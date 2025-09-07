@@ -36,7 +36,7 @@ use std::{sync::Arc, time::Instant, marker::PhantomData};
 
 
 /// Maximum amount of blake2 blocks.
-const MAX_BLOCK_COUNT: usize = 8;
+const MAX_BLOCK_COUNT: usize = 50;
 /// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
@@ -219,9 +219,26 @@ impl VariativeBlake2 {
     pub fn prove(self) -> ProofWithCircuitData<VariativeBlake2Target> {
         // *if self.data.len() <= BLOCK_BYTES
         {
-            let index = self.data.len().div_ceil(BLOCK_BYTES).max(1) - 1;
+            let index = self.data.len().div_ceil(BLOCK_BYTES).max(1);
             log::debug!("index = {index}, self.data.len() = {}", self.data.len());
-            let (prover_data, targets) = &PROVER_DATA_BY_BLOCK_COUNT[index];
+
+            let path = env::var("PATH_DATA").expect("PATH_DATA");
+            let serializer_gate = CustomGateSerializer::default();
+            let serializer_generator = CustomGeneratorSerializer::<C, D>::default();
+
+            let now = Instant::now();
+
+            let serialized = std::fs::read(format!("{path}/prover_circuit_data-{index}")).expect("Good file with serialized data");
+            let prover_data = ProverCircuitData::<F, C, D>::from_bytes(&serialized, &serializer_gate, &serializer_generator).expect("Correctly formed serialized data");
+
+            let serialized = std::fs::read(format!("{path}/prover_circuit_data-targets-{index}")).expect("Good file with serialized data");
+            let mut buffer_read = Buffer::new(&serialized[..]);
+            let targets = buffer_read.read_target_vec()
+                .expect("buffer_read.read_target_vec()");
+
+            log::info!("Loading circuit data time: {}ms", now.elapsed().as_millis());
+
+            // let (prover_data, targets) = &PROVER_DATA_BY_BLOCK_COUNT[index];
 
             let mut witness = PartialWitness::new();
             witness.set_target(targets[0], F::from_canonical_usize(self.data.len()));
@@ -245,7 +262,7 @@ impl VariativeBlake2 {
             return ProofWithCircuitData {
                 proof,
                 circuit_data: Arc::from(VerifierCircuitData {
-                    verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index].clone(),
+                    verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index - 1].clone(),
                     common: prover_data.common.clone(),
                 }),
                 public_inputs,
@@ -400,8 +417,11 @@ impl VariativeBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
+        log::trace!("VariativeBlake2; 10 builder.num_gates() = {}", builder.num_gates());
+
         // Standardize degree.
-        while builder.num_gates() < 1 << 16 {
+        // (2^19 + 2^17)
+        while builder.num_gates() < 655_360 {
             builder.add_gate(NoopGate, vec![]);
         }
 

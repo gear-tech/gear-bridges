@@ -18,7 +18,7 @@ use alloy::{
 use anyhow::{Context, Result as AnyResult};
 use primitive_types::{H160, H256};
 use reqwest::Url;
-use std::{ops::Deref, str::FromStr};
+use std::{ops::Deref, str::FromStr, time::Duration};
 
 pub use alloy::primitives::TxHash;
 
@@ -212,6 +212,16 @@ impl EthApi {
         message_queue_address: &str,
         private_key: Option<&str>,
     ) -> Result<EthApi, Error> {
+        Self::new_with_retries(url, message_queue_address, private_key, None, None).await
+    }
+
+    pub async fn new_with_retries(
+        url: &str,
+        message_queue_address: &str,
+        private_key: Option<&str>,
+        ws_max_retry: Option<u32>,
+        ws_retry_interval: Option<Duration>,
+    ) -> Result<EthApi, Error> {
         let signer = match private_key {
             Some(private_key) => {
                 let pk: B256 =
@@ -230,7 +240,17 @@ impl EthApi {
             .map_err(|_| Error::WrongAddress)?;
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
-        let ws = WsConnect::new(url.clone());
+
+        let mut ws = WsConnect::new(url.clone());
+
+        if let Some(ws_max_retry) = ws_max_retry {
+            ws = ws.with_max_retries(ws_max_retry)
+        }
+
+        if let Some(ws_retry_interval) = ws_retry_interval {
+            ws = ws.with_retry_interval(ws_retry_interval)
+        }
+
         let provider: ProviderType = ProviderBuilder::new()
             .wallet(wallet.clone())
             .connect_ws(ws)

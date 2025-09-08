@@ -81,6 +81,14 @@ pub struct EthereumArgs {
     #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]
     pub eth_endpoint: String,
 
+    /// Number of retries for the ethereum endpoint
+    #[arg(long = "eth-max-retries", env = "ETH_RPC_MAX_RETRIES")]
+    pub eth_max_retries: Option<u32>,
+
+    // Interval in milliseconds between retries for the ethereum endpoint
+    #[arg(long = "eth-retry-interval-ms", env = "ETH_RPC_RETRY_INTERVAL_MS")]
+    pub eth_retry_interval_ms: Option<u64>,
+
     /// Ethereum address of message queue contract
     #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     pub mq_address: String,
@@ -99,6 +107,25 @@ pub struct BeaconRpcArgs {
         default_value = "10"
     )]
     pub beacon_timeout: Option<u64>,
+}
+
+#[derive(Args)]
+pub struct RelayerHttpArgs {
+    /// URL of the relayer HTTP endpoint
+    #[arg(long = "relayer-http-url", env = "RELAYER_HTTP_URL")]
+    pub url: String,
+
+    /// Access token for the relayer HTTP endpoint
+    #[arg(long = "relayer-http-access-token", env = "RELAYER_HTTP_ACCESS_TOKEN")]
+    pub access_token: String,
+
+    /// Timeout in seconds for requests to the relayer HTTP endpoint
+    #[arg(
+        long = "relayer-http-timeout-secs",
+        default_value = "30",
+        env = "RELAYER_HTTP_TIMEOUT_SECS"
+    )]
+    pub timeout_secs: u64,
 }
 
 #[derive(Args)]

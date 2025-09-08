@@ -99,6 +99,15 @@ pub(crate) async fn submit_merkle_root_to_ethereum(
     Ok(tx_hash)
 }
 
+pub(crate) async fn send_challege_root_to_ethereum(
+    _eth_api: &EthApi,
+) -> Result<TxHash, ethereum_client::Error> {
+    let tx_hash = TxHash::default();
+    log::info!("TODO: Challenging merkle root on ethereum, tx hash: {tx_hash:?}");
+
+    Ok(tx_hash)
+}
+
 pub(crate) fn is_rpc_transport_error_recoverable(err: &RpcError<TransportErrorKind>) -> bool {
     match err {
         RpcError::Transport(transport) => match transport {

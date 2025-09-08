@@ -1,5 +1,12 @@
 //! ### Contains circuit that's used to compute blake2 hash of generic-length data.
 
+use crate::{
+    common::{
+        targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
+        ProofWithCircuitData,
+    },
+    prelude::*,
+};
 use lazy_static::lazy_static;
 use plonky2::{
     gates::noop::NoopGate,
@@ -16,19 +23,11 @@ use plonky2_blake2b256::circuit::{
     blake2_circuit_from_message_targets_and_length_target, BLOCK_BITS, BLOCK_BYTES,
 };
 use plonky2_field::types::Field;
+use std::iter;
 
-use crate::{
-    common::{
-        targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
-        ProofWithCircuitData,
-    },
-    prelude::*,
-};
-
-use super::pad_byte_vec;
-
-/// Maximum amount of blake2 blocks.
 const MAX_BLOCK_COUNT: usize = 8;
+const NUM_GATES: usize = 1 << 16;
+
 /// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
@@ -171,21 +170,49 @@ struct VariativeBlake2 {
 }
 
 impl VariativeBlake2 {
-    pub fn prove(self) -> ProofWithCircuitData<VariativeBlake2Target> {
+    pub fn prove(&self) -> ProofWithCircuitData<VariativeBlake2Target> {
+        let (mut builder, targets) = self.create_builder_targets();
+
+        let mut witness = PartialWitness::new();
+        witness.set_target(targets[0], F::from_canonical_usize(self.data.len()));
+
+        for i in 0..self.data.len() {
+            witness.set_target(targets[i + 1], F::from_canonical_u8(self.data[i]));
+        }
+        // zero the remaining tail
+        for target in targets.iter().skip(1 + self.data.len()) {
+            witness.set_target(*target, F::from_canonical_u8(0));
+        }
+
+        // Standardize degree.
+        while builder.num_gates() < NUM_GATES {
+            builder.add_gate(NoopGate, vec![]);
+        }
+
+        ProofWithCircuitData::prove_from_builder(builder, witness)
+    }
+
+    fn create_builder_targets(&self) -> (CircuitBuilder<F, D>, Vec<Target>) {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
-        let mut witness = PartialWitness::new();
 
         let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
 
         let length_target = builder.add_virtual_target();
-        witness.set_target(length_target, F::from_canonical_usize(self.data.len()));
 
-        let data_target: [ByteTarget; MAX_DATA_BYTES] = pad_byte_vec(self.data).map(|byte| {
-            let target = builder.add_virtual_target();
-            witness.set_target(target, F::from_canonical_u8(byte));
-            ByteTarget::from_target_safe(target, &mut builder)
-        });
+        let mut targets = Vec::with_capacity(MAX_DATA_BYTES + 1);
+        targets.push(length_target);
+
+        let data_target: [ByteTarget; MAX_DATA_BYTES] = iter::repeat_n((), MAX_DATA_BYTES)
+            .map(|_| {
+                let target = builder.add_virtual_target();
+                targets.push(target);
+
+                ByteTarget::from_target_safe(target, &mut builder)
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Size of the vec is correct");
 
         // Assert that padding is zeroed.
         let mut data_end = builder._false();
@@ -240,12 +267,7 @@ impl VariativeBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
-        // Standardize degree.
-        while builder.num_gates() < 1 << 16 {
-            builder.add_gate(NoopGate, vec![]);
-        }
-
-        ProofWithCircuitData::prove_from_builder(builder, witness)
+        (builder, targets)
     }
 }
 
@@ -303,5 +325,46 @@ mod tests {
         assert_eq!(&public_inputs.data[..data.len()], &data[..]);
 
         proof.circuit_data().clone()
+    }
+
+    #[test]
+    fn assert_constants() {
+        assert_eq!(
+            (MAX_BLOCK_COUNT, NUM_GATES),
+            (8, 1 << 16),
+            r#"Any hashing algorithm works in blocks. For example, blake2 uses blocks of 128 bytes:
+
+i.e. if an empty byte array is input, then the hash is actually calculated from the block [0u8; 128];
+if [1u8; 1], then from [1u8, 0u8, ..., 0u8; 128];
+if [1u8; 129], then [1u8, ..., 1u8, 0u8, ..., 0u8; 256].
+
+Simply put, the input byte array is padded with zeros so that the resulting length becomes a multiple of
+the working block size.
+
+VariativeBlake2 works with a hard-coded number of blocks. In other words, the Prover/VerifierCircuit
+is different for each multiple of the block size from the length of the incoming data.
+
+GenericBlake2 works with input data whose length in blocks does not exceed a predefined constant - MAX_BLOCK_COUNT.
+The resulting VerifierCircuitData does not depend on the input data. This is achieved by using
+VariativeBlake2 internal proofs for blocks from 1 to MAX_BLOCK_COUNT. Therefore, all CircuitData for
+VariativeBlake2 must have the same complexity (see the code for details) and, accordingly, MAX_BLOCK_COUNT
+is associated with the constant NUM_GATES. (Check also https://github.com/gear-tech/plonky2/blob/349beae1431ecffc1bf8c044d6c00e2bf194b74a/plonky2/examples/bench_recursion.rs#L224 for details.)
+
+To change the MAX_BLOCK_COUNT constant please use the test `determine_num_gates` to get the corresponding number of gates and adjust NUM_GATES."#
+        )
+    }
+
+    #[ignore = "Use to determine maximum number of gates"]
+    #[test]
+    fn determine_num_gates() {
+        let (builder, _targets) = VariativeBlake2 {
+            data: vec![0; MAX_DATA_BYTES],
+        }
+        .create_builder_targets();
+
+        println!(
+            "builder.num_gates() = {} (MAX_BLOCK_COUNT = {MAX_BLOCK_COUNT})",
+            builder.num_gates()
+        );
     }
 }

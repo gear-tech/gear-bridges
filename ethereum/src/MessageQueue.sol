@@ -177,14 +177,14 @@ contract MessageQueue is
      *      Only the emergency stop admin or time expiry (CHALLENGE_ROOT_DELAY) can lift it.
      *
      * @dev Reverts if:
-     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
      *      - challenging root status is already enabled with `ChallengeRoot` error.
      *
      * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
      */
     function challengeRoot() external {
-        if (msg.sender != _emergencyStopAdmin) {
-            revert NotEmergencyStopAdmin();
+        if (!_emergencyStopObservers.contains(msg.sender)) {
+            revert NotEmergencyStopObserver();
         }
 
         if (isChallengingRoot()) {

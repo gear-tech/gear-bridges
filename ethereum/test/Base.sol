@@ -237,6 +237,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(messageQueue.governanceAdmin(), address(governanceAdmin));
         assertEq(messageQueue.governancePauser(), address(governancePauser));
         assertEq(messageQueue.emergencyStopAdmin(), deploymentArguments.emergencyStopAdmin);
+        address[] memory emergencyStopObservers = messageQueue.emergencyStopObservers();
+        assertEq(emergencyStopObservers.length, deploymentArguments.emergencyStopObservers.length);
+        for (uint256 i = 0; i < emergencyStopObservers.length; i++) {
+            assertEq(emergencyStopObservers[i], deploymentArguments.emergencyStopObservers[i]);
+        }
         assertEq(messageQueue.verifier(), address(verifier));
         assertEq(messageQueue.isChallengingRoot(), false);
         assertEq(messageQueue.isEmergencyStopped(), false);

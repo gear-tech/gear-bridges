@@ -344,6 +344,30 @@ contract MessageQueueTest is Test, Base {
         vm.stopPrank();
     }
 
+    function test_ChallengeRoot() public {
+        // TODO
+    }
+
+    function test_ChallengeRootWithNotEmergencyStopObserver() public {
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopObserver.selector));
+        messageQueue.challengeRoot();
+    }
+
+    function test_ChallengeRootTwice() public {
+        vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
+
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        messageQueue.challengeRoot();
+
+        vm.stopPrank();
+    }
+
     function test_SubmitMerkleRoot() public {
         uint256 blockNumber = 0x11;
         bytes32 merkleRoot = bytes32(uint256(0x22));

@@ -59,9 +59,9 @@ interface IMessageQueue is IPausable {
     error MerkleRootAlreadySet(uint256 blockNumber);
 
     /**
-     * @dev Caller is not emergency stop admin.
+     * @dev Caller is not emergency stop observer.
      */
-    error NotEmergencyStopAdmin();
+    error NotEmergencyStopObserver();
 
     /**
      * @dev Emitted when challenging root status is enabled.
@@ -138,7 +138,7 @@ interface IMessageQueue is IPausable {
      *      Only the emergency stop admin or time expiry (CHALLENGE_ROOT_DELAY) can lift it.
      *
      * @dev Reverts if:
-     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
      *      - challenging root status is already enabled with `ChallengeRoot` error.
      *
      * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.

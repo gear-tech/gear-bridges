@@ -77,6 +77,8 @@ pub struct KillSwitchRelayer {
 
     metrics: Metrics,
     block_finality_metrics: BlockFinalityArchiverMetrics,
+
+    count_thread: Option<usize>,
 }
 
 impl MeteredService for KillSwitchRelayer {
@@ -97,6 +99,8 @@ impl KillSwitchRelayer {
         proof_storage: Arc<dyn ProofStorage>,
         from_eth_block: Option<u64>,
         block_finality_storage: sled::Db,
+
+        count_thread: Option<usize>,
     ) -> Self {
         Self {
             api_provider,
@@ -108,6 +112,7 @@ impl KillSwitchRelayer {
             block_finality_storage,
             metrics: Metrics::new(),
             block_finality_metrics: BlockFinalityArchiverMetrics::new(),
+            count_thread,
         }
     }
 
@@ -300,6 +305,7 @@ impl KillSwitchRelayer {
             self.genesis_config,
             latest_authority_set_id,
             latest_proven_authority_set_id,
+            self.count_thread,
         )
         .await
     }
@@ -402,6 +408,7 @@ impl KillSwitchRelayer {
             inner_proof,
             self.genesis_config,
             (block_hash, block_finality),
+            self.count_thread,
         )
         .await
     }

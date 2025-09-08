@@ -38,18 +38,18 @@ const main = async () => {
   const ethAccount = privateKeyToAccount(ETH_PRIVATE_KEY);
 
   if (nonceArg && blockNumberArg) {
-    return await relayVaraToEth(
-      BigInt(nonceArg),
-      BigInt(blockNumberArg),
-      publicClient,
-      walletClient,
-      ethAccount,
+    return await relayVaraToEth({
+      nonce: BigInt(nonceArg),
+      blockNumber: BigInt(blockNumberArg),
+      ethereumPublicClient: publicClient,
+      ethereumWalletClient: walletClient,
+      ethereumAccount: ethAccount,
       gearApi,
-      MESSAGE_QUEUE_ADDRESS,
-      (status, details) => {
-        console.log(`[relayEthToVara]: ${status}`, details);
+      messageQueueAddress: MESSAGE_QUEUE_ADDRESS,
+      statusCb: (status, details) => {
+        console.log(`[relayEthToVara]: ${status}`, details || '');
       },
-    );
+    });
   }
 
   const keyring = new Keyring({ type: 'sr25519', ss58Format: 137 });
@@ -128,18 +128,19 @@ const main = async () => {
 
   await waitForMerkleRootAppearedInMessageQueue(blockNumber.toBigInt(), publicClient, MESSAGE_QUEUE_ADDRESS);
 
-  await relayVaraToEth(
-    ethBridgeMessage.nonce,
-    blockNumber.toBigInt(),
-    publicClient,
-    walletClient,
-    ethAccount,
+  await relayVaraToEth({
+    nonce: ethBridgeMessage.nonce,
+    blockNumber: blockNumber.toBigInt(),
+    ethereumPublicClient: publicClient,
+    ethereumWalletClient: walletClient,
+    ethereumAccount: ethAccount,
     gearApi,
-    MESSAGE_QUEUE_ADDRESS,
-    (status, details) => {
-      console.log(`[relayEthToVara]: ${status}`, details);
+    messageQueueAddress: MESSAGE_QUEUE_ADDRESS,
+    wait: true,
+    statusCb: (status, details) => {
+      console.log(`[relayEthToVara]: ${status}`, details || '');
     },
-  );
+  });
 };
 
 main()

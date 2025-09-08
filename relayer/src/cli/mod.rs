@@ -10,6 +10,7 @@ pub use common::{
 use crate::cli::common::BlockStorageArgs;
 
 pub const DEFAULT_COUNT_CONFIRMATIONS: u64 = 8;
+pub const DEFAULT_COUNT_THREADS: usize = 24;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -67,6 +68,21 @@ pub struct GearEthCoreArgs {
     /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
+
+    /// Authorization token for web-server
+    #[arg(long, env)]
+    pub web_server_token: String,
+
+    /// Socket address for web-server
+    #[arg(long, env, default_value = "127.0.0.1:8443")]
+    pub web_server_address: String,
+
+    #[arg(
+        long,
+        help = format!("Count of worker threads for generating signing proofs.\n\nNote that each thread allocates memory, which can lead to an out-of-memory error with a large number of threads.\n\nDefault is: {DEFAULT_COUNT_THREADS}. The value is safe to run the relayer on a machine with 96 CPU cores and 256GiB of RAM."),
+        value_parser = parse_thread_count,
+    )]
+    pub thread_count: Option<ThreadCount>,
 }
 
 #[derive(Args)]
@@ -298,4 +314,29 @@ fn parse_fee_payers(s: &str) -> anyhow::Result<FeePayers> {
     } else {
         Ok(FeePayers::ExcludedIds(ids))
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum ThreadCount {
+    /// User explicitly requests to set count of worker threads automatically.
+    Auto,
+    /// Count of worker threads set manually.
+    Manual(usize),
+}
+
+impl From<ThreadCount> for Option<usize> {
+    fn from(value: ThreadCount) -> Self {
+        match value {
+            ThreadCount::Auto => None,
+            ThreadCount::Manual(count) => Some(count),
+        }
+    }
+}
+
+fn parse_thread_count(s: &str) -> anyhow::Result<ThreadCount> {
+    if s.trim().eq_ignore_ascii_case("auto") {
+        return Ok(ThreadCount::Auto);
+    }
+
+    Ok(s.parse::<usize>().map(ThreadCount::Manual)?)
 }

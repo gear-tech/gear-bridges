@@ -30,7 +30,7 @@ export const processor = new EvmBatchProcessor()
   })
   .addLog({
     address: [config.msgQ],
-    topic0: [messageQueueAbi.events.MessageProcessed.topic],
+    topic0: [messageQueueAbi.events.MessageProcessed.topic, messageQueueAbi.events.MerkleRoot.topic],
   })
   .setBlockRange({
     from: config.fromBlock,

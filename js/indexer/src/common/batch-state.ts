@@ -203,7 +203,11 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
   protected async _saveTransfers() {
     if (this._transfers.size === 0) return;
 
-    await this._ctx.store.save(mapValues(this._transfers));
+    const transfers = mapValues(this._transfers);
+
+    for (let i = 0; i < this._transfers.size; i += 1000) {
+      await this._ctx.store.save(transfers.slice(i, i + 1000));
+    }
 
     this._log.info(`Saved ${this._transfers.size} transfers`);
   }

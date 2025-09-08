@@ -113,11 +113,7 @@ async fn run() -> AnyResult<()> {
         }
 
         CliCommands::KillSwitch(args) => {
-            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
-            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
-            if rust_min_stack < SIZE_THREAD_STACK_MIN {
-                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
-            }
+            use reqwest::header;
 
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
@@ -125,28 +121,31 @@ async fn run() -> AnyResult<()> {
                 args.gear_args.retries,
             )
             .await
-            .expect("Failed to connec to Gear API");
+            .expect("Failed to connect to Gear API");
 
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(args.relayer_http_args.timeout_secs))
+                .default_headers({
+                    let mut headers = header::HeaderMap::new();
+                    headers.insert(
+                        "X-Token",
+                        header::HeaderValue::from_str(&args.relayer_http_args.access_token)
+                            .expect("Invalid token"),
+                    );
+                    headers
+                })
+                .build()
+                .expect("Failed to create HTTP client");
 
             let metrics = MetricsBuilder::new();
-
-            let (proof_storage, metrics) =
-                create_proof_storage(&args.proof_storage_args, &args.gear_args, metrics).await;
-
-            let genesis_config = create_genesis_config(&args.genesis_config_args);
-
-            let block_finality_storage =
-                sled::open("./block_finality_storage").expect("Db not corrupted");
 
             let mut kill_switch = KillSwitchRelayer::new(
                 api_provider.connection(),
                 eth_api,
-                genesis_config,
-                proof_storage,
+                http_client,
                 args.from_eth_block,
-                block_finality_storage,
-                Some(DEFAULT_COUNT_THREADS),
+                args.relayer_http_args.url,
             )
             .await;
 
@@ -565,14 +564,21 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
 async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
-
         mq_address,
+        eth_max_retries,
+        eth_retry_interval_ms,
         ..
     } = &args.ethereum_args;
 
-    EthApi::new(eth_endpoint, mq_address, Some(&args.fee_payer))
-        .await
-        .expect("Error while creating ethereum client")
+    EthApi::new_with_retries(
+        eth_endpoint,
+        mq_address,
+        Some(&args.fee_payer),
+        *eth_max_retries,
+        eth_retry_interval_ms.map(Duration::from_millis),
+    )
+    .await
+    .expect("Error while creating ethereum client")
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {

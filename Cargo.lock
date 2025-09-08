@@ -10514,9 +10514,9 @@ dependencies = [
 
 [[package]]
 name = "sails-client-gen"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5b20f666818dffa3f20fc83fb68c527f350313b09e97bf1b01633ca6110001b"
+checksum = "b2ad99588130c2290fc0c40e2e0c242ec146b8efce64d9caba7fbf01bfe37663"
 dependencies = [
  "anyhow",
  "convert_case 0.7.1",
@@ -10552,9 +10552,9 @@ dependencies = [
 
 [[package]]
 name = "sails-idl-parser"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fb8aea7c7ba78a904124102e3e81675daa302ff00b8173ea3b4a16d52fe1802"
+checksum = "73fc96b2eaea7c6c5da34aaf32b6b281b23eeb3aefc72f0d60fb9f0a18edc2f9"
 dependencies = [
  "lalrpop",
  "lalrpop-util",

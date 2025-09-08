@@ -60,7 +60,11 @@ impl GenericBlake2 {
         #[allow(clippy::let_unit_value)]
         let _ = AssertDataLengthValid::<MAX_DATA_LENGTH_ESTIMATION>::VALID;
 
-        assert!(data.len() <= MAX_DATA_LENGTH_ESTIMATION);
+        assert!(
+            data.len() <= MAX_DATA_LENGTH_ESTIMATION,
+            "data.len() = {}, MAX_DATA_LENGTH_ESTIMATION = {MAX_DATA_LENGTH_ESTIMATION}",
+            data.len()
+        );
 
         Self { data }
     }

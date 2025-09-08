@@ -5,7 +5,11 @@ use crate::{
         prover::FinalityProverIo,
     },
     message_relayer::{
-        common::{gear::block_listener::BlockListener, GearBlock},
+        common::{
+            gear::block_listener::BlockListener,
+            web_request::{MerkleRootsRequest, MerkleRootsResponse},
+            GearBlock,
+        },
         eth_to_gear::api_provider::ApiProviderConnection,
     },
     proof_storage::ProofStorageError,
@@ -47,6 +51,7 @@ pub struct Relayer {
     last_sealed: Option<u64>,
     genesis_config: GenesisConfig,
     eth_api: EthApi,
+    http: UnboundedReceiver<MerkleRootsRequest>,
 }
 
 impl MeteredService for Relayer {
@@ -59,17 +64,22 @@ impl MeteredService for Relayer {
 }
 
 impl Relayer {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         api_provider: ApiProviderConnection,
         eth_api: EthApi,
+        http: UnboundedReceiver<MerkleRootsRequest>,
         storage: Arc<MerkleRootStorage>,
         genesis_config: GenesisConfig,
         last_sealed: Option<u64>,
         confirmations: u64,
+
+        count_thread: Option<usize>,
     ) -> Self {
         let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
 
-        let merkle_roots = MerkleRootRelayer::new(api_provider.clone(), storage.clone()).await;
+        let merkle_roots =
+            MerkleRootRelayer::new(api_provider.clone(), storage.clone(), count_thread).await;
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
@@ -78,7 +88,8 @@ impl Relayer {
         )
         .await;
 
-        let prover = prover::FinalityProver::new(api_provider.clone(), genesis_config);
+        let prover =
+            prover::FinalityProver::new(api_provider.clone(), genesis_config, count_thread);
 
         let submitter =
             submitter::MerkleRootSubmitter::new(eth_api.clone(), storage, confirmations);
@@ -92,6 +103,7 @@ impl Relayer {
             last_sealed,
             genesis_config,
             eth_api,
+            http,
         }
     }
 
@@ -105,6 +117,7 @@ impl Relayer {
             genesis_config,
             last_sealed,
             eth_api,
+            http,
         } = self;
 
         let [blocks0, blocks1] = block_listener.run().await;
@@ -120,6 +133,7 @@ impl Relayer {
                 submitter,
                 prover,
                 authority_set_sync,
+                http,
                 last_sealed,
                 genesis_config,
                 eth_api,
@@ -141,12 +155,16 @@ pub struct MerkleRootRelayer {
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
     save_interval: Interval,
+
+    count_thread: Option<usize>,
 }
 
 impl MerkleRootRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
         storage: Arc<MerkleRootStorage>,
+
+        count_thread: Option<usize>,
     ) -> MerkleRootRelayer {
         let mut save_interval = tokio::time::interval(Duration::from_secs(60));
         save_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -160,6 +178,7 @@ impl MerkleRootRelayer {
             waiting_for_authority_set_sync: BTreeMap::new(),
 
             save_interval,
+            count_thread,
         }
     }
 
@@ -170,7 +189,7 @@ impl MerkleRootRelayer {
         mut submitter: SubmitterIo,
         mut prover: FinalityProverIo,
         mut authority_set_sync: AuthoritySetSyncIo,
-
+        mut http: UnboundedReceiver<MerkleRootsRequest>,
         last_sealed: Option<u64>,
         genesis_config: GenesisConfig,
         eth_api: EthApi,
@@ -226,6 +245,8 @@ impl MerkleRootRelayer {
                                 block_number: merkle_root.block_number,
                                 block_hash: merkle_root.block_hash,
                                 status: MerkleRootStatus::GenerateProof,
+                                proof: None,
+                                rpc_requests: Vec::new(),
                             },
                         );
                         if !prover.prove(
@@ -233,6 +254,7 @@ impl MerkleRootRelayer {
                             merkle_root.block_hash,
                             hash,
                             authority_set_proof,
+                            false,
                         ) {
                             log::error!("Prover connection closed, exiting...");
                             return Ok(());
@@ -246,10 +268,12 @@ impl MerkleRootRelayer {
                             MerkleRoot {
                                 block_number: merkle_root.block_number,
                                 block_hash: merkle_root.block_hash,
+                                proof: None,
                                 status: MerkleRootStatus::WaitForAuthoritySetSync(
                                     *id,
                                     block.number(),
                                 ),
+                                rpc_requests: Vec::new(),
                             },
                         );
 
@@ -287,6 +311,8 @@ impl MerkleRootRelayer {
                             block_number: merkle_root.block_number,
                             block_hash: merkle_root.block_hash,
                             status: MerkleRootStatus::GenerateProof,
+                            proof: None,
+                            rpc_requests: Vec::new(),
                         },
                     );
 
@@ -314,30 +340,38 @@ impl MerkleRootRelayer {
                         merkle_root.block_hash,
                         hash,
                         inner_proof,
+                        false,
                     ) {
                         log::error!("Prover connection closed, exiting...");
                         return Ok(());
                     }
                 }
 
-                MerkleRootStatus::SubmitProof(proof) => {
+                MerkleRootStatus::SubmitProof => {
                     log::info!(
                         "Merkle root {} for block #{} is waiting for proof submission",
                         hash,
                         merkle_root.block_number
                     );
 
+                    let proof = merkle_root.proof.ok_or_else(|| {
+                        anyhow::anyhow!(
+                        "Proof should be available when status is SubmitProof; Check your storage"
+                    )
+                    })?;
+
                     self.roots.insert(
                         hash,
                         MerkleRoot {
                             block_number: merkle_root.block_number,
                             block_hash: merkle_root.block_hash,
-                            status: MerkleRootStatus::SubmitProof(proof.clone()),
+                            status: MerkleRootStatus::SubmitProof,
+                            proof: Some(proof.clone()),
+                            rpc_requests: Vec::new(),
                         },
                     );
 
-                    if !submitter.submit_merkle_root(merkle_root.block_number, hash, proof.clone())
-                    {
+                    if !submitter.submit_merkle_root(merkle_root.block_number, hash, proof) {
                         log::error!("Proof submitter connection closed, exiting");
                         return Ok(());
                     }
@@ -350,6 +384,8 @@ impl MerkleRootRelayer {
                             block_number: merkle_root.block_number,
                             block_hash: merkle_root.block_hash,
                             status: MerkleRootStatus::Failed(err.clone()),
+                            rpc_requests: Vec::new(),
+                            proof: merkle_root.proof,
                         },
                     );
 
@@ -368,6 +404,8 @@ impl MerkleRootRelayer {
                             block_number: merkle_root.block_number,
                             block_hash: merkle_root.block_hash,
                             status: MerkleRootStatus::Finalized,
+                            rpc_requests: Vec::new(),
+                            proof: merkle_root.proof,
                         },
                     );
 
@@ -385,6 +423,7 @@ impl MerkleRootRelayer {
             self.api_provider.clone(),
             eth_api,
             genesis_config,
+            self.count_thread,
         )
         .await?
         .seal(self.storage.proofs.clone());
@@ -402,6 +441,7 @@ impl MerkleRootRelayer {
                     &mut blocks_rx,
                     &mut authority_set_sync,
                     &mut sealed_eras,
+                    &mut http,
                 )
                 .await
             {
@@ -444,6 +484,7 @@ impl MerkleRootRelayer {
         blocks_rx: &mut Receiver<GearBlock>,
         authority_set_sync: &mut AuthoritySetSyncIo,
         sealed_eras: &mut UnboundedReceiver<SealedNotFinalizedEra>,
+        rpc: &mut UnboundedReceiver<MerkleRootsRequest>,
     ) -> anyhow::Result<()> {
         loop {
             let result = self
@@ -453,6 +494,7 @@ impl MerkleRootRelayer {
                     blocks_rx,
                     authority_set_sync,
                     sealed_eras,
+                    rpc,
                 )
                 .await;
 
@@ -478,6 +520,7 @@ impl MerkleRootRelayer {
         blocks_rx: &mut Receiver<GearBlock>,
         authority_set_sync: &mut AuthoritySetSyncIo,
         sealed_eras: &mut UnboundedReceiver<SealedNotFinalizedEra>,
+        rpc: &mut UnboundedReceiver<MerkleRootsRequest>,
     ) -> anyhow::Result<bool> {
         tokio::select! {
             _ = self.save_interval.tick() => {
@@ -487,12 +530,70 @@ impl MerkleRootRelayer {
                 }
             }
 
+            req = rpc.recv() => {
+                match req {
+                    Some(req) => {
+                        match req {
+                            MerkleRootsRequest::GetMerkleRootProof {
+                                block_number,
+                                response
+                            } => {
+                                // filter by `proof.is_some()` since some old storage entries do not contain proofs in them.
+                                if let Some((hash, root)) = self.roots.iter().find(|(_, r)| r.block_number == block_number).filter(|(_, r)| r.proof.is_some()) {
+                                    if let MerkleRootStatus::Finalized = root.status {
+                                        let Ok(_) = response.send(MerkleRootsResponse::MerkleRootProof {
+                                            proof: root.proof.as_ref().map(|p| p.proof.clone()).expect("proof availability is checked above"),
+                                            block_number: root.block_number,
+                                            block_hash: root.block_hash,
+                                            merkle_root: *hash,
+                                        }) else {
+                                            log::error!("RPC response send failed");
+                                            return Ok(false);
+                                        };
+                                        return Ok(true);
+                                    }
+                                }
+
+                                let api = self.api_provider.client();
+                                let block_hash = api.block_number_to_hash(block_number).await?;
+                                let block = api.get_block_at(block_hash).await?;
+                                let block = GearBlock::from_subxt_block(block).await?;
+
+                                match self.try_proof_merkle_root(prover, authority_set_sync, block, true).await {
+                                    Ok(Some(merkle_root)) => {
+                                        if let Some(r) = self.roots.get_mut(&merkle_root) { r.rpc_requests.push(response) }
+                                    }
+
+                                    Ok(None) => {
+                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
+                                            log::error!("RPC response send failed");
+                                            return Ok(false);
+                                        };
+                                    }
+
+                                    Err(err) => {
+                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
+                                            log::error!("RPC response send failed");
+                                            return Ok(false);
+                                        };
+                                        return Err(err);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    None => {
+                        log::error!("Failed to receive RPC request");
+                        return Ok(false);
+                    }
+                }
+            }
+
             block = blocks_rx.recv() => {
                 match block {
                     Ok(block) => {
-                        if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
-                            return Ok(false);
-                        }
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, false).await?;
                     }
 
                     Err(RecvError::Lagged(n)) => {
@@ -525,7 +626,8 @@ impl MerkleRootRelayer {
 
                         self.roots.entry(merkle_root)
                             .and_modify(|merkle_root| {
-                                merkle_root.status = MerkleRootStatus::SubmitProof(proof.clone());
+                                merkle_root.status = MerkleRootStatus::SubmitProof;
+                                merkle_root.proof = Some(proof.clone());
                             });
 
 
@@ -553,7 +655,8 @@ impl MerkleRootRelayer {
 
                         self.roots.entry(merkle_root)
                             .and_modify(|merkle_root| {
-                                merkle_root.status = MerkleRootStatus::SubmitProof(proof.clone());
+                                merkle_root.status = MerkleRootStatus::SubmitProof;
+                                merkle_root.proof = Some(proof.clone());
                             });
 
                         if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
@@ -595,9 +698,7 @@ impl MerkleRootRelayer {
 
                         log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
                         while let Some(block) = to_submit.pop() {
-                            if !self.try_proof_merkle_root(prover, authority_set_sync, block).await? {
-                                return Ok(false);
-                            }
+                            self.try_proof_merkle_root(prover, authority_set_sync, block, false).await?;
                         }
                     }
                 }
@@ -634,6 +735,22 @@ impl MerkleRootRelayer {
                         response.merkle_root,
                         response.merkle_root_block
                     );
+                    let proof = merkle_root
+                        .proof
+                        .as_ref()
+                        .map(|p| p.proof.clone())
+                        .expect("proof should be available if root is finalized");
+                    for req in merkle_root.rpc_requests.drain(..) {
+                        let Ok(_) = req.send(MerkleRootsResponse::MerkleRootProof {
+                            proof: proof.clone(),
+                            block_number: merkle_root.block_number,
+                            block_hash: merkle_root.block_hash,
+                            merkle_root: response.merkle_root,
+                        }) else {
+                            log::error!("RPC response send failed");
+                            return Err(anyhow::anyhow!("RPC response send failed"));
+                        };
+                    }
                 }
 
                 submitter::ResponseStatus::Failed(err) => {
@@ -644,6 +761,14 @@ impl MerkleRootRelayer {
                         response.merkle_root_block,
                         err
                     );
+                    for req in merkle_root.rpc_requests.drain(..) {
+                        let Ok(_) = req.send(MerkleRootsResponse::Failed {
+                            message: err.clone(),
+                        }) else {
+                            log::error!("RPC response send failed");
+                            return Err(anyhow::anyhow!("RPC response send failed"));
+                        };
+                    }
                 }
             }
         } else {
@@ -664,9 +789,10 @@ impl MerkleRootRelayer {
         prover: &mut FinalityProverIo,
         authority_set_sync: &mut AuthoritySetSyncIo,
         block: GearBlock,
-    ) -> anyhow::Result<bool> {
+        priority: bool,
+    ) -> anyhow::Result<Option<H256>> {
         let Some(merkle_root) = storage::queue_merkle_root_changed(&block) else {
-            return Ok(true);
+            return Ok(None);
         };
         // mark root processed so that we don't process the entire block again.
         self.storage.merkle_root_processed(block.number()).await;
@@ -675,15 +801,13 @@ impl MerkleRootRelayer {
             log::error!("Failed to save block storage state: {err:?}");
         }
 
-        if self.roots.contains_key(&merkle_root)
-            || self.storage.is_merkle_root_submitted(merkle_root).await
-        {
+        if self.storage.is_merkle_root_submitted(merkle_root).await {
             log::info!(
                 "Skipping merkle root {} for block #{} as there were no new messages",
                 merkle_root,
                 block.number()
             );
-            return Ok(true);
+            return Ok(None);
         }
 
         let signed_by_authority_set_id = self
@@ -706,12 +830,20 @@ impl MerkleRootRelayer {
                         block_number: number,
                         block_hash: block.hash(),
                         status: MerkleRootStatus::GenerateProof,
+                        rpc_requests: Vec::new(),
+                        proof: None,
                     },
                 );
                 log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{number}");
-                if !prover.prove(block.number(), block.hash(), merkle_root, inner_proof) {
+                if !prover.prove(
+                    block.number(),
+                    block.hash(),
+                    merkle_root,
+                    inner_proof,
+                    priority,
+                ) {
                     log::error!("Prover connection closed, exiting...");
-                    return Ok(false);
+                    return Err(anyhow::anyhow!("Prover connection closed"));
                 }
             }
 
@@ -731,6 +863,8 @@ impl MerkleRootRelayer {
                             signed_by_authority_set_id,
                             block.number(),
                         ),
+                        rpc_requests: Vec::new(),
+                        proof: None,
                     },
                 );
 
@@ -760,6 +894,8 @@ impl MerkleRootRelayer {
                         block_number: block.number(),
                         block_hash: block.hash(),
                         status: MerkleRootStatus::Failed(err.to_string()),
+                        rpc_requests: Vec::new(),
+                        proof: None,
                     },
                 );
                 log::error!(
@@ -769,14 +905,18 @@ impl MerkleRootRelayer {
             }
         }
 
-        Ok(true)
+        Ok(Some(merkle_root))
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MerkleRoot {
     pub block_number: u32,
     pub block_hash: H256,
+    #[serde(skip)]
+    pub rpc_requests: Vec<tokio::sync::oneshot::Sender<MerkleRootsResponse>>,
+    #[serde(default)]
+    pub proof: Option<FinalProof>,
     pub status: MerkleRootStatus,
 }
 
@@ -784,7 +924,7 @@ pub struct MerkleRoot {
 pub enum MerkleRootStatus {
     WaitForAuthoritySetSync(u64, u32),
     GenerateProof,
-    SubmitProof(FinalProof),
+    SubmitProof,
     Finalized,
     Failed(String),
 }

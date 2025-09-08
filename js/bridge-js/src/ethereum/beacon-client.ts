@@ -1,4 +1,4 @@
-import { BeaconBlockHeader, BeaconGenesisBlock, IBeaconBlock } from './types';
+import { BeaconBlockHeader, BeaconGenesisBlock, IBeaconBlock } from './types.js';
 
 export interface BeaconClient {
   readonly genesisBlockTime: number;

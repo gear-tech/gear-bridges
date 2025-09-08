@@ -62,6 +62,8 @@ pub struct AuthoritySetSync {
     proof_storage: Arc<dyn ProofStorage>,
     genesis_config: GenesisConfig,
 
+    count_thread: Option<usize>,
+
     metrics: Metrics,
 }
 
@@ -83,6 +85,7 @@ impl AuthoritySetSync {
             api_provider,
             proof_storage,
             genesis_config,
+            count_thread: None,
 
             metrics: Metrics::new(),
         }
@@ -253,6 +256,7 @@ impl AuthoritySetSync {
                 self.genesis_config,
                 latest_authority_set_id,
                 latest_proven_authority_set_id,
+                self.count_thread,
             )
             .await?,
             latest_authority_set_id,

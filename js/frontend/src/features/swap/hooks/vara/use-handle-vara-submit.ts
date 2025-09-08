@@ -50,29 +50,29 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
     const shouldApprove = amount > allowance;
 
     if (shouldMint) {
-      const { transaction, awaited } = await mint.prepareTransactionAsync({ args: [], value: amount });
+      const { transaction, fee } = await mint.prepareTransactionAsync({ args: [], value: amount });
 
       txs.push({
         extrinsic: transaction.extrinsic,
         gasLimit: transaction.gasInfo.min_limit.toBigInt(),
-        estimatedFee: awaited.fee,
+        estimatedFee: fee,
         value: amount,
       });
     }
 
     if (shouldApprove) {
-      const { transaction, awaited } = await approve.prepareTransactionAsync({
+      const { transaction, fee } = await approve.prepareTransactionAsync({
         args: [CONTRACT_ADDRESS.VFT_MANAGER, amount],
       });
 
       txs.push({
         extrinsic: transaction.extrinsic,
         gasLimit: transaction.gasInfo.min_limit.toBigInt(),
-        estimatedFee: awaited.fee,
+        estimatedFee: fee,
       });
     }
 
-    const { transaction, awaited } = await requestBridging.prepareTransactionAsync({
+    const { transaction, fee } = await requestBridging.prepareTransactionAsync({
       gasLimit: GAS_LIMIT.BRIDGE,
       args: [token.address, amount, accountAddress],
       value: vftManagerFee,
@@ -81,14 +81,14 @@ function useHandleVaraSubmit({ bridgingFee, vftManagerFee, allowance, onTransact
     txs.push({
       extrinsic: transaction.extrinsic,
       gasLimit: GAS_LIMIT.BRIDGE,
-      estimatedFee: awaited.fee,
+      estimatedFee: fee,
       value: vftManagerFee,
     });
 
     txs.push({
       extrinsic: undefined,
       gasLimit: GAS_LIMIT.APPROXIMATE_PAY_FEE,
-      estimatedFee: awaited.fee, // cuz we don't know payFees gas limit yet
+      estimatedFee: fee, // cuz we don't know payFees gas limit yet
       value: bridgingFee,
     });
 

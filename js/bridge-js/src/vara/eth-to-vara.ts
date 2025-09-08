@@ -11,7 +11,7 @@ import {
   ExecutionPayload,
   U64,
   U256,
-} from './historical-proxy-types';
+} from './historical-proxy-types.js';
 
 const registry = new TypeRegistry();
 registry.setKnownTypes({ types: HistoricalProxyTypes });

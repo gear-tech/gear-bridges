@@ -47,6 +47,9 @@ pub mod consts {
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
     pub const MAX_VALIDATOR_COUNT: usize = 6;
+
+    // 4MiB
+    pub const SIZE_THREAD_STACK_MIN: usize = 4_194_304;
 }
 
 pub mod proving {

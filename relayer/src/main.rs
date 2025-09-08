@@ -5,6 +5,7 @@ use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+    DEFAULT_COUNT_THREADS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -17,9 +18,9 @@ use message_relayer::{
 };
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::proving::GenesisConfig;
+use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
 use relayer::*;
-use std::{collections::HashSet, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
 
@@ -51,6 +52,12 @@ async fn run() -> AnyResult<()> {
 
     match cli.command {
         CliCommands::GearEthCore(mut args) => {
+            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
+            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
+            if rust_min_stack < SIZE_THREAD_STACK_MIN {
+                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
+            }
+
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -74,14 +81,28 @@ async fn run() -> AnyResult<()> {
 
             let genesis_config = create_genesis_config(&args.genesis_config_args);
 
+            let tcp_listener = TcpListener::bind(&args.web_server_address)?;
+
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let web_server =
+                server::create(tcp_listener, args.web_server_token, None, Some(sender))
+                    .context("Failed to create web server")?;
+            let handle_server = web_server.handle();
+            tokio::spawn(web_server);
+
             let relayer = merkle_roots::Relayer::new(
                 api_provider.connection(),
                 eth_api,
+                receiver,
                 storage,
                 genesis_config,
                 args.start_authority_set_id,
                 args.confirmations_merkle_root
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                match args.thread_count {
+                    None => Some(DEFAULT_COUNT_THREADS),
+                    Some(thread_count) => thread_count.into(),
+                },
             )
             .await;
 
@@ -92,9 +113,18 @@ async fn run() -> AnyResult<()> {
                 .await;
             api_provider.spawn();
 
-            relayer.run().await.expect("Merkle root relayer failed");
+            let res = relayer.run().await;
+            handle_server.stop(true).await;
+            return res;
         }
+
         CliCommands::KillSwitch(args) => {
+            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
+            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
+            if rust_min_stack < SIZE_THREAD_STACK_MIN {
+                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
+            }
+
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -122,6 +152,7 @@ async fn run() -> AnyResult<()> {
                 proof_storage,
                 args.from_eth_block,
                 block_finality_storage,
+                Some(DEFAULT_COUNT_THREADS),
             )
             .await;
 
@@ -233,8 +264,9 @@ async fn run() -> AnyResult<()> {
                     // spawn web-server
                     let tcp_listener = TcpListener::bind(web_server_address)?;
                     let (sender, receiver) = mpsc::unbounded_channel();
-                    let web_server = server::create(tcp_listener, web_server_token, sender)
-                        .context("Failed to create web server")?;
+                    let web_server =
+                        server::create(tcp_listener, web_server_token, Some(sender), None)
+                            .context("Failed to create web server")?;
                     let handle_server = web_server.handle();
                     task::spawn(web_server);
 

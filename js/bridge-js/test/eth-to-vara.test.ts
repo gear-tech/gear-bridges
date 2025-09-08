@@ -39,7 +39,7 @@ describe('EthToVara', () => {
   let proof: ProofResult;
 
   test('generate proof', async () => {
-    proof = await composeProof(beaconClient, ethClient, checkpointClient, TX_HASH);
+    proof = await composeProof(beaconClient, ethClient, checkpointClient, TX_HASH, () => {});
   });
 
   test('receipt rlp should be correct', () => {

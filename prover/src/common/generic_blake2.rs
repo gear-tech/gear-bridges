@@ -26,8 +26,8 @@ use plonky2_blake2b256::circuit::{
 use plonky2_field::types::Field;
 use std::{env, fs, iter};
 
-const MAX_BLOCK_COUNT: usize = 8;
-const NUM_GATES: usize = 1 << 16;
+const MAX_BLOCK_COUNT: usize = 50;
+const NUM_GATES: usize = 655_360;
 
 /// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
@@ -332,7 +332,7 @@ mod tests {
     fn assert_constants() {
         assert_eq!(
             (MAX_BLOCK_COUNT, NUM_GATES),
-            (8, 1 << 16),
+            (50, 655_360),
             r#"Any hashing algorithm works in blocks. For example, blake2 uses blocks of 128 bytes:
 
 i.e. if an empty byte array is input, then the hash is actually calculated from the block [0u8; 128];

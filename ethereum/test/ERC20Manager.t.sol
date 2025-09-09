@@ -228,7 +228,7 @@ contract ERC20ManagerTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x55;
+        blockNumber = 0x45;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -294,7 +294,7 @@ contract ERC20ManagerTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x55;
+        blockNumber = 0x45;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -1003,7 +1003,7 @@ contract ERC20ManagerTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x55;
+        blockNumber = 0x45;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));

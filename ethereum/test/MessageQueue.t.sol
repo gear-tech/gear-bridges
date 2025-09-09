@@ -181,7 +181,7 @@ contract MessageQueueTest is Test, Base {
 
         messageHash = message3.hash();
 
-        blockNumber = 0x55;
+        blockNumber = 0x45;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -252,7 +252,7 @@ contract MessageQueueTest is Test, Base {
 
         messageHash = message3.hash();
 
-        blockNumber = 0x55;
+        blockNumber = 0x45;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -380,6 +380,58 @@ contract MessageQueueTest is Test, Base {
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
         assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+    }
+
+    function test_SubmitMerkleRootWithBlockNumberBeforeGenesis() public {
+        uint256 blockNumber = 0x11;
+        bytes32 merkleRoot = bytes32(uint256(0x22));
+        bytes memory proof = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+        assertEq(messageQueue.genesisBlock(), 0x11);
+        assertEq(messageQueue.maxBlockNumber(), 0x11);
+
+        blockNumber -= 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMessageQueue.BlockNumberBeforeGenesis.selector, blockNumber, messageQueue.genesisBlock()
+            )
+        );
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+    }
+
+    function test_SubmitMerkleRootWithBlockNumberTooFar() public {
+        uint256 blockNumber = 0x11;
+        bytes32 merkleRoot = bytes32(uint256(0x22));
+        bytes memory proof = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+        assertEq(messageQueue.genesisBlock(), 0x11);
+        assertEq(messageQueue.maxBlockNumber(), 0x11);
+
+        blockNumber += messageQueue.MAX_BLOCK_DISTANCE() + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMessageQueue.BlockNumberTooFar.selector,
+                blockNumber,
+                messageQueue.maxBlockNumber() + messageQueue.MAX_BLOCK_DISTANCE()
+            )
+        );
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
     }
 
     function test_SubmitMerkleRootTwice() public {

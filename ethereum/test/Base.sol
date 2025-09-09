@@ -245,6 +245,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(messageQueue.verifier(), address(verifier));
         assertEq(messageQueue.isChallengingRoot(), false);
         assertEq(messageQueue.isEmergencyStopped(), false);
+        assertEq(messageQueue.genesisBlock(), 0);
+        assertEq(messageQueue.maxBlockNumber(), 0);
 
         console.log();
 

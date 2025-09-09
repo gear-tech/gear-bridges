@@ -64,6 +64,16 @@ interface IMessageQueue is IPausable {
     error NotEmergencyStopObserver();
 
     /**
+     * @dev Block number is before genesis block.
+     */
+    error BlockNumberBeforeGenesis(uint256 blockNumber, uint256 genesisBlock);
+
+    /**
+     * @dev Block number is too far from max block number.
+     */
+    error BlockNumberTooFar(uint256 blockNumber, uint256 maxBlockNumber);
+
+    /**
      * @dev Emitted when challenging root status is enabled.
      */
     event ChallengeRootEnabled(uint256 untilTimestamp);
@@ -132,6 +142,18 @@ interface IMessageQueue is IPausable {
      * @return isEmergencyStopped emergency stop status.
      */
     function isEmergencyStopped() external view returns (bool);
+
+    /**
+     * @dev Returns genesis block number.
+     * @return genesisBlock Genesis block number.
+     */
+    function genesisBlock() external view returns (uint256);
+
+    /**
+     * @dev Returns maximum block number.
+     * @return maxBlockNumber Maximum block number.
+     */
+    function maxBlockNumber() external view returns (uint256);
 
     /**
      * @dev Puts MessageQueue into a high-priority paused state.

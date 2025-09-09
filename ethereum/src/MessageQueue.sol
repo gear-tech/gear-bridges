@@ -41,6 +41,8 @@ contract MessageQueue is
     uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 3 minutes;
     uint256 public constant PROCESS_USER_MESSAGE_DELAY = 5 minutes;
 
+    uint256 public constant MAX_BLOCK_DISTANCE = 5;
+
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
     address private _emergencyStopAdmin;
@@ -48,6 +50,8 @@ contract MessageQueue is
     IVerifier private _verifier;
     uint256 private _challengingRootTimestamp;
     bool private _emergencyStop;
+    uint256 private _genesisBlock;
+    uint256 private _maxBlockNumber;
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
@@ -153,6 +157,22 @@ contract MessageQueue is
     }
 
     /**
+     * @dev Returns genesis block number.
+     * @return genesisBlock Genesis block number.
+     */
+    function genesisBlock() external view returns (uint256) {
+        return _genesisBlock;
+    }
+
+    /**
+     * @dev Returns maximum block number.
+     * @return maxBlockNumber Maximum block number.
+     */
+    function maxBlockNumber() external view returns (uint256) {
+        return _maxBlockNumber;
+    }
+
+    /**
      * @dev Pauses the contract.
      */
     function pause() public onlyRole(PAUSER_ROLE) {
@@ -208,13 +228,34 @@ contract MessageQueue is
      * @param blockNumber Block number on Vara Network.
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number.
      * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
-     * @dev Reverts if emergency stop status is set with `EmergencyStop` error.
+     * @dev Reverts if challenging root status is enabled and caller is not emergency stop admin with `ChallengeRoot` error.
+     * @dev Reverts if emergency stop status is set and caller is not emergency stop admin with `EmergencyStop` error.
      * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
+     * @dev Reverts if block number is before genesis block with `BlockNumberBeforeGenesis` error.
+     * @dev Reverts if block number is too far from max block number with `BlockNumberTooFar` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
+
+        if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
+            revert ChallengeRoot();
+        }
+
         if (_emergencyStop && !isFromEmergencyStopAdmin) {
             revert EmergencyStop();
+        }
+
+        if (_genesisBlock == 0) {
+            _genesisBlock = blockNumber;
+            _maxBlockNumber = blockNumber;
+        } else {
+            if (blockNumber < _genesisBlock) {
+                revert BlockNumberBeforeGenesis(blockNumber, _genesisBlock);
+            }
+
+            if (blockNumber > _maxBlockNumber + MAX_BLOCK_DISTANCE) {
+                revert BlockNumberTooFar(blockNumber, _maxBlockNumber + MAX_BLOCK_DISTANCE);
+            }
         }
 
         uint256[] memory publicInputs = new uint256[](2);
@@ -229,18 +270,24 @@ contract MessageQueue is
         bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
         if (previousMerkleRoot != 0) {
             if (previousMerkleRoot != merkleRoot) {
-                _emergencyStop = true;
-
                 delete _blockNumbers[blockNumber];
                 delete _merkleRootTimestamps[previousMerkleRoot];
 
-                emit EmergencyStopEnabled();
+                if (!_emergencyStop) {
+                    _emergencyStop = true;
+
+                    emit EmergencyStopEnabled();
+                }
             } else {
                 revert MerkleRootAlreadySet(blockNumber);
             }
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
             _merkleRootTimestamps[merkleRoot] = block.timestamp;
+
+            if (blockNumber > _maxBlockNumber) {
+                _maxBlockNumber = blockNumber;
+            }
 
             emit MerkleRoot(blockNumber, merkleRoot);
         }

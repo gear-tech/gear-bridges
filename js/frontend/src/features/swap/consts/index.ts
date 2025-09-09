@@ -3,7 +3,7 @@ import { CONTRACT_ADDRESS, ETH_BEACON_NODE_ADDRESS } from './env';
 import { EVENT_NAME } from './eth';
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE, SUBMIT_STATUS } from './form';
 import { BridgingPaymentProgram, VftManagerProgram } from './sails';
-import { PRIORITY, CLAIM_TYPE } from './settings';
+import { CLAIM_TYPE } from './settings';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
 
 const NETWORK = {
@@ -26,7 +26,6 @@ export {
   SERVICE_NAME,
   QUERY_NAME,
   SUBMIT_STATUS,
-  PRIORITY,
   CLAIM_TYPE,
   ETH_BEACON_NODE_ADDRESS,
   BridgingPaymentProgram,

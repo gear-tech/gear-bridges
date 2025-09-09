@@ -18,8 +18,6 @@ type UseHandleSubmitParameters = {
   allowance: bigint | undefined;
   accountBalance: bigint | undefined;
   vftManagerFee: bigint | undefined;
-  priorityFee: bigint | undefined;
-  shouldPayPriorityFee: boolean;
   onTransactionStart: (values: FormattedValues, estimatedFees: bigint) => void;
 };
 

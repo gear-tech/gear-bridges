@@ -16,14 +16,15 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
     },
+    util::serialization::gate_serialization::default::DefaultGateSerializer,
 };
 use plonky2_blake2b256::circuit::{
     blake2_circuit_from_message_targets_and_length_target, BLOCK_BITS, BLOCK_BYTES,
 };
 use plonky2_field::types::Field;
-use std::iter;
+use std::{env, fs, iter};
 
 const MAX_BLOCK_COUNT: usize = 8;
 const NUM_GATES: usize = 1 << 16;
@@ -137,22 +138,22 @@ impl GenericBlake2 {
 
 lazy_static! {
     /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
-    static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = (1
-        ..=MAX_BLOCK_COUNT)
-        .map(blake2_circuit_verifier_data)
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("Correct max block count");
-}
+    static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = {
+        let path = env::var("VERIFIER_DATA_PATH").expect("VERIFIER_DATA_PATH is set");
 
-fn blake2_circuit_verifier_data(num_blocks: usize) -> VerifierOnlyCircuitData<C, D> {
-    VariativeBlake2 {
-        data: vec![0; BLOCK_BYTES * num_blocks],
-    }
-    .prove()
-    .circuit_data()
-    .verifier_only
-    .clone()
+        let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
+        let serializer_gate = DefaultGateSerializer;
+
+        for i in 1..=MAX_BLOCK_COUNT {
+            let serialized = fs::read(format!("{path}/verifier_circuit_data-{i}")).expect("Correctly formed file with serialized data");
+            let data = VerifierCircuitData::<F, C, D>::from_bytes(serialized, &serializer_gate).expect("Correctly formed serialized data");
+            verifier_data.push(data.verifier_only);
+        }
+
+        verifier_data
+            .try_into()
+            .expect("Correct max block count")
+    };
 }
 
 impl_target_set! {

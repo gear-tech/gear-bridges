@@ -1,7 +1,4 @@
-use std::{
-    process,
-    time::{Duration, Instant},
-};
+use std::{process, time::Duration};
 
 use reqwest::Client as HttpClient;
 use thiserror::Error;
@@ -11,7 +8,10 @@ use prometheus::{Gauge, IntCounter, IntGauge};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{send_challege_root_to_ethereum, submit_merkle_root_to_ethereum},
+    common::{
+        is_rpc_transport_error_recoverable, send_challege_root_to_ethereum,
+        submit_merkle_root_to_ethereum,
+    },
     message_relayer::{
         common::web_request::{MerkleRootBlocks, MerkleRootsResponse},
         eth_to_gear::api_provider::ApiProviderConnection,
@@ -19,7 +19,8 @@ use crate::{
     prover_interface::FinalProof,
 };
 
-const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(12);
+const REPEAT_PERIOD_SEC: Duration = Duration::from_secs(12);
+const ERROR_REPEAT_DELAY: Duration = Duration::from_secs(3);
 
 impl_metered_service! {
     struct Metrics {
@@ -142,58 +143,72 @@ impl KillSwitchRelayer {
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
         log::info!("Starting kill switch relayer");
-        let loop_delay = MIN_MAIN_LOOP_DURATION;
 
         loop {
-            let now = Instant::now();
-            let _res: Result<_, Error> = match &self.state {
+            let loop_delay;
+
+            let res = match &self.state {
                 State::Normal => self.main_loop().await.map_err(Error::from),
                 State::ChallengeRoot { .. } => self.challenge_root().await.map_err(Error::from),
                 State::SubmitMerkleRoot { .. } => {
                     self.submit_merkle_root().await.map_err(Error::from)
                 }
                 State::Exit => {
-                    log::info!("Exiting ..");
+                    log::info!("Exiting ...");
+                    tokio::time::sleep(Duration::from_secs(3)).await;
                     process::exit(1);
                 }
             };
 
-            // TODO: handler errors and retries
+            match res {
+                Ok(()) => {
+                    if let State::Normal = self.state {
+                        // Repeat merkle root event scan after a delay
+                        loop_delay = REPEAT_PERIOD_SEC;
+                    } else {
+                        // State changed so we want to immediately process the new state.
+                        loop_delay = Duration::ZERO;
+                    }
+                }
+                Err(err) => {
+                    loop_delay = ERROR_REPEAT_DELAY;
 
-            //if let Err(err) = res {
-            //    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-            //    log::error!(
-            //        "Main loop error (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}..."
-            //    );
-            //    if attempts >= MAX_RETRIES {
-            //        log::error!("Max attempts reached, exiting ..");
-            //        return Err(err);
-            //    }
+                    match err {
+                        Error::MainLoop(MainLoopError::EthApi(
+                            ethereum_client::Error::ErrorInHTTPTransport(err),
+                        ))
+                        | Error::ChallengeRoot(ChallengeRootError::EthApi(
+                            ethereum_client::Error::ErrorInHTTPTransport(err),
+                        ))
+                        | Error::SubmitMerkleRoot(SubmitMerkleRootError::EthApi(
+                            ethereum_client::Error::ErrorInHTTPTransport(err),
+                        )) => {
+                            if is_rpc_transport_error_recoverable(&err) {
+                                // Reconnect on Ethereum API
+                                log::error!(
+                                    "Recoverable Ethereum transport error: {err}, reconnecting..."
+                                );
+                                if let Err(e) = self.eth_api.reconnect().await {
+                                    log::error!("Ethereum API reconnect failed: {e}");
+                                }
+                            }
+                        }
+                        Error::MainLoop(MainLoopError::GearApi(e)) => {
+                            // Reconnect on Gear API
+                            log::error!("Gear API error: {e}, reconnecting...");
+                            if let Err(e) = self.api_provider.reconnect().await {
+                                log::error!("Gear API reconnect failed: {e}");
+                            }
+                        }
+                        e => {
+                            log::error!("Error in kill switch relayer: {e}");
+                        }
+                    }
+                }
+            }
 
-            //    tokio::time::sleep(BASE_RETRY_DELAY * attempts).await;
-            //    match self.api_provider.reconnect().await {
-            //        Ok(()) => {
-            //            log::info!("Gear block listener reconnected");
-            //        }
-
-            //        Err(err) => {
-            //            log::error!("Gear block listener unable to reconnect: {err}");
-            //            return Err(anyhow::anyhow!("Failed to reconnect: {}", err));
-            //        }
-            //    }
-
-            //    if common::is_transport_error_recoverable(&err) {
-            //        self.eth_api = self
-            //            .eth_api
-            //            .reconnect()
-            //            .await
-            //            .map_err(|e| anyhow::anyhow!("Failed to reconnect: {}", e))?;
-            //    }
-            //}
-
-            let main_loop_duration = now.elapsed();
-            if main_loop_duration < loop_delay {
-                tokio::time::sleep(loop_delay - main_loop_duration).await;
+            if loop_delay != Duration::ZERO {
+                tokio::time::sleep(loop_delay).await;
             }
         }
     }

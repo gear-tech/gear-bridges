@@ -30,6 +30,8 @@ function useHandleVaraSubmit({
   bridgingFee,
   shouldPayBridgingFee,
   vftManagerFee,
+  priorityFee,
+  shouldPayPriorityFee,
   allowance,
   onTransactionStart,
 }: UseHandleSubmitParameters) {
@@ -39,13 +41,14 @@ function useHandleVaraSubmit({
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
-  const payFees = usePayFeesWithAwait({ fee: bridgingFee, shouldPayBridgingFee });
+  const payFees = usePayFeesWithAwait({ fee: bridgingFee, priorityFee, shouldPayBridgingFee, shouldPayPriorityFee });
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
     definedAssert(allowance, 'Allowance');
     definedAssert(bridgingFee, 'Bridging fee value');
     definedAssert(vftManagerFee, 'VFT Manager fee value');
+    definedAssert(priorityFee, 'Priority fee value');
     definedAssert(token, 'Fungible token');
 
     const txs: Transaction[] = [];
@@ -96,6 +99,7 @@ function useHandleVaraSubmit({
     };
 
     if (shouldPayBridgingFee) txs.push({ ...feesTx, value: bridgingFee });
+    if (shouldPayPriorityFee) txs.push({ ...feesTx, value: priorityFee });
 
     return txs;
   };

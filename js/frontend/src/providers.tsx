@@ -59,6 +59,7 @@ const adapter = new WagmiAdapter({
   transports: { [ETH_CHAIN_ID]: http(ETH_NODE_ADDRESS) },
 });
 
+const METAMASK_WALLET_ID = 'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96';
 const COINBASE_WALLET_ID = 'fd20dc426fb37566d803205b19bbc1d4096b248ac04548e3cfb6b3a38bd033aa';
 const TRUST_WALLET_ID = '4622a2b2d6af1c9844944291e5e7351a6aa24cd7b23099efac1b2fd875da31a0';
 
@@ -71,7 +72,7 @@ createAppKit({
   enableWalletGuide: false,
   allWallets: 'HIDE',
   excludeWalletIds: [TRUST_WALLET_ID],
-  featuredWalletIds: [COINBASE_WALLET_ID],
+  includeWalletIds: [METAMASK_WALLET_ID, COINBASE_WALLET_ID],
   themeMode: 'dark',
   themeVariables: {
     '--w3m-font-family': 'Geist Variable',

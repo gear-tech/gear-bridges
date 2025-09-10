@@ -55,7 +55,7 @@
     "sails-js": "0.4.3",
     "sails-js-cli": "0.4.3",
     "sails-js-parser": "0.4.3",
-    "viem": "2.37.1",
+    "viem": "2.37.5",
     "vitest": "3.2.4"
   }
 }

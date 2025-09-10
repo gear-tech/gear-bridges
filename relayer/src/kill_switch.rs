@@ -48,7 +48,7 @@ impl_metered_service! {
 }
 
 #[derive(Debug, Error)]
-enum MainLoopError {
+enum ScanForEventsError {
     #[error("Ethereum API error: {0}")]
     EthApi(#[from] ethereum_client::Error),
     #[error("Gear API error: {0}")]
@@ -75,8 +75,8 @@ enum SubmitMerkleRootError {
 
 #[derive(Debug, Error)]
 enum Error {
-    #[error("Main loop error: {0}")]
-    MainLoop(#[from] MainLoopError),
+    #[error("Scan for events error: {0}")]
+    ScanForEvents(#[from] ScanForEventsError),
     #[error("Challenge root error: {0}")]
     ChallengeRoot(#[from] ChallengeRootError),
     #[error("Submit merkle root error: {0}")]
@@ -84,8 +84,8 @@ enum Error {
 }
 
 enum State {
-    // Normal operation
-    Normal,
+    // Scan for events (normal operation)
+    ScanForEvents,
     // Waiting for challenge root tx to be finalized
     ChallengeRoot { tx_hash: Option<TxHash> },
     // Waiting for submit merkle root tx to be finalized
@@ -127,7 +127,7 @@ impl KillSwitchRelayer {
             relayer_http_url,
             http_client,
             start_from_eth_block: from_eth_block,
-            state: State::Normal,
+            state: State::ScanForEvents,
             challenged_block: None,
             metrics: Metrics::new(),
         }
@@ -140,7 +140,7 @@ impl KillSwitchRelayer {
             let loop_delay;
 
             let res = match &self.state {
-                State::Normal => self.main_loop().await.map_err(Error::from),
+                State::ScanForEvents => self.scan_for_events().await.map_err(Error::from),
                 State::ChallengeRoot { .. } => self.challenge_root().await.map_err(Error::from),
                 State::SubmitMerkleRoot { .. } => {
                     self.submit_merkle_root().await.map_err(Error::from)
@@ -154,7 +154,7 @@ impl KillSwitchRelayer {
 
             match res {
                 Ok(()) => {
-                    if let State::Normal = self.state {
+                    if let State::ScanForEvents = self.state {
                         // Repeat merkle root event scan after a delay
                         loop_delay = REPEAT_PERIOD_SEC;
                     } else {
@@ -166,7 +166,7 @@ impl KillSwitchRelayer {
                     loop_delay = ERROR_REPEAT_DELAY;
 
                     match err {
-                        Error::MainLoop(MainLoopError::EthApi(
+                        Error::ScanForEvents(ScanForEventsError::EthApi(
                             ethereum_client::Error::ErrorInHTTPTransport(err),
                         ))
                         | Error::ChallengeRoot(ChallengeRootError::EthApi(
@@ -185,7 +185,7 @@ impl KillSwitchRelayer {
                                 }
                             }
                         }
-                        Error::MainLoop(MainLoopError::GearApi(e)) => {
+                        Error::ScanForEvents(ScanForEventsError::GearApi(e)) => {
                             // Reconnect on Gear API
                             log::error!("Gear API error: {e}, reconnecting...");
                             if let Err(e) = self.api_provider.reconnect().await {
@@ -205,7 +205,7 @@ impl KillSwitchRelayer {
         }
     }
 
-    async fn main_loop(&mut self) -> Result<(), MainLoopError> {
+    async fn scan_for_events(&mut self) -> Result<(), ScanForEventsError> {
         let balance = self.eth_api.get_approx_balance().await?;
         self.metrics.fee_payer_balance.set(balance);
 
@@ -213,7 +213,7 @@ impl KillSwitchRelayer {
             .eth_api
             .finalized_block_number()
             .await
-            .map_err(MainLoopError::GearApi)?;
+            .map_err(ScanForEventsError::GearApi)?;
 
         // Set the initial value for `from_eth_block` if it's not set yet.
         let start_from_eth_block = self.start_from_eth_block.unwrap_or(last_finalized_block);
@@ -333,7 +333,10 @@ impl KillSwitchRelayer {
         Ok(())
     }
 
-    async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> Result<bool, MainLoopError> {
+    async fn compare_merkle_roots(
+        &self,
+        event: &MerkleRootEntry,
+    ) -> Result<bool, ScanForEventsError> {
         let gear_api = self.api_provider.client();
         let res = gear_api
             .block_number_to_hash(event.block_number as u32)

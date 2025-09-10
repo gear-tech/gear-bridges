@@ -16,9 +16,8 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
     },
-    util::serialization::gate_serialization::default::DefaultGateSerializer,
 };
 use plonky2_blake2b256::circuit::{
     blake2_circuit_from_message_targets_and_length_target, BLOCK_BITS, BLOCK_BYTES,
@@ -142,12 +141,11 @@ lazy_static! {
         let path = env::var("VERIFIER_DATA_PATH").expect("VERIFIER_DATA_PATH is set");
 
         let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
-        let serializer_gate = DefaultGateSerializer;
 
         for i in 1..=MAX_BLOCK_COUNT {
-            let serialized = fs::read(format!("{path}/verifier_circuit_data-{i}")).expect("Correctly formed file with serialized data");
-            let data = VerifierCircuitData::<F, C, D>::from_bytes(serialized, &serializer_gate).expect("Correctly formed serialized data");
-            verifier_data.push(data.verifier_only);
+            let serialized = fs::read(format!("{path}/verifier_only_circuit_data-{i}")).expect("Correctly formed file with serialized data");
+            let data = VerifierOnlyCircuitData::<C, D>::from_bytes(serialized).expect("Correctly formed serialized data");
+            verifier_data.push(data);
         }
 
         verifier_data

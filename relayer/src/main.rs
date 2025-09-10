@@ -3,9 +3,9 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
-    DEFAULT_COUNT_THREADS,
+    EthereumArgs, EthereumSignerArgs, EthereumSignerPathArgs, FetchMerkleRootsArgs, GearArgs,
+    GearEthTokensCommands, GearSignerArgs, GenesisConfigArgs, ProofStorageArgs,
+    DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -123,7 +123,9 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to connect to Gear API");
 
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let eth_api = create_eth_signer_client_from_path(&args.ethereum_args)
+                .await
+                .expect("Failed to create Ethereum client");
             let http_client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(args.relayer_http_args.timeout_secs))
                 .default_headers({
@@ -579,6 +581,23 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     )
     .await
     .expect("Error while creating ethereum client")
+}
+
+async fn create_eth_signer_client_from_path(args: &EthereumSignerPathArgs) -> AnyResult<EthApi> {
+    let pk_bytes = std::fs::read(&args.fee_payer_path).with_context(|| {
+        format!(
+            "Failed to read ETH_FEE_PAYER_PATH file: {:?}",
+            &args.fee_payer_path
+        )
+    })?;
+    let fee_payer = format!("0x{}", hex::encode(pk_bytes));
+
+    let args = EthereumSignerArgs {
+        ethereum_args: args.ethereum_args.clone(),
+        fee_payer,
+    };
+
+    Ok(create_eth_signer_client(&args).await)
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {

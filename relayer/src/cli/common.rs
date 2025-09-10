@@ -76,6 +76,16 @@ pub struct EthereumSignerArgs {
 }
 
 #[derive(Args)]
+pub struct EthereumSignerPathArgs {
+    #[clap(flatten)]
+    pub ethereum_args: EthereumArgs,
+
+    /// Private key for fee payer
+    #[arg(long = "eth-fee-payer-path", env = "ETH_FEE_PAYER_PATH")]
+    pub fee_payer_path: PathBuf,
+}
+
+#[derive(Args, Clone)]
 pub struct EthereumArgs {
     /// Address of the ethereum endpoint
     #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]

@@ -15,6 +15,7 @@ use crate::{
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
 };
+
 use ::prover::proving::GenesisConfig;
 use anyhow::Context;
 use ethereum_client::EthApi;
@@ -216,6 +217,17 @@ impl MerkleRootRelayer {
                     .context("Failed to get authority set id for latest finalized block")?
             }
         };
+
+        if self
+            .storage
+            .proofs
+            .get_latest_authority_set_id()
+            .await
+            .is_none()
+        {
+            log::info!("Proof storage is empty, syncing authority sets from genesis");
+            authority_set_sync.initialize();
+        }
 
         let gear_api = self.api_provider.client();
 

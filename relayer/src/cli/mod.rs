@@ -3,8 +3,8 @@ use clap::{Args, Parser, Subcommand};
 mod common;
 
 pub use common::{
-    BeaconRpcArgs, EthereumArgs, EthereumSignerArgs, GearArgs, GearSignerArgs, GenesisConfigArgs,
-    PrometheusArgs, ProofStorageArgs,
+    BeaconRpcArgs, EthereumArgs, EthereumSignerArgs, EthereumSignerPathArgs, GearArgs,
+    GearSignerArgs, GenesisConfigArgs, PrometheusArgs, ProofStorageArgs,
 };
 
 use crate::cli::common::{BlockStorageArgs, RelayerHttpArgs};
@@ -278,7 +278,7 @@ pub struct KillSwitchArgs {
     pub gear_args: GearArgs,
 
     #[clap(flatten)]
-    pub ethereum_args: EthereumSignerArgs,
+    pub ethereum_args: EthereumSignerPathArgs,
 
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,

@@ -24,14 +24,6 @@ const ERROR_REPEAT_DELAY: Duration = Duration::from_secs(3);
 
 impl_metered_service! {
     struct Metrics {
-        latest_proven_era: IntGauge = IntGauge::new(
-            "kill_switch_latest_proven_era",
-            "Latest proven era number",
-        ),
-        latest_observed_gear_era: IntGauge = IntGauge::new(
-            "kill_switch_latest_observed_gear_era",
-            "Latest era number observed by relayer",
-        ),
         fee_payer_balance: Gauge = Gauge::new(
             "kill_switch_fee_payer_balance",
             "Transaction fee payer balance",
@@ -48,9 +40,9 @@ impl_metered_service! {
             "kill_switch_merkle_root_mismatch_cnt",
             "Amount of merkle root mismatches found",
         ),
-        finality_proof_for_mismatched_root_not_found_cnt: IntCounter = IntCounter::new(
-            "kill_switch_finality_proof_for_mismatched_root_not_found_cnt",
-            "Amount of not found finality proofs",
+        merkle_root_proof_not_found_on_block_cnt: IntCounter = IntCounter::new(
+            "kill_switch_merkle_root_proof_not_found_on_block",
+            "Amount of merkle root proofs not found on block",
         ),
     }
 }
@@ -396,9 +388,9 @@ impl KillSwitchRelayer {
                 block_number,
                 block_hash,
             } => {
-                log::info!("Got proof for block {block_number}: {:?}", &proof);
-                log::info!("Merkle root: {:?}", &merkle_root);
-                log::info!("Block hash: {block_hash:?}");
+                log::debug!("Fetched proof for block {block_number}: {:?}", &proof);
+                log::debug!("Merkle root: {:?}", &merkle_root);
+                log::debug!("Block hash: {block_hash:?}");
                 FinalProof {
                     proof,
                     merkle_root: merkle_root.to_fixed_bytes(),
@@ -406,7 +398,8 @@ impl KillSwitchRelayer {
                 }
             }
             MerkleRootsResponse::NoMerkleRootOnBlock { block_number } => {
-                log::error!("No Merkle root found on block {block_number}");
+                log::error!("No Merkle proof root found on block {block_number}");
+                self.metrics.merkle_root_proof_not_found_on_block_cnt.inc();
                 return Err(SubmitMerkleRootError::NoMerkleRootOnBlock { block_number });
             }
             MerkleRootsResponse::Failed { message } => {

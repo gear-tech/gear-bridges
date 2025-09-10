@@ -245,7 +245,7 @@ impl KillSwitchRelayer {
         for (event, _block_number_eth) in events {
             if !self.compare_merkle_roots(&event).await? {
                 // Okay, we have a mismatch,
-                // that means for some reason the proof with incorrect merkle root was submitted to relayer contract.
+                // that means for some reason the proof with incorrect merkle root was submitted to relayer MQ contract.
                 // We need to challenge it by submitting the correct merkle root.
                 log::debug!("Got event with mismatched merkle root: {:?}", &event);
 
@@ -335,10 +335,30 @@ impl KillSwitchRelayer {
 
     async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> Result<bool, MainLoopError> {
         let gear_api = self.api_provider.client();
-        let block_hash = gear_api
+        let res = gear_api
             .block_number_to_hash(event.block_number as u32)
-            .await?;
-        let merkle_root = gear_api.fetch_queue_merkle_root(block_hash).await?;
+            .await
+            .convert()?;
+
+        let Some(block_hash) = res else {
+            log::info!(
+                "Block #{} is not present on Gear RPC node, cannot compare merkle roots",
+                event.block_number,
+            );
+            return Ok(false);
+        };
+
+        let Some(merkle_root) = gear_api
+            .fetch_queue_merkle_root(block_hash)
+            .await
+            .convert()?
+        else {
+            log::info!(
+                "Block #{} is not present on Gear RPC node, cannot compare merkle roots",
+                event.block_number,
+            );
+            return Ok(false);
+        };
 
         let is_matches = merkle_root == event.merkle_root;
 
@@ -409,5 +429,23 @@ impl KillSwitchRelayer {
         };
 
         Ok(proof)
+    }
+}
+
+fn is_block_no_present_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains("not present on RPC node")
+}
+
+trait ConvertToOptGearApiError<T> {
+    fn convert(self) -> anyhow::Result<Option<T>>;
+}
+
+impl<T> ConvertToOptGearApiError<T> for anyhow::Result<T> {
+    fn convert(self) -> anyhow::Result<Option<T>> {
+        match self {
+            Err(err) if is_block_no_present_error(&err) => Ok(None),
+            Err(err) => Err(err),
+            Ok(val) => Ok(Some(val)),
+        }
     }
 }

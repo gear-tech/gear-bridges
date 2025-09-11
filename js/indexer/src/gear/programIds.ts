@@ -1,8 +1,8 @@
-import { Client } from 'pg';
+import pg from 'pg';
 import { ProgramName } from './util.js';
 
 const createClient = () =>
-  new Client({
+  new pg.Client({
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT),
     user: process.env.DB_USER,

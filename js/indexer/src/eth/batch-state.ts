@@ -24,7 +24,8 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this._processStatuses();
     await this._savePaidRequests();
     await this._saveTransfers();
-    await Promise.all([this._saveCompletedTransfers(), this._saveMerkleRoots()]);
+    await this._saveMerkleRoots();
+    await this._saveCompletedTransfers();
     await this._processCompletedTransfers();
   }
 

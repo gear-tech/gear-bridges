@@ -26,6 +26,14 @@
   }
 
   .sidebar {
+    align-self: flex-start;
+
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .actions {
     display: flex;
     align-items: center;
     gap: 16px;

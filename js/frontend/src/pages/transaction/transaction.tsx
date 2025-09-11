@@ -9,7 +9,7 @@ import { useTokens } from '@/context';
 import { useTransaction } from '@/features/history';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
-import { PayVaraFeeButton, RelayTxButton } from '@/features/swap';
+import { PayVaraFeeButton, RelayTxButton, RelayTxNote } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
 
 import { Field } from './field';
@@ -129,27 +129,36 @@ function Transaction() {
         </div>
 
         <div className={styles.sidebar}>
-          <TransactionStatus status={status} />
+          <div className={styles.actions}>
+            <TransactionStatus status={status} />
 
-          {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+            {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+
+            {isAwaitingPayment &&
+              (isVaraNetwork ? (
+                bridgingStartedAtBlock && (
+                  <RelayTxButton.Vara
+                    sender={sender}
+                    nonce={rawNonce as HexString}
+                    blockNumber={bridgingStartedAtBlock}
+                    onSuccess={refetch}
+                  />
+                )
+              ) : (
+                <RelayTxButton.Eth
+                  sender={sender}
+                  txHash={txHash as HexString}
+                  blockNumber={BigInt(blockNumber)}
+                  onSuccess={refetch}
+                />
+              ))}
+          </div>
 
           {isAwaitingPayment &&
             (isVaraNetwork ? (
-              bridgingStartedAtBlock && (
-                <RelayTxButton.Vara
-                  sender={sender}
-                  nonce={rawNonce as HexString}
-                  blockNumber={bridgingStartedAtBlock}
-                  onSuccess={refetch}
-                />
-              )
+              bridgingStartedAtBlock && <RelayTxNote.Vara blockNumber={bridgingStartedAtBlock} sender={sender} />
             ) : (
-              <RelayTxButton.Eth
-                sender={sender}
-                txHash={txHash as HexString}
-                blockNumber={BigInt(blockNumber)}
-                onSuccess={refetch}
-              />
+              <RelayTxNote.Eth blockNumber={BigInt(blockNumber)} sender={sender} />
             ))}
         </div>
       </header>

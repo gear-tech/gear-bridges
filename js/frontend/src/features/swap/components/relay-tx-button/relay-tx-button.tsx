@@ -4,7 +4,6 @@ import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
 
-import { Tooltip } from '@/components';
 import { useEthAccount, useModal } from '@/hooks';
 import { getErrorMessage } from '@/utils';
 
@@ -43,26 +42,10 @@ function RelayVaraTxButton({ sender, nonce, blockNumber, onSuccess }: VaraProps)
       .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
   };
 
-  const getTooltipText = () => {
-    if (!isAvailable) return 'Relay is not available yet - awaiting merkle root in message queues';
-    if (!ethAccount.address) return 'Connect Ethereum wallet to relay the transaction';
-  };
-
   if (account ? !isOwner : !ethAccount.address) return;
 
   return (
-    <Tooltip value={getTooltipText()}>
-      {/* wrapping into span to preserve tooltip while button is disabled */}
-      <span>
-        <Button
-          text="Manual Relay"
-          size="x-small"
-          onClick={handleClick}
-          isLoading={isPending}
-          disabled={!isAvailable}
-        />
-      </span>
-    </Tooltip>
+    <Button text="Manual Relay" size="x-small" onClick={handleClick} isLoading={isPending} disabled={!isAvailable} />
   );
 }
 
@@ -99,27 +82,11 @@ function RelayEthTxButton({ sender, txHash, blockNumber, onSuccess }: EthProps) 
       .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
   };
 
-  const getTooltipText = () => {
-    if (!isAvailable) return 'Relay is not available yet - awaiting checkpoint slots';
-    if (!account) return 'Connect Vara wallet to relay the transaction';
-  };
-
   if (ethAccount.address ? !isOwner : !account) return;
 
   return (
     <>
-      <Tooltip value={getTooltipText()}>
-        {/* wrapping into span to preserve tooltip while button is disabled */}
-        <span>
-          <Button
-            text="Manual Relay"
-            size="x-small"
-            onClick={handleClick}
-            isLoading={isPending}
-            disabled={!isAvailable}
-          />
-        </span>
-      </Tooltip>
+      <Button text="Manual Relay" size="x-small" onClick={handleClick} isLoading={isPending} disabled={!isAvailable} />
 
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}
     </>

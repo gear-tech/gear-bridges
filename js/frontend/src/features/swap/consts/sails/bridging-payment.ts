@@ -4,6 +4,7 @@ import { GearApi, BaseGearProgram, HexString, decodeAddress } from '@gear-js/api
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
+  H256,
   ActorId,
   throwOnErrorReply,
   getServiceNamePrefix,
@@ -23,6 +24,10 @@ export interface State {
    * Fee amount that will be charged from users.
    */
   fee: number | string | bigint;
+  /**
+   * Priority fee amount that will be charged from users.
+   */
+  priority_fee: number | string | bigint;
 }
 
 export class SailsProgram {
@@ -35,7 +40,7 @@ export class SailsProgram {
     programId?: `0x${string}`,
   ) {
     const types: Record<string, any> = {
-      State: { admin_address: '[u8;32]', fee: 'u128' },
+      State: { admin_address: '[u8;32]', fee: 'u128', priority_fee: 'u128' },
     };
 
     this.registry = new TypeRegistry();
@@ -102,7 +107,7 @@ export class BridgingPayment {
   /**
    * Pay fees for message processing to the admin.
    *
-   * This method requires that **exactly** [Config::fee] must
+   * This method requires that **exactly** [State::fee] must
    * be attached as a value when sending message to this method.
    *
    * Current fee amount can be retreived by calling `get_state`.
@@ -117,6 +122,29 @@ export class BridgingPayment {
       'PayFees',
       nonce,
       'U256',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Pay fees for priority message processing to the admin.
+   *
+   * This method requires that **exactly** [State::priority_fee] must be
+   * attached as a value when sending message to this method.
+   *
+   * Current fee amount can be retrieved by calling `get_state`.
+   */
+  public payPriorityFees(block: H256, nonce: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'BridgingPayment',
+      'PayPriorityFees',
+      [block, nonce],
+      '(H256, U256)',
       'Null',
       this._program.programId,
     );
@@ -156,6 +184,27 @@ export class BridgingPayment {
       'BridgingPayment',
       'SetFee',
       fee,
+      'u128',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Set fee that this program will take for processing priority
+   * requests.
+   *
+   * This method can be called only by admin.
+   */
+  public setPriorityFee(priority_fee: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'BridgingPayment',
+      'SetPriorityFee',
+      priority_fee,
       'u128',
       'Null',
       this._program.programId,
@@ -219,6 +268,29 @@ export class BridgingPayment {
           this._program.registry
             .createType('(String, String, {"nonce":"U256"})', message.payload)[2]
             .toJSON() as unknown as { nonce: number | string | bigint },
+        );
+      }
+    });
+  }
+
+  /**
+   * Fee for the message processing by relayer was paid
+   * and priority bridging was requested.
+   */
+  public subscribeToPriorityBridgingPaidEvent(
+    callback: (data: { block: H256; nonce: number | string | bigint }) => void | Promise<void>,
+  ): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'BridgingPayment' && getFnNamePrefix(payload) === 'PriorityBridgingPaid') {
+        callback(
+          this._program.registry
+            .createType('(String, String, {"block":"H256","nonce":"U256"})', message.payload)[2]
+            .toJSON() as unknown as { block: H256; nonce: number | string | bigint },
         );
       }
     });

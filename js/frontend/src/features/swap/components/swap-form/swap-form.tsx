@@ -6,23 +6,22 @@ import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
-import { TransactionModal } from '@/features/history/components/transaction-modal';
-import { Network as TransferNetwork } from '@/features/history/types';
 import { TokenPrice } from '@/features/token-price';
 import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
-import { FIELD_NAME, NETWORK } from '../../consts';
+import { CLAIM_TYPE, FIELD_NAME, NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
 import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance, FormattedValues } from '../../types';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
-import { DetailsAccordion } from '../details-accordion';
+import { Settings } from '../settings';
 import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
+import { TransactionModal } from '../transaction-modal';
 
 import styles from './swap-form.module.scss';
 
@@ -55,49 +54,42 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
   >();
 
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
+  const shouldPayBridgingFee = claimType === CLAIM_TYPE.AUTO;
+  const time = '20 mins';
 
   const varaSymbol = useVaraSymbol();
 
   const openTransactionModal = (values: FormattedValues, estimatedFees: bigint) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
-    const amount = values.amount.toString();
+    const amount = values.amount;
     const receiver = values.accountAddress;
+    const isVaraNetwork = network.isVara;
     const source = token.address;
     const destination = destinationToken.address;
-    const sourceNetwork = network.isVara ? TransferNetwork.Vara : TransferNetwork.Ethereum;
-    const destNetwork = network.isVara ? TransferNetwork.Ethereum : TransferNetwork.Vara;
-    const sender = network.isVara ? account!.decodedAddress : ethAccount.address!;
     const close = () => setTransactionModal(undefined);
 
-    setTransactionModal({
-      amount,
-      source,
-      destination,
-      sourceNetwork,
-      destNetwork,
-      sender,
-      receiver,
-      estimatedFees,
-      close,
-    });
+    setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, estimatedFees, time, close });
   };
 
   const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
     bridgingFee: bridgingFee.value,
+    shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
     allowance: allowance.data,
     accountBalance: accountBalance.data,
     onTransactionStart: openTransactionModal,
   });
 
+  const isLoading =
+    submit.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || allowance.isLoading;
+
   const { form, amount, handleSubmit, setMaxBalance } = useSwapForm({
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
     onSubmit,
     requiredBalance,
-    onValidation: () => setIsDetailsOpen(true),
   });
 
   const renderFromBalance = () => {
@@ -117,7 +109,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const isEnoughBalance = () => {
     if (!api || isUndefined(bridgingFee.value) || !accountBalance.data) return false;
 
-    let minBalance = bridgingFee.value;
+    let minBalance = shouldPayBridgingFee ? bridgingFee.value : 0n;
 
     if (network.isVara) {
       if (isUndefined(vftManagerFee?.value)) return false;
@@ -138,6 +130,11 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     const openWalletModal = network.isVara ? openSubstrateWalletModal : openEthWalletModal;
 
     void openWalletModal();
+  };
+
+  const handleClaimTypeChange = (value: typeof claimType) => {
+    requiredBalance.reset();
+    setClaimType(value);
   };
 
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
@@ -202,33 +199,24 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             </div>
           </div>
 
-          <DetailsAccordion
-            isOpen={isDetailsOpen}
-            onToggle={() => setIsDetailsOpen((prevValue) => !prevValue)}
+          <Settings
+            claimType={claimType}
+            onClaimTypeChange={handleClaimTypeChange}
             isVaraNetwork={network.isVara}
-            feeValue={requiredBalance?.data?.fees}
-            isLoading={requiredBalance?.isPending}
+            fee={requiredBalance?.data?.fees}
+            isFeeLoading={requiredBalance?.isPending}
+            disabled={isLoading}
+            time={time}
           />
 
           {isNetworkAccountConnected ? (
-            <Button
-              type="submit"
-              text={getButtonText()}
-              disabled={!isEnoughBalance()}
-              isLoading={
-                submit.isPending ||
-                accountBalance.isLoading ||
-                ftBalance.isLoading ||
-                config.isLoading ||
-                allowance.isLoading
-              }
-              block
-            />
+            <Button type="submit" text={getButtonText()} disabled={!isEnoughBalance()} isLoading={isLoading} block />
           ) : (
             <Button text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
           )}
         </form>
       </FormProvider>
+
       {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
 
       {/* passing renderProgressBar explicitly to avoid state closure */}

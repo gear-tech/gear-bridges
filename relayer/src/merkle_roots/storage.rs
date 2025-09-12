@@ -7,7 +7,7 @@ use crate::{
     proof_storage::ProofStorage,
 };
 use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
-use primitive_types::H256;
+use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
@@ -29,7 +29,7 @@ pub struct MerkleRootStorage {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Block {
     pub block_hash: H256,
-    pub merkle_root_changed: Option<H256>,
+    pub merkle_root_changed: Option<(u64, H256)>,
     pub authority_set_changed: bool,
 }
 
@@ -39,10 +39,20 @@ impl Block {
     }
 }
 
-pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<H256> {
+pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<(u64, H256)> {
     block.events().iter().find_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged(hash)) => {
-            Some(*hash)
+        gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged {
+            queue_id,
+            root,
+        }) => Some((*queue_id, *root)),
+        _ => None,
+    })
+}
+
+pub(super) fn message_queued_events_of(block: &GearBlock) -> impl Iterator<Item = U256> + use<'_> {
+    block.events().iter().filter_map(|event| match event {
+        gclient::Event::GearEthBridge(GearEthBridgeEvent::MessageQueued { message, .. }) => {
+            Some(U256(message.nonce.0))
         }
         _ => None,
     })

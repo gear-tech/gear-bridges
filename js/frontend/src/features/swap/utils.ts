@@ -1,3 +1,4 @@
+import { GearApi } from '@gear-js/api';
 import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
 
@@ -41,4 +42,7 @@ const getAmountSchema = (
     .refine((value) => value <= accountBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE });
 };
 
-export { getAmountSchema };
+const initArchiveApi = () =>
+  GearApi.create({ providerAddress: import.meta.env.VITE_VARA_ARCHIVE_NODE_ADDRESS as string });
+
+export { getAmountSchema, initArchiveApi };

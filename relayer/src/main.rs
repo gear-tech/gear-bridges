@@ -5,6 +5,7 @@ use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+    DEFAULT_COUNT_THREADS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -17,9 +18,9 @@ use message_relayer::{
 };
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::proving::GenesisConfig;
+use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
 use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
-use std::{collections::HashSet, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
 
@@ -51,6 +52,12 @@ async fn run() -> AnyResult<()> {
 
     match cli.command {
         CliCommands::GearEthCore(mut args) => {
+            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
+            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
+            if rust_min_stack < SIZE_THREAD_STACK_MIN {
+                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
+            }
+
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -103,7 +110,14 @@ async fn run() -> AnyResult<()> {
             handle_server.stop(true).await;
             return res;
         }
+
         CliCommands::KillSwitch(args) => {
+            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
+            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
+            if rust_min_stack < SIZE_THREAD_STACK_MIN {
+                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
+            }
+
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -131,6 +145,7 @@ async fn run() -> AnyResult<()> {
                 proof_storage,
                 args.from_eth_block,
                 block_finality_storage,
+                Some(DEFAULT_COUNT_THREADS),
             )
             .await;
 

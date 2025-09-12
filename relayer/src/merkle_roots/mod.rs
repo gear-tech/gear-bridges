@@ -1,5 +1,5 @@
 use crate::{
-    cli::{GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS},
+    cli::{GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS},
     common::{BASE_RETRY_DELAY, MAX_RETRIES},
     merkle_roots::{
         authority_set_sync::AuthoritySetSyncIo, eras::SealedNotFinalizedEra,
@@ -87,7 +87,11 @@ impl Relayer {
         )
         .await;
 
-        let prover = prover::FinalityProver::new(api_provider.clone(), options.genesis_config);
+        let prover = prover::FinalityProver::new(
+            api_provider.clone(),
+            options.genesis_config,
+            options.count_thread,
+        );
 
         let submitter =
             submitter::MerkleRootSubmitter::new(eth_api.clone(), storage, options.confirmations);
@@ -389,6 +393,7 @@ impl MerkleRootRelayer {
             self.api_provider.clone(),
             eth_api,
             self.options.genesis_config,
+            self.options.count_thread,
         )
         .await?
         .seal(self.storage.proofs.clone());
@@ -970,6 +975,7 @@ pub struct MerkleRootRelayerOptions {
     pub genesis_config: GenesisConfig,
     pub last_sealed: Option<u64>,
     pub confirmations: u64,
+    pub count_thread: Option<usize>,
 }
 
 impl MerkleRootRelayerOptions {
@@ -995,6 +1001,10 @@ impl MerkleRootRelayerOptions {
             },
             last_sealed: config.start_authority_set_id,
             confirmations: config.confirmations_merkle_root.unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+            count_thread: match config.thread_count {
+                None => Some(DEFAULT_COUNT_THREADS),
+                Some(thread_count) => thread_count.into(),
+            }
         })
     }
 }

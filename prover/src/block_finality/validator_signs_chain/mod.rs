@@ -18,7 +18,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
     ThreadPoolBuilder,
 };
-use std::{iter, sync::mpsc::channel};
+use std::{env, iter, sync::mpsc::channel};
 
 mod indexed_validator_sign;
 mod single_validator_sign;
@@ -44,8 +44,6 @@ use indexed_validator_sign::IndexedValidatorSign;
 
 use super::{validator_set_hash::ValidatorSetHash, GrandpaMessageTarget, ProcessedPreCommit};
 
-const VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE: usize = 65_536 * 64;
-
 impl_target_set! {
     /// Public inputs for `ValidatorSignsChain`.
     pub struct ValidatorSignsChainTarget {
@@ -63,6 +61,7 @@ pub struct ValidatorSignsChain {
     pub pre_commits: Vec<ProcessedPreCommit>,
     /// GRANDPA message.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
+    pub count_thread: Option<usize>,
 }
 
 impl ValidatorSignsChain {
@@ -79,7 +78,13 @@ impl ValidatorSignsChain {
         let (sender, receiver) = channel();
 
         let thread_pool = ThreadPoolBuilder::new()
-            .stack_size(VALIDATOR_SIGN_PROVER_THREAD_MAX_STACK_SIZE)
+            .stack_size(
+                env::var("RUST_MIN_STACK")
+                    .expect("RUST_MIN_STACK should be set")
+                    .parse::<usize>()
+                    .expect("RUST_MIN_STACK should have the correct value"),
+            )
+            .num_threads(self.count_thread.unwrap_or(0))
             .build()
             .expect("Failed to create ThreadPool");
 

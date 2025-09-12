@@ -14,9 +14,10 @@ type SubmitStatus = (typeof SUBMIT_STATUS)[keyof typeof SUBMIT_STATUS];
 
 type UseHandleSubmitParameters = {
   bridgingFee: bigint | undefined;
+  shouldPayBridgingFee: boolean;
   allowance: bigint | undefined;
   accountBalance: bigint | undefined;
-  vftManagerFee?: bigint | undefined;
+  vftManagerFee: bigint | undefined;
   onTransactionStart: (values: FormattedValues, estimatedFees: bigint) => void;
 };
 

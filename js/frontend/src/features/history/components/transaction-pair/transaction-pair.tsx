@@ -1,11 +1,11 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
 
+import ArrowSVG from '@/assets/arrow.svg?react';
 import { Address, FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { Token } from '@/context';
 import { NETWORK } from '@/features/swap/consts';
 
-import ArrowSVG from '../../assets/arrow.svg?react';
 import { Network, Transfer } from '../../types';
 
 import styles from './transaction-pair.module.scss';

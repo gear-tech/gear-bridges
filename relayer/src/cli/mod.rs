@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use std::time::Duration;
 
 mod common;
 
@@ -69,6 +70,33 @@ pub struct GearEthCoreArgs {
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
 
+    #[arg(
+        help = "Spike window used to cutoff old events to not trigger false spikes",
+        value_parser = humantime::parse_duration, default_value="15m")]
+    pub spike_window: Duration,
+    #[arg(
+        help = "Timeout after which we start processing events",
+        value_parser = humantime::parse_duration, default_value="30m"
+    )]
+    pub spike_timeout: Duration,
+    #[arg(
+        help = "After threshold is reached we enter \"spike\" mode
+        where events are processed immediately",
+        default_value = "8"
+    )]
+    pub spike_threshold: usize,
+
+    #[arg(
+        help = "Interval at which we save the state to disk",
+        value_parser = humantime::parse_duration, default_value="30m"
+    )]
+    pub save_interval: Duration,
+    #[arg(
+        help = "Interval at which we check for spike or timeout",
+        value_parser = humantime::parse_duration, default_value="30s"
+    )]
+    pub check_interval: Duration,
+
     /// Authorization token for web-server
     #[arg(long, env)]
     pub web_server_token: String,
@@ -128,7 +156,7 @@ pub struct GearEthTokensArgs {
 
     #[arg(
         long,
-        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"), 
+        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"),
         value_parser = parse_fee_payers,
     )]
     pub no_fee: Option<FeePayers>,
@@ -316,7 +344,7 @@ fn parse_fee_payers(s: &str) -> anyhow::Result<FeePayers> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ThreadCount {
     /// User explicitly requests to set count of worker threads automatically.
     Auto,

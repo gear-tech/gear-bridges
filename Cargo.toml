@@ -122,6 +122,7 @@ clap = { version = "4.5.41", features = ["derive", "env"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.9.0"
+humantime = "2.2.0"
 ethereum-types = { version = "0.14.1", default-features = false, features = [
     "serialize",
     "codec",
@@ -179,22 +180,22 @@ uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
 async-trait = "0.1.88"
 # Gear/Substrate deps
-gprimitives = "=1.9.1"
-gstd = { version = "=1.9.1", features = ["nightly"] }
-gtest = "=1.9.1"
-gear-wasm-builder = { version = "=1.9.1", default-features = false }
-gsdk = "=1.9.1"
-gclient = "=1.9.1"
-gear-core = "=1.9.1"
-gbuiltin-bls381 = "=1.9.1"
-gbuiltin-eth-bridge = "=1.9.1"
-pallet-gear-eth-bridge-primitives = "=1.9.1"
+gprimitives = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+gstd = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue", features = ["nightly"] }
+gtest = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+gear-wasm-builder = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue", default-features = false }
+gsdk = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+gclient = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+gear-core = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+pallet-gear-eth-bridge-primitives = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
 # TODO: remove idl-gen and client-gen
-sails-idl-gen = "0.9.1"
-sails-client-gen = "0.9.1"
-sails-rs = "0.9.1"
-awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", rev = "d2afdad65e1f447d254c4795c3687da6fc54fb41", default-features = false }
-awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", rev = "d2afdad65e1f447d254c4795c3687da6fc54fb41", default-features = false, features = [
+sails-idl-gen = { git = "https://github.com/gear-tech/sails", branch = "vo/bridge-unlimited-queue" }
+sails-client-gen = { git = "https://github.com/gear-tech/sails", branch = "vo/bridge-unlimited-queue" }
+sails-rs = { git = "https://github.com/gear-tech/sails", branch = "vo/bridge-unlimited-queue" }
+awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", branch = "vo/bridge-unlimited-queue", default-features = false }
+awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", branch = "vo/bridge-unlimited-queue", default-features = false, features = [
     "vft",
     "vft-admin",
     "vft-extension",

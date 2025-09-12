@@ -218,13 +218,9 @@ async fn fetch_merkle_roots_inner(
 
         let len = merkle_roots.len();
         log::trace!("Found {len} entry(ies) with merkle roots (i = {i})");
-        for (root, _block_number_eth) in
-            merkle_roots
-                .into_iter()
-                .filter_map(|(root, block)| match block {
-                    Some(block) => Some((root, block)),
-                    None => None,
-                })
+        for (root, _block_number_eth) in merkle_roots
+            .into_iter()
+            .filter_map(|(root, block)| block.map(|block| (root, block)))
         {
             let timestamp = eth_api.get_block_timestamp(_block_number_eth).await?;
             let block_hash = gear_api

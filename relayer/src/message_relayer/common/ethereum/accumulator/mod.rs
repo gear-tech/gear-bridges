@@ -203,7 +203,7 @@ async fn run_inner(
                         authority_set_id: message.authority_set_id,
                         block: message.block,
                         tx_uuid: message.tx_uuid,
-                        merkle_root: merkle_root
+                        merkle_root
                     }) else {
                         log::error!("Messages connection closed, exiting");
                         return Ok(());

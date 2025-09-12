@@ -16,6 +16,7 @@ use crate::message_relayer::{
     gear_to_eth::{storage::NoStorage, tx_manager::TransactionManager},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub async fn relay(
     api_provider: ApiProviderConnection,
     eth_api: EthApi,
@@ -75,13 +76,9 @@ pub async fn relay(
     }
 
     let (merkle_roots_sender, merkle_roots_receiver) = mpsc::unbounded_channel();
-    for (merkle_root, block_number_eth) in
-        merkle_roots
-            .into_iter()
-            .filter_map(|(merkle_root, block)| match block {
-                Some(block) => Some((merkle_root, block)),
-                None => None,
-            })
+    for (merkle_root, block_number_eth) in merkle_roots
+        .into_iter()
+        .filter_map(|(merkle_root, block)| block.map(|block| (merkle_root, block)))
     {
         let block_hash = gear_api
             .block_number_to_hash(merkle_root.block_number as u32)

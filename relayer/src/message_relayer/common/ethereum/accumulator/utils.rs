@@ -110,7 +110,7 @@ impl Messages {
             if let Some(root) =
                 merkle_roots.find(message.authority_set_id, message.block, timestamp, delay)
             {
-                removed.push((root.clone(), message.clone()));
+                removed.push((*root, message.clone()));
                 false
             } else {
                 true

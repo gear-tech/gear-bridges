@@ -119,65 +119,6 @@ impl Messages {
 
         removed.into_iter()
     }
-
-    /*pub fn drain(
-        &mut self,
-        merkle_root: &RelayedMerkleRoot,
-        timestamp: u64,
-        delay: impl Fn(ActorId) -> u64,
-    ) -> Drain<'_, accumulator::Request> {
-        let index_end = match self.0.binary_search_by(|message| {
-            Self::compare(
-                message.authority_set_id,
-                message.block,
-                merkle_root.authority_set_id,
-                merkle_root.block,
-            )
-        }) {
-            Ok(i) => i + 1,
-            Err(i) => i,
-        };
-
-        let index_start = match self.0.binary_search_by(|message| {
-            Self::compare(
-                message.authority_set_id,
-                message.block,
-                merkle_root.authority_set_id,
-                GearBlockNumber(0),
-            )
-        }) {
-            Ok(i) | Err(i) => i,
-        };
-
-        let range = index_start..index_end;
-        let messages_to_remove: Vec<_> = self.0[range.clone()]
-            .iter()
-            .filter(|message| merkle_root.timestamp + delay(message.source) >= timestamp)
-            .collect();
-
-        let mut removed_indices = Vec::new();
-        for message in messages_to_remove {
-            if let Ok(index) = self.0.binary_search_by(|m| {
-                Self::compare(
-                    m.authority_set_id,
-                    m.block,
-                    message.authority_set_id,
-                    message.block,
-                )
-            }) {
-                removed_indices.push(index);
-            }
-        }
-
-        removed_indices.sort();
-
-        if let Some(&first) = removed_indices.first() {
-            drain_range =
-            self.0.drain(first..first + removed_indices.len();)
-        } else {
-            self.0.drain(0..0)
-        }
-    }*/
 }
 
 /// Represents the successful status of adding a relayed merkle root.

@@ -128,13 +128,18 @@ pub struct GearEthTokensArgs {
 
     #[arg(
         long,
-        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"), 
+        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"),
         value_parser = parse_fee_payers,
     )]
     pub no_fee: Option<FeePayers>,
 
     #[arg(long = "storage-path", env = "GEAR_ETH_TX_STORAGE_PATH")]
     pub storage_path: String,
+
+    #[arg(long = "governance-admin", env = "GEAR_GOVERNANCE_ADMIN")]
+    pub governance_admin: String,
+    #[arg(long = "governance-pauser", env = "GEAR_GOVERNANCE_PAUSER")]
+    pub governance_pauser: String,
 }
 
 #[derive(Subcommand)]
@@ -230,6 +235,10 @@ pub struct GearEthManualArgs {
 
     #[arg(long, help = format!("How many confirmations wait for message transaction on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
     pub confirmations_status: Option<u64>,
+    #[arg(long, help = "Governance admin address")]
+    pub governance_admin: String,
+    #[arg(long, help = "Governance pauser address")]
+    pub governance_pauser: String,
 }
 
 #[derive(Args)]

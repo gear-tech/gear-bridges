@@ -85,6 +85,17 @@ pub struct GearEthCoreArgs {
     )]
     pub spike_threshold: usize,
 
+    #[arg(
+        help = "Interval at which we save the state to disk",
+        value_parser = humantime::parse_duration, default_value="30m"
+    )]
+    pub save_interval: Duration,
+    #[arg(
+        help = "Interval at which we check for spike or timeout",
+        value_parser = humantime::parse_duration, default_value="30s"
+    )]
+    pub check_interval: Duration,
+
     /// Authorization token for web-server
     #[arg(long, env)]
     pub web_server_token: String,
@@ -137,7 +148,7 @@ pub struct GearEthTokensArgs {
 
     #[arg(
         long,
-        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"), 
+        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"),
         value_parser = parse_fee_payers,
     )]
     pub no_fee: Option<FeePayers>,

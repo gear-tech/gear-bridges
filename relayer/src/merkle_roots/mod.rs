@@ -1,4 +1,5 @@
 use crate::{
+    cli::{GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS},
     common::{BASE_RETRY_DELAY, MAX_RETRIES},
     merkle_roots::{
         authority_set_sync::AuthoritySetSyncIo, eras::SealedNotFinalizedEra,
@@ -15,7 +16,10 @@ use crate::{
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
 };
-use ::prover::proving::{GenesisConfig, ProofWithCircuitData};
+use ::prover::{
+    consts::BLAKE2_DIGEST_SIZE,
+    proving::{GenesisConfig, ProofWithCircuitData},
+};
 use anyhow::Context;
 use ethereum_client::EthApi;
 use primitive_types::{H256, U256};
@@ -48,8 +52,7 @@ pub struct Relayer {
     prover: prover::FinalityProver,
     submitter: submitter::MerkleRootSubmitter,
     block_listener: BlockListener,
-    last_sealed: Option<u64>,
-    genesis_config: GenesisConfig,
+
     eth_api: EthApi,
     http: UnboundedReceiver<MerkleRootsRequest>,
 }
@@ -70,27 +73,24 @@ impl Relayer {
         eth_api: EthApi,
         http: UnboundedReceiver<MerkleRootsRequest>,
         storage: Arc<MerkleRootStorage>,
-        genesis_config: GenesisConfig,
-        last_sealed: Option<u64>,
-        confirmations: u64,
-        spike_config: SpikeConfig,
+        options: MerkleRootRelayerOptions,
     ) -> Self {
         let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
 
         let merkle_roots =
-            MerkleRootRelayer::new(api_provider.clone(), storage.clone(), spike_config).await;
+            MerkleRootRelayer::new(api_provider.clone(), storage.clone(), options).await;
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
             storage.proofs.clone(),
-            genesis_config,
+            options.genesis_config,
         )
         .await;
 
-        let prover = prover::FinalityProver::new(api_provider.clone(), genesis_config);
+        let prover = prover::FinalityProver::new(api_provider.clone(), options.genesis_config);
 
         let submitter =
-            submitter::MerkleRootSubmitter::new(eth_api.clone(), storage, confirmations);
+            submitter::MerkleRootSubmitter::new(eth_api.clone(), storage, options.confirmations);
 
         Self {
             merkle_roots,
@@ -98,8 +98,7 @@ impl Relayer {
             prover,
             submitter,
             block_listener,
-            last_sealed,
-            genesis_config,
+
             eth_api,
             http,
         }
@@ -112,8 +111,7 @@ impl Relayer {
             prover,
             submitter,
             block_listener,
-            genesis_config,
-            last_sealed,
+
             eth_api,
             http,
         } = self;
@@ -132,8 +130,6 @@ impl Relayer {
                 prover,
                 authority_set_sync,
                 http,
-                last_sealed,
-                genesis_config,
                 eth_api,
             )
             .await
@@ -152,26 +148,26 @@ pub struct MerkleRootRelayer {
     /// Set of blocks that are waiting for authority set sync.
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
-    save_interval: Interval,
-
-    main_interval: Interval,
-    spike: SpikeConfig,
     first_pending_timestamp: Option<Instant>,
-
     queued_root_timestamps: VecDeque<Instant>,
     merkle_root_batch: Vec<PendingMerkleRoot>,
+
+    options: MerkleRootRelayerOptions,
+
+    save_interval: Interval,
+    main_interval: Interval,
 }
 
 impl MerkleRootRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
         storage: Arc<MerkleRootStorage>,
-        spike_config: SpikeConfig,
+        options: MerkleRootRelayerOptions,
     ) -> MerkleRootRelayer {
-        let mut save_interval = tokio::time::interval(Duration::from_secs(60));
+        let mut save_interval = tokio::time::interval(options.save_interval);
         save_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut main_interval = tokio::time::interval(Duration::from_secs(15));
+        let mut main_interval = tokio::time::interval(options.check_interval);
         main_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         MerkleRootRelayer {
@@ -182,20 +178,18 @@ impl MerkleRootRelayer {
 
             waiting_for_authority_set_sync: BTreeMap::new(),
 
-            save_interval,
-
-            main_interval,
-
-            spike: spike_config,
             first_pending_timestamp: None,
-
             queued_root_timestamps: VecDeque::with_capacity(8),
             merkle_root_batch: Vec::with_capacity(8),
+
+            options,
+            save_interval,
+            main_interval,
         }
     }
 
     fn prune_old_timestamps(&mut self) {
-        let cutoff_time = Instant::now() - self.spike.window;
+        let cutoff_time = Instant::now() - self.options.spike_config.window;
 
         while let Some(&timestamp) = self.queued_root_timestamps.front() {
             if timestamp < cutoff_time {
@@ -214,8 +208,7 @@ impl MerkleRootRelayer {
         mut prover: FinalityProverIo,
         mut authority_set_sync: AuthoritySetSyncIo,
         mut http: UnboundedReceiver<MerkleRootsRequest>,
-        last_sealed: Option<u64>,
-        genesis_config: GenesisConfig,
+
         eth_api: EthApi,
     ) -> anyhow::Result<()> {
         log::info!("Starting relayer");
@@ -227,7 +220,7 @@ impl MerkleRootRelayer {
             }
         };
         let gear_api = self.api_provider.client();
-        let mut last_sealed = match last_sealed {
+        let mut last_sealed = match self.options.last_sealed {
             Some(era) => era,
             None => {
                 let block = gear_api
@@ -395,7 +388,7 @@ impl MerkleRootRelayer {
             Some(last_sealed),
             self.api_provider.clone(),
             eth_api,
-            genesis_config,
+            self.options.genesis_config,
         )
         .await?
         .seal(self.storage.proofs.clone());
@@ -506,9 +499,9 @@ impl MerkleRootRelayer {
                 // prune old timestamps to not trigger spike when not necessary
                 self.prune_old_timestamps();
 
-                let is_spike = self.merkle_root_batch.iter().map(|root| root.nonces_count).sum::<usize>() >= self.spike.threshold;
+                let is_spike = self.merkle_root_batch.iter().map(|root| root.nonces_count).sum::<usize>() >= self.options.spike_config.threshold;
                 let is_timeout = self.first_pending_timestamp
-                    .is_some_and(|t| t.elapsed() >= self.spike.timeout);
+                    .is_some_and(|t| t.elapsed() >= self.options.spike_config.timeout);
 
                 if is_spike || is_timeout {
                     // consume the timestamp to not trigger timeout again immediately.
@@ -969,6 +962,44 @@ pub enum MerkleRootStatus {
     Failed(String),
 }
 
+#[derive(Clone, Copy)]
+pub struct MerkleRootRelayerOptions {
+    pub spike_config: SpikeConfig,
+    pub check_interval: Duration,
+    pub save_interval: Duration,
+    pub genesis_config: GenesisConfig,
+    pub last_sealed: Option<u64>,
+    pub confirmations: u64,
+}
+
+impl MerkleRootRelayerOptions {
+    pub fn from_cli(config: &GearEthCoreArgs) -> anyhow::Result<Self> {
+        Ok(Self {
+            spike_config: SpikeConfig {
+                timeout: config.spike_timeout,
+                window: config.spike_window,
+                threshold: config.spike_threshold,
+            },
+            check_interval: config.check_interval,
+            save_interval: config.save_interval,
+            genesis_config: GenesisConfig {
+                authority_set_hash: hex::decode(&config.genesis_config_args.authority_set_hash)
+                    .context(
+                        "Incorrect format for authority set hash: hex encoded hash is expected",
+                    )?
+                    .try_into()
+                    .map_err(|got: Vec<u8>| {
+                        anyhow::anyhow!("Incorrect format for authority set hash: wrong length. Expected {}, got {}", BLAKE2_DIGEST_SIZE, got.len())
+                    })?,
+                authority_set_id: config.genesis_config_args.authority_set_id,
+            },
+            last_sealed: config.start_authority_set_id,
+            confirmations: config.confirmations_merkle_root.unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+        })
+    }
+}
+
+#[derive(Copy, Clone)]
 pub struct SpikeConfig {
     /// Timeout after which we start relaying merkle-root
     pub timeout: Duration,

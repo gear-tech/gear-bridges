@@ -10,7 +10,7 @@ use alloy::{
         Identity, Provider, ProviderBuilder, RootProvider,
     },
     pubsub::Subscription,
-    rpc::types::{Block, BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
+    rpc::types::{Block, BlockId, BlockNumberOrTag, Filter, Header, Log as RpcLog},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
     transports::{ws::WsConnect, RpcError, TransportErrorKind},
@@ -271,6 +271,18 @@ impl EthApi {
         &self.contracts.provider
     }
 
+    pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
+        self.contracts.process_admin_message_delay().await
+    }
+
+    pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
+        self.contracts.process_pauser_message_delay().await
+    }
+
+    pub async fn process_user_message_delay(&self) -> Result<u64, Error> {
+        self.contracts.process_user_message_delay().await
+    }
+
     pub async fn get_approx_balance(&self) -> Result<f64, Error> {
         self.contracts.get_approx_balance(self.public_key).await
     }
@@ -383,6 +395,12 @@ impl EthApi {
 
         self.raw_provider().clone().subscribe_logs(&filter).await
     }
+
+    pub async fn subscribe_blocks(
+        &self,
+    ) -> Result<Subscription<Header>, RpcError<TransportErrorKind>> {
+        self.raw_provider().clone().subscribe_blocks().await
+    }
 }
 
 impl Contracts {
@@ -394,6 +412,33 @@ impl Contracts {
             provider,
             message_queue_instance,
         })
+    }
+
+    pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
+        self.message_queue_instance
+            .PROCESS_ADMIN_MESSAGE_DELAY()
+            .call()
+            .await
+            .map(|delay| delay.to())
+            .map_err(|err| Error::ErrorDuringContractExecution(err))
+    }
+
+    pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
+        self.message_queue_instance
+            .PROCESS_PAUSER_MESSAGE_DELAY()
+            .call()
+            .await
+            .map(|delay| delay.to())
+            .map_err(|err| Error::ErrorDuringContractExecution(err))
+    }
+
+    pub async fn process_user_message_delay(&self) -> Result<u64, Error> {
+        self.message_queue_instance
+            .PROCESS_USER_MESSAGE_DELAY()
+            .call()
+            .await
+            .map(|delay| delay.to())
+            .map_err(Error::ErrorDuringContractExecution)
     }
 
     pub async fn get_approx_balance(&self, address: Address) -> Result<f64, Error> {

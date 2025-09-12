@@ -20,6 +20,7 @@ use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
 use relayer::*;
+use sails_rs::ActorId;
 use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
@@ -183,6 +184,14 @@ async fn run() -> AnyResult<()> {
             .context("Failed to create API provider")?;
 
             let api = provider.connection().client();
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
 
             let mut excluded_from_fees = HashSet::new();
             match args.no_fee {
@@ -238,6 +247,8 @@ async fn run() -> AnyResult<()> {
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.storage_path,
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -281,6 +292,8 @@ async fn run() -> AnyResult<()> {
                         excluded_from_fees,
                         receiver,
                         args.storage_path.clone(),
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -444,6 +457,15 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to create API provider");
 
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
+
             let connection = api_provider.connection();
             api_provider.spawn();
 
@@ -455,6 +477,8 @@ async fn run() -> AnyResult<()> {
                 args.from_eth_block,
                 args.confirmations_status
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                governance_admin,
+                governance_pauser,
             )
             .await;
         }

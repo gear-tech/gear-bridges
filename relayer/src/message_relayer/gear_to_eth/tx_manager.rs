@@ -1,6 +1,7 @@
 use ethereum_client::TxHash;
 use gear_rpc_client::dto::MerkleProof;
 use prometheus::IntCounter;
+use sails_rs::ActorId;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedReceiver, RwLock};
@@ -152,6 +153,7 @@ impl TransactionManager {
                         tx.message.authority_set_id,
                         tx.message.block,
                         tx.message.block_hash,
+                        ActorId::from(tx.message.message.source),
                     ) {
                         log::warn!("Accumulator stopped accepting messages, exiting");
                         return Ok(false);
@@ -288,7 +290,7 @@ impl TransactionManager {
                 };
 
                 self.storage.block_storage().complete_transaction(&message).await;
-
+                let source = ActorId::from(message.message.source);
                 let tx = Transaction::new(message, TxStatus::WaitForMerkleRoot);
 
                 let block_hash = tx.message.block_hash;
@@ -298,7 +300,7 @@ impl TransactionManager {
 
                 self.add_transaction(tx).await;
 
-                if !accumulator.send_message(uuid, authority_set_id, block, block_hash) {
+                if !accumulator.send_message(uuid, authority_set_id, block, block_hash, source) {
                     log::warn!("Failed to send message to accumulator, exiting");
                     return Ok(false);
                 }

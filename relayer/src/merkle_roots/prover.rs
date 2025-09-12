@@ -124,7 +124,7 @@ impl FinalityProver {
         let gear_api = self.api_provider.client();
 
         // Batch size which is equal approximately to 2 full queues.
-        const BATCH_SIZE: usize = 2048;
+        const BATCH_SIZE: usize = 4096;
 
         let mut batch_vec = Vec::with_capacity(BATCH_SIZE);
         // Group requests by authority set ID and queue ID, storing all blocks for each set

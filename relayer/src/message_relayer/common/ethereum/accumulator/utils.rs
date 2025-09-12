@@ -87,7 +87,10 @@ impl Messages {
     ) -> impl Iterator<Item = accumulator::Request> {
         let mut removed = Vec::new();
         self.0.retain(|message| {
-            if merkle_root.timestamp + delay(message.source) >= timestamp {
+            if message.authority_set_id == merkle_root.authority_set_id
+                && message.block <= merkle_root.block
+                && timestamp >= merkle_root.timestamp + delay(message.source)
+            {
                 removed.push(message.clone());
                 false
             } else {
@@ -224,9 +227,11 @@ impl MerkleRoots {
             Err(i) => i,
         };
 
-        if let Some(root) = self.0.get(i - 1) {
-            if root.authority_set_id == root_new.authority_set_id {
-                return Err(i - 1);
+        if i != 0 {
+            if let Some(root) = self.0.get(i - 1) {
+                if root.authority_set_id == root_new.authority_set_id {
+                    return Err(i - 1);
+                }
             }
         }
 
@@ -601,10 +606,13 @@ mod tests {
     }
 
     #[test]
-    fn messages_drain_timestamp_delay() {
-        // Test that messages are drained when root_timestamp + delay >= last_timestamp
+    fn messages_drain_with_timestamps_and_delays() {
+        let actor_fast = ActorId::from([1; 32]);
+        let actor_medium = ActorId::from([2; 32]);
+        let actor_slow = ActorId::from([3; 32]);
 
-        // Create a root with timestamp 100
+        let base_timestamp = 1000u64;
+
         let root = RelayedMerkleRoot {
             block: GearBlockNumber(16_881_826),
             block_hash: hex!("410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848")
@@ -612,316 +620,347 @@ mod tests {
             authority_set_id: AuthoritySetId(1_183),
             merkle_root: hex!("bfd87951376d18fe27f106b603a4f082d83f0cc4da3c5bebb61ab276cb8033fe")
                 .into(),
-            timestamp: 100,
+            timestamp: base_timestamp,
         };
 
-        // Create test messages with different sources
-        let source1 = ActorId::from([1u8; 32]);
-        let source2 = ActorId::from([2u8; 32]);
-        let source3 = ActorId::from([3u8; 32]);
-
-        let messages_data = [
+        let data = [
             accumulator::Request {
-                block: GearBlockNumber(16_881_824),
-                block_hash: hex!(
-                    "24b437d833fc6b7e9aea9d987ca1411ae293d340427da57dd7d9888fda8b16a2"
-                )
-                .into(),
-                authority_set_id: AuthoritySetId(1_183),
-                tx_uuid: Uuid::now_v7(),
-                source: source1,
-            },
-            accumulator::Request {
-                block: GearBlockNumber(16_881_825),
+                block: GearBlockNumber(16_881_800),
                 block_hash: hex!(
                     "38f753a5d02c81e91ff8b3950c2cd03c526ced9abc0b6ef29803ee4250a0df85"
                 )
                 .into(),
                 authority_set_id: AuthoritySetId(1_183),
                 tx_uuid: Uuid::now_v7(),
-                source: source2,
+                source: actor_fast, // Should be drained with delay=100
             },
             accumulator::Request {
-                block: GearBlockNumber(16_881_827),
+                block: GearBlockNumber(16_881_825),
                 block_hash: hex!(
                     "74dcef50f0cf4299a0774b147a748f3d5961d913afb9d0e74868a298255edea2"
                 )
                 .into(),
                 authority_set_id: AuthoritySetId(1_183),
                 tx_uuid: Uuid::now_v7(),
-                source: source3,
+                source: actor_medium, // Should NOT be drained with delay=500
+            },
+            accumulator::Request {
+                block: GearBlockNumber(16_881_820),
+                block_hash: hex!(
+                    "24b437d833fc6b7e9aea9d987ca1411ae293d340427da57dd7d9888fda8b16a2"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1_183),
+                tx_uuid: Uuid::now_v7(),
+                source: actor_slow, // Should NOT be drained with delay=1000
             },
         ];
 
-        let mut messages = Messages::new(10);
-        for message in &messages_data {
+        // Test with a current timestamp that allows some delays to pass
+        let current_timestamp = base_timestamp + 200; // 1200
+
+        // Delay function: fast=100, medium=500, slow=1000
+        let delay_fn = |actor: ActorId| -> u64 {
+            if actor == actor_fast {
+                100
+            } else if actor == actor_medium {
+                500
+            } else if actor == actor_slow {
+                1000
+            } else {
+                0
+            }
+        };
+
+        let mut messages = Messages::new(data.len());
+        for message in &data {
             assert!(messages.add(message.clone()).is_some());
         }
-        assert_eq!(messages.len(), 3);
 
-        // Test Case 1: No messages should be drained when root_timestamp + delay < last_timestamp
-        // root.timestamp = 100, delay for source1 = 50, last_timestamp = 200
-        // 100 + 50 = 150 < 200, so message should NOT be drained
-        let delay_fn = |source: ActorId| {
-            if source == source1 {
-                50
-            } else {
-                0
-            }
-        };
-        let drained: Vec<_> = messages.drain(&root, 200, delay_fn).collect();
-        assert!(
-            drained.is_empty(),
-            "No messages should be drained when root_timestamp + delay < last_timestamp"
-        );
-        assert_eq!(messages.len(), 3);
+        let removed: Vec<_> = messages.drain(&root, current_timestamp, delay_fn).collect();
 
-        // Test Case 2: Message should be drained when root_timestamp + delay >= last_timestamp
-        // root.timestamp = 100, delay for source1 = 50, last_timestamp = 150
-        // 100 + 50 = 150 >= 150, so message should be drained
-        let delay_fn = |source: ActorId| {
-            if source == source1 {
-                50
-            } else {
-                0
-            }
-        };
-        let drained: Vec<_> = messages.drain(&root, 150, delay_fn).collect();
-        assert_eq!(
-            drained.len(),
-            1,
-            "One message should be drained when root_timestamp + delay >= last_timestamp"
-        );
-        assert_eq!(drained[0].source, source1);
-        assert_eq!(messages.len(), 2);
+        // Only the first message (actor_fast) should be drained
+        // current_timestamp (1200) >= root.timestamp + delay(actor_fast) (1000 + 100 = 1100)
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].source, actor_fast);
+        assert_eq!(messages.len(), 2); // Two messages should remain
 
-        // Test Case 3: Multiple messages with different delays
-        // root.timestamp = 100
-        // source2 delay = 30, last_timestamp = 130, 100 + 30 = 130 >= 130 -> should be drained
-        // source3 delay = 40, last_timestamp = 130, 100 + 40 = 140 >= 130 -> should be drained
-        let delay_fn = |source: ActorId| match source {
-            s if s == source2 => 30,
-            s if s == source3 => 40,
-            _ => 0,
-        };
-        let drained: Vec<_> = messages.drain(&root, 130, delay_fn).collect();
-        assert_eq!(drained.len(), 2, "Two messages should be drained");
-        let drained_sources: Vec<_> = drained.iter().map(|m| m.source).collect();
-        assert!(drained_sources.contains(&source2));
-        assert!(drained_sources.contains(&source3));
-        assert_eq!(messages.len(), 0);
+        // Test with later timestamp that allows more draining
+        let later_timestamp = base_timestamp + 600; // 1600
+        let removed: Vec<_> = messages.drain(&root, later_timestamp, delay_fn).collect();
+
+        // Now the medium delay message should also be drained
+        // current_timestamp (1600) >= root.timestamp + delay(actor_medium) (1000 + 500 = 1500)
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].source, actor_medium);
+        assert_eq!(messages.len(), 1); // One message should remain
+
+        // Test with even later timestamp that drains everything
+        let much_later_timestamp = base_timestamp + 1100; // 2100
+        let removed: Vec<_> = messages
+            .drain(&root, much_later_timestamp, delay_fn)
+            .collect();
+
+        // Now the slow delay message should also be drained
+        // current_timestamp (2100) >= root.timestamp + delay(actor_slow) (1000 + 1000 = 2000)
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].source, actor_slow);
+        assert_eq!(messages.len(), 0); // No messages should remain
     }
 
     #[test]
-    fn messages_drain_timestamp_with_merkle_roots() {
-        // Test drain_timestamp method which uses MerkleRoots to find applicable roots
-
-        let source1 = ActorId::from([1u8; 32]);
-        let source2 = ActorId::from([2u8; 32]);
-
-        // Create merkle roots with different timestamps
-        let root1 = RelayedMerkleRoot {
-            block: GearBlockNumber(16_881_820),
-            block_hash: hex!("410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848")
-                .into(),
-            authority_set_id: AuthoritySetId(1_183),
-            merkle_root: hex!("bfd87951376d18fe27f106b603a4f082d83f0cc4da3c5bebb61ab276cb8033fe")
-                .into(),
-            timestamp: 100,
-        };
-
-        let root2 = RelayedMerkleRoot {
-            block: GearBlockNumber(16_881_830),
-            block_hash: hex!("24b437d833fc6b7e9aea9d987ca1411ae293d340427da57dd7d9888fda8b16a2")
-                .into(),
-            authority_set_id: AuthoritySetId(1_183),
-            merkle_root: hex!("8f3dbd805121a1c9f820884f1f5e71c5c9deb733f1238366043b052dd468e390")
-                .into(),
-            timestamp: 200,
-        };
-
-        let mut merkle_roots = MerkleRoots::new(10);
-        assert!(merkle_roots.add(root1).is_ok());
-        assert!(merkle_roots.add(root2).is_ok());
-
-        // Create messages at different blocks
-        let message1 = accumulator::Request {
-            block: GearBlockNumber(16_881_825), // Between root1 and root2
-            block_hash: hex!("38f753a5d02c81e91ff8b3950c2cd03c526ced9abc0b6ef29803ee4250a0df85")
-                .into(),
-            authority_set_id: AuthoritySetId(1_183),
-            tx_uuid: Uuid::now_v7(),
-            source: source1,
-        };
-
-        let message2 = accumulator::Request {
-            block: GearBlockNumber(16_881_835), // After root2
-            block_hash: hex!("74dcef50f0cf4299a0774b147a748f3d5961d913afb9d0e74868a298255edea2")
-                .into(),
-            authority_set_id: AuthoritySetId(1_183),
-            tx_uuid: Uuid::now_v7(),
-            source: source2,
-        };
-
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message1.clone()).is_some());
-        assert!(messages.add(message2.clone()).is_some());
-        assert_eq!(messages.len(), 2);
-
-        // Test Case 1: No drain when timestamp conditions not met
-        // For message1 at block 16_881_825, it should find root1 (timestamp=100)
-        // For message2 at block 16_881_835, it should find root2 (timestamp=200)
-        // If delay=30 and last_timestamp=120:
-        // - message1: 100 + 30 = 130 >= 120 -> should be drained
-        // - message2: 200 + 30 = 230 >= 120 -> should be drained
-        let delay_fn = |_: ActorId| 30u64;
-        let drained: Vec<_> = messages
-            .drain_timestamp(120, delay_fn, &merkle_roots)
-            .collect();
-        assert_eq!(drained.len(), 2, "Both messages should be drained");
-        assert_eq!(messages.len(), 0);
-
-        // Restore messages for next test
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message1.clone()).is_some());
-        assert!(messages.add(message2.clone()).is_some());
-
-        // Test Case 2: Partial drain based on timestamp + delay condition
-        // If delay=10 and last_timestamp=105:
-        // - message1: 100 + 10 = 110 >= 105 -> should be drained
-        // - message2: 200 + 10 = 210 >= 105 -> should be drained
-        let delay_fn = |_: ActorId| 10u64;
-        let drained: Vec<_> = messages
-            .drain_timestamp(105, delay_fn, &merkle_roots)
-            .collect();
-        assert_eq!(drained.len(), 2, "Both messages should be drained");
-        assert_eq!(messages.len(), 0);
-
-        // Restore messages for next test
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message1.clone()).is_some());
-        assert!(messages.add(message2.clone()).is_some());
-
-        // Test Case 3: No drain when conditions not met
-        // If delay=5 and last_timestamp=100:
-        // - message1: 100 + 5 = 105 >= 100 -> should be drained
-        // - message2: 200 + 5 = 205 >= 100 -> should be drained
-        let delay_fn = |_: ActorId| 5u64;
-        let drained: Vec<_> = messages
-            .drain_timestamp(100, delay_fn, &merkle_roots)
-            .collect();
-        assert_eq!(drained.len(), 2, "Both messages should be drained");
-        assert_eq!(messages.len(), 0);
-
-        // Restore messages for final test
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message1.clone()).is_some());
-        assert!(messages.add(message2.clone()).is_some());
-
-        // Test Case 4: No drain when timestamp + delay < last_timestamp
-        // If delay=5 and last_timestamp=300:
-        // - message1: 100 + 5 = 105 < 300 -> should NOT be drained
-        // - message2: 200 + 5 = 205 < 300 -> should NOT be drained
-        let delay_fn = |_: ActorId| 5u64;
-        let drained: Vec<_> = messages
-            .drain_timestamp(300, delay_fn, &merkle_roots)
-            .collect();
-        assert_eq!(
-            drained.len(),
-            0,
-            "No messages should be drained when timestamp + delay < last_timestamp"
-        );
-        assert_eq!(messages.len(), 2);
-    }
-
-    #[test]
-    fn messages_drain_boundary_conditions() {
-        // Test edge cases for timestamp + delay draining
-
-        let source = ActorId::from([1u8; 32]);
+    fn messages_drain_edge_cases() {
+        let actor = ActorId::from([42; 32]);
 
         let root = RelayedMerkleRoot {
-            block: GearBlockNumber(16_881_826),
+            block: GearBlockNumber(100),
             block_hash: hex!("410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848")
                 .into(),
-            authority_set_id: AuthoritySetId(1_183),
+            authority_set_id: AuthoritySetId(1),
             merkle_root: hex!("bfd87951376d18fe27f106b603a4f082d83f0cc4da3c5bebb61ab276cb8033fe")
                 .into(),
             timestamp: 1000,
         };
 
         let message = accumulator::Request {
-            block: GearBlockNumber(16_881_824),
-            block_hash: hex!("24b437d833fc6b7e9aea9d987ca1411ae293d340427da57dd7d9888fda8b16a2")
+            block: GearBlockNumber(100),
+            block_hash: hex!("38f753a5d02c81e91ff8b3950c2cd03c526ced9abc0b6ef29803ee4250a0df85")
                 .into(),
-            authority_set_id: AuthoritySetId(1_183),
+            authority_set_id: AuthoritySetId(1),
             tx_uuid: Uuid::now_v7(),
-            source,
+            source: actor,
         };
 
-        // Test Case 1: Exact equality (root_timestamp + delay == last_timestamp)
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message.clone()).is_some());
+        // Test with zero delay
+        {
+            let mut messages = Messages::new(10);
+            messages.add(message.clone()).unwrap();
 
-        let delay_fn = |_: ActorId| 500u64;
-        let drained: Vec<_> = messages.drain(&root, 1500, delay_fn).collect(); // 1000 + 500 == 1500
-        assert_eq!(
-            drained.len(),
-            1,
-            "Message should be drained when root_timestamp + delay == last_timestamp"
-        );
-        assert_eq!(messages.len(), 0);
+            let removed: Vec<_> = messages.drain(&root, 1000, |_| 0).collect();
+            assert_eq!(removed.len(), 1);
+            assert_eq!(messages.len(), 0);
+        }
 
-        // Test Case 2: One unit less (root_timestamp + delay < last_timestamp by 1)
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message.clone()).is_some());
+        // Test with current timestamp exactly equal to threshold
+        {
+            let mut messages = Messages::new(10);
+            messages.add(message.clone()).unwrap();
 
-        let delay_fn = |_: ActorId| 500u64;
-        let drained: Vec<_> = messages.drain(&root, 1501, delay_fn).collect(); // 1000 + 500 < 1501
-        assert_eq!(
-            drained.len(),
-            0,
-            "Message should NOT be drained when root_timestamp + delay < last_timestamp"
-        );
+            let removed: Vec<_> = messages.drain(&root, 1500, |_| 500).collect();
+            assert_eq!(removed.len(), 1); // Should be drained since 1500 >= 1000 + 500
+            assert_eq!(messages.len(), 0);
+        }
+
+        // Test with current timestamp one less than threshold
+        {
+            let mut messages = Messages::new(10);
+            messages.add(message.clone()).unwrap();
+
+            let removed: Vec<_> = messages.drain(&root, 1499, |_| 500).collect();
+            assert_eq!(removed.len(), 0); // Should NOT be drained since 1499 < 1000 + 500
+            assert_eq!(messages.len(), 1);
+        }
+
+        // Test with future timestamp (should not be drained)
+        {
+            let mut messages = Messages::new(10);
+            messages.add(message.clone()).unwrap();
+
+            let removed: Vec<_> = messages.drain(&root, 999, |_| 0).collect();
+            assert_eq!(removed.len(), 0); // Should NOT be drained since 999 < 1000 + 0
+            assert_eq!(messages.len(), 1);
+        }
+    }
+
+    #[test]
+    fn messages_drain_all() {
+        let data = [
+            // Authority set 1000, block 100
+            accumulator::Request {
+                block: GearBlockNumber(100),
+                block_hash: hex!(
+                    "1111111111111111111111111111111111111111111111111111111111111111"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1000),
+                tx_uuid: Uuid::now_v7(),
+                source: ActorId::zero(),
+            },
+            // Authority set 1000, block 200
+            accumulator::Request {
+                block: GearBlockNumber(200),
+                block_hash: hex!(
+                    "2222222222222222222222222222222222222222222222222222222222222222"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1000),
+                tx_uuid: Uuid::now_v7(),
+                source: ActorId::zero(),
+            },
+            // Authority set 1001, block 50
+            accumulator::Request {
+                block: GearBlockNumber(50),
+                block_hash: hex!(
+                    "3333333333333333333333333333333333333333333333333333333333333333"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1001),
+                tx_uuid: Uuid::now_v7(),
+                source: ActorId::zero(),
+            },
+            // Authority set 1001, block 150
+            accumulator::Request {
+                block: GearBlockNumber(150),
+                block_hash: hex!(
+                    "4444444444444444444444444444444444444444444444444444444444444444"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1001),
+                tx_uuid: Uuid::now_v7(),
+                source: ActorId::zero(),
+            },
+        ];
+
+        let mut messages = Messages::new(data.len());
+        for message in &data {
+            messages.add(message.clone()).unwrap();
+        }
+
+        // Test draining with authority set 1000, block 150
+        // The drain_all logic drains messages with the same authority set ID and block <= target block
+        let root = RelayedMerkleRoot {
+            block: GearBlockNumber(150),
+            block_hash: hex!("5555555555555555555555555555555555555555555555555555555555555555")
+                .into(),
+            authority_set_id: AuthoritySetId(1000),
+            merkle_root: hex!("6666666666666666666666666666666666666666666666666666666666666666")
+                .into(),
+            timestamp: 0,
+        };
+
+        let removed: Vec<_> = messages.drain_all(&root).collect();
+
+        // Should drain messages with the same authority set (1000) and block <= 150
+        // Based on the compare function and drain_all logic:
+        // It drains messages from the start of the authority set to the target block
+        assert_eq!(removed.len(), 1); // Only block 100 matches (authority_set_id=1000, block<=150)
+        assert_eq!(removed[0].authority_set_id, AuthoritySetId(1000));
+        assert_eq!(removed[0].block, GearBlockNumber(100));
+        assert_eq!(messages.len(), 3);
+
+        // Test draining with higher authority set and block
+        let root2 = RelayedMerkleRoot {
+            block: GearBlockNumber(250),
+            block_hash: hex!("7777777777777777777777777777777777777777777777777777777777777777")
+                .into(),
+            authority_set_id: AuthoritySetId(1001),
+            merkle_root: hex!("8888888888888888888888888888888888888888888888888888888888888888")
+                .into(),
+            timestamp: 0,
+        };
+
+        let removed2: Vec<_> = messages.drain_all(&root2).collect();
+
+        // This should drain messages with authority_set_id == 1001 and block <= 250
+        // Only 2 messages match: both 1001 authority set messages
+        assert_eq!(removed2.len(), 2); // Two messages from authority set 1001
+        assert_eq!(messages.len(), 1); // One message remains (authority set 1000, block 200)
+    }
+
+    #[test]
+    fn messages_drain_timestamp_with_merkle_roots() {
+        let actor1 = ActorId::from([1; 32]);
+        let actor2 = ActorId::from([2; 32]);
+        let actor3 = ActorId::from([3; 32]);
+
+        // Create merkle roots with different timestamps
+        let root1 = RelayedMerkleRoot {
+            block: GearBlockNumber(100),
+            block_hash: hex!("1111111111111111111111111111111111111111111111111111111111111111")
+                .into(),
+            authority_set_id: AuthoritySetId(1000),
+            merkle_root: hex!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .into(),
+            timestamp: 1000,
+        };
+
+        let root2 = RelayedMerkleRoot {
+            block: GearBlockNumber(200),
+            block_hash: hex!("2222222222222222222222222222222222222222222222222222222222222222")
+                .into(),
+            authority_set_id: AuthoritySetId(1001),
+            merkle_root: hex!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+                .into(),
+            timestamp: 2000,
+        };
+
+        let mut merkle_roots = MerkleRoots::new(10);
+        merkle_roots.add(root1).unwrap();
+        merkle_roots.add(root2).unwrap();
+
+        let messages_data = [
+            // Message that should match with delay
+            accumulator::Request {
+                block: GearBlockNumber(50),
+                block_hash: hex!(
+                    "3333333333333333333333333333333333333333333333333333333333333333"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1000),
+                tx_uuid: Uuid::now_v7(),
+                source: actor1, // delay=100
+            },
+            // Message that should match with delay
+            accumulator::Request {
+                block: GearBlockNumber(150),
+                block_hash: hex!(
+                    "4444444444444444444444444444444444444444444444444444444444444444"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1001),
+                tx_uuid: Uuid::now_v7(),
+                source: actor2, // delay=200
+            },
+            // Message that should not match any root due to high delay
+            accumulator::Request {
+                block: GearBlockNumber(50),
+                block_hash: hex!(
+                    "5555555555555555555555555555555555555555555555555555555555555555"
+                )
+                .into(),
+                authority_set_id: AuthoritySetId(1000),
+                tx_uuid: Uuid::now_v7(),
+                source: actor3, // delay=2000
+            },
+        ];
+
+        let delay_fn = |actor: ActorId| -> u64 {
+            if actor == actor1 {
+                100
+            } else if actor == actor2 {
+                200
+            } else {
+                2000
+            }
+        };
+
+        let mut messages = Messages::new(messages_data.len());
+        for message in &messages_data {
+            messages.add(message.clone()).unwrap();
+        }
+
+        // Test with timestamp that allows first two messages to be drained
+        let current_timestamp = 2300; // Should allow matching against roots
+
+        let removed: Vec<_> = messages
+            .drain_timestamp(current_timestamp, delay_fn, &merkle_roots)
+            .collect();
+
+        // Should drain messages that have appropriate roots found with the delay
+        assert_eq!(removed.len(), 2);
         assert_eq!(messages.len(), 1);
 
-        // Test Case 3: One unit more (root_timestamp + delay > last_timestamp by 1)
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message.clone()).is_some());
-
-        let delay_fn = |_: ActorId| 500u64;
-        let drained: Vec<_> = messages.drain(&root, 1499, delay_fn).collect(); // 1000 + 500 > 1499
-        assert_eq!(
-            drained.len(),
-            1,
-            "Message should be drained when root_timestamp + delay > last_timestamp"
-        );
-        assert_eq!(messages.len(), 0);
-
-        // Test Case 4: Zero delay
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message.clone()).is_some());
-
-        let delay_fn = |_: ActorId| 0u64;
-        let drained: Vec<_> = messages.drain(&root, 1000, delay_fn).collect(); // 1000 + 0 == 1000
-        assert_eq!(
-            drained.len(),
-            1,
-            "Message should be drained with zero delay when timestamps equal"
-        );
-        assert_eq!(messages.len(), 0);
-
-        // Test Case 5: Very large delay
-        let mut messages = Messages::new(10);
-        assert!(messages.add(message.clone()).is_some());
-
-        let delay_fn = |_: ActorId| u64::MAX - 1000;
-        let drained: Vec<_> = messages.drain(&root, u64::MAX, delay_fn).collect(); // 1000 + (u64::MAX - 1000) == u64::MAX
-        assert_eq!(
-            drained.len(),
-            1,
-            "Message should be drained with very large delay"
-        );
-        assert_eq!(messages.len(), 0);
+        // The remaining message should be the one with high delay
+        assert_eq!(messages.0[0].source, actor3);
     }
 }

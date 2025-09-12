@@ -420,7 +420,7 @@ impl Contracts {
             .call()
             .await
             .map(|delay| delay.to())
-            .map_err(|err| Error::ErrorDuringContractExecution(err))
+            .map_err(Error::ErrorDuringContractExecution)
     }
 
     pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
@@ -429,7 +429,7 @@ impl Contracts {
             .call()
             .await
             .map(|delay| delay.to())
-            .map_err(|err| Error::ErrorDuringContractExecution(err))
+            .map_err(Error::ErrorDuringContractExecution)
     }
 
     pub async fn process_user_message_delay(&self) -> Result<u64, Error> {

@@ -19,8 +19,8 @@ use message_relayer::{
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
-use sails_rs::ActorId;
 use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
+use sails_rs::ActorId;
 use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;

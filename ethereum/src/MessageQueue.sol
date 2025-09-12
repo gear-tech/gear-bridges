@@ -38,10 +38,10 @@ contract MessageQueue is
     uint256 public constant CHALLENGE_ROOT_DELAY = 1 days;
 
     uint256 public constant PROCESS_ADMIN_MESSAGE_DELAY = 1 hours;
-    uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 3 minutes;
+    uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 5 minutes;
     uint256 public constant PROCESS_USER_MESSAGE_DELAY = 5 minutes;
 
-    uint256 public constant MAX_BLOCK_DISTANCE = 5;
+    uint256 public constant MAX_BLOCK_DISTANCE = 7200;
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;

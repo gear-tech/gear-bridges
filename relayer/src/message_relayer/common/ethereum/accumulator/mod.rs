@@ -2,12 +2,10 @@ pub mod utils;
 
 use super::*;
 use crate::{common::BASE_RETRY_DELAY, message_relayer::common::AuthoritySetId};
-use futures::{
-    future::{self, Either},
-    pin_mut,
-};
+use ethereum_client::EthApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
+use sails_rs::ActorId;
 use std::sync::Arc;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -23,6 +21,7 @@ pub struct Request {
     pub block: GearBlockNumber,
     pub block_hash: H256,
     pub tx_uuid: Uuid,
+    pub source: ActorId,
 }
 
 pub enum Response {
@@ -68,12 +67,14 @@ impl AccumulatorIo {
         authority_set_id: AuthoritySetId,
         block: GearBlockNumber,
         block_hash: H256,
+        source: ActorId,
     ) -> bool {
         let request = Request {
             authority_set_id,
             block,
             block_hash,
             tx_uuid,
+            source,
         };
         self.messages.send(request).is_ok()
     }
@@ -89,6 +90,9 @@ pub struct Accumulator {
     messages: Messages,
     merkle_roots: Arc<RwLock<MerkleRoots>>,
     receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
+    governance_admin: ActorId,
+    governance_pauser: ActorId,
+    eth_api: EthApi,
 }
 
 impl MeteredService for Accumulator {
@@ -109,14 +113,19 @@ impl_metered_service! {
 impl Accumulator {
     pub fn new(
         receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
-
         merkle_roots: Arc<RwLock<MerkleRoots>>,
+        governance_admin: ActorId,
+        governance_pauser: ActorId,
+        eth_api: EthApi,
     ) -> Self {
         Self {
             metrics: Metrics::new(),
             messages: Messages::new(10_000),
             merkle_roots,
             receiver_roots,
+            governance_admin,
+            governance_pauser,
+            eth_api,
         }
     }
 
@@ -131,6 +140,13 @@ impl Accumulator {
                         log::error!("{e:?}");
 
                         tokio::time::sleep(BASE_RETRY_DELAY).await;
+                        self.eth_api = match self.eth_api.reconnect().await {
+                            Ok(api) => api,
+                            Err(e) => {
+                                log::error!("Failed to reconnect to Ethereum API: {e:?}");
+                                return;
+                            }
+                        };
                     }
                 }
             }
@@ -145,55 +161,100 @@ async fn run_inner(
     messages_out: &mut UnboundedSender<Response>,
     requests: &mut UnboundedReceiver<Request>,
 ) -> anyhow::Result<()> {
+    let mut last_block = this.eth_api.finalized_block_number().await?;
+    let mut last_timestamp = this
+        .eth_api
+        .get_block_timestamp(last_block)
+        .await
+        .unwrap_or(0);
+
+    let process_message_admin_delay = this.eth_api.process_admin_message_delay().await?;
+    let process_message_pauser_delay = this.eth_api.process_pauser_message_delay().await?;
+    let process_message_user_delay = this.eth_api.process_user_message_delay().await?;
+
+    let message_delay = |source: ActorId| {
+        if source == this.governance_admin {
+            process_message_admin_delay
+        } else if source == this.governance_pauser {
+            process_message_pauser_delay
+        } else {
+            process_message_user_delay
+        }
+    };
+
+    let mut poll_interval = tokio::time::interval(std::time::Duration::from_secs(12));
+    poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
     loop {
-        let recv_messages = requests.recv();
-        pin_mut!(recv_messages);
+        tokio::select! {
+            _ = poll_interval.tick() => {
+                let block = this.eth_api.finalized_block_number().await?;
+                if block <= last_block {
+                    continue;
+                }
+                last_block = block;
 
-        let recv_merkle_roots = this.receiver_roots.recv();
-        pin_mut!(recv_merkle_roots);
+                let timestamp = this.eth_api.get_block_timestamp(block).await?;
+                last_timestamp = timestamp;
 
-        match future::select(recv_messages, recv_merkle_roots).await {
-            Either::Left((None, _)) => {
-                log::info!("Channel with messages closed. Exiting");
-                return Ok(());
-            }
-
-            Either::Right((None, _)) => {
-                log::info!("Channel with merkle roots closed. Exiting");
-                return Ok(());
-            }
-
-            Either::Left((Some(message), _)) => {
                 let merkle_roots = this.merkle_roots.read().await;
-                if let Some(merkle_root) =
-                    merkle_roots.find(message.authority_set_id, message.block)
-                {
-                    messages_out.send(Response::Success {
+                for (merkle_root, message) in this.messages.drain_timestamp(last_timestamp, &message_delay, &merkle_roots) {
+                    let Ok(_) = messages_out.send(Response::Success {
                         authority_set_id: message.authority_set_id,
                         block: message.block,
                         tx_uuid: message.tx_uuid,
-                        merkle_root: *merkle_root,
-                    })?;
-                    continue;
+                        merkle_root
+                    }) else {
+                        log::error!("Messages connection closed, exiting");
+                        return Ok(());
+                    };
                 }
+            }
+            message = requests.recv() => {
+                match message {
+                    Some(message) => {
+                        let merkle_roots = this.merkle_roots.read().await;
+                        let delay = message_delay(message.source);
+                        if let Some(merkle_root) =
+                            merkle_roots.find(message.authority_set_id, message.block, last_timestamp, delay)
+                        {
+                            messages_out.send(Response::Success {
+                                authority_set_id: message.authority_set_id,
+                                block: message.block,
+                                tx_uuid: message.tx_uuid,
+                                merkle_root: *merkle_root,
+                            })?;
+                            continue;
+                        }
 
-                if this.messages.add(message.clone()).is_none() {
-                    log::error!(
-                        "Unable to add the message '{message:?}' since the capacity is full"
-                    );
+                        if this.messages.add(message.clone()).is_none() {
+                            log::error!(
+                                "Unable to add the message '{message:?}' since the capacity is full"
+                            );
 
-                    messages_out.send(Response::Overflowed(message))?;
+                            messages_out.send(Response::Overflowed(message))?;
+                        }
+                    }
+                    None => {
+                        log::error!("Channel with messages closed. Exiting");
+                        return Ok(());
+                    }
                 }
             }
 
-            Either::Right((Some(merkle_root), _)) => {
+            merkle_root = this.receiver_roots.recv() => {
+                let Some(merkle_root) = merkle_root else {
+                    log::info!("Channel with merkle roots closed. Exiting");
+                    return Ok(());
+                };
+
                 let mut merkle_roots = this.merkle_roots.write().await;
                 match merkle_roots.add(merkle_root) {
                     Ok(Added::Ok | Added::Overwritten(_)) => {}
 
                     Ok(Added::Removed(merkle_root_old)) => {
                         log::warn!("Removing merkle root = {merkle_root_old:?}");
-                        let messages = this.messages.drain(&merkle_root_old);
+                        let messages = this.messages.drain_all(&merkle_root_old);
                         for message in messages {
                             log::error!("Remove stuck message = {message:?}");
                             messages_out.send(Response::Stuck {
@@ -211,7 +272,7 @@ async fn run_inner(
                     }
                 }
 
-                for message in this.messages.drain(&merkle_root) {
+                for message in this.messages.drain(&merkle_root, last_timestamp, &message_delay) {
                     messages_out.send(Response::Success {
                         authority_set_id: message.authority_set_id,
                         block: message.block,

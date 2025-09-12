@@ -6,10 +6,11 @@
   margin-bottom: 32px;
 
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 
-  @include breakpoint(400px) {
+  @include sm {
     flex-direction: column;
   }
 
@@ -26,6 +27,12 @@
   }
 
   .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .actions {
     display: flex;
     align-items: center;
     gap: 16px;

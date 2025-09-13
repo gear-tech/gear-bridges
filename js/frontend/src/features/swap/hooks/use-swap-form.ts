@@ -1,6 +1,5 @@
 import { useAlert, useAccount, useApi } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { UseMutationResult } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { formatUnits } from 'viem';
@@ -8,28 +7,28 @@ import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
 import { usePendingTxsCount } from '@/features/history/hooks';
-import { useEthAccount, useVaraSymbol } from '@/hooks';
-import { isUndefined, logger, getErrorMessage, definedAssert } from '@/utils';
+import { useEthAccount } from '@/hooks';
+import { isUndefined, logger, getErrorMessage } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { useBridgeContext } from '../context';
-import { InsufficientAccountBalanceError } from '../errors';
+// import { InsufficientAccountBalanceError } from '../errors';
 import { FormattedValues } from '../types';
 import { getAmountSchema } from '../utils';
 
 type Params = {
   accountBalance: bigint | undefined;
   ftBalance: bigint | undefined;
-  requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
-  onSubmit: (values: FormattedValues) => Promise<unknown>;
+  // requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
+  // onSubmit: (values: FormattedValues) => Promise<unknown>;
 };
 
-function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance }: Params) {
+function useSwapForm({ accountBalance, ftBalance }: Params) {
   const { api } = useApi();
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const { token, network } = useBridgeContext();
-  const varaSymbol = useVaraSymbol();
+  // const varaSymbol = useVaraSymbol();
   const pendingTxsCount = usePendingTxsCount();
   const alert = useAlert();
 
@@ -54,38 +53,41 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance }: P
   });
 
   const { setValue, reset, formState } = form;
+
   const amount = form.watch(FIELD_NAME.VALUE);
+  const accountAddress = form.watch(FIELD_NAME.ADDRESS);
 
-  const validateBalance = async (values: FormattedValues) => {
-    definedAssert(accountBalance, 'Account balance is not defined');
-    definedAssert(varaSymbol, 'Vara symbol is not defined');
+  // const validateBalance = async (values: FormattedValues) => {
+  //   definedAssert(accountBalance, 'Account balance is not defined');
+  //   definedAssert(varaSymbol, 'Vara symbol is not defined');
 
-    const { requiredBalance: _requiredBalance } = await requiredBalance.mutateAsync(values);
-    const symbol = network.isVara ? varaSymbol : 'ETH';
+  //   const { requiredBalance: _requiredBalance } = await requiredBalance.mutateAsync(values);
+  //   const symbol = network.isVara ? varaSymbol : 'ETH';
 
-    if (accountBalance < _requiredBalance) throw new InsufficientAccountBalanceError(symbol, _requiredBalance);
-  };
+  //   if (accountBalance < _requiredBalance) throw new InsufficientAccountBalanceError(symbol, _requiredBalance);
+  // };
 
-  const handleSubmit = form.handleSubmit((values) => {
-    const onSuccess = () => {
-      reset();
-      requiredBalance.reset();
+  const handleSubmit = (onSubmit: (values: FormattedValues) => Promise<unknown>) =>
+    form.handleSubmit((values) => {
+      const onSuccess = () => {
+        reset();
+        // requiredBalance.reset();
 
-      alert.success('Your transfer request was successful');
+        alert.success('Your transfer request was successful');
 
-      // to display warning asap
-      return pendingTxsCount.refetch();
-    };
+        // to display warning asap
+        return pendingTxsCount.refetch();
+      };
 
-    const onError = (error: WriteContractErrorType | string) => {
-      logger.error('Transfer Error', typeof error === 'string' ? new Error(error) : error);
-      alert.error(getErrorMessage(error));
-    };
+      const onError = (error: WriteContractErrorType | string) => {
+        logger.error('Transfer Error', typeof error === 'string' ? new Error(error) : error);
+        alert.error(getErrorMessage(error));
+      };
 
-    if (isUndefined(requiredBalance.data)) return validateBalance(values).catch(onError);
+      // if (isUndefined(requiredBalance.data)) return validateBalance(values).catch(onError);
 
-    onSubmit(values).then(onSuccess).catch(onError);
-  });
+      onSubmit(values).then(onSuccess).catch(onError);
+    });
 
   const setMaxBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -104,12 +106,11 @@ function useSwapForm({ accountBalance, ftBalance, onSubmit, requiredBalance }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, ethAccount.address]);
 
-  useEffect(() => {
-    requiredBalance.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, token?.address]);
+  // useEffect(() => {
+  //   requiredBalance.reset();
+  // }, [amount, token?.address]);
 
-  return { form, amount, handleSubmit, setMaxBalance };
+  return { form, amount, accountAddress, handleSubmit, setMaxBalance };
 }
 
 export { useSwapForm };

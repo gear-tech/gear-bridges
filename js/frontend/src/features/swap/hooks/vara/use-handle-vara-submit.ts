@@ -2,10 +2,9 @@ import { HexString } from '@gear-js/api';
 import { useApi } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
 
-import { definedAssert } from '@/utils';
+import { definedAssert, isUndefined } from '@/utils';
 
-import { SUBMIT_STATUS, CONTRACT_ADDRESS } from '../../consts';
-import { useBridgeContext } from '../../context';
+import { SUBMIT_STATUS } from '../../consts';
 import { Extrinsic, FormattedValues, UseHandleSubmitParameters } from '../../types';
 
 import { usePayFeesWithAwait } from './use-pay-fees-with-await';
@@ -13,20 +12,10 @@ import { usePrepareApprove } from './use-prepare-approve';
 import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 import { useSignAndSend } from './use-sign-and-send';
-
-type Transaction = {
-  extrinsic: Extrinsic | undefined;
-  gasLimit: bigint;
-  estimatedFee: bigint;
-  value?: bigint;
-};
-
-const GAS_LIMIT = {
-  BRIDGE: 150_000_000_000n,
-  APPROXIMATE_PAY_FEE: 10_000_000_000n,
-} as const;
+import { useVaraTxs } from './use-vara-txs';
 
 function useHandleVaraSubmit({
+  formValues,
   bridgingFee,
   shouldPayBridgingFee,
   vftManagerFee,
@@ -34,7 +23,6 @@ function useHandleVaraSubmit({
   onTransactionStart,
 }: UseHandleSubmitParameters) {
   const { api } = useApi();
-  const { token } = useBridgeContext();
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
@@ -42,63 +30,7 @@ function useHandleVaraSubmit({
   const payFees = usePayFeesWithAwait({ fee: bridgingFee, shouldPayBridgingFee });
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
-  const getTransactions = async ({ amount, accountAddress }: FormattedValues) => {
-    definedAssert(allowance, 'Allowance');
-    definedAssert(bridgingFee, 'Bridging fee value');
-    definedAssert(vftManagerFee, 'VFT Manager fee value');
-    definedAssert(token, 'Fungible token');
-
-    const txs: Transaction[] = [];
-    const shouldMint = token.isNative;
-    const shouldApprove = amount > allowance;
-
-    if (shouldMint) {
-      const { transaction, fee } = await mint.prepareTransactionAsync({ args: [], value: amount });
-
-      txs.push({
-        extrinsic: transaction.extrinsic,
-        gasLimit: transaction.gasInfo.min_limit.toBigInt(),
-        estimatedFee: fee,
-        value: amount,
-      });
-    }
-
-    if (shouldApprove) {
-      const { transaction, fee } = await approve.prepareTransactionAsync({
-        args: [CONTRACT_ADDRESS.VFT_MANAGER, amount],
-      });
-
-      txs.push({
-        extrinsic: transaction.extrinsic,
-        gasLimit: transaction.gasInfo.min_limit.toBigInt(),
-        estimatedFee: fee,
-      });
-    }
-
-    const { transaction, fee } = await requestBridging.prepareTransactionAsync({
-      gasLimit: GAS_LIMIT.BRIDGE,
-      args: [token.address, amount, accountAddress],
-      value: vftManagerFee,
-    });
-
-    txs.push({
-      extrinsic: transaction.extrinsic,
-      gasLimit: GAS_LIMIT.BRIDGE,
-      estimatedFee: fee,
-      value: vftManagerFee,
-    });
-
-    // using approximate values, cuz we don't know the exact gas limit yet
-    const feesTx = {
-      extrinsic: undefined,
-      gasLimit: GAS_LIMIT.APPROXIMATE_PAY_FEE,
-      estimatedFee: fee,
-    };
-
-    if (shouldPayBridgingFee) txs.push({ ...feesTx, value: bridgingFee });
-
-    return txs;
-  };
+  const txs = useVaraTxs({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
 
   const resetState = () => {
     signAndSend.reset();
@@ -107,12 +39,10 @@ function useHandleVaraSubmit({
 
   const sendTransactions = async (values: FormattedValues) => {
     definedAssert(api, 'API');
-    definedAssert(requiredBalance.data, 'Required balance');
-
-    const txs = await getTransactions(values);
+    definedAssert(txs.data, 'Prepared transactions');
 
     resetState();
-    onTransactionStart(values, requiredBalance.data.fees);
+    onTransactionStart(values);
 
     // event subscription to get nonce from bridging request reply, and send pay fee transaction.
     // since we're already checking replies in useSignAndSend,
@@ -121,7 +51,7 @@ function useHandleVaraSubmit({
     let blockHash: HexString | undefined;
 
     try {
-      const extrinsics = txs
+      const extrinsics = txs.data
         .map(({ extrinsic }) => extrinsic)
         .filter((extrinsic): extrinsic is Extrinsic => Boolean(extrinsic));
 
@@ -139,24 +69,22 @@ function useHandleVaraSubmit({
     return result(blockHash);
   };
 
-  const getRequiredBalance = async (values: FormattedValues) => {
-    definedAssert(api, 'API');
-    definedAssert(bridgingFee, 'Fee value');
-    definedAssert(vftManagerFee, 'VFT Manager fee value');
+  const estimateTxs = () => {
+    if (isUndefined(bridgingFee) || isUndefined(vftManagerFee) || !api || !txs.data) return;
 
-    const txs = await getTransactions(values);
-
-    const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * api.valuePerGas.toBigInt();
-    const totalEstimatedFee = txs.reduce((sum, { estimatedFee }) => sum + estimatedFee, 0n);
-    const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
+    const totalGasLimit = txs.data.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * api.valuePerGas.toBigInt();
+    const totalEstimatedFee = txs.data.reduce((sum, { estimatedFee }) => sum + estimatedFee, 0n);
+    const totalValue = txs.data.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
 
     const requiredBalance = totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
-    const fees = totalGasLimit + totalEstimatedFee + bridgingFee + vftManagerFee;
+    let fees = totalGasLimit + totalEstimatedFee + vftManagerFee;
+
+    if (shouldPayBridgingFee) fees += bridgingFee;
 
     return { requiredBalance, fees };
   };
 
-  const requiredBalance = useMutation({ mutationFn: getRequiredBalance });
+  const txsEstimate = estimateTxs();
 
   const getStatus = () => {
     if (signAndSend.isPending || signAndSend.error) return SUBMIT_STATUS.BRIDGE;
@@ -168,7 +96,7 @@ function useHandleVaraSubmit({
   const { mutateAsync, isPending, error } = useMutation({ mutationFn: sendTransactions });
   const status = getStatus();
 
-  return { onSubmit: mutateAsync, isPending: isPending || requiredBalance.isPending, error, status, requiredBalance };
+  return { onSubmit: mutateAsync, isPending, error, status, txsEstimate };
 }
 
 export { useHandleVaraSubmit };

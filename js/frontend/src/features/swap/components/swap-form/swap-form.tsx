@@ -73,24 +73,22 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, estimatedFees, time, close });
   };
 
-  const { onSubmit, requiredBalance, ...submit } = useHandleSubmit({
+  const { form, amount, accountAddress, handleSubmit, setMaxBalance } = useSwapForm({
+    accountBalance: accountBalance.data,
+    ftBalance: ftBalance.data,
+  });
+
+  const { onSubmit, txsEstimate, ...submit } = useHandleSubmit({
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
     allowance: allowance.data,
-    accountBalance: accountBalance.data,
-    onTransactionStart: openTransactionModal,
+    formValues: { amount: BigInt(amount || '0'), accountAddress: `0x${accountAddress}` },
+    onTransactionStart: (values) => openTransactionModal(values, 0n),
   });
 
   const isLoading =
     submit.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || allowance.isLoading;
-
-  const { form, amount, handleSubmit, setMaxBalance } = useSwapForm({
-    accountBalance: accountBalance.data,
-    ftBalance: ftBalance.data,
-    onSubmit,
-    requiredBalance,
-  });
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -123,7 +121,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const getButtonText = () => {
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
-    return requiredBalance.data ? 'Confirm Transfer' : 'Transfer';
+    return 'Transfer';
   };
 
   const handleConnectWalletButtonClick = () => {
@@ -133,7 +131,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const handleClaimTypeChange = (value: typeof claimType) => {
-    requiredBalance.reset();
+    // requiredBalance.reset();
     setClaimType(value);
   };
 
@@ -143,7 +141,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   return (
     <>
       <FormProvider {...form}>
-        <form onSubmit={handleSubmit} className={styles.form}>
+        <form onSubmit={handleSubmit(onSubmit)} className={styles.form}>
           <div>
             <div className={styles.card}>
               <header className={styles.header}>
@@ -203,8 +201,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
             claimType={claimType}
             onClaimTypeChange={handleClaimTypeChange}
             isVaraNetwork={network.isVara}
-            fee={requiredBalance?.data?.fees}
-            isFeeLoading={requiredBalance?.isPending}
+            fee={txsEstimate?.fees}
+            isFeeLoading={isUndefined(txsEstimate)}
             disabled={isLoading}
             time={time}
           />

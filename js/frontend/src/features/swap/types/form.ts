@@ -12,7 +12,7 @@ type FormattedValues = {
 type SubmitStatus = (typeof SUBMIT_STATUS)[keyof typeof SUBMIT_STATUS];
 
 type UseHandleSubmitParameters = {
-  formValues: FormattedValues;
+  formValues: FormattedValues | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   allowance: bigint | undefined;

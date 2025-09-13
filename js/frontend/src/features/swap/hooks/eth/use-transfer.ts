@@ -12,6 +12,7 @@ import { useBridgeContext } from '../../context';
 type Parameters = {
   amount: bigint;
   accountAddress: HexString;
+  accountOverride?: HexString;
   permit?: { deadline: bigint; v: number; r: HexString; s: HexString };
 };
 
@@ -21,7 +22,7 @@ function useTransfer(fee: bigint | undefined) {
   const { writeContractAsync } = useWriteContract();
   const config = useConfig();
 
-  const getGasLimitWithFee = ({ amount, accountAddress }: Parameters) => {
+  const getGasLimitWithFee = ({ amount, accountAddress, accountOverride }: Parameters) => {
     definedAssert(fee, 'Fee');
     definedAssert(token?.address, 'Fungible token address');
 
@@ -35,6 +36,7 @@ function useTransfer(fee: bigint | undefined) {
       to: CONTRACT_ADDRESS.ERC20_MANAGER,
       data: encodedData,
       value: fee,
+      account: accountOverride,
     });
   };
 
@@ -60,7 +62,7 @@ function useTransfer(fee: bigint | undefined) {
     return waitForTransactionReceipt(config, { hash });
   };
 
-  const getGasLimitWithoutFee = ({ amount, accountAddress }: Parameters) => {
+  const getGasLimitWithoutFee = ({ amount, accountAddress, accountOverride }: Parameters) => {
     definedAssert(token?.address, 'Fungible token address');
 
     const encodedData = encodeFunctionData({
@@ -72,6 +74,7 @@ function useTransfer(fee: bigint | undefined) {
     return estimateGas(config, {
       to: CONTRACT_ADDRESS.ERC20_MANAGER,
       data: encodedData,
+      account: accountOverride,
     });
   };
 

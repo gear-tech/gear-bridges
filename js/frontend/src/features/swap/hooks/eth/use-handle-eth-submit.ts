@@ -39,7 +39,9 @@ function useHandleEthSubmit({
     const totalValue = txs.data.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
 
     const requiredBalance = totalValue + totalGasLimit;
-    const fees = totalGasLimit + bridgingFee;
+    let fees = totalGasLimit;
+
+    if (shouldPayBridgingFee) fees += bridgingFee;
 
     return { requiredBalance, fees };
   };

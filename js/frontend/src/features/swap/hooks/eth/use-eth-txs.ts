@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { definedAssert } from '@/utils';
+import { useEthAccount } from '@/hooks';
+import { definedAssert, isUndefined } from '@/utils';
 
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
@@ -19,13 +20,15 @@ type Transaction = {
 };
 
 type Params = {
+  formValues: FormattedValues | undefined;
   allowance: bigint | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
-  formValues: FormattedValues;
 };
 
 function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }: Params) {
+  const ethAccount = useEthAccount();
+
   const { token } = useBridgeContext();
 
   const mint = useMint();
@@ -40,7 +43,13 @@ function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }:
     definedAssert(bridgingFee, 'Fee');
     definedAssert(token, 'Fungible token');
 
-    const { amount, accountAddress } = formValues;
+    const ALICE_ACCOUNT_ADDRESS = '0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d';
+    const DUMMY_ETH_ADDRESS = '0x000000000000000000000000000000000000dEaD';
+
+    const amount = formValues ? formValues.amount : 1n;
+    const accountAddress = formValues ? formValues.accountAddress : ALICE_ACCOUNT_ADDRESS;
+    const accountOverride = ethAccount.address ? undefined : DUMMY_ETH_ADDRESS;
+
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
     const shouldApprove = amount > allowance;
@@ -48,7 +57,7 @@ function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }:
 
     if (shouldMint) {
       const value = amount;
-      const gasLimit = await mint.getGasLimit(value);
+      const gasLimit = await mint.getGasLimit({ value, accountOverride });
 
       txs.push({
         call: () => mint.mutateAsync({ value }),
@@ -64,7 +73,7 @@ function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }:
         permit = await permitUSDC.mutateAsync(amount);
       } else {
         const call = () => approve.mutateAsync({ amount });
-        const gasLimit = await approve.getGasLimit(amount);
+        const gasLimit = await approve.getGasLimit({ amount, accountOverride });
 
         txs.push({ call, gasLimit });
       }
@@ -76,7 +85,11 @@ function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }:
     // which is not feasible to do programmatically (at least I didn't managed to find a convenient way to do so).
     txs.push({
       call: () => transfer.mutateAsync({ amount, accountAddress, permit }),
-      gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
+
+      gasLimit: shouldApprove
+        ? TRANSFER_GAS_LIMIT_FALLBACK
+        : await transfer.getGasLimit({ amount, accountAddress, accountOverride }),
+
       value: shouldPayBridgingFee ? bridgingFee : undefined,
     });
 
@@ -89,13 +102,17 @@ function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }:
       allowance?.toString(),
       bridgingFee?.toString(),
       shouldPayBridgingFee,
-      formValues.amount.toString(),
-      formValues.accountAddress,
+      formValues?.amount.toString(),
+      formValues?.accountAddress,
+      ethAccount?.address,
       token,
     ],
 
     queryFn: getTxs,
-    enabled: Boolean(allowance && bridgingFee && token),
+
+    // it's probably worth to check isConnecting too, but there is a bug:
+    // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
+    enabled: Boolean(!isUndefined(allowance) && !isUndefined(bridgingFee) && token && !ethAccount.isReconnecting),
   });
 }
 

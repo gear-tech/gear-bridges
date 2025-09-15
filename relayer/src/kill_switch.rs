@@ -19,7 +19,7 @@ use crate::{
     prover_interface::FinalProof,
 };
 
-const REPEAT_PERIOD_SEC: Duration = Duration::from_secs(12);
+const SCAN_EVENTS_PERIOD_SEC: Duration = Duration::from_secs(12);
 const ERROR_REPEAT_DELAY: Duration = Duration::from_secs(3);
 
 impl_metered_service! {
@@ -146,21 +146,19 @@ impl KillSwitchRelayer {
                     self.submit_merkle_root().await.map_err(Error::from)
                 }
                 State::Exit => {
-                    log::info!("Exiting ...");
-                    tokio::time::sleep(Duration::from_secs(3)).await;
                     process::exit(1);
                 }
             };
 
             match res {
                 Ok(()) => {
-                    if let State::ScanForEvents = self.state {
+                    loop_delay = if let State::ScanForEvents = self.state {
                         // Repeat merkle root event scan after a delay
-                        loop_delay = REPEAT_PERIOD_SEC;
+                        SCAN_EVENTS_PERIOD_SEC
                     } else {
-                        // State changed so we want to immediately process the new state.
-                        loop_delay = Duration::ZERO;
-                    }
+                        // New state entered or polling in Challenge/Submit states
+                        Duration::from_secs(5)
+                    };
                 }
                 Err(err) => {
                     loop_delay = ERROR_REPEAT_DELAY;
@@ -199,9 +197,7 @@ impl KillSwitchRelayer {
                 }
             }
 
-            if loop_delay != Duration::ZERO {
-                tokio::time::sleep(loop_delay).await;
-            }
+            tokio::time::sleep(loop_delay).await;
         }
     }
 
@@ -273,16 +269,16 @@ impl KillSwitchRelayer {
 
             match tx_status {
                 TxStatus::Finalized => {
-                    log::info!("Challenge root tx finalized, resuming normal operation");
+                    log::info!("Challenge root TX 0x{tx_hash} finalized, switching to submit merkle root state");
                     self.state = State::SubmitMerkleRoot { tx_hash: None };
                     return Ok(());
                 }
                 TxStatus::Pending => {
-                    log::info!("Challenge root tx is still pending, waiting ..");
+                    log::info!("Challenge root TX 0x{tx_hash} is still pending, waiting ..");
                     return Ok(());
                 }
                 TxStatus::Failed => {
-                    log::warn!("Tx #{tx_hash} failed. Re-trying challenge root tx finalization");
+                    log::warn!("Challenge root TX 0x{tx_hash} failed. Re-trying challenge root tx finalization");
                 }
             }
         };
@@ -305,17 +301,17 @@ impl KillSwitchRelayer {
 
             match tx_status {
                 TxStatus::Finalized => {
-                    log::info!("Submit merkle root tx finalized, resuming normal operation");
+                    log::info!("Submit merkle root TX 0x{tx_hash} finalized, exiting ..");
                     self.state = State::Exit;
                     return Ok(());
                 }
                 TxStatus::Pending => {
-                    log::info!("Submit merkle root tx is still pending, waiting ..");
+                    log::info!("Submit merkle root TX 0x{tx_hash} is still pending, waiting ..");
                     return Ok(());
                 }
                 TxStatus::Failed => {
                     log::warn!(
-                        "Tx #{tx_hash} failed. Re-trying submit merkle root tx finalization"
+                        "Submit merkle root TX 0x{tx_hash} failed. Re-trying submit merkle root tx finalization"
                     );
                 }
             }

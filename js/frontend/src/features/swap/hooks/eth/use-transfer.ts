@@ -16,7 +16,7 @@ type Parameters = {
   permit?: { deadline: bigint; v: number; r: HexString; s: HexString };
 };
 
-function useTransfer(fee: bigint | undefined) {
+function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
   const { token } = useBridgeContext();
 
   const { writeContractAsync } = useWriteContract();
@@ -99,10 +99,25 @@ function useTransfer(fee: bigint | undefined) {
     return waitForTransactionReceipt(config, { hash });
   };
 
-  return {
-    transferWithoutFee: { ...useMutation({ mutationFn: transferWithoutFee }), getGasLimit: getGasLimitWithoutFee },
-    transferWithFee: { ...useMutation({ mutationFn: transferWithFee }), getGasLimit: getGasLimitWithFee },
+  const transferWithoutFeeMutation = {
+    ...useMutation({
+      mutationKey: ['eth-transfer-without-fee'],
+      mutationFn: transferWithoutFee,
+    }),
+
+    getGasLimit: getGasLimitWithoutFee,
   };
+
+  const transferWithFeeMutation = {
+    ...useMutation({
+      mutationKey: ['eth-transfer-with-fee'],
+      mutationFn: transferWithFee,
+    }),
+
+    getGasLimit: getGasLimitWithFee,
+  };
+
+  return shouldPayBridgingFee ? transferWithFeeMutation : transferWithoutFeeMutation;
 }
 
 export { useTransfer };

@@ -25,7 +25,7 @@ type Params = {
 function useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance, onTransactionStart }: Params) {
   const { api } = useApi();
 
-  const prepareVaraTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
+  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
@@ -41,9 +41,9 @@ function useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allo
 
   const sendTxs = async (values: FormattedValues) => {
     definedAssert(api, 'API');
-    definedAssert(prepareVaraTxs, 'Prepared transactions');
+    definedAssert(prepareTxs, 'Prepared transactions');
 
-    const txs = await prepareVaraTxs(values);
+    const txs = await prepareTxs(values);
 
     resetState();
     onTransactionStart(values);

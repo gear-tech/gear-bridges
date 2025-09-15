@@ -1,7 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { HexString } from '@gear-js/api';
 
-import { useEthAccount } from '@/hooks';
-import { definedAssert, isUndefined } from '@/utils';
+import { isUndefined } from '@/utils';
 
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
@@ -20,36 +19,22 @@ type Transaction = {
 };
 
 type Params = {
-  formValues: FormattedValues | undefined;
   allowance: bigint | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
 };
 
-function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }: Params) {
-  const ethAccount = useEthAccount();
-
+function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Params) {
   const { token } = useBridgeContext();
 
   const mint = useMint();
   const approve = useApprove();
   const permitUSDC = usePermitUSDC();
+  const transfer = useTransfer(bridgingFee, shouldPayBridgingFee);
 
-  const { transferWithoutFee, transferWithFee } = useTransfer(bridgingFee);
-  const transfer = shouldPayBridgingFee ? transferWithFee : transferWithoutFee;
+  if (isUndefined(allowance) || isUndefined(bridgingFee) || !token) return;
 
-  const getTxs = async () => {
-    definedAssert(allowance, 'Allowance');
-    definedAssert(bridgingFee, 'Fee');
-    definedAssert(token, 'Fungible token');
-
-    const ALICE_ACCOUNT_ADDRESS = '0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d';
-    const DUMMY_ETH_ADDRESS = '0x000000000000000000000000000000000000dEaD';
-
-    const amount = formValues ? formValues.amount : 1n;
-    const accountAddress = formValues ? formValues.accountAddress : ALICE_ACCOUNT_ADDRESS;
-    const accountOverride = ethAccount.address ? undefined : DUMMY_ETH_ADDRESS;
-
+  return async ({ amount, accountAddress, accountOverride }: FormattedValues & { accountOverride?: HexString }) => {
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
     const shouldApprove = amount > allowance;
@@ -95,25 +80,6 @@ function useEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, formValues }:
 
     return txs;
   };
-
-  return useQuery({
-    queryKey: [
-      'eth-txs',
-      allowance?.toString(),
-      bridgingFee?.toString(),
-      shouldPayBridgingFee,
-      formValues?.amount.toString(),
-      formValues?.accountAddress,
-      ethAccount?.address,
-      token,
-    ],
-
-    queryFn: getTxs,
-
-    // it's probably worth to check isConnecting too, but there is a bug:
-    // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-    enabled: Boolean(!isUndefined(allowance) && !isUndefined(bridgingFee) && token && !ethAccount.isReconnecting),
-  });
 }
 
-export { useEthTxs };
+export { usePrepareEthTxs };

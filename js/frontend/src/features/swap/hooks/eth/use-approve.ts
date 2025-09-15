@@ -42,7 +42,7 @@ function useApprove() {
     return waitForTransactionReceipt(config, { hash });
   };
 
-  return { ...useMutation({ mutationFn: approve }), getGasLimit };
+  return { ...useMutation({ mutationKey: ['eth-approve'], mutationFn: approve }), getGasLimit };
 }
 
 export { useApprove };

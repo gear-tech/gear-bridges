@@ -86,7 +86,7 @@ function usePermitUSDC() {
     return { deadline, r, s, v };
   };
 
-  return { ...useMutation({ mutationFn: permit }) };
+  return { ...useMutation({ mutationKey: ['eth-permit-usdc'], mutationFn: permit }) };
 }
 
 export { usePermitUSDC };

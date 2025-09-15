@@ -11,13 +11,7 @@ function useHandleVaraSubmit({
   allowance,
   onTransactionStart,
 }: UseHandleSubmitParameters) {
-  const { mutateAsync, isPending, error, status } = useSendVaraTxs({
-    bridgingFee,
-    shouldPayBridgingFee,
-    vftManagerFee,
-    allowance,
-    onTransactionStart,
-  });
+  const sendTxs = useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance, onTransactionStart });
 
   const { data: txsEstimate } = useVaraTxsEstimate({
     formValues,
@@ -27,7 +21,7 @@ function useHandleVaraSubmit({
     allowance,
   });
 
-  return { onSubmit: mutateAsync, isPending, error, status, txsEstimate };
+  return { ...sendTxs, txsEstimate };
 }
 
 export { useHandleVaraSubmit };

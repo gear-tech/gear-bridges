@@ -26,15 +26,15 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
 
-  const prepareVaraTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
+  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
 
   const estimateTxs = async () => {
     definedAssert(vftManagerFee, 'VFT Manager fee');
     definedAssert(bridgingFee, 'Bridging fee value');
     definedAssert(api, 'API');
-    definedAssert(prepareVaraTxs, 'Prepared transactions');
+    definedAssert(prepareTxs, 'Prepared transactions');
 
-    const txs = await prepareVaraTxs({
+    const txs = await prepareTxs({
       ...(formValues ?? DUMMY_FORM_VALUES),
       accountOverride: DUMMY_ADDRESS.VARA_ALICE,
     });
@@ -64,8 +64,7 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
 
     queryFn: estimateTxs,
 
-    enabled:
-      !isUndefined(bridgingFee) && !isUndefined(vftManagerFee) && Boolean(api && prepareVaraTxs) && isAccountReady,
+    enabled: !isUndefined(bridgingFee) && !isUndefined(vftManagerFee) && Boolean(api && prepareTxs) && isAccountReady,
   });
 }
 

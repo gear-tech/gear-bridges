@@ -21,7 +21,7 @@ type UseHandleSubmitParameters = {
 };
 
 type UseHandleSubmit = (params: UseHandleSubmitParameters) => {
-  onSubmit: (values: FormattedValues) => Promise<unknown>;
+  mutateAsync: (values: FormattedValues) => Promise<unknown>;
   status: SubmitStatus;
   isPending: boolean;
   error: Error | null;

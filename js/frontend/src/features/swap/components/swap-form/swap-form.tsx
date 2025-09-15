@@ -78,7 +78,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     ftBalance: ftBalance.data,
   });
 
-  const { onSubmit, txsEstimate, ...submit } = useHandleSubmit({
+  const { txsEstimate, ...submit } = useHandleSubmit({
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
@@ -141,7 +141,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   return (
     <>
       <FormProvider {...form}>
-        <form onSubmit={handleSubmit(onSubmit)} className={styles.form}>
+        <form onSubmit={handleSubmit(submit.mutateAsync)} className={styles.form}>
           <div>
             <div className={styles.card}>
               <header className={styles.header}>

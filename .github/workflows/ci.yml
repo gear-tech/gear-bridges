@@ -211,6 +211,9 @@ jobs:
           --exclude plonky2_sha512
           --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
 
+      - name: Run prover asserting tests
+        run: cargo test --release --package prover assert_constants
+
       - name: Run solidity tests
         run: |
           cd ethereum
@@ -239,7 +242,9 @@ jobs:
               - 'prover/**'
 
   zk-tests:
-    runs-on: kuberunner
+    runs-on: zk-tests
+    env:
+      VERIFIER_DATA_PATH: "/VariativeBlake2"
     needs: check-zk-circuits-changed
     if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
     steps:

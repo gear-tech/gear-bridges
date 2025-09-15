@@ -11,6 +11,11 @@ const NETWORK = {
   ETH: 'eth',
 } as const;
 
+const DUMMY_ADDRESS = {
+  VARA_ALICE: '0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d',
+  ETH_DEAD: '0x000000000000000000000000000000000000dEaD',
+} as const;
+
 export {
   CONTRACT_ADDRESS,
   BRIDGING_PAYMENT_ABI,
@@ -28,6 +33,7 @@ export {
   SUBMIT_STATUS,
   CLAIM_TYPE,
   ETH_BEACON_NODE_ADDRESS,
+  DUMMY_ADDRESS,
   BridgingPaymentProgram,
   VftManagerProgram,
 };

@@ -1,8 +1,7 @@
-import { useAccount } from '@gear-js/react-hooks';
+import { HexString } from '@gear-js/api';
 import { Extrinsic } from '@polkadot/types/interfaces';
-import { useQuery } from '@tanstack/react-query';
 
-import { definedAssert, isUndefined } from '@/utils';
+import { isUndefined } from '@/utils';
 
 import { CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
@@ -12,6 +11,11 @@ import { usePrepareApprove } from './use-prepare-approve';
 import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
 
+const GAS_LIMIT = {
+  BRIDGE: 150_000_000_000n,
+  APPROXIMATE_PAY_FEE: 10_000_000_000n,
+} as const;
+
 type Transaction = {
   extrinsic: Extrinsic | undefined;
   gasLimit: bigint;
@@ -19,47 +23,31 @@ type Transaction = {
   value?: bigint;
 };
 
-const GAS_LIMIT = {
-  BRIDGE: 150_000_000_000n,
-  APPROXIMATE_PAY_FEE: 10_000_000_000n,
-} as const;
-
 type Params = {
-  formValues: FormattedValues | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   vftManagerFee: bigint | undefined;
   allowance: bigint | undefined;
 };
 
-function useVaraTxs({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance }: Params) {
-  const { account: varaAccount, isAccountReady } = useAccount();
-
+function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance }: Params) {
   const { token } = useBridgeContext();
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
 
-  const getTxs = async () => {
-    definedAssert(allowance, 'Allowance');
-    definedAssert(bridgingFee, 'Bridging fee value');
-    definedAssert(vftManagerFee, 'VFT Manager fee value');
-    definedAssert(token, 'Fungible token');
+  if (isUndefined(bridgingFee) || isUndefined(vftManagerFee) || isUndefined(allowance) || !token) return;
 
-    const ALICE_ACCOUNT_ADDRESS = '0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d';
-    const DUMMY_ETH_ADDRESS = '0x000000000000000000000000000000000000dEaD';
-
-    const amount = formValues ? formValues.amount : 0n;
-    const accountAddress = formValues ? formValues.accountAddress : DUMMY_ETH_ADDRESS;
-    const account = varaAccount ? undefined : { addressOrPair: ALICE_ACCOUNT_ADDRESS };
+  return async ({ amount, accountAddress, accountOverride }: FormattedValues & { accountOverride?: HexString }) => {
+    const accountArg = accountOverride ? { account: { addressOrPair: accountOverride } } : {};
 
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
     const shouldApprove = amount > allowance;
 
     if (shouldMint) {
-      const { transaction, fee } = await mint.prepareTransactionAsync({ args: [], value: amount, account });
+      const { transaction, fee } = await mint.prepareTransactionAsync({ ...accountArg, args: [], value: amount });
 
       txs.push({
         extrinsic: transaction.extrinsic,
@@ -71,8 +59,8 @@ function useVaraTxs({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerF
 
     if (shouldApprove) {
       const { transaction, fee } = await approve.prepareTransactionAsync({
+        ...accountArg,
         args: [CONTRACT_ADDRESS.VFT_MANAGER, amount],
-        account,
       });
 
       txs.push({
@@ -83,10 +71,10 @@ function useVaraTxs({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerF
     }
 
     const { transaction, fee } = await requestBridging.prepareTransactionAsync({
+      ...accountArg,
       gasLimit: GAS_LIMIT.BRIDGE,
       args: [token.address, amount, accountAddress],
       value: vftManagerFee,
-      account,
     });
 
     txs.push({
@@ -107,25 +95,6 @@ function useVaraTxs({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerF
 
     return txs;
   };
-
-  return useQuery({
-    queryKey: [
-      'vara-txs',
-      bridgingFee?.toString(),
-      shouldPayBridgingFee,
-      vftManagerFee?.toString(),
-      allowance?.toString(),
-      formValues?.amount.toString(),
-      formValues?.accountAddress,
-      varaAccount?.address,
-      token,
-    ],
-
-    queryFn: getTxs,
-    enabled: Boolean(
-      !isUndefined(bridgingFee) && !isUndefined(vftManagerFee) && !isUndefined(allowance) && token && isAccountReady,
-    ),
-  });
 }
 
-export { useVaraTxs };
+export { usePrepareVaraTxs };

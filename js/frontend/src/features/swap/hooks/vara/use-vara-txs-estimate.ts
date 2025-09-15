@@ -1,0 +1,72 @@
+import { useAccount, useApi } from '@gear-js/react-hooks';
+import { useQuery } from '@tanstack/react-query';
+
+import { definedAssert, isUndefined } from '@/utils';
+
+import { DUMMY_ADDRESS } from '../../consts';
+import { FormattedValues } from '../../types';
+import { estimateBridging } from '../../utils';
+
+import { usePrepareVaraTxs } from './use-prepare-vara-txs';
+
+type Params = {
+  formValues: FormattedValues | undefined;
+  bridgingFee: bigint | undefined;
+  shouldPayBridgingFee: boolean;
+  vftManagerFee: bigint | undefined;
+  allowance: bigint | undefined;
+};
+
+const DUMMY_FORM_VALUES = {
+  amount: 0n,
+  accountAddress: DUMMY_ADDRESS.ETH_DEAD,
+} as const;
+
+function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance }: Params) {
+  const { api } = useApi();
+  const { account, isAccountReady } = useAccount();
+
+  const prepareVaraTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
+
+  const estimateTxs = async () => {
+    definedAssert(vftManagerFee, 'VFT Manager fee');
+    definedAssert(bridgingFee, 'Bridging fee value');
+    definedAssert(api, 'API');
+    definedAssert(prepareVaraTxs, 'Prepared transactions');
+
+    const txs = await prepareVaraTxs({
+      ...(formValues ?? DUMMY_FORM_VALUES),
+      accountOverride: DUMMY_ADDRESS.VARA_ALICE,
+    });
+
+    const { totalGasLimit, totalValue } = estimateBridging(txs, api.valuePerGas.toBigInt());
+
+    const totalEstimatedFee = txs.reduce((sum, { estimatedFee }) => sum + estimatedFee, 0n);
+    const requiredBalance = totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
+
+    let fees = totalGasLimit + totalEstimatedFee + vftManagerFee;
+    if (shouldPayBridgingFee) fees += bridgingFee;
+
+    return { requiredBalance, fees };
+  };
+
+  return useQuery({
+    queryKey: [
+      'vara-txs-estimate',
+      formValues?.amount.toString(),
+      formValues?.accountAddress,
+      bridgingFee?.toString(),
+      shouldPayBridgingFee,
+      vftManagerFee?.toString(),
+      allowance?.toString(),
+      account?.address,
+    ],
+
+    queryFn: estimateTxs,
+
+    enabled:
+      !isUndefined(bridgingFee) && !isUndefined(vftManagerFee) && Boolean(api && prepareVaraTxs) && isAccountReady,
+  });
+}
+
+export { useVaraTxsEstimate };

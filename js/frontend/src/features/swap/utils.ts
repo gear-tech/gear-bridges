@@ -45,4 +45,11 @@ const getAmountSchema = (
 const initArchiveApi = () =>
   GearApi.create({ providerAddress: import.meta.env.VITE_VARA_ARCHIVE_NODE_ADDRESS as string });
 
-export { getAmountSchema, initArchiveApi };
+const estimateBridging = (txs: { gasLimit: bigint; value?: bigint }[], valuePerGas: bigint) => {
+  const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * valuePerGas;
+  const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
+
+  return { totalGasLimit, totalValue };
+};
+
+export { getAmountSchema, initArchiveApi, estimateBridging };

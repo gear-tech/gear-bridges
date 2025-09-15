@@ -1,5 +1,6 @@
 use ethereum_client::EthApi;
 use primitive_types::U256;
+use sails_rs::ActorId;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -15,6 +16,7 @@ use crate::message_relayer::{
     gear_to_eth::{storage::NoStorage, tx_manager::TransactionManager},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub async fn relay(
     api_provider: ApiProviderConnection,
     eth_api: EthApi,
@@ -22,6 +24,8 @@ pub async fn relay(
     gear_block: u32,
     from_eth_block: Option<u64>,
     confirmations: u64,
+    governance_admin: ActorId,
+    governance_pauser: ActorId,
 ) {
     let gear_api = api_provider.client();
     let gear_block_hash = gear_api
@@ -72,7 +76,10 @@ pub async fn relay(
     }
 
     let (merkle_roots_sender, merkle_roots_receiver) = mpsc::unbounded_channel();
-    for (merkle_root, _block_number_eth) in merkle_roots {
+    for (merkle_root, block_number_eth) in merkle_roots
+        .into_iter()
+        .filter_map(|(merkle_root, block)| block.map(|block| (merkle_root, block)))
+    {
         let block_hash = gear_api
             .block_number_to_hash(merkle_root.block_number as u32)
             .await
@@ -84,6 +91,11 @@ pub async fn relay(
                 .await
                 .expect("Unable to get AuthoritySetId"),
         );
+
+        let timestamp = eth_api
+            .get_block_timestamp(block_number_eth)
+            .await
+            .expect("failed to get Ethereum block timestamp");
 
         log::info!(
             "Found merkle root for gear block #{} and era #{}",
@@ -97,6 +109,7 @@ pub async fn relay(
                 block_hash,
                 authority_set_id,
                 merkle_root: merkle_root.merkle_root,
+                timestamp,
             })
             .expect("Unable to send RelayedMerkleRoot");
 
@@ -113,7 +126,13 @@ pub async fn relay(
     let message_sender = MessageSender::new(1, eth_api.clone());
 
     let (queued_messages_sender, mut queued_messages_receiver) = mpsc::unbounded_channel();
-    let accumulator = Accumulator::new(merkle_roots_receiver, tx_manager.merkle_roots.clone());
+    let accumulator = Accumulator::new(
+        merkle_roots_receiver,
+        tx_manager.merkle_roots.clone(),
+        governance_admin,
+        governance_pauser,
+        eth_api.clone(),
+    );
     let mut accumulator_io = accumulator.spawn();
     let mut proof_fetcher_io = MerkleProofFetcher::new(api_provider).spawn();
 

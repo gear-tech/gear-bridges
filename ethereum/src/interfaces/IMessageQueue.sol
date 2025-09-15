@@ -19,7 +19,12 @@ struct VaraMessage {
  */
 interface IMessageQueue is IPausable {
     /**
-     * @dev Emergency stop status is active.
+     * @dev Challenge root status is enabled.
+     */
+    error ChallengeRoot();
+
+    /**
+     * @dev Emergency stop status is enabled.
      */
     error EmergencyStop();
 
@@ -39,6 +44,11 @@ interface IMessageQueue is IPausable {
     error MerkleRootNotFound(uint256 blockNumber);
 
     /**
+     * @dev Merkle root delay is not passed.
+     */
+    error MerkleRootDelayNotPassed();
+
+    /**
      * @dev Merkle proof is invalid.
      */
     error InvalidMerkleProof();
@@ -49,9 +59,35 @@ interface IMessageQueue is IPausable {
     error MerkleRootAlreadySet(uint256 blockNumber);
 
     /**
-     * @dev Emitted when emergency stop status is set.
+     * @dev Caller is not emergency stop observer.
      */
-    event EmergencyStopSet();
+    error NotEmergencyStopObserver();
+
+    /**
+     * @dev Block number is before genesis block.
+     */
+    error BlockNumberBeforeGenesis(uint256 blockNumber, uint256 genesisBlock);
+
+    /**
+     * @dev Block number is too far from max block number.
+     */
+    error BlockNumberTooFar(uint256 blockNumber, uint256 maxBlockNumber);
+
+    /**
+     * @dev Emitted when challenging root status is enabled.
+     */
+    event ChallengeRootEnabled(uint256 untilTimestamp);
+
+    /**
+     * @dev Emitted when emergency stop status is enabled.
+     */
+    event EmergencyStopEnabled();
+
+    /**
+     * @dev Emitted when emergency stop status is disabled.
+     *      Should be emitted on upgradeV2 function of the smart contract.
+     */
+    event EmergencyStopDisabled();
 
     /**
      * @dev Emitted when block number and merkle root are stored.
@@ -76,6 +112,18 @@ interface IMessageQueue is IPausable {
     function governancePauser() external view returns (address);
 
     /**
+     * @dev Returns emergency stop admin address.
+     * @return emergencyStopAdmin Emergency stop admin address.
+     */
+    function emergencyStopAdmin() external view returns (address);
+
+    /**
+     * @dev Returns list of emergency stop observers.
+     * @return emergencyStopObservers List of emergency stop observers.
+     */
+    function emergencyStopObservers() external view returns (address[] memory);
+
+    /**
      * @dev Returns verifier address.
      *      Verifier is smart contract that is responsible for verifying
      *      the validity of the Merkle proof.
@@ -84,10 +132,40 @@ interface IMessageQueue is IPausable {
     function verifier() external view returns (address);
 
     /**
+     * @dev Returns challenging root status.
+     * @return isChallengingRoot challenging root status.
+     */
+    function isChallengingRoot() external view returns (bool);
+
+    /**
      * @dev Returns emergency stop status.
      * @return isEmergencyStopped emergency stop status.
      */
     function isEmergencyStopped() external view returns (bool);
+
+    /**
+     * @dev Returns genesis block number.
+     * @return genesisBlock Genesis block number.
+     */
+    function genesisBlock() external view returns (uint256);
+
+    /**
+     * @dev Returns maximum block number.
+     * @return maxBlockNumber Maximum block number.
+     */
+    function maxBlockNumber() external view returns (uint256);
+
+    /**
+     * @dev Puts MessageQueue into a high-priority paused state.
+     *      Only the emergency stop admin or time expiry (CHALLENGE_ROOT_DELAY) can lift it.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
+     *      - challenging root status is already enabled with `ChallengeRoot` error.
+     *
+     * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
+     */
+    function challengeRoot() external;
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
@@ -101,7 +179,7 @@ interface IMessageQueue is IPausable {
      * @param blockNumber Block number on Vara Network
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number
      * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
-     * @dev Reverts if emergency stop status is set with `EmergencyStop` error.
+     * @dev Reverts if emergency stop status is enabled with `EmergencyStop` error.
      * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external;
@@ -113,6 +191,14 @@ interface IMessageQueue is IPausable {
      * @return merkleRoot Merkle root for specified block number.
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32);
+
+    /**
+     * @dev Returns timestamp when merkle root was set.
+     *      Returns `0` if merkle root was not provided for specified block number.
+     * @param merkleRoot Target merkle root.
+     * @return timestamp Timestamp when merkle root was set.
+     */
+    function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256);
 
     /**
      * @dev Verifies and processes message originated from Vara Network.
@@ -136,8 +222,9 @@ interface IMessageQueue is IPausable {
      *              was included into `blockNumber`.
      *
      * @dev Reverts if:
+     *      - MessageQueue is in challenging root status with `ChallengeRoot` error.
      *      - MessageQueue is paused and message source is not any governance address.
-     *      - MessageQueue emergency stop status is set.
+     *      - MessageQueue emergency stop status is enabled and caller is not emergency stop admin.
      *      - Message nonce is already processed.
      *      - Merkle root is not set for the block number in MessageQueue smart contract.
      *      - Merkle proof is invalid.

@@ -24,9 +24,8 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this._processStatuses();
     await this._savePaidRequests();
     await this._saveTransfers();
-    await this._saveCompletedTransfers();
+    await Promise.all([this._saveCompletedTransfers(), this._saveMerkleRoots()]);
     await this._processCompletedTransfers();
-    this._saveMerkleRoots();
   }
 
   private async _savePaidRequests() {
@@ -47,6 +46,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   public bridgingPaid(txHash: string) {
+    this._log.info({ txHash }, `Bridging paid`);
     this._paidRequests.add(txHash.toLowerCase());
   }
 

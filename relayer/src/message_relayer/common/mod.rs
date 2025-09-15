@@ -97,6 +97,7 @@ pub struct PaidMessage {
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
     pub block_hash: H256,
+    pub timestamp: u64,
     pub authority_set_id: AuthoritySetId,
     pub merkle_root: H256,
 }

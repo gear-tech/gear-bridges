@@ -19,7 +19,8 @@ use message_relayer::{
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
-use relayer::*;
+use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
+use sails_rs::ActorId;
 use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
@@ -79,7 +80,7 @@ async fn run() -> AnyResult<()> {
             let storage =
                 relayer::merkle_roots::storage::MerkleRootStorage::new(proof_storage, path);
 
-            let genesis_config = create_genesis_config(&args.genesis_config_args);
+            let options = MerkleRootRelayerOptions::from_cli(&args)?;
 
             let tcp_listener = TcpListener::bind(&args.web_server_address)?;
 
@@ -95,14 +96,7 @@ async fn run() -> AnyResult<()> {
                 eth_api,
                 receiver,
                 storage,
-                genesis_config,
-                args.start_authority_set_id,
-                args.confirmations_merkle_root
-                    .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
-                match args.thread_count {
-                    None => Some(DEFAULT_COUNT_THREADS),
-                    Some(thread_count) => thread_count.into(),
-                },
+                options,
             )
             .await;
 
@@ -183,6 +177,14 @@ async fn run() -> AnyResult<()> {
             .context("Failed to create API provider")?;
 
             let api = provider.connection().client();
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
 
             let mut excluded_from_fees = HashSet::new();
             match args.no_fee {
@@ -238,6 +240,8 @@ async fn run() -> AnyResult<()> {
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.storage_path,
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -281,6 +285,8 @@ async fn run() -> AnyResult<()> {
                         excluded_from_fees,
                         receiver,
                         args.storage_path.clone(),
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -444,6 +450,15 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to create API provider");
 
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
+
             let connection = api_provider.connection();
             api_provider.spawn();
 
@@ -455,6 +470,8 @@ async fn run() -> AnyResult<()> {
                 args.from_eth_block,
                 args.confirmations_status
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                governance_admin,
+                governance_pauser,
             )
             .await;
         }
@@ -606,19 +623,6 @@ async fn create_proof_storage(
     (proof_storage, metrics)
 }
 
-fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
-    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
-        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
-    let authority_set_hash = authority_set_hash
-        .try_into()
-        .expect("Incorrect format for authority set hash: wrong length");
-
-    GenesisConfig {
-        authority_set_id: genesis_config_args.authority_set_id,
-        authority_set_hash,
-    }
-}
-
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     let eth_api = create_eth_client(&args.ethereum_args).await;
     let block_finalized = eth_api.finalized_block_number().await?;
@@ -649,4 +653,17 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     }
 
     Ok(())
+}
+
+fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
+    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
+        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
+    let authority_set_hash = authority_set_hash
+        .try_into()
+        .expect("Incorrect format for authority set hash: wrong length");
+
+    GenesisConfig {
+        authority_set_id: genesis_config_args.authority_set_id,
+        authority_set_hash,
+    }
 }

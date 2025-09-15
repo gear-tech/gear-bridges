@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - release-202509
   pull_request:
     branches:
       - main
+      - release-202509
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,8 +39,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -129,8 +129,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -179,8 +177,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4

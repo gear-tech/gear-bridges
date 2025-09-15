@@ -5,6 +5,7 @@ use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
     GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+    DEFAULT_COUNT_THREADS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -17,9 +18,10 @@ use message_relayer::{
 };
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::proving::GenesisConfig;
-use relayer::*;
-use std::{collections::HashSet, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
+use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
+use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
+use sails_rs::ActorId;
+use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
 
@@ -51,6 +53,12 @@ async fn run() -> AnyResult<()> {
 
     match cli.command {
         CliCommands::GearEthCore(mut args) => {
+            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
+            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
+            if rust_min_stack < SIZE_THREAD_STACK_MIN {
+                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
+            }
+
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -72,14 +80,8 @@ async fn run() -> AnyResult<()> {
             let storage =
                 relayer::merkle_roots::storage::MerkleRootStorage::new(proof_storage, path);
 
-            let genesis_config = create_genesis_config(&args.genesis_config_args);
+            let options = MerkleRootRelayerOptions::from_cli(&args)?;
 
-            let bridging_payment_address = args
-                .bridging_payment_address
-                .as_ref()
-                .map(|x| hex_utils::decode_h256(x))
-                .transpose()
-                .context("Failed to parse bridging payment address")?;
             let tcp_listener = TcpListener::bind(&args.web_server_address)?;
 
             let (sender, receiver) = mpsc::unbounded_channel();
@@ -94,11 +96,7 @@ async fn run() -> AnyResult<()> {
                 eth_api,
                 receiver,
                 storage,
-                genesis_config,
-                args.start_authority_set_id,
-                args.confirmations_merkle_root
-                    .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
-                bridging_payment_address,
+                options,
             )
             .await;
 
@@ -113,7 +111,14 @@ async fn run() -> AnyResult<()> {
             handle_server.stop(true).await;
             return res;
         }
+
         CliCommands::KillSwitch(args) => {
+            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
+            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
+            if rust_min_stack < SIZE_THREAD_STACK_MIN {
+                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
+            }
+
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
@@ -141,6 +146,7 @@ async fn run() -> AnyResult<()> {
                 proof_storage,
                 args.from_eth_block,
                 block_finality_storage,
+                Some(DEFAULT_COUNT_THREADS),
             )
             .await;
 
@@ -171,6 +177,14 @@ async fn run() -> AnyResult<()> {
             .context("Failed to create API provider")?;
 
             let api = provider.connection().client();
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
 
             let mut excluded_from_fees = HashSet::new();
             match args.no_fee {
@@ -226,6 +240,8 @@ async fn run() -> AnyResult<()> {
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.storage_path,
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -269,6 +285,8 @@ async fn run() -> AnyResult<()> {
                         excluded_from_fees,
                         receiver,
                         args.storage_path.clone(),
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -432,6 +450,15 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to create API provider");
 
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
+
             let connection = api_provider.connection();
             api_provider.spawn();
 
@@ -443,6 +470,8 @@ async fn run() -> AnyResult<()> {
                 args.from_eth_block,
                 args.confirmations_status
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                governance_admin,
+                governance_pauser,
             )
             .await;
         }
@@ -594,19 +623,6 @@ async fn create_proof_storage(
     (proof_storage, metrics)
 }
 
-fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
-    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
-        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
-    let authority_set_hash = authority_set_hash
-        .try_into()
-        .expect("Incorrect format for authority set hash: wrong length");
-
-    GenesisConfig {
-        authority_set_id: genesis_config_args.authority_set_id,
-        authority_set_hash,
-    }
-}
-
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     let eth_api = create_eth_client(&args.ethereum_args).await;
     let block_finalized = eth_api.finalized_block_number().await?;
@@ -637,4 +653,17 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     }
 
     Ok(())
+}
+
+fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
+    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
+        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
+    let authority_set_hash = authority_set_hash
+        .try_into()
+        .expect("Incorrect format for authority set hash: wrong length");
+
+    GenesisConfig {
+        authority_set_id: genesis_config_args.authority_set_id,
+        authority_set_hash,
+    }
 }

@@ -86,6 +86,7 @@ pub struct BlockFinality {
     pub pre_commits: Vec<PreCommit>,
     /// Message that GRANDPA voters sign.
     pub message: [u8; GRANDPA_VOTE_LENGTH],
+    pub count_thread: Option<usize>,
 }
 
 impl BlockFinality {
@@ -119,6 +120,7 @@ impl BlockFinality {
             validator_set_hash,
             pre_commits: processed_pre_commits,
             message: self.message,
+            count_thread: self.count_thread,
         }
         .prove();
 

@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use std::time::Duration;
 
 mod common;
 
@@ -10,6 +11,7 @@ pub use common::{
 use crate::cli::common::BlockStorageArgs;
 
 pub const DEFAULT_COUNT_CONFIRMATIONS: u64 = 8;
+pub const DEFAULT_COUNT_THREADS: usize = 24;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -70,6 +72,33 @@ pub struct GearEthCoreArgs {
 
     /// An address of bridging payment contract for priority processing of merkle-roots when needed.
     pub bridging_payment_address: Option<String>,
+    #[arg(
+        help = "Spike window used to cutoff old events to not trigger false spikes",
+        value_parser = humantime::parse_duration, default_value="15m")]
+    pub spike_window: Duration,
+    #[arg(
+        help = "Timeout after which we start processing events",
+        value_parser = humantime::parse_duration, default_value="30m"
+    )]
+    pub spike_timeout: Duration,
+    #[arg(
+        help = "After threshold is reached we enter \"spike\" mode
+        where events are processed immediately",
+        default_value = "8"
+    )]
+    pub spike_threshold: usize,
+
+    #[arg(
+        help = "Interval at which we save the state to disk",
+        value_parser = humantime::parse_duration, default_value="30m"
+    )]
+    pub save_interval: Duration,
+    #[arg(
+        help = "Interval at which we check for spike or timeout",
+        value_parser = humantime::parse_duration, default_value="30s"
+    )]
+    pub check_interval: Duration,
+
     /// Authorization token for web-server
     #[arg(long, env)]
     pub web_server_token: String,
@@ -77,6 +106,13 @@ pub struct GearEthCoreArgs {
     /// Socket address for web-server
     #[arg(long, env, default_value = "127.0.0.1:8443")]
     pub web_server_address: String,
+
+    #[arg(
+        long,
+        help = format!("Count of worker threads for generating signing proofs.\n\nNote that each thread allocates memory, which can lead to an out-of-memory error with a large number of threads.\n\nDefault is: {DEFAULT_COUNT_THREADS}. The value is safe to run the relayer on a machine with 96 CPU cores and 256GiB of RAM."),
+        value_parser = parse_thread_count,
+    )]
+    pub thread_count: Option<ThreadCount>,
 }
 
 #[derive(Args)]
@@ -122,13 +158,18 @@ pub struct GearEthTokensArgs {
 
     #[arg(
         long,
-        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"), 
+        help = format!("Specify which addresses will not be required to pay fees for bridging. Default: bridgeAdmin and bridgePauser from chain genesis config"),
         value_parser = parse_fee_payers,
     )]
     pub no_fee: Option<FeePayers>,
 
     #[arg(long = "storage-path", env = "GEAR_ETH_TX_STORAGE_PATH")]
     pub storage_path: String,
+
+    #[arg(long = "governance-admin", env = "GEAR_GOVERNANCE_ADMIN")]
+    pub governance_admin: String,
+    #[arg(long = "governance-pauser", env = "GEAR_GOVERNANCE_PAUSER")]
+    pub governance_pauser: String,
 }
 
 #[derive(Subcommand)]
@@ -224,6 +265,10 @@ pub struct GearEthManualArgs {
 
     #[arg(long, help = format!("How many confirmations wait for message transaction on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
     pub confirmations_status: Option<u64>,
+    #[arg(long, help = "Governance admin address")]
+    pub governance_admin: String,
+    #[arg(long, help = "Governance pauser address")]
+    pub governance_pauser: String,
 }
 
 #[derive(Args)]
@@ -308,4 +353,29 @@ fn parse_fee_payers(s: &str) -> anyhow::Result<FeePayers> {
     } else {
         Ok(FeePayers::ExcludedIds(ids))
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ThreadCount {
+    /// User explicitly requests to set count of worker threads automatically.
+    Auto,
+    /// Count of worker threads set manually.
+    Manual(usize),
+}
+
+impl From<ThreadCount> for Option<usize> {
+    fn from(value: ThreadCount) -> Self {
+        match value {
+            ThreadCount::Auto => None,
+            ThreadCount::Manual(count) => Some(count),
+        }
+    }
+}
+
+fn parse_thread_count(s: &str) -> anyhow::Result<ThreadCount> {
+    if s.trim().eq_ignore_ascii_case("auto") {
+        return Ok(ThreadCount::Auto);
+    }
+
+    Ok(s.parse::<usize>().map(ThreadCount::Manual)?)
 }

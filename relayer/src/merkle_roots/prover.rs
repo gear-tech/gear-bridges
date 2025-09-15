@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -18,6 +18,7 @@ pub struct Request {
     pub block_number: u32,
     pub block_hash: H256,
     pub merkle_root: H256,
+    pub queue_id: u64,
     pub inner_proof: ProofWithCircuitData,
     pub priority: bool,
 }
@@ -61,6 +62,7 @@ impl FinalityProverIo {
         block_hash: H256,
         merkle_root: H256,
         inner_proof: ProofWithCircuitData,
+        queue_id: u64,
         priority: bool,
     ) -> bool {
         self.requests
@@ -69,6 +71,7 @@ impl FinalityProverIo {
                 block_hash,
                 merkle_root,
                 inner_proof,
+                queue_id,
                 priority,
             })
             .is_ok()
@@ -83,14 +86,22 @@ impl FinalityProverIo {
 pub struct FinalityProver {
     api_provider: ApiProviderConnection,
     genesis_config: GenesisConfig,
+
+    count_thread: Option<usize>,
 }
 
 impl FinalityProver {
-    pub fn new(api_provider: ApiProviderConnection, genesis_config: GenesisConfig) -> Self {
+    pub fn new(
+        api_provider: ApiProviderConnection,
+        genesis_config: GenesisConfig,
+        count_thread: Option<usize>,
+    ) -> Self {
         Self {
             api_provider,
 
             genesis_config,
+
+            count_thread,
         }
     }
 
@@ -120,63 +131,78 @@ impl FinalityProver {
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
 
-        // ~13 minutes worth of blocks
-        // Why 13 minutes aka 256 blocks? Under heavy load (many merkle-root changes == many finality proof requests)
-        // we don't want to generate proof for every single request since it would suffice to generate
-        // the proof for the latest block in each authority set and use it for all blocks
-        // in that set.
-        const BATCH_SIZE: usize = 256;
+        // Batch size which is equal approximately to 2 full queues.
+        const BATCH_SIZE: usize = 4096;
 
         let mut batch_vec = Vec::with_capacity(BATCH_SIZE);
-        // Group requests by authority set ID, storing all blocks for each set
-        let mut authority_groups: HashMap<u64, BatchProofRequest> = HashMap::new();
+        // Group requests by authority set ID and queue ID, storing all blocks for each set
+        let mut request_groups: HashMap<(u64, u64), BatchProofRequest> = HashMap::new();
 
-        let mut priority_requests = Vec::new();
+        let mut priority_requests: HashMap<(u64, u64), BatchProofRequest> = HashMap::new();
 
         loop {
+            // Receives messages into `batch_vec` but has one big downside requiring another `recv_many`
+            // down below: will receive only one element first *and* only then will receive the full batch.
             let n = requests.recv_many(&mut batch_vec, BATCH_SIZE).await;
             if n == 0 {
                 log::info!("Requests channel closed, exiting");
                 break;
             }
 
-            if n == 1 {
-                log::info!("Only one request received, processing it immediately");
-                let request = batch_vec.pop().unwrap();
-                let proof = self
-                    .generate_proof(
-                        &gear_api,
-                        request.block_number,
-                        request.block_hash,
-                        request.merkle_root,
-                        request.inner_proof,
-                    )
-                    .await?;
+            let n = if n == 1 {
+                // attempt to receive more requests in 10 second timeout.
+                let rest = tokio::time::timeout(
+                    Duration::from_secs(10),
+                    requests.recv_many(&mut batch_vec, BATCH_SIZE - 1),
+                )
+                .await;
 
-                if responses
-                    .send(Response::Single {
-                        block_number: request.block_number,
-                        merkle_root: request.merkle_root,
-                        proof,
-                    })
-                    .is_err()
-                {
-                    log::warn!("Response channel closed, exiting");
-                    return Ok(());
+                match rest {
+                    Err(_) => {
+                        log::info!("Only one request received, processing it immediately");
+                        let request = batch_vec.pop().expect("at least one request is received");
+                        let proof = self
+                            .generate_proof(
+                                &gear_api,
+                                request.block_number,
+                                request.block_hash,
+                                request.merkle_root,
+                                request.inner_proof,
+                            )
+                            .await?;
+
+                        if responses
+                            .send(Response::Single {
+                                block_number: request.block_number,
+                                merkle_root: request.merkle_root,
+                                proof,
+                            })
+                            .is_err()
+                        {
+                            log::warn!("Response channel closed, exiting");
+                            return Ok(());
+                        }
+
+                        continue;
+                    }
+
+                    // received more requests, process them in batch
+                    Ok(rest) => rest + 1,
                 }
-
-                continue;
-            }
+            } else {
+                n
+            };
 
             log::info!("Received {n} requests, grouping by authority set...");
 
             for request in batch_vec.drain(..) {
-                if request.priority {
-                    priority_requests.push(request);
-                    continue;
-                }
+                let group = if request.priority {
+                    &mut priority_requests
+                } else {
+                    &mut request_groups
+                };
                 let authority_set_id = gear_api.authority_set_id(request.block_hash).await?;
-                match authority_groups.entry(authority_set_id) {
+                match group.entry((authority_set_id, request.queue_id)) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().add_request(request);
                     }
@@ -186,36 +212,9 @@ impl FinalityProver {
                 }
             }
 
-            for request in priority_requests.drain(..) {
-                log::info!(
-                    "Processing priority request for block #{}, merkle-root {}",
-                    request.block_number,
-                    request.merkle_root
-                );
-                let proof = self
-                    .generate_proof(
-                        &gear_api,
-                        request.block_number,
-                        request.block_hash,
-                        request.merkle_root,
-                        request.inner_proof,
-                    )
-                    .await?;
-
-                if responses
-                    .send(Response::Single {
-                        block_number: request.block_number,
-                        merkle_root: request.merkle_root,
-                        proof,
-                    })
-                    .is_err()
-                {
-                    log::warn!("Response channel closed, exiting");
-                    return Ok(());
-                }
-            }
-
-            for (authority_set_id, request) in authority_groups.drain() {
+            for ((authority_set_id, queue_id), request) in
+                priority_requests.drain().chain(request_groups.drain())
+            {
                 let BatchProofRequest {
                     block_number,
                     block_hash,
@@ -224,7 +223,7 @@ impl FinalityProver {
                     batch_roots,
                 } = request;
                 log::info!(
-                    "Proving finality for latest block #{block_number} with authority set #{authority_set_id} and merkle-root {merkle_root} (will apply to {} blocks)",
+                    "Proving finality for latest block #{block_number} with authority set #{authority_set_id}, merkle-root {merkle_root} and queue #{queue_id} (will apply to {} blocks)",
                     batch_roots.len()
                 );
 
@@ -269,9 +268,14 @@ impl FinalityProver {
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
         let start = Instant::now();
-        let proof =
-            prover_interface::prove_final(gear_api, inner_proof, self.genesis_config, block_hash)
-                .await?;
+        let proof = prover_interface::prove_final(
+            gear_api,
+            inner_proof,
+            self.genesis_config,
+            block_hash,
+            self.count_thread,
+        )
+        .await?;
         log::info!(
             "Proof for {merkle_root} generated (block #{block_number}) in {:.3} seconds",
             start.elapsed().as_secs_f64()

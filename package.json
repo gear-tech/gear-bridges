@@ -38,7 +38,7 @@
     "typescript-eslint": "^8.39.1"
   },
   "scripts": {
-    "build:frontend": "lerna run build --scope gear-bridge-common --scope frontend --verbose",
+    "build:frontend": "lerna run build --scope gear-bridge-common --scope @gear-js/bridge --scope frontend --verbose",
     "build:indexer": "lerna run build --scope gear-bridge-common --scope indexer --verbose",
     "build:bridge-js": "lerna run build --scope @gear-js/bridge --verbose",
     "build:common": "lerna run build --scope gear-bridge-common --verbose",

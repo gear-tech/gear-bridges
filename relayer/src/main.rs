@@ -4,8 +4,7 @@ use clap::Parser;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
     EthereumArgs, EthereumSignerArgs, EthereumSignerPathArgs, FetchMerkleRootsArgs, GearArgs,
-    GearEthTokensCommands, GearSignerArgs, GenesisConfigArgs, ProofStorageArgs,
-    DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
+    GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -18,7 +17,7 @@ use message_relayer::{
 };
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
+use prover::consts::SIZE_THREAD_STACK_MIN;
 use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
 use sails_rs::ActorId;
 use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
@@ -678,17 +677,4 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     }
 
     Ok(())
-}
-
-fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
-    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
-        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
-    let authority_set_hash = authority_set_hash
-        .try_into()
-        .expect("Incorrect format for authority set hash: wrong length");
-
-    GenesisConfig {
-        authority_set_id: genesis_config_args.authority_set_id,
-        authority_set_hash,
-    }
 }

@@ -238,6 +238,17 @@ impl MerkleRootRelayer {
             }
         };
 
+        if self
+            .storage
+            .proofs
+            .get_latest_authority_set_id()
+            .await
+            .is_none()
+        {
+            log::info!("Proof storage is empty, syncing authority sets from genesis");
+            authority_set_sync.initialize();
+        }
+
         let gear_api = self.api_provider.client();
 
         for (hash, merkle_root) in roots.drain() {

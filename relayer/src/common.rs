@@ -100,10 +100,10 @@ pub(crate) async fn submit_merkle_root_to_ethereum(
 }
 
 pub(crate) async fn send_challege_root_to_ethereum(
-    _eth_api: &EthApi,
+    eth_api: &EthApi,
 ) -> Result<TxHash, ethereum_client::Error> {
-    let tx_hash = TxHash::default();
-    log::info!("TODO: Challenging merkle root on ethereum, tx hash: {tx_hash:?}");
+    log::info!("Sending challenge root to ethereum");
+    let tx_hash = eth_api.send_challenge_root().await?;
 
     Ok(tx_hash)
 }

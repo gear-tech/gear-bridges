@@ -322,6 +322,10 @@ impl EthApi {
             .await
     }
 
+    pub async fn send_challenge_root(&self) -> Result<TxHash, Error> {
+        self.contracts.challenge_root().await
+    }
+
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
         self.contracts.get_tx_status(tx_hash).await
     }
@@ -487,6 +491,42 @@ impl Contracts {
                     .send()
                     .await
                 {
+                    Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
+                    Err(e) => {
+                        log::error!("Sending error: {e:?}");
+                        if let Some(e) =
+                            e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                        {
+                            return Err(Error::MessageQueue(e));
+                        }
+
+                        Err(Error::ErrorSendingTransaction(e))
+                    }
+                }
+            }
+
+            Err(e) => {
+                if let Some(e) =
+                    e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                {
+                    return Err(Error::MessageQueue(e));
+                }
+
+                Err(Error::ErrorDuringContractExecution(e))
+            }
+        }
+    }
+
+    pub async fn challenge_root(&self) -> Result<TxHash, Error> {
+        match self
+            .message_queue_instance
+            .challengeRoot()
+            .estimate_gas()
+            .await
+        {
+            Ok(gas_used) => {
+                log::info!("Gas used: {gas_used}");
+                match self.message_queue_instance.challengeRoot().send().await {
                     Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");

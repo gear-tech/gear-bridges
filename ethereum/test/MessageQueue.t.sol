@@ -345,7 +345,138 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_ChallengeRoot() public {
-        // TODO
+        uint256 blockNumber = 0x11;
+        bytes32 merkleRoot = bytes32(uint256(0x22)); // valid root, update max block height
+        bytes memory proof1 = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+
+        blockNumber = 0x12;
+        merkleRoot = bytes32(uint256(0x33)); // invalid root, suspicious address managed to send it
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+
+        blockNumber = 0x13;
+        merkleRoot = bytes32(uint256(0x44)); // invalid root, suspicious address managed to send it
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+
+        vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
+
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.stopPrank();
+
+        VaraMessage memory message1 = VaraMessage({
+            nonce: 0x11,
+            source: governancePauser.governance(),
+            destination: address(governancePauser),
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+        });
+        assertEq(messageQueue.isProcessed(message1.nonce), false);
+
+        bytes32 messageHash = message1.hash();
+
+        blockNumber = 0x14;
+        merkleRoot = messageHash; // valid root, just to check that no one can submit any root now
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        uint256 totalLeaves = 1;
+        uint256 leafIndex = 0;
+        bytes32[] memory proof2 = new bytes32[](0);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        blockNumber = 0x12;
+        merkleRoot = bytes32(uint256(0xdeadbeef)); // valid root, calculated by emergency stop admin
+        bytes32 previousMerkleRoot = bytes32(uint256(0x33));
+
+        // emergency stop admin managed to submit valid root for first challenged block
+        // and enabled emergency stop status
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.EmergencyStopEnabled();
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.isEmergencyStopped(), true);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), bytes32(0));
+        assertEq(messageQueue.getMerkleRootTimestamp(previousMerkleRoot), 0);
+
+        blockNumber = 0x13;
+        merkleRoot = bytes32(uint256(0xfee1dead)); // valid root, calculated by emergency stop admin
+        previousMerkleRoot = bytes32(uint256(0x44));
+
+        // emergency stop admin managed to submit valid root for second challenged block
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), bytes32(0));
+        assertEq(messageQueue.getMerkleRootTimestamp(previousMerkleRoot), 0);
+
+        // when all bad roots are removed
+        // governance can send message to update MessageQueue and remove emergency stop status
+        // emergencyStopAdmin in this case will only accept roots from our RPC node
+        VaraMessage memory message2 = VaraMessage({
+            nonce: 0x11,
+            source: governanceAdmin.governance(),
+            destination: address(governanceAdmin),
+            payload: UpgradeProxyMessage({
+                proxy: address(messageQueue),
+                newImplementation: address(newImplementationMock),
+                data: ""
+            }).pack()
+        });
+        assertEq(messageQueue.isProcessed(message2.nonce), false);
+
+        messageHash = message2.hash();
+
+        blockNumber = 0x13;
+        merkleRoot = messageHash;
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
+
+        vm.expectEmit(address(messageQueue));
+        emit IERC1967.Upgraded(address(newImplementationMock));
+
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
+        assertEq(
+            address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+            address(newImplementationMock)
+        );
+
+        vm.stopPrank();
     }
 
     function test_ChallengeRootWithNotEmergencyStopObserver() public {
@@ -366,6 +497,72 @@ contract MessageQueueTest is Test, Base {
         messageQueue.challengeRoot();
 
         vm.stopPrank();
+    }
+
+    function test_ChallengeRootWithPause() public {
+        uint256 blockNumber = 0x11;
+        bytes32 merkleRoot = bytes32(uint256(0x22)); // valid root, update max block height
+        bytes memory proof1 = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+
+        VaraMessage memory message1 = VaraMessage({
+            nonce: 0x11,
+            source: governancePauser.governance(),
+            destination: address(governancePauser),
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+        });
+        assertEq(messageQueue.isProcessed(message1.nonce), false);
+
+        bytes32 messageHash = message1.hash();
+
+        blockNumber = 0x12;
+        merkleRoot = messageHash; // invalid root, suspicious address managed to send pause
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
+
+        uint256 totalLeaves = 1;
+        uint256 leafIndex = 0;
+        bytes32[] memory proof2 = new bytes32[](0);
+
+        vm.expectEmit(address(messageQueue));
+        emit PausableUpgradeable.Paused(address(governancePauser));
+
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
+        assertEq(messageQueue.isProcessed(message1.nonce), true);
+
+        vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
+
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.stopPrank();
+
+        blockNumber = 0x13;
+        merkleRoot = bytes32(uint256(0x33)); // valid root, just to check that no one can submit any root now
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
     }
 
     function test_SubmitMerkleRoot() public {

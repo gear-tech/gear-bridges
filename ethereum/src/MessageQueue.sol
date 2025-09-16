@@ -274,6 +274,7 @@ contract MessageQueue is
                 delete _merkleRootTimestamps[previousMerkleRoot];
 
                 if (!_emergencyStop) {
+                    _challengingRootTimestamp = 0;
                     _emergencyStop = true;
 
                     emit EmergencyStopEnabled();

@@ -50,15 +50,14 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, allowance, formV
     return { requiredBalance, fees };
   };
 
-  const debouncedFormValues = useDebounce({
-    amount: formValues?.amount.toString(),
-    accountAddress: formValues?.accountAddress,
-  });
+  const debouncedAmount = useDebounce(formValues?.amount?.toString());
+  const debouncedAccountAddress = useDebounce(formValues?.accountAddress);
 
   return useQuery({
     queryKey: [
       'eth-txs-estimate',
-      debouncedFormValues,
+      debouncedAmount,
+      debouncedAccountAddress,
       allowance?.toString(),
       bridgingFee?.toString(),
       shouldPayBridgingFee,

@@ -12,15 +12,12 @@ import { isUndefined, logger, getErrorMessage } from '@/utils';
 
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA } from '../consts';
 import { useBridgeContext } from '../context';
-// import { InsufficientAccountBalanceError } from '../errors';
 import { FormattedValues } from '../types';
 import { getAmountSchema } from '../utils';
 
 type Params = {
   accountBalance: bigint | undefined;
   ftBalance: bigint | undefined;
-  // requiredBalance: UseMutationResult<{ requiredBalance: bigint; fees: bigint }, Error, FormattedValues, unknown>;
-  // onSubmit: (values: FormattedValues) => Promise<unknown>;
 };
 
 function useSwapForm({ accountBalance, ftBalance }: Params) {
@@ -28,13 +25,11 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const { token, network } = useBridgeContext();
-  // const varaSymbol = useVaraSymbol();
   const pendingTxsCount = usePendingTxsCount();
   const alert = useAlert();
 
   const valueSchema = getAmountSchema(
     token?.isNative,
-    accountBalance,
     ftBalance,
     token?.decimals,
     network.isVara ? api?.existentialDeposit.toBigInt() : 0n,
@@ -55,27 +50,14 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
   const { setValue, reset, formState } = form;
   const { isValid } = formState;
 
-  const values = form.watch();
-  const { amount } = values;
-
-  const formattedValues = isValid ? schema.safeParse(values).data : undefined;
-
-  // const validateBalance = async (values: FormattedValues) => {
-  //   definedAssert(accountBalance, 'Account balance is not defined');
-  //   definedAssert(varaSymbol, 'Vara symbol is not defined');
-
-  //   const { requiredBalance: _requiredBalance } = await requiredBalance.mutateAsync(values);
-  //   const symbol = network.isVara ? varaSymbol : 'ETH';
-
-  //   if (accountBalance < _requiredBalance) throw new InsufficientAccountBalanceError(symbol, _requiredBalance);
-  // };
+  const formValues = form.watch();
+  const { amount } = formValues;
+  const formattedValues = isValid ? schema.safeParse(formValues).data : undefined;
 
   const handleSubmit = (onSubmit: (values: FormattedValues) => Promise<unknown>) =>
-    form.handleSubmit((_values) => {
+    form.handleSubmit((values) => {
       const onSuccess = () => {
         reset();
-        // requiredBalance.reset();
-
         alert.success('Your transfer request was successful');
 
         // to display warning asap
@@ -87,9 +69,7 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
         alert.error(getErrorMessage(error));
       };
 
-      // if (isUndefined(requiredBalance.data)) return validateBalance(values).catch(onError);
-
-      onSubmit(_values).then(onSuccess).catch(onError);
+      onSubmit(values).then(onSuccess).catch(onError);
     });
 
   const setMaxBalance = () => {
@@ -108,10 +88,6 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
     form.clearErrors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, ethAccount.address]);
-
-  // useEffect(() => {
-  //   requiredBalance.reset();
-  // }, [amount, token?.address]);
 
   return { form, amount, formattedValues, handleSubmit, setMaxBalance };
 }

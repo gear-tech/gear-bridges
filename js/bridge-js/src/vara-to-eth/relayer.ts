@@ -17,7 +17,7 @@ export type RelayVaraToEthParams = {
    */
   nonce: bigint | HexString;
   /**
-   * The Vara block number containing the message sent by EthBridge builtin
+   * The Vara block number containing the initial transaction
    */
   blockNumber: bigint;
   /**
@@ -126,7 +126,7 @@ export async function relayVaraToEth(params: RelayVaraToEthParams) {
   }
 
   statusCb(`Fetching message from block`, { nonce: nonce.toString(), blockHash });
-  const msg = await gearClient.findMessageQueuedEvent(blockHash, nonce);
+  const msg = await gearClient.findMessageQueuedEvent(Number(blockNumber), nonce);
 
   if (!msg) {
     throw new Error(`Message with nonce ${nonce} not found in block ${blockNumber}`);
@@ -177,7 +177,7 @@ export async function relayVaraToEth(params: RelayVaraToEthParams) {
 
   const msgHash = messageHash(msg);
   statusCb(`Fetching merkle proof`, { blockNumber: blockNumber.toString(), msgHash });
-  const merkleProof = await gearClient.fetchMerkleProof(blockHash, msgHash);
+  const merkleProof = await gearClient.fetchMerkleProof(Number(blockNumber), msgHash);
 
   return msgQClient.processMessage(blockNumber, msg, merkleProof, statusCb);
 }

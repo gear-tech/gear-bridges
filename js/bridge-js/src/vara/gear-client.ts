@@ -1,9 +1,7 @@
-import { FrameSystemEventRecord } from '@polkadot/types/lookup';
 import { GearApi, HexString } from '@gear-js/api';
-import { compactStripLength } from '@polkadot/util';
-import { Vec } from '@polkadot/types';
+import { hexToU8a } from '@polkadot/util';
 
-import { EthBridgeMessageQueuedData, VaraMessage, Proof } from './types.js';
+import { VaraMessage, Proof } from './types.js';
 
 export class GearClient {
   constructor(private _api: GearApi) {}
@@ -17,7 +15,8 @@ export class GearClient {
     return setId.toBigInt();
   }
 
-  public async fetchMerkleProof(blockHash: HexString, messageHash: HexString): Promise<Proof> {
+  public async fetchMerkleProof(blockNumber: number, messageHash: HexString): Promise<Proof> {
+    const blockHash = await this._api.blocks.getBlockHash(blockNumber);
     const proof = await this._api.ethBridge.merkleProof(messageHash, blockHash);
 
     return {
@@ -28,34 +27,18 @@ export class GearClient {
     };
   }
 
-  public async findMessageQueuedEvent(blockHash: HexString, nonce: bigint): Promise<VaraMessage | null> {
-    const apiAt = await this._api.at(blockHash);
+  public async findMessageQueuedEvent(blockNumber: number, nonce: bigint): Promise<VaraMessage | null> {
+    const msg = await this._api.ethBridge.events.findGearEthBridgeMessageByNonce({ nonce, fromBlock: blockNumber });
 
-    const blockEvents = (await apiAt.query.system.events()) as Vec<FrameSystemEventRecord>;
-
-    const mqEvents = blockEvents.filter(
-      ({ event }) => event.section === 'gearEthBridge' && event.method === 'MessageQueued',
-    );
-
-    const eventData = mqEvents.find(({ event }) => {
-      const data = event.data as EthBridgeMessageQueuedData;
-      const _nonce = data.message.nonce.toBigInt();
-      return nonce === _nonce;
-    })?.event.data as EthBridgeMessageQueuedData;
-
-    if (!eventData) {
+    if (!msg) {
       return null;
     }
 
-    const { message } = eventData;
-
-    const payload = compactStripLength(message.payload.toU8a())[1];
-
     return {
-      nonce: message.nonce.toBigInt(),
-      source: message.source.toU8a(),
-      destination: message.destination.toU8a(),
-      payload,
+      nonce: msg.nonce,
+      source: hexToU8a(msg.source),
+      destination: hexToU8a(msg.destination),
+      payload: hexToU8a(msg.payload),
     };
   }
 }

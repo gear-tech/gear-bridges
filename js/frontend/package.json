@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@base-ui-components/react": "1.0.0-beta.3",
-    "@gear-js/api": "0.44.0",
+    "@gear-js/api": "0.44.1",
     "@gear-js/bridge": "workspace:*",
     "@gear-js/react-hooks": "0.18.2",
     "@gear-js/ui": "0.7.0",

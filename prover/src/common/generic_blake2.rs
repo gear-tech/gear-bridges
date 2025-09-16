@@ -236,9 +236,21 @@ impl VariativeBlake2 {
             let serializer_generator = CustomGeneratorSerializer::<C, D>::default();
 
             let now = Instant::now();
+            let prover_data = {
+                let file = std::fs::OpenOptions::new().read(true).open(format!("{path}/prover_circuit_data-{index}")).expect("Open a file with correctly formed data for read");
+                let mut reader = std::io::BufReader::with_capacity(get_buffer_size(), file);
 
-            let serialized = std::fs::read(format!("{path}/prover_circuit_data-{index}")).expect("Good file with serialized data");
-            let prover_data = ProverCircuitData::<F, C, D>::from_bytes(&serialized, &serializer_gate, &serializer_generator).expect("Correctly formed serialized data");
+                let mut read_adapter = ReadAdapter::new(reader, None);
+
+                read_adapter.
+                    read_prover_circuit_data::<F, C, D>(
+                        &serializer_gate,
+                        &serializer_generator).expect("Correctly formed serialized data")
+            };
+
+            log::info!("Loading circuit data directly time: {}ms", now.elapsed().as_millis());
+
+            let now = Instant::now();
 
             let serialized = std::fs::read(format!("{path}/prover_circuit_data-targets-{index}")).expect("Good file with serialized data");
             let mut buffer_read = Buffer::new(&serialized[..]);
@@ -747,6 +759,25 @@ impl<Reader: std::io::Read + std::io::Seek> plonky2::util::serialization::Read f
     }
 }
 
+    fn get_buffer_size() -> usize {
+        // 8KiB
+        const DEFAULT: usize = 8_192;
+
+        let Ok(buffer_size) = std::env::var("BUFFER_SIZE") else {
+            log::debug!(r#""BUFFER_SIZE" is not set. Use default value ({DEFAULT})."#);
+
+            return DEFAULT;
+        };
+
+        let Ok(buffer_size) = buffer_size.parse::<usize>() else {
+            log::debug!(r#""BUFFER_SIZE" is not a number. Use default value ({DEFAULT})."#);
+
+            return DEFAULT;
+        };
+
+        buffer_size
+    }
+
 #[cfg(test)]
 mod tests {
     use blake2::{
@@ -850,25 +881,6 @@ mod tests {
         assert_eq!(&public_inputs.data[..data.len()], &data[..]);
 
         proof.circuit_data().clone()
-    }
-
-    fn get_buffer_size() -> usize {
-        // 8KiB
-        const DEFAULT: usize = 8_192;
-
-        let Ok(buffer_size) = std::env::var("BUFFER_SIZE") else {
-            log::debug!(r#""BUFFER_SIZE" is not set. Use default value ({DEFAULT})."#);
-
-            return DEFAULT;
-        };
-
-        let Ok(buffer_size) = buffer_size.parse::<usize>() else {
-            log::debug!(r#""BUFFER_SIZE" is not a number. Use default value ({DEFAULT})."#);
-
-            return DEFAULT;
-        };
-
-        buffer_size
     }
 
     fn get_index() -> usize {

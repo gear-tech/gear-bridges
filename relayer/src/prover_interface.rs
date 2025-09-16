@@ -205,7 +205,6 @@ pub async fn prove_final_with_block_finality(
 
     let now = Instant::now();
     let timer = PROVING_TIME.with_label_values(&["final"]).start_timer();
-    let now = Instant::now();
 
     let handler = thread::spawn(move || {
         let proof = proving::prove_message_sent(
@@ -223,7 +222,6 @@ pub async fn prove_final_with_block_finality(
         .join()
         .expect("proving::prove_message_sent & gnark handle should be joined");
 
-    log::info!("prove_final_with_block_finality took: {}ms", now.elapsed().as_millis());
     timer.stop_and_record();
     log::info!("Final prove time: {}ms", now.elapsed().as_millis());
 
@@ -327,6 +325,7 @@ pub mod gnark {
 mod tests {
     use super::*;
     use parity_scale_codec::Decode;
+    use hex_literal::hex;
 
     fn get_thread_count() -> usize {
         const DEFAULT: usize = 12;
@@ -437,5 +436,98 @@ mod tests {
         );
 
         log::info!("Recursive prove time: {}ms", now.elapsed().as_millis());
+    }
+
+    #[test]
+    fn update_verifier_sol() {
+        println!("async fn update_verifier_sol(); MAX_VALIDATOR_COUNT = {}", prover::consts::MAX_VALIDATOR_COUNT);
+
+        let count_thread = Some(get_thread_count());
+        
+        let genesis_config = GenesisConfig {
+            authority_set_id: 1_436,
+            authority_set_hash: hex!("3535453e3b04a139e765128d161b7eb4423d263e8c88f69ef1207a13a1db9666"),
+        };
+
+        // let block = 0x1e5860239bbd89f6e72f70ae62b6e431d6f7be2aeea975b07bd6e32ffd4a1f9e
+        let current_epoch_block_finality = Decode::decode(&mut &hex!("1858bb04a8d4887be0f04d38b9137d0189545891d4fc2e6f2291003866eb0a2f296238894f19edef4a4a638b3fab9b42909336912bd6ccdf835e9ecc24a64a8713c3a91848c88b9481405fb29d07cc221c400763ce3ed3c8735c64a86c026bb5eebb8705995445cc1cae7ec9d7203a5f187b204ef691eb284f59509e6e88d1ef73e7d812ca5322f9b735e6cef4953cb706ce349752d7c737ef7aac817ebb840de1559f99f172dcfef6c6894cfe53312b3f11d67c3ac0c29ead872d3ec37f7fcffa14559f99f172dcfef6c6894cfe53312b3f11d67c3ac0c29ead872d3ec37f7fcffa37d704480b3cf136ef165caab9e146b7bd00a9a6a85773e2f2f14cf1c458938bd1cec960114e52e920a06ceb19c7307f2ba399922f18e86f882f8f552d1f2c0058bb04a8d4887be0f04d38b9137d0189545891d4fc2e6f2291003866eb0a2f2929e5f077fbc707265780acb962d229fa213c41d8b5bd3670cfda1536dea7266d891274cb0b7c568bfdd31f9ae7d8c3642c65918e65a44744eefaefc8afbf58056238894f19edef4a4a638b3fab9b42909336912bd6ccdf835e9ecc24a64a87138b3384818ce75feb6a143eeeed84f8d025c5a605e623b187a19d5fac6a56b5e29f41471d5eeff27be44dffc78af379e52993aec57d9b8f4455c7b281a5baf10abb8705995445cc1cae7ec9d7203a5f187b204ef691eb284f59509e6e88d1ef73abed9023ba02de9142ca86cfdafa640f0ac087a8d286a35b6919d4f2825f4e22c9cafe9698353a033e6b20962bdeb92f715af038eeb430cc6298251d2fbee005e7d812ca5322f9b735e6cef4953cb706ce349752d7c737ef7aac817ebb840de1b3feb0e2f078610df7fa5c7a05c45fd48a6ceb134759bd370286e1052138dae28ed5607fc256b67948e37f393d426bc57077ae32c1c2e94eab0359828eb18e0ad4011e5860239bbd89f6e72f70ae62b6e431d6f7be2aeea975b07bd6e32ffd4a1f9ef4383901232a0000000000009c05000000000000")[..]).unwrap();
+        let next_validator_set_inclusion_proof: dto::StorageInclusionProof = Decode::decode(&mut &hex!("80fd6e027f7a1bd8baa6406cea4d80d9327120fd2add6d1249bf1b6bfc3bdf510f550b39ae1606c286c912c9d9f5996ebf498984294139152b7d0091f406f36e13e7e6d2e3e4040f50c99b87c85a3168aa5aed7b0d79beefff13e642cd11c5548ae81f7c516988f4aaf4789523cf806f0cc358bfa8df8227834c26344a6d6d76eb5309b1541af9100642414245340203000000169cea22000000000442414245490401184426c08997ce26fbbde7490d76167ad177b75cb43e2948642708e7429002b16e01000000000000003c4c519e3d7149c93181e8e3762562db6f580c27502e9a6ab2f7464d6185241b0100000000000000587e919f8149e31f7d4e99e8fbdf30ff119593376f066e20dacda9054892b478010000000000000068fb09335b3876a0e09ae06bb0070bb3e81ba51c8228b47e88693a7f8ed57c430100000000000000c8e4df7eac6b52dc5281659f1f393903932ee4b1f69f311c3cb123bc40f9267a0100000000000000f2fd6936b8ddad025d329ff2d6b5577e6381cb25333f6f17f592494b0b61ef550100000000000000c776e43fce9cebb28e9c558d0190958d6c1391090ece7c21eba7be199b5fa0fd0446524e4bd903011858bb04a8d4887be0f04d38b9137d0189545891d4fc2e6f2291003866eb0a2f2901000000000000006238894f19edef4a4a638b3fab9b42909336912bd6ccdf835e9ecc24a64a87130100000000000000c3a91848c88b9481405fb29d07cc221c400763ce3ed3c8735c64a86c026bb5ee0100000000000000bb8705995445cc1cae7ec9d7203a5f187b204ef691eb284f59509e6e88d1ef730100000000000000e7d812ca5322f9b735e6cef4953cb706ce349752d7c737ef7aac817ebb840de10100000000000000559f99f172dcfef6c6894cfe53312b3f11d67c3ac0c29ead872d3ec37f7fcffa010000000000000000000000054241424501017acd2c04048ed2725e79601bc0ac2c630ce936a320d03f948236b51fe5978a61091fe8435c5914c92c3e13891d25323f71eea47886ed0e7e13ef24e0fe56b08c0ca9029e6e027f7a1bd8baa6406cea4d80d932b0a080b8e055dec166f62102fde0cec5b354ce9ed63f268552fdb40be6a3094ff542c54c5f01d47f736dfc5807b7a3033e859a8dfd040080a2149a01906a0d41443ecc3b40fe5365ce4de0afb60594151ff218ac8cf14cc580d16dad8d5b79c031830ae4c85dd12ffe63923aa58a2494ad269b85a5a5d331aa805a4357759c4cf8066ca08fce5e5229c0c27db1d95bb7f5673f7200b239014b0e07990180016080b930d29e963fec427a4d9efca8d811fe97452042a6c0cf53d7f9b0988c55a7fe800b868ed77a9de9aefb5edeb9f7b57ab932aff0e7320caf20b66fca829c3f563c8033baaefeea5d5351844728bc3b88e53ac550e831d2bb5f5aa2003dbce16275f60dc10680bff580e919e5bf782c77127cb29453744d21f50877ce1009fcc285ff3e795c250fce5080fb451b2b137698badc7c536b24e4159518cbb8c673e274b128f438ccc83a525e80c8218b74673b411614ab8bfe35cac7b5165abc81f1fdee4d42a764dc219d40c180f5444c165b8eeea67a2eae454d40ee57539af762b9aa14ae7f8c4d5753503a628093b4202075803222e5bd965576d23faf002c576dd00a17491ec27a6a2c511a7e8061ccd79a9f2f5419dceb9f9fec9f4782d947e2d47b7cd42956e8f0f08c1e555d80a15c53e28612b224511dcacc69d0cccb06e08ddf955a9028e230c34448313bd580aab5cd8ad590b10c05dc23d393e3e0d09bb20a4977d55b03b4414fae7fbe911280eff01b502fe40def1c0c0116069e47edcf698991abd20bfe6509cf158aa15c298097f87c92d8963f3c4d9d67320d51d99ce1ddb1d11c1f597c15b64a2a26eec3ae80036ebf84f8f87a2d38b358d9bd386b47be8c5ada26c930b1afad6a44d761fd9c8048308dbbe725037b9f13c9043520164279e12ad36a1646b30dbb743a99867aab80c4a081791f6612057eaf7ba5cd5e71d6a4f9f4a1f70a781d8396829ca68cb75b0fc85f0120fd2add6d1249bf1b6bfc3bdf510f803535453e3b04a139e765128d161b7eb4423d263e8c88f69ef1207a13a1db9666803535453e3b04a139e765128d161b7eb4423d263e8c88f69ef1207a13a1db9666")[..]).unwrap();
+
+        let next_validator_set_storage_data = next_validator_set_inclusion_proof.stored_data.clone();
+        let next_validator_set_inclusion_proof =
+            parse_rpc_inclusion_proof(next_validator_set_inclusion_proof);
+
+        let now = Instant::now();
+
+        let handler = thread::spawn(move || {
+            proving::prove_genesis(
+                parse_rpc_block_finality_proof(current_epoch_block_finality, count_thread),
+                genesis_config,
+                next_validator_set_inclusion_proof,
+                next_validator_set_storage_data,
+            )
+        });
+
+        let previous_proof = handler
+            .join()
+            .expect("prover::proving::prove_genesis handle should be joined");
+
+        println!("Genesis prove time: {}ms", now.elapsed().as_millis());
+        println!("===================================================");
+
+        // block 20,541,625 (0xd4b01153d0126182d716cfdd746919d094e6cdfa6295200d8f4329aa0023a77f)
+        let at_block = hex!("d4b01153d0126182d716cfdd746919d094e6cdfa6295200d8f4329aa0023a77f");
+        // let (block, block_finality) = gear_api.fetch_finality_proof(at_block.into()).await.unwrap();
+        // println!("block = {}", hex::encode(block.encode()),);
+        // println!("block_finality = {}",
+        //     hex::encode(block_finality.encode()),
+        // );
+
+        // block = 9b899f361e84b018ae3676dbe7935afa41d50ba97d167a62bdc47925f3efc69e
+        let block_finality = Decode::decode(&mut &hex!("1858bb04a8d4887be0f04d38b9137d0189545891d4fc2e6f2291003866eb0a2f296238894f19edef4a4a638b3fab9b42909336912bd6ccdf835e9ecc24a64a8713c3a91848c88b9481405fb29d07cc221c400763ce3ed3c8735c64a86c026bb5eebb8705995445cc1cae7ec9d7203a5f187b204ef691eb284f59509e6e88d1ef73e7d812ca5322f9b735e6cef4953cb706ce349752d7c737ef7aac817ebb840de1559f99f172dcfef6c6894cfe53312b3f11d67c3ac0c29ead872d3ec37f7fcffa1458bb04a8d4887be0f04d38b9137d0189545891d4fc2e6f2291003866eb0a2f298adb97c01eb1891251d5bbee17142a537ae76f59ce5fd07f746ddf0c47a806e5e49944d0659a0234818cf8b5d3b52d75e4a4bf0dbba9ae1407c27e55406737006238894f19edef4a4a638b3fab9b42909336912bd6ccdf835e9ecc24a64a8713b6338c2ba099e0179b5976b51b8db2d827b2b186139917b1c084c9970bf08500a3bdc1da51c1e5547fe1971d2551772bbd74c0c869e7d13ea9ab2907ba635f02bb8705995445cc1cae7ec9d7203a5f187b204ef691eb284f59509e6e88d1ef73786e01e14fc33a692a83ce81c5f924be9429ca854337635a0cd759ac521ef303a99afc9a92453f1db722d6cd4dea520ec2fd514efdd512e84361d0701bc94003c3a91848c88b9481405fb29d07cc221c400763ce3ed3c8735c64a86c026bb5ee54c3654a7f9632ff027eb147f2fab20008b4e41349a7e356508c8239fbee041b3faed214da9f3187dd277efe0b295122374cb8258d84b3251321335b637ecf02e7d812ca5322f9b735e6cef4953cb706ce349752d7c737ef7aac817ebb840de1fbede545f1381e278818b8abe9eba6bb1944af665d4a9c95f597a7a4a1e00c1097ff3c0c4f8758805ef427d13688949a2270ee70cb0c426fdbff816455871d07d4019b899f361e84b018ae3676dbe7935afa41d50ba97d167a62bdc47925f3efc69e34713901222a0000000000009d05000000000000")[..]).unwrap();
+        let sent_message_inclusion_proof: dto::StorageInclusionProof = Decode::decode(&mut &hex!("80fd6e027f7a1bd8baa6406cea4d80d932df509310bc655bbf75a5b563fc3c8eee550b67ded7f97b334422bc3b8099885b1b57b5e4046dacba4bc50fb299ecc6e883d0d2c4e5045eb10d8b184b7fa782e5928242aeffd9c38a215d43b39b5dffb3473abc7e2b1057f8febfbae7e53551863ed3ab5c8f11c95da74f9111de688ec11e04fef57bf010064241424534020400000056d4ea22000000000442414245490401184426c08997ce26fbbde7490d76167ad177b75cb43e2948642708e7429002b16e01000000000000003c4c519e3d7149c93181e8e3762562db6f580c27502e9a6ab2f7464d6185241b0100000000000000587e919f8149e31f7d4e99e8fbdf30ff119593376f066e20dacda9054892b478010000000000000068fb09335b3876a0e09ae06bb0070bb3e81ba51c8228b47e88693a7f8ed57c430100000000000000c8e4df7eac6b52dc5281659f1f393903932ee4b1f69f311c3cb123bc40f9267a0100000000000000f2fd6936b8ddad025d329ff2d6b5577e6381cb25333f6f17f592494b0b61ef55010000000000000019017ab8caad280cf777386d1585c4142059944458a0492307f3e5b382d540520446524e4bd903011858bb04a8d4887be0f04d38b9137d0189545891d4fc2e6f2291003866eb0a2f2901000000000000006238894f19edef4a4a638b3fab9b42909336912bd6ccdf835e9ecc24a64a87130100000000000000c3a91848c88b9481405fb29d07cc221c400763ce3ed3c8735c64a86c026bb5ee0100000000000000bb8705995445cc1cae7ec9d7203a5f187b204ef691eb284f59509e6e88d1ef730100000000000000e7d812ca5322f9b735e6cef4953cb706ce349752d7c737ef7aac817ebb840de10100000000000000559f99f172dcfef6c6894cfe53312b3f11d67c3ac0c29ead872d3ec37f7fcffa01000000000000000000000005424142450101389eaaf59456a38b00bbdcabf4299d09cdd60679240321e5d0db0c97f8a7093b576598be4c865987111d2b65c737d987cd8d5b92692e97b876824a244834ad8e0ca9029e6e027f7a1bd8baa6406cea4d80d932b0a080b8e055dec166f62102fde0cec5b354ce9ed63f268552fdb40be6a3094ff542c54c5f01d47f736dfc5807b7a3033e859a8dfd0400803e348c1bd3ed1da998f34f42ed1a1190599767f4b1c240d71898a47d6cb8026080ab1ea465c5d674672864d1189b1b487e17bd2d3ddbf35f5273a9f61bf094df8d80783c08ec2bf16a405830bc54f60be37ac5a96ec2eb4d3ad4bb820fbbe3b5fb260d99018001608027c7d623f8ecea32f20af82a8e22c89cd8da537fd8d28737ac019dfc48a7b4b180b28c2e76823e58b6459dc1c34f10af29d2e2736323553dfc5be6d18811fbc5d980aa53a7ad9ad5d5ce62114c6a839c8c7f7dd0502ccd2545dc55dbfa2b75b847a30dc10680bff580e919e5bf782c77127cb29453744d21f50877ce1009fcc285ff3e795c250fce508066566e50f9450bc35b93aa8cb0c7bc16c76f909eccb721bc58d2c8c1b2d0b3d280a359a278ce70d468bacec8df7eadb80841a324a3e3a79955a840b275122af681800bab157810705cce3af2b5c4fb7aac1a542a1be64113fd0748b77d96ed3f874b8093b4202075803222e5bd965576d23faf002c576dd00a17491ec27a6a2c511a7e80c85b8233fa272b413023a99913eb39f6a10fa639230ac2d64fbec02cd79effd380a15c53e28612b224511dcacc69d0cccb06e08ddf955a9028e230c34448313bd580d4256a32c7eea7270dd93d349dee45e3cf8bad22bc76ef765483b0b5bba0372380eff01b502fe40def1c0c0116069e47edcf698991abd20bfe6509cf158aa15c2980b23eddd6adf6491b2bdccf70e03d127bc9ddbc1f831fcd3eb3d1f89937d7b92580036ebf84f8f87a2d38b358d9bd386b47be8c5ada26c930b1afad6a44d761fd9c80e4ec84c430ca16fde3250e7bf615218fe7304a760229584f59f746d5cb3e964580a9135c4690949f09c141893d202a5cc4ca2ace95d6b438dff84c0d38b35a72100fc85f0f509310bc655bbf75a5b563fc3c8eee80876e8e0111f19c08b9ab0f9a4a088711efb2858a415556b31809324c7b75b37380876e8e0111f19c08b9ab0f9a4a088711efb2858a415556b31809324c7b75b373")[..]).unwrap();
+
+        // let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await.unwrap();
+        // println!("sent_message_inclusion_proof = {}", hex::encode(sent_message_inclusion_proof.encode()),);
+
+        let message_contents = sent_message_inclusion_proof.stored_data.clone();
+        let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
+
+        let now = Instant::now();
+
+        let handler = thread::spawn(move || {
+            let proof = proving::prove_message_sent(
+                previous_proof,
+                parse_rpc_block_finality_proof(block_finality, count_thread),
+                genesis_config,
+                sent_message_inclusion_proof,
+                message_contents,
+            );
+
+            gnark::prove_circuit(&proof)
+        });
+
+        let proof = handler
+            .join()
+            .expect("proving::prove_message_sent & gnark handle should be joined");
+
+        let public_inputs: [_; 2] = proof
+            .public_inputs
+            .try_into()
+            .expect("Got wrong public input count from gnark prover");
+
+        let public_inputs = public_inputs
+            .map(|s| BigUint::from_str(&s).expect("Got wrong public input format from ganrk"));
+
+        let proof = FinalProof::from_proof_and_public_inputs(
+            proof.proof,
+            public_inputs,
+        );
+
+        println!("proof = '{}'", hex::encode(&proof.proof));
+        println!("block_number = {}", proof.block_number);
+        println!("merkle_root = '{}'", hex::encode(&proof.merkle_root));
+
+        println!("Final prove time: {}ms", now.elapsed().as_millis());
     }
 }

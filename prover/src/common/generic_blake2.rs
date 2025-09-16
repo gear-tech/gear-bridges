@@ -871,6 +871,24 @@ mod tests {
         buffer_size
     }
 
+    fn get_index() -> usize {
+        const DEFAULT: usize = 1;
+
+        let Ok(buffer_size) = std::env::var("INDEX") else {
+            log::debug!(r#""INDEX" is not set. Use default value ({DEFAULT})."#);
+
+            return DEFAULT;
+        };
+
+        let Ok(buffer_size) = buffer_size.parse::<usize>() else {
+            log::debug!(r#""INDEX" is not a number. Use default value ({DEFAULT})."#);
+
+            return DEFAULT;
+        };
+
+        buffer_size
+    }
+
     #[test]
     fn bench_deserialization() {
         use std::io::prelude::*;
@@ -937,5 +955,56 @@ mod tests {
 
             log::info!("Loading circuit data time: {}ms", now.elapsed().as_millis());
         }
+    }
+
+    #[test]
+    fn bench_deserialization2() {
+        use std::io::prelude::*;
+        use std::io::BufReader;
+        use std::fs::File;
+        use std::fs::OpenOptions;
+
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .filter_level(log::LevelFilter::Info)
+            .format_target(false)
+            .format_timestamp_secs()
+            .parse_default_env()
+            .try_init();
+
+        let path = env::var("PATH_DATA").expect("PATH_DATA");
+        log::debug!(r#"bench_deserialization started; PATH_DATA = "{path}""#);
+
+        let buffer_size = get_buffer_size();
+
+        let serializer_gate = CustomGateSerializer::default();
+        let serializer_generator = CustomGeneratorSerializer::<C, D>::default();
+
+        let index = get_index();
+
+        let path = format!("{path}/prover_circuit_data-{index}");
+        log::trace!(r#"path = "{path}""#);
+
+        {
+            let now = Instant::now();
+
+            let serialized = std::fs::read(&path).expect("Good file with serialized data");
+            let prover_data = ProverCircuitData::<F, C, D>::from_bytes(&serialized, &serializer_gate, &serializer_generator).expect("Correctly formed serialized data");
+
+            log::info!("Loading circuit data time: {}ms", now.elapsed().as_millis());
+        }
+
+        let file = OpenOptions::new().read(true).open(path).expect("Open a file with correctly formed data for read");
+        let mut reader = BufReader::with_capacity(buffer_size, file);
+
+        let mut read_adapter = ReadAdapter::new(reader, None);
+
+        let now = Instant::now();
+
+        let prover_data = read_adapter.
+            read_prover_circuit_data::<F, C, D>(
+                &serializer_gate,
+                &serializer_generator).expect("Correctly formed serialized data");
+
+        log::info!("Loading circuit data directly time: {}ms", now.elapsed().as_millis());
     }
 }

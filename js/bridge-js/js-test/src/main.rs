@@ -10,7 +10,7 @@ mod vara_to_eth;
 
 pub fn get_var(name: &str) -> String {
     env::var(name)
-        .map_err(|_| format!("{:?} env variable should be set", name))
+        .map_err(|_| format!("{name} env variable should be set"))
         .unwrap()
 }
 

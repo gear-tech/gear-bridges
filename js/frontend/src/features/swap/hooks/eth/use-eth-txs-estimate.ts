@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useConfig } from 'wagmi';
 import { estimateFeesPerGas } from 'wagmi/actions';
 
-import { useEthAccount } from '@/hooks';
+import { useDebounce, useEthAccount } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import { DUMMY_ADDRESS } from '../../consts';
@@ -19,7 +19,7 @@ type Params = {
 };
 
 const DUMMY_FORM_VALUES = {
-  amount: 0n,
+  amount: 1n, // eth fails on 0
   accountAddress: DUMMY_ADDRESS.VARA_ALICE,
 } as const;
 
@@ -36,6 +36,7 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, allowance, formV
     const txs = await prepareTxs({
       ...(formValues ?? DUMMY_FORM_VALUES),
       accountOverride: DUMMY_ADDRESS.ETH_DEAD,
+      isEstimate: true,
     });
 
     const { maxFeePerGas } = await estimateFeesPerGas(config);
@@ -49,11 +50,15 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, allowance, formV
     return { requiredBalance, fees };
   };
 
+  const debouncedFormValues = useDebounce({
+    amount: formValues?.amount.toString(),
+    accountAddress: formValues?.accountAddress,
+  });
+
   return useQuery({
     queryKey: [
       'eth-txs-estimate',
-      formValues?.amount.toString(),
-      formValues?.accountAddress,
+      debouncedFormValues,
       allowance?.toString(),
       bridgingFee?.toString(),
       shouldPayBridgingFee,

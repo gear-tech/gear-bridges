@@ -55,8 +55,10 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
   const { setValue, reset, formState } = form;
   const { isValid } = formState;
 
-  const amount = form.watch(FIELD_NAME.VALUE);
-  const formValues = isValid ? (schema.safeParse(form.getValues()).data as FormattedValues) : undefined;
+  const values = form.watch();
+  const { amount } = values;
+
+  const formattedValues = isValid ? schema.safeParse(values).data : undefined;
 
   // const validateBalance = async (values: FormattedValues) => {
   //   definedAssert(accountBalance, 'Account balance is not defined');
@@ -69,7 +71,7 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
   // };
 
   const handleSubmit = (onSubmit: (values: FormattedValues) => Promise<unknown>) =>
-    form.handleSubmit((values) => {
+    form.handleSubmit((_values) => {
       const onSuccess = () => {
         reset();
         // requiredBalance.reset();
@@ -87,7 +89,7 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
 
       // if (isUndefined(requiredBalance.data)) return validateBalance(values).catch(onError);
 
-      onSubmit(values).then(onSuccess).catch(onError);
+      onSubmit(_values).then(onSuccess).catch(onError);
     });
 
   const setMaxBalance = () => {
@@ -111,7 +113,7 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
   //   requiredBalance.reset();
   // }, [amount, token?.address]);
 
-  return { form, amount, formValues, handleSubmit, setMaxBalance };
+  return { form, amount, formattedValues, handleSubmit, setMaxBalance };
 }
 
 export { useSwapForm };

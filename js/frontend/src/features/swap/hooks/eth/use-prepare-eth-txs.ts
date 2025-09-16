@@ -34,7 +34,12 @@ function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Para
 
   if (isUndefined(allowance) || isUndefined(bridgingFee) || !token) return;
 
-  return async ({ amount, accountAddress, accountOverride }: FormattedValues & { accountOverride?: HexString }) => {
+  return async ({
+    amount,
+    accountAddress,
+    accountOverride,
+    isEstimate,
+  }: FormattedValues & { accountOverride?: HexString; isEstimate?: boolean }) => {
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
     const shouldApprove = amount > allowance;
@@ -54,7 +59,7 @@ function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Para
     let permit: Awaited<ReturnType<typeof permitUSDC.mutateAsync>> | undefined;
 
     if (shouldApprove) {
-      if (isUSDC) {
+      if (isUSDC && !isEstimate) {
         permit = await permitUSDC.mutateAsync(amount);
       } else {
         const call = () => approve.mutateAsync({ amount });

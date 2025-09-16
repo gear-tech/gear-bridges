@@ -1,6 +1,7 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
 
+import { useDebounce } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import { DUMMY_ADDRESS } from '../../consts';
@@ -50,11 +51,15 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
     return { requiredBalance, fees };
   };
 
+  const debouncedFormValues = useDebounce({
+    amount: formValues?.amount.toString(),
+    accountAddress: formValues?.accountAddress,
+  });
+
   return useQuery({
     queryKey: [
       'vara-txs-estimate',
-      formValues?.amount.toString(),
-      formValues?.accountAddress,
+      debouncedFormValues,
       bridgingFee?.toString(),
       shouldPayBridgingFee,
       vftManagerFee?.toString(),

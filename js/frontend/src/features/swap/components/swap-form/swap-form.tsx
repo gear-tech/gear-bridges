@@ -73,7 +73,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, estimatedFees, time, close });
   };
 
-  const { form, amount, formValues, handleSubmit, setMaxBalance } = useSwapForm({
+  const { form, amount, formattedValues, handleSubmit, setMaxBalance } = useSwapForm({
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
   });
@@ -83,7 +83,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
     allowance: allowance.data,
-    formValues,
+    formValues: formattedValues,
     onTransactionStart: (values) => openTransactionModal(values, 0n),
   });
 

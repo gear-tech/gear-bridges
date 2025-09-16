@@ -139,14 +139,14 @@ export class ServiceSyncUpdate {
 export class ServiceState {
   constructor(private _program: CheckpointClient) {}
 
-  public getLatestSlot(order: Order, index_start: number, count: number): Promise<StateData> {
+  public getLatestSlot(): Promise<StateData> {
     const query = new QueryBuilder<StateData>(
       this._program.api,
       this._program.registry,
       this._program.programId,
       'ServiceState',
       'Get',
-      [order, index_start, count],
+      ['Reverse', 0, 1],
       '(Order, u32, u32)',
       'StateData',
     );

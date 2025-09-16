@@ -1,4 +1,4 @@
-import { useAccount, useApi } from '@gear-js/react-hooks';
+import { useAccount } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
@@ -35,8 +35,6 @@ type Props = {
 
 function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
   const { network, token, destinationToken } = useBridgeContext();
-
-  const { api } = useApi();
 
   const { bridgingFee, vftManagerFee, ...config } = useFee();
   const accountBalance = useAccountBalance();
@@ -88,7 +86,12 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   });
 
   const isLoading =
-    submit.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || allowance.isLoading;
+    submit.isPending ||
+    accountBalance.isLoading ||
+    ftBalance.isLoading ||
+    config.isLoading ||
+    allowance.isLoading ||
+    !txsEstimate;
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -105,17 +108,9 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const isEnoughBalance = () => {
-    if (!api || isUndefined(bridgingFee.value) || !accountBalance.data) return false;
+    if (!accountBalance.data || !txsEstimate) return false;
 
-    let minBalance = shouldPayBridgingFee ? bridgingFee.value : 0n;
-
-    if (network.isVara) {
-      if (isUndefined(vftManagerFee?.value)) return false;
-
-      minBalance += vftManagerFee.value + api.existentialDeposit.toBigInt();
-    }
-
-    return accountBalance.data > minBalance;
+    return accountBalance.data > txsEstimate.requiredBalance;
   };
 
   const getButtonText = () => {
@@ -131,7 +126,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   };
 
   const handleClaimTypeChange = (value: typeof claimType) => {
-    // requiredBalance.reset();
     setClaimType(value);
   };
 

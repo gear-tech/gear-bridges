@@ -9,7 +9,9 @@ mod eth_to_vara;
 mod vara_to_eth;
 
 pub fn get_var(name: &str) -> String {
-    env::var(name).expect("{name} env variable should be set")
+    env::var(name)
+        .map_err(|_| format!("{:?} env variable should be set", name))
+        .unwrap()
 }
 
 #[tokio::main]

@@ -1,5 +1,5 @@
 import { GearApi, HexString } from '@gear-js/api';
-import { compactStripLength, hexToU8a } from '@polkadot/util';
+import { hexToU8a } from '@polkadot/util';
 
 import { VaraMessage, Proof } from './types.js';
 
@@ -38,7 +38,7 @@ export class GearClient {
       nonce: msg.nonce,
       source: hexToU8a(msg.source),
       destination: hexToU8a(msg.destination),
-      payload: compactStripLength(hexToU8a(msg.payload))[1],
+      payload: hexToU8a(msg.payload),
     };
   }
 }

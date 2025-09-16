@@ -580,6 +580,173 @@ impl<F: RichField + Extendable<D>, const D: usize> GateSerializer<F, D> for Cust
     }
 }
 
+use plonky2::util::serialization::IoResult;
+use plonky2::plonk::circuit_data::CommonCircuitData;
+use plonky2::gates::gate::GateRef;
+use plonky2::iop::generator::WitnessGeneratorRef;
+use plonky2::util::serialization::Remaining;
+
+pub struct ReadAdapter<Reader: std::io::Read + std::io::Seek> {
+    pub reader: Reader,
+    pub buffer: Vec<u8>,
+}
+
+impl<Reader: std::io::Read + std::io::Seek> ReadAdapter<Reader> {
+    pub fn new(reader: Reader, size: Option<usize>) -> Self {
+        Self {
+            reader,
+            buffer: vec![0; size.unwrap_or(1_024)],
+        }
+    }
+}
+
+impl<Reader: std::io::Read + std::io::Seek> plonky2::util::serialization::Read for ReadAdapter<Reader> {
+    fn read_exact(&mut self, bytes: &mut [u8]) -> IoResult<()> {
+        // log::trace!("self.read_exact(bytes) entered");
+
+        self.reader.read_exact(bytes)
+            .map_err(|e| {
+                log::trace!("self.read_exact(bytes) failed: {e:?}");
+
+                plonky2::util::serialization::IoError
+            })
+    }
+
+    fn read_gate<F: RichField + Extendable<D>, const D: usize>(
+        &mut self,
+        gate_serializer: &dyn GateSerializer<F, D>,
+        common_data: &CommonCircuitData<F, D>,
+    ) -> IoResult<GateRef<F, D>> {
+        // log::trace!("fn read_gate<F: RichField + Extendable<D>, const D: usize>( entered");
+
+        let bytes_read = self.reader.read(&mut self.buffer)
+            .map_err(|e| {
+                log::trace!("self.reader.read(&mut buffer) failed: {e:?}");
+
+                plonky2::util::serialization::IoError
+            })?;
+        // log::trace!("fn read_gate<F: RichField + Extendable<D>, const D: usize>( bytes_read = {bytes_read}");
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        match gate_serializer.read_gate(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("gate_serializer.read_gate(&mut buffer, common_data) failed: {e:?}");
+            })
+        {
+            Ok(result) => {
+                // log::trace!("fn read_generator<F: RichField + Extendable<D>, const D: usize>( remaining = {}", buffer_plonky.remaining());
+
+                self.reader.seek_relative(-(buffer_plonky.remaining() as i64))
+                    .map_err(|e| {
+                        log::trace!("self.reader.seek_relative(-(buffer.remaining() as i64)) failed: {e:?}");
+
+                        plonky2::util::serialization::IoError
+                    })?;
+
+                return Ok(result);
+            }
+
+            // implementation of Read may be buffered so we have to try to read next buffer and
+            // deserialize
+            Err(e) if bytes_read < self.buffer.len() => {}
+
+            result => return result,
+        }
+
+        let bytes_read = bytes_read + self.reader.read(&mut self.buffer[bytes_read..])
+            .map_err(|e| {
+                log::trace!("self.reader.read(&mut buffer[bytes_read]) failed: {e:?}");
+
+                plonky2::util::serialization::IoError
+            })?;
+        // log::trace!("fn read_gate<F: RichField + Extendable<D>, const D: usize>( bytes_read = {bytes_read}");
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        let result = gate_serializer.read_gate(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("gate_serializer.read_gate(&mut buffer, common_data) failed: {e:?}");
+            })?;
+            
+        // log::trace!("fn read_generator<F: RichField + Extendable<D>, const D: usize>( remaining = {}", buffer_plonky.remaining());
+
+        self.reader.seek_relative(-(buffer_plonky.remaining() as i64))
+            .map_err(|e| {
+                log::trace!("self.reader.seek_relative(-(buffer.remaining() as i64)) failed: {e:?}");
+
+                plonky2::util::serialization::IoError
+            })?;
+
+        Ok(result)
+    }
+
+    fn read_generator<F: RichField + Extendable<D>, const D: usize>(
+        &mut self,
+        generator_serializer: &dyn WitnessGeneratorSerializer<F, D>,
+        common_data: &CommonCircuitData<F, D>,
+    ) -> IoResult<WitnessGeneratorRef<F, D>> {
+        // log::trace!("fn read_generator<F: RichField + Extendable<D>, const D: usize>( entered");
+
+        let bytes_read = self.reader.read(&mut self.buffer)
+            .map_err(|e| {
+                log::trace!("self.reader.read(&mut buffer) failed: {e:?}");
+
+                plonky2::util::serialization::IoError
+            })?;
+        // log::trace!("fn read_generator<F: RichField + Extendable<D>, const D: usize>( bytes_read = {bytes_read}");
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        match generator_serializer.read_generator(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("generator_serializer.read_generator(&mut buffer_plonky, common_data) failed: {e:?}");
+            })
+        {
+            Ok(result) => {
+                // log::trace!("fn read_generator<F: RichField + Extendable<D>, const D: usize>( remaining = {}", buffer_plonky.remaining());
+
+                self.reader.seek_relative(-(buffer_plonky.remaining() as i64))
+                    .map_err(|e| {
+                        log::trace!("self.reader.seek_relative(-(buffer.remaining() as i64)) failed: {e:?}");
+
+                        plonky2::util::serialization::IoError
+                    })?;
+
+                return Ok(result);
+            }
+
+            // implementation of Read may be buffered so we have to try to read next buffer and
+            // deserialize
+            Err(e) if bytes_read < self.buffer.len() => {}
+
+            result => return result,
+        }
+
+        let bytes_read = bytes_read + self.reader.read(&mut self.buffer[bytes_read..])
+            .map_err(|e| {
+                log::trace!("self.reader.read(&mut buffer[bytes_read]) failed: {e:?}");
+
+                plonky2::util::serialization::IoError
+            })?;
+        // log::trace!("fn read_gate<F: RichField + Extendable<D>, const D: usize>( bytes_read = {bytes_read}");
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        let result = generator_serializer.read_generator(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("gate_serializer.read_gate(&mut buffer, common_data) failed: {e:?}");
+            })?;
+            
+        // log::trace!("fn read_generator<F: RichField + Extendable<D>, const D: usize>( remaining = {}", buffer_plonky.remaining());
+
+        self.reader.seek_relative(-(buffer_plonky.remaining() as i64))
+            .map_err(|e| {
+                log::trace!("self.reader.seek_relative(-(buffer.remaining() as i64)) failed: {e:?}");
+
+                plonky2::util::serialization::IoError
+            })?;
+
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use blake2::{
@@ -683,5 +850,92 @@ mod tests {
         assert_eq!(&public_inputs.data[..data.len()], &data[..]);
 
         proof.circuit_data().clone()
+    }
+
+    fn get_buffer_size() -> usize {
+        // 8KiB
+        const DEFAULT: usize = 8_192;
+
+        let Ok(buffer_size) = std::env::var("BUFFER_SIZE") else {
+            log::debug!(r#""BUFFER_SIZE" is not set. Use default value ({DEFAULT})."#);
+
+            return DEFAULT;
+        };
+
+        let Ok(buffer_size) = buffer_size.parse::<usize>() else {
+            log::debug!(r#""BUFFER_SIZE" is not a number. Use default value ({DEFAULT})."#);
+
+            return DEFAULT;
+        };
+
+        buffer_size
+    }
+
+    #[test]
+    fn bench_deserialization() {
+        use std::io::prelude::*;
+        use std::io::BufReader;
+        use std::fs::File;
+        use std::fs::OpenOptions;
+
+        let _ = pretty_env_logger::formatted_timed_builder()
+            .filter_level(log::LevelFilter::Info)
+            .format_target(false)
+            .format_timestamp_secs()
+            .parse_default_env()
+            .try_init();
+
+        let path = env::var("PATH_DATA").expect("PATH_DATA");
+        log::debug!(r#"bench_deserialization started; PATH_DATA = "{path}""#);
+
+        let buffer_size = get_buffer_size();
+
+        let serializer_gate = CustomGateSerializer::default();
+        let serializer_generator = CustomGeneratorSerializer::<C, D>::default();
+
+        for index in 1..=MAX_BLOCK_COUNT {
+            {
+                let path = format!("{path}/verifier_circuit_data-{index}");
+                log::trace!(r#"path = "{path}""#);
+
+                let file = OpenOptions::new().read(true).open(path).expect("Open a file with correctly formed data for read");
+                let mut reader = BufReader::with_capacity(buffer_size, file);
+
+                let mut read_adapter = ReadAdapter::new(reader, None);
+
+                let _data = read_adapter.
+                    read_verifier_circuit_data::<F, C, D>(&serializer_gate).expect("Correctly formed serialized data");
+            }
+
+            {
+                let path = format!("{path}/verifier_only_circuit_data-{index}");
+                log::trace!(r#"path = "{path}""#);
+
+                let file = OpenOptions::new().read(true).open(path).expect("Open a file with correctly formed data for read");
+                let mut reader = BufReader::with_capacity(buffer_size, file);
+
+                let mut read_adapter = ReadAdapter::new(reader, None);
+
+                let _data = read_adapter.
+                    read_verifier_only_circuit_data::<F, C, D>().expect("Correctly formed serialized data");
+            }
+
+            let path = format!("{path}/prover_circuit_data-{index}");
+            log::trace!(r#"path = "{path}""#);
+
+            let file = OpenOptions::new().read(true).open(path).expect("Open a file with correctly formed data for read");
+            let mut reader = BufReader::with_capacity(buffer_size, file);
+
+            let mut read_adapter = ReadAdapter::new(reader, None);
+
+            let now = Instant::now();
+
+            let prover_data = read_adapter.
+                read_prover_circuit_data::<F, C, D>(
+                    &serializer_gate,
+                    &serializer_generator).expect("Correctly formed serialized data");
+
+            log::info!("Loading circuit data time: {}ms", now.elapsed().as_millis());
+        }
     }
 }

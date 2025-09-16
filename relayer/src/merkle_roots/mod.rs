@@ -1,6 +1,7 @@
 use crate::{
     cli::{GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS},
     common::{BASE_RETRY_DELAY, MAX_RETRIES},
+    hex_utils,
     merkle_roots::{
         authority_set_sync::AuthoritySetSyncIo, eras::SealedNotFinalizedEra,
         prover::FinalityProverIo,
@@ -608,6 +609,15 @@ impl MerkleRootRelayer {
             block = blocks_rx.recv() => {
                 match block {
                     Ok(block) => {
+                        if let Some(bridging_payment_address) = self.options.bridging_payment_address {
+                            for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
+                                let pblock = self.api_provider.client().get_block_at(pblock).await?;
+                                let pblock = GearBlock::from_subxt_block(pblock).await?;
+                                log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
+                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, false, true).await?;
+                            }
+                        }
+
                         self.try_proof_merkle_root(prover, authority_set_sync, block, true, false).await?;
                     }
 
@@ -987,6 +997,7 @@ pub struct MerkleRootRelayerOptions {
     pub last_sealed: Option<u64>,
     pub confirmations: u64,
     pub count_thread: Option<usize>,
+    pub bridging_payment_address: Option<H256>,
 }
 
 impl MerkleRootRelayerOptions {
@@ -1015,7 +1026,13 @@ impl MerkleRootRelayerOptions {
             count_thread: match config.thread_count {
                 None => Some(DEFAULT_COUNT_THREADS),
                 Some(thread_count) => thread_count.into(),
-            }
+            },
+            bridging_payment_address: config
+                .bridging_payment_address
+                .as_ref()
+                .map(|x| hex_utils::decode_h256(x))
+                .transpose()
+                .context("Failed to parse bridging payment address")?,
         })
     }
 }

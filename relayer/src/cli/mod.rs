@@ -70,6 +70,8 @@ pub struct GearEthCoreArgs {
     #[arg(long, env = "START_AUTHORITY_SET_ID")]
     pub start_authority_set_id: Option<u64>,
 
+    /// An address of bridging payment contract for priority processing of merkle-roots when needed.
+    pub bridging_payment_address: Option<String>,
     #[arg(
         help = "Spike window used to cutoff old events to not trigger false spikes",
         value_parser = humantime::parse_duration, default_value="15m")]

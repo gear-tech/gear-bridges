@@ -73,13 +73,20 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, acco
   const debouncedAccountAddress = useDebounce(formValues?.accountAddress);
 
   return useQuery({
-    queryKey: ['eth-txs-estimate', debouncedAmount, debouncedAccountAddress, shouldPayBridgingFee, ethAccount.address],
+    queryKey: [
+      'eth-txs-estimate',
+      debouncedAmount,
+      debouncedAccountAddress,
+      shouldPayBridgingFee,
+      token?.address,
+      ethAccount.address,
+    ],
 
     queryFn: estimateTxs,
 
     // it's probably worth to check isConnecting too, but there is a bug:
     // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-    enabled: Boolean(!isUndefined(bridgingFee) && !ethAccount.isReconnecting),
+    enabled: Boolean(!isUndefined(bridgingFee) && token && !ethAccount.isReconnecting),
   });
 }
 

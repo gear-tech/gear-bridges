@@ -66,8 +66,10 @@ function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
     let permit: Awaited<ReturnType<typeof permitUSDC.mutateAsync>> | undefined;
 
     if (shouldApprove) {
-      if (isUSDC && !isEstimate) {
-        permit = await permitUSDC.mutateAsync(amount);
+      if (isUSDC) {
+        if (!isEstimate) {
+          permit = await permitUSDC.mutateAsync(amount);
+        }
       } else {
         const call = () => approve.mutateAsync({ amount });
         const gasLimit = await approve.getGasLimit({ amount, accountOverride });

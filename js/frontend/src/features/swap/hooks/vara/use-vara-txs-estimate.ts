@@ -5,6 +5,7 @@ import { useDebounce } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import { DUMMY_ADDRESS } from '../../consts';
+import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 import { estimateBridging } from '../../utils';
 
@@ -25,6 +26,8 @@ const DUMMY_FORM_VALUES = {
 function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
+
+  const { token } = useBridgeContext();
 
   const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee });
 
@@ -54,11 +57,19 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
   const debouncedAccountAddress = useDebounce(formValues?.accountAddress);
 
   return useQuery({
-    queryKey: ['vara-txs-estimate', debouncedAmount, debouncedAccountAddress, shouldPayBridgingFee, account?.address],
+    queryKey: [
+      'vara-txs-estimate',
+      debouncedAmount,
+      debouncedAccountAddress,
+      shouldPayBridgingFee,
+      token?.address,
+      account?.address,
+    ],
 
     queryFn: estimateTxs,
 
-    enabled: !isUndefined(bridgingFee) && !isUndefined(vftManagerFee) && Boolean(api && prepareTxs) && isAccountReady,
+    enabled:
+      !isUndefined(bridgingFee) && !isUndefined(vftManagerFee) && Boolean(api && token && prepareTxs) && isAccountReady,
   });
 }
 

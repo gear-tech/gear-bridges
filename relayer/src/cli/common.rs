@@ -129,10 +129,10 @@ pub struct RelayerHttpArgs {
     #[arg(long = "relayer-http-access-token", env = "RELAYER_HTTP_ACCESS_TOKEN")]
     pub access_token: String,
 
-    /// Timeout in seconds for requests to the relayer HTTP endpoint
+    /// Timeout in seconds for requests to the relayer HTTP endpoint, default is 1800 seconds (30 minutes)
     #[arg(
         long = "relayer-http-timeout-secs",
-        default_value = "30",
+        default_value = "1800",
         env = "RELAYER_HTTP_TIMEOUT_SECS"
     )]
     pub timeout_secs: u64,

@@ -257,16 +257,7 @@ library Hasher {
      */
     function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
         /// forge-lint: disable-next-line(asm-keccak256)
-        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-
-        // TODO: avoid double hashing.
-        bytes32 hash2;
-        assembly ("memory-safe") {
-            mstore(0x00, hash1)
-            hash2 := keccak256(0x00, 0x20)
-        }
-
-        return hash2;
+        return keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
     }
 
     /**
@@ -276,15 +267,6 @@ library Hasher {
      */
     function hash(VaraMessage memory message) internal pure returns (bytes32) {
         /// forge-lint: disable-next-line(asm-keccak256)
-        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-
-        // TODO: avoid double hashing.
-        bytes32 hash2;
-        assembly ("memory-safe") {
-            mstore(0x00, hash1)
-            hash2 := keccak256(0x00, 0x20)
-        }
-
-        return hash2;
+        return keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
     }
 }

@@ -634,7 +634,7 @@ impl MerkleRootRelayer {
                                     let Ok(_) = rpc.send(MerkleRootsResponse::MerkleRootProof {
                                         proof: proof.proof.clone(),
                                         block_number,
-                                        block_hash: merkle_root.block_hash,
+                                        block_hash: merkle_root_entry.block_hash,
                                         merkle_root
                                     }) else {
                                         log::error!("RPC response send failed");

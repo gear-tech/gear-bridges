@@ -6,6 +6,7 @@ import { useDebounce, useEthAccount } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import { DUMMY_ADDRESS } from '../../consts';
+import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 import { estimateBridging } from '../../utils';
 
@@ -15,6 +16,7 @@ type Params = {
   formValues: FormattedValues | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
+  accountBalance: bigint | undefined;
 };
 
 const DUMMY_FORM_VALUES = {
@@ -22,19 +24,31 @@ const DUMMY_FORM_VALUES = {
   accountAddress: DUMMY_ADDRESS.VARA_ALICE,
 } as const;
 
-function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues }: Params) {
+function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, accountBalance = 0n }: Params) {
   const ethAccount = useEthAccount();
   const config = useConfig();
+
+  const { token } = useBridgeContext();
 
   const ethTxs = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee });
 
   const estimateTxs = async () => {
     definedAssert(bridgingFee, 'Bridging fee');
+    definedAssert(token, 'Fungible Token');
     definedAssert(ethTxs.prepare, 'Prepared transactions');
 
+    const safeValues = formValues ?? DUMMY_FORM_VALUES;
+
+    const feeValue = shouldPayBridgingFee ? bridgingFee : 0n;
+    const amountValue = token.isNative ? safeValues.amount : 0n;
+
+    // if balance is insufficient - estimate gas will fail, so we have to use dummy account with existing balance.
+    // it should be used dummy values as well, in case if user amount input is too high
+    const isDummyAccount = amountValue + feeValue >= accountBalance;
+
     const txs = await ethTxs.prepare({
-      ...(formValues ?? DUMMY_FORM_VALUES),
-      accountOverride: ethAccount.address ? undefined : DUMMY_ADDRESS.ETH_DEAD,
+      ...(isDummyAccount ? DUMMY_FORM_VALUES : safeValues),
+      accountOverride: isDummyAccount ? DUMMY_ADDRESS.ETH_DEAD : undefined,
       isEstimate: true,
     });
 

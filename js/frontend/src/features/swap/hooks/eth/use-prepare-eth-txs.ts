@@ -76,10 +76,7 @@ function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
       }
     }
 
-    // if approve is not made, transfer gas estimate will fail.
-    // it can be avoided by using stateOverride,
-    // but it requires the knowledge of the storage slot or state diff of the allowance for each token,
-    // which is not feasible to do programmatically (at least I didn't managed to find a convenient way to do so).
+    // if approve is not made, transfer gas estimate will fail
     txs.push({
       call: () => transfer.mutateAsync({ amount, accountAddress, permit }),
 

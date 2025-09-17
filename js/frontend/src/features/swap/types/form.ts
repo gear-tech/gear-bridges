@@ -16,6 +16,7 @@ type UseHandleSubmitParameters = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   vftManagerFee: bigint | undefined;
+  accountBalance?: bigint | undefined;
   onTransactionStart: (values: FormattedValues) => void;
 };
 

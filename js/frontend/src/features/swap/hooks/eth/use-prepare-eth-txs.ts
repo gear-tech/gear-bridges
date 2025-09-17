@@ -1,7 +1,8 @@
 import { HexString } from '@gear-js/api';
 
-import { isUndefined } from '@/utils';
+import { definedAssert, isUndefined } from '@/utils';
 
+import { SUBMIT_STATUS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 
@@ -32,14 +33,16 @@ function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Para
   const permitUSDC = usePermitUSDC();
   const transfer = useTransfer(bridgingFee, shouldPayBridgingFee);
 
-  if (isUndefined(allowance) || isUndefined(bridgingFee) || !token) return;
-
-  return async ({
+  const prepare = async ({
     amount,
     accountAddress,
     accountOverride,
     isEstimate,
   }: FormattedValues & { accountOverride?: HexString; isEstimate?: boolean }) => {
+    definedAssert(allowance, 'Allowance');
+    definedAssert(bridgingFee, 'Bridging fee');
+    definedAssert(token, 'Token');
+
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
     const shouldApprove = amount > allowance;
@@ -84,6 +87,28 @@ function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Para
     });
 
     return txs;
+  };
+
+  const resetState = () => {
+    mint.reset();
+    approve.reset();
+    permitUSDC.reset();
+    transfer.reset();
+  };
+
+  const getStatus = () => {
+    if (mint.isPending || mint.error) return SUBMIT_STATUS.MINT;
+    if (approve.isPending || approve.error) return SUBMIT_STATUS.APPROVE;
+    if (permitUSDC.isPending || permitUSDC.error) return SUBMIT_STATUS.PERMIT;
+    if (transfer.isPending || transfer.error) return SUBMIT_STATUS.BRIDGE;
+
+    return SUBMIT_STATUS.SUCCESS;
+  };
+
+  return {
+    prepare: !isUndefined(allowance) && !isUndefined(bridgingFee) && !!token ? prepare : undefined,
+    resetState,
+    status: getStatus(),
   };
 }
 

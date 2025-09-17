@@ -100,20 +100,12 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
   };
 
   const transferWithoutFeeMutation = {
-    ...useMutation({
-      mutationKey: ['eth-transfer-without-fee'],
-      mutationFn: transferWithoutFee,
-    }),
-
+    ...useMutation({ mutationFn: transferWithoutFee }),
     getGasLimit: getGasLimitWithoutFee,
   };
 
   const transferWithFeeMutation = {
-    ...useMutation({
-      mutationKey: ['eth-transfer-with-fee'],
-      mutationFn: transferWithFee,
-    }),
-
+    ...useMutation({ mutationFn: transferWithFee }),
     getGasLimit: getGasLimitWithFee,
   };
 

@@ -38,7 +38,7 @@ function useMint() {
     return estimateGas(config, { to: token.address, data, value, account: accountOverride });
   };
 
-  return { ...useMutation({ mutationKey: ['eth-mint'], mutationFn: mint }), getGasLimit };
+  return { ...useMutation({ mutationFn: mint }), getGasLimit };
 }
 
 export { useMint };

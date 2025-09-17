@@ -27,13 +27,13 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, allowance, formV
   const ethAccount = useEthAccount();
   const config = useConfig();
 
-  const prepareTxs = usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee });
+  const ethTxs = usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee });
 
   const estimateTxs = async () => {
     definedAssert(bridgingFee, 'Bridging fee');
-    definedAssert(prepareTxs, 'Prepared transactions');
+    definedAssert(ethTxs.prepare, 'Prepared transactions');
 
-    const txs = await prepareTxs({
+    const txs = await ethTxs.prepare({
       ...(formValues ?? DUMMY_FORM_VALUES),
       accountOverride: DUMMY_ADDRESS.ETH_DEAD,
       isEstimate: true,

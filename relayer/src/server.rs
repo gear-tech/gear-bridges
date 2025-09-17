@@ -2,7 +2,6 @@ use crate::message_relayer::common::web_request::{
     MerkleRootBlocks, MerkleRootsRequest, Message, Messages,
 };
 use actix_web::{guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer};
-use futures::{stream::FuturesUnordered, StreamExt};
 use std::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -65,7 +64,7 @@ async fn get_merkle_root_proof(
 
     let blocks = blocks.into_inner().blocks;
 
-    let mut futures = FuturesUnordered::new();
+    let mut futures = Vec::new();
 
     for block in blocks {
         let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -86,8 +85,8 @@ async fn get_merkle_root_proof(
 
     let mut merkle_roots = Vec::new();
 
-    while let Some(result) = futures.next().await {
-        match result {
+    for future in futures.drain(..) {
+        match future.await {
             Ok(response) => {
                 merkle_roots.push(response);
                 to_process -= 1;

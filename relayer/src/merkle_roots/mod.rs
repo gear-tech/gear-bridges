@@ -559,7 +559,7 @@ impl MerkleRootRelayer {
                                 let block = api.get_block_at(block_hash).await?;
                                 let block = GearBlock::from_subxt_block(block).await?;
 
-                                match self.try_proof_merkle_root(prover, authority_set_sync, block, true, true).await {
+                                match self.try_proof_merkle_root(prover, authority_set_sync, block, Priority::Yes, ForceGeneration::Yes).await {
                                     Ok(Some(merkle_root)) => {
                                         if let Some(r) = self.roots.get_mut(&merkle_root) { r.rpc_requests.push(response) } else {
                                             response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
@@ -595,7 +595,7 @@ impl MerkleRootRelayer {
             block = blocks_rx.recv() => {
                 match block {
                     Ok(block) => {
-                        self.try_proof_merkle_root(prover, authority_set_sync, block, false, false).await?;
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, Priority::No, ForceGeneration::No).await?;
                     }
 
                     Err(RecvError::Lagged(n)) => {
@@ -736,7 +736,7 @@ impl MerkleRootRelayer {
 
                         log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
                         while let Some(block) = to_submit.pop() {
-                            self.try_proof_merkle_root(prover, authority_set_sync, block, false, false).await?;
+                            self.try_proof_merkle_root(prover, authority_set_sync, block, Priority::No, ForceGeneration::No).await?;
                         }
                     }
                 }
@@ -811,10 +811,10 @@ impl MerkleRootRelayer {
         prover: &mut FinalityProverIo,
         authority_set_sync: &mut AuthoritySetSyncIo,
         block: GearBlock,
-        priority: bool,
-        force_generation: bool,
+        priority: Priority,
+        force_generation: ForceGeneration,
     ) -> anyhow::Result<Option<H256>> {
-        let merkle_root = if force_generation {
+        let merkle_root = if force_generation == ForceGeneration::Yes {
             self.api_provider
                 .client()
                 .fetch_queue_merkle_root(block.hash())
@@ -839,8 +839,10 @@ impl MerkleRootRelayer {
             log::error!("Failed to save block storage state: {err:?}");
         }
 
-        if self.storage.is_merkle_root_submitted(merkle_root).await && !force_generation {
-            log::info!(
+        if self.storage.is_merkle_root_submitted(merkle_root).await
+            && force_generation == ForceGeneration::No
+        {
+            log::debug!(
                 "Skipping merkle root {} for block #{} as there were no new messages",
                 merkle_root,
                 block.number()
@@ -875,7 +877,7 @@ impl MerkleRootRelayer {
                     block.hash(),
                     merkle_root,
                     inner_proof,
-                    priority,
+                    priority == Priority::Yes,
                 ) {
                     log::error!("Prover connection closed, exiting...");
                     return Err(anyhow::anyhow!("Prover connection closed"));
@@ -956,4 +958,16 @@ pub enum MerkleRootStatus {
     SubmitProof,
     Finalized,
     Failed(String),
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Priority {
+    Yes,
+    No,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum ForceGeneration {
+    Yes,
+    No,
 }

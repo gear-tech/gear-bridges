@@ -21,10 +21,4 @@ type UseFee = () => {
   vftManagerFee?: BalanceValues;
 };
 
-type UseFTAllowance = (address: HexString | undefined) => {
-  data: bigint | undefined;
-  isLoading: boolean;
-  refetch: () => Promise<unknown>;
-};
-
-export type { UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance };
+export type { UseAccountBalance, UseFTBalance, UseFee };

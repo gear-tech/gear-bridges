@@ -8,18 +8,11 @@ function useHandleVaraSubmit({
   bridgingFee,
   shouldPayBridgingFee,
   vftManagerFee,
-  allowance,
   onTransactionStart,
 }: UseHandleSubmitParameters) {
-  const sendTxs = useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance, onTransactionStart });
+  const sendTxs = useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, onTransactionStart });
 
-  const { data: txsEstimate } = useVaraTxsEstimate({
-    formValues,
-    bridgingFee,
-    shouldPayBridgingFee,
-    vftManagerFee,
-    allowance,
-  });
+  const { data: txsEstimate } = useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee });
 
   return { ...sendTxs, txsEstimate };
 }

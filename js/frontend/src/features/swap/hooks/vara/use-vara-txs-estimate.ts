@@ -15,7 +15,6 @@ type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   vftManagerFee: bigint | undefined;
-  allowance: bigint | undefined;
 };
 
 const DUMMY_FORM_VALUES = {
@@ -23,11 +22,11 @@ const DUMMY_FORM_VALUES = {
   accountAddress: DUMMY_ADDRESS.ETH_DEAD,
 } as const;
 
-function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance }: Params) {
+function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
 
-  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
+  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee });
 
   const estimateTxs = async () => {
     definedAssert(vftManagerFee, 'VFT Manager fee');
@@ -37,7 +36,7 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
 
     const txs = await prepareTxs({
       ...(formValues ?? DUMMY_FORM_VALUES),
-      accountOverride: DUMMY_ADDRESS.VARA_ALICE,
+      accountOverride: account ? undefined : DUMMY_ADDRESS.VARA_ALICE,
     });
 
     const { totalGasLimit, totalValue } = estimateBridging(txs, api.valuePerGas.toBigInt());
@@ -55,16 +54,7 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
   const debouncedAccountAddress = useDebounce(formValues?.accountAddress);
 
   return useQuery({
-    queryKey: [
-      'vara-txs-estimate',
-      debouncedAmount,
-      debouncedAccountAddress,
-      bridgingFee?.toString(),
-      shouldPayBridgingFee,
-      vftManagerFee?.toString(),
-      allowance?.toString(),
-      account?.address,
-    ],
+    queryKey: ['vara-txs-estimate', debouncedAmount, debouncedAccountAddress, shouldPayBridgingFee, account?.address],
 
     queryFn: estimateTxs,
 

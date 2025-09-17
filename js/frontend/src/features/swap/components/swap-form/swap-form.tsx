@@ -14,7 +14,7 @@ import PlusSVG from '../../assets/plus.svg?react';
 import { CLAIM_TYPE, FIELD_NAME, NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
-import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance, FormattedValues } from '../../types';
+import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, FormattedValues } from '../../types';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { Settings } from '../settings';
@@ -28,18 +28,16 @@ import styles from './swap-form.module.scss';
 type Props = {
   useAccountBalance: UseAccountBalance;
   useFTBalance: UseFTBalance;
-  useFTAllowance: UseFTAllowance;
   useHandleSubmit: UseHandleSubmit;
   useFee: UseFee;
 };
 
-function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllowance, useFee }: Props) {
+function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: Props) {
   const { network, token, destinationToken } = useBridgeContext();
 
   const { bridgingFee, vftManagerFee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
-  const allowance = useFTAllowance(token?.address);
 
   const { account } = useAccount();
   const ethAccount = useEthAccount();
@@ -49,7 +47,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
   const [isSubstrateWalletModalOpen, openSubstrateWalletModal, closeSubstrateWalletModal] = useModal();
 
   const [transactionModal, setTransactionModal] = useState<
-    Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
+    Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar' | 'estimatedFees'> | undefined
   >();
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
@@ -58,7 +56,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransactionModal = (values: FormattedValues, estimatedFees: bigint) => {
+  const openTransactionModal = (values: FormattedValues) => {
     if (!token || !destinationToken) throw new Error('Address is not defined');
 
     const amount = values.amount;
@@ -68,7 +66,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     const destination = destinationToken.address;
     const close = () => setTransactionModal(undefined);
 
-    setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, estimatedFees, time, close });
+    setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, time, close });
   };
 
   const { form, amount, formattedValues, handleSubmit, setMaxBalance } = useSwapForm({
@@ -80,18 +78,12 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
-    allowance: allowance.data,
     formValues: formattedValues,
-    onTransactionStart: (values) => openTransactionModal(values, 0n),
+    onTransactionStart: openTransactionModal,
   });
 
   const isLoading =
-    submit.isPending ||
-    accountBalance.isLoading ||
-    ftBalance.isLoading ||
-    config.isLoading ||
-    allowance.isLoading ||
-    !txsEstimate;
+    submit.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || !txsEstimate;
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -212,7 +204,13 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFTAllow
       {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
 
       {/* passing renderProgressBar explicitly to avoid state closure */}
-      {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}
+      {transactionModal && (
+        <TransactionModal
+          renderProgressBar={renderProgressBar}
+          estimatedFees={txsEstimate?.fees || 0n}
+          {...transactionModal}
+        />
+      )}
     </>
   );
 }

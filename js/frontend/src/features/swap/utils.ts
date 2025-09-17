@@ -8,11 +8,11 @@ import { ERROR_MESSAGE } from './consts';
 
 const getAmountSchema = (
   isNativeToken: boolean | undefined,
-  ftBalanceValue: bigint | undefined,
+  ftBalanceValue = 0n, // can be undefined on no account, but schema is needed for useTxsEstimate
   decimals: number | undefined,
   eDeposit: bigint | undefined,
 ) => {
-  if (isUndefined(isNativeToken) || isUndefined(ftBalanceValue) || isUndefined(decimals) || isUndefined(eDeposit))
+  if (isUndefined(isNativeToken) || isUndefined(decimals) || isUndefined(eDeposit))
     return z.string().transform((value) => BigInt(value));
 
   const schema = z

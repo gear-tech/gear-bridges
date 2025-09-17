@@ -6,12 +6,11 @@ import { useSendEthTxs } from './use-send-eth-txs';
 function useHandleEthSubmit({
   bridgingFee,
   shouldPayBridgingFee,
-  allowance,
   formValues,
   onTransactionStart,
 }: UseHandleSubmitParameters) {
-  const sendEthTxs = useSendEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, onTransactionStart });
-  const { data: txsEstimate } = useEthTxsEstimate({ allowance, bridgingFee, shouldPayBridgingFee, formValues });
+  const sendEthTxs = useSendEthTxs({ bridgingFee, shouldPayBridgingFee, onTransactionStart });
+  const { data: txsEstimate } = useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues });
 
   return { ...sendEthTxs, txsEstimate };
 }

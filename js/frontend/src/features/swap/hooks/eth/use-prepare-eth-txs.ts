@@ -7,6 +7,7 @@ import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 
 import { useApprove } from './use-approve';
+import { useGetEthAllowance } from './use-get-eth-ft-allowance';
 import { useMint } from './use-mint';
 import { usePermitUSDC } from './use-permit-usdc';
 import { useTransfer } from './use-transfer';
@@ -20,13 +21,14 @@ type Transaction = {
 };
 
 type Params = {
-  allowance: bigint | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
 };
 
-function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Params) {
+function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
   const { token } = useBridgeContext();
+
+  const getAllowance = useGetEthAllowance(token?.address);
 
   const mint = useMint();
   const approve = useApprove();
@@ -39,13 +41,15 @@ function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Para
     accountOverride,
     isEstimate,
   }: FormattedValues & { accountOverride?: HexString; isEstimate?: boolean }) => {
-    definedAssert(allowance, 'Allowance');
     definedAssert(bridgingFee, 'Bridging fee');
     definedAssert(token, 'Token');
 
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
+
+    const allowance = await getAllowance(accountOverride);
     const shouldApprove = amount > allowance;
+
     const isUSDC = token.symbol.toLowerCase().includes('usdc');
 
     if (shouldMint) {
@@ -106,7 +110,7 @@ function usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee }: Para
   };
 
   return {
-    prepare: !isUndefined(allowance) && !isUndefined(bridgingFee) && !!token ? prepare : undefined,
+    prepare: !isUndefined(bridgingFee) && !!token ? prepare : undefined,
     resetState,
     status: getStatus(),
   };

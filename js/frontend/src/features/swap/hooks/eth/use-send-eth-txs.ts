@@ -7,14 +7,13 @@ import { FormattedValues } from '../../types';
 import { usePrepareEthTxs } from './use-prepare-eth-txs';
 
 type Params = {
-  allowance: bigint | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   onTransactionStart: (values: FormattedValues) => void;
 };
 
-function useSendEthTxs({ allowance, bridgingFee, shouldPayBridgingFee, onTransactionStart }: Params) {
-  const ethTsx = usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee });
+function useSendEthTxs({ bridgingFee, shouldPayBridgingFee, onTransactionStart }: Params) {
+  const ethTsx = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee });
 
   const sendTxs = async (values: FormattedValues) => {
     definedAssert(ethTsx.prepare, 'Prepared transactions');

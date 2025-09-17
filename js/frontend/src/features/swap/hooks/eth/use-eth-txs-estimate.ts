@@ -13,7 +13,6 @@ import { usePrepareEthTxs } from './use-prepare-eth-txs';
 
 type Params = {
   formValues: FormattedValues | undefined;
-  allowance: bigint | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
 };
@@ -23,11 +22,11 @@ const DUMMY_FORM_VALUES = {
   accountAddress: DUMMY_ADDRESS.VARA_ALICE,
 } as const;
 
-function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, allowance, formValues }: Params) {
+function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues }: Params) {
   const ethAccount = useEthAccount();
   const config = useConfig();
 
-  const ethTxs = usePrepareEthTxs({ allowance, bridgingFee, shouldPayBridgingFee });
+  const ethTxs = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee });
 
   const estimateTxs = async () => {
     definedAssert(bridgingFee, 'Bridging fee');
@@ -35,7 +34,7 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, allowance, formV
 
     const txs = await ethTxs.prepare({
       ...(formValues ?? DUMMY_FORM_VALUES),
-      accountOverride: DUMMY_ADDRESS.ETH_DEAD,
+      accountOverride: ethAccount.address ? undefined : DUMMY_ADDRESS.ETH_DEAD,
       isEstimate: true,
     });
 
@@ -54,21 +53,13 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, allowance, formV
   const debouncedAccountAddress = useDebounce(formValues?.accountAddress);
 
   return useQuery({
-    queryKey: [
-      'eth-txs-estimate',
-      debouncedAmount,
-      debouncedAccountAddress,
-      allowance?.toString(),
-      bridgingFee?.toString(),
-      shouldPayBridgingFee,
-      ethAccount.address,
-    ],
+    queryKey: ['eth-txs-estimate', debouncedAmount, debouncedAccountAddress, shouldPayBridgingFee, ethAccount.address],
 
     queryFn: estimateTxs,
 
     // it's probably worth to check isConnecting too, but there is a bug:
     // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-    enabled: Boolean(!isUndefined(allowance) && !isUndefined(bridgingFee) && !ethAccount.isReconnecting),
+    enabled: Boolean(!isUndefined(bridgingFee) && !ethAccount.isReconnecting),
   });
 }
 

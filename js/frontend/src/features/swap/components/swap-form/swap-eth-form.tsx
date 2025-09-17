@@ -1,6 +1,6 @@
 import { useEthAccountBalance, useEthFTBalance } from '@/hooks';
 
-import { useHandleEthSubmit, useEthFee, useEthFTAllowance } from '../../hooks';
+import { useHandleEthSubmit, useEthFee } from '../../hooks';
 
 import { SwapForm } from './swap-form';
 
@@ -10,7 +10,6 @@ function SwapEthForm() {
       useHandleSubmit={useHandleEthSubmit}
       useAccountBalance={useEthAccountBalance}
       useFTBalance={useEthFTBalance}
-      useFTAllowance={useEthFTAllowance}
       useFee={useEthFee}
     />
   );

@@ -18,14 +18,13 @@ type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   vftManagerFee: bigint | undefined;
-  allowance: bigint | undefined;
   onTransactionStart: (values: FormattedValues) => void;
 };
 
-function useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance, onTransactionStart }: Params) {
+function useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, onTransactionStart }: Params) {
   const { api } = useApi();
 
-  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance });
+  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee });
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();

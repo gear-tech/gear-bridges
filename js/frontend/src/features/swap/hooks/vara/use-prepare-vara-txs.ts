@@ -7,6 +7,7 @@ import { CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 
+import { useGetVaraFTAllowance } from './use-get-vara-ft-allowance';
 import { usePrepareApprove } from './use-prepare-approve';
 import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
@@ -27,23 +28,26 @@ type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   vftManagerFee: bigint | undefined;
-  allowance: bigint | undefined;
 };
 
-function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, allowance }: Params) {
+function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
   const { token } = useBridgeContext();
+
+  const getAllowance = useGetVaraFTAllowance(token?.address);
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
 
-  if (isUndefined(bridgingFee) || isUndefined(vftManagerFee) || isUndefined(allowance) || !token) return;
+  if (isUndefined(bridgingFee) || isUndefined(vftManagerFee) || !token) return;
 
   return async ({ amount, accountAddress, accountOverride }: FormattedValues & { accountOverride?: HexString }) => {
     const accountArg = accountOverride ? { account: { addressOrPair: accountOverride } } : {};
 
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
+
+    const allowance = await getAllowance(accountOverride);
     const shouldApprove = amount > allowance;
 
     if (shouldMint) {

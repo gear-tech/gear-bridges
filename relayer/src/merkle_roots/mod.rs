@@ -627,15 +627,15 @@ impl MerkleRootRelayer {
                         );
 
                         self.roots.entry(merkle_root)
-                            .and_modify(|merkle_root| {
-                                merkle_root.status = MerkleRootStatus::SubmitProof;
-                                merkle_root.proof = Some(proof.clone());
-                                for rpc in merkle_root.rpc_requests.drain(..) {
+                            .and_modify(|merkle_root_entry| {
+                                merkle_root_entry.status = MerkleRootStatus::SubmitProof;
+                                merkle_root_entry.proof = Some(proof.clone());
+                                for rpc in merkle_root_entry.rpc_requests.drain(..) {
                                     let Ok(_) = rpc.send(MerkleRootsResponse::MerkleRootProof {
                                         proof: proof.proof.clone(),
                                         block_number,
                                         block_hash: merkle_root.block_hash,
-                                        merkle_root,
+                                        merkle_root
                                     }) else {
                                         log::error!("RPC response send failed");
                                         return;

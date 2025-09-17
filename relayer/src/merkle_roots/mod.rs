@@ -663,6 +663,7 @@ impl MerkleRootRelayer {
                             self.roots.entry(merkle_root)
                                 .and_modify(|merkle_root_entry| {
                                     merkle_root_entry.status = MerkleRootStatus::Finalized;
+                                    merkle_root_entry.proof = Some(proof.clone());
                                     for rpc in merkle_root_entry.rpc_requests.drain(..) {
                                         let Ok(_) = rpc.send(MerkleRootsResponse::MerkleRootProof {
                                             proof: proof.proof.clone(),
@@ -673,6 +674,7 @@ impl MerkleRootRelayer {
                                             log::error!("RPC response send failed");
                                             continue;
                                         };
+                                        log::info!("Send HTTP response for merkle root {merkle_root} at block #{block_number}");
                                     }
                             });
 
@@ -860,16 +862,13 @@ impl MerkleRootRelayer {
         {
             Ok(inner_proof) => {
                 let number = block.number();
-                self.roots.insert(
-                    merkle_root,
-                    MerkleRoot {
-                        block_number: number,
-                        block_hash: block.hash(),
-                        status: MerkleRootStatus::GenerateProof,
-                        rpc_requests: Vec::new(),
-                        proof: None,
-                    },
-                );
+                self.roots.entry(merkle_root).or_insert(MerkleRoot {
+                    block_number: number,
+                    block_hash: block.hash(),
+                    status: MerkleRootStatus::GenerateProof,
+                    rpc_requests: Vec::new(),
+                    proof: None,
+                });
                 log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{number}");
                 if !prover.prove(
                     block.number(),
@@ -890,19 +889,16 @@ impl MerkleRootRelayer {
                     block.number(),
                     signed_by_authority_set_id,
                 );
-                self.roots.insert(
-                    merkle_root,
-                    MerkleRoot {
-                        block_number: block.number(),
-                        block_hash: block.hash(),
-                        status: MerkleRootStatus::WaitForAuthoritySetSync(
-                            signed_by_authority_set_id,
-                            block.number(),
-                        ),
-                        rpc_requests: Vec::new(),
-                        proof: None,
-                    },
-                );
+                self.roots.entry(merkle_root).or_insert(MerkleRoot {
+                    block_number: block.number(),
+                    block_hash: block.hash(),
+                    status: MerkleRootStatus::WaitForAuthoritySetSync(
+                        signed_by_authority_set_id,
+                        block.number(),
+                    ),
+                    rpc_requests: Vec::new(),
+                    proof: None,
+                });
 
                 let force_sync = self
                     .storage
@@ -924,16 +920,13 @@ impl MerkleRootRelayer {
             }
 
             Err(err) => {
-                self.roots.insert(
-                    merkle_root,
-                    MerkleRoot {
-                        block_number: block.number(),
-                        block_hash: block.hash(),
-                        status: MerkleRootStatus::Failed(err.to_string()),
-                        rpc_requests: Vec::new(),
-                        proof: None,
-                    },
-                );
+                self.roots.entry(merkle_root).or_insert(MerkleRoot {
+                    block_number: block.number(),
+                    block_hash: block.hash(),
+                    status: MerkleRootStatus::Failed(err.to_string()),
+                    rpc_requests: Vec::new(),
+                    proof: None,
+                });
                 log::error!(
                     "Failed to get proof for authority set id {signed_by_authority_set_id}: {err}"
                 );

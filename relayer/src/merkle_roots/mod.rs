@@ -638,7 +638,7 @@ impl MerkleRootRelayer {
                                         merkle_root
                                     }) else {
                                         log::error!("RPC response send failed");
-                                        return;
+                                        continue;
                                     };
                                 }
                             });
@@ -671,7 +671,7 @@ impl MerkleRootRelayer {
                                             merkle_root,
                                         }) else {
                                             log::error!("RPC response send failed");
-                                            return;
+                                            continue;
                                         };
                                     }
                             });
@@ -690,7 +690,7 @@ impl MerkleRootRelayer {
                                         merkle_root,
                                     }) else {
                                         log::error!("RPC response send failed");
-                                        return;
+                                        continue;
                                     };
                                 }
                             });

@@ -55,6 +55,12 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, acco
     const { maxFeePerGas } = await estimateFeesPerGas(config);
     const { totalGasLimit, totalValue } = estimateBridging(txs, maxFeePerGas);
 
+    // it's feasible to calculate required balance using prepared txs as a single source of truth,
+    // but whenever dummy amount is used (and since it has to be used whenever dummy account is used)
+    // - it will be incorrect most of the time.
+    // maybe we will figure out a better way to estimate gas for arbitrary amounts later,
+    // maybe it's worth to consider to just using constant (heuristic) gas limit fallbacks on failed estimates,
+    // but for now leaving it as is, even though it's useless
     const requiredBalance = totalValue + totalGasLimit;
 
     let fees = totalGasLimit;

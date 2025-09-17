@@ -1,4 +1,4 @@
-import { useAccount } from '@gear-js/react-hooks';
+import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
@@ -34,6 +34,8 @@ type Props = {
 
 function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: Props) {
   const { network, token, destinationToken } = useBridgeContext();
+
+  const { api } = useApi();
 
   const { bridgingFee, vftManagerFee, ...config } = useFee();
   const accountBalance = useAccountBalance();
@@ -101,9 +103,21 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: 
   };
 
   const isEnoughBalance = () => {
-    if (!accountBalance.data || !txsEstimate) return false;
+    if (!api || !token || isUndefined(bridgingFee.value) || isUndefined(txsEstimate) || !accountBalance.data)
+      return false;
 
-    return accountBalance.data > txsEstimate.requiredBalance;
+    const amountValue = token.isNative && formattedValues ? formattedValues.amount : 0n;
+    let minBalance = amountValue + txsEstimate.fees;
+
+    if (shouldPayBridgingFee) minBalance += bridgingFee.value;
+
+    if (network.isVara) {
+      if (isUndefined(vftManagerFee?.value)) return false;
+
+      minBalance += vftManagerFee.value + api.existentialDeposit.toBigInt();
+    }
+
+    return accountBalance.data > minBalance;
   };
 
   const getButtonText = () => {

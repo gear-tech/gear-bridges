@@ -561,7 +561,9 @@ impl MerkleRootRelayer {
 
                                 match self.try_proof_merkle_root(prover, authority_set_sync, block, true, true).await {
                                     Ok(Some(merkle_root)) => {
-                                        if let Some(r) = self.roots.get_mut(&merkle_root) { r.rpc_requests.push(response) }
+                                        if let Some(r) = self.roots.get_mut(&merkle_root) { r.rpc_requests.push(response) } else {
+                                            response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
+                                        }
                                     }
 
                                     Ok(None) => {
@@ -628,6 +630,17 @@ impl MerkleRootRelayer {
                             .and_modify(|merkle_root| {
                                 merkle_root.status = MerkleRootStatus::SubmitProof;
                                 merkle_root.proof = Some(proof.clone());
+                                for rpc in merkle_root.rpc_requests.drain(..) {
+                                    let Ok(_) = rpc.send(MerkleRootsResponse::MerkleRootProof {
+                                        proof: proof.proof.clone(),
+                                        block_number,
+                                        block_hash: merkle_root.block_hash,
+                                        merkle_root,
+                                    }) else {
+                                        log::error!("RPC response send failed");
+                                        return;
+                                    };
+                                }
                             });
 
 

@@ -57,13 +57,13 @@ function RelayEthTxNote({ blockNumber, sender }: EthProps) {
     return (
       <div className={styles.text}>
         <p>Transaction is finalizing on the Vara chain.</p>
-        <p>You can pay the fee now for automatic claim or wait until manual claim becomes available.</p>
+        <p>Please wait until manual claim becomes available.</p>
       </div>
     );
 
   return (
     <div className={styles.text}>
-      <p>Choose how to claim your tokens: pay a fee to auto-claim, or finalize manually using your wallet.</p>
+      <p>Claim your tokens: finalize manually using your wallet.</p>
       {!account && <p>Vara wallet connection will be requested.</p>}
     </div>
   );

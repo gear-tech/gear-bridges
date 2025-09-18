@@ -2,6 +2,7 @@ import { useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { Tooltip } from '@/components';
 import { getErrorMessage, isUndefined } from '@/utils';
 
 import { usePayVaraFee, useVaraFee } from '../../hooks';
@@ -30,13 +31,22 @@ function PayVaraFeeButton({ transactionId, nonce }: Props) {
       .catch((error: Error) => alert.error(getErrorMessage(error)));
   };
 
+  const renderTooltipText = () => (
+    <>
+      <p>Pay a small fee in Vara chain tokens to let the bridge automatically deliver your assets.</p>
+      <p>Recommended if you don&apos;t have tokens to pay gas on the Ethereum chain.</p>
+    </>
+  );
+
   return (
-    <Button
-      text="Claim Automatically"
-      size="x-small"
-      onClick={handlePayFeeButtonClick}
-      isLoading={isUndefined(bridgingFee.value) || isPending}
-    />
+    <Tooltip value={renderTooltipText()}>
+      <Button
+        text="Claim Automatically"
+        size="x-small"
+        onClick={handlePayFeeButtonClick}
+        isLoading={isUndefined(bridgingFee.value) || isPending}
+      />
+    </Tooltip>
   );
 }
 

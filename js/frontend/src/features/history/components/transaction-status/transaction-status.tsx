@@ -29,15 +29,11 @@ const STATUS_TEXT = {
   [StatusType.Bridging]: 'Bridging',
 } as const;
 
-type Props = Pick<Transfer, 'status'> & {
-  className?: string;
-};
-
-function TransactionStatus({ status, className }: Props) {
+function TransactionStatus({ status }: Pick<Transfer, 'status'>) {
   const StatusSVG = STATUS_SVG[status];
 
   return (
-    <div className={cx(styles.status, STATUS_CLASSNAME[status], className)}>
+    <div className={cx(styles.status, STATUS_CLASSNAME[status])}>
       <StatusSVG />
       {STATUS_TEXT[status] || status}
     </div>

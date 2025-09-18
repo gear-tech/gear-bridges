@@ -132,12 +132,12 @@ function Transaction() {
           <p className={styles.subheading}>Cross-chain swap transaction information</p>
         </div>
 
-        <div className={styles.sidebar}>
-          <div className={styles.buttons}>
-            {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+        {isAwaitingPayment && (
+          <div className={styles.sidebar}>
+            <div className={styles.buttons}>
+              {isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
 
-            {isAwaitingPayment &&
-              (isVaraNetwork ? (
+              {isVaraNetwork ? (
                 bridgingStartedAtBlock && (
                   <RelayTxButton.Vara
                     sender={sender}
@@ -153,16 +153,16 @@ function Transaction() {
                   blockNumber={BigInt(blockNumber)}
                   onSuccess={refetch}
                 />
-              ))}
-          </div>
+              )}
+            </div>
 
-          {isAwaitingPayment &&
-            (isVaraNetwork ? (
+            {isVaraNetwork ? (
               bridgingStartedAtBlock && <RelayTxNote.Vara blockNumber={bridgingStartedAtBlock} sender={sender} />
             ) : (
               <RelayTxNote.Eth blockNumber={BigInt(blockNumber)} sender={sender} />
-            ))}
-        </div>
+            )}
+          </div>
+        )}
       </header>
 
       <div className={styles.cards}>

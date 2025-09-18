@@ -2,39 +2,55 @@
   max-width: 860px;
 }
 
-.header {
-  margin-bottom: 32px;
+.headingContainer {
+  margin-bottom: 12px;
 
   display: flex;
   align-items: center;
+  gap: 16px;
+}
+
+.header {
+  padding: 6px 0;
+  margin-bottom: 32px;
+
+  display: flex;
   justify-content: space-between;
   gap: 16px;
 
-  @include sm {
+  @include md {
     flex-direction: column;
+    gap: 32px;
   }
 
   .heading {
-    margin-bottom: 4px;
-
     font-size: 30px;
     font-weight: 700;
-    line-height: 40px;
+    line-height: 1;
   }
 
   .subheading {
     color: #f6f6f6e5;
+    line-height: 1;
   }
 
   .sidebar {
+    padding-bottom: 2px;
+
     display: flex;
     flex-direction: column;
+    align-items: flex-end;
+    justify-content: space-between;
     gap: 8px;
+
+    @include md {
+      align-items: flex-start;
+    }
   }
 
-  .actions {
-    display: flex;
-    align-items: center;
+  .buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 16px;
   }
 }

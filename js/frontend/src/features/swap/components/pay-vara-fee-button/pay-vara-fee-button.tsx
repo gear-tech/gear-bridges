@@ -32,7 +32,7 @@ function PayVaraFeeButton({ transactionId, nonce }: Props) {
 
   return (
     <Button
-      text="Pay Fee"
+      text="Claim Automatically"
       size="x-small"
       onClick={handlePayFeeButtonClick}
       isLoading={isUndefined(bridgingFee.value) || isPending}

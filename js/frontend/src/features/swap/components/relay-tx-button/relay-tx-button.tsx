@@ -45,7 +45,7 @@ function RelayVaraTxButton({ sender, nonce, blockNumber, onSuccess }: VaraProps)
   if (account ? !isOwner : !ethAccount.address) return;
 
   return (
-    <Button text="Manual Relay" size="x-small" onClick={handleClick} isLoading={isPending} disabled={!isAvailable} />
+    <Button text="Claim Manually" size="x-small" onClick={handleClick} isLoading={isPending} disabled={!isAvailable} />
   );
 }
 
@@ -86,7 +86,13 @@ function RelayEthTxButton({ sender, txHash, blockNumber, onSuccess }: EthProps) 
 
   return (
     <>
-      <Button text="Manual Relay" size="x-small" onClick={handleClick} isLoading={isPending} disabled={!isAvailable} />
+      <Button
+        text="Claim Manually"
+        size="x-small"
+        onClick={handleClick}
+        isLoading={isPending}
+        disabled={!isAvailable}
+      />
 
       {isSubstrateModalOpen && <WalletModal close={closeSubstrateModal} />}
     </>

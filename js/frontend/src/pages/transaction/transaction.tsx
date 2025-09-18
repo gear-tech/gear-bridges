@@ -124,14 +124,16 @@ function Transaction() {
     <Container className={styles.container}>
       <header className={styles.header}>
         <div>
-          <h1 className={styles.heading}>Transaction</h1>
+          <div className={styles.headingContainer}>
+            <h1 className={styles.heading}>Transaction</h1>
+            <TransactionStatus status={status} />
+          </div>
+
           <p className={styles.subheading}>Cross-chain swap transaction information</p>
         </div>
 
         <div className={styles.sidebar}>
-          <div className={styles.actions}>
-            <TransactionStatus status={status} />
-
+          <div className={styles.buttons}>
             {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
 
             {isAwaitingPayment &&

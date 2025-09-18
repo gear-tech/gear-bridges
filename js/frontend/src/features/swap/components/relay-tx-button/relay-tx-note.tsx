@@ -23,15 +23,19 @@ function RelayVaraTxNote({ blockNumber, sender }: VaraProps) {
   if ((account && !isOwner) || (!account && !ethAccount.address) || isUndefined(isAvailable)) return;
 
   if (!isAvailable)
-    return <p className={styles.text}>Waiting for finalization. Manual relay will be available soon.</p>;
-
-  if (!ethAccount.address)
     return (
       <div className={styles.text}>
-        <p>Click to complete the transfer and claim tokens.</p>
-        <p>Ethereum wallet connection will be prompted.</p>
+        <p>Transaction is finalizing on the Ethereum chain.</p>
+        <p>You can pay the fee now for automatic claim or wait until manual claim becomes available.</p>
       </div>
     );
+
+  return (
+    <div className={styles.text}>
+      <p>Choose how to claim your tokens: pay a fee to auto-claim, or finalize manually using your wallet.</p>
+      {!ethAccount.address && <p>Ethereum wallet connection will be requested.</p>}
+    </div>
+  );
 }
 
 type EthProps = {
@@ -50,15 +54,19 @@ function RelayEthTxNote({ blockNumber, sender }: EthProps) {
   if ((ethAccount.address && !isOwner) || (!ethAccount.address && !account) || isUndefined(isAvailable)) return;
 
   if (!isAvailable)
-    return <p className={styles.text}>Waiting for finalization. Manual relay will be available soon.</p>;
-
-  if (!account)
     return (
       <div className={styles.text}>
-        <p>Click to complete the transfer and claim tokens.</p>
-        <p>Vara wallet connection will be prompted.</p>
+        <p>Transaction is finalizing on the Vara chain.</p>
+        <p>You can pay the fee now for automatic claim or wait until manual claim becomes available.</p>
       </div>
     );
+
+  return (
+    <div className={styles.text}>
+      <p>Choose how to claim your tokens: pay a fee to auto-claim, or finalize manually using your wallet.</p>
+      {!account && <p>Vara wallet connection will be requested.</p>}
+    </div>
+  );
 }
 
 const RelayTxNote = {

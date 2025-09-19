@@ -78,7 +78,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -132,7 +132,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -195,7 +195,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -232,7 +232,7 @@ contract ERC20ManagerTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -261,7 +261,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -298,7 +298,7 @@ contract ERC20ManagerTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -340,7 +340,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -439,7 +439,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -608,7 +608,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -639,7 +639,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -683,7 +683,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -716,7 +716,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -743,7 +743,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -774,7 +774,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -806,7 +806,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -839,7 +839,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -874,7 +874,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -929,7 +929,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -967,7 +967,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -1007,7 +1007,7 @@ contract ERC20ManagerTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -1047,7 +1047,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -1078,7 +1078,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -1109,7 +1109,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 

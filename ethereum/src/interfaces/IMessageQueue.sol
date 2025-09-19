@@ -92,7 +92,7 @@ interface IMessageQueue is IPausable {
     /**
      * @dev Emitted when block number and merkle root are stored.
      */
-    event MerkleRoot(uint256 blockNumber, bytes32 merkleRoot);
+    event MerkleRoot(uint256 blockNumber, bytes32 merkleRoot, uint256 maxBlockNumber);
 
     /**
      * @dev Emitted when message is processed.

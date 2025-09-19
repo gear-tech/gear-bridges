@@ -161,7 +161,7 @@ scale-info = { version = "2.10", default-features = false, features = [
     "derive",
 ] }
 
-serde = { version = "1.0.215", default-features = false, features = [
+serde = { version = "1.0", default-features = false, features = [
     "alloc",
     "derive",
 ] }
@@ -181,7 +181,9 @@ chrono = "0.4.41"
 async-trait = "0.1.88"
 # Gear/Substrate deps
 gprimitives = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-gstd = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue", features = ["nightly"] }
+gstd = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue", features = [
+    "nightly",
+] }
 gtest = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
 gear-wasm-builder = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue", default-features = false }
 gsdk = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
@@ -217,12 +219,14 @@ sp-core = { version = "34.0.0", default-features = false }
 primitive-types = { version = "0.12.2", default-features = false }
 
 # Alloy deps
-alloy-consensus = { version = "=1.0.9", default-features = false }
-alloy-eips = { version = "=1.0.9", default-features = false }
-alloy-rlp = { version = "=0.3.12", default-features = false }
-alloy-primitives = { version = "=1.1.2", default-features = false }
-alloy-sol-types = { version = "=1.1.2", default-features = false }
-alloy = { version = "=1.0.9", package = "alloy", features = [
+alloy-consensus = { version = "1.0", default-features = false, features = [
+    "serde",
+] }
+alloy-eips = { version = "1.0", default-features = false }
+alloy-rlp = { version = "0.3.12", default-features = false }
+alloy-primitives = { version = "1.1", default-features = false }
+alloy-sol-types = { version = "1.1", default-features = false }
+alloy = { version = "1.0", package = "alloy", features = [
     "sol-types",
     "contract",
     "pubsub",
@@ -238,4 +242,5 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
     "rpc-client",
     "json-rpc",
     "rpc-types",
+    "serde",
 ] }

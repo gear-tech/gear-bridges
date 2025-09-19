@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { useMutation } from '@tanstack/react-query';
 import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
@@ -27,7 +26,7 @@ function useMint() {
     return waitForTransactionReceipt(config, { hash });
   };
 
-  const getGasLimit = ({ value, accountOverride }: { value: bigint; accountOverride?: HexString }) => {
+  const getGasLimit = ({ value }: { value: bigint }) => {
     definedAssert(token?.address, 'Fungible token address');
 
     const data = encodeFunctionData({
@@ -35,7 +34,7 @@ function useMint() {
       functionName: 'deposit',
     });
 
-    return estimateGas(config, { to: token.address, data, value, account: accountOverride });
+    return estimateGas(config, { to: token.address, data, value });
   };
 
   return { ...useMutation({ mutationFn: mint }), getGasLimit };

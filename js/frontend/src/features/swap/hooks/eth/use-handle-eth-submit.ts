@@ -7,11 +7,10 @@ function useHandleEthSubmit({
   bridgingFee,
   shouldPayBridgingFee,
   formValues,
-  accountBalance,
   onTransactionStart,
 }: UseHandleSubmitParameters) {
   const sendEthTxs = useSendEthTxs({ bridgingFee, shouldPayBridgingFee, onTransactionStart });
-  const { data: txsEstimate } = useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, accountBalance });
+  const { data: txsEstimate } = useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues });
 
   return { ...sendEthTxs, txsEstimate };
 }

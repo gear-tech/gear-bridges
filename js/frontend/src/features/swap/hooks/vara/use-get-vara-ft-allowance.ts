@@ -11,14 +11,12 @@ function useGetVaraFTAllowance(address: HexString | undefined) {
 
   const { data: program } = useVFTProgram(address);
 
-  return (accountOverride: HexString | undefined) => {
-    const accountAddress = account?.decodedAddress || accountOverride;
-
+  return () => {
     definedAssert(program, 'VFT program');
     definedAssert(address, 'FT address');
-    definedAssert(accountAddress, 'Allowance account address');
+    definedAssert(account?.decodedAddress, 'Account address');
 
-    return program.vft.allowance(accountAddress, CONTRACT_ADDRESS.VFT_MANAGER);
+    return program.vft.allowance(account.decodedAddress, CONTRACT_ADDRESS.VFT_MANAGER);
   };
 }
 

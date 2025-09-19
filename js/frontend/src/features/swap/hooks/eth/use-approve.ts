@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api/types';
 import { useMutation } from '@tanstack/react-query';
 import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
@@ -20,7 +19,7 @@ function useApprove() {
   const config = useConfig();
   const { writeContractAsync } = useWriteContract();
 
-  const getGasLimit = ({ amount, accountOverride }: { amount: bigint; accountOverride?: HexString }) => {
+  const getGasLimit = ({ amount }: { amount: bigint }) => {
     definedAssert(address, 'Fungible token address');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
@@ -28,7 +27,7 @@ function useApprove() {
     const to = address;
     const data = encodeFunctionData({ abi, functionName, args });
 
-    return estimateGas(config, { to, data, account: accountOverride });
+    return estimateGas(config, { to, data });
   };
 
   const approve = async ({ amount }: { amount: bigint }) => {

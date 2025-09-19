@@ -1,5 +1,3 @@
-import { HexString } from '@gear-js/api';
-
 import { definedAssert, isUndefined } from '@/utils';
 
 import { SUBMIT_STATUS } from '../../consts';
@@ -35,26 +33,21 @@ function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
   const permitUSDC = usePermitUSDC();
   const transfer = useTransfer(bridgingFee, shouldPayBridgingFee);
 
-  const prepare = async ({
-    amount,
-    accountAddress,
-    accountOverride,
-    isEstimate,
-  }: FormattedValues & { accountOverride?: HexString; isEstimate?: boolean }) => {
+  const prepare = async ({ amount, accountAddress, isEstimate }: FormattedValues & { isEstimate?: boolean }) => {
     definedAssert(bridgingFee, 'Bridging fee');
     definedAssert(token, 'Token');
 
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
 
-    const allowance = await getAllowance(accountOverride);
+    const allowance = await getAllowance();
     const shouldApprove = amount > allowance;
 
     const isUSDC = token.symbol.toLowerCase().includes('usdc');
 
     if (shouldMint) {
       const value = amount;
-      const gasLimit = await mint.getGasLimit({ value, accountOverride });
+      const gasLimit = await mint.getGasLimit({ value });
 
       txs.push({
         call: () => mint.mutateAsync({ value }),
@@ -72,7 +65,7 @@ function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
         }
       } else {
         const call = () => approve.mutateAsync({ amount });
-        const gasLimit = await approve.getGasLimit({ amount, accountOverride });
+        const gasLimit = await approve.getGasLimit({ amount });
 
         txs.push({ call, gasLimit });
       }
@@ -82,9 +75,7 @@ function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
     txs.push({
       call: () => transfer.mutateAsync({ amount, accountAddress, permit }),
 
-      gasLimit: shouldApprove
-        ? TRANSFER_GAS_LIMIT_FALLBACK
-        : await transfer.getGasLimit({ amount, accountAddress, accountOverride }),
+      gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
 
       value: shouldPayBridgingFee ? bridgingFee : undefined,
     });

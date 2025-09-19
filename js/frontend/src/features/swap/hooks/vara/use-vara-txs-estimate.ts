@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useDebounce } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
-import { DUMMY_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 import { estimateBridging } from '../../utils';
@@ -18,11 +17,6 @@ type Params = {
   vftManagerFee: bigint | undefined;
 };
 
-const DUMMY_FORM_VALUES = {
-  amount: 0n,
-  accountAddress: DUMMY_ADDRESS.ETH_DEAD,
-} as const;
-
 function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
@@ -32,16 +26,13 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
   const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee });
 
   const estimateTxs = async () => {
+    definedAssert(formValues, 'Form values');
     definedAssert(vftManagerFee, 'VFT Manager fee');
     definedAssert(bridgingFee, 'Bridging fee value');
     definedAssert(api, 'API');
     definedAssert(prepareTxs, 'Prepared transactions');
 
-    const txs = await prepareTxs({
-      ...(formValues ?? DUMMY_FORM_VALUES),
-      accountOverride: account ? undefined : DUMMY_ADDRESS.VARA_ALICE,
-    });
-
+    const txs = await prepareTxs(formValues);
     const { totalGasLimit, totalValue } = estimateBridging(txs, api.valuePerGas.toBigInt());
 
     const totalEstimatedFee = txs.reduce((sum, { estimatedFee }) => sum + estimatedFee, 0n);
@@ -69,7 +60,10 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
     queryFn: estimateTxs,
 
     enabled:
-      !isUndefined(bridgingFee) && !isUndefined(vftManagerFee) && Boolean(api && token && prepareTxs) && isAccountReady,
+      !isUndefined(bridgingFee) &&
+      !isUndefined(vftManagerFee) &&
+      Boolean(api && formValues && token && prepareTxs) &&
+      isAccountReady,
   });
 }
 

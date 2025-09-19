@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { Extrinsic } from '@polkadot/types/interfaces';
 
 import { isUndefined } from '@/utils';
@@ -41,17 +40,15 @@ function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee }:
 
   if (isUndefined(bridgingFee) || isUndefined(vftManagerFee) || !token) return;
 
-  return async ({ amount, accountAddress, accountOverride }: FormattedValues & { accountOverride?: HexString }) => {
-    const accountArg = accountOverride ? { account: { addressOrPair: accountOverride } } : {};
-
+  return async ({ amount, accountAddress }: FormattedValues) => {
     const txs: Transaction[] = [];
     const shouldMint = token.isNative;
 
-    const allowance = await getAllowance(accountOverride);
+    const allowance = await getAllowance();
     const shouldApprove = amount > allowance;
 
     if (shouldMint) {
-      const { transaction, fee } = await mint.prepareTransactionAsync({ ...accountArg, args: [], value: amount });
+      const { transaction, fee } = await mint.prepareTransactionAsync({ args: [], value: amount });
 
       txs.push({
         extrinsic: transaction.extrinsic,
@@ -63,7 +60,6 @@ function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee }:
 
     if (shouldApprove) {
       const { transaction, fee } = await approve.prepareTransactionAsync({
-        ...accountArg,
         args: [CONTRACT_ADDRESS.VFT_MANAGER, amount],
       });
 
@@ -75,7 +71,6 @@ function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee }:
     }
 
     const { transaction, fee } = await requestBridging.prepareTransactionAsync({
-      ...accountArg,
       gasLimit: GAS_LIMIT.BRIDGE,
       args: [token.address, amount, accountAddress],
       value: vftManagerFee,

@@ -81,7 +81,6 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: 
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
     formValues: formattedValues,
-    accountBalance: accountBalance.data,
     onTransactionStart: openTransactionModal,
   });
 

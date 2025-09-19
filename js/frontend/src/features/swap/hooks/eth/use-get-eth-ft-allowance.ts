@@ -12,17 +12,15 @@ function useGetEthAllowance(address: HexString | undefined) {
   const ethAccount = useEthAccount();
   const config = useConfig();
 
-  return (accountOverride: HexString | undefined) => {
-    const accountAddress = ethAccount.address || accountOverride;
-
+  return () => {
     definedAssert(address, 'FT address');
-    definedAssert(accountAddress, 'Allowance account address');
+    definedAssert(ethAccount.address, 'Ethereum account address');
 
     return readContract(config, {
       address,
       abi: ERC20_ABI,
       functionName: 'allowance',
-      args: [accountAddress, CONTRACT_ADDRESS.ERC20_MANAGER],
+      args: [ethAccount.address, CONTRACT_ADDRESS.ERC20_MANAGER],
     });
   };
 }

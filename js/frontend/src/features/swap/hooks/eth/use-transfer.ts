@@ -12,7 +12,6 @@ import { useBridgeContext } from '../../context';
 type Parameters = {
   amount: bigint;
   accountAddress: HexString;
-  accountOverride?: HexString;
   permit?: { deadline: bigint; v: number; r: HexString; s: HexString };
 };
 
@@ -22,7 +21,7 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
   const { writeContractAsync } = useWriteContract();
   const config = useConfig();
 
-  const getGasLimitWithFee = ({ amount, accountAddress, accountOverride }: Parameters) => {
+  const getGasLimitWithFee = ({ amount, accountAddress }: Parameters) => {
     definedAssert(fee, 'Fee');
     definedAssert(token?.address, 'Fungible token address');
 
@@ -36,7 +35,6 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
       to: CONTRACT_ADDRESS.ERC20_MANAGER,
       data: encodedData,
       value: fee,
-      account: accountOverride,
     });
   };
 
@@ -62,7 +60,7 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
     return waitForTransactionReceipt(config, { hash });
   };
 
-  const getGasLimitWithoutFee = ({ amount, accountAddress, accountOverride }: Parameters) => {
+  const getGasLimitWithoutFee = ({ amount, accountAddress }: Parameters) => {
     definedAssert(token?.address, 'Fungible token address');
 
     const encodedData = encodeFunctionData({
@@ -74,7 +72,6 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
     return estimateGas(config, {
       to: CONTRACT_ADDRESS.ERC20_MANAGER,
       data: encodedData,
-      account: accountOverride,
     });
   };
 

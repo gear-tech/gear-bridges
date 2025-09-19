@@ -1,5 +1,7 @@
 import { HexString } from '@gear-js/api';
 
+import { FormattedValues, SubmitStatus } from './form';
+
 type BalanceValues = {
   value: bigint | undefined;
   formattedValue: string | undefined;
@@ -21,4 +23,25 @@ type UseFee = () => {
   vftManagerFee?: BalanceValues;
 };
 
-export type { UseAccountBalance, UseFTBalance, UseFee };
+type UseSendTxs = (params: {
+  bridgingFee: bigint | undefined;
+  shouldPayBridgingFee: boolean;
+  vftManagerFee: bigint | undefined;
+  onTransactionStart: (values: FormattedValues) => void;
+}) => {
+  mutateAsync: (values: FormattedValues) => Promise<unknown>;
+  status: SubmitStatus;
+  isPending: boolean;
+  error: Error | null;
+};
+
+type UseTxsEstimate = (params: {
+  formValues: FormattedValues | undefined;
+  bridgingFee: bigint | undefined;
+  shouldPayBridgingFee: boolean;
+  vftManagerFee: bigint | undefined;
+}) => {
+  data: { requiredBalance: bigint; fees: bigint } | undefined;
+};
+
+export type { UseAccountBalance, UseFTBalance, UseFee, UseSendTxs, UseTxsEstimate };

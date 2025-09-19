@@ -14,7 +14,7 @@ import PlusSVG from '../../assets/plus.svg?react';
 import { CLAIM_TYPE, FIELD_NAME, NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
-import { UseHandleSubmit, UseAccountBalance, UseFTBalance, UseFee, FormattedValues } from '../../types';
+import { UseSendTxs, UseAccountBalance, UseFTBalance, UseFee, FormattedValues, UseTxsEstimate } from '../../types';
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { Settings } from '../settings';
@@ -28,11 +28,12 @@ import styles from './swap-form.module.scss';
 type Props = {
   useAccountBalance: UseAccountBalance;
   useFTBalance: UseFTBalance;
-  useHandleSubmit: UseHandleSubmit;
+  useSendTxs: UseSendTxs;
+  useTxsEstimate: UseTxsEstimate;
   useFee: UseFee;
 };
 
-function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: Props) {
+function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsEstimate }: Props) {
   const { network, token, destinationToken } = useBridgeContext();
 
   const { api } = useApi();
@@ -76,16 +77,22 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: 
     ftBalance: ftBalance.data,
   });
 
-  const { txsEstimate, ...submit } = useHandleSubmit({
+  const sendTxs = useSendTxs({
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
-    formValues: formattedValues,
     onTransactionStart: openTransactionModal,
   });
 
+  const txsEstimate = useTxsEstimate({
+    formValues: formattedValues,
+    bridgingFee: bridgingFee.value,
+    shouldPayBridgingFee,
+    vftManagerFee: vftManagerFee?.value,
+  });
+
   const isLoading =
-    submit.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || !txsEstimate;
+    sendTxs.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || !txsEstimate;
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -102,11 +109,11 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: 
   };
 
   const isEnoughBalance = () => {
-    if (!api || !token || isUndefined(bridgingFee.value) || isUndefined(txsEstimate) || !accountBalance.data)
+    if (!api || !token || isUndefined(bridgingFee.value) || isUndefined(txsEstimate.data) || !accountBalance.data)
       return false;
 
     const amountValue = token.isNative && formattedValues ? formattedValues.amount : 0n;
-    let minBalance = amountValue + txsEstimate.fees;
+    let minBalance = amountValue + txsEstimate.data.fees;
 
     if (shouldPayBridgingFee) minBalance += bridgingFee.value;
 
@@ -136,12 +143,12 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: 
   };
 
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
-  const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...submit} />;
+  const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...sendTxs} />;
 
   return (
     <>
       <FormProvider {...form}>
-        <form onSubmit={handleSubmit(submit.mutateAsync)} className={styles.form}>
+        <form onSubmit={handleSubmit(sendTxs.mutateAsync)} className={styles.form}>
           <div>
             <div className={styles.card}>
               <header className={styles.header}>
@@ -201,8 +208,8 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: 
             claimType={claimType}
             onClaimTypeChange={handleClaimTypeChange}
             isVaraNetwork={network.isVara}
-            fee={txsEstimate?.fees}
-            isFeeLoading={isUndefined(txsEstimate)}
+            fee={txsEstimate.data?.fees}
+            isFeeLoading={isUndefined(txsEstimate.data)}
             disabled={isLoading}
             time={time}
           />
@@ -221,7 +228,7 @@ function SwapForm({ useHandleSubmit, useAccountBalance, useFTBalance, useFee }: 
       {transactionModal && (
         <TransactionModal
           renderProgressBar={renderProgressBar}
-          estimatedFees={txsEstimate?.fees || 0n}
+          estimatedFees={txsEstimate.data?.fees || 0n}
           {...transactionModal}
         />
       )}

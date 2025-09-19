@@ -3,39 +3,60 @@
 }
 
 .header {
+  padding: 6px 0;
   margin-bottom: 32px;
 
   display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: 16px;
 
-  @include sm {
+  @include md {
     flex-direction: column;
+    align-items: center;
+    gap: 32px;
+
+    text-align: center;
+  }
+
+  .headingContainer {
+    margin-bottom: 12px;
+
+    display: flex;
+    align-items: center;
+    gap: 16px;
   }
 
   .heading {
-    margin-bottom: 4px;
-
     font-size: 30px;
     font-weight: 700;
-    line-height: 40px;
+    line-height: 1;
   }
 
   .subheading {
     color: #f6f6f6e5;
+    line-height: 1;
   }
 
   .sidebar {
     display: flex;
     flex-direction: column;
+    align-items: flex-end;
+    justify-content: space-between;
     gap: 8px;
+
+    @include md {
+      align-items: center;
+    }
   }
 
-  .actions {
-    display: flex;
-    align-items: center;
+  .buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 16px;
+
+    > *:only-child {
+      grid-column: 1 / -1;
+    }
   }
 }
 

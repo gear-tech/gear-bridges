@@ -3,9 +3,8 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
-    DEFAULT_COUNT_THREADS,
+    EthereumArgs, EthereumSignerArgs, EthereumSignerPathArgs, FetchMerkleRootsArgs, GearArgs,
+    GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -18,7 +17,7 @@ use message_relayer::{
 };
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
+use prover::consts::SIZE_THREAD_STACK_MIN;
 use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
 use sails_rs::ActorId;
 use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
@@ -113,11 +112,7 @@ async fn run() -> AnyResult<()> {
         }
 
         CliCommands::KillSwitch(args) => {
-            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
-            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
-            if rust_min_stack < SIZE_THREAD_STACK_MIN {
-                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
-            }
+            use reqwest::header;
 
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
@@ -125,28 +120,33 @@ async fn run() -> AnyResult<()> {
                 args.gear_args.retries,
             )
             .await
-            .expect("Failed to connec to Gear API");
+            .expect("Failed to connect to Gear API");
 
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let eth_api = create_eth_signer_client_from_path(&args.ethereum_args)
+                .await
+                .expect("Failed to create Ethereum client");
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(args.relayer_http_args.timeout_secs))
+                .default_headers({
+                    let mut headers = header::HeaderMap::new();
+                    headers.insert(
+                        "X-Token",
+                        header::HeaderValue::from_str(&args.relayer_http_args.access_token)
+                            .expect("Invalid token"),
+                    );
+                    headers
+                })
+                .build()
+                .expect("Failed to create HTTP client");
 
             let metrics = MetricsBuilder::new();
-
-            let (proof_storage, metrics) =
-                create_proof_storage(&args.proof_storage_args, &args.gear_args, metrics).await;
-
-            let genesis_config = create_genesis_config(&args.genesis_config_args);
-
-            let block_finality_storage =
-                sled::open("./block_finality_storage").expect("Db not corrupted");
 
             let mut kill_switch = KillSwitchRelayer::new(
                 api_provider.connection(),
                 eth_api,
-                genesis_config,
-                proof_storage,
+                http_client,
                 args.from_eth_block,
-                block_finality_storage,
-                Some(DEFAULT_COUNT_THREADS),
+                args.relayer_http_args.url,
             )
             .await;
 
@@ -565,14 +565,38 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
 async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
-
         mq_address,
+        eth_max_retries,
+        eth_retry_interval_ms,
         ..
     } = &args.ethereum_args;
 
-    EthApi::new(eth_endpoint, mq_address, Some(&args.fee_payer))
-        .await
-        .expect("Error while creating ethereum client")
+    EthApi::new_with_retries(
+        eth_endpoint,
+        mq_address,
+        Some(&args.fee_payer),
+        *eth_max_retries,
+        eth_retry_interval_ms.map(Duration::from_millis),
+    )
+    .await
+    .expect("Error while creating ethereum client")
+}
+
+async fn create_eth_signer_client_from_path(args: &EthereumSignerPathArgs) -> AnyResult<EthApi> {
+    let pk_bytes = std::fs::read(&args.fee_payer_path).with_context(|| {
+        format!(
+            "Failed to read ETH_FEE_PAYER_PATH file: {:?}",
+            &args.fee_payer_path
+        )
+    })?;
+    let fee_payer = format!("0x{}", hex::encode(pk_bytes));
+
+    let args = EthereumSignerArgs {
+        ethereum_args: args.ethereum_args.clone(),
+        fee_payer,
+    };
+
+    Ok(create_eth_signer_client(&args).await)
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {
@@ -653,17 +677,4 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     }
 
     Ok(())
-}
-
-fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
-    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
-        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
-    let authority_set_hash = authority_set_hash
-        .try_into()
-        .expect("Incorrect format for authority set hash: wrong length");
-
-    GenesisConfig {
-        authority_set_id: genesis_config_args.authority_set_id,
-        authority_set_hash,
-    }
 }

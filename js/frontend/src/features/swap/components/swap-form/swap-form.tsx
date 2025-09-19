@@ -8,7 +8,7 @@ import { FormProvider } from 'react-hook-form';
 import { Input } from '@/components';
 import { TokenPrice } from '@/features/token-price';
 import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
-import { isUndefined } from '@/utils';
+import { definedAssert, isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
 import { CLAIM_TYPE, FIELD_NAME, NETWORK } from '../../consts';
@@ -50,7 +50,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const [isSubstrateWalletModalOpen, openSubstrateWalletModal, closeSubstrateWalletModal] = useModal();
 
   const [transactionModal, setTransactionModal] = useState<
-    Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar' | 'estimatedFees'> | undefined
+    Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
   >();
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
@@ -59,29 +59,9 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const varaSymbol = useVaraSymbol();
 
-  const openTransactionModal = (values: FormattedValues) => {
-    if (!token || !destinationToken) throw new Error('Address is not defined');
-
-    const amount = values.amount;
-    const receiver = values.accountAddress;
-    const isVaraNetwork = network.isVara;
-    const source = token.address;
-    const destination = destinationToken.address;
-    const close = () => setTransactionModal(undefined);
-
-    setTransactionModal({ isVaraNetwork, amount, source, destination, receiver, time, close });
-  };
-
   const { form, amount, formattedValues, handleSubmit, setMaxBalance } = useSwapForm({
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
-  });
-
-  const sendTxs = useSendTxs({
-    bridgingFee: bridgingFee.value,
-    shouldPayBridgingFee,
-    vftManagerFee: vftManagerFee?.value,
-    onTransactionStart: openTransactionModal,
   });
 
   const txsEstimate = useTxsEstimate({
@@ -89,6 +69,30 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
+  });
+
+  const openTransactionModal = (values: FormattedValues) => {
+    definedAssert(token, 'Token');
+    definedAssert(destinationToken, 'Destination token');
+    definedAssert(txsEstimate.data, 'Transaction estimation');
+
+    setTransactionModal({
+      amount: values.amount,
+      receiver: values.accountAddress,
+      isVaraNetwork: network.isVara,
+      source: token.address,
+      destination: destinationToken.address,
+      estimatedFees: txsEstimate.data.fees,
+      time,
+      close: () => setTransactionModal(undefined),
+    });
+  };
+
+  const sendTxs = useSendTxs({
+    bridgingFee: bridgingFee.value,
+    shouldPayBridgingFee,
+    vftManagerFee: vftManagerFee?.value,
+    onTransactionStart: openTransactionModal,
   });
 
   const isLoading =
@@ -214,13 +218,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
       {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
 
       {/* passing renderProgressBar explicitly to avoid state closure */}
-      {transactionModal && (
-        <TransactionModal
-          renderProgressBar={renderProgressBar}
-          estimatedFees={txsEstimate.data?.fees || 0n}
-          {...transactionModal}
-        />
-      )}
+      {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}
     </>
   );
 }

@@ -11,15 +11,13 @@ import { getErrorMessage, isUndefined } from '@/utils';
 import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
 
 type VaraProps = {
-  sender: string;
   nonce: HexString;
   blockNumber: string;
   onSuccess: () => void;
 };
 
-function RelayVaraTxButton({ sender, nonce, blockNumber, onSuccess }: VaraProps) {
+function RelayVaraTxButton({ nonce, blockNumber, onSuccess }: VaraProps) {
   const { account } = useAccount();
-  const isOwner = account?.decodedAddress === sender;
 
   const ethAccount = useEthAccount();
   const { open: openEthModal } = useAppKit();
@@ -60,7 +58,7 @@ function RelayVaraTxButton({ sender, nonce, blockNumber, onSuccess }: VaraProps)
     );
   };
 
-  if (account ? !isOwner : !ethAccount.address) return;
+  if (!account && !ethAccount.address) return;
 
   return (
     <Tooltip value={renderTooltipText()}>
@@ -80,19 +78,16 @@ function RelayVaraTxButton({ sender, nonce, blockNumber, onSuccess }: VaraProps)
 }
 
 type EthProps = {
-  sender: string;
   blockNumber: bigint;
   txHash: HexString;
   onSuccess: () => void;
 };
 
-function RelayEthTxButton({ sender, txHash, blockNumber, onSuccess }: EthProps) {
+function RelayEthTxButton({ txHash, blockNumber, onSuccess }: EthProps) {
   const { account } = useAccount();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
   const ethAccount = useEthAccount();
-  const isOwner = ethAccount.address?.toLowerCase() === sender;
-
   const alert = useAlert();
 
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
@@ -129,7 +124,7 @@ function RelayEthTxButton({ sender, txHash, blockNumber, onSuccess }: EthProps) 
     );
   };
 
-  if (ethAccount.address ? !isOwner : !account) return;
+  if (!account && !ethAccount.address) return;
 
   return (
     <>

@@ -1,5 +1,5 @@
 import { HexString } from '@gear-js/api';
-import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
+import { getVaraAddress } from '@gear-js/react-hooks';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -78,7 +78,6 @@ function ExplorerLink({ children, network, id, urls }: ExplorerLinkProps) {
 }
 
 function Transaction() {
-  const { account } = useAccount();
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
@@ -117,7 +116,6 @@ function Transaction() {
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
-  const isOwner = account?.decodedAddress === sender;
   const rawNonce = isVaraNetwork ? `0x${nonce.padStart(64, '0')}` : nonce;
 
   return (
@@ -135,31 +133,25 @@ function Transaction() {
         {isAwaitingPayment && (
           <div className={styles.sidebar}>
             <div className={styles.buttons}>
-              {isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+              {isVaraNetwork && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
 
               {isVaraNetwork ? (
                 bridgingStartedAtBlock && (
                   <RelayTxButton.Vara
-                    sender={sender}
                     nonce={rawNonce as HexString}
                     blockNumber={bridgingStartedAtBlock}
                     onSuccess={refetch}
                   />
                 )
               ) : (
-                <RelayTxButton.Eth
-                  sender={sender}
-                  txHash={txHash as HexString}
-                  blockNumber={BigInt(blockNumber)}
-                  onSuccess={refetch}
-                />
+                <RelayTxButton.Eth txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} onSuccess={refetch} />
               )}
             </div>
 
             {isVaraNetwork ? (
-              bridgingStartedAtBlock && <RelayTxNote.Vara blockNumber={bridgingStartedAtBlock} sender={sender} />
+              bridgingStartedAtBlock && <RelayTxNote.Vara blockNumber={bridgingStartedAtBlock} />
             ) : (
-              <RelayTxNote.Eth blockNumber={BigInt(blockNumber)} sender={sender} />
+              <RelayTxNote.Eth blockNumber={BigInt(blockNumber)} />
             )}
           </div>
         )}

@@ -9,18 +9,15 @@ import styles from './relay-tx-note.module.scss';
 
 type VaraProps = {
   blockNumber: string;
-  sender: string;
 };
 
-function RelayVaraTxNote({ blockNumber, sender }: VaraProps) {
+function RelayVaraTxNote({ blockNumber }: VaraProps) {
   const { account } = useAccount();
-  const isOwner = account?.decodedAddress === sender;
-
   const ethAccount = useEthAccount();
 
   const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
 
-  if ((account && !isOwner) || (!account && !ethAccount.address) || isUndefined(isAvailable)) return;
+  if ((!account && !ethAccount.address) || isUndefined(isAvailable)) return;
 
   if (!isAvailable)
     return (
@@ -32,26 +29,24 @@ function RelayVaraTxNote({ blockNumber, sender }: VaraProps) {
 
   return (
     <div className={styles.text}>
-      <p>Choose how to claim your tokens: pay a fee to auto-claim, or finalize manually using your wallet.</p>
-      {!ethAccount.address && <p>Ethereum wallet connection will be requested.</p>}
+      <p>Choose how to claim tokens: pay a fee to auto-claim, or finalize manually using your wallet.</p>
+      {!account && <p>Vara wallet connection will be requested for auto claim.</p>}
+      {!ethAccount.address && <p>Ethereum wallet connection will be requested for manual claim.</p>}
     </div>
   );
 }
 
 type EthProps = {
   blockNumber: bigint;
-  sender: string;
 };
 
-function RelayEthTxNote({ blockNumber, sender }: EthProps) {
+function RelayEthTxNote({ blockNumber }: EthProps) {
   const { account } = useAccount();
-
   const ethAccount = useEthAccount();
-  const isOwner = ethAccount.address?.toLowerCase() === sender;
 
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
 
-  if ((ethAccount.address && !isOwner) || (!ethAccount.address && !account) || isUndefined(isAvailable)) return;
+  if ((!ethAccount.address && !account) || isUndefined(isAvailable)) return;
 
   if (!isAvailable)
     return (
@@ -63,7 +58,7 @@ function RelayEthTxNote({ blockNumber, sender }: EthProps) {
 
   return (
     <div className={styles.text}>
-      <p>Claim your tokens: finalize manually using your wallet.</p>
+      <p>Claim tokens: finalize manually using your wallet.</p>
       {!account && <p>Vara wallet connection will be requested.</p>}
     </div>
   );

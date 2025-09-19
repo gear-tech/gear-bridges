@@ -124,7 +124,6 @@ function RelayEthTxButton({ sender, txHash, blockNumber, onSuccess }: EthProps) 
     return (
       <>
         <p>Use your Vara chain wallet to claim tokens by yourself.</p>
-        <p>A network fee is required.</p>
         <p>A network fee is required. {!account && 'Wallet connection will be requested.'}</p>
       </>
     );

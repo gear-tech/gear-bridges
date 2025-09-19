@@ -286,11 +286,11 @@ contract MessageQueue is
             _blockNumbers[blockNumber] = merkleRoot;
             _merkleRootTimestamps[merkleRoot] = block.timestamp;
 
+            emit MerkleRoot(blockNumber, merkleRoot, _maxBlockNumber + MAX_BLOCK_DISTANCE);
+
             if (blockNumber > _maxBlockNumber) {
                 _maxBlockNumber = blockNumber;
             }
-
-            emit MerkleRoot(blockNumber, merkleRoot);
         }
     }
 

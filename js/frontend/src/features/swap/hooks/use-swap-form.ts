@@ -81,9 +81,8 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
     if (isUndefined(balance)) throw new Error('Balance is not defined');
 
     const formattedValue = formatUnits(balance, token.decimals);
-    const shouldValidate = formState.isSubmitted; // validating only if validation was already fired
 
-    setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate });
+    setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate: true });
   };
 
   useEffect(() => {

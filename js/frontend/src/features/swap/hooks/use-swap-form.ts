@@ -30,6 +30,7 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
 
   const valueSchema = getAmountSchema(
     token?.isNative,
+    accountBalance,
     ftBalance,
     token?.decimals,
     network.isVara ? api?.existentialDeposit.toBigInt() : 0n,
@@ -45,6 +46,7 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
   const form = useForm({
     defaultValues: DEFAULT_VALUES,
     resolver: zodResolver(schema),
+    mode: 'onChange',
   });
 
   const { setValue, reset, formState } = form;

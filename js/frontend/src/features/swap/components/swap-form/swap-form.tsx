@@ -92,7 +92,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   });
 
   const isLoading =
-    sendTxs.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || !txsEstimate;
+    sendTxs.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || txsEstimate.isLoading;
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -109,24 +109,13 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   };
 
   const isEnoughBalance = () => {
-    if (!api || !token || isUndefined(bridgingFee.value) || isUndefined(txsEstimate.data) || !accountBalance.data)
-      return false;
+    if (!api || !token || isUndefined(bridgingFee.value) || !txsEstimate.data || !accountBalance.data) return false;
 
-    const amountValue = token.isNative && formattedValues ? formattedValues.amount : 0n;
-    let minBalance = amountValue + txsEstimate.data.fees;
-
-    if (shouldPayBridgingFee) minBalance += bridgingFee.value;
-
-    if (network.isVara) {
-      if (isUndefined(vftManagerFee?.value)) return false;
-
-      minBalance += vftManagerFee.value + api.existentialDeposit.toBigInt();
-    }
-
-    return accountBalance.data > minBalance;
+    return accountBalance.data > txsEstimate.data.requiredBalance;
   };
 
   const getButtonText = () => {
+    if (!txsEstimate.data) return 'Fill the form';
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
     return 'Transfer';
@@ -209,7 +198,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
             onClaimTypeChange={handleClaimTypeChange}
             isVaraNetwork={network.isVara}
             fee={txsEstimate.data?.fees}
-            isFeeLoading={isUndefined(txsEstimate.data)}
+            isFeeLoading={txsEstimate.isLoading}
             disabled={isLoading}
             time={time}
           />

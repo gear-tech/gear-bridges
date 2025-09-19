@@ -8,11 +8,18 @@ import { ERROR_MESSAGE } from './consts';
 
 const getAmountSchema = (
   isNativeToken: boolean | undefined,
-  ftBalanceValue = 0n, // can be undefined on no account, but schema is needed for useTxsEstimate
+  accountBalanceValue: bigint | undefined,
+  ftBalanceValue: bigint | undefined,
   decimals: number | undefined,
   eDeposit: bigint | undefined,
 ) => {
-  if (isUndefined(isNativeToken) || isUndefined(decimals) || isUndefined(eDeposit))
+  if (
+    isUndefined(isNativeToken) ||
+    isUndefined(accountBalanceValue) ||
+    isUndefined(ftBalanceValue) ||
+    isUndefined(decimals) ||
+    isUndefined(eDeposit)
+  )
     return z.string().transform((value) => BigInt(value));
 
   const schema = z
@@ -25,7 +32,9 @@ const getAmountSchema = (
     // existential deposit is a minimum required amount to transfer if balance is 0
     const minAmountMsg = eDeposit ? `Minimum amount is ${formatUnits(eDeposit, decimals)}` : ERROR_MESSAGE.MIN_AMOUNT;
 
-    return schema.refine((value) => (eDeposit ? value >= eDeposit : value > 0n), { message: minAmountMsg });
+    return schema
+      .refine((value) => (eDeposit ? value >= eDeposit : value > 0n), { message: minAmountMsg })
+      .refine((value) => value <= accountBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE });
   }
 
   return schema

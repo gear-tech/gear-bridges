@@ -42,6 +42,7 @@ type UseTxsEstimate = (params: {
   vftManagerFee: bigint | undefined;
 }) => {
   data: { requiredBalance: bigint; fees: bigint } | undefined;
+  isLoading: boolean;
 };
 
 export type { UseAccountBalance, UseFTBalance, UseFee, UseSendTxs, UseTxsEstimate };

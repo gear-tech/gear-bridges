@@ -103,6 +103,10 @@ pub enum Event {
     BridgingRequested {
         /// Nonce that gear-eth-bridge built-in actor have returned.
         nonce: U256,
+        /// Queue ID that gear-eth-bridge built-in actor have returned.
+        queue_id: u64,
+        /// Hash of the message that gear-eth-bridge built-in actor have returned.
+        hash: H256,
         /// `VFT` token address that was locked/burned.
         vara_token_id: ActorId,
         /// Amount of tokens that should be bridged.

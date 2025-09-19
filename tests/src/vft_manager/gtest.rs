@@ -30,13 +30,20 @@ impl WasmProgram for GearBridgeBuiltinMock {
     fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
         #[derive(Encode)]
         enum Response {
-            MessageSent { nonce: U256, hash: H256 },
+            MessageSent {
+                block_number: u32,
+                hash: H256,
+                nonce: U256,
+                queue_id: u64,
+            },
         }
 
         Ok(Some(
             Response::MessageSent {
+                block_number: 1,
                 nonce: U256::from(1),
                 hash: [1; 32].into(),
+                queue_id: 1,
             }
             .encode(),
         ))

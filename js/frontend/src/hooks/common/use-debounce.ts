@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-function useDebounce<T = unknown>(value: T, wait: number, options = { leading: false }) {
+function useDebounce<T = unknown>(value: T, wait = 300, options = { leading: false }) {
   const [_value, setValue] = useState(value);
   const mountedRef = useRef(false);
   const timeoutRef = useRef<number | null>(null);

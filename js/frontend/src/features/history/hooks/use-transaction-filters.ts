@@ -77,7 +77,7 @@ function useTransactionFilters() {
   // treat carefully, formState is not acting 100% accurate with watch and optional valition schema.
   // relying on it only cuz debounce value is getting set later. otherwise would need to think about another solution
   const searchError = formState.errors[FIELD_NAME.SEARCH];
-  const [debouncedSearch] = useDebounce(search, 300);
+  const [debouncedSearch] = useDebounce(search);
 
   const filters = useMemo(() => {
     const filter = {} as TransferFilter;

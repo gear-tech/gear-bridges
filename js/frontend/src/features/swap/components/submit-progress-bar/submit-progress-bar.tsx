@@ -4,11 +4,11 @@ import { Card } from '@/components';
 import { cx, getErrorMessage } from '@/utils';
 
 import { SUBMIT_STATUS } from '../../consts';
-import { UseHandleSubmit } from '../../types';
+import { UseSendTxs } from '../../types';
 
 import styles from './submit-progress-bar.module.scss';
 
-type Props = Pick<ReturnType<UseHandleSubmit>, 'status' | 'isPending' | 'error'> & {
+type Props = Pick<ReturnType<UseSendTxs>, 'status' | 'isPending' | 'error'> & {
   isVaraNetwork: boolean;
 };
 

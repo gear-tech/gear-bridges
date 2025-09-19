@@ -1,5 +1,6 @@
 import { Controller, FieldError, get, useFormContext } from 'react-hook-form';
 import { NumericFormat, numericFormatter } from 'react-number-format';
+import { SourceType } from 'react-number-format/types/types';
 
 import { TruncatedText } from '@/components';
 import { cx } from '@/utils';
@@ -24,7 +25,13 @@ function AmountInput() {
           <NumericFormat
             placeholder="0"
             value={fieldValue}
-            onValueChange={({ value }) => field.onChange(value)}
+            onValueChange={({ value }, { source }) => {
+              // cuz react-hook-form triggers onValueChange programmatically during form reset,
+              // and with mode 'onChange' it results in immediate validation after
+              if (source !== ('event' as SourceType)) return;
+
+              field.onChange(value);
+            }}
             aria-invalid={Boolean(error?.message)}
             className={cx(styles.input, Number(fieldValue) && styles.active)}
             {...PROPS}

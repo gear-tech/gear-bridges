@@ -19,7 +19,7 @@ function useApprove() {
   const config = useConfig();
   const { writeContractAsync } = useWriteContract();
 
-  const getGasLimit = (amount: bigint) => {
+  const getGasLimit = ({ amount }: { amount: bigint }) => {
     definedAssert(address, 'Fungible token address');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;

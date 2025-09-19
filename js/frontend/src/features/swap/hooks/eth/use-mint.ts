@@ -26,7 +26,7 @@ function useMint() {
     return waitForTransactionReceipt(config, { hash });
   };
 
-  const getGasLimit = (value: bigint) => {
+  const getGasLimit = ({ value }: { value: bigint }) => {
     definedAssert(token?.address, 'Fungible token address');
 
     const data = encodeFunctionData({

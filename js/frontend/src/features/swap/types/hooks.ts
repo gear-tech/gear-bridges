@@ -27,6 +27,7 @@ type UseSendTxs = (params: {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   vftManagerFee: bigint | undefined;
+  ftBalance: bigint | undefined;
   onTransactionStart: (values: FormattedValues) => void;
 }) => {
   mutateAsync: (values: FormattedValues) => Promise<unknown>;
@@ -40,6 +41,7 @@ type UseTxsEstimate = (params: {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
   vftManagerFee: bigint | undefined;
+  ftBalance: bigint | undefined;
 }) => {
   data: { requiredBalance: bigint; fees: bigint } | undefined;
   isLoading: boolean;

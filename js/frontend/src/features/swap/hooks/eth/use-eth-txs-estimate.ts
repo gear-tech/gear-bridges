@@ -15,15 +15,16 @@ type Params = {
   formValues: FormattedValues | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
+  ftBalance: bigint | undefined;
 };
 
-function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues }: Params) {
+function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, ftBalance }: Params) {
   const ethAccount = useEthAccount();
   const config = useConfig();
 
   const { token } = useBridgeContext();
 
-  const ethTxs = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee });
+  const ethTxs = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee, ftBalance });
 
   const estimateTxs = async () => {
     definedAssert(formValues, 'Form values');

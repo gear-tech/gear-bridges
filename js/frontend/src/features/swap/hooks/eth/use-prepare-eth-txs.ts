@@ -21,9 +21,10 @@ type Transaction = {
 type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
+  ftBalance: bigint | undefined;
 };
 
-function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
+function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee, ftBalance }: Params) {
   const { token } = useBridgeContext();
 
   const getAllowance = useGetEthAllowance(token?.address);
@@ -35,6 +36,7 @@ function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
 
   const prepare = async ({ amount, accountAddress, isEstimate }: FormattedValues & { isEstimate?: boolean }) => {
     definedAssert(bridgingFee, 'Bridging fee');
+    definedAssert(ftBalance, 'FT balance');
     definedAssert(token, 'Token');
 
     const txs: Transaction[] = [];
@@ -71,11 +73,16 @@ function usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee }: Params) {
       }
     }
 
-    // if approve is not made, transfer gas estimate will fail
+    // transfer estimate will fail if allowance or balance is less than amount.
+    // we're checking balance at the form level, but not for WETH because it's always getting minted
+    const canEstimateTransfer = !shouldApprove && ftBalance >= amount;
+
     txs.push({
       call: () => transfer.mutateAsync({ amount, accountAddress, permit }),
 
-      gasLimit: shouldApprove ? TRANSFER_GAS_LIMIT_FALLBACK : await transfer.getGasLimit({ amount, accountAddress }),
+      gasLimit: canEstimateTransfer
+        ? await transfer.getGasLimit({ amount, accountAddress })
+        : TRANSFER_GAS_LIMIT_FALLBACK,
 
       value: shouldPayBridgingFee ? bridgingFee : undefined,
     });

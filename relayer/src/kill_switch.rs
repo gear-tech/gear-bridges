@@ -269,16 +269,16 @@ impl KillSwitchRelayer {
 
             match tx_status {
                 TxStatus::Finalized => {
-                    log::info!("Challenge root TX 0x{tx_hash} finalized, switching to submit merkle root state");
+                    log::info!("Challenge root TX {tx_hash:#x} finalized, switching to submit merkle root state");
                     self.state = State::SubmitMerkleRoot { tx_hash: None };
                     return Ok(());
                 }
                 TxStatus::Pending => {
-                    log::info!("Challenge root TX 0x{tx_hash} is still pending, waiting ..");
+                    log::info!("Challenge root TX {tx_hash:#x} is still pending, waiting ..");
                     return Ok(());
                 }
                 TxStatus::Failed => {
-                    log::warn!("Challenge root TX 0x{tx_hash} failed. Re-trying challenge root tx finalization");
+                    log::warn!("Challenge root TX {tx_hash:#x} failed. Re-trying challenge root tx finalization");
                 }
             }
         };
@@ -301,17 +301,17 @@ impl KillSwitchRelayer {
 
             match tx_status {
                 TxStatus::Finalized => {
-                    log::info!("Submit merkle root TX 0x{tx_hash} finalized, exiting ..");
+                    log::info!("Submit merkle root TX {tx_hash:#x} finalized, exiting ..");
                     self.state = State::Exit;
                     return Ok(());
                 }
                 TxStatus::Pending => {
-                    log::info!("Submit merkle root TX 0x{tx_hash} is still pending, waiting ..");
+                    log::info!("Submit merkle root TX {tx_hash:#x} is still pending, waiting ..");
                     return Ok(());
                 }
                 TxStatus::Failed => {
                     log::warn!(
-                        "Submit merkle root TX 0x{tx_hash} failed. Re-trying submit merkle root tx finalization"
+                        "Submit merkle root TX {tx_hash:#x} failed. Re-trying submit merkle root tx finalization"
                     );
                 }
             }

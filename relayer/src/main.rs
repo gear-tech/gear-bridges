@@ -574,7 +574,7 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     EthApi::new_with_retries(
         eth_endpoint,
         mq_address,
-        Some(&args.fee_payer),
+        Some(&args.eth_fee_payer),
         *eth_max_retries,
         eth_retry_interval_ms.map(Duration::from_millis),
     )
@@ -583,17 +583,17 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
 }
 
 async fn create_eth_signer_client_from_path(args: &EthereumSignerPathArgs) -> AnyResult<EthApi> {
-    let pk_bytes = std::fs::read(&args.fee_payer_path).with_context(|| {
+    let pk_bytes = std::fs::read(&args.eth_fee_payer_path).with_context(|| {
         format!(
             "Failed to read ETH_FEE_PAYER_PATH file: {:?}",
-            &args.fee_payer_path
+            &args.eth_fee_payer_path
         )
     })?;
     let fee_payer = format!("0x{}", hex::encode(pk_bytes));
 
     let args = EthereumSignerArgs {
         ethereum_args: args.ethereum_args.clone(),
-        fee_payer,
+        eth_fee_payer: fee_payer,
     };
 
     Ok(create_eth_signer_client(&args).await)

@@ -72,7 +72,7 @@ pub struct EthereumSignerArgs {
 
     /// Private key for fee payer
     #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
-    pub fee_payer: String,
+    pub eth_fee_payer: String,
 }
 
 #[derive(Args)]
@@ -82,7 +82,7 @@ pub struct EthereumSignerPathArgs {
 
     /// Private key for fee payer
     #[arg(long = "eth-fee-payer-path", env = "ETH_FEE_PAYER_PATH")]
-    pub fee_payer_path: PathBuf,
+    pub eth_fee_payer_path: PathBuf,
 }
 
 #[derive(Args, Clone)]

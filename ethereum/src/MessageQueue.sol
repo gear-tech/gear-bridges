@@ -274,6 +274,7 @@ contract MessageQueue is
                 delete _merkleRootTimestamps[previousMerkleRoot];
 
                 if (!_emergencyStop) {
+                    _challengingRootTimestamp = 0;
                     _emergencyStop = true;
 
                     emit EmergencyStopEnabled();
@@ -285,11 +286,11 @@ contract MessageQueue is
             _blockNumbers[blockNumber] = merkleRoot;
             _merkleRootTimestamps[merkleRoot] = block.timestamp;
 
+            emit MerkleRoot(blockNumber, merkleRoot, _maxBlockNumber + MAX_BLOCK_DISTANCE);
+
             if (blockNumber > _maxBlockNumber) {
                 _maxBlockNumber = blockNumber;
             }
-
-            emit MerkleRoot(blockNumber, merkleRoot);
         }
     }
 

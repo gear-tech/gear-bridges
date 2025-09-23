@@ -9,11 +9,12 @@ import { usePrepareEthTxs } from './use-prepare-eth-txs';
 type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
+  ftBalance: bigint | undefined;
   onTransactionStart: (values: FormattedValues) => void;
 };
 
-function useSendEthTxs({ bridgingFee, shouldPayBridgingFee, onTransactionStart }: Params) {
-  const ethTsx = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee });
+function useSendEthTxs({ bridgingFee, shouldPayBridgingFee, ftBalance, onTransactionStart }: Params) {
+  const ethTsx = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee, ftBalance });
 
   const sendTxs = async (values: FormattedValues) => {
     definedAssert(ethTsx.prepare, 'Prepared transactions');

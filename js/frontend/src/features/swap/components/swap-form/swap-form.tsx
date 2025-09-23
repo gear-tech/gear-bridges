@@ -69,6 +69,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
+    ftBalance: ftBalance.data,
   });
 
   const openTransactionModal = (values: FormattedValues) => {
@@ -92,6 +93,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
     vftManagerFee: vftManagerFee?.value,
+    ftBalance: ftBalance.data,
     onTransactionStart: openTransactionModal,
   });
 

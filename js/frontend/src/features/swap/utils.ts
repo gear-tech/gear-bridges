@@ -47,7 +47,7 @@ const initArchiveApi = () =>
 
 const estimateBridging = (txs: { gasLimit: bigint; value?: bigint }[], valuePerGas: bigint) => {
   const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * valuePerGas;
-  const totalValue = txs.reduce((sum, { value }) => (value ? sum + value : sum), 0n);
+  const totalValue = txs.reduce((sum, { value = 0n }) => sum + value, 0n);
 
   return { totalGasLimit, totalValue };
 };

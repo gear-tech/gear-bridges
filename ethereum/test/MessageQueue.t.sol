@@ -493,8 +493,13 @@ contract MessageQueueTest is Test, Base {
         messageQueue.challengeRoot();
         assertEq(messageQueue.isChallengingRoot(), true);
 
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        vm.warp(vm.getBlockTimestamp() + 1);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
+
         messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
 
         vm.stopPrank();
     }

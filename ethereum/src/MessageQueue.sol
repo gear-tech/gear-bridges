@@ -35,7 +35,7 @@ contract MessageQueue is
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
-    uint256 public constant CHALLENGE_ROOT_DELAY = 1 days;
+    uint256 public constant CHALLENGE_ROOT_DELAY = 2 days;
 
     uint256 public constant PROCESS_ADMIN_MESSAGE_DELAY = 1 hours;
     uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 5 minutes;
@@ -198,17 +198,12 @@ contract MessageQueue is
      *
      * @dev Reverts if:
      *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
-     *      - challenging root status is already enabled with `ChallengeRoot` error.
      *
      * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
      */
     function challengeRoot() external {
         if (!_emergencyStopObservers.contains(msg.sender)) {
             revert NotEmergencyStopObserver();
-        }
-
-        if (isChallengingRoot()) {
-            revert ChallengeRoot();
         }
 
         _challengingRootTimestamp = block.timestamp;

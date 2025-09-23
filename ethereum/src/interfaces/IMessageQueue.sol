@@ -161,7 +161,6 @@ interface IMessageQueue is IPausable {
      *
      * @dev Reverts if:
      *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
-     *      - challenging root status is already enabled with `ChallengeRoot` error.
      *
      * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
      */

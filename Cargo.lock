@@ -3224,6 +3224,7 @@ dependencies = [
  "gclient",
  "gear-common 0.3.0",
  "gear-core",
+ "gsdk",
  "hex",
  "sails-rs",
  "tokio",

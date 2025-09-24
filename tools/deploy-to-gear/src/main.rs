@@ -3,7 +3,7 @@ use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
 use vft_client::traits::*;
-use vft_vara_client::traits::*;
+use vft_vara_client::{traits::*, Mainnet};
 
 const SIZE_MIGRATE_BATCH: u32 = 25;
 
@@ -321,6 +321,14 @@ impl Uploader {
     }
 
     async fn upload_vft_vara(self) {
+        let signer: gsdk::signer::Signer = self.api.clone().into();
+        let network = if signer.api().rpc().system_chain().await.expect("Determine chain name") == "Vara Network" {
+            Mainnet::Yes
+        } else {
+            Mainnet::No
+        };
+        println!("Deploy for the main network: {}", matches!(network, Mainnet::Yes));
+
         let code_id = self.upload_code(vft_vara::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");
 
@@ -332,7 +340,7 @@ impl Uploader {
             .unwrap_or_else(|| H256::random().0.to_vec());
 
         let program_id = factory
-            .new()
+            .new(network)
             .with_gas_limit(self.gas_limit)
             .send_recv(code_id, &salt)
             .await

@@ -5,7 +5,7 @@ use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
     VftManagerFactory as VftManagerFactoryC,
 };
-use vft_vara_client::traits::VftVaraFactory;
+use vft_vara_client::{traits::VftVaraFactory, Mainnet};
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
@@ -114,7 +114,7 @@ async fn setup_for_test() -> Fixture {
     // VFT
     let vft_code_id = remoting.system().submit_code(vft_vara::WASM_BINARY);
     let gear_supply_vft = vft_vara_client::VftVaraFactory::new(remoting.clone())
-        .new()
+        .new(Mainnet::No)
         .send_recv(vft_code_id, b"salt")
         .await
         .unwrap();

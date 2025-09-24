@@ -23,7 +23,7 @@ use sails_rs::{gstd::msg, prelude::*};
 #[codec(crate = sails_rs::scale_codec)]
 pub enum Mainnet {
     Yes,
-    No
+    No,
 }
 
 pub struct Program {
@@ -53,17 +53,9 @@ impl Program {
         balances.set_minimum_balance(1_000_000_000_000u64.into());
 
         let metadata = match network {
-            Mainnet::Yes => Metadata::new(
-                    "Wrapped Vara".into(),
-                    "WVARA".into(),
-                    12,
-                ),
+            Mainnet::Yes => Metadata::new("Wrapped Vara".into(), "WVARA".into(), 12),
 
-            Mainnet::No => Metadata::new(
-                    "Wrapped Testnet Vara".into(),
-                    "WTVARA".into(),
-                    12,
-                ),
+            Mainnet::No => Metadata::new("Wrapped Testnet Vara".into(), "WTVARA".into(), 12),
         };
 
         Self {

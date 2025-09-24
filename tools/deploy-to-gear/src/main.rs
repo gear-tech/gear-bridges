@@ -45,11 +45,11 @@ enum CliCommands {
     /// Deploy VFT-VARA contract
     VftVara(RolesArgs),
     /// Deploy VFT contract for WUSDT
-    WUSDT(RolesArgs),
+    Wusdt(RolesArgs),
     /// Deploy VFT contract for WUSDC
-    WUSDC(RolesArgs),
+    Wusdc(RolesArgs),
     /// Deploy VFT contract for WETH
-    WETH(RolesArgs),
+    Weth(RolesArgs),
     AllocateShards {
         /// Program ID of the VFT contract
         program_id: String,
@@ -153,7 +153,7 @@ async fn main() {
             uploader.upload_vft_vara().await;
         }
 
-        CliCommands::WUSDT(args) => {
+        CliCommands::Wusdt(args) => {
             let minter = args.minter.map(str_to_actorid);
             let burner = args.burner.map(str_to_actorid);
 
@@ -163,7 +163,7 @@ async fn main() {
                 .await
         }
 
-        CliCommands::WUSDC(args) => {
+        CliCommands::Wusdc(args) => {
             let minter = args.minter.map(str_to_actorid);
             let burner = args.burner.map(str_to_actorid);
 
@@ -173,7 +173,7 @@ async fn main() {
                 .await
         }
 
-        CliCommands::WETH(args) => {
+        CliCommands::Weth(args) => {
             let minter = args.minter.map(str_to_actorid);
             let burner = args.burner.map(str_to_actorid);
 
@@ -299,7 +299,9 @@ impl Uploader {
     }
 
     async fn upload_vft(self, name: String, symbol: String, decimals: u8) {
-        println!(r#"Upload VFT with: name = "{name}", symbol = "{symbol}", decimals = "{decimals}""#);
+        println!(
+            r#"Upload VFT with: name = "{name}", symbol = "{symbol}", decimals = "{decimals}""#
+        );
 
         let code_id = self.upload_code(vft::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");
@@ -322,12 +324,22 @@ impl Uploader {
 
     async fn upload_vft_vara(self) {
         let signer: gsdk::signer::Signer = self.api.clone().into();
-        let network = if signer.api().rpc().system_chain().await.expect("Determine chain name") == "Vara Network" {
+        let network = if signer
+            .api()
+            .rpc()
+            .system_chain()
+            .await
+            .expect("Determine chain name")
+            == "Vara Network"
+        {
             Mainnet::Yes
         } else {
             Mainnet::No
         };
-        println!("Deploy for the main network: {}", matches!(network, Mainnet::Yes));
+        println!(
+            "Deploy for the main network: {}",
+            matches!(network, Mainnet::Yes)
+        );
 
         let code_id = self.upload_code(vft_vara::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");

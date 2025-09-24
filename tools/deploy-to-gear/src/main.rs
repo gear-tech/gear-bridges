@@ -299,6 +299,8 @@ impl Uploader {
     }
 
     async fn upload_vft(self, name: String, symbol: String, decimals: u8) {
+        println!(r#"Upload VFT with: name = "{name}", symbol = "{symbol}", decimals = "{decimals}""#);
+
         let code_id = self.upload_code(vft::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");
 

@@ -46,6 +46,8 @@ enum CliCommands {
     VftVara(RolesArgs),
     /// Deploy VFT contract for WUSDT
     WUSDT(RolesArgs),
+    /// Deploy VFT contract for WUSDC
+    WUSDC(RolesArgs),
     AllocateShards {
         /// Program ID of the VFT contract
         program_id: String,
@@ -156,6 +158,16 @@ async fn main() {
             let uploader = Uploader::new(gear_api, minter, burner, salt);
             uploader
                 .upload_vft("Bridged Tether USD".into(), "WUSDT".into(), 6)
+                .await
+        }
+
+        CliCommands::WUSDC(args) => {
+            let minter = args.minter.map(str_to_actorid);
+            let burner = args.burner.map(str_to_actorid);
+
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
+            uploader
+                .upload_vft("Bridged USD Coin".into(), "WUSDC".into(), 6)
                 .await
         }
 

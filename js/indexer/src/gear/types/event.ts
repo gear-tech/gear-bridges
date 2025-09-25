@@ -1,7 +1,5 @@
 import { Event } from '../processor.js';
 
-export type MessageQueuedEvent = Omit<Event, 'args'> & { args: MessageQueuedArgs };
-
 export type EthBridgeMessageQueuedEvent = Omit<Event, 'args'> & { args: EthBridgeMessageQueuedArgs };
 
 export interface EthBridgeMessageQueuedArgs {
@@ -13,6 +11,15 @@ export interface EthBridgeMessageQueuedArgs {
   };
   readonly hash: string;
 }
+
+export type QueueMerkleRootChangedEvent = Omit<Event, 'args'> & { args: QueueMerkleRootChangedArgs };
+
+export interface QueueMerkleRootChangedArgs {
+  readonly queueId: number;
+  readonly root: string;
+}
+
+export type MessageQueuedEvent = Omit<Event, 'args'> & { args: MessageQueuedArgs };
 
 export interface MessageQueuedArgs {
   readonly id: string;
@@ -38,5 +45,14 @@ export interface UserMessageSentDetails {
   readonly to: string;
   readonly code: {
     readonly __kind: 'Success' | 'Error';
+  };
+}
+
+export type ProgramChangedEvent = Omit<Event, 'args'> & { args: ProgramChangedArgs };
+
+export interface ProgramChangedArgs {
+  readonly id: `0x${string}`;
+  readonly change: {
+    readonly __kind: 'Active' | 'Inactive';
   };
 }

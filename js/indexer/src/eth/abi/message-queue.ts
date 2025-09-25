@@ -18,9 +18,10 @@ export const events = {
     }
   >(abi, abi.getEvent('MessageProcessed')!.topicHash),
   MerkleRoot: new LogEvent<
-    [blockNumber: bigint, merkleRoot: string] & {
+    [blockNumber: bigint, merkleRoot: string, maxBlockNumber: bigint] & {
       blockNumber: bigint;
       merkleRoot: string;
+      maxBlockNumber: bigint;
     }
   >(abi, abi.getEvent('MerkleRoot')!.topicHash),
 };

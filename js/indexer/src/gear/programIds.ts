@@ -1,5 +1,7 @@
 import pg from 'pg';
+
 import { ProgramName } from './util.js';
+import { config } from './config.js';
 
 const createClient = () =>
   new pg.Client({
@@ -55,4 +57,15 @@ export async function updateId(name: string, programId: string) {
   await client.connect();
   await client.query('UPDATE gear_programs SET program_id = $1 WHERE name = $2', [programId, name]);
   await client.end();
+}
+
+export let programs: Map<string, ProgramName>;
+
+export async function setPrograms() {
+  programs = await init({
+    [ProgramName.VftManager]: config.vftManager,
+    [ProgramName.HistoricalProxy]: config.historicalProxy,
+    [ProgramName.BridgingPayment]: config.bridgingPayment,
+    [ProgramName.CheckpointClient]: config.checkpointClient,
+  });
 }

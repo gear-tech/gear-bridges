@@ -1,4 +1,4 @@
-module.exports = class Comments1753370188946 {
+export default class Comments1753370188946 {
   name = 'Comments1753370188946';
 
   async up(queryRunner) {
@@ -11,4 +11,4 @@ module.exports = class Comments1753370188946 {
   }
 
   async down() {}
-};
+}

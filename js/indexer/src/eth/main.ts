@@ -63,8 +63,8 @@ const handler = async (ctx: Context) => {
             const _nonce = gearNonce(nonce, false);
             state.setCompletedTransfer(_nonce, timestamp, blockNumber, txHash);
           } else if (topic === MSGQ_MERKLE_ROOT) {
-            const [blockNumber, merkleRoot] = messageQueueAbi.events.MerkleRoot.decode(log);
-            state.newMerkleRoot(blockNumber, merkleRoot);
+            const [blockNumber, merkleRoot, maxBlockNumber] = messageQueueAbi.events.MerkleRoot.decode(log);
+            state.newMerkleRoot(blockNumber, merkleRoot, maxBlockNumber);
           }
           break;
         }

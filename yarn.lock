@@ -4876,26 +4876,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@subsquid/evm-processor@npm:1.27.1":
-  version: 1.27.1
-  resolution: "@subsquid/evm-processor@npm:1.27.1"
+"@subsquid/evm-processor@npm:1.27.3":
+  version: 1.27.3
+  resolution: "@subsquid/evm-processor@npm:1.27.3"
   dependencies:
-    "@subsquid/http-client": "npm:^1.6.0"
+    "@subsquid/http-client": "npm:^1.6.1"
     "@subsquid/logger": "npm:^1.4.0"
-    "@subsquid/rpc-client": "npm:^4.11.0"
+    "@subsquid/rpc-client": "npm:^4.13.0"
     "@subsquid/util-internal": "npm:^3.2.0"
     "@subsquid/util-internal-archive-client": "npm:^0.1.2"
     "@subsquid/util-internal-hex": "npm:^1.2.2"
     "@subsquid/util-internal-ingest-tools": "npm:^1.1.4"
     "@subsquid/util-internal-processor-tools": "npm:^4.2.1"
     "@subsquid/util-internal-range": "npm:^0.3.0"
-    "@subsquid/util-internal-validation": "npm:^0.7.0"
+    "@subsquid/util-internal-validation": "npm:^0.8.0"
     "@subsquid/util-timeout": "npm:^2.3.2"
-  checksum: 10c0/617dd36d67ba9abeefc1d504799627fb277baa11fba21d6906704b5a92798e6b982c8ac326cf82445beea3a5896f6ff0c9ef6f3741469cbdd334e0e1516348ae
+  checksum: 10c0/adf880aea8d49ed2ed422436605cceba5de7f214eb55083cae961938c8c2ee4b2b50372a1027fc388f473b45952627d4b6cf94089dc8c5cb8c2b98fb43e93b99
   languageName: node
   linkType: hard
 
-"@subsquid/http-client@npm:^1.6.0, @subsquid/http-client@npm:^1.6.1":
+"@subsquid/http-client@npm:^1.6.1":
   version: 1.6.1
   resolution: "@subsquid/http-client@npm:1.6.1"
   dependencies:
@@ -4917,7 +4917,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@subsquid/rpc-client@npm:^4.11.0":
+"@subsquid/rpc-client@npm:^4.13.0":
   version: 4.13.0
   resolution: "@subsquid/rpc-client@npm:4.13.0"
   dependencies:
@@ -4988,13 +4988,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@subsquid/substrate-processor@npm:8.6.0":
-  version: 8.6.0
-  resolution: "@subsquid/substrate-processor@npm:8.6.0"
+"@subsquid/substrate-processor@npm:8.6.1":
+  version: 8.6.1
+  resolution: "@subsquid/substrate-processor@npm:8.6.1"
   dependencies:
-    "@subsquid/http-client": "npm:^1.6.0"
+    "@subsquid/http-client": "npm:^1.6.1"
     "@subsquid/logger": "npm:^1.4.0"
-    "@subsquid/rpc-client": "npm:^4.11.0"
+    "@subsquid/rpc-client": "npm:^4.13.0"
     "@subsquid/substrate-data": "npm:^4.4.0"
     "@subsquid/substrate-data-raw": "npm:^1.2.0"
     "@subsquid/util-internal": "npm:^3.2.0"
@@ -5004,10 +5004,10 @@ __metadata:
     "@subsquid/util-internal-json": "npm:^1.2.3"
     "@subsquid/util-internal-processor-tools": "npm:^4.2.1"
     "@subsquid/util-internal-range": "npm:^0.3.0"
-    "@subsquid/util-internal-validation": "npm:^0.7.0"
+    "@subsquid/util-internal-validation": "npm:^0.8.0"
   peerDependencies:
     "@subsquid/substrate-runtime": ^2.0.1
-  checksum: 10c0/a4a85affdf2d92ca5586d851d0c65da569cbc15d7cc30ba3e63eb8589bf3a7a003e0af0d4cbc26c6b6f6e2989b41b77d6fbc2713d7fd5e0b0ccbd2057f3e8ee2
+  checksum: 10c0/3eda22aa72ee12b566f77b0df8ac299dda6afeeb7934fe69f09e2817c17b7aee1dca1ac4f1a477f0156a78e423e99b69dcb891c341da16fe559bc5604059c918
   languageName: node
   linkType: hard
 
@@ -5184,15 +5184,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@subsquid/util-internal-validation@npm:^0.7.0":
-  version: 0.7.0
-  resolution: "@subsquid/util-internal-validation@npm:0.7.0"
+"@subsquid/util-internal-validation@npm:^0.8.0":
+  version: 0.8.0
+  resolution: "@subsquid/util-internal-validation@npm:0.8.0"
   peerDependencies:
-    "@subsquid/logger": ^1.3.3
+    "@subsquid/logger": ^1.4.0
   peerDependenciesMeta:
     "@subsquid/logger":
       optional: true
-  checksum: 10c0/b92e522157a3473ce72f0df3235faac737a6b026d7df32d3c880fba0a362e1767009aa4beaf07ac2ededdcfb5003e1f0cf2cf3f1786dba78c8ad39908169cbc8
+  checksum: 10c0/768e54989e90f631344f6be83bceee9d0644ee5525ec0f9753562bcc39779dea23e43ab33015926b94c3bf76f6fd9b670bf82b606a3d51c01f4c6e17cca9261b
   languageName: node
   linkType: hard
 
@@ -12687,9 +12687,9 @@ __metadata:
     "@polkadot/api": "npm:16.4.6"
     "@polkadot/util": "npm:13.5.6"
     "@subsquid/evm-abi": "npm:0.3.1"
-    "@subsquid/evm-processor": "npm:1.27.1"
+    "@subsquid/evm-processor": "npm:1.27.3"
     "@subsquid/scale-codec": "npm:4.0.1"
-    "@subsquid/substrate-processor": "npm:8.6.0"
+    "@subsquid/substrate-processor": "npm:8.6.1"
     "@subsquid/substrate-runtime": "npm:2.0.1"
     "@subsquid/typeorm-store": "npm:1.5.1"
     "@types/express": "npm:5.0.3"

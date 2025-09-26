@@ -1028,26 +1028,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@gear-js/react-hooks@npm:0.18.2":
-  version: 0.18.2
-  resolution: "@gear-js/react-hooks@npm:0.18.2"
+"@gear-js/react-hooks@npm:0.18.3":
+  version: 0.18.3
+  resolution: "@gear-js/react-hooks@npm:0.18.3"
   dependencies:
     "@polkadot/extension-inject": "npm:0.61.7"
     "@polkadot/util": "npm:13.5.6"
     "@substrate/connect": "npm:2.1.8"
     bignumber.js: "npm:9.3.1"
-    nanoid: "npm:5.1.5"
+    nanoid: "npm:5.1.6"
     react-transition-group: "npm:4.4.5"
     sails-js-parser: "npm:0.4.3"
   peerDependencies:
-    "@gear-js/api": ^0.44.0
+    "@gear-js/api": ^0.44.1
     "@polkadot/api": ^16.4.6
     "@polkadot/api-derive": ^16.4.6
     "@tanstack/react-query": ^5.56.2
     react: ^18 || ^19
     react-dom: ^18 || ^19
     sails-js: ^0.4.3
-  checksum: 10c0/d8e07733c82fbaf9e87a5a0079daac6a31f9c2b0faf7f16cae9b712b5fa134c221cc5f24f2728a7bc273eec62f4a29858cc393432b4a47ab7c0606c09bae3236
+  checksum: 10c0/5783622396d1f0a35fb142d98a88e2e667247bd0c30e791d4d03c55515351a2f8229844777ff9489664ab4e02f7030d7250e55a4e415d2a12bc274b7e0188af1
   languageName: node
   linkType: hard
 
@@ -11622,7 +11622,7 @@ __metadata:
     "@gear-js/api": "npm:0.44.1"
     "@gear-js/bridge": "workspace:*"
     "@gear-js/frontend-configs": "npm:0.1.2"
-    "@gear-js/react-hooks": "npm:0.18.2"
+    "@gear-js/react-hooks": "npm:0.18.3"
     "@gear-js/ui": "npm:0.7.0"
     "@gear-js/vara-ui": "npm:0.3.1"
     "@gear-js/wallet-connect": "npm:0.4.2"
@@ -14886,12 +14886,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"nanoid@npm:5.1.5":
-  version: 5.1.5
-  resolution: "nanoid@npm:5.1.5"
+"nanoid@npm:5.1.6":
+  version: 5.1.6
+  resolution: "nanoid@npm:5.1.6"
   bin:
     nanoid: bin/nanoid.js
-  checksum: 10c0/e6004f1ad6c7123eeb037062c4441d44982037dc043aabb162457ef6986e99964ba98c63c975f96c547403beb0bf95bc537bd7bf9a09baf381656acdc2975c3c
+  checksum: 10c0/27b5b055ad8332cf4f0f9f6e2a494aa7e5ded89df4cab8c8490d4eabefe72c4423971d2745d22002868b1d50576a5e42b7b05214733b19f576382323282dd26e
   languageName: node
   linkType: hard
 

@@ -30,13 +30,13 @@ function PayVaraFeeButton({ nonce, onInBlock, onFinalization }: Props) {
     if (isUndefined(bridgingFee.value)) throw new Error('Fee is not found');
 
     sendTransactionAsync({ args: [nonce], value: bridgingFee.value })
-      .then(async ({ isFinalized }) => {
+      .then(({ isFinalized }) => {
         alert.success('Fee paid successfully');
-
         onInBlock();
-        await isFinalized;
-        onFinalization();
+
+        return isFinalized;
       })
+      .then(() => onFinalization())
       .catch((error: Error) => alert.error(getErrorMessage(error)));
   };
 

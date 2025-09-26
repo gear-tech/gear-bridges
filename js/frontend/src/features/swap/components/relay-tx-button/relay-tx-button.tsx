@@ -13,10 +13,11 @@ import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRela
 type VaraProps = {
   nonce: HexString;
   blockNumber: string;
-  onSuccess: () => void;
+  onReceipt: () => void;
+  onConfirmation: () => void;
 };
 
-function RelayVaraTxButton({ nonce, blockNumber, onSuccess }: VaraProps) {
+function RelayVaraTxButton({ nonce, blockNumber, onReceipt, onConfirmation }: VaraProps) {
   const { account } = useAccount();
 
   const ethAccount = useEthAccount();
@@ -34,10 +35,13 @@ function RelayVaraTxButton({ nonce, blockNumber, onSuccess }: VaraProps) {
     const onLog = (message: string) => alert.update(alertId, message);
 
     mutateAsync(onLog)
-      .then(() => {
-        onSuccess();
+      .then(({ isTransactionConfirmed }) => {
+        onReceipt();
         alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+
+        return isTransactionConfirmed;
       })
+      .then(() => onConfirmation())
       .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
   };
 
@@ -80,10 +84,11 @@ function RelayVaraTxButton({ nonce, blockNumber, onSuccess }: VaraProps) {
 type EthProps = {
   blockNumber: bigint;
   txHash: HexString;
-  onSuccess: () => void;
+  onInBlock: () => void;
+  onFinalization: () => void;
 };
 
-function RelayEthTxButton({ txHash, blockNumber, onSuccess }: EthProps) {
+function RelayEthTxButton({ txHash, blockNumber, onInBlock, onFinalization }: EthProps) {
   const { account } = useAccount();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
@@ -100,10 +105,13 @@ function RelayEthTxButton({ txHash, blockNumber, onSuccess }: EthProps) {
     const onLog = (message: string) => alert.update(alertId, message);
 
     mutateAsync(onLog)
-      .then(() => {
-        onSuccess();
+      .then(({ isFinalized }) => {
         alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+        onInBlock();
+
+        return isFinalized;
       })
+      .then(() => onFinalization())
       .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
   };
 

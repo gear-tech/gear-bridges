@@ -107,6 +107,7 @@ export interface MerkleRootLogArgs {
 export interface MessageProcessResult {
   success: boolean;
   transactionHash: `0x${string}`;
+  isTransactionConfirmed?: Promise<boolean>;
   blockNumber?: bigint;
   messageHash?: `0x${string}`;
   messageNonce?: bigint;

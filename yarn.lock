@@ -11650,7 +11650,7 @@ __metadata:
     react-hook-form: "npm:7.62.0"
     react-number-format: "npm:5.4.4"
     react-router-dom: "npm:7.8.2"
-    sails-js: "npm:0.4.3"
+    sails-js: "npm:0.5.0"
     sass: "npm:1.92.1"
     viem: "npm:2.37.5"
     vite: "npm:7.1.5"

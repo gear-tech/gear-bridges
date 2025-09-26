@@ -143,11 +143,17 @@ function Transaction() {
                   <RelayTxButton.Vara
                     nonce={rawNonce as HexString}
                     blockNumber={bridgingStartedAtBlock}
-                    onSuccess={refetch}
+                    onReceipt={optimisticTxUpdate}
+                    onConfirmation={refetch}
                   />
                 )
               ) : (
-                <RelayTxButton.Eth txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} onSuccess={refetch} />
+                <RelayTxButton.Eth
+                  txHash={txHash as HexString}
+                  blockNumber={BigInt(blockNumber)}
+                  onInBlock={optimisticTxUpdate}
+                  onFinalization={refetch}
+                />
               )}
             </div>
 

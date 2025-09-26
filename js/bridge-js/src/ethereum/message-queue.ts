@@ -267,6 +267,11 @@ export class MessageQueueClient {
 
       const receipt = await this._client.waitForTransactionReceipt({ hash });
 
+      const isConfirmed = this._client
+        .waitForTransactionReceipt({ hash, confirmations: 2 })
+        .then(() => true)
+        .catch(() => false);
+
       statusCb(`Transaction receipt received`, { txHash: hash });
 
       const [messageProcessed] = parseEventLogs({
@@ -287,6 +292,7 @@ export class MessageQueueClient {
           messageHash: args.messageHash,
           messageNonce: args.messageNonce,
           messageDestination: args.messageDestination,
+          isTransactionConfirmed: isConfirmed,
         };
       } else {
         statusCb(`Message processed event not found in transaction receipt`, { txHash: hash });

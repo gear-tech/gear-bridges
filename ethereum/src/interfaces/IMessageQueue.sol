@@ -24,6 +24,11 @@ interface IMessageQueue is IPausable {
     error ChallengeRoot();
 
     /**
+     * @dev Challenging root status is disabled.
+     */
+    error ChallengeRootNotEnabled();
+
+    /**
      * @dev Emergency stop status is enabled.
      */
     error EmergencyStop();
@@ -59,6 +64,11 @@ interface IMessageQueue is IPausable {
     error MerkleRootAlreadySet(uint256 blockNumber);
 
     /**
+     * @dev Caller is not emergency stop admin.
+     */
+    error NotEmergencyStopAdmin();
+
+    /**
      * @dev Caller is not emergency stop observer.
      */
     error NotEmergencyStopObserver();
@@ -77,6 +87,11 @@ interface IMessageQueue is IPausable {
      * @dev Emitted when challenging root status is enabled.
      */
     event ChallengeRootEnabled(uint256 untilTimestamp);
+
+    /**
+     * @dev Emitted when challenging root status is disabled.
+     */
+    event ChallengeRootDisabled();
 
     /**
      * @dev Emitted when emergency stop status is enabled.
@@ -165,6 +180,17 @@ interface IMessageQueue is IPausable {
      * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
      */
     function challengeRoot() external;
+
+    /**
+     * @dev Disables challenging root status.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - challenging root status is not enabled with `ChallengeRootNotEnabled` error.
+     *
+     * @dev Emits `ChallengeRootDisabled` event.
+     */
+    function disableChallengeRoot() external;
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.

@@ -418,6 +418,9 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0xdeadbeef)); // valid root, calculated by emergency stop admin
         bytes32 previousMerkleRoot = bytes32(uint256(0x33));
 
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootDisabled();
+
         // emergency stop admin managed to submit valid root for first challenged block
         // and enabled emergency stop status
         vm.expectEmit(address(messageQueue));
@@ -568,6 +571,41 @@ contract MessageQueueTest is Test, Base {
 
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
+    }
+
+    function test_DisableChallengeRoot() public {
+        vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
+
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.stopPrank();
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootDisabled();
+
+        messageQueue.disableChallengeRoot();
+
+        vm.stopPrank();
+    }
+
+    function test_DisableChallengeRootWithNotEmergencyStopAdmin() public {
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopAdmin.selector));
+        messageQueue.disableChallengeRoot();
+    }
+
+    function test_DisableChallengeRootWithChallengeRootNotEnabled() public {
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRootNotEnabled.selector));
+        messageQueue.disableChallengeRoot();
+
+        vm.stopPrank();
     }
 
     function test_SubmitMerkleRoot() public {

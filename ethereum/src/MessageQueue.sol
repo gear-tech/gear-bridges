@@ -212,6 +212,29 @@ contract MessageQueue is
     }
 
     /**
+     * @dev Disables challenging root status.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - challenging root status is not enabled with `ChallengeRootNotEnabled` error.
+     *
+     * @dev Emits `ChallengeRootDisabled` event.
+     */
+    function disableChallengeRoot() external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (!isChallengingRoot()) {
+            revert ChallengeRootNotEnabled();
+        }
+
+        _challengingRootTimestamp = 0;
+
+        emit ChallengeRootDisabled();
+    }
+
+    /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
      *      Upon successfully storing data about block number and corresponding Merkle root,
@@ -272,6 +295,7 @@ contract MessageQueue is
                     _challengingRootTimestamp = 0;
                     _emergencyStop = true;
 
+                    emit ChallengeRootDisabled();
                     emit EmergencyStopEnabled();
                 }
             } else {

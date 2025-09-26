@@ -46,7 +46,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -77,7 +77,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -108,7 +108,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -142,7 +142,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -176,7 +176,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -207,7 +207,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -239,7 +239,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -270,7 +270,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 

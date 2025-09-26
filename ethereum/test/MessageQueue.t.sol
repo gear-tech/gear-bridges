@@ -44,7 +44,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -89,7 +89,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -143,7 +143,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -185,7 +185,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -214,7 +214,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -256,7 +256,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -298,7 +298,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -350,7 +350,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -361,7 +361,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0x33)); // invalid root, suspicious address managed to send it
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -372,7 +372,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0x44)); // invalid root, suspicious address managed to send it
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -464,7 +464,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -513,7 +513,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -534,7 +534,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash; // invalid root, suspicious address managed to send pause
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -614,7 +614,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
@@ -628,7 +628,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
@@ -653,7 +653,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
@@ -680,7 +680,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
@@ -708,7 +708,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -745,7 +745,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -780,7 +780,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -803,7 +803,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
@@ -855,7 +855,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -911,7 +911,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
@@ -940,7 +940,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot, expectedMaxBlockNumber(blockNumber));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 

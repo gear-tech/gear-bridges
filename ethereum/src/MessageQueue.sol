@@ -52,6 +52,7 @@ contract MessageQueue is
     bool private _emergencyStop;
     uint256 private _genesisBlock;
     uint256 private _maxBlockNumber;
+    bool private _allowMessageProcessing;
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
@@ -235,6 +236,27 @@ contract MessageQueue is
     }
 
     /**
+     * @dev Allows message processing when emergency stop is enabled.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - emergency stop status is not enabled with `EmergencyStopNotEnabled` error.
+     */
+    function allowMessageProcessing() external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (!_emergencyStop) {
+            revert EmergencyStopNotEnabled();
+        }
+
+        _allowMessageProcessing = true;
+
+        emit MessageProcessingAllowed();
+    }
+
+    /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
      *      Upon successfully storing data about block number and corresponding Merkle root,
@@ -378,12 +400,14 @@ contract MessageQueue is
         bytes32 governancePauserAddress = _governancePauser.governance();
 
         bool isFromAdminOrPauser = message.source == governanceAdminAddress || message.source == governancePauserAddress;
-        if (paused() && !isFromAdminOrPauser) {
+        bool canBypassPause = isFromAdminOrPauser;
+        if (paused() && !canBypassPause) {
             revert EnforcedPause();
         }
 
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
-        if (_emergencyStop && !isFromEmergencyStopAdmin) {
+        bool canBypassEmergencyStop = isFromEmergencyStopAdmin || _allowMessageProcessing;
+        if (_emergencyStop && !canBypassEmergencyStop) {
             revert EmergencyStop();
         }
 

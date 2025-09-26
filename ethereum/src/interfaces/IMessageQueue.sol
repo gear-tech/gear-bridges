@@ -34,6 +34,11 @@ interface IMessageQueue is IPausable {
     error EmergencyStop();
 
     /**
+     * @dev Emergency stop status is disabled.
+     */
+    error EmergencyStopNotEnabled();
+
+    /**
      * @dev The plonk proof is invalid.
      */
     error InvalidPlonkProof();
@@ -108,6 +113,11 @@ interface IMessageQueue is IPausable {
      * @dev Emitted when block number and merkle root are stored.
      */
     event MerkleRoot(uint256 blockNumber, bytes32 merkleRoot);
+
+    /**
+     * @dev Emitted when message processing is allowed during emergency stop.
+     */
+    event MessageProcessingAllowed();
 
     /**
      * @dev Emitted when message is processed.
@@ -191,6 +201,15 @@ interface IMessageQueue is IPausable {
      * @dev Emits `ChallengeRootDisabled` event.
      */
     function disableChallengeRoot() external;
+
+    /**
+     * @dev Allows message processing when emergency stop is enabled.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - emergency stop status is not enabled with `EmergencyStopNotEnabled` error.
+     */
+    function allowMessageProcessing() external;
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.

@@ -4,7 +4,7 @@ use std::time::Duration;
 mod common;
 
 pub use common::{
-    BeaconRpcArgs, EthereumArgs, EthereumSignerArgs, EthereumSignerPathArgs, GearArgs,
+    BeaconRpcArgs, EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, GearArgs,
     GearSignerArgs, GenesisConfigArgs, PrometheusArgs, ProofStorageArgs,
 };
 
@@ -315,7 +315,7 @@ pub struct KillSwitchArgs {
     pub gear_args: GearArgs,
 
     #[clap(flatten)]
-    pub ethereum_args: EthereumSignerPathArgs,
+    pub ethereum_args: EthereumKillSwitchArgs,
 
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,

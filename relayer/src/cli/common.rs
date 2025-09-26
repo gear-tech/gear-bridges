@@ -76,13 +76,17 @@ pub struct EthereumSignerArgs {
 }
 
 #[derive(Args)]
-pub struct EthereumSignerPathArgs {
+pub struct EthereumKillSwitchArgs {
     #[clap(flatten)]
     pub ethereum_args: EthereumArgs,
 
-    /// Private key for fee payer
-    #[arg(long = "eth-fee-payer-path", env = "ETH_FEE_PAYER_PATH")]
-    pub eth_fee_payer_path: PathBuf,
+    /// Private key for observer role
+    #[arg(long = "eth-observer-pk-path", env = "ETH_OBSERVER_PK_PATH")]
+    pub eth_observer_pk_path: PathBuf,
+
+    /// Private key for admin role
+    #[arg(long = "eth-admin-pk-path", env = "ETH_ADMIN_PK_PATH")]
+    pub eth_admin_pk_path: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]

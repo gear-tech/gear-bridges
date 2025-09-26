@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumSignerArgs, EthereumSignerPathArgs, FetchMerkleRootsArgs, GearArgs,
+    EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs,
     GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 use ethereum_beacon_client::BeaconClient;
@@ -122,9 +122,10 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to connect to Gear API");
 
-            let eth_api = create_eth_signer_client_from_path(&args.ethereum_args)
-                .await
-                .expect("Failed to create Ethereum client");
+            let (eth_observer_api, eth_admin_api) =
+                create_eth_killswitch_client(&args.ethereum_args)
+                    .await
+                    .expect("Failed to create Ethereum client");
             let http_client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(args.relayer_http_args.timeout_secs))
                 .default_headers({
@@ -143,7 +144,8 @@ async fn run() -> AnyResult<()> {
 
             let mut kill_switch = KillSwitchRelayer::new(
                 api_provider.connection(),
-                eth_api,
+                eth_observer_api,
+                eth_admin_api,
                 http_client,
                 args.from_eth_block,
                 args.relayer_http_args.url,
@@ -582,21 +584,42 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     .expect("Error while creating ethereum client")
 }
 
-async fn create_eth_signer_client_from_path(args: &EthereumSignerPathArgs) -> AnyResult<EthApi> {
-    let pk_bytes = std::fs::read(&args.eth_fee_payer_path).with_context(|| {
+async fn create_eth_killswitch_client(
+    args: &EthereumKillSwitchArgs,
+) -> AnyResult<(EthApi, Option<EthApi>)> {
+    let observer_pk_bytes = std::fs::read(&args.eth_observer_pk_path).with_context(|| {
         format!(
-            "Failed to read ETH_FEE_PAYER_PATH file: {:?}",
-            &args.eth_fee_payer_path
+            "Failed to read ETH_OBSERVER_PK_PATH file: {:?}",
+            &args.eth_observer_pk_path
         )
     })?;
-    let fee_payer = format!("0x{}", hex::encode(pk_bytes));
+    let observer_pk_str = format!("0x{}", hex::encode(observer_pk_bytes));
 
-    let args = EthereumSignerArgs {
+    let observer_api = create_eth_signer_client(&EthereumSignerArgs {
         ethereum_args: args.ethereum_args.clone(),
-        eth_fee_payer: fee_payer,
+        eth_fee_payer: observer_pk_str,
+    })
+    .await;
+
+    let maybe_admin_pk_bytes = args
+        .eth_admin_pk_path
+        .as_deref()
+        .and_then(|path| std::fs::read(path).ok());
+
+    let maybe_admin_api = if let Some(admin_pk_bytes) = maybe_admin_pk_bytes {
+        let admin_pk_str = format!("0x{}", hex::encode(admin_pk_bytes));
+        Some(
+            create_eth_signer_client(&EthereumSignerArgs {
+                ethereum_args: args.ethereum_args.clone(),
+                eth_fee_payer: admin_pk_str,
+            })
+            .await,
+        )
+    } else {
+        None
     };
 
-    Ok(create_eth_signer_client(&args).await)
+    Ok((observer_api, maybe_admin_api))
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {

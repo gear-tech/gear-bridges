@@ -96,7 +96,8 @@ enum State {
 
 pub struct KillSwitchRelayer {
     api_provider: ApiProviderConnection,
-    eth_api: EthApi,
+    eth_observer_api: EthApi,
+    eth_admin_api: Option<EthApi>,
     http_client: HttpClient,
     relayer_http_url: String,
 
@@ -116,14 +117,16 @@ impl MeteredService for KillSwitchRelayer {
 impl KillSwitchRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
-        eth_api: EthApi,
+        eth_observer_api: EthApi,
+        eth_admin_api: Option<EthApi>,
         http_client: HttpClient,
         from_eth_block: Option<u64>,
         relayer_http_url: String,
     ) -> Self {
         Self {
             api_provider,
-            eth_api,
+            eth_observer_api,
+            eth_admin_api,
             relayer_http_url,
             http_client,
             start_from_eth_block: from_eth_block,
@@ -134,7 +137,14 @@ impl KillSwitchRelayer {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        log::info!("Starting kill switch relayer");
+        log::info!(
+            "Starting kill switch relayer, with {}",
+            if self.eth_admin_api.is_some() {
+                "observer + admin roles"
+            } else {
+                "observer role"
+            }
+        );
 
         loop {
             let loop_delay;
@@ -178,7 +188,7 @@ impl KillSwitchRelayer {
                                 log::error!(
                                     "Recoverable Ethereum transport error: {err}, reconnecting..."
                                 );
-                                if let Err(e) = self.eth_api.reconnect().await {
+                                if let Err(e) = self.eth_observer_api.reconnect().await {
                                     log::error!("Ethereum API reconnect failed: {e}");
                                 }
                             }
@@ -202,11 +212,11 @@ impl KillSwitchRelayer {
     }
 
     async fn scan_for_events(&mut self) -> Result<(), ScanForEventsError> {
-        let balance = self.eth_api.get_approx_balance().await?;
+        let balance = self.eth_observer_api.get_approx_balance().await?;
         self.metrics.fee_payer_balance.set(balance);
 
         let last_finalized_block = self
-            .eth_api
+            .eth_observer_api
             .finalized_block_number()
             .await
             .map_err(ScanForEventsError::GearApi)?;
@@ -228,7 +238,7 @@ impl KillSwitchRelayer {
         }
 
         let events = self
-            .eth_api
+            .eth_observer_api
             .fetch_merkle_roots_in_range(start_from_eth_block, last_finalized_block)
             .await?;
 
@@ -265,12 +275,18 @@ impl KillSwitchRelayer {
             tx_hash: Some(tx_hash),
         } = &self.state
         {
-            let tx_status = self.eth_api.get_tx_status(*tx_hash).await?;
+            let tx_status = self.eth_observer_api.get_tx_status(*tx_hash).await?;
 
             match tx_status {
                 TxStatus::Finalized => {
                     log::info!("Challenge root TX {tx_hash:#x} finalized, switching to submit merkle root state");
-                    self.state = State::SubmitMerkleRoot { tx_hash: None };
+                    // For submit merkle root we need admin role
+                    if self.eth_admin_api.is_some() {
+                        self.state = State::SubmitMerkleRoot { tx_hash: None };
+                    } else {
+                        log::info!("Challenge root TX finalized, exiting ..");
+                        self.state = State::Exit;
+                    }
                     return Ok(());
                 }
                 TxStatus::Pending => {
@@ -284,7 +300,7 @@ impl KillSwitchRelayer {
         };
 
         self.state = State::ChallengeRoot { tx_hash: None };
-        let tx_hash = send_challege_root_to_ethereum(&self.eth_api).await?;
+        let tx_hash = send_challege_root_to_ethereum(&self.eth_observer_api).await?;
         self.state = State::ChallengeRoot {
             tx_hash: Some(tx_hash),
         };
@@ -293,11 +309,16 @@ impl KillSwitchRelayer {
     }
 
     async fn submit_merkle_root(&mut self) -> Result<(), SubmitMerkleRootError> {
+        let eth_admin_api = self
+            .eth_admin_api
+            .as_ref()
+            .expect("PK for admin role is required to submit merkle root");
+
         if let State::SubmitMerkleRoot {
             tx_hash: Some(tx_hash),
         } = &self.state
         {
-            let tx_status = self.eth_api.get_tx_status(*tx_hash).await?;
+            let tx_status = eth_admin_api.get_tx_status(*tx_hash).await?;
 
             match tx_status {
                 TxStatus::Finalized => {
@@ -321,7 +342,7 @@ impl KillSwitchRelayer {
         let proof = self
             .fetch_merkle_root_proof_from_relayer(self.challenged_block.expect("bad state"))
             .await?;
-        let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof).await?;
+        let tx_hash = submit_merkle_root_to_ethereum(eth_admin_api, proof).await?;
         self.state = State::SubmitMerkleRoot {
             tx_hash: Some(tx_hash),
         };

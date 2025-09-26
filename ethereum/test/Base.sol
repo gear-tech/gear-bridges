@@ -333,11 +333,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(messageQueue.maxBlockNumber(), 0);
     }
 
-    function expectedMaxBlockNumber(uint256 blockNumber) public view returns (uint256) {
-        return (messageQueue.maxBlockNumber() == 0 ? blockNumber : messageQueue.maxBlockNumber())
-            + messageQueue.MAX_BLOCK_DISTANCE();
-    }
-
     function erc20ManagerAssertions(address erc20ManagerAddress) public view {
         assertEq(erc20ManagerAddress, address(erc20Manager));
         assertEq(erc20Manager.governanceAdmin(), address(governanceAdmin));

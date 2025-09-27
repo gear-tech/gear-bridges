@@ -6,9 +6,10 @@ import { useAppKit } from '@reown/appkit/react';
 
 import { Tooltip } from '@/components';
 import { useEthAccount, useModal } from '@/hooks';
-import { getErrorMessage, isUndefined } from '@/utils';
+import { getErrorMessage, isUndefined, logger } from '@/utils';
 
 import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
+import { initArchiveApi } from '../../utils';
 
 type VaraProps = {
   nonce: HexString;
@@ -28,21 +29,27 @@ function RelayVaraTxButton({ nonce, blockNumber, onReceipt, onConfirmation }: Va
   const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
   const { mutateAsync, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (!ethAccount.address) return openEthModal();
 
     const alertId = alert.loading('Relaying Vara transaction...');
     const onLog = (message: string) => alert.update(alertId, message);
 
-    mutateAsync(onLog)
-      .then(({ isTransactionExtraConfirmed }) => {
+    const api = await initArchiveApi();
+
+    mutateAsync({ api, onLog })
+      .then(({ isExtraConfirmed }) => {
         onReceipt();
         alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
 
-        return isTransactionExtraConfirmed;
+        return isExtraConfirmed;
       })
       .then(() => onConfirmation())
-      .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
+      .catch((error: Error) => {
+        logger.error('Vara -> Eth relay', error);
+        alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
+      })
+      .finally(() => void api.disconnect());
   };
 
   const renderTooltipText = () => {
@@ -98,13 +105,16 @@ function RelayEthTxButton({ txHash, blockNumber, onInBlock, onFinalization }: Et
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
   const { mutateAsync, isPending } = useRelayEthTx(txHash);
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (!account) return openSubstrateModal();
 
     const alertId = alert.loading('Relaying Ethereum transaction...');
     const onLog = (message: string) => alert.update(alertId, message);
 
-    mutateAsync(onLog)
+    // keeping api here, in hook it will be disconnected before isFinalized is resolved
+    const api = await initArchiveApi();
+
+    mutateAsync({ api, onLog })
       .then(({ isFinalized }) => {
         alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
         onInBlock();
@@ -112,7 +122,11 @@ function RelayEthTxButton({ txHash, blockNumber, onInBlock, onFinalization }: Et
         return isFinalized;
       })
       .then(() => onFinalization())
-      .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
+      .catch((error: Error) => {
+        logger.error('Eth -> Vara relay', error);
+        alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
+      })
+      .finally(() => void api.disconnect());
   };
 
   const renderTooltipText = () => {

@@ -231,7 +231,6 @@ export class MessageQueueClient {
     blockNumber: bigint,
     varaMessage: VaraMessage,
     merkleProof: Proof,
-    extraTransactionConfirmations: number,
     statusCb: StatusCb,
   ): Promise<MessageProcessResult> {
     if (!this._walletClient || !this._account) {
@@ -268,12 +267,6 @@ export class MessageQueueClient {
 
       const receipt = await this._client.waitForTransactionReceipt({ hash });
 
-      const isExtraConfirmed = extraTransactionConfirmations
-        ? this._client
-            .waitForTransactionReceipt({ hash, confirmations: extraTransactionConfirmations })
-            .then(() => true)
-        : undefined;
-
       statusCb(`Transaction receipt received`, { txHash: hash });
 
       const [messageProcessed] = parseEventLogs({
@@ -294,7 +287,6 @@ export class MessageQueueClient {
           messageHash: args.messageHash,
           messageNonce: args.messageNonce,
           messageDestination: args.messageDestination,
-          isTransactionExtraConfirmed: isExtraConfirmed,
         };
       } else {
         statusCb(`Message processed event not found in transaction receipt`, { txHash: hash });

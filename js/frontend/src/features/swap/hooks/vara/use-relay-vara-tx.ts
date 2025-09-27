@@ -1,43 +1,47 @@
-import { HexString } from '@gear-js/api';
+import { GearApi, HexString } from '@gear-js/api';
 import { relayVaraToEth } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
-import { usePublicClient, useWalletClient } from 'wagmi';
+import { useConfig, usePublicClient, useWalletClient } from 'wagmi';
+import { waitForTransactionReceipt } from 'wagmi/actions';
 
 import { definedAssert } from '@/utils';
 
 import { CONTRACT_ADDRESS } from '../../consts';
-import { initArchiveApi } from '../../utils';
+
+type Params = {
+  api: GearApi;
+  onLog: (message: string) => void;
+};
 
 function useRelayVaraTx(nonce: HexString, blockNumber: bigint) {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
+  const config = useConfig();
 
-  const relay = async (onLog: (message: string) => void) => {
+  const relay = async ({ api, onLog }: Params) => {
     definedAssert(publicClient, 'Ethereum Public Client');
     definedAssert(walletClient, 'Wallet Client');
 
-    const archiveApi = await initArchiveApi();
+    const { error, success, ...result } = await relayVaraToEth({
+      nonce,
+      blockNumber,
+      ethereumPublicClient: publicClient,
+      ethereumWalletClient: walletClient,
+      ethereumAccount: walletClient.account,
+      gearApi: api,
+      messageQueueAddress: CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
+      statusCb: onLog,
+    });
 
-    try {
-      const { error, success, ...result } = await relayVaraToEth({
-        nonce,
-        blockNumber,
-        ethereumPublicClient: publicClient,
-        ethereumWalletClient: walletClient,
-        ethereumAccount: walletClient.account,
-        gearApi: archiveApi,
-        messageQueueAddress: CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
-        extraTransactionConfirmations: 2,
-        statusCb: onLog,
-      });
+    if (error) throw new Error(error);
+    if (!success) throw new Error('Failed to relay Vara transaction');
 
-      if (error) throw new Error(error);
-      if (!success) throw new Error('Failed to relay Vara transaction');
+    const isExtraConfirmed = waitForTransactionReceipt(config, {
+      hash: result.transactionHash,
+      confirmations: 2,
+    });
 
-      return result;
-    } finally {
-      await archiveApi.disconnect();
-    }
+    return { ...result, isExtraConfirmed };
   };
 
   return useMutation({ mutationFn: relay });

@@ -45,11 +45,6 @@ export type RelayVaraToEthParams = {
    */
   wait?: boolean;
   /**
-   * Number of extra confirmations to wait for after the transaction is mined.
-   * If specified, isTransactionExtraConfirmed in the result will be a promise that resolves once the extra confirmations are reached.
-   */
-  extraTransactionConfirmations?: number;
-  /**
    * Optional callback function to track relay operation status
    */
   statusCb?: StatusCb;
@@ -111,7 +106,6 @@ export async function relayVaraToEth(params: RelayVaraToEthParams) {
     gearApi,
     messageQueueAddress,
     wait = false,
-    extraTransactionConfirmations = 0,
     statusCb = () => {},
   } = params;
 
@@ -185,5 +179,5 @@ export async function relayVaraToEth(params: RelayVaraToEthParams) {
   statusCb(`Fetching merkle proof`, { blockNumber: blockNumber.toString(), msgHash });
   const merkleProof = await gearClient.fetchMerkleProof(Number(blockNumber), msgHash);
 
-  return msgQClient.processMessage(blockNumber, msg, merkleProof, extraTransactionConfirmations, statusCb);
+  return msgQClient.processMessage(blockNumber, msg, merkleProof, statusCb);
 }

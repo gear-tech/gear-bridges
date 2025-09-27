@@ -91,7 +91,7 @@ impl GearApi {
             .chain_get_block(Some(block))
             .await?
             .map(|block| block.block.header.number)
-            .ok_or_else(|| anyhow!("Block {} not present on RPC node", block))
+            .ok_or_else(|| anyhow!("Block {block} not present on RPC node"))
     }
 
     pub async fn block_number_to_hash(&self, block: u32) -> AnyResult<H256> {
@@ -99,7 +99,7 @@ impl GearApi {
             .rpc()
             .chain_get_block_hash(Some(block.into()))
             .await?
-            .ok_or_else(|| anyhow!("Block #{} not present on RPC node", block))
+            .ok_or_else(|| anyhow!("Block #{block} not present on RPC node"))
     }
 
     pub async fn latest_finalized_block(&self) -> AnyResult<H256> {
@@ -493,7 +493,7 @@ impl GearApi {
             .storage()
             .fetch_raw(address)
             .await?
-            .ok_or_else(|| anyhow!("Storage at address {:?} doesn't exist", address))?;
+            .ok_or_else(|| anyhow!("Storage at address {address:?} doesn't exist"))?;
 
         let mut proof = sp_trie::generate_trie_proof::<
             sp_trie::LayoutV1<sp_core::Blake2Hasher>,
@@ -612,11 +612,7 @@ impl GearApi {
             .await?;
 
         let proof = proof.ok_or_else(|| {
-            anyhow!(
-                "Message with hash {} not found in block {}",
-                message_hash,
-                block
-            )
+            anyhow!("Message with hash {message_hash} not found in block {block}",)
         })?;
 
         Ok(dto::MerkleProof {

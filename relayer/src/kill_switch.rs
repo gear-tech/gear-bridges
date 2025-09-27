@@ -285,12 +285,12 @@ impl KillSwitchRelayer {
 
             match tx_status {
                 TxStatus::Finalized => {
-                    log::info!("Challenge root TX {tx_hash:#x} finalized, switching to submit merkle root state");
                     // For submit merkle root we need admin role
                     if self.eth_admin_api.is_some() {
+                        log::info!("Challenge root TX {tx_hash:#x} finalized, switching to submit merkle root state");
                         self.state = State::SubmitMerkleRoot { tx_hash: None };
                     } else {
-                        log::info!("Challenge root TX finalized, exiting ..");
+                        log::info!("Challenge root TX {tx_hash:#x} finalized, exiting ..");
                         self.state = State::Exit;
                     }
                     return Ok(());

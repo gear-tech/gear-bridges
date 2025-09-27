@@ -594,7 +594,10 @@ async fn create_eth_killswitch_client(
     fn read_pk_bytes<P: AsRef<Path>>(path: P, buf: &mut Zeroizing<[u8; 32]>) -> AnyResult<()> {
         let path = path.as_ref();
         let mut file = File::open(path)?;
-        file.read(buf.as_mut())?;
+        if file.read(buf.as_mut())? != 32 {
+            return Err(anyhow!("Invalid key length in file: {path:?}"));
+        }
+
         Ok(())
     }
 

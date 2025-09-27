@@ -7,6 +7,17 @@ import styles from './home.module.scss';
 function Home() {
   return (
     <Container maxWidth="640px" className={styles.container}>
+      <div className={styles.warning}>
+        <div>
+          <p className={styles.date}>⚠️ Testnet Update on 30 September.</p>
+
+          <p>
+            Bridge upgrade scheduled. Previous test transaction history will be removed from the UI. Real funds are not
+            affected. New transactions will be visible as usual. Thanks for supporting the test phase!
+          </p>
+        </div>
+      </div>
+
       <PendingTransactionsWarning />
       <Swap />
     </Container>

@@ -35,7 +35,7 @@ contract MessageQueue is
 
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
-    uint256 public constant CHALLENGE_ROOT_DELAY = 1 days;
+    uint256 public constant CHALLENGE_ROOT_DELAY = 2 days;
 
     uint256 public constant PROCESS_ADMIN_MESSAGE_DELAY = 1 hours;
     uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 5 minutes;
@@ -52,6 +52,7 @@ contract MessageQueue is
     bool private _emergencyStop;
     uint256 private _genesisBlock;
     uint256 private _maxBlockNumber;
+    bool private _allowMessageProcessing;
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
@@ -198,7 +199,6 @@ contract MessageQueue is
      *
      * @dev Reverts if:
      *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
-     *      - challenging root status is already enabled with `ChallengeRoot` error.
      *
      * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
      */
@@ -207,13 +207,53 @@ contract MessageQueue is
             revert NotEmergencyStopObserver();
         }
 
-        if (isChallengingRoot()) {
-            revert ChallengeRoot();
-        }
-
         _challengingRootTimestamp = block.timestamp;
 
         emit ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY);
+    }
+
+    /**
+     * @dev Disables challenging root status.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - challenging root status is not enabled with `ChallengeRootNotEnabled` error.
+     *
+     * @dev Emits `ChallengeRootDisabled` event.
+     */
+    function disableChallengeRoot() external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (!isChallengingRoot()) {
+            revert ChallengeRootNotEnabled();
+        }
+
+        _challengingRootTimestamp = 0;
+
+        emit ChallengeRootDisabled();
+    }
+
+    /**
+     * @dev Allows message processing when emergency stop is enabled.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - emergency stop status is not enabled with `EmergencyStopNotEnabled` error.
+     */
+    function allowMessageProcessing() external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (!_emergencyStop) {
+            revert EmergencyStopNotEnabled();
+        }
+
+        _allowMessageProcessing = true;
+
+        emit MessageProcessingAllowed();
     }
 
     /**
@@ -274,8 +314,10 @@ contract MessageQueue is
                 delete _merkleRootTimestamps[previousMerkleRoot];
 
                 if (!_emergencyStop) {
+                    _challengingRootTimestamp = 0;
                     _emergencyStop = true;
 
+                    emit ChallengeRootDisabled();
                     emit EmergencyStopEnabled();
                 }
             } else {
@@ -358,12 +400,14 @@ contract MessageQueue is
         bytes32 governancePauserAddress = _governancePauser.governance();
 
         bool isFromAdminOrPauser = message.source == governanceAdminAddress || message.source == governancePauserAddress;
-        if (paused() && !isFromAdminOrPauser) {
+        bool canBypassPause = isFromAdminOrPauser;
+        if (paused() && !canBypassPause) {
             revert EnforcedPause();
         }
 
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
-        if (_emergencyStop && !isFromEmergencyStopAdmin) {
+        bool canBypassEmergencyStop = isFromEmergencyStopAdmin || _allowMessageProcessing;
+        if (_emergencyStop && !canBypassEmergencyStop) {
             revert EmergencyStop();
         }
 

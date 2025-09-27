@@ -7,6 +7,8 @@ type State = struct {
   admin_address: actor_id,
   /// Fee amount that will be charged from users.
   fee: u128,
+  /// Priority fee amount that will be charged from users.
+  priority_fee: u128,
 };
 
 constructor {
@@ -17,11 +19,18 @@ constructor {
 service BridgingPayment {
   /// Pay fees for message processing to the admin.
   /// 
-  /// This method requires that **exactly** [Config::fee] must
+  /// This method requires that **exactly** [State::fee] must
   /// be attached as a value when sending message to this method.
   /// 
   /// Current fee amount can be retreived by calling `get_state`.
   PayFees : (nonce: u256) -> null;
+  /// Pay fees for priority message processing to the admin.
+  /// 
+  /// This method requires that **exactly** [State::priority_fee] must be
+  /// attached as a value when sending message to this method.
+  /// 
+  /// Current fee amount can be retrieved by calling `get_state`.
+  PayPriorityFees : (block: h256, nonce: u256) -> null;
   /// Withdraw fees that were collected from user requests.
   /// 
   /// This method can be called only by admin.
@@ -34,6 +43,11 @@ service BridgingPayment {
   /// 
   /// This method can be called only by admin.
   SetFee : (fee: u128) -> null;
+  /// Set fee that this program will take for processing priority
+  /// requests.
+  /// 
+  /// This method can be called only by admin.
+  SetPriorityFee : (priority_fee: u128) -> null;
   /// Upgrades the program to the provided new address.
   Upgrade : (new: actor_id) -> null;
   /// Get current service [State].
@@ -44,6 +58,16 @@ service BridgingPayment {
     BridgingPaid: struct {
       /// Nonce of the message that was paid for.
       nonce: u256
+    };
+    /// Fee for the message processing by relayer was paid
+    /// and priority bridging was requested.
+    PriorityBridgingPaid: struct {
+      /// Block at which message was queued.
+      /// 
+      /// Used by merkle-root relayer to process requests faster.
+      block: h256,
+      /// Nonce of the message that was paid for.
+      nonce: u256,
     };
   }
 };

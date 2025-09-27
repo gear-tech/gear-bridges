@@ -8,6 +8,7 @@ use crate::{
 };
 use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::{H256, U256};
+use sails_rs::events::EventIo;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
@@ -56,6 +57,23 @@ pub(super) fn message_queued_events_of(block: &GearBlock) -> impl Iterator<Item 
         }
         _ => None,
     })
+}
+
+pub(super) fn priority_bridging_paid<'a>(
+    block: &'a GearBlock,
+    bridging_payment_address: H256,
+) -> impl Iterator<Item = (H256, U256)> + 'a {
+    block
+        .user_message_sent_events(bridging_payment_address, H256::default())
+        .filter_map(|payload| {
+            match bridging_payment_client::bridging_payment::events::BridgingPaymentEvents::decode_event(payload) {
+                Ok(bridging_payment_client::bridging_payment::events::BridgingPaymentEvents::PriorityBridgingPaid {
+                    block,
+                    nonce,
+                }) => Some((block, nonce)),
+                _ => None,
+            }
+        })
 }
 
 pub(super) fn authority_set_changed(block: &GearBlock) -> bool {

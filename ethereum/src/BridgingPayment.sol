@@ -37,10 +37,17 @@ contract BridgingPayment is IBridgingPayment, Ownable {
      * @dev Modifier to check if the caller is the ERC20Manager.
      */
     modifier onlyErc20Manager() {
+        _onlyErc20Manager();
+        _;
+    }
+
+    /**
+     * @dev Internal function to check if the caller is the ERC20Manager.
+     */
+    function _onlyErc20Manager() internal view {
         if (msg.sender != ERC20_MANAGER) {
             revert OnlyErc20Manager();
         }
-        _;
     }
 
     /**

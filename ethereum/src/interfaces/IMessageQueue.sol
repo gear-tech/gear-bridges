@@ -24,9 +24,19 @@ interface IMessageQueue is IPausable {
     error ChallengeRoot();
 
     /**
+     * @dev Challenging root status is disabled.
+     */
+    error ChallengeRootNotEnabled();
+
+    /**
      * @dev Emergency stop status is enabled.
      */
     error EmergencyStop();
+
+    /**
+     * @dev Emergency stop status is disabled.
+     */
+    error EmergencyStopNotEnabled();
 
     /**
      * @dev The plonk proof is invalid.
@@ -59,6 +69,11 @@ interface IMessageQueue is IPausable {
     error MerkleRootAlreadySet(uint256 blockNumber);
 
     /**
+     * @dev Caller is not emergency stop admin.
+     */
+    error NotEmergencyStopAdmin();
+
+    /**
      * @dev Caller is not emergency stop observer.
      */
     error NotEmergencyStopObserver();
@@ -79,6 +94,11 @@ interface IMessageQueue is IPausable {
     event ChallengeRootEnabled(uint256 untilTimestamp);
 
     /**
+     * @dev Emitted when challenging root status is disabled.
+     */
+    event ChallengeRootDisabled();
+
+    /**
      * @dev Emitted when emergency stop status is enabled.
      */
     event EmergencyStopEnabled();
@@ -93,6 +113,11 @@ interface IMessageQueue is IPausable {
      * @dev Emitted when block number and merkle root are stored.
      */
     event MerkleRoot(uint256 blockNumber, bytes32 merkleRoot);
+
+    /**
+     * @dev Emitted when message processing is allowed during emergency stop.
+     */
+    event MessageProcessingAllowed();
 
     /**
      * @dev Emitted when message is processed.
@@ -161,11 +186,30 @@ interface IMessageQueue is IPausable {
      *
      * @dev Reverts if:
      *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
-     *      - challenging root status is already enabled with `ChallengeRoot` error.
      *
      * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
      */
     function challengeRoot() external;
+
+    /**
+     * @dev Disables challenging root status.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - challenging root status is not enabled with `ChallengeRootNotEnabled` error.
+     *
+     * @dev Emits `ChallengeRootDisabled` event.
+     */
+    function disableChallengeRoot() external;
+
+    /**
+     * @dev Allows message processing when emergency stop is enabled.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *      - emergency stop status is not enabled with `EmergencyStopNotEnabled` error.
+     */
+    function allowMessageProcessing() external;
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
@@ -257,16 +301,7 @@ library Hasher {
      */
     function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
         /// forge-lint: disable-next-line(asm-keccak256)
-        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-
-        // TODO: avoid double hashing.
-        bytes32 hash2;
-        assembly ("memory-safe") {
-            mstore(0x00, hash1)
-            hash2 := keccak256(0x00, 0x20)
-        }
-
-        return hash2;
+        return keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
     }
 
     /**
@@ -276,15 +311,6 @@ library Hasher {
      */
     function hash(VaraMessage memory message) internal pure returns (bytes32) {
         /// forge-lint: disable-next-line(asm-keccak256)
-        bytes32 hash1 = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-
-        // TODO: avoid double hashing.
-        bytes32 hash2;
-        assembly ("memory-safe") {
-            mstore(0x00, hash1)
-            hash2 := keccak256(0x00, 0x20)
-        }
-
-        return hash2;
+        return keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
     }
 }

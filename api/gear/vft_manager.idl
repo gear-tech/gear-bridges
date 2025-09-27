@@ -119,7 +119,7 @@ type MessageStatus = enum {
   /// Message to the `pallet-gear-eth-bridge` is sent.
   SendingMessageToBridgeBuiltin,
   /// Reply is received for a message to the `pallet-gear-eth-bridge`.
-  BridgeResponseReceived: opt u256,
+  BridgeResponseReceived: opt struct { u256, h256, u64 },
   /// Message to refund tokens is sent.
   SendingMessageToReturnTokens,
   /// Reply is received for a token refund message.
@@ -287,6 +287,10 @@ service VftManager {
     BridgingRequested: struct {
       /// Nonce that gear-eth-bridge built-in actor have returned.
       nonce: u256,
+      /// Queue ID that gear-eth-bridge built-in actor have returned.
+      queue_id: u64,
+      /// Hash of the message that gear-eth-bridge built-in actor have returned.
+      hash: h256,
       /// `VFT` token address that was locked/burned.
       vara_token_id: actor_id,
       /// Amount of tokens that should be bridged.

@@ -48,7 +48,7 @@ pub enum MessageStatus {
     /// Message to the `pallet-gear-eth-bridge` is sent.
     SendingMessageToBridgeBuiltin,
     /// Reply is received for a message to the `pallet-gear-eth-bridge`.
-    BridgeResponseReceived(Option<U256>),
+    BridgeResponseReceived(Option<(U256, H256, u64)>),
 
     /// Message to refund tokens is sent.
     SendingMessageToReturnTokens,

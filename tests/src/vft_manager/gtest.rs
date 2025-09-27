@@ -5,7 +5,7 @@ use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
     VftManagerFactory as VftManagerFactoryC,
 };
-use vft_vara_client::traits::VftVaraFactory;
+use vft_vara_client::{traits::VftVaraFactory, Mainnet};
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
@@ -30,13 +30,20 @@ impl WasmProgram for GearBridgeBuiltinMock {
     fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
         #[derive(Encode)]
         enum Response {
-            MessageSent { nonce: U256, hash: H256 },
+            MessageSent {
+                block_number: u32,
+                hash: H256,
+                nonce: U256,
+                queue_id: u64,
+            },
         }
 
         Ok(Some(
             Response::MessageSent {
+                block_number: 1,
                 nonce: U256::from(1),
                 hash: [1; 32].into(),
+                queue_id: 1,
             }
             .encode(),
         ))
@@ -107,7 +114,7 @@ async fn setup_for_test() -> Fixture {
     // VFT
     let vft_code_id = remoting.system().submit_code(vft_vara::WASM_BINARY);
     let gear_supply_vft = vft_vara_client::VftVaraFactory::new(remoting.clone())
-        .new()
+        .new(Mainnet::No)
         .send_recv(vft_code_id, b"salt")
         .await
         .unwrap();

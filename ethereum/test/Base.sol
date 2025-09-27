@@ -233,20 +233,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         );
         console.log("    MessageQueue:        ", address(messageQueue));
 
-        assertEq(messageQueueAddress, address(messageQueue));
-        assertEq(messageQueue.governanceAdmin(), address(governanceAdmin));
-        assertEq(messageQueue.governancePauser(), address(governancePauser));
-        assertEq(messageQueue.emergencyStopAdmin(), deploymentArguments.emergencyStopAdmin);
-        address[] memory emergencyStopObservers = messageQueue.emergencyStopObservers();
-        assertEq(emergencyStopObservers.length, deploymentArguments.emergencyStopObservers.length);
-        for (uint256 i = 0; i < emergencyStopObservers.length; i++) {
-            assertEq(emergencyStopObservers[i], deploymentArguments.emergencyStopObservers[i]);
-        }
-        assertEq(messageQueue.verifier(), address(verifier));
-        assertEq(messageQueue.isChallengingRoot(), false);
-        assertEq(messageQueue.isEmergencyStopped(), false);
-        assertEq(messageQueue.genesisBlock(), 0);
-        assertEq(messageQueue.maxBlockNumber(), 0);
+        messageQueueAssertions(messageQueueAddress);
 
         console.log();
 
@@ -327,6 +314,23 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         return deploymentArguments.overrides.circleToken != BaseConstants.ZERO_ADDRESS
             && deploymentArguments.overrides.tetherToken != BaseConstants.ZERO_ADDRESS
             && deploymentArguments.overrides.wrappedEther != BaseConstants.ZERO_ADDRESS;
+    }
+
+    function messageQueueAssertions(address messageQueueAddress) public view {
+        assertEq(messageQueueAddress, address(messageQueue));
+        assertEq(messageQueue.governanceAdmin(), address(governanceAdmin));
+        assertEq(messageQueue.governancePauser(), address(governancePauser));
+        assertEq(messageQueue.emergencyStopAdmin(), deploymentArguments.emergencyStopAdmin);
+        address[] memory emergencyStopObservers = messageQueue.emergencyStopObservers();
+        assertEq(emergencyStopObservers.length, deploymentArguments.emergencyStopObservers.length);
+        for (uint256 i = 0; i < emergencyStopObservers.length; i++) {
+            assertEq(emergencyStopObservers[i], deploymentArguments.emergencyStopObservers[i]);
+        }
+        assertEq(messageQueue.verifier(), address(verifier));
+        assertEq(messageQueue.isChallengingRoot(), false);
+        assertEq(messageQueue.isEmergencyStopped(), false);
+        assertEq(messageQueue.genesisBlock(), 0);
+        assertEq(messageQueue.maxBlockNumber(), 0);
     }
 
     function erc20ManagerAssertions(address erc20ManagerAddress) public view {

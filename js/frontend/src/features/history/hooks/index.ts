@@ -1,5 +1,5 @@
 import { usePairs } from './use-pairs';
-import { usePendingTxsCount } from './use-pending-txs-count';
+import { usePendingTxsCount, useOptimisticPendingTxsCountUpdate } from './use-pending-txs-count';
 import { useTransaction, useOptimisticTxUpdate } from './use-transaction';
 import { useTransactionFilters } from './use-transaction-filters';
 import { useTransactions } from './use-transactions';
@@ -13,4 +13,5 @@ export {
   useTransaction,
   useOptimisticTxUpdate,
   usePendingTxsCount,
+  useOptimisticPendingTxsCountUpdate,
 };

@@ -35,11 +35,11 @@ function RelayVaraTxButton({ nonce, blockNumber, onReceipt, onConfirmation }: Va
     const onLog = (message: string) => alert.update(alertId, message);
 
     mutateAsync(onLog)
-      .then(({ isTransactionConfirmed }) => {
+      .then(({ isTransactionExtraConfirmed }) => {
         onReceipt();
         alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
 
-        return isTransactionConfirmed;
+        return isTransactionExtraConfirmed;
       })
       .then(() => onConfirmation())
       .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));

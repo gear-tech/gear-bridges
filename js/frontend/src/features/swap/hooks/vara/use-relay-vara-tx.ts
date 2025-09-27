@@ -27,6 +27,7 @@ function useRelayVaraTx(nonce: HexString, blockNumber: bigint) {
         ethereumAccount: walletClient.account,
         gearApi: archiveApi,
         messageQueueAddress: CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
+        extraTransactionConfirmations: 2,
         statusCb: onLog,
       });
 

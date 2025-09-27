@@ -49,10 +49,35 @@ $ anvil
 
 ```shell
 $ source .env
+
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+```
+
+### Upgrade
+
+> [!WARNING]
+> Before you run upgrade scripts, edit `reinitialize` method depending on how you want to perform upgrade (only for `ERC20Manager` and `MessageQueue`)!
+
+```shell
+$ source .env
+
+$ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+
+$ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+
+$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
 ### Cast

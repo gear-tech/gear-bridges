@@ -608,6 +608,76 @@ contract MessageQueueTest is Test, Base {
         vm.stopPrank();
     }
 
+    function test_AllowMessageProcessing() public {
+        uint256 blockNumber = 0x11;
+        bytes32 merkleRoot = bytes32(uint256(0x22));
+        bytes memory proof = "";
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+
+        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+
+        merkleRoot = bytes32(uint256(0x33));
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.EmergencyStopEnabled();
+
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStop.selector));
+        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
+
+        VaraMessage memory message = VaraMessage({
+            nonce: 0x11,
+            source: bytes32(uint256(0x22)),
+            destination: address(messageHandlerMock),
+            payload: hex"33"
+        });
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+
+        uint256 totalLeaves = 1;
+        uint256 leafIndex = 0;
+        bytes32[] memory proof2 = new bytes32[](0);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStop.selector));
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.MessageProcessingAllowed();
+
+        messageQueue.allowMessageProcessing();
+
+        vm.stopPrank();
+
+        // message is not processed, but anyone can call processMessage now
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootNotFound.selector, 0x11));
+        messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
+        assertEq(messageQueue.isProcessed(message.nonce), false);
+    }
+
+    function test_AllowMessageProcessingWithNotEmergencyStopAdmin() public {
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopAdmin.selector));
+        messageQueue.allowMessageProcessing();
+    }
+
+    function test_AllowMessageProcessingWithNotEmergencyStop() public {
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.EmergencyStopNotEnabled.selector));
+        messageQueue.allowMessageProcessing();
+
+        vm.stopPrank();
+    }
+
     function test_SubmitMerkleRoot() public {
         uint256 blockNumber = 0x11;
         bytes32 merkleRoot = bytes32(uint256(0x22));

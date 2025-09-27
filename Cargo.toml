@@ -180,18 +180,18 @@ uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
 async-trait = "0.1.88"
 # Gear/Substrate deps
-gprimitives = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-gstd = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue", features = [
+gprimitives = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }
+gstd = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0", features = [
     "nightly",
 ] }
-gtest = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-gear-wasm-builder = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue", default-features = false }
-gsdk = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-gclient = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-gear-core = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
-pallet-gear-eth-bridge-primitives = { git = "https://github.com/gear-tech/gear", branch = "dn-bridge-unlimited-queue" }
+gtest = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }
+gear-wasm-builder = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0", default-features = false }
+gsdk = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }
+gclient = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }
+gear-core = { git = "https://github.com/gear-tech/gear", tag = 'v1.9.2-rc.0' }
+gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }
+gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }
+pallet-gear-eth-bridge-primitives = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }
 # TODO: remove idl-gen and client-gen
 sails-idl-gen = { git = "https://github.com/gear-tech/sails", branch = "vo/bridge-unlimited-queue" }
 sails-client-gen = { git = "https://github.com/gear-tech/sails", branch = "vo/bridge-unlimited-queue" }

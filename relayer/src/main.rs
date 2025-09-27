@@ -20,9 +20,13 @@ use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::consts::SIZE_THREAD_STACK_MIN;
 use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
 use sails_rs::ActorId;
-use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet, env, fs::File, io::Read as _, net::TcpListener, path::Path, str::FromStr,
+    sync::Arc, time::Duration,
+};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
+use zeroize::Zeroizing;
 
 fn main() -> AnyResult<()> {
     // we need at least 2 native threads to run some of the blocking tasks like proof composition
@@ -587,13 +591,22 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
 async fn create_eth_killswitch_client(
     args: &EthereumKillSwitchArgs,
 ) -> AnyResult<(EthApi, Option<EthApi>)> {
-    let observer_pk_bytes = std::fs::read(&args.eth_observer_pk_path).with_context(|| {
+    fn read_pk_bytes<P: AsRef<Path>>(path: P, buf: &mut Zeroizing<[u8; 32]>) -> AnyResult<()> {
+        let path = path.as_ref();
+        let mut file = File::open(path)?;
+        file.read(buf.as_mut())?;
+        Ok(())
+    }
+
+    let mut buf = Zeroizing::<[u8; 32]>::default();
+
+    read_pk_bytes(&args.eth_observer_pk_path, &mut buf).with_context(|| {
         format!(
             "Failed to read ETH_OBSERVER_PK_PATH file: {:?}",
             &args.eth_observer_pk_path
         )
     })?;
-    let observer_pk_str = format!("0x{}", hex::encode(observer_pk_bytes));
+    let observer_pk_str = format!("0x{}", hex::encode(buf.as_ref()));
 
     let observer_api = create_eth_signer_client(&EthereumSignerArgs {
         ethereum_args: args.ethereum_args.clone(),
@@ -601,13 +614,13 @@ async fn create_eth_killswitch_client(
     })
     .await;
 
-    let maybe_admin_pk_bytes = args
+    let is_admin_pk_set = args
         .eth_admin_pk_path
         .as_deref()
-        .and_then(|path| std::fs::read(path).ok());
+        .and_then(|path| read_pk_bytes(path, &mut buf).ok());
 
-    let maybe_admin_api = if let Some(admin_pk_bytes) = maybe_admin_pk_bytes {
-        let admin_pk_str = format!("0x{}", hex::encode(admin_pk_bytes));
+    let maybe_admin_api = if is_admin_pk_set.is_some() {
+        let admin_pk_str = format!("0x{}", hex::encode(buf.as_ref()));
         Some(
             create_eth_signer_client(&EthereumSignerArgs {
                 ethereum_args: args.ethereum_args.clone(),

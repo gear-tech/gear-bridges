@@ -45,7 +45,7 @@ function useOptimisticTxUpdate(id: string) {
     queryClient.setQueryData<TransferQueryQuery>(['transaction', id], (data) => {
       if (!data?.transferById) return data;
 
-      return { transferById: { ...data.transferById, status: StatusEnum.Bridging } };
+      return { transferById: { ...data.transferById, status: StatusEnum.Completed } };
     });
 }
 

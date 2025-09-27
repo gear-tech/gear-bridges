@@ -9,7 +9,6 @@ import { useEthAccount, useModal } from '@/hooks';
 import { getErrorMessage, isUndefined, logger } from '@/utils';
 
 import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
-import { initArchiveApi } from '../../utils';
 
 type VaraProps = {
   nonce: HexString;
@@ -18,7 +17,7 @@ type VaraProps = {
   onConfirmation: () => void;
 };
 
-function RelayVaraTxButton({ nonce, blockNumber, onReceipt, onConfirmation }: VaraProps) {
+function RelayVaraTxButton({ nonce, blockNumber, onConfirmation, ...props }: VaraProps) {
   const { account } = useAccount();
 
   const ethAccount = useEthAccount();
@@ -27,7 +26,7 @@ function RelayVaraTxButton({ nonce, blockNumber, onReceipt, onConfirmation }: Va
   const alert = useAlert();
 
   const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
-  const { mutateAsync, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
+  const { mutate, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
 
   const handleClick = async () => {
     if (!ethAccount.address) return openEthModal();
@@ -35,21 +34,17 @@ function RelayVaraTxButton({ nonce, blockNumber, onReceipt, onConfirmation }: Va
     const alertId = alert.loading('Relaying Vara transaction...');
     const onLog = (message: string) => alert.update(alertId, message);
 
-    const api = await initArchiveApi();
+    const onReceipt = () => {
+      props.onReceipt();
+      alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+    };
 
-    mutateAsync({ api, onLog })
-      .then(({ isExtraConfirmed }) => {
-        onReceipt();
-        alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+    const onError = (error: Error) => {
+      logger.error('Vara -> Eth relay', error);
+      alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
+    };
 
-        return isExtraConfirmed;
-      })
-      .then(() => onConfirmation())
-      .catch((error: Error) => {
-        logger.error('Vara -> Eth relay', error);
-        alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
-      })
-      .finally(() => void api.disconnect());
+    mutate({ onLog, onReceipt, onConfirmation, onError });
   };
 
   const renderTooltipText = () => {
@@ -95,7 +90,7 @@ type EthProps = {
   onFinalization: () => void;
 };
 
-function RelayEthTxButton({ txHash, blockNumber, onInBlock, onFinalization }: EthProps) {
+function RelayEthTxButton({ txHash, blockNumber, onFinalization, ...props }: EthProps) {
   const { account } = useAccount();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
@@ -103,30 +98,26 @@ function RelayEthTxButton({ txHash, blockNumber, onInBlock, onFinalization }: Et
   const alert = useAlert();
 
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
-  const { mutateAsync, isPending } = useRelayEthTx(txHash);
+  const { mutate, isPending } = useRelayEthTx(txHash);
 
-  const handleClick = async () => {
+  const handleClick = () => {
     if (!account) return openSubstrateModal();
 
     const alertId = alert.loading('Relaying Ethereum transaction...');
+
     const onLog = (message: string) => alert.update(alertId, message);
 
-    // keeping api here, in hook it will be disconnected before isFinalized is resolved
-    const api = await initArchiveApi();
+    const onInBlock = () => {
+      alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+      props.onInBlock();
+    };
 
-    mutateAsync({ api, onLog })
-      .then(({ isFinalized }) => {
-        alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
-        onInBlock();
+    const onError = (error: Error) => {
+      logger.error('Eth -> Vara relay', error);
+      alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
+    };
 
-        return isFinalized;
-      })
-      .then(() => onFinalization())
-      .catch((error: Error) => {
-        logger.error('Eth -> Vara relay', error);
-        alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
-      })
-      .finally(() => void api.disconnect());
+    mutate({ onLog, onInBlock, onFinalization, onError });
   };
 
   const renderTooltipText = () => {

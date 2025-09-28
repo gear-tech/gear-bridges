@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {BaseConstants} from "test/Base.sol";
 import {DeploymentScript} from "script/Deployment.s.sol";
 
-contract DeploymentTest is Test {
+contract DeploymentScriptTest is Test {
     function setUp() public {}
 
     function test_DeploymentMainnet() public {

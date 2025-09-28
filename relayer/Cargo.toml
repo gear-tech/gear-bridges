@@ -55,6 +55,7 @@ subxt.workspace = true
 gsdk.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+zeroize.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true
 

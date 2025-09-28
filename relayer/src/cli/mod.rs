@@ -4,11 +4,11 @@ use std::time::Duration;
 mod common;
 
 pub use common::{
-    BeaconRpcArgs, EthereumArgs, EthereumSignerArgs, GearArgs, GearSignerArgs, GenesisConfigArgs,
-    PrometheusArgs, ProofStorageArgs,
+    BeaconRpcArgs, EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, GearArgs,
+    GearSignerArgs, GenesisConfigArgs, PrometheusArgs, ProofStorageArgs,
 };
 
-use crate::cli::common::BlockStorageArgs;
+use crate::cli::common::{BlockStorageArgs, RelayerHttpArgs};
 
 pub const DEFAULT_COUNT_CONFIRMATIONS: u64 = 8;
 pub const DEFAULT_COUNT_THREADS: usize = 24;
@@ -311,15 +311,16 @@ pub struct KillSwitchArgs {
     pub from_eth_block: Option<u64>,
 
     #[clap(flatten)]
+    pub relayer_http_args: RelayerHttpArgs,
+
+    #[clap(flatten)]
     pub gear_args: GearArgs,
+
     #[clap(flatten)]
-    pub ethereum_args: EthereumSignerArgs,
-    #[clap(flatten)]
-    pub genesis_config_args: GenesisConfigArgs,
+    pub ethereum_args: EthereumKillSwitchArgs,
+
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
-    #[clap(flatten)]
-    pub proof_storage_args: ProofStorageArgs,
 }
 
 #[derive(Args)]

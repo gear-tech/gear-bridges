@@ -178,6 +178,7 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
+zeroize = "1.8.1"
 async-trait = "0.1.88"
 # Gear/Substrate deps
 gprimitives = { git = "https://github.com/gear-tech/gear", tag = "v1.9.2-rc.0" }

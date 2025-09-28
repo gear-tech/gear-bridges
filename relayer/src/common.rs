@@ -99,6 +99,15 @@ pub(crate) async fn submit_merkle_root_to_ethereum(
     Ok(tx_hash)
 }
 
+pub(crate) async fn send_challege_root_to_ethereum(
+    eth_api: &EthApi,
+) -> Result<TxHash, ethereum_client::Error> {
+    log::info!("Sending challenge root to ethereum");
+    let tx_hash = eth_api.send_challenge_root().await?;
+
+    Ok(tx_hash)
+}
+
 pub(crate) fn is_rpc_transport_error_recoverable(err: &RpcError<TransportErrorKind>) -> bool {
     match err {
         RpcError::Transport(transport) => match transport {

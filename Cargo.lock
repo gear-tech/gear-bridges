@@ -10038,6 +10038,7 @@ dependencies = [
  "utils-prometheus",
  "uuid",
  "vft-manager-client",
+ "zeroize",
 ]
 
 [[package]]

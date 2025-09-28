@@ -16,6 +16,7 @@ import {TetherToken} from "src/erc20/TetherToken.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
 import {WrappedVara} from "src/erc20/WrappedVara.sol";
 import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
@@ -66,7 +67,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     IERC20Metadata public circleToken;
     IERC20Metadata public tetherToken;
     IERC20Metadata public wrappedEther;
-    IERC20Metadata public wrappedVara;
+    WrappedVara public wrappedVara;
 
     GovernanceAdmin public governanceAdmin;
     GovernancePauser public governancePauser;
@@ -177,11 +178,34 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    WETH:                ", address(wrappedEther));
 
         address erc20ManagerAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 7
+            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 8
+        );
+        address governanceAdminAddress = vm.computeCreateAddress(
+            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 2
+        );
+        address governancePauserAddress = vm.computeCreateAddress(
+            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 3
         );
 
-        wrappedVara = new WrappedVara(erc20ManagerAddress);
-        console.log("    WVARA:               ", address(wrappedVara));
+        // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
+        wrappedVara = WrappedVara(
+            Upgrades.deployUUPSProxy(
+                "WrappedVara.sol",
+                abi.encodeCall(
+                    WrappedVara.initialize,
+                    (IGovernance(governanceAdminAddress), IGovernance(governancePauserAddress), erc20ManagerAddress)
+                )
+            )
+        );
+        if (block.chainid == 1) {
+            console.log("    WVARA:               ", address(wrappedVara));
+        } else {
+            console.log("    WTVARA:              ", address(wrappedVara));
+        }
+
+        assertEq(wrappedVara.governanceAdmin(), governanceAdminAddress);
+        assertEq(wrappedVara.governancePauser(), governancePauserAddress);
+        assertEq(wrappedVara.minter(), erc20ManagerAddress);
 
         console.log();
 
@@ -193,13 +217,19 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 4
         );
 
-        governanceAdmin =
-            new GovernanceAdmin(deploymentArguments.governanceAdmin, messageQueueAddress, erc20ManagerAddress);
+        governanceAdmin = new GovernanceAdmin(
+            deploymentArguments.governanceAdmin, address(wrappedVara), messageQueueAddress, erc20ManagerAddress
+        );
         console.log("    GovernanceAdmin:     ", address(governanceAdmin));
 
-        governancePauser =
-            new GovernancePauser(deploymentArguments.governancePauser, messageQueueAddress, erc20ManagerAddress);
+        assertEq(governanceAdminAddress, address(governanceAdmin));
+
+        governancePauser = new GovernancePauser(
+            deploymentArguments.governancePauser, address(wrappedVara), messageQueueAddress, erc20ManagerAddress
+        );
         console.log("    GovernancePauser:    ", address(governancePauser));
+
+        assertEq(governancePauserAddress, address(governancePauser));
 
         console.log();
 
@@ -259,7 +289,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         );
         console.log("    ERC20Manager:        ", address(erc20Manager));
 
-        erc20ManagerAssertions(address(erc20Manager));
+        erc20ManagerAssertions(erc20ManagerAddress);
 
         //////////////////////////////////////////////////////////////////////////////
 
@@ -287,6 +317,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
             console.log("Script specific:");
 
+            printContractInfo(
+                "WrappedVara", address(wrappedVara), Upgrades.getImplementationAddress(address(wrappedVara))
+            );
             printContractInfo(
                 "MessageQueue", address(messageQueue), Upgrades.getImplementationAddress(address(messageQueue))
             );

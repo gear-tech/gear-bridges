@@ -1,5 +1,5 @@
 import { HexString } from '@gear-js/api';
-import { getVaraAddress, useAccount } from '@gear-js/react-hooks';
+import { getVaraAddress } from '@gear-js/react-hooks';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -9,7 +9,7 @@ import { useTokens } from '@/context';
 import { useTransaction } from '@/features/history';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
-import { PayVaraFeeButton, RelayTxButton } from '@/features/swap';
+import { PayVaraFeeButton, RelayTxButton, RelayTxNote } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
 
 import { Field } from './field';
@@ -78,7 +78,6 @@ function ExplorerLink({ children, network, id, urls }: ExplorerLinkProps) {
 }
 
 function Transaction() {
-  const { account } = useAccount();
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
@@ -117,41 +116,45 @@ function Transaction() {
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
-  const isOwner = account?.decodedAddress === sender;
   const rawNonce = isVaraNetwork ? `0x${nonce.padStart(64, '0')}` : nonce;
 
   return (
     <Container className={styles.container}>
       <header className={styles.header}>
         <div>
-          <h1 className={styles.heading}>Transaction</h1>
+          <div className={styles.headingContainer}>
+            <h1 className={styles.heading}>Transaction</h1>
+            <TransactionStatus status={status} />
+          </div>
+
           <p className={styles.subheading}>Cross-chain swap transaction information</p>
         </div>
 
-        <div className={styles.sidebar}>
-          <TransactionStatus status={status} />
+        {isAwaitingPayment && (
+          <div className={styles.sidebar}>
+            <div className={styles.buttons}>
+              {isVaraNetwork && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
 
-          {isAwaitingPayment && isOwner && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+              {isVaraNetwork ? (
+                bridgingStartedAtBlock && (
+                  <RelayTxButton.Vara
+                    nonce={rawNonce as HexString}
+                    blockNumber={bridgingStartedAtBlock}
+                    onSuccess={refetch}
+                  />
+                )
+              ) : (
+                <RelayTxButton.Eth txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} onSuccess={refetch} />
+              )}
+            </div>
 
-          {isAwaitingPayment &&
-            (isVaraNetwork ? (
-              bridgingStartedAtBlock && (
-                <RelayTxButton.Vara
-                  sender={sender}
-                  nonce={rawNonce as HexString}
-                  blockNumber={bridgingStartedAtBlock}
-                  onSuccess={refetch}
-                />
-              )
+            {isVaraNetwork ? (
+              bridgingStartedAtBlock && <RelayTxNote.Vara blockNumber={bridgingStartedAtBlock} />
             ) : (
-              <RelayTxButton.Eth
-                sender={sender}
-                txHash={txHash as HexString}
-                blockNumber={BigInt(blockNumber)}
-                onSuccess={refetch}
-              />
-            ))}
-        </div>
+              <RelayTxNote.Eth blockNumber={BigInt(blockNumber)} />
+            )}
+          </div>
+        )}
       </header>
 
       <div className={styles.cards}>

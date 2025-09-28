@@ -35,9 +35,7 @@ afterAll(async () => {
 
 describe('VaraToEth', () => {
   test('message hash', async () => {
-    const blockHash = (await gearApi.blocks.getBlockHash(BLOCK_NUMBER)).toHex();
-
-    const msg = await gearClient.findMessageQueuedEvent(blockHash, NONCE);
+    const msg = await gearClient.findMessageQueuedEvent(BLOCK_NUMBER, NONCE);
 
     if (!msg) {
       throw new Error('Message not found');
@@ -49,15 +47,13 @@ describe('VaraToEth', () => {
   });
 
   test('merkle proof', async () => {
-    const blockHash = (await gearApi.blocks.getBlockHash(BLOCK_NUMBER)).toHex();
-
-    const msg = await gearClient.findMessageQueuedEvent(blockHash, NONCE);
+    const msg = await gearClient.findMessageQueuedEvent(BLOCK_NUMBER, NONCE);
 
     if (!msg) {
       throw new Error('Message not found');
     }
 
-    const merkleProof = await gearClient.fetchMerkleProof(blockHash, messageHash(msg));
+    const merkleProof = await gearClient.fetchMerkleProof(BLOCK_NUMBER, messageHash(msg));
 
     expect(merkleProof.leafIndex.toString()).toEqual(LEAF_INDEX);
     expect(merkleProof.numLeaves.toString()).toEqual(NUM_LEAVES);
@@ -66,15 +62,13 @@ describe('VaraToEth', () => {
   });
 
   test('process message call', async () => {
-    const blockHash = (await gearApi.blocks.getBlockHash(BLOCK_NUMBER)).toHex();
-
-    const msg = await gearClient.findMessageQueuedEvent(blockHash, NONCE);
+    const msg = await gearClient.findMessageQueuedEvent(BLOCK_NUMBER, NONCE);
 
     if (!msg) {
       throw new Error('Message not found');
     }
 
-    const merkleProof = await gearClient.fetchMerkleProof(blockHash, messageHash(msg));
+    const merkleProof = await gearClient.fetchMerkleProof(BLOCK_NUMBER, messageHash(msg));
 
     const data = encodeFunctionData({
       abi: MessageQueueAbi,

@@ -1,5 +1,5 @@
 import { PayVaraFeeButton } from './pay-vara-fee-button';
-import { RelayTxButton } from './relay-tx-button';
+import { RelayTxButton, RelayTxNote } from './relay-tx-button';
 import { Swap } from './swap';
 
-export { Swap, PayVaraFeeButton, RelayTxButton };
+export { Swap, PayVaraFeeButton, RelayTxButton, RelayTxNote };

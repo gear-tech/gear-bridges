@@ -1,6 +1,6 @@
 import { GearApi, BaseGearProgram } from '@gear-js/api';
 import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
-import { H256, throwOnErrorReply, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import { H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 import { StatusCb } from '../util';
 
 export type CheckpointError = 'OutDated' | 'NotPresent';
@@ -52,8 +52,8 @@ export class CheckpointClient {
     }
 
     this.serviceCheckpointFor = new ServiceCheckpointFor(this);
-    this.serviceSyncUpdate = new ServiceSyncUpdate(this);
     this.serviceState = new ServiceState(this);
+    this.serviceSyncUpdate = new ServiceSyncUpdate(this);
   }
 
   public get programId(): `0x${string}` {
@@ -66,52 +66,46 @@ export class ServiceCheckpointFor {
   constructor(private _program: CheckpointClient) {}
 
   public async get(slot: number, wait = false, statusCb: StatusCb = () => {}): Promise<[number, H256]> {
-    const payload = this._program.registry
-      .createType('(String, String, u64)', ['ServiceCheckpointFor', 'Get', slot])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: ZERO_ADDRESS,
-      payload,
-      value: 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const [_service, _method, result] = this._program.registry.createType(
-      '(String, String, Result<(u64, H256), CheckpointError>)',
-      reply.payload,
+    const query = new QueryBuilder<{ ok: [number, H256] } | { err: CheckpointError }>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'ServiceCheckpointFor',
+      'Get',
+      slot,
+      'u64',
+      'Result<(u64, H256), CheckpointError>',
     );
 
-    if (result.isErr) {
-      const error = result.asErr.toString() as CheckpointError;
+    const result = await query.call();
 
-      if (error === 'NotPresent') {
-        if (!wait) {
-          throw new Error(`Slot ${slot} is not present yet`);
-        }
-
-        let unsub: () => void;
-        statusCb(`Slot hasn't been submitted yet.`, { slot: slot.toString() });
-
-        const [_slot, _treeHashRoot] = await new Promise<[number, H256]>((resolve, reject) => {
-          statusCb('Subscribing for new slots');
-          this._program.serviceSyncUpdate
-            .subscribeToNewCheckpointEvent((event) => {
-              statusCb(`Received new slot`, { slot: event.slot.toString() });
-              if (event.slot >= slot) {
-                resolve([event.slot, event.tree_hash_root]);
-              }
-            })
-            .then((_unsub) => {
-              unsub = _unsub;
-            })
-            .catch((e) => reject(e));
-        }).finally(unsub!);
-
-        return [_slot, _treeHashRoot];
+    if ('ok' in result) {
+      return [Number(result.ok[0]), result.ok[1]];
+    } else {
+      if (!wait) {
+        throw new Error(`Slot ${slot} is not present yet`);
       }
+
+      let unsub: () => void;
+      statusCb(`Slot hasn't been submitted yet.`, { slot: slot.toString() });
+
+      const [_slot, _treeHashRoot] = await new Promise<[number, H256]>((resolve, reject) => {
+        statusCb('Subscribing for new slots');
+        this._program.serviceSyncUpdate
+          .subscribeToNewCheckpointEvent((event) => {
+            statusCb(`Received new slot`, { slot: event.slot.toString() });
+            if (event.slot >= slot) {
+              resolve([event.slot, event.tree_hash_root]);
+            }
+          })
+          .then((_unsub) => {
+            unsub = _unsub;
+          })
+          .catch((e) => reject(e));
+      }).finally(unsub!);
+
+      return [_slot, _treeHashRoot];
     }
-    return [result.asOk[0].toNumber(), H256(result.asOk[1])];
   }
 }
 
@@ -145,19 +139,18 @@ export class ServiceSyncUpdate {
 export class ServiceState {
   constructor(private _program: CheckpointClient) {}
 
-  public async getLatestSlot(): Promise<StateData> {
-    const payload = this._program.registry
-      .createType('(String, String, Order, u32, u32)', ['ServiceState', 'Get', 'Reverse', 0, 1])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: ZERO_ADDRESS,
-      payload,
-      value: 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, StateData)', reply.payload);
-    return result[2].toJSON() as unknown as StateData;
+  public getLatestSlot(): Promise<StateData> {
+    const query = new QueryBuilder<StateData>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'ServiceState',
+      'Get',
+      ['Reverse', 0, 1],
+      '(Order, u32, u32)',
+      'StateData',
+    );
+
+    return query.call();
   }
 }

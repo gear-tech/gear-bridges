@@ -59,10 +59,15 @@ $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL
 ### Upgrade
 
 > [!WARNING]
-> Before you run upgrade scripts, edit `reinitialize` method depending on how you want to perform upgrade (only for `ERC20Manager` and `MessageQueue`)!
+> Before you run upgrade scripts, edit `reinitialize` method depending on how you want to perform upgrade (only for `WrappedVara`, `ERC20Manager`, `MessageQueue`)!
 
 ```shell
 $ source .env
+
+$ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
 $ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv

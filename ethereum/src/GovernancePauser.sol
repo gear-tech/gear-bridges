@@ -26,17 +26,20 @@ contract GovernancePauser is IMessageHandler, IGovernance {
     uint256 internal constant OFFSET1 = 1;
 
     bytes32 public governance;
+    address public wrappedVara;
     address public messageQueue;
     address public erc20Manager;
 
     /**
      * @dev Initializes the GovernancePauser contract.
      * @param _governance The governance address (Vara Network address).
+     * @param _wrappedVara The WrappedVara address.
      * @param _messageQueue The message queue address.
      * @param _erc20Manager The ERC20Manager address.
      */
-    constructor(bytes32 _governance, address _messageQueue, address _erc20Manager) {
+    constructor(bytes32 _governance, address _wrappedVara, address _messageQueue, address _erc20Manager) {
         governance = _governance;
+        wrappedVara = _wrappedVara;
         messageQueue = _messageQueue;
         erc20Manager = _erc20Manager;
     }
@@ -134,7 +137,7 @@ contract GovernancePauser is IMessageHandler, IGovernance {
             proxy := shr(PROXY_ADDRESS_BIT_SHIFT, calldataload(add(payload.offset, OFFSET1)))
         }
 
-        if (!(proxy == messageQueue || proxy == erc20Manager)) {
+        if (!(proxy == wrappedVara || proxy == messageQueue || proxy == erc20Manager)) {
             return false;
         }
 

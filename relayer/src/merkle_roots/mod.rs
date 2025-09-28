@@ -469,7 +469,7 @@ impl MerkleRootRelayer {
         http: &mut UnboundedReceiver<MerkleRootsRequest>,
     ) -> anyhow::Result<()> {
         loop {
-           let result = self
+            let result = self
                 .process(
                     submitter,
                     prover,
@@ -910,17 +910,15 @@ impl MerkleRootRelayer {
                 let block_number = block.number();
                 let block_hash = block.hash();
                 let nonces_count = nonces.len();
-                self.roots.entry(merkle_root).or_insert(
-                    MerkleRoot {
-                        queue_id,
-                        block_number,
-                        block_hash,
-                        status: MerkleRootStatus::GenerateProof,
-                        message_nonces: nonces,
-                        http_requests: Vec::new(),
-                        proof: None,
-                    },
-                );
+                self.roots.entry(merkle_root).or_insert(MerkleRoot {
+                    queue_id,
+                    block_number,
+                    block_hash,
+                    status: MerkleRootStatus::GenerateProof,
+                    message_nonces: nonces,
+                    http_requests: Vec::new(),
+                    proof: None,
+                });
                 if matches!(batch, Batch::Yes) {
                     let now = Instant::now();
 
@@ -962,20 +960,18 @@ impl MerkleRootRelayer {
                     block.number(),
                     signed_by_authority_set_id,
                 );
-                self.roots.entry(merkle_root).or_insert(
-                    MerkleRoot {
-                        queue_id,
-                        block_number: block.number(),
-                        block_hash: block.hash(),
-                        status: MerkleRootStatus::WaitForAuthoritySetSync(
-                            signed_by_authority_set_id,
-                            block.number(),
-                        ),
-                        message_nonces: nonces,
-                        http_requests: Vec::new(),
-                        proof: None,
-                    },
-                );
+                self.roots.entry(merkle_root).or_insert(MerkleRoot {
+                    queue_id,
+                    block_number: block.number(),
+                    block_hash: block.hash(),
+                    status: MerkleRootStatus::WaitForAuthoritySetSync(
+                        signed_by_authority_set_id,
+                        block.number(),
+                    ),
+                    message_nonces: nonces,
+                    http_requests: Vec::new(),
+                    proof: None,
+                });
 
                 let force_sync = self
                     .storage

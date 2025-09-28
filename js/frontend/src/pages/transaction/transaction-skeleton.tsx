@@ -10,12 +10,12 @@ function TransactionSkeleton() {
     <Container className={styles.container}>
       <header className={styles.header}>
         <div>
-          <h1 className={styles.heading}>Transaction</h1>
-          <p className={styles.subheading}>Cross-chain swap transaction information</p>
-        </div>
+          <div className={styles.headingContainer}>
+            <h1 className={styles.heading}>Transaction</h1>
+            <Skeleton width="128px" />
+          </div>
 
-        <div className={styles.sidebar}>
-          <Skeleton width="100px" />
+          <p className={styles.subheading}>Cross-chain swap transaction information</p>
         </div>
       </header>
 

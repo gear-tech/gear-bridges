@@ -8,8 +8,8 @@ import styles from './settings.module.scss';
 import { TooltipContent } from './tooltip-content';
 
 const CLAIM_TYPE_BUTTONS = [
-  { value: CLAIM_TYPE.MANUAL, text: 'Manual', SVG: HandSVG, SVGColorType: 'stroke' as const },
   { value: CLAIM_TYPE.AUTO, text: 'Automatic', SVG: CircleCheckSVG },
+  { value: CLAIM_TYPE.MANUAL, text: 'Manual', SVG: HandSVG, SVGColorType: 'stroke' as const },
 ];
 
 type ClaimType = (typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE];

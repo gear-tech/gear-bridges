@@ -1,19 +1,9 @@
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ISubmittableResult } from '@polkadot/types/types';
 
-import { Values, FormattedValues, UseHandleSubmitParameters, UseHandleSubmit } from './form';
-import { UseAccountBalance, UseFTBalance, UseFee, UseFTAllowance } from './hooks';
+import { Values, FormattedValues } from './form';
+import { UseAccountBalance, UseFTBalance, UseFee, UseSendTxs, UseTxsEstimate } from './hooks';
 
 type Extrinsic = SubmittableExtrinsic<'promise', ISubmittableResult>;
 
-export type {
-  UseAccountBalance,
-  UseFTBalance,
-  UseHandleSubmitParameters,
-  UseHandleSubmit,
-  UseFee,
-  UseFTAllowance,
-  Values,
-  FormattedValues,
-  Extrinsic,
-};
+export type { UseAccountBalance, UseFTBalance, UseFee, UseSendTxs, UseTxsEstimate, Values, FormattedValues, Extrinsic };

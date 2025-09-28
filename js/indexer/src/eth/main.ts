@@ -21,7 +21,7 @@ const BRIDGING_PAYMENT = config.bridgingPayment.toLowerCase();
 const BRIDGING_PAYMENT_FEE_PAID = bridgingPayment.events.FeePaid.topic;
 
 console.log(`Erc20Manager address: ${ERC20_MANAGER}`);
-console.log(`BridginPayment address: ${BRIDGING_PAYMENT}`);
+console.log(`BridgingPayment address: ${BRIDGING_PAYMENT}`);
 console.log(`MessageQueue address: ${MSGQ}`);
 
 const handler = async (ctx: Context) => {

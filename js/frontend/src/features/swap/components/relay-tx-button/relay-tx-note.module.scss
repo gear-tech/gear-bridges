@@ -1,0 +1,10 @@
+.text {
+  text-align: right;
+  font-size: 10px;
+  color: #9cacb1;
+  line-height: 1;
+
+  @include md {
+    text-align: center;
+  }
+}

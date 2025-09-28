@@ -1,8 +1,8 @@
 import { gql, makeExtendSchemaPlugin } from 'postgraphile';
 import { PubSub } from 'graphql-subscriptions';
-import { Pool } from 'pg';
+import pg from 'pg';
 
-export const TransferCountSubscriptionPlugin = async (dbPool: Pool) => {
+export const TransferCountSubscriptionPlugin = async (dbPool: pg.Pool) => {
   const COUNT_TOPIC = 'transfer_count';
   const pubsub = new PubSub();
   let count = 0;

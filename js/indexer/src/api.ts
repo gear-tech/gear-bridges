@@ -3,7 +3,7 @@ import ConnectionFilterPlugin from 'postgraphile-plugin-connection-filter';
 import { createServer } from 'node:http';
 import express from 'express';
 import dotenv from 'dotenv';
-import { Pool } from 'pg';
+import pg from 'pg';
 import {
   DefaultLimitPlugin,
   PairsAliasPlugin,
@@ -16,7 +16,7 @@ dotenv.config();
 const isDev = process.env.NODE_ENV === 'development';
 
 async function main() {
-  const dbPool = new Pool({ connectionString: process.env.DATABASE_URL || 'postgres://bridge' });
+  const dbPool = new pg.Pool({ connectionString: process.env.DATABASE_URL || 'postgres://bridge' });
 
   const options: PostGraphileOptions = {
     watchPg: isDev,

@@ -10,13 +10,14 @@ import { Store } from '@subsquid/typeorm-store';
 
 import * as erc20TreasuryAbi from './abi/erc20-manager.js';
 import * as messageQueueAbi from './abi/message-queue.js';
+import * as bridgingPaymentAbi from './abi/bridging-payment.js';
 import { config } from './config.js';
 
 export const processor = new EvmBatchProcessor()
   .setGateway(config.archiveUrl)
   .setRpcEndpoint({
     url: config.rpcUrl,
-    rateLimit: 10,
+    rateLimit: config.rateLimit,
   })
   .setFinalityConfirmation(75)
   .setFields({
@@ -31,6 +32,10 @@ export const processor = new EvmBatchProcessor()
   .addLog({
     address: [config.msgQ],
     topic0: [messageQueueAbi.events.MessageProcessed.topic, messageQueueAbi.events.MerkleRoot.topic],
+  })
+  .addLog({
+    address: [config.bridgingPayment],
+    topic0: [bridgingPaymentAbi.events.FeePaid.topic],
   })
   .setBlockRange({
     from: config.fromBlock,

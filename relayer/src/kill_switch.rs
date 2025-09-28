@@ -374,7 +374,7 @@ impl KillSwitchRelayer {
             return Ok(false);
         };
 
-        let Some(merkle_root) = gear_api
+        let Some((_, merkle_root)) = gear_api
             .fetch_queue_merkle_root(block_hash)
             .await
             .convert()?

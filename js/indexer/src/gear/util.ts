@@ -69,6 +69,7 @@ export const enum BridgingPaymentMethods {
 
 export const enum CheckpointClientServices {
   ServiceSyncUpdate = 'ServiceSyncUpdate',
+  ServiceReplayBack = 'ServiceReplayBack',
 }
 
 export const enum CheckpointClientMethods {

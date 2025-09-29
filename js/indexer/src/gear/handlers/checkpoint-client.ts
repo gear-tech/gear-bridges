@@ -3,7 +3,8 @@ import { CheckpointClientMethods, CheckpointClientServices } from '../util.js';
 
 export function handleCheckpointClientEvents(ctx: UserMessageSentHandlerContext) {
   const { service, method } = ctx;
-  if (service !== CheckpointClientServices.ServiceSyncUpdate) return;
+  if (service !== CheckpointClientServices.ServiceSyncUpdate && service !== CheckpointClientServices.ServiceReplayBack)
+    return;
   if (method !== CheckpointClientMethods.NewCheckpoint) return;
 
   const { slot, tree_hash_root } = ctx.decoder.decodeEvent<NewCheckpointEvent>(

@@ -165,8 +165,14 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private async _saveSlots() {
     if (this._slots.size === 0) return;
 
-    await this._ctx.store.save(mapValues(this._slots));
-    this._log.info(`${this._slots.size} slots saved`);
+    const existingRecords = await this._ctx.store.find(CheckpointSlot, { where: { slot: In(mapKeys(this._slots)) } });
+
+    const existingSlots = existingRecords.map(({ slot }) => slot);
+
+    const slotsToSave = mapValues(this._slots).filter(({ slot }) => !existingSlots.includes(slot));
+
+    await this._ctx.store.save(slotsToSave);
+    this._log.info(`${slotsToSave.length} slots saved`);
   }
 
   public async save() {

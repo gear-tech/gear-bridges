@@ -85,7 +85,7 @@ impl Relayer {
             api_provider.clone(),
             storage.proofs.clone(),
             options.genesis_config,
-            options.count_thread
+            options.count_thread,
         )
         .await;
 

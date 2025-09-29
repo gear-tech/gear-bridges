@@ -97,7 +97,14 @@ impl MessageDataExtractor {
         let block_hash = block.hash();
         for message_queued in messages {
             if U256::from_big_endian(&message_queued.nonce_be) != message.nonce {
+                log::trace!(
+                    "Checking queued message '{}' against {}",
+                    U256::from_big_endian(&message_queued.nonce_be),
+                    message.nonce
+                );
                 continue;
+            } else {
+                log::trace!("Found queued message: '{message_queued:?}'");
             }
 
             self.sender.send(MessageInBlock {

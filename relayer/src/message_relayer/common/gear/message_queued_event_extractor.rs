@@ -113,7 +113,7 @@ impl MessageQueuedEventExtractor {
             .add_block(
                 GearBlockNumber(block.number()),
                 block_hash,
-                messages.iter().map(|message| message.nonce_le),
+                messages.iter().map(|message| message.nonce_be),
             )
             .await;
 

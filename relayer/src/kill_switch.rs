@@ -227,28 +227,36 @@ impl KillSwitchRelayer {
             .await
             .map_err(ScanForEventsError::GearApi)?;
 
+        let latest_block = self
+            .eth_observer_api
+            .latest_block_number()
+            .await
+            .map_err(ScanForEventsError::GearApi)?;
+
         // Set the initial value for `from_eth_block` if it's not set yet.
         let start_from_eth_block = self.start_from_eth_block.unwrap_or(last_finalized_block);
 
-        if last_finalized_block < start_from_eth_block {
-            log::info!(
-                "No new eth block, skipping.. last_processed_eth_block={}, last_finalized_block={}",
-                start_from_eth_block.saturating_sub(1),
-                last_finalized_block,
-            );
+        log::info!(
+            "Scanning.. last_processed_eth_block={}, last_finalized_block={}, latest_block={}",
+            start_from_eth_block.saturating_sub(1),
+            last_finalized_block,
+            latest_block,
+        );
+
+        if latest_block < start_from_eth_block {
+            log::info!("No new eth block, skipping..");
             return Ok(());
         } else {
-            self.metrics
-                .latest_eth_block
-                .set(last_finalized_block as i64);
+            self.metrics.latest_eth_block.set(latest_block as i64);
         }
 
         let events = self
             .eth_observer_api
-            .fetch_merkle_roots_in_range(start_from_eth_block, last_finalized_block)
+            .fetch_merkle_roots_in_range(start_from_eth_block, latest_block)
             .await?;
 
         if !events.is_empty() {
+            // FIXME: doesn't work as intended, discovered events can be duplicated
             self.metrics
                 .merkle_roots_discovered_cnt
                 .inc_by(events.len() as u64);
@@ -269,7 +277,8 @@ impl KillSwitchRelayer {
             }
         }
 
-        // After processing all events, `last_finalized_block` is the last block we've processed.
+        // After processing events till `latest` block, due to possible reorgs we cannot count them as processed.
+        // Instead we set the last finalized block as processed.
         // So, we need to increment it by 1 to set the next block to process.
         self.start_from_eth_block = Some(last_finalized_block.saturating_add(1));
 

@@ -191,6 +191,13 @@ pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
         .context("Finalized block is None")
 }
 
+pub async fn latest_block(provider: impl Provider) -> AnyResult<Block> {
+    provider
+        .get_block_by_number(BlockNumberOrTag::Latest)
+        .await?
+        .context("Latest block is None")
+}
+
 pub async fn get_block(provider: impl Provider, block: u64) -> AnyResult<Block> {
     provider
         .get_block_by_number(BlockNumberOrTag::Number(block))
@@ -376,6 +383,10 @@ impl EthApi {
             .await?
             .header
             .number)
+    }
+
+    pub async fn latest_block_number(&self) -> AnyResult<u64> {
+        Ok(self::latest_block(self.raw_provider()).await?.header.number)
     }
 
     #[allow(clippy::too_many_arguments)]

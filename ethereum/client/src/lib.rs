@@ -105,6 +105,10 @@ impl PollingEthApi {
         self::finalized_block(&self.provider).await
     }
 
+    pub async fn safe_block(&self) -> AnyResult<Block> {
+        self::safe_block(&self.provider).await
+    }
+
     pub async fn get_block(&self, block: u64) -> AnyResult<Block> {
         self::get_block(&self.provider, block).await
     }
@@ -189,6 +193,13 @@ pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
         .get_block_by_number(BlockNumberOrTag::Finalized)
         .await?
         .context("Finalized block is None")
+}
+
+pub async fn safe_block(provider: impl Provider) -> AnyResult<Block> {
+    provider
+        .get_block_by_number(BlockNumberOrTag::Safe)
+        .await?
+        .context("Safe block is None")
 }
 
 pub async fn get_block(provider: impl Provider, block: u64) -> AnyResult<Block> {
@@ -376,6 +387,10 @@ impl EthApi {
             .await?
             .header
             .number)
+    }
+
+    pub async fn safe_block_number(&self) -> AnyResult<u64> {
+        Ok(self::safe_block(self.raw_provider()).await?.header.number)
     }
 
     #[allow(clippy::too_many_arguments)]

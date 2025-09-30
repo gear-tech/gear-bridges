@@ -118,6 +118,7 @@ impl Relayer {
             governance_admin,
             governance_pauser,
             eth_api.clone(),
+            confirmations_merkle_root,
         );
 
         let message_data_extractor =

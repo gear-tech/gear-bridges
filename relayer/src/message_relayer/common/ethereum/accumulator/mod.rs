@@ -93,6 +93,8 @@ pub struct Accumulator {
     governance_admin: ActorId,
     governance_pauser: ActorId,
     eth_api: EthApi,
+
+    confirmations: u64,
 }
 
 impl MeteredService for Accumulator {
@@ -117,6 +119,7 @@ impl Accumulator {
         governance_admin: ActorId,
         governance_pauser: ActorId,
         eth_api: EthApi,
+        confirmations: u64,
     ) -> Self {
         Self {
             metrics: Metrics::new(),
@@ -126,6 +129,7 @@ impl Accumulator {
             governance_admin,
             governance_pauser,
             eth_api,
+            confirmations,
         }
     }
 
@@ -188,15 +192,18 @@ async fn run_inner(
     loop {
         tokio::select! {
             _ = poll_interval.tick() => {
-                let block = this.eth_api.safe_block_number().await?;
-                if block <= last_block {
+                let latest_block = this.eth_api.latest_block_number().await?;
+                let Some(target) = latest_block.checked_sub(this.confirmations) else {
+                    continue;
+                };
+                if target <= last_block {
                     continue;
                 }
-                last_block = block;
+                last_block = target;
 
-                let timestamp = this.eth_api.get_block_timestamp(block).await?;
+                let timestamp = this.eth_api.get_block_timestamp(target).await?;
                 last_timestamp = timestamp;
-                log::info!("Found new Ethereum finalized block #{block} at {timestamp}");
+                log::trace!("Found new Ethereum block #{target} at {timestamp} with {} confirmations", this.confirmations);
                 let merkle_roots = this.merkle_roots.read().await;
                 for (merkle_root, message) in this.messages.drain_timestamp(last_timestamp, &message_delay, &merkle_roots) {
                     let Ok(_) = messages_out.send(Response::Success {

@@ -193,19 +193,18 @@ async fn run_inner(
         tokio::select! {
             _ = poll_interval.tick() => {
                 let latest_block = this.eth_api.latest_block_number().await?;
-                let Some(target) = latest_block.checked_sub(this.confirmations) else {
-                    continue;
-                };
-                if target <= last_block {
+
+                if latest_block <= last_block {
                     continue;
                 }
-                last_block = target;
+                last_block = latest_block;
 
-                let timestamp = this.eth_api.get_block_timestamp(target).await?;
+                let timestamp = this.eth_api.get_block_timestamp(latest_block).await?;
                 last_timestamp = timestamp;
-                log::trace!("Found new Ethereum block #{target} at {timestamp} with {} confirmations", this.confirmations);
+
                 let merkle_roots = this.merkle_roots.read().await;
                 for (merkle_root, message) in this.messages.drain_timestamp(last_timestamp, &message_delay, &merkle_roots) {
+                    log::trace!("Found merkle root for the message '{message:?}' after new block {latest_block} with timestamp = {last_timestamp}");
                     let Ok(_) = messages_out.send(Response::Success {
                         authority_set_id: message.authority_set_id,
                         block: message.block,

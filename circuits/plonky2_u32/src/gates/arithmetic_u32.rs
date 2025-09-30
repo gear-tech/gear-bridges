@@ -1,4 +1,4 @@
-use alloc::{format, string::String, vec, vec::Vec};
+use alloc::{format, string::{String, ToString}, vec, vec::Vec};
 use core::marker::PhantomData;
 
 use itertools::unfold;
@@ -21,10 +21,11 @@ use plonky2::{
             EvaluationVarsBasePacked,
         },
     },
+    util::serialization::{Read, Write},
 };
 
 /// A gate to perform a basic mul-add on 32-bit values (we assume they are range-checked beforehand).
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct U32ArithmeticGate<F: RichField + Extendable<D>, const D: usize> {
     pub num_ops: usize,
     _phantom: PhantomData<F>,
@@ -273,20 +274,22 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for U32ArithmeticG
 
     fn serialize(
         &self,
-        _dst: &mut Vec<u8>,
+        dst: &mut Vec<u8>,
         _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
-        unimplemented!()
+        dst.write_usize(self.num_ops)
     }
 
     fn deserialize(
-        _src: &mut plonky2::util::serialization::Buffer,
+        src: &mut plonky2::util::serialization::Buffer,
         _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,
     {
-        unimplemented!()
+        let num_ops = src.read_usize()?;
+
+        Ok(Self { num_ops, _phantom: PhantomData, })
     }
 }
 
@@ -355,8 +358,8 @@ impl<F: RichField + Extendable<D>, const D: usize> PackedEvaluableBase<F, D>
     }
 }
 
-#[derive(Clone, Debug)]
-struct U32ArithmeticGenerator<F: RichField + Extendable<D>, const D: usize> {
+#[derive(Clone, Debug, Default)]
+pub struct U32ArithmeticGenerator<F: RichField + Extendable<D>, const D: usize> {
     gate: U32ArithmeticGate<F, D>,
     row: usize,
     i: usize,
@@ -367,7 +370,7 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
     for U32ArithmeticGenerator<F, D>
 {
     fn id(&self) -> String {
-        unimplemented!()
+        "U32ArithmeticGenerator".to_string()
     }
 
     fn dependencies(&self) -> Vec<Target> {
@@ -434,20 +437,28 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
     fn serialize(
         &self,
-        _dst: &mut Vec<u8>,
-        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        dst: &mut Vec<u8>,
+        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<()> {
-        unimplemented!()
+        dst.write_usize(self.row)?;
+        dst.write_usize(self.i)?;
+
+        self.gate.serialize(dst, common_data)
     }
 
     fn deserialize(
-        _src: &mut plonky2::util::serialization::Buffer,
-        _common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
+        src: &mut plonky2::util::serialization::Buffer,
+        common_data: &plonky2::plonk::circuit_data::CommonCircuitData<F, D>,
     ) -> plonky2::util::serialization::IoResult<Self>
     where
         Self: Sized,
     {
-        unimplemented!()
+        let row = src.read_usize()?;
+        let i = src.read_usize()?;
+
+        let gate = U32ArithmeticGate::deserialize(src, common_data)?;
+
+        Ok(Self { gate, row, i, _phantom: PhantomData, })
     }
 }
 

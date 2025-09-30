@@ -40,6 +40,10 @@ impl_metered_service! {
             "kill_switch_merkle_root_mismatch_cnt",
             "Amount of merkle root mismatches found",
         ),
+        challenge_sent_cnt: IntCounter = IntCounter::new(
+            "kill_switch_challenge_sent_cnt",
+            "Amount of challenge sends finalized",
+        ),
         merkle_root_proof_not_found_on_block_cnt: IntCounter = IntCounter::new(
             "kill_switch_merkle_root_proof_not_found_on_block",
             "Amount of merkle root proofs not found on block",
@@ -53,6 +57,8 @@ enum ScanForEventsError {
     EthApi(#[from] ethereum_client::Error),
     #[error("Gear API error: {0}")]
     GearApi(#[from] anyhow::Error),
+    #[error("Other error: {0}")]
+    Other(anyhow::Error),
 }
 
 #[derive(Debug, Error)]
@@ -225,13 +231,13 @@ impl KillSwitchRelayer {
             .eth_observer_api
             .finalized_block_number()
             .await
-            .map_err(ScanForEventsError::GearApi)?;
+            .map_err(downcast_anyhow_to_ethereum_client)?;
 
         let latest_block = self
             .eth_observer_api
             .latest_block_number()
             .await
-            .map_err(ScanForEventsError::GearApi)?;
+            .map_err(downcast_anyhow_to_ethereum_client)?;
 
         // Set the initial value for `from_eth_block` if it's not set yet.
         let start_from_eth_block = self.start_from_eth_block.unwrap_or(last_finalized_block);
@@ -302,6 +308,8 @@ impl KillSwitchRelayer {
                         log::info!("Challenge root TX {tx_hash:#x} finalized, exiting ..");
                         self.state = State::Exit;
                     }
+                    self.metrics.challenge_sent_cnt.inc();
+
                     return Ok(());
                 }
                 TxStatus::Pending => {
@@ -482,5 +490,12 @@ impl<T> ConvertToOptGearApiError<T> for anyhow::Result<T> {
             Err(err) => Err(err),
             Ok(val) => Ok(Some(val)),
         }
+    }
+}
+
+fn downcast_anyhow_to_ethereum_client(err: anyhow::Error) -> ScanForEventsError {
+    match err.downcast::<ethereum_client::Error>() {
+        Ok(e) => ScanForEventsError::EthApi(e),
+        Err(e) => ScanForEventsError::Other(e),
     }
 }

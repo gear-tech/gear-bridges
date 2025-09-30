@@ -96,7 +96,7 @@ impl MessageDataExtractor {
         let messages = common::message_queued_events_of(&block);
         let block_hash = block.hash();
         for message_queued in messages {
-            if U256::from_little_endian(&message_queued.nonce_le) != message.nonce {
+            if U256::from_big_endian(&message_queued.nonce_be) != message.nonce {
                 continue;
             }
 

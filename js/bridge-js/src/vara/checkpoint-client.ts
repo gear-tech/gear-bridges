@@ -87,10 +87,10 @@ export class ServiceCheckpointFor {
       }
 
       let unsub: () => void;
-      statusCb(`Slot hasn't been submitted yet.`, { slot: slot.toString() });
+      statusCb(`Slot hasn't been submitted yet`, { slot: slot.toString() });
 
       const [_slot, _treeHashRoot] = await new Promise<[number, H256]>((resolve, reject) => {
-        statusCb('Subscribing for new slots');
+        statusCb(`Subscribing for new slots`);
         this._program.serviceSyncUpdate
           .subscribeToNewCheckpointEvent((event) => {
             statusCb(`Received new slot`, { slot: event.slot.toString() });

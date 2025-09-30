@@ -133,7 +133,10 @@ export async function relayVaraToEth(params: RelayVaraToEthParams) {
   }
 
   const authoritySetId = await gearClient.getAuthoritySetIdByBlockNumber(blockNumber);
-  statusCb(`Authority set ID for block ${blockNumber}: ${authoritySetId}`);
+  statusCb(`Retrieved authority set ID`, {
+    blockNumber: blockNumber.toString(),
+    authoritySetId: authoritySetId.toString(),
+  });
 
   statusCb(`Fetching merkle root`, { blockNumber: blockNumber.toString() });
   let merkleRoot = await msgQClient.getMerkleRoot(blockNumber);

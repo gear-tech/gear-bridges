@@ -11,18 +11,19 @@ export const getPrefix = (service: string, method: string): `0x${string}` => {
  * Decodes a response from EthBridge builtin
  *
  * @param data - The raw data bytes containing the encoded message response
- * @returns Object containing the decoded nonce, hash, and nonce in little endian format
+ * @returns Object containing the decoded nonce, hash, block number and queue id
  */
 export const decodeEthBridgeMessageResponse = (
   data: Uint8Array,
-): { nonce: bigint; hash: HexString; nonceLe: HexString } => {
-  const _data = data.length == 64 ? data : data.slice(data.length - 64);
+): { blockNumber: bigint; hash: HexString; nonce: bigint; queueId: bigint } => {
+  const _data = data.length == 76 ? data : data.slice(data.length - 76);
 
-  const [nonce, hash] = registry.createType('(U256, H256)', _data);
+  const [blockNumber, hash, nonce, queueId] = registry.createType('(u32, H256, U256, u64)', _data);
 
   return {
-    nonce: nonce.toBigInt(),
+    blockNumber: blockNumber.toBigInt(),
     hash: hash.toHex(),
-    nonceLe: nonce.toHex(true),
+    nonce: nonce.toBigInt(),
+    queueId: queueId.toBigInt(),
   };
 };

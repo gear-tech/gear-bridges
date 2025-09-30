@@ -33,12 +33,30 @@ export class PingClient {
       this.api,
       this.registry,
       'upload_program',
-      undefined,
+      null,
       'New',
-      undefined,
-      '()',
+      null,
+      null,
       'String',
       code,
+      async (programId) => {
+        this._program = await BaseGearProgram.new(programId, this.api);
+      },
+    );
+    return builder;
+  }
+
+  newCtorFromCodeId(codeId: `0x${string}`) {
+    const builder = new TransactionBuilder<null>(
+      this.api,
+      this.registry,
+      'create_program',
+      null,
+      'New',
+      null,
+      null,
+      'String',
+      codeId,
       async (programId) => {
         this._program = await BaseGearProgram.new(programId, this.api);
       },
@@ -54,9 +72,9 @@ export class Ping {
     slot: number | string | bigint,
     transaction_index: number,
     _receipt_rlp: `0x${string}`,
-  ): TransactionBuilder<null> {
+  ): TransactionBuilder<{ ok: null } | { err: string }> {
     if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
+    return new TransactionBuilder<{ ok: null } | { err: string }>(
       this._program.api,
       this._program.registry,
       'send_message',
@@ -64,7 +82,7 @@ export class Ping {
       'SubmitReceipt',
       [slot, transaction_index, _receipt_rlp],
       '(u64, u32, Vec<u8>)',
-      'Null',
+      'Result<Null, String>',
       this._program.programId,
     );
   }

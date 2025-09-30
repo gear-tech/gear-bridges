@@ -23,12 +23,17 @@ const VARA_WS_RPC = process.env.VARA_WS_RPC!;
 assertEnv('ETH_PRIVATE_KEY');
 const ETH_PRIVATE_KEY = process.env.ETH_PRIVATE_KEY! as HexString;
 const GEAR_BRIDGE_BUILTIN = '0xf2816ced0b15749595392d3a18b5a2363d6fefe5b3b6153739f218151b7acdbf';
-const DESTINATION = '0x187453bD463773a3af896D4bFe7A1168D206AFAB';
+assertEnv('ETH_DESTINATION');
+const DESTINATION = process.env.ETH_DESTINATION! as HexString;
 
 const [nonceArg, blockNumberArg] = process.argv.slice(2).map((arg) => {
   const match = arg.match(/^--(nonce|bn)=(\d+)$/);
   return match ? parseInt(match[2]) : undefined;
 });
+
+const statusCb = (status: string, details?: any) => {
+  console.log(`[relayEthToVara]: ${status}`, details || '');
+};
 
 const main = async () => {
   const ethTransport = webSocket(ETH_WS_RPC);
@@ -108,15 +113,16 @@ const main = async () => {
 
   const reply = await gearApi.message.getReplyEvent(GEAR_BRIDGE_BUILTIN, msgId, blockHash);
 
-  const { nonce, hash, nonceLe } = decodeEthBridgeMessageResponse(reply.data.message.payload.toU8a());
+  const { blockNumber, nonce, hash, queueId } = decodeEthBridgeMessageResponse(reply.data.message.payload.toU8a());
 
-  console.log(`Got reply with nonce ${nonce} (${nonceLe}) and hash ${hash}`);
+  console.log(`Got reply with nonce ${nonce}, hash ${hash}, queueId ${queueId}, blockNumber: ${blockNumber}`);
 
   let ethBridgeMessage: { nonce: bigint; blockhash: HexString } | undefined = undefined;
 
   while (!ethBridgeMessage) {
     if (!ethBridgeMessages.has(hash)) {
       console.log(`Waiting for eth bridge message ${hash}`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     } else {
       ethBridgeMessage = ethBridgeMessages.get(hash);
     }
@@ -124,22 +130,19 @@ const main = async () => {
 
   unsub();
 
-  const blockNumber = await gearApi.blocks.getBlockNumber(ethBridgeMessage.blockhash);
-
-  await waitForMerkleRootAppearedInMessageQueue(blockNumber.toBigInt(), publicClient, MESSAGE_QUEUE_ADDRESS);
+  console.log(`Waiting for merkle root appeared in message queue`);
+  await waitForMerkleRootAppearedInMessageQueue(blockNumber, publicClient, MESSAGE_QUEUE_ADDRESS, undefined, statusCb);
 
   await relayVaraToEth({
     nonce: ethBridgeMessage.nonce,
-    blockNumber: blockNumber.toBigInt(),
+    blockNumber,
     ethereumPublicClient: publicClient,
     ethereumWalletClient: walletClient,
     ethereumAccount: ethAccount,
     gearApi,
     messageQueueAddress: MESSAGE_QUEUE_ADDRESS,
     wait: true,
-    statusCb: (status, details) => {
-      console.log(`[relayEthToVara]: ${status}`, details || '');
-    },
+    statusCb,
   });
 };
 

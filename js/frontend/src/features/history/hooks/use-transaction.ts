@@ -1,8 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
 import { INDEXER_ADDRESS } from '../consts';
 import { graphql } from '../graphql';
+import { StatusEnum, TransferQueryQuery } from '../graphql/graphql';
 
 const TRANSFER_QUERY = graphql(`
   query TransferQuery($id: String!) {
@@ -37,4 +38,15 @@ function useTransaction(id: string) {
   });
 }
 
-export { useTransaction };
+function useOptimisticTxUpdate(id: string) {
+  const queryClient = useQueryClient();
+
+  return () =>
+    queryClient.setQueryData<TransferQueryQuery>(['transaction', id], (data) => {
+      if (!data?.transferById) return data;
+
+      return { transferById: { ...data.transferById, status: StatusEnum.Completed } };
+    });
+}
+
+export { useTransaction, useOptimisticTxUpdate };

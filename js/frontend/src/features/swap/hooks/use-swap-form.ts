@@ -6,7 +6,7 @@ import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
-import { usePendingTxsCount } from '@/features/history/hooks';
+import { usePendingTxsCount, useOptimisticPendingTxsCountUpdate } from '@/features/history/hooks';
 import { useEthAccount } from '@/hooks';
 import { isUndefined, logger, getErrorMessage } from '@/utils';
 
@@ -18,15 +18,18 @@ import { getAmountSchema } from '../utils';
 type Params = {
   accountBalance: bigint | undefined;
   ftBalance: bigint | undefined;
+  shouldPayBridgingFee: boolean;
 };
 
-function useSwapForm({ accountBalance, ftBalance }: Params) {
+function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params) {
   const { api } = useApi();
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const { token, network } = useBridgeContext();
-  const pendingTxsCount = usePendingTxsCount();
   const alert = useAlert();
+
+  const pendingTxsCount = usePendingTxsCount();
+  const optimisticPendingTxsCountUpdate = useOptimisticPendingTxsCountUpdate();
 
   const valueSchema = getAmountSchema(
     token?.isNative,
@@ -62,8 +65,13 @@ function useSwapForm({ accountBalance, ftBalance }: Params) {
         reset();
         alert.success('Your transfer request was successful');
 
-        // to display warning asap
-        return pendingTxsCount.refetch();
+        // only for manual relay, failed vara fee tx case is not considered
+        if (shouldPayBridgingFee) return;
+
+        optimisticPendingTxsCountUpdate();
+
+        // better to refetch after finalization, but it's hard with current send txs implementation
+        setTimeout(() => void pendingTxsCount.refetch(), 5000);
       };
 
       const onError = (error: WriteContractErrorType | string) => {

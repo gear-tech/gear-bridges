@@ -1,7 +1,6 @@
 import { useAccount, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
-import { useQueryClient } from '@tanstack/react-query';
 
 import { Tooltip } from '@/components';
 import { useEthAccount, useModal } from '@/hooks';
@@ -10,13 +9,12 @@ import { getErrorMessage, isUndefined } from '@/utils';
 import { usePayVaraFee, useVaraFee } from '../../hooks';
 
 type Props = {
-  transactionId: string;
   nonce: string;
+  onInBlock: () => void;
+  onFinalization: () => void;
 };
 
-function PayVaraFeeButton({ transactionId, nonce }: Props) {
-  const queryClient = useQueryClient();
-
+function PayVaraFeeButton({ nonce, onInBlock, onFinalization }: Props) {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
@@ -32,11 +30,13 @@ function PayVaraFeeButton({ transactionId, nonce }: Props) {
     if (isUndefined(bridgingFee.value)) throw new Error('Fee is not found');
 
     sendTransactionAsync({ args: [nonce], value: bridgingFee.value })
-      .then(() => {
+      .then(({ isFinalized }) => {
         alert.success('Fee paid successfully');
+        onInBlock();
 
-        return queryClient.invalidateQueries({ queryKey: ['transaction', transactionId] });
+        return isFinalized;
       })
+      .then(() => onFinalization())
       .catch((error: Error) => alert.error(getErrorMessage(error)));
   };
 

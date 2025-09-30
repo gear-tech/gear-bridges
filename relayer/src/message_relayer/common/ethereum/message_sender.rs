@@ -163,7 +163,7 @@ async fn task_inner(
                 relayed_root.block.0,
                 proof.num_leaves as u32,
                 proof.leaf_index as u32,
-                message.nonce_le,
+                message.nonce_be,
                 message.source,
                 message.destination,
                 message.payload.to_vec(),
@@ -177,7 +177,7 @@ async fn task_inner(
             )) => {
                 log::info!(
                     "Message with nonce {} already processed, skipping: tx_uuid = {}",
-                    hex::encode(message.nonce_le),
+                    hex::encode(message.nonce_be),
                     tx_uuid
                 );
                 if responses
@@ -194,7 +194,7 @@ async fn task_inner(
 
         log::info!(
             "Message with nonce {} relaying started: tx_hash = {tx_hash}",
-            hex::encode(message.nonce_le)
+            hex::encode(message.nonce_be)
         );
 
         if responses

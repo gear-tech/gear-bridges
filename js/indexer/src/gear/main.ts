@@ -39,7 +39,7 @@ const handler = async (ctx: ProcessorContext) => {
         const name = programs.get(event.args.message.source);
 
         if (!name) {
-          ctx.log.error(`Failed to get program name and decoder for ${event.args.message.source}`);
+          ctx.log.error({ programId: event.args.message.source }, 'Failed to get program name and decoder');
           continue;
         }
 
@@ -59,7 +59,7 @@ const handler = async (ctx: ProcessorContext) => {
         else if (name === ProgramName.HistoricalProxy) handleHistoricalProxyEvents(eventCtx);
         else if (name === ProgramName.BridgingPayment) handleBridgingPaymentEvents(eventCtx);
         else if (name === ProgramName.CheckpointClient) handleCheckpointClientEvents(eventCtx);
-        else ctx.log.error(`Unknown program name ${name}`);
+        else ctx.log.error({ programName: name }, 'Unknown program name');
 
         continue;
       }

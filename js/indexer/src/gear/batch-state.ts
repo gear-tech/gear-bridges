@@ -73,7 +73,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
 
     if (this._addedPairs.size > 0) {
       await this._ctx.store.save(mapValues(this._addedPairs));
-      this._log.info(`Saved ${this._addedPairs.size} new pairs`);
+      this._log.info({ count: this._addedPairs.size }, 'New pairs saved');
     }
 
     if (this._removedPairs.size > 0) {
@@ -86,7 +86,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
         pair.isActive = false;
       }
       pairs.push(...removed);
-      this._log.info(`Saved ${removed.length} removed pairs`);
+      this._log.info({ count: removed.length }, 'Removed pairs saved');
     }
 
     if (this._upgradedPairs.size > 0) {
@@ -100,7 +100,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
         pair.isActive = false;
       }
       pairs.push(...upgraded);
-      this._log.info(`Saved ${upgraded.length} upgraded pairs`);
+      this._log.info({ count: upgraded.length }, 'Upgraded pairs saved');
     }
 
     if (pairs.length > 0) {
@@ -134,7 +134,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     }
     await this._ctx.store.save(mapValues(this._ethBridgeMessages));
 
-    this._log.info(`${this._ethBridgeMessages.size} Gear ETH bridge messages saved`);
+    this._log.info({ count: this._ethBridgeMessages.size }, 'Gear ETH bridge messages saved');
   }
 
   protected async _saveTransfers(): Promise<void> {
@@ -172,7 +172,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     const slotsToSave = mapValues(this._slots).filter(({ slot }) => !existingSlots.includes(slot));
 
     await this._ctx.store.save(slotsToSave);
-    this._log.info(`${slotsToSave.length} slots saved`);
+    this._log.info({ count: slotsToSave.length }, 'Slots saved');
   }
 
   public async save() {
@@ -196,19 +196,19 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     const initTransfer = this._initiatedTransfers.get(id);
 
     if (!initTransfer) {
-      this._log.error(`Initiated transfer ${id} not found`);
+      this._log.error({ transferId: id }, 'Initiated transfer not found');
       return;
     }
 
     if (!nonce) {
-      this._log.error(`Nonce not provided for initiated transfer ${id}`);
+      this._log.error({ transferId: id }, 'Nonce not provided for initiated transfer');
       return;
     }
 
     const transfer = await this._getTransfer(nonce);
 
     if (!transfer) {
-      this._log.error(`Transfer ${nonce} not found`);
+      this._log.error({ nonce }, 'Transfer not found');
       return;
     }
 
@@ -235,12 +235,12 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     const addedPair = this._addedPairs.get(id);
 
     if (existingPair && !existingPair.isRemoved && !existingPair.upgradedTo) {
-      this._log.warn({ varaToken, ethToken }, 'Pair already exists, skipping addition');
+      this._log.debug({ varaToken, ethToken }, 'Pair already exists, skipping addition');
       return;
     }
 
     if (addedPair) {
-      this._log.warn({ varaToken, ethToken }, 'Pair already being added in this batch, skipping addition');
+      this._log.debug({ varaToken, ethToken }, 'Pair already being added in this batch, skipping addition');
       return;
     }
 
@@ -304,8 +304,8 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._removedPairs.set(createPairHash(vftAddr, erc20Addr), blockNumber);
     this._log.info(
       {
-        vftAddr,
-        erc20Addr,
+        varaToken: vftAddr,
+        ethToken: erc20Addr,
       },
       'Pair removed',
     );
@@ -327,13 +327,13 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
 
     await this.addPair(vftAddr, pair.ethToken, pair.tokenSupply, block);
 
-    this._log.info(`Vara Token ${vftAddr} upgraded to ${newId}`);
+    this._log.info({ varaToken: vftAddr, newProgramId: newId }, 'Vara token upgraded');
   }
 
   public async newSlot(slot: bigint, treeHashRoot: string) {
     if (this._slots.has(slot)) return;
 
-    this._log.info(`Received slot: ${slot}`);
+    this._log.info({ slot, treeHashRoot }, 'Checkpoint slot received');
 
     this._slots.set(
       slot,
@@ -381,11 +381,11 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     transfer.txHash = transfer.txHash.toLowerCase();
     this._initiatedTransfers.set(transfer.id, transfer);
 
-    this._log.info(`${transfer.id}: Transfer requested in block ${transfer.blockNumber}`);
+    this._log.info({ transferId: transfer.id, blockNumber: transfer.blockNumber }, 'Initiated transfer requested');
   }
 
   public addEthBridgeMessage(message: GearEthBridgeMessage) {
     this._ethBridgeMessages.set(message.nonce, message);
-    this._log.info(`Gear ETH bridge message with nonce ${message.nonce} added`);
+    this._log.info({ nonce: message.nonce, messageId: message.id }, 'Gear ETH bridge message added');
   }
 }

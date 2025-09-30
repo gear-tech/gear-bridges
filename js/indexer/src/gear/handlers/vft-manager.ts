@@ -70,7 +70,7 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
     }
     case VftManagerMethods.HistoricalProxyAddressChanged: {
       const data = decoder.decodeEvent<HistoricalProxyAddressChanged>(service, method, msg.payload);
-      ctx.log.info(`Historical proxy program changed to ${data.new}`);
+      ctx.log.info({ newProgramId: data.new }, 'Historical proxy program changed');
       await updateId(ProgramName.HistoricalProxy, data.new);
       await state.save();
       await setPrograms();

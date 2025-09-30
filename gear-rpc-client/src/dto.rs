@@ -54,7 +54,7 @@ pub struct MerkleProof {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Message {
-    pub nonce_le: [u8; 32],
+    pub nonce_be: [u8; 32],
     pub source: [u8; 32],
     pub destination: [u8; 20],
     pub payload: Vec<u8>,

@@ -640,11 +640,11 @@ impl GearApi {
             if let RuntimeEvent::GearEthBridge(GearBridgeEvent::MessageQueued { message, .. }) =
                 event
             {
-                let mut nonce_le = [0; 32];
-                primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
+                let mut nonce_be = [0; 32];
+                primitive_types::U256(message.nonce.0).to_big_endian(&mut nonce_be);
 
                 Some(dto::Message {
-                    nonce_le,
+                    nonce_be,
                     source: message.source.0,
                     destination: message.destination.0,
                     payload: message.payload,

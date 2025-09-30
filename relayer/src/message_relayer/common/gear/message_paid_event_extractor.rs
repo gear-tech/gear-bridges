@@ -96,10 +96,10 @@ impl MessagePaidEventExtractor {
 
         let mut total = 0;
         for nonce in messages {
-            let mut nonce_le = [0; 32];
-            nonce.to_little_endian(&mut nonce_le);
+            let mut nonce_be = [0; 32];
+            nonce.to_big_endian(&mut nonce_be);
 
-            sender.send(PaidMessage { nonce: nonce_le })?;
+            sender.send(PaidMessage { nonce: nonce_be })?;
             total += 1;
         }
 

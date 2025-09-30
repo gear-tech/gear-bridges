@@ -1,7 +1,7 @@
 export interface BridgingRequested {
   readonly nonce: string;
   readonly queue_id: string;
-  readonly hash: string;
+  readonly hash: `0x${string}`;
   readonly vara_token_id: string;
   readonly amount: string;
   readonly sender: string;

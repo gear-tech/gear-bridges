@@ -67,4 +67,10 @@ export class Transfer {
 
   @Column({ nullable: true, name: 'bridging_started_at_message_id' })
   bridgingStartedAtMessageId?: string;
+
+  @Column('bigint', { nullable: true, name: 'eth_bridge_built_in_queue_id' })
+  ethBridgeBuiltInQueueId?: bigint;
+
+  @Column({ nullable: true, name: 'eth_bridge_built_in_msg_hash', length: 66 })
+  ethBridgeBuiltInMsgHash?: `0x${string}`;
 }

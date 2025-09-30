@@ -20,8 +20,7 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
 
   switch (method) {
     case VftManagerMethods.BridgingRequested: {
-      // TODO: queue_id
-      const { nonce, vara_token_id, sender, receiver, amount } = decoder.decodeEvent<BridgingRequested>(
+      const { nonce, vara_token_id, sender, receiver, amount, queue_id, hash } = decoder.decodeEvent<BridgingRequested>(
         service,
         method,
         msg.payload,
@@ -40,6 +39,8 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
         sender,
         receiver,
         amount: amount.toString(),
+        ethBridgeBuiltInQueueId: BigInt(queue_id),
+        ethBridgeBuiltInMsgHash: hash,
       });
       await state.addTransfer(transfer);
       return;

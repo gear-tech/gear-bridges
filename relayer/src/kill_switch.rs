@@ -53,6 +53,8 @@ enum ScanForEventsError {
     EthApi(#[from] ethereum_client::Error),
     #[error("Gear API error: {0}")]
     GearApi(#[from] anyhow::Error),
+    #[error("Other error: {0}")]
+    Other(anyhow::Error),
 }
 
 #[derive(Debug, Error)]
@@ -225,13 +227,13 @@ impl KillSwitchRelayer {
             .eth_observer_api
             .finalized_block_number()
             .await
-            .map_err(ScanForEventsError::GearApi)?;
+            .map_err(downcast_anyhow_to_ethereum_client)?;
 
         let latest_block = self
             .eth_observer_api
             .latest_block_number()
             .await
-            .map_err(ScanForEventsError::GearApi)?;
+            .map_err(downcast_anyhow_to_ethereum_client)?;
 
         // Set the initial value for `from_eth_block` if it's not set yet.
         let start_from_eth_block = self.start_from_eth_block.unwrap_or(last_finalized_block);
@@ -482,5 +484,12 @@ impl<T> ConvertToOptGearApiError<T> for anyhow::Result<T> {
             Err(err) => Err(err),
             Ok(val) => Ok(Some(val)),
         }
+    }
+}
+
+fn downcast_anyhow_to_ethereum_client(err: anyhow::Error) -> ScanForEventsError {
+    match err.downcast::<ethereum_client::Error>() {
+        Ok(e) => ScanForEventsError::EthApi(e),
+        Err(e) => ScanForEventsError::Other(e),
     }
 }

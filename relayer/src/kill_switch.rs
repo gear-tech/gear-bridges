@@ -40,6 +40,10 @@ impl_metered_service! {
             "kill_switch_merkle_root_mismatch_cnt",
             "Amount of merkle root mismatches found",
         ),
+        challenge_sent_cnt: IntCounter = IntCounter::new(
+            "kill_switch_challenge_sent_cnt",
+            "Amount of challenge sends finalized",
+        ),
         merkle_root_proof_not_found_on_block_cnt: IntCounter = IntCounter::new(
             "kill_switch_merkle_root_proof_not_found_on_block",
             "Amount of merkle root proofs not found on block",
@@ -304,6 +308,8 @@ impl KillSwitchRelayer {
                         log::info!("Challenge root TX {tx_hash:#x} finalized, exiting ..");
                         self.state = State::Exit;
                     }
+                    self.metrics.challenge_sent_cnt.inc();
+
                     return Ok(());
                 }
                 TxStatus::Pending => {

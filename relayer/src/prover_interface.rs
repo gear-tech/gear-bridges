@@ -1,3 +1,4 @@
+use anyhow::Context;
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
 use primitive_types::H256;
@@ -175,7 +176,10 @@ pub async fn prove_final(
 
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
-    let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
+    let (block, block_finality) = gear_api
+        .fetch_finality_proof(at_block)
+        .await
+        .context("failed to fetch finality proofs")?;
     prove_final_with_block_finality(
         gear_api,
         previous_proof,
@@ -194,7 +198,10 @@ pub async fn prove_final_with_block_finality(
 
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
-    let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await?;
+    let sent_message_inclusion_proof = gear_api
+        .fetch_sent_message_inclusion_proof(block)
+        .await
+        .context("fetch sent message inclusion proof")?;
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);

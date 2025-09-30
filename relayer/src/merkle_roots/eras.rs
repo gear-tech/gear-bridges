@@ -3,6 +3,7 @@ use crate::{
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
+use anyhow::Context;
 use ethereum_client::EthApi;
 use futures::executor::block_on;
 use prover::proving::GenesisConfig;
@@ -82,8 +83,14 @@ impl Eras {
         responses: &UnboundedSender<SealedNotFinalizedEra>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
-        let latest = gear_api.latest_finalized_block().await?;
-        let current_era = gear_api.signed_by_authority_set_id(latest).await?;
+        let latest = gear_api
+            .latest_finalized_block()
+            .await
+            .context("failed to find latest finalized block")?;
+        let current_era = gear_api
+            .signed_by_authority_set_id(latest)
+            .await
+            .context("failed to find authority set id")?;
 
         if self.last_sealed + 2 <= current_era {
             log::info!(
@@ -120,10 +127,19 @@ impl Eras {
         response: &UnboundedSender<SealedNotFinalizedEra>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
-        let block = gear_api.find_era_first_block(authority_set_id + 1).await?;
-        let block_number = gear_api.block_hash_to_number(block).await?;
+        let block = gear_api
+            .find_era_first_block(authority_set_id + 1)
+            .await
+            .context("failed to find era first block")?;
+        let block_number = gear_api
+            .block_hash_to_number(block)
+            .await
+            .context("failed to get block number from hash")?;
 
-        let (_, queue_merkle_root) = gear_api.fetch_queue_merkle_root(block).await?;
+        let (_, queue_merkle_root) = gear_api
+            .fetch_queue_merkle_root(block)
+            .await
+            .context("failed to fetch queue merkle root")?;
         if queue_merkle_root.is_zero() {
             log::info!("Message queue at block #{block_number} is empty. Skipping sealing");
             return Ok(());
@@ -132,7 +148,8 @@ impl Eras {
         let root_exists = self
             .eth_api
             .read_finalized_merkle_root(block_number)
-            .await?
+            .await
+            .map_err(|err| anyhow::anyhow!("Failed to read finalized merkle root: {err:?}"))?
             .is_some();
 
         if root_exists {
@@ -142,7 +159,12 @@ impl Eras {
 
         let inner_proof = proof_storage
             .get_proof_for_authority_set_id(authority_set_id)
-            .await?;
+            .await
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "Failed to get proof for authority set #{authority_set_id}: {err:?}"
+                )
+            })?;
 
         let instant = Instant::now();
         let proof = prover_interface::prove_final(
@@ -152,7 +174,8 @@ impl Eras {
             block,
             self.count_thread,
         )
-        .await?;
+        .await
+        .context("failed to prove final")?;
         let elapsed_proof = instant.elapsed();
         log::info!("prover_interface::prove_final took {elapsed_proof:?} for block_number = #{block_number}, authority_set_id = #{authority_set_id}");
 

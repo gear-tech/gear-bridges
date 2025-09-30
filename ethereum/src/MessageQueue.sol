@@ -319,11 +319,15 @@ contract MessageQueue is
                 delete _merkleRootTimestamps[previousMerkleRoot];
 
                 if (!_emergencyStop) {
-                    _challengingRootTimestamp = 0;
                     _emergencyStop = true;
 
-                    emit ChallengeRootDisabled();
                     emit EmergencyStopEnabled();
+
+                    if (isChallengingRoot()) {
+                        _challengingRootTimestamp = 0;
+
+                        emit ChallengeRootDisabled();
+                    }
                 }
             } else {
                 revert MerkleRootAlreadySet(blockNumber);

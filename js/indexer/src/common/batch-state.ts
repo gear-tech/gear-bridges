@@ -77,7 +77,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
     let pair = this._pairs.get(src);
     while (!pair) {
-      this._log.warn(`Pair not found for ${src}, retrying...`);
+      this._log.error(`Pair not found for ${src}, retrying...`);
       await new Promise((resolve) => setTimeout(resolve, PAIR_RETRY_DELAY));
 
       if (this._network === Network.Ethereum) {
@@ -188,6 +188,8 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       }
     }
 
+    const notUpdatedTransfers: string[] = [];
+
     for (const [nonce, status] of this._statuses.entries()) {
       const transfer = this._transfers.get(nonce);
       if (transfer) {
@@ -195,8 +197,28 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
           transfer.status = status;
         }
       } else {
-        this._log.error(`${nonce}: Transfer not found in cache or DB for status update`);
+        notUpdatedTransfers.push(nonce);
       }
+    }
+
+    if (notUpdatedTransfers.length > 0) {
+      const transfers = await this._ctx.store.find(Transfer, {
+        where: { nonce: In(notUpdatedTransfers), sourceNetwork: this._network },
+      });
+
+      const notCompletedTransfers = transfers.filter(({ status }) => status !== Status.Completed);
+
+      for (const t of notCompletedTransfers) {
+        this._log.error(`${t.nonce}: Failed to update status to ${this._statuses.get(t.nonce)}`);
+      }
+
+      if (transfers.length === notUpdatedTransfers.length) return;
+
+      const noncesInDb = transfers.map(({ nonce }) => nonce);
+
+      const missingNonces = notUpdatedTransfers.filter((nonce) => !noncesInDb.includes(nonce));
+
+      this._log.error({ nonces: missingNonces }, `Nonces not found nor in DB nor in cache`);
     }
   }
 

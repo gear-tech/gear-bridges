@@ -188,7 +188,7 @@ async fn run_inner(
     loop {
         tokio::select! {
             _ = poll_interval.tick() => {
-                let block = this.eth_api.finalized_block_number().await?;
+                let block = this.eth_api.safe_block_number().await?;
                 if block <= last_block {
                     continue;
                 }

@@ -418,13 +418,13 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0xdeadbeef)); // valid root, calculated by emergency stop admin
         bytes32 previousMerkleRoot = bytes32(uint256(0x33));
 
-        vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.ChallengeRootDisabled();
-
         // emergency stop admin managed to submit valid root for first challenged block
         // and enabled emergency stop status
         vm.expectEmit(address(messageQueue));
         emit IMessageQueue.EmergencyStopEnabled();
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.ChallengeRootDisabled();
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 

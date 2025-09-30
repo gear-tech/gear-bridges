@@ -1,4 +1,4 @@
-module.exports = class Init1753369468957 {
+export default class Init1753369468957 {
   name = 'Init1753369468957';
 
   async up(queryRunner) {
@@ -65,4 +65,4 @@ module.exports = class Init1753369468957 {
     await queryRunner.query(`DROP TYPE "public"."network_enum"`);
     await queryRunner.query(`DROP TYPE "public"."status_enum"`);
   }
-};
+}

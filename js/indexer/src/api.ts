@@ -57,9 +57,9 @@ async function main() {
     const address = server.address()!;
     if (typeof address !== 'string') {
       const href = `http://${address.address}:${address.port}${options.graphiqlRoute || '/graphiql'}`;
-      console.log(`PostGraphiQL available at ${href} 🚀`);
+      console.log(`PostGraphiQL available at ${href}`);
     } else {
-      console.log(`PostGraphile listening on ${address} 🚀`);
+      console.log(`PostGraphile listening on ${address}`);
     }
   });
 }

@@ -6,7 +6,7 @@
  * @class
  * @implements {MigrationInterface}
  */
-module.exports = class MerkleRootsAndSlots1756320525792 {
+export default class MerkleRootsAndSlots1756320525792 {
   name = 'MerkleRootsAndSlots1756320525792';
 
   async up(queryRunner) {
@@ -22,4 +22,4 @@ module.exports = class MerkleRootsAndSlots1756320525792 {
     await queryRunner.query(`DROP TABLE "checkpoint_slot"`);
     await queryRunner.query(`DROP TABLE "merkle_root_in_message_queue"`);
   }
-};
+}

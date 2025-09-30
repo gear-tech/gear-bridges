@@ -43,16 +43,16 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
 
     await this._ctx.store.save(setValues(this._merkleRoots));
 
-    this._log.info(`${this._merkleRoots.size} saved`);
+    this._log.info({ count: this._merkleRoots.size }, 'Merkle roots saved');
   }
 
   public bridgingPaid(txHash: string) {
-    this._log.info({ txHash }, `Bridging paid`);
+    this._log.info({ txHash }, 'Bridging paid');
     this._paidRequests.add(txHash.toLowerCase());
   }
 
   public newMerkleRoot(blockNumber: bigint, merkleRoot: string) {
-    this._log.info(`Received merkle root for block ${blockNumber}`);
+    this._log.info({ blockNumber, merkleRoot }, 'Merkle root received');
     this._merkleRoots.add(new MerkleRootInMessageQueue({ blockNumber, merkleRoot }));
   }
 }

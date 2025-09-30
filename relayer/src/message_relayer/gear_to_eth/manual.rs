@@ -132,7 +132,6 @@ pub async fn relay(
         governance_admin,
         governance_pauser,
         eth_api.clone(),
-        confirmations,
     );
     let mut accumulator_io = accumulator.spawn();
     let mut proof_fetcher_io = MerkleProofFetcher::new(api_provider).spawn();

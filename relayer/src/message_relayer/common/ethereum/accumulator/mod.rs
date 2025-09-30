@@ -93,8 +93,6 @@ pub struct Accumulator {
     governance_admin: ActorId,
     governance_pauser: ActorId,
     eth_api: EthApi,
-
-    confirmations: u64,
 }
 
 impl MeteredService for Accumulator {
@@ -119,7 +117,6 @@ impl Accumulator {
         governance_admin: ActorId,
         governance_pauser: ActorId,
         eth_api: EthApi,
-        confirmations: u64,
     ) -> Self {
         Self {
             metrics: Metrics::new(),
@@ -129,7 +126,6 @@ impl Accumulator {
             governance_admin,
             governance_pauser,
             eth_api,
-            confirmations,
         }
     }
 

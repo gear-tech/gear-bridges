@@ -32,7 +32,7 @@ const [nonceArg, blockNumberArg] = process.argv.slice(2).map((arg) => {
 });
 
 const statusCb = (status: string, details?: any) => {
-  console.log(`[relayEthToVara]: ${status}`, details || '');
+  console.log(`[relayVaraToEth]: ${status}`, details || '');
 };
 
 const main = async () => {

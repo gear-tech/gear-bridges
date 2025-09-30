@@ -11,7 +11,7 @@ import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
-import { CLAIM_TYPE, FIELD_NAME, NETWORK } from '../../consts';
+import { CLAIM_TYPE, FIELD_NAME, NETWORK, PRIORITY } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
 import { UseSendTxs, UseAccountBalance, UseFTBalance, UseFee, FormattedValues, UseTxsEstimate } from '../../types';
@@ -38,7 +38,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const { api } = useApi();
 
-  const { bridgingFee, vftManagerFee, ...config } = useFee();
+  const { bridgingFee, vftManagerFee, priorityFee, ...config } = useFee();
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
 
@@ -53,9 +53,12 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
   >();
 
+  const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.HIGH);
+  const shouldPayPriorityFee = priority === PRIORITY.HIGH;
+  const time = shouldPayPriorityFee ? '20 mins' : '1 hour';
+
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
   const shouldPayBridgingFee = claimType === CLAIM_TYPE.AUTO;
-  const time = '20 mins';
 
   const varaSymbol = useVaraSymbol();
 
@@ -68,6 +71,8 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     formValues: formattedValues,
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
+    priorityFee: priorityFee?.value,
+    shouldPayPriorityFee,
     vftManagerFee: vftManagerFee?.value,
     ftBalance: ftBalance.data,
   });
@@ -92,6 +97,8 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const sendTxs = useSendTxs({
     bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
+    priorityFee: priorityFee?.value,
+    shouldPayPriorityFee,
     vftManagerFee: vftManagerFee?.value,
     ftBalance: ftBalance.data,
     onTransactionStart: openTransactionModal,
@@ -131,10 +138,6 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     const openWalletModal = network.isVara ? openSubstrateWalletModal : openEthWalletModal;
 
     void openWalletModal();
-  };
-
-  const handleClaimTypeChange = (value: typeof claimType) => {
-    setClaimType(value);
   };
 
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
@@ -200,8 +203,10 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
           </div>
 
           <Settings
+            priority={priority}
             claimType={claimType}
-            onClaimTypeChange={handleClaimTypeChange}
+            onPriorityChange={setPriority}
+            onClaimTypeChange={setClaimType}
             isVaraNetwork={network.isVara}
             fee={txsEstimate.data?.fees}
             isFeeLoading={txsEstimate.isLoading}

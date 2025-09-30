@@ -14,21 +14,37 @@ type Params = {
   formValues: FormattedValues | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
+  priorityFee: bigint | undefined;
+  shouldPayPriorityFee: boolean;
   vftManagerFee: bigint | undefined;
 };
 
-function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
+function useVaraTxsEstimate({
+  formValues,
+  bridgingFee,
+  shouldPayBridgingFee,
+  priorityFee,
+  shouldPayPriorityFee,
+  vftManagerFee,
+}: Params) {
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
 
   const { token } = useBridgeContext();
 
-  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee });
+  const prepareTxs = usePrepareVaraTxs({
+    bridgingFee,
+    shouldPayBridgingFee,
+    priorityFee,
+    shouldPayPriorityFee,
+    vftManagerFee,
+  });
 
   const estimateTxs = async () => {
     definedAssert(formValues, 'Form values');
     definedAssert(vftManagerFee, 'VFT Manager fee');
     definedAssert(bridgingFee, 'Bridging fee value');
+    definedAssert(priorityFee, 'Priority fee value');
     definedAssert(api, 'API');
     definedAssert(prepareTxs, 'Prepared transactions');
 
@@ -39,7 +55,9 @@ function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vft
     const requiredBalance = totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
 
     let fees = totalGasLimit + totalEstimatedFee + vftManagerFee;
+
     if (shouldPayBridgingFee) fees += bridgingFee;
+    if (shouldPayPriorityFee) fees += priorityFee;
 
     return { requiredBalance, fees };
   };

@@ -188,7 +188,7 @@ async fn run() -> AnyResult<()> {
             match args.no_fee {
                 None => {
                     log::warn!("No free from charge accounts listed, using default: bridgeAdmin and bridgePauser from chain constants");
-                    match api.bridge_admin().await.map(AccountId32::from) {
+                    match api.bridge_admin().await {
                         Ok(admin) => {
                             log::info!("Bridge admin: {admin}");
                             excluded_from_fees.insert(admin);
@@ -198,7 +198,7 @@ async fn run() -> AnyResult<()> {
                         }
                     };
 
-                    match api.bridge_pauser().await.map(AccountId32::from) {
+                    match api.bridge_pauser().await {
                         Ok(pauser) => {
                             log::info!("Bridge pauser: {pauser}");
                             excluded_from_fees.insert(pauser);

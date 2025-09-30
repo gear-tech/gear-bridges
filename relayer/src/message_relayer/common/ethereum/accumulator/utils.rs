@@ -192,6 +192,20 @@ impl MerkleRoots {
         let result = self.0.get(i - 1)?;
         if result.authority_set_id != authority_set_id || result.timestamp + delay > last_timestamp
         {
+            if result.authority_set_id != authority_set_id {
+                log::trace!(
+                    "find: authority_set_id not found: requested = {authority_set_id:?}, found = {result:?}"
+                );
+            }
+
+            if result.timestamp + delay > last_timestamp {
+                log::trace!(
+                    "find: timestamp + delay not met: last_timestamp = {last_timestamp}, root.timestamp = {}, delay = {}, requested authority set = {authority_set_id:?}, found = {result:?}",
+                    result.timestamp,
+                    delay,
+                );
+            }
+
             return None;
         }
 

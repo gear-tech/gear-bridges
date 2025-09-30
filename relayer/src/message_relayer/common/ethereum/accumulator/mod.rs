@@ -188,7 +188,7 @@ async fn run_inner(
     loop {
         tokio::select! {
             _ = poll_interval.tick() => {
-                let block = this.eth_api.finalized_block_number().await?;
+                let block = this.eth_api.safe_block_number().await?;
                 if block <= last_block {
                     continue;
                 }
@@ -196,7 +196,7 @@ async fn run_inner(
 
                 let timestamp = this.eth_api.get_block_timestamp(block).await?;
                 last_timestamp = timestamp;
-
+                log::info!("Found new Ethereum finalized block #{block} at {timestamp}");
                 let merkle_roots = this.merkle_roots.read().await;
                 for (merkle_root, message) in this.messages.drain_timestamp(last_timestamp, &message_delay, &merkle_roots) {
                     let Ok(_) = messages_out.send(Response::Success {
@@ -218,6 +218,7 @@ async fn run_inner(
                         if let Some(merkle_root) =
                             merkle_roots.find(message.authority_set_id, message.block, last_timestamp, delay)
                         {
+                            log::trace!("Found merkle root for the message '{message:?}' with delay = {delay:?}");
                             messages_out.send(Response::Success {
                                 authority_set_id: message.authority_set_id,
                                 block: message.block,
@@ -225,6 +226,8 @@ async fn run_inner(
                                 merkle_root: *merkle_root,
                             })?;
                             continue;
+                        } else {
+                            log::trace!("No merkle root found for the message '{message:?}' with delay = {delay:?}");
                         }
 
                         if this.messages.add(message.clone()).is_none() {
@@ -272,6 +275,7 @@ async fn run_inner(
                     }
                 }
 
+                log::trace!("Drain messages for merkle root = {merkle_root:?}, current timestamp = {last_timestamp}");
                 for message in this.messages.drain(&merkle_root, last_timestamp, &message_delay) {
                     messages_out.send(Response::Success {
                         authority_set_id: message.authority_set_id,

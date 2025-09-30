@@ -146,7 +146,7 @@ impl TransactionManager {
                     log::info!(
                         "Transaction {}, nonce={} is waiting for merkle root",
                         tx.uuid,
-                        hex::encode(tx.message.message.nonce_le)
+                        hex::encode(tx.message.message.nonce_be)
                     );
                     if !accumulator.send_message(
                         tx.uuid,
@@ -164,13 +164,13 @@ impl TransactionManager {
                     log::info!(
                         "Transaction {}, nonce={} is fetching merkle root for block #{}",
                         tx.uuid,
-                        hex::encode(tx.message.message.nonce_le),
+                        hex::encode(tx.message.message.nonce_be),
                         merkle_root.block
                     );
                     if !proof_fetcher.send_request(
                         tx.uuid,
                         tx.message_hash,
-                        tx.message.message.nonce_le,
+                        tx.message.message.nonce_be,
                         *merkle_root,
                     ) {
                         log::warn!("Merkle root fetcher stopped accepting requests, exiting");
@@ -182,7 +182,7 @@ impl TransactionManager {
                     log::info!(
                         "Transaction {}, nonce={} is being relayed with merkle root for block #{}",
                         tx.uuid,
-                        hex::encode(tx.message.message.nonce_le),
+                        hex::encode(tx.message.message.nonce_be),
                         relayed_merkle_root.block
                     );
                     if !message_sender.send(
@@ -200,7 +200,7 @@ impl TransactionManager {
                     log::info!(
                         "Transaction {}, nonce={} is waiting for confirmations, tx_hash={}",
                         tx.uuid,
-                        hex::encode(tx.message.message.nonce_le),
+                        hex::encode(tx.message.message.nonce_be),
                         tx_hash
                     );
                     if !status_fetcher.send_request(tx.uuid, tx_hash) {
@@ -319,7 +319,7 @@ impl TransactionManager {
                             if !proof_fetcher.send_request(
                                 tx_uuid,
                                 tx.message_hash,
-                                tx.message.message.nonce_le,
+                                tx.message.message.nonce_be,
                                 merkle_root,
                             ) {
                                 log::warn!("Merkle root fetcher stopped accepting requests, exiting");
@@ -430,7 +430,7 @@ impl TransactionManager {
                     status_fetcher::Response::Failed(uuid, e) => {
                         if let Some(tx) = self.transactions.write().await.remove(&uuid) {
                             self.fail_transaction(uuid, e.to_string()).await;
-                            let nonce = hex::encode(tx.message.message.nonce_le);
+                            let nonce = hex::encode(tx.message.message.nonce_be);
                             log::error!("Transaction {uuid}, nonce={nonce} failed: {e}", );
                         } else {
                             log::warn!("Received failure response for unknown transaction: {uuid}");

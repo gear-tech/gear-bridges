@@ -86,12 +86,14 @@ impl AuthoritySetSync {
         proof_storage: Arc<dyn ProofStorage>,
 
         genesis_config: GenesisConfig,
+
+        count_thread: Option<usize>,
     ) -> Self {
         Self {
             api_provider,
             proof_storage,
             genesis_config,
-            count_thread: None,
+            count_thread,
 
             metrics: Metrics::new(),
         }

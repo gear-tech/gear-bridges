@@ -15,7 +15,7 @@ sol!(
 
 fn message_hash(message: &Message) -> [u8; 32] {
     let data = [
-        message.nonce_le.as_ref(),
+        message.nonce_be.as_ref(),
         message.source.as_ref(),
         message.destination.as_ref(),
         message.payload.as_ref(),
@@ -41,7 +41,7 @@ pub async fn vara_to_eth(gear_api: GearApi, message_nonce: primitive_types::U256
 
     let message = message_queued_events
         .into_iter()
-        .find(|m| primitive_types::U256::from_little_endian(&m.nonce_le) == message_nonce)
+        .find(|m| primitive_types::U256::from_big_endian(&m.nonce_be) == message_nonce)
         .unwrap_or_else(|| {
             panic!("Message with nonce {message_nonce} is not found in gear block {gear_block}")
         });
@@ -54,7 +54,7 @@ pub async fn vara_to_eth(gear_api: GearApi, message_nonce: primitive_types::U256
         .expect("Unable to fetch message inclusion proof");
 
     let vara_message = IMessageQueue::VaraMessage {
-        nonce: U256::from_be_bytes(message.nonce_le),
+        nonce: U256::from_be_bytes(message.nonce_be),
         source: FixedBytes::from_slice(&message.source),
         destination: Address::from_slice(&message.destination),
         payload: Bytes::from(message.payload.clone()),

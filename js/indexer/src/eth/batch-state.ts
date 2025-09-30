@@ -51,8 +51,8 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._paidRequests.add(txHash.toLowerCase());
   }
 
-  public newMerkleRoot(blockNumber: bigint, merkleRoot: string, maxBlockNumber: bigint) {
+  public newMerkleRoot(blockNumber: bigint, merkleRoot: string) {
     this._log.info(`Received merkle root for block ${blockNumber}`);
-    this._merkleRoots.add(new MerkleRootInMessageQueue({ blockNumber, merkleRoot, maxBlockNumber }));
+    this._merkleRoots.add(new MerkleRootInMessageQueue({ blockNumber, merkleRoot }));
   }
 }

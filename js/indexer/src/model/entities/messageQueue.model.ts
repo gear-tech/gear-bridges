@@ -16,7 +16,4 @@ export class MerkleRootInMessageQueue {
 
   @Column('varchar', { name: 'merkle_root', length: 66 })
   merkleRoot!: string;
-
-  @Column('bigint', { name: 'max_block_number' })
-  maxBlockNumber!: bigint;
 }

@@ -709,24 +709,21 @@ impl GearApi {
         Ok(res)
     }
 
-    /* todo(playX18): some version mismatch between relayer and this crate does not allow us to return AccountId32 as is, return raw bytes for now */
-    pub async fn bridge_admin(&self) -> AnyResult<[u8; 32]> {
+    pub async fn bridge_admin(&self) -> AnyResult<AccountId32> {
         self.get_constant("GearEthBridge", "BridgeAdmin")
             .await
             .and_then(|res| {
                 AccountId32::decode(&mut res.encoded())
                     .context("Failed to decode BridgeAdmin address")
-                    .map(AccountId32::into)
             })
     }
 
-    pub async fn bridge_pauser(&self) -> AnyResult<[u8; 32]> {
+    pub async fn bridge_pauser(&self) -> AnyResult<AccountId32> {
         self.get_constant("GearEthBridge", "BridgePauser")
             .await
             .and_then(|res| {
                 AccountId32::decode(&mut res.encoded())
                     .context("Failed to decode BridgePauser address")
-                    .map(AccountId32::into)
             })
     }
 }

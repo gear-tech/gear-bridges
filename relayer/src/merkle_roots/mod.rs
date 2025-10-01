@@ -1185,7 +1185,7 @@ pub struct MerkleRootRelayerOptions {
 impl MerkleRootRelayerOptions {
     pub fn from_cli(config: &GearEthCoreArgs) -> anyhow::Result<Self> {
         Ok(Self {
-            critical_threshold: Duration::from_secs(60 * 60 * 5), // 5 hours
+            critical_threshold: config.critical_threshold,
             spike_config: SpikeConfig {
                 timeout: config.spike_timeout,
                 window: config.spike_window,

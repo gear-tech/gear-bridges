@@ -113,6 +113,13 @@ pub struct GearEthCoreArgs {
         value_parser = parse_thread_count,
     )]
     pub thread_count: Option<ThreadCount>,
+
+    #[arg(
+        help = "Critical threshold duration. If latest submitted merkle-root timestamp is older than current time minus threshold, will force generate new merkle-root.",
+        value_parser = humantime::parse_duration,
+        default_value = "4h"
+    )]
+    pub critical_threshold: Duration,
 }
 
 #[derive(Args)]

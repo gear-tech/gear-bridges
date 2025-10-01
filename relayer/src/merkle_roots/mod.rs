@@ -721,11 +721,8 @@ impl MerkleRootRelayer {
                                 force = ForceGeneration::Yes;
                                 batch = Batch::No;
                             }
-                        } else {
-                            log::info!("No merkle roots have been submitted yet, forcing proof generation");
-                            force = ForceGeneration::Yes;
-                            batch = Batch::No;
                         }
+
                         if let Some(bridging_payment_address) = self.options.bridging_payment_address {
                             for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
                                 let pblock = self.api_provider.client().get_block_at(pblock).await?;

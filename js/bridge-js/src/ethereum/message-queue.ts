@@ -1,7 +1,5 @@
 import { Account, PublicClient, WalletClient, zeroHash, parseEventLogs } from 'viem';
 import { bytesToHex } from '@ethereumjs/util';
-import { bytesToBigint } from 'viem/utils';
-import { bnToU8a } from '@polkadot/util';
 
 import { MerkleRootLog, MerkleRootLogArgs, MessageProcessResult } from './types.js';
 import { Proof, VaraMessage } from '../vara/types.js';
@@ -107,7 +105,7 @@ export const getProcessMessageArgs = (blockNumber: bigint, varaMessage: VaraMess
     proof.numLeaves,
     proof.leafIndex,
     {
-      nonce: bytesToBigint(bnToU8a(varaMessage.nonce, { bitLength: 256, isLe: true })),
+      nonce: varaMessage.nonce,
       destination: bytesToHex(varaMessage.destination),
       source: bytesToHex(varaMessage.source),
       payload: bytesToHex(varaMessage.payload),

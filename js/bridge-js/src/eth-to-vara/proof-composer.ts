@@ -76,11 +76,11 @@ export async function composeProof(
 
   const slot = await ethClient.getSlot(blockNumber);
 
-  statusCb(`Generating merkle proof`);
+  statusCb(`Generating merkle proof`, { transactionIndex: receipt.transactionIndex.toString() });
 
   const { proof, receiptRlp } = await generateMerkleProof(receipt.transactionIndex, receipts);
 
-  statusCb(`Building inclusion proof`);
+  statusCb(`Building inclusion proof`, { slot: slot.toString() });
   const proofBlock = await buildInclusionProof(beaconClient, checkpointClient, slot, wait, statusCb);
 
   return {
@@ -129,7 +129,7 @@ async function buildInclusionProof(
     },
   };
 
-  statusCb(`Requesting slot from Checkpoint Client program`);
+  statusCb(`Requesting slot from Checkpoint Client program`, { slot: slot.toString() });
   const checkpointSlot = await checkpointClient.serviceCheckpointFor.get(slot, wait, statusCb);
 
   if (checkpointSlot[0] === slot) {

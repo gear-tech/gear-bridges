@@ -1,4 +1,4 @@
-import { Account, PublicClient, WalletClient } from 'viem';
+import { Account, PublicClient, WalletClient, bytesToHex } from 'viem';
 import { GearApi, HexString } from '@gear-js/api';
 
 import { getMessageQueueClient } from '../ethereum/index.js';
@@ -132,8 +132,18 @@ export async function relayVaraToEth(params: RelayVaraToEthParams) {
     throw new Error(`Message with nonce ${nonce} not found in block ${blockNumber}`);
   }
 
+  statusCb(`Message found`, {
+    nonce: msg.nonce.toString(),
+    source: bytesToHex(msg.source),
+    destination: bytesToHex(msg.destination),
+    payload: bytesToHex(msg.payload),
+  });
+
   const authoritySetId = await gearClient.getAuthoritySetIdByBlockNumber(blockNumber);
-  statusCb(`Authority set ID for block ${blockNumber}: ${authoritySetId}`);
+  statusCb(`Retrieved authority set ID`, {
+    blockNumber: blockNumber.toString(),
+    authoritySetId: authoritySetId.toString(),
+  });
 
   statusCb(`Fetching merkle root`, { blockNumber: blockNumber.toString() });
   let merkleRoot = await msgQClient.getMerkleRoot(blockNumber);
@@ -171,6 +181,10 @@ export async function relayVaraToEth(params: RelayVaraToEthParams) {
         merkleRoot = merkleRootFromLogs.merkleRoot;
         blockNumber = merkleRootFromLogs.blockNumber;
         blockHash = (await gearApi.blocks.getBlockHash(Number(blockNumber))).toHex();
+      } else {
+        throw new Error(
+          `Authority set ID mismatch. Required: ${authoritySetId}, Received: ${authoritySetIdForClosestBlock}`,
+        );
       }
     }
   }

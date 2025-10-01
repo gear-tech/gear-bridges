@@ -139,7 +139,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
 
   const checkpointClient = new CheckpointClient(params.gearApi, params.checkpointClientId);
 
-  statusCb(`Composing proof`);
+  statusCb(`Composing proof`, { txHash: params.transactionHash });
   const composeResult = await composeProof(
     beaconClient,
     ethClient,
@@ -149,7 +149,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
     statusCb,
   );
 
-  statusCb(`Building transaction`);
+  statusCb(`Building transaction`, { slot: composeResult.proofBlock.block.slot.toString() });
   const encodedEthToVaraEvent = encodeEthToVaraEvent(composeResult);
 
   const historicalProxyClient = new HistoricalProxyClient(params.gearApi, params.historicalProxyId);
@@ -164,7 +164,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
     .withAccount(params.signer, params.signerOptions)
     .withGas('max');
 
-  statusCb(`Sending transaction`);
+  statusCb(`Sending transaction`, { historicalProxyId: params.historicalProxyId });
   const { blockHash, msgId, txHash, response, isFinalized } = await tx.signAndSend();
 
   statusCb(`Waiting for response`, { txHash, blockHash });

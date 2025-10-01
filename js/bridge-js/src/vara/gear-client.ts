@@ -7,12 +7,25 @@ export class GearClient {
   constructor(private _api: GearApi) {}
 
   public async getAuthoritySetIdByBlockNumber(bn: bigint): Promise<bigint> {
-    const blockHash = await this._api.blocks.getBlockHash(Number(bn));
-    const apiAt = await this._api.at(blockHash.toHex());
+    const [blockHash, prevBlockHash] = await Promise.all([
+      this._api.blocks.getBlockHash(Number(bn)),
+      this._api.blocks.getBlockHash(Number(bn) - 1),
+    ]);
 
-    const setId = await apiAt.query.grandpa.currentSetId();
+    const [apiAt, prevApiAt] = await Promise.all([
+      this._api.at(blockHash.toHex()),
+      this._api.at(prevBlockHash.toHex()),
+    ]);
+    const [setId, prevSetId] = await Promise.all([
+      apiAt.query.grandpa.currentSetId(),
+      prevApiAt.query.grandpa.currentSetId(),
+    ]);
 
-    return setId.toBigInt();
+    if (prevSetId !== setId) {
+      return prevSetId.toBigInt();
+    } else {
+      return setId.toBigInt();
+    }
   }
 
   public async fetchMerkleProof(blockNumber: number, messageHash: HexString): Promise<Proof> {

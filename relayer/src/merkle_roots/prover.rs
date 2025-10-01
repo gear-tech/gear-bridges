@@ -57,6 +57,7 @@ impl FinalityProverIo {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn prove(
         &mut self,
         block_number: u32,

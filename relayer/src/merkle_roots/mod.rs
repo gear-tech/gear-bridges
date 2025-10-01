@@ -967,6 +967,7 @@ impl MerkleRootRelayer {
 
     /// Attempt to create proof for merkle root of `block`. If authority set that signed `block`
     /// is not yet proven, proof generation will be delayed until authority set is synced.
+    #[allow(clippy::too_many_arguments)]
     async fn try_proof_merkle_root(
         &mut self,
         prover: &mut FinalityProverIo,

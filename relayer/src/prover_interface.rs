@@ -175,12 +175,12 @@ pub async fn prove_final(
 
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
-    let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
+    let (_, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
     prove_final_with_block_finality(
         gear_api,
         previous_proof,
         genesis_config,
-        (block, block_finality),
+        (at_block, block_finality),
         count_thread,
     )
     .await

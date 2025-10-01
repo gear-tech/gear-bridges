@@ -8843,7 +8843,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 [[package]]
 name = "plonky2"
 version = "0.1.4"
-source = "git+https://github.com/gear-tech/plonky2.git?rev=4a620f4d79efe9233d0e7682df5a2fc625b5420e#4a620f4d79efe9233d0e7682df5a2fc625b5420e"
+source = "git+https://github.com/gear-tech/plonky2.git?rev=81e7273ec8bcf048c80689ee7606dcc153cb92cd#81e7273ec8bcf048c80689ee7606dcc153cb92cd"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -8922,7 +8922,7 @@ dependencies = [
 [[package]]
 name = "plonky2_field"
 version = "0.1.1"
-source = "git+https://github.com/gear-tech/plonky2.git?rev=4a620f4d79efe9233d0e7682df5a2fc625b5420e#4a620f4d79efe9233d0e7682df5a2fc625b5420e"
+source = "git+https://github.com/gear-tech/plonky2.git?rev=81e7273ec8bcf048c80689ee7606dcc153cb92cd#81e7273ec8bcf048c80689ee7606dcc153cb92cd"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
@@ -8937,7 +8937,7 @@ dependencies = [
 [[package]]
 name = "plonky2_maybe_rayon"
 version = "0.1.1"
-source = "git+https://github.com/gear-tech/plonky2.git?rev=4a620f4d79efe9233d0e7682df5a2fc625b5420e#4a620f4d79efe9233d0e7682df5a2fc625b5420e"
+source = "git+https://github.com/gear-tech/plonky2.git?rev=81e7273ec8bcf048c80689ee7606dcc153cb92cd#81e7273ec8bcf048c80689ee7606dcc153cb92cd"
 dependencies = [
  "rayon",
 ]
@@ -8978,7 +8978,7 @@ dependencies = [
 [[package]]
 name = "plonky2_util"
 version = "0.1.1"
-source = "git+https://github.com/gear-tech/plonky2.git?rev=4a620f4d79efe9233d0e7682df5a2fc625b5420e#4a620f4d79efe9233d0e7682df5a2fc625b5420e"
+source = "git+https://github.com/gear-tech/plonky2.git?rev=81e7273ec8bcf048c80689ee7606dcc153cb92cd#81e7273ec8bcf048c80689ee7606dcc153cb92cd"
 
 [[package]]
 name = "polkavm"

@@ -95,10 +95,10 @@ vft-vara-client = { path = "gear-programs/vft-vara/client" }
 
 # Contracts' deps
 
-plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
+plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
+plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
+plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
 
 # Coordinates of `EdwardsPoint` made public in fork.
 curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek", rev = "f63777fbeeb181944097bdcaeb9384ac158ec931" }

@@ -1,4 +1,8 @@
-use alloc::{format, string::{String, ToString}, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::marker::PhantomData;
 
 use itertools::unfold;
@@ -292,7 +296,11 @@ impl<F: RichField + Extendable<D>, const D: usize> Gate<F, D> for U32AddManyGate
         let num_addends = src.read_usize()?;
         let num_ops = src.read_usize()?;
 
-        Ok(Self { num_addends, num_ops, _phantom: PhantomData, })
+        Ok(Self {
+            num_addends,
+            num_ops,
+            _phantom: PhantomData,
+        })
     }
 }
 
@@ -394,7 +402,12 @@ impl<F: RichField + Extendable<D>, const D: usize> SimpleGenerator<F, D>
 
         let gate = U32AddManyGate::deserialize(src, common_data)?;
 
-        Ok(Self { gate, row, i, _phantom: PhantomData, })
+        Ok(Self {
+            gate,
+            row,
+            i,
+            _phantom: PhantomData,
+        })
     }
 }
 

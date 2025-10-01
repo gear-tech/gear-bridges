@@ -309,14 +309,26 @@ impl EthApi {
         &self.contracts.provider
     }
 
+    /// Returns the maximum block number that can be submitted as part of a
+    /// merkle-root submission into MessageQueue contract.
+    pub async fn max_block_number(&self) -> Result<u32, Error> {
+        self.contracts.max_block_number().await
+    }
+
+    /// Returns the delay (in seconds) requires before merkle-root submitted
+    /// by an admin can be used.
     pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
         self.contracts.process_admin_message_delay().await
     }
 
+    /// Returns the delay (in seconds) requires before merkle-root submitted
+    /// by a pauser can be used.
     pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
         self.contracts.process_pauser_message_delay().await
     }
 
+    /// Returns the delay (in seconds) requires before merkle-root submitted
+    /// by an arbitrary user can be used.
     pub async fn process_user_message_delay(&self) -> Result<u64, Error> {
         self.contracts.process_user_message_delay().await
     }
@@ -462,6 +474,15 @@ impl Contracts {
             provider,
             message_queue_instance,
         })
+    }
+
+    pub async fn max_block_number(&self) -> Result<u32, Error> {
+        self.message_queue_instance
+            .maxBlockNumber()
+            .call()
+            .await
+            .map(|num| num.to())
+            .map_err(Error::ErrorDuringContractExecution)
     }
 
     pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {

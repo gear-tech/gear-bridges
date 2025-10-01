@@ -23,7 +23,7 @@ use tokio::{
 pub struct MerkleRootStorage {
     pub proofs: Arc<dyn ProofStorage>,
     pub blocks: RwLock<BTreeMap<u32, Block>>,
-    pub submitted_roots: RwLock<HashSet<H256>>,
+    pub submitted_roots: RwLock<HashSet<(u32, H256)>>,
     pub path: PathBuf,
 }
 
@@ -142,16 +142,25 @@ impl MerkleRootStorage {
         })
     }
 
-    pub async fn is_merkle_root_submitted(&self, merkle_root: H256) -> bool {
-        self.submitted_roots.read().await.contains(&merkle_root)
+    pub async fn is_merkle_root_submitted(&self, block: u32, merkle_root: H256) -> bool {
+        self.submitted_roots
+            .read()
+            .await
+            .contains(&(block, merkle_root))
     }
 
-    pub async fn submitted_merkle_root(&self, merkle_root: H256) {
-        self.submitted_roots.write().await.insert(merkle_root);
+    pub async fn submitted_merkle_root(&self, block: u32, merkle_root: H256) {
+        self.submitted_roots
+            .write()
+            .await
+            .insert((block, merkle_root));
     }
 
-    pub async fn submission_failed(&self, merkle_root: H256) {
-        self.submitted_roots.write().await.remove(&merkle_root);
+    pub async fn submission_failed(&self, block: u32, merkle_root: H256) {
+        self.submitted_roots
+            .write()
+            .await
+            .remove(&(block, merkle_root));
     }
 
     pub async fn merkle_root_processed(&self, block_number: u32) {
@@ -252,13 +261,13 @@ impl MerkleRootStorage {
 #[derive(Serialize)]
 struct SerializedStorage<'a> {
     blocks: &'a BTreeMap<u32, Block>,
-    submitted_merkle_roots: &'a HashSet<H256>,
+    submitted_merkle_roots: &'a HashSet<(u32, H256)>,
     roots: &'a HashMap<H256, MerkleRoot>,
 }
 
 #[derive(Deserialize)]
 struct DeserializedStorage {
     blocks: BTreeMap<u32, Block>,
-    submitted_merkle_roots: HashSet<H256>,
+    submitted_merkle_roots: HashSet<(u32, H256)>,
     roots: HashMap<H256, MerkleRoot>,
 }

@@ -9,7 +9,7 @@ use crate::{
 use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::{H256, U256};
 use sails_rs::events::EventIo;
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
     path::PathBuf,
@@ -258,16 +258,82 @@ impl MerkleRootStorage {
     }
 }
 
-#[derive(Serialize)]
 struct SerializedStorage<'a> {
     blocks: &'a BTreeMap<u32, Block>,
     submitted_merkle_roots: &'a HashSet<(u32, H256)>,
     roots: &'a HashMap<(u32, H256), MerkleRoot>,
 }
 
-#[derive(Deserialize)]
+impl Serialize for SerializedStorage<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("MerkleRootStorage", 3)?;
+        state.serialize_field("blocks", &self.blocks)?;
+        state.serialize_field("submitted_merkle_roots", &self.submitted_merkle_roots)?;
+
+        let roots_hex: HashMap<String, MerkleRoot> = self
+            .roots
+            .iter()
+            .map(|((block, hash), root)| {
+                let key = format!("{}-{}", block, hex::encode(hash.as_bytes()));
+                (key, root.clone())
+            })
+            .collect();
+        state.serialize_field("roots", &roots_hex)?;
+        state.end()
+    }
+}
+
 struct DeserializedStorage {
     blocks: BTreeMap<u32, Block>,
     submitted_merkle_roots: HashSet<(u32, H256)>,
     roots: HashMap<(u32, H256), MerkleRoot>,
+}
+impl<'de> Deserialize<'de> for DeserializedStorage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            blocks: BTreeMap<u32, Block>,
+            submitted_merkle_roots: HashSet<(u32, H256)>,
+            roots: HashMap<String, MerkleRoot>,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+
+        let roots = helper
+            .roots
+            .into_iter()
+            .map(|(key, root)| {
+                let parts: Vec<&str> = key.splitn(2, '-').collect();
+                if parts.len() != 2 {
+                    return Err(serde::de::Error::custom("Invalid root key format"));
+                }
+
+                let block: u32 = parts[0]
+                    .parse()
+                    .map_err(|_| serde::de::Error::custom("Invalid block number"))?;
+
+                let hash_bytes = hex::decode(parts[1])
+                    .map_err(|_| serde::de::Error::custom("Invalid hash format"))?;
+
+                if hash_bytes.len() != 32 {
+                    return Err(serde::de::Error::custom("Hash must be 32 bytes"));
+                }
+
+                let hash = H256::from_slice(&hash_bytes);
+                Ok(((block, hash), root))
+            })
+            .collect::<Result<HashMap<(u32, H256), MerkleRoot>, D::Error>>()?;
+
+        Ok(DeserializedStorage {
+            blocks: helper.blocks,
+            submitted_merkle_roots: helper.submitted_merkle_roots,
+            roots,
+        })
+    }
 }

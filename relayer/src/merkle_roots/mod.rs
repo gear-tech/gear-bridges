@@ -1174,6 +1174,21 @@ pub struct MerkleRoot {
     pub status: MerkleRootStatus,
 }
 
+impl Clone for MerkleRoot {
+    fn clone(&self) -> Self {
+        Self {
+            block_number: self.block_number,
+            block_hash: self.block_hash,
+            queue_id: self.queue_id,
+            timestamp: self.timestamp,
+            message_nonces: self.message_nonces.clone(),
+            http_requests: Vec::new(),
+            proof: self.proof.clone(),
+            status: self.status.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MerkleRootStatus {
     WaitForAuthoritySetSync(u64, u32),

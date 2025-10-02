@@ -61,6 +61,9 @@ library BaseConstants {
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+    uint256 public messageNonce;
+    uint256 public currentBlockNumber;
+
     DeploymentArguments public deploymentArguments;
 
     IERC20Metadata public erc20GearSupply;
@@ -188,6 +191,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 emergencyStopObservers: messageQueue.emergencyStopObservers(),
                 bridgingPaymentFee: bridgingPayment.fee()
             });
+
+            messageNonce = 10_000;
+            currentBlockNumber = messageQueue.maxBlockNumber() + 1;
+
+            // TODO: all manipulations with the forked contracts should be done here
         }
 
         console.log("Deployment arguments:");
@@ -199,7 +207,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    bridgingPaymentFee:  ", deploymentArguments.bridgingPaymentFee, "wei");
 
         if (isTest) {
-            vm.warp(vm.unixTime() / 1000);
+            if (!isFork) {
+                vm.warp(vm.unixTime() / 1000);
+            }
             vm.deal(deploymentArguments.deployerAddress, BaseConstants.DEPLOYER_INITIAL_BALANCE);
             vm.startPrank(deploymentArguments.deployerAddress, deploymentArguments.deployerAddress);
         } else if (isScript) {
@@ -447,8 +457,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(messageQueue.verifier(), address(verifier));
         assertEq(messageQueue.isChallengingRoot(), false);
         assertEq(messageQueue.isEmergencyStopped(), false);
-        assertEq(messageQueue.genesisBlock(), 0);
-        assertEq(messageQueue.maxBlockNumber(), 0);
+        if (!isFork()) {
+            assertEq(messageQueue.genesisBlock(), 0);
+            assertEq(messageQueue.maxBlockNumber(), 0);
+        }
     }
 
     function erc20ManagerAssertions(address erc20ManagerAddress) public view {

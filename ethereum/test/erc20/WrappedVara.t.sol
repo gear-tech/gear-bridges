@@ -28,7 +28,7 @@ contract WrappedVaraTest is Test, Base {
 
     function test_PauseWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
@@ -37,7 +37,7 @@ contract WrappedVaraTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -68,7 +68,7 @@ contract WrappedVaraTest is Test, Base {
 
     function test_PauseWithGovernancePauser() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
@@ -77,7 +77,7 @@ contract WrappedVaraTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -117,7 +117,7 @@ contract WrappedVaraTest is Test, Base {
 
     function test_UnpauseWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
@@ -126,7 +126,7 @@ contract WrappedVaraTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -155,7 +155,7 @@ contract WrappedVaraTest is Test, Base {
         vm.stopPrank();
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x13,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack()
@@ -164,7 +164,7 @@ contract WrappedVaraTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x45;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -189,7 +189,7 @@ contract WrappedVaraTest is Test, Base {
 
     function test_UnpauseWithGovernancePauser() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
@@ -198,7 +198,7 @@ contract WrappedVaraTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -227,7 +227,7 @@ contract WrappedVaraTest is Test, Base {
         vm.stopPrank();
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x13,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack()
@@ -236,7 +236,7 @@ contract WrappedVaraTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x45;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -270,7 +270,7 @@ contract WrappedVaraTest is Test, Base {
 
     function test_UpgradeToAndCallWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
@@ -283,7 +283,7 @@ contract WrappedVaraTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 

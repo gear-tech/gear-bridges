@@ -30,7 +30,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_PauseWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -39,7 +39,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -61,7 +61,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x12,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -75,7 +75,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_PauseWithGovernancePauser() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -84,7 +84,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -106,7 +106,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x12,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -129,7 +129,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_UnpauseWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -138,7 +138,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -160,7 +160,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x12,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -172,7 +172,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
         VaraMessage memory message3 = VaraMessage({
-            nonce: 0x13,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UnpauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -181,7 +181,7 @@ contract MessageQueueTest is Test, Base {
 
         messageHash = message3.hash();
 
-        blockNumber = 0x45;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -200,7 +200,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_UnpauseWithGovernancePauser() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -209,7 +209,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -231,7 +231,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x12,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -243,7 +243,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
         VaraMessage memory message3 = VaraMessage({
-            nonce: 0x13,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: UnpauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -252,7 +252,7 @@ contract MessageQueueTest is Test, Base {
 
         messageHash = message3.hash();
 
-        blockNumber = 0x45;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -280,7 +280,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_UpgradeToAndCallWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
@@ -293,7 +293,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -508,7 +508,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_ChallengeRootWithPause() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22)); // valid root, update max block height
         bytes memory proof1 = "";
 
@@ -521,7 +521,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -530,7 +530,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        blockNumber = 0x12;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash; // invalid root, suspicious address managed to send pause
 
         vm.expectEmit(address(messageQueue));
@@ -563,7 +563,7 @@ contract MessageQueueTest is Test, Base {
 
         vm.stopPrank();
 
-        blockNumber = 0x13;
+        blockNumber = currentBlockNumber++;
         merkleRoot = bytes32(uint256(0x33)); // valid root, just to check that no one can submit any root now
 
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
@@ -609,7 +609,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_AllowMessageProcessing() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
@@ -634,7 +634,7 @@ contract MessageQueueTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -659,7 +659,7 @@ contract MessageQueueTest is Test, Base {
         vm.stopPrank();
 
         // message is not processed, but anyone can call processMessage now
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootNotFound.selector, 0x11));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootNotFound.selector, blockNumber));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -679,7 +679,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_SubmitMerkleRoot() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
@@ -745,7 +745,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_SubmitMerkleRootTwice() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
@@ -764,7 +764,7 @@ contract MessageQueueTest is Test, Base {
     function test_SubmitMerkleRootWithInvalidProof() public {
         IVerifierMock(address(verifier)).setValue(false);
 
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
@@ -773,7 +773,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_SubmitMerkleRootWithEmergencyStop() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof1 = "";
 
@@ -804,7 +804,7 @@ contract MessageQueueTest is Test, Base {
         vm.startPrank(deploymentArguments.emergencyStopAdmin);
 
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -836,7 +836,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_ProcessMessage() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -845,7 +845,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -868,7 +868,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_ProcessMessageWithEmergencyStop() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
@@ -893,7 +893,7 @@ contract MessageQueueTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -911,7 +911,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_ProcessMessageWithMessageAlreadyProcessed() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -920,7 +920,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -948,14 +948,14 @@ contract MessageQueueTest is Test, Base {
 
     function test_ProcessMessageWithMerkleRootNotSet() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof = new bytes32[](0);
@@ -967,7 +967,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_ProcessMessageWithMerkleRootDelayNotPassed() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -976,7 +976,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -996,7 +996,7 @@ contract MessageQueueTest is Test, Base {
 
     function test_ProcessMessageWithInvalidMerkleProof() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(messageHandlerMock),
             payload: hex"33"
@@ -1005,7 +1005,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 

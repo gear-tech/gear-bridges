@@ -345,7 +345,12 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_ChallengeRoot() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber1 = currentBlockNumber++;
+        uint256 blockNumber2 = currentBlockNumber++;
+        uint256 blockNumber3 = currentBlockNumber++;
+        uint256 blockNumber4 = currentBlockNumber++;
+
+        uint256 blockNumber = blockNumber1;
         bytes32 merkleRoot = bytes32(uint256(0x22)); // valid root, update max block height
         bytes memory proof1 = "";
 
@@ -357,7 +362,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
         assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
-        blockNumber = 0x12;
+        blockNumber = blockNumber2;
         merkleRoot = bytes32(uint256(0x33)); // invalid root, suspicious address managed to send it
 
         vm.expectEmit(address(messageQueue));
@@ -368,7 +373,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
         assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
-        blockNumber = 0x13;
+        blockNumber = blockNumber3;
         merkleRoot = bytes32(uint256(0x44)); // invalid root, suspicious address managed to send it
 
         vm.expectEmit(address(messageQueue));
@@ -390,7 +395,7 @@ contract MessageQueueTest is Test, Base {
         vm.stopPrank();
 
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
@@ -399,7 +404,7 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        blockNumber = 0x14;
+        blockNumber = blockNumber4;
         merkleRoot = messageHash; // valid root, just to check that no one can submit any root now
 
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
@@ -414,7 +419,7 @@ contract MessageQueueTest is Test, Base {
 
         vm.startPrank(deploymentArguments.emergencyStopAdmin);
 
-        blockNumber = 0x12;
+        blockNumber = blockNumber2;
         merkleRoot = bytes32(uint256(0xdeadbeef)); // valid root, calculated by emergency stop admin
         bytes32 previousMerkleRoot = bytes32(uint256(0x33));
 
@@ -433,7 +438,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.getMerkleRoot(blockNumber), bytes32(0));
         assertEq(messageQueue.getMerkleRootTimestamp(previousMerkleRoot), 0);
 
-        blockNumber = 0x13;
+        blockNumber = blockNumber3;
         merkleRoot = bytes32(uint256(0xfee1dead)); // valid root, calculated by emergency stop admin
         previousMerkleRoot = bytes32(uint256(0x44));
 
@@ -447,7 +452,7 @@ contract MessageQueueTest is Test, Base {
         // governance can send message to update MessageQueue and remove emergency stop status
         // emergencyStopAdmin in this case will only accept roots from our RPC node
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
@@ -460,7 +465,7 @@ contract MessageQueueTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x13;
+        blockNumber = blockNumber3;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
@@ -693,19 +698,23 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_SubmitMerkleRootWithBlockNumberBeforeGenesis() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = messageQueue.genesisBlock();
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
-        vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        if (blockNumber == 0) {
+            blockNumber += 42;
 
-        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
-        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
-        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
-        assertEq(messageQueue.genesisBlock(), 0x11);
-        assertEq(messageQueue.maxBlockNumber(), 0x11);
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+
+            assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+            assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+            assertEq(messageQueue.genesisBlock(), blockNumber);
+            assertEq(messageQueue.maxBlockNumber(), blockNumber);
+        }
 
         blockNumber -= 1;
 
@@ -718,21 +727,25 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_SubmitMerkleRootWithBlockNumberTooFar() public {
-        uint256 blockNumber = 0x11;
+        uint256 blockNumber = messageQueue.genesisBlock();
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
-        vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+        if (blockNumber == 0) {
+            blockNumber += 42;
 
-        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
-        assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
-        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
-        assertEq(messageQueue.genesisBlock(), 0x11);
-        assertEq(messageQueue.maxBlockNumber(), 0x11);
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
 
-        blockNumber += messageQueue.MAX_BLOCK_DISTANCE() + 1;
+            assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
+            assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+            assertEq(messageQueue.genesisBlock(), blockNumber);
+            assertEq(messageQueue.maxBlockNumber(), blockNumber);
+        }
+
+        blockNumber = messageQueue.maxBlockNumber() + messageQueue.MAX_BLOCK_DISTANCE() + 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(

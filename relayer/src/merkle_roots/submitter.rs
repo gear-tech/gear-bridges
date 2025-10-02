@@ -241,7 +241,7 @@ impl MerkleRootSubmitter {
                                 if responses.send(Response {
                                     era: request.era,
                                     merkle_root_block: request.merkle_root_block,
-                                    merkle_root: H256::from(request.proof.merkle_root),
+                                    merkle_root: H256::from(request.merkle_root),
                                     status: ResponseStatus::Submitted,
                                     proof: request.proof,
                                 }).is_err() {
@@ -254,24 +254,25 @@ impl MerkleRootSubmitter {
                                 if responses.send(Response {
                                     era: request.era,
                                     merkle_root_block: request.merkle_root_block,
-                                    merkle_root: H256::from(request.proof.merkle_root),
+                                    merkle_root: H256::from(request.merkle_root),
                                     status: ResponseStatus::Failed("Error during contract execution".to_string()),
                                     proof: request.proof,
                                 }).is_err() {
                                     return Ok(());
                                 };
                             }
-
                         }
 
+
                         Err(err) => {
+
                             log::error!("Failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
                             self.metrics.failed_submissions.inc();
-                            self.storage.submission_failed(request.merkle_root_block, H256::from(request.proof.merkle_root)).await;
+                            self.storage.submission_failed(request.proof.block_number, H256::from(request.proof.merkle_root)).await;
                             if responses.send(Response {
                                 era: request.era,
                                 merkle_root_block: request.merkle_root_block,
-                                merkle_root: H256::from(request.proof.merkle_root),
+                                merkle_root: H256::from(request.merkle_root),
                                 status: ResponseStatus::Failed(err.to_string()),
                                 proof: request.proof,
                             }).is_err() {

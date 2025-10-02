@@ -609,7 +609,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_AllowMessageProcessing() public {
-        uint256 blockNumber = messageNonce++;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 
@@ -868,7 +868,7 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_ProcessMessageWithEmergencyStop() public {
-        uint256 blockNumber = messageNonce++;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = bytes32(uint256(0x22));
         bytes memory proof = "";
 

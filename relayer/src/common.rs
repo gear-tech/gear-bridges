@@ -2,8 +2,10 @@ use std::{sync::Arc, time::Duration};
 
 use alloy::transports::{RpcError, TransportErrorKind};
 use prover::proving::GenesisConfig;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
+    merkle_roots::authority_set_sync,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
 };
@@ -19,7 +21,7 @@ pub(crate) async fn sync_authority_set_id(
     genesis_config: GenesisConfig,
     latest_authority_set_id: u64,
     latest_proven_authority_set_id: Option<u64>,
-
+    responses: &UnboundedSender<authority_set_sync::Response>,
     count_thread: Option<usize>,
 ) -> anyhow::Result<SyncStepCount> {
     let Some(latest_proven) = latest_proven_authority_set_id else {
@@ -64,6 +66,15 @@ pub(crate) async fn sync_authority_set_id(
             proof_storage
                 .update(proof.proof.clone(), set_id + 1)
                 .await?;
+            let initial_block = gear_api.find_era_first_block(set_id + 1).await?;
+            let block_number = gear_api.block_hash_to_number(initial_block).await?;
+            log::info!("Authority set #{set_id} is in sync");
+            responses
+                .send(authority_set_sync::Response::AuthoritySetSynced(
+                    set_id + 1,
+                    block_number,
+                ))
+                .ok();
         }
 
         let step_count = latest_authority_set_id - latest_proven;

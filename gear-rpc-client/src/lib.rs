@@ -1,6 +1,8 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
+use std::time::Duration;
+
 use anyhow::{anyhow, Context, Result as AnyResult};
 use blake2::{
     digest::{Update, VariableOutput},
@@ -13,7 +15,7 @@ use gsdk::{
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-        storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage},
+        storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage, TimestampStorage},
         vara_runtime::SessionKeys,
     },
     Event as RuntimeEvent, GearConfig,
@@ -621,6 +623,15 @@ impl GearApi {
             num_leaves: proof.number_of_leaves,
             leaf_index: proof.leaf_index,
         })
+    }
+
+    pub async fn fetch_timestamp(&self, block: H256) -> AnyResult<u64> {
+        let block = (*self.api).blocks().at(block).await?;
+        let timestamp_address = gsdk::Api::storage_root(TimestampStorage::Now);
+        Self::fetch_from_storage(&block, &timestamp_address)
+            .await
+            .map(Duration::from_millis)
+            .map(|d| d.as_secs())
     }
 
     /// Fetch queue merkle root for the given block.

@@ -447,6 +447,7 @@ impl KillSwitchRelayer {
         let proof = match response {
             MerkleRootsResponse::MerkleRootProof {
                 proof,
+                proof_block_number: _,
                 merkle_root,
                 block_number,
                 block_hash,

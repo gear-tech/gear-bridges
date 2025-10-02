@@ -9,7 +9,7 @@ function Home() {
     <Container maxWidth="640px" className={styles.container}>
       <div className={styles.warning}>
         <div>
-          <p className={styles.date}>⚠️ Testnet Update on 1 October.</p>
+          <p className={styles.date}>⚠️ Testnet Update coming soon.</p>
 
           <p>
             Bridge upgrade scheduled. Previous test transaction history will be removed from the UI. Real funds are not

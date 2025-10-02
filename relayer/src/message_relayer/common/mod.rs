@@ -235,6 +235,7 @@ pub mod web_request {
     pub enum MerkleRootsResponse {
         MerkleRootProof {
             proof: Vec<u8>,
+            proof_block_number: u32,
             merkle_root: H256,
             block_number: u32,
             block_hash: H256,

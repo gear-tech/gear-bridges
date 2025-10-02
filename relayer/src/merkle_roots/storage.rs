@@ -192,7 +192,7 @@ impl MerkleRootStorage {
     }
 
     /// Save unprocessed blocks to the provided path.
-    pub async fn save(&self, roots: &HashMap<H256, MerkleRoot>) -> anyhow::Result<()> {
+    pub async fn save(&self, roots: &HashMap<(u32, H256), MerkleRoot>) -> anyhow::Result<()> {
         self.prune_blocks().await;
         let blocks = self.blocks.read().await;
         let submitted_merkle_roots = self.submitted_roots.read().await;
@@ -218,7 +218,7 @@ impl MerkleRootStorage {
         Ok(())
     }
 
-    pub async fn load(&self) -> anyhow::Result<HashMap<H256, MerkleRoot>> {
+    pub async fn load(&self) -> anyhow::Result<HashMap<(u32, H256), MerkleRoot>> {
         let mut file = tokio::fs::OpenOptions::new()
             .read(true)
             .open(&self.path)
@@ -262,12 +262,12 @@ impl MerkleRootStorage {
 struct SerializedStorage<'a> {
     blocks: &'a BTreeMap<u32, Block>,
     submitted_merkle_roots: &'a HashSet<(u32, H256)>,
-    roots: &'a HashMap<H256, MerkleRoot>,
+    roots: &'a HashMap<(u32, H256), MerkleRoot>,
 }
 
 #[derive(Deserialize)]
 struct DeserializedStorage {
     blocks: BTreeMap<u32, Block>,
     submitted_merkle_roots: HashSet<(u32, H256)>,
-    roots: HashMap<H256, MerkleRoot>,
+    roots: HashMap<(u32, H256), MerkleRoot>,
 }

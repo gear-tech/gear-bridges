@@ -196,7 +196,7 @@ impl MerkleRootSubmitter {
                         return Ok(());
                     };
 
-                    if self.storage.is_merkle_root_submitted(request.proof.block_number, H256::from(request.proof.merkle_root)).await {
+                    if self.storage.is_merkle_root_submitted(request.merkle_root_block, H256::from(request.proof.merkle_root)).await {
                         log::info!(
                             "Merkle root {} for block #{} is already submitted", H256::from(request.proof.merkle_root), request.merkle_root_block);
                         if responses.send(Response {
@@ -211,7 +211,7 @@ impl MerkleRootSubmitter {
                         continue;
                     }
 
-                    self.storage.submitted_merkle_root(request.proof.block_number, H256::from(request.proof.merkle_root)).await;
+                    self.storage.submitted_merkle_root(request.merkle_root_block, H256::from(request.proof.merkle_root)).await;
 
                     match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
                         Ok(tx_hash) => {
@@ -267,7 +267,7 @@ impl MerkleRootSubmitter {
                         Err(err) => {
                             log::error!("Failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
                             self.metrics.failed_submissions.inc();
-                            self.storage.submission_failed(request.proof.block_number, H256::from(request.proof.merkle_root)).await;
+                            self.storage.submission_failed(request.merkle_root_block, H256::from(request.proof.merkle_root)).await;
                             if responses.send(Response {
                                 era: request.era,
                                 merkle_root_block: request.merkle_root_block,

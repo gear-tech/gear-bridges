@@ -40,7 +40,7 @@ pub enum Response {
         merkle_root: H256,
         proof: FinalProof,
 
-        batch_roots: Vec<H256>,
+        batch_roots: Vec<(u32, H256)>,
     },
 }
 
@@ -343,7 +343,7 @@ struct BatchProofRequest {
     merkle_root: H256,
     inner_proof: ProofWithCircuitData,
 
-    batch_roots: Vec<H256>,
+    batch_roots: Vec<(u32, H256)>,
 }
 
 impl BatchProofRequest {
@@ -362,14 +362,15 @@ impl BatchProofRequest {
     /// and adds the current merkle root to the batch roots.
     fn add_request(&mut self, request: Request) {
         if request.block_number > self.block_number {
-            self.batch_roots.push(self.merkle_root);
+            self.batch_roots.push((self.block_number, self.merkle_root));
 
             self.block_number = request.block_number;
             self.block_hash = request.block_hash;
             self.merkle_root = request.merkle_root;
             self.inner_proof = request.inner_proof;
         } else {
-            self.batch_roots.push(request.merkle_root);
+            self.batch_roots
+                .push((request.block_number, request.merkle_root));
         }
     }
 }

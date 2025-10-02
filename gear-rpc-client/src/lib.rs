@@ -626,7 +626,10 @@ impl GearApi {
     pub async fn fetch_timestamp(&self, block: H256) -> AnyResult<u64> {
         let block = (*self.api).blocks().at(block).await?;
         let timestamp_address = gsdk::Api::storage_root(TimestampStorage::Now);
-        Self::fetch_from_storage(&block, &timestamp_address).await
+        Self::fetch_from_storage(&block, &timestamp_address)
+            .await
+            .map(Duration::from_millis)
+            .map(|d| d.as_secs())
     }
 
     /// Fetch queue merkle root for the given block.

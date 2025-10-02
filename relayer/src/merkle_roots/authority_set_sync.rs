@@ -218,7 +218,7 @@ impl AuthoritySetSync {
 
         log::info!("Syncing authority set #{authority_set_id}");
         loop {
-            let (sync_steps, _) = match blocks.recv().await {
+            let (sync_steps, authority_set_id) = match blocks.recv().await {
                 Ok(block) => self.sync_authority_set(&block).await?,
 
                 Err(RecvError::Closed) => {
@@ -233,6 +233,13 @@ impl AuthoritySetSync {
                     continue;
                 }
             };
+
+            responses
+                .send(Response::AuthoritySetSynced(
+                    authority_set_id,
+                    block.number(),
+                ))
+                .ok();
 
             if sync_steps == 0 {
                 break;

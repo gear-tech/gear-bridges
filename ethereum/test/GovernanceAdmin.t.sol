@@ -32,7 +32,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithInvalidSource() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(governanceAdmin),
             payload: ""
@@ -41,7 +41,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -63,7 +63,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithEmptyPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: ""
@@ -72,7 +72,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -94,7 +94,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithInvalidDiscriminant() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: abi.encodePacked(uint8(GovernanceConstants.UPGRADE_PROXY + 1))
@@ -103,7 +103,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -128,7 +128,7 @@ contract GovernanceAdminTest is Test, Base {
         bytes32 newGovernance = bytes32(uint256(0x22));
         assertEq(ChangeGovernanceMessage({newGovernance: newGovernance}).pack().length, 33);
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: previousGovernance,
             destination: address(governanceAdmin),
             payload: ChangeGovernanceMessage({newGovernance: newGovernance}).pack()
@@ -137,7 +137,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -162,7 +162,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithChangeGovernanceAndNotEnoughPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: abi.encodePacked(uint8(GovernanceConstants.CHANGE_GOVERNANCE))
@@ -171,7 +171,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -193,7 +193,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithUpgradeProxyAndNotEnoughPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: abi.encodePacked(uint8(GovernanceConstants.UPGRADE_PROXY))
@@ -202,7 +202,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -225,7 +225,7 @@ contract GovernanceAdminTest is Test, Base {
     function test_HandleMessageWithPauseAndInvalidProxy() public {
         address invalidProxy = address(0x22);
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: PauseProxyMessage({proxy: invalidProxy}).pack()
@@ -234,7 +234,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -256,7 +256,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithPauseAndInvalidMessageSize() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: bytes.concat(PauseProxyMessage({proxy: address(messageQueue)}).pack(), "ff")
@@ -265,7 +265,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -287,7 +287,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithUpgradeProxyAndInvalidMessageSize() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: abi.encodePacked(uint8(GovernanceConstants.UPGRADE_PROXY), address(messageQueue))
@@ -296,7 +296,7 @@ contract GovernanceAdminTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 

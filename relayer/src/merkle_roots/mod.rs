@@ -1032,6 +1032,10 @@ impl MerkleRootRelayer {
                 let block_number = block.number();
                 let block_hash = block.hash();
                 let nonces_count = nonces.len();
+                self.last_submitted_timestamp = match self.last_submitted_timestamp {
+                    Some(ts) if timestamp > ts => Some(timestamp),
+                    _ => Some(timestamp),
+                };
                 self.roots.entry(merkle_root).or_insert(MerkleRoot {
                     queue_id,
                     timestamp,

@@ -1,6 +1,8 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
+use std::time::Duration;
+
 use anyhow::{anyhow, Context, Result as AnyResult};
 use blake2::{
     digest::{Update, VariableOutput},

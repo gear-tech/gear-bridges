@@ -77,8 +77,24 @@ async fn reset_overflowed_queue_from_storage(
     suri: &str,
 ) -> anyhow::Result<()> {
     let client = api_provider.client();
-    let Some(block) = client.fetch_queue_overflowed_since().await? else {
-        return Ok(());
+    let block = match client.fetch_queue_overflowed_since().await {
+        Ok(Some(block)) => {
+            log::info!("Last overflowed queue reset at block #{block}",);
+            if block == 0 {
+                // Nothing to do
+                return Ok(());
+            }
+
+            block
+        }
+        Ok(None) => {
+            log::info!("No overflowed queue reset found in storage");
+            return Ok(());
+        }
+        Err(err) => {
+            log::error!("Failed to fetch queue overflowed since: {err}");
+            return Err(err);
+        }
     };
     log::info!("Found unprocessed overflowed queue event at block #{block}",);
     let block_hash = client.block_number_to_hash(block).await?;

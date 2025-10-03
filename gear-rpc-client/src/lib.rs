@@ -262,9 +262,15 @@ impl GearApi {
 
     pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
         let block = self.latest_finalized_block().await?;
-        let block = (*self.api).blocks().at(block).await?;
+        let block = (*self.api)
+            .blocks()
+            .at(block)
+            .await
+            .context("No block for queue overflowed since")?;
         let queue_reset_since = gsdk::Api::storage_root(GearEthBridgeStorage::QueueOverflowedSince);
-        Self::fetch_from_storage(&block, &queue_reset_since).await
+        Self::fetch_from_storage(&block, &queue_reset_since)
+            .await
+            .context("failed to fetch queue overflowed since")
     }
 
     /// Returns finality proof for block not earlier `after_block`

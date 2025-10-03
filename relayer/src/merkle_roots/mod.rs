@@ -154,7 +154,7 @@ pub struct MerkleRootRelayer {
     /// Set of blocks that are waiting for authority set sync.
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
-    last_submitted_timestamp: Option<u64>,
+    last_submitted: Option<u32>,
     first_pending_timestamp: Option<Instant>,
     queued_root_timestamps: VecDeque<Instant>,
     merkle_root_batch: Vec<PendingMerkleRoot>,
@@ -185,7 +185,7 @@ impl MerkleRootRelayer {
 
             waiting_for_authority_set_sync: BTreeMap::new(),
 
-            last_submitted_timestamp: None,
+            last_submitted: None,
             first_pending_timestamp: None,
             queued_root_timestamps: VecDeque::with_capacity(8),
             merkle_root_batch: Vec::with_capacity(8),
@@ -733,10 +733,10 @@ impl MerkleRootRelayer {
                     Ok(block) => {
                         let mut force = ForceGeneration::No;
                         let mut batch = Batch::Yes;
-                        let timestamp = self.api_provider.client().fetch_timestamp(block.hash()).await?;
-                        if let Some(last_submitted_timestamp) = self.last_submitted_timestamp {
-                            if last_submitted_timestamp + self.options.critical_threshold.as_secs() <= timestamp {
-                                log::warn!("Last submitted timestamp {last_submitted_timestamp} is older than current block timestamp {timestamp} by more than {threshold:?}, forcing proof generation", threshold = self.options.critical_threshold.as_secs());
+                        let number = block.number();
+                        if let Some(last_submitted) = self.last_submitted {
+                            if last_submitted + self.options.critical_threshold <= number {
+                                log::warn!("Last submitted {last_submitted} is older than current block number {number} by more than {threshold:?}, forcing proof generation", threshold = self.options.critical_threshold);
                                 force = ForceGeneration::Yes;
                                 batch = Batch::No;
                             }
@@ -1133,7 +1133,10 @@ impl MerkleRootRelayer {
                         proof: None,
                         timestamp,
                     });
-
+                self.last_submitted_timestamp = match self.last_submitted_timestamp {
+                    Some(ts) if timestamp > ts => Some(timestamp),
+                    _ => Some(timestamp),
+                };
                 let force_sync = self
                     .storage
                     .proofs
@@ -1227,13 +1230,13 @@ pub struct MerkleRootRelayerOptions {
     pub confirmations: u64,
     pub count_thread: Option<usize>,
     pub bridging_payment_address: Option<H256>,
-    pub critical_threshold: Duration,
+    pub critical_threshold: u32,
 }
 
 impl MerkleRootRelayerOptions {
     pub fn from_cli(config: &GearEthCoreArgs) -> anyhow::Result<Self> {
         Ok(Self {
-            critical_threshold: config.critical_threshold,
+            critical_threshold: (config.critical_threshold.as_secs() / 3) as u32,
             spike_config: SpikeConfig {
                 timeout: config.spike_timeout,
                 window: config.spike_window,

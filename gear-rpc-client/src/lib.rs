@@ -246,6 +246,26 @@ impl GearApi {
         Ok(stream)
     }
 
+    pub async fn prove_finality(&self, after_block: u32) -> AnyResult<Option<Vec<u8>>> {
+        let Some(finality): Option<String> = self
+            .api
+            .rpc()
+            .request::<Option<String>>("grandpa_proveFinality", rpc_params![after_block])
+            .await?
+        else {
+            return Ok(None);
+        };
+        let finality = hex::decode(finality.strip_prefix("0x").unwrap_or(&finality))?;
+
+        Ok(Some(finality))
+    }
+
+    pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
+        let block = (*self.api).blocks().at_latest().await?;
+        let queue_reset_since = gsdk::Api::storage_root(GearEthBridgeStorage::QueueOverflowedSince);
+        Self::fetch_from_storage(&block, &queue_reset_since).await
+    }
+
     /// Returns finality proof for block not earlier `after_block`
     /// and not later the end of session this block belongs to.
     pub async fn fetch_finality_proof(

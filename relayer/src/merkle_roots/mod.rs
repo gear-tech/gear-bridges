@@ -1146,6 +1146,10 @@ impl MerkleRootRelayer {
                     .entry(signed_by_authority_set_id)
                     .or_insert_with(|| {
                         if force_sync {
+                            self.last_submitted_timestamp = match self.last_submitted_timestamp {
+                                Some(ts) if timestamp > ts => Some(timestamp),
+                                _ => Some(timestamp),
+                            };
                             authority_set_sync.send(block.clone());
                         }
                         Vec::new()

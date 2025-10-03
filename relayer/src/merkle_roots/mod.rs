@@ -431,8 +431,8 @@ impl MerkleRootRelayer {
         if last_block > max_block_number {
             if let Some(max_stored) = max_block_number_in_storage {
                 // If we have some finalized merkle roots in storage, we can start from
-                // max of (max_block_number_in_storage + 1) and (last finalized block - 300).
-                let start_block = (max_stored + 1).max(last_block.saturating_sub(300));
+                // max stored + 1 to catch up.
+                let start_block = max_stored + 1;
                 log::info!("Resuming merkle root processing from block #{start_block} to catch up");
                 let mut block_number = start_block;
                 // step is a number of blocks to skip ahead

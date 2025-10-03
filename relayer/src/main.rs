@@ -165,6 +165,19 @@ async fn run() -> AnyResult<()> {
             kill_switch.run().await.expect("Kill switch relayer failed");
         }
 
+        CliCommands::QueueCleaner(args) => {
+            let suri = args.suri;
+            let mut api_provider = ApiProvider::new(
+                args.gear_args.domain.clone(),
+                args.gear_args.port,
+                args.gear_args.retries,
+            )
+            .await?;
+            api_provider.spawn();
+            let conn = api_provider.connection();
+            relayer::queue_cleaner::queue_cleaner(conn, &args.suri);
+        }
+
         CliCommands::GearEthTokens(args) => {
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 

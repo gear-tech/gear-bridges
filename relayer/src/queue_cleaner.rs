@@ -80,10 +80,7 @@ async fn reset_overflowed_queue_from_storage(
     let Some(block) = client.fetch_queue_overflowed_since().await? else {
         return Ok(());
     };
-    log::info!(
-        "Found unprocessed overflowed queue event at block #{}",
-        block
-    );
+    log::info!("Found unprocessed overflowed queue event at block #{block}",);
     let block_hash = client.block_number_to_hash(block).await?;
     let block = client.get_block_at(block_hash).await?;
     let block = GearBlock::from_subxt_block(block).await?;

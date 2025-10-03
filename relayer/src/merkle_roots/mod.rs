@@ -897,7 +897,7 @@ impl MerkleRootRelayer {
                         log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
                         while let Some(block) = to_submit.pop() {
                             let timestamp = self.api_provider.client().fetch_timestamp(block.hash()).await?;
-                            self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::No, ForceGeneration::No, timestamp).await?;
+                            self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::No, ForceGeneration::Yes, timestamp).await?;
                         }
                     }
                 }
@@ -1146,6 +1146,10 @@ impl MerkleRootRelayer {
                     .entry(signed_by_authority_set_id)
                     .or_insert_with(|| {
                         if force_sync {
+                            self.last_submitted_timestamp = match self.last_submitted_timestamp {
+                                Some(ts) if timestamp > ts => Some(timestamp),
+                                _ => Some(timestamp),
+                            };
                             authority_set_sync.send(block.clone());
                         }
                         Vec::new()

@@ -93,7 +93,7 @@ async fn reset_overflowed_queue_from_storage(
         }
         Err(err) => {
             log::error!("Failed to fetch queue overflowed since: {err}");
-            return Err(err);
+            return Ok(());
         }
     };
     log::info!("Found unprocessed overflowed queue event at block #{block}",);

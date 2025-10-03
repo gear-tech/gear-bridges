@@ -207,7 +207,8 @@ impl AuthoritySetSync {
         blocks: &mut Receiver<GearBlock>,
         responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<Option<u64>> {
-        let (sync_steps, authority_set_id) = self.sync_authority_set(initial_block).await?;
+        let (sync_steps, authority_set_id) =
+            self.sync_authority_set(initial_block, responses).await?;
         if sync_steps == 0 {
             log::info!(
                 "Authority set #{authority_set_id} is already in sync at block #{}",
@@ -219,7 +220,7 @@ impl AuthoritySetSync {
         log::info!("Syncing authority set #{authority_set_id}");
         loop {
             let (sync_steps, _) = match blocks.recv().await {
-                Ok(block) => self.sync_authority_set(&block).await?,
+                Ok(block) => self.sync_authority_set(&block, responses).await?,
 
                 Err(RecvError::Closed) => {
                     log::warn!("Gear block listener connection closed");
@@ -259,6 +260,7 @@ impl AuthoritySetSync {
     async fn sync_authority_set(
         &mut self,
         block: &GearBlock,
+        responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<(SyncStepCount, u64)> {
         let gear_api = self.api_provider.client();
 
@@ -281,6 +283,7 @@ impl AuthoritySetSync {
                 self.genesis_config,
                 latest_authority_set_id,
                 latest_proven_authority_set_id,
+                responses,
                 self.count_thread,
             )
             .await?,

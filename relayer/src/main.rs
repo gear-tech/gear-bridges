@@ -166,16 +166,16 @@ async fn run() -> AnyResult<()> {
         }
 
         CliCommands::QueueCleaner(args) => {
-            let suri = args.suri;
-            let mut api_provider = ApiProvider::new(
+            let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
                 args.gear_args.retries,
             )
             .await?;
-            api_provider.spawn();
             let conn = api_provider.connection();
-            relayer::queue_cleaner::queue_cleaner(conn, args.suri);
+            api_provider.spawn();
+
+            relayer::queue_cleaner::queue_cleaner(conn, args.suri).await?;
         }
 
         CliCommands::GearEthTokens(args) => {

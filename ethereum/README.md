@@ -4,10 +4,10 @@
 
 Foundry consists of:
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
+- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
+- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
+- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
 
 ## Documentation
 
@@ -83,6 +83,29 @@ $ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $MAINNET_
 $ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+```
+
+### Coverage
+
+We use Docker image and slightly modified sources to produce coverage report in HTML format.
+
+```shell
+$ docker build --tag gear-bridges/ethereum-contracts .
+$ docker run --rm -it --volume "$(pwd)":/files gear-bridges/ethereum-contracts
+
+$ sed -i '/if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {/{N;N;d;}' src/MessageQueue.sol
+$ sed -i '/emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);/d' src/MessageQueue.sol
+$ sed -i '/function test_ProcessMessageWithInvalidMerkleProof()/,/^[[:space:]]*}[[:space:]]*$/d' test/MessageQueue.t.sol
+$ forge test
+$ forge coverage --report lcov
+$ genhtml lcov.info --branch-coverage --output-dir /files/coverage
+$ exit
+
+$ docker image rm gear-bridges/ethereum-contracts
+$ docker buildx prune --all
+
+$ sudo chown -R $(whoami):$(whoami) coverage
+$ firefox coverage/index.html
 ```
 
 ### Cast

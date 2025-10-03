@@ -8,3 +8,4 @@ pub mod message_relayer;
 pub mod proof_storage;
 pub mod prover_interface;
 pub mod server;
+pub mod queue_cleaner;

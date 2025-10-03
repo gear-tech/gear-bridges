@@ -474,26 +474,45 @@ impl MerkleRootRelayer {
                     }
                 }
             } else if max_block_number != 0 {
-                let target_block = max_block_number.saturating_sub(300);
+                let mut target_block = max_block_number.saturating_sub(300);
+                let step = (self.options.critical_threshold.as_secs() / 3) as u32;
                 log::info!("No finalized merkle roots in storage, starting from #{target_block}");
+                loop {
+                    // If there are no finalized merkle roots in storage, we need to start from
+                    // max_block_number of MessageQueue contract minus some safety margin.
+                    let block_hash = gear_api.block_number_to_hash(target_block).await?;
+                    let block = gear_api.get_block_at(block_hash).await?;
+                    let block = GearBlock::from_subxt_block(block).await?;
+                    let timestamp = gear_api.fetch_timestamp(block.hash()).await?;
 
-                // If there are no finalized merkle roots in storage, we need to start from
-                // max_block_number of MessageQueue contract minus some safety margin.
-                let block_hash = gear_api.block_number_to_hash(target_block).await?;
-                let block = gear_api.get_block_at(block_hash).await?;
-                let block = GearBlock::from_subxt_block(block).await?;
-                let timestamp = gear_api.fetch_timestamp(block.hash()).await?;
-
-                self.try_proof_merkle_root(
-                    &mut prover,
-                    &mut authority_set_sync,
-                    block,
-                    Batch::No,
-                    Priority::No,
-                    ForceGeneration::Yes,
-                    timestamp,
-                )
-                .await?;
+                    self.try_proof_merkle_root(
+                        &mut prover,
+                        &mut authority_set_sync,
+                        block,
+                        Batch::No,
+                        Priority::No,
+                        ForceGeneration::Yes,
+                        timestamp,
+                    )
+                    .await?;
+                    target_block += step;
+                    if target_block >= last_block {
+                        log::info!("Reached the latest finalized block, generating merkle-root for it: #{last_block}");
+                        let block = gear_api.get_block_at(last_block_hash).await?;
+                        let block = GearBlock::from_subxt_block(block).await?;
+                        self.try_proof_merkle_root(
+                            &mut prover,
+                            &mut authority_set_sync,
+                            block,
+                            Batch::No,
+                            Priority::No,
+                            ForceGeneration::Yes,
+                            timestamp,
+                        )
+                        .await?;
+                        break;
+                    }
+                }
             }
         }
 

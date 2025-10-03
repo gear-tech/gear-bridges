@@ -261,7 +261,8 @@ impl GearApi {
     }
 
     pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
-        let block = (*self.api).blocks().at_latest().await?;
+        let block = self.latest_finalized_block().await?;
+        let block = (*self.api).blocks().at(block).await?;
         let queue_reset_since = gsdk::Api::storage_root(GearEthBridgeStorage::QueueOverflowedSince);
         Self::fetch_from_storage(&block, &queue_reset_since).await
     }

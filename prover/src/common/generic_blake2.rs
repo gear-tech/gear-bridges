@@ -178,7 +178,7 @@ impl VariativeBlake2 {
 
         let path = env::var("VBLAKE2_CACHE_PATH")
             .expect(r#"VariativeBlake2: "VBLAKE2_CACHE_PATH" is set"#);
-        let serializer_gate = GateSerializer::default();
+        let serializer_gate = GateSerializer;
         let serializer_generator = GeneratorSerializer::<C, D>::default();
 
         let now = Instant::now();
@@ -214,8 +214,8 @@ impl VariativeBlake2 {
             witness.set_target(targets[i + 1], F::from_canonical_u8(self.data[i]));
         }
         // zero the remaining tail
-        for i in (1 + self.data.len())..targets.len() {
-            witness.set_target(targets[i], F::from_canonical_u8(0));
+        for target in targets.iter().skip(1 + self.data.len()) {
+            witness.set_target(*target, F::from_canonical_u8(0));
         }
 
         let now = Instant::now();

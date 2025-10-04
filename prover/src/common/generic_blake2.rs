@@ -3,9 +3,10 @@
 use crate::{
     common::{
         targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
-        ProofWithCircuitData,
+        ProofWithCircuitData, BUFFER_SIZE,
     },
     prelude::*,
+    serialization::{GateSerializer, GeneratorSerializer, ReadAdapter},
 };
 use lazy_static::lazy_static;
 use plonky2::{
@@ -16,14 +17,16 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierOnlyCircuitData},
+        circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
+        proof::ProofWithPublicInputs,
     },
+    util::serialization::{Buffer, Read},
 };
 use plonky2_blake2b256::circuit::{
     blake2_circuit_from_message_targets_and_length_target, BLOCK_BITS, BLOCK_BYTES,
 };
 use plonky2_field::types::Field;
-use std::{env, fs, iter};
+use std::{env, fs, io, iter, marker::PhantomData, sync::Arc, time::Instant};
 
 const MAX_BLOCK_COUNT: usize = 50;
 const NUM_GATES: usize = 655_360;
@@ -138,7 +141,7 @@ impl GenericBlake2 {
 lazy_static! {
     /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
     static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = {
-        let path = env::var("VERIFIER_DATA_PATH").expect("VERIFIER_DATA_PATH is set");
+        let path = env::var("VBLAKE2_CACHE_PATH").expect("VBLAKE2_CACHE_PATH is set");
 
         let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
 
@@ -169,7 +172,77 @@ struct VariativeBlake2 {
 }
 
 impl VariativeBlake2 {
+    // The function uses cached circuit data from files.
     pub fn prove(&self) -> ProofWithCircuitData<VariativeBlake2Target> {
+        let index = self.data.len().div_ceil(BLOCK_BYTES).max(1);
+
+        let path = env::var("VBLAKE2_CACHE_PATH")
+            .expect(r#"VariativeBlake2: "VBLAKE2_CACHE_PATH" is set"#);
+        let serializer_gate = GateSerializer;
+        let serializer_generator = GeneratorSerializer::<C, D>::default();
+
+        let now = Instant::now();
+        let prover_data = {
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .open(format!("{path}/prover_circuit_data-{index}"))
+                .expect("VariativeBlake2: open a file with correctly formed data for read");
+            let reader = io::BufReader::with_capacity(*BUFFER_SIZE, file);
+
+            let mut read_adapter = ReadAdapter::new(reader, None);
+
+            read_adapter
+                .read_prover_circuit_data::<F, C, D>(&serializer_gate, &serializer_generator)
+                .expect("Correctly formed serialized data")
+        };
+
+        log::trace!(
+            "Loading circuit data directly time: {}ms",
+            now.elapsed().as_millis()
+        );
+
+        let serialized = fs::read(format!("{path}/prover_circuit_data-targets-{index}"))
+            .expect("VariativeBlake2: Good file with serialized data");
+        let mut buffer_read = Buffer::new(&serialized[..]);
+        let targets = buffer_read
+            .read_target_vec()
+            .expect("VariativeBlake2: buffer_read.read_target_vec()");
+
+        let mut witness = PartialWitness::new();
+        witness.set_target(targets[0], F::from_canonical_usize(self.data.len()));
+        for i in 0..self.data.len() {
+            witness.set_target(targets[i + 1], F::from_canonical_u8(self.data[i]));
+        }
+        // zero the remaining tail
+        for target in targets.iter().skip(1 + self.data.len()) {
+            witness.set_target(*target, F::from_canonical_u8(0));
+        }
+
+        let now = Instant::now();
+
+        let ProofWithPublicInputs {
+            proof,
+            public_inputs,
+        } = prover_data.prove(witness).unwrap();
+
+        log::trace!(
+            "VariativeBlake2 prove time: {}ms",
+            now.elapsed().as_millis()
+        );
+
+        ProofWithCircuitData {
+            proof,
+            circuit_data: Arc::from(VerifierCircuitData {
+                verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index - 1].clone(),
+                common: prover_data.common.clone(),
+            }),
+            public_inputs,
+            public_inputs_parser: PhantomData,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn prove_non_cached(&self) -> ProofWithCircuitData<VariativeBlake2Target> {
         let (mut builder, targets) = self.create_builder_targets();
 
         let mut witness = PartialWitness::new();

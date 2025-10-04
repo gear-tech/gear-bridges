@@ -244,7 +244,7 @@ jobs:
   zk-tests:
     runs-on: zk-tests
     env:
-      VERIFIER_DATA_PATH: "/VariativeBlake2"
+      VBLAKE2_CACHE_PATH: "/VariativeBlake2"
     needs: check-zk-circuits-changed
     if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
     steps:

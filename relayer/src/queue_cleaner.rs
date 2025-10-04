@@ -5,6 +5,7 @@ use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 pub async fn queue_cleaner(
     mut api_provider: ApiProviderConnection,
     suri: String,
+    delay: u64,
 ) -> anyhow::Result<()> {
     let client = api_provider.client();
 
@@ -26,7 +27,7 @@ pub async fn queue_cleaner(
                 );
                 let start = std::time::Instant::now();
                 if let Err(err) =
-                    reset_overflowed_queue(&api_provider, &gear_block, &suri).await
+                    reset_overflowed_queue(&api_provider, &gear_block, &suri,delay).await
                 {
                     log::error!(
                         "Failed to reset overflowed queue at block #{}: {err}",
@@ -100,7 +101,7 @@ async fn reset_overflowed_queue_from_storage(
     let block_hash = client.block_number_to_hash(block).await?;
     let block = client.get_block_at(block_hash).await?;
     let block = GearBlock::from_subxt_block(block).await?;
-    reset_overflowed_queue(api_provider, &block, suri).await
+    reset_overflowed_queue(api_provider, &block, suri, 15).await
 }
 
 fn queue_overflowed(block: &GearBlock) -> bool {
@@ -116,13 +117,14 @@ async fn reset_overflowed_queue(
     api_provider: &ApiProviderConnection,
     block: &GearBlock,
     suri: &str,
+    delay: u64,
 ) -> anyhow::Result<()> {
     let mut api_provider = api_provider.clone();
     let suri = suri.to_string();
     let block_number = block.number();
     // spawn tokio task to avoid blocking the main loop
     tokio::task::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         match reset_overflowed_queue_impl(&mut api_provider, block_number, &suri).await {
             Ok(()) => (),
             Err(err) => {

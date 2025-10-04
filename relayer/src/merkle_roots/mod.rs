@@ -1032,18 +1032,28 @@ impl MerkleRootRelayer {
             }
         };
 
-        let (block_finality_hash, block_finality_proof) = self
-            .api_provider
-            .client()
-            .fetch_finality_proof(block.hash())
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to fetch finality proof for block #{} with merkle-root {}",
-                    block.number(),
-                    merkle_root
-                )
-            })?;
+        // finality proof might be available already which happens in the case of
+        // merkle roots being inserted there before authority set is synced. Otherwise
+        // immediately fetch finality proof.
+        let (block_finality_hash, block_finality_proof) = match self
+            .roots
+            .get(&(block.number(), merkle_root))
+            .map(|root| (root.block_finality_hash, root.block_finality_proof.clone()))
+        {
+            Some((hash, proof)) => (hash, proof),
+            None => self
+                .api_provider
+                .client()
+                .fetch_finality_proof(block.hash())
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to fetch finality proof for block #{} with merkle-root {}",
+                        block.number(),
+                        merkle_root
+                    )
+                })?,
+        };
 
         let nonces = storage::message_queued_events_of(&block).collect::<Vec<_>>();
 

@@ -169,7 +169,7 @@ impl TransactionManager {
                     );
                     if !proof_fetcher.send_request(
                         tx.uuid,
-                        tx.message.block,
+                        tx.message.block.0,
                         tx.message_hash,
                         tx.message.message.nonce_be,
                         *merkle_root,
@@ -299,15 +299,17 @@ impl TransactionManager {
                 let block = tx.message.block;
                 let uuid = tx.uuid;
 
-                self.add_transaction(tx).await;
+
                 log::info!(
                     "New transaction {}, nonce={} from source {} at block #{}({})",
                     uuid,
                     hex::encode(tx.message.message.nonce_be),
                     source,
-                    block,
+                    block.0,
                     block_hash,
                 );
+
+                self.add_transaction(tx).await;
                 if !accumulator.send_message(uuid, authority_set_id, block, block_hash, source) {
                     log::warn!("Failed to send message to accumulator, exiting");
                     return Ok(false);
@@ -327,16 +329,16 @@ impl TransactionManager {
                             log::info!(
                                 "Transaction {} at block #{}({}), hash={}, nonce={} got merkle root {} for block #{}",
                                 tx_uuid,
-                                tx.message.block,
+                                tx.message.block.0,
                                 tx.message.block_hash,
-                                message_hash(&tx.message.message),
+                                hex::encode(message_hash(&tx.message.message)),
                                 hex::encode(tx.message.message.nonce_be),
                                 merkle_root.merkle_root,
                                 merkle_root.block
                             );
                             if !proof_fetcher.send_request(
                                 tx_uuid,
-                                tx.message.block,
+                                tx.message.block.0,
                                 tx.message_hash,
                                 tx.message.message.nonce_be,
                                 merkle_root,

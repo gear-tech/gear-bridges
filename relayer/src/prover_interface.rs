@@ -174,8 +174,12 @@ pub async fn prove_final(
     at_block: H256,
 
     count_thread: Option<usize>,
+    finality: (H256, dto::BlockFinalityProof),
 ) -> anyhow::Result<FinalProof> {
-    let (block, block_finality) = gear_api.fetch_finality_proof(at_block).await?;
+    let (block, block_finality) = match finality {
+        Some(finality) => finality,
+        None => gear_api.fetch_finality_proof(at_block).await?,
+    };
     prove_final_with_block_finality(
         gear_api,
         previous_proof,

@@ -23,6 +23,7 @@ use ::prover::{
 };
 use anyhow::Context;
 use ethereum_client::EthApi;
+use gear_rpc_client::dto;
 use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -273,6 +274,8 @@ impl MerkleRootRelayer {
                         message_nonces: Vec::new(),
                         proof: merkle_root.proof.clone(),
                         http_requests: Vec::new(),
+                        block_finality_proof: merkle_root.block_finality_proof.clone(),
+                        block_finality_hash: merkle_root.block_finality_hash,
                     },
                 );
             };
@@ -304,6 +307,10 @@ impl MerkleRootRelayer {
                                 merkle_root.queue_id,
                                 false,
                                 true,
+                                (
+                                    merkle_root.block_finality_hash,
+                                    merkle_root.block_finality_proof.clone(),
+                                ),
                             ) {
                                 log::error!("Prover connection closed, exiting...");
                                 return Ok(());
@@ -371,6 +378,10 @@ impl MerkleRootRelayer {
                         merkle_root.queue_id,
                         false,
                         true,
+                        (
+                            merkle_root.block_finality_hash,
+                            merkle_root.block_finality_proof.clone(),
+                        ),
                     ) {
                         log::error!("Prover connection closed, exiting...");
                         return Ok(());
@@ -646,6 +657,7 @@ impl MerkleRootRelayer {
                     log::info!("Triggering proof generation. Batch size: {batch_size}, Reason: Spike={is_spike}, Timeout={is_timeout}");
                     // do not group blocks by authority set id, prover will do this for us.
                     for pending in self.merkle_root_batch.drain(..) {
+                        let merkle_root = &self.roots[&(pending.block_number, pending.merkle_root)];
                         if !prover.prove(
                             pending.block_number,
                             pending.block_hash,
@@ -655,6 +667,7 @@ impl MerkleRootRelayer {
                             false,
                             /* request is part of the batch: */
                             true,
+                            (merkle_root.block_finality_hash, merkle_root.block_finality_proof.clone()),
                         ) {
                             log::warn!("Prover connection closed, exiting");
                             return Ok(false);
@@ -1019,6 +1032,19 @@ impl MerkleRootRelayer {
             }
         };
 
+        let (block_finality_hash, block_finality_proof) = self
+            .api_provider
+            .client()
+            .fetch_finality_proof(block.hash())
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to fetch finality proof for block #{} with merkle-root {}",
+                    block.number(),
+                    merkle_root
+                )
+            })?;
+
         let nonces = storage::message_queued_events_of(&block).collect::<Vec<_>>();
 
         // mark root processed so that we don't process the entire block again.
@@ -1074,6 +1100,8 @@ impl MerkleRootRelayer {
                         message_nonces: nonces,
                         http_requests: Vec::new(),
                         proof: None,
+                        block_finality_proof,
+                        block_finality_hash,
                     });
                 if matches!(batch, Batch::Yes) {
                     let now = Instant::now();
@@ -1105,6 +1133,7 @@ impl MerkleRootRelayer {
                     priority == Priority::Yes,
                     /* non batching request: should be processed separately */
                     false,
+                    (block_finality_hash, block_finality_proof.clone()),
                 ) {
                     log::error!("Prover connection closed, exiting...");
                     return Err(anyhow::anyhow!("Prover connection closed"));
@@ -1132,6 +1161,8 @@ impl MerkleRootRelayer {
                         http_requests: Vec::new(),
                         proof: None,
                         timestamp,
+                        block_finality_proof,
+                        block_finality_hash,
                     });
 
                 let force_sync = self
@@ -1169,6 +1200,8 @@ impl MerkleRootRelayer {
                         message_nonces: nonces,
                         http_requests: Vec::new(),
                         proof: None,
+                        block_finality_proof,
+                        block_finality_hash,
                     },
                 );
 
@@ -1195,6 +1228,8 @@ pub struct MerkleRoot {
     #[serde(default)]
     pub proof: Option<FinalProof>,
     pub status: MerkleRootStatus,
+    pub block_finality_proof: dto::BlockFinalityProof,
+    pub block_finality_hash: H256,
 }
 
 impl Clone for MerkleRoot {
@@ -1208,6 +1243,8 @@ impl Clone for MerkleRoot {
             http_requests: Vec::new(),
             proof: self.proof.clone(),
             status: self.status.clone(),
+            block_finality_proof: self.block_finality_proof.clone(),
+            block_finality_hash: self.block_finality_hash,
         }
     }
 }

@@ -174,7 +174,7 @@ pub async fn prove_final(
     at_block: H256,
 
     count_thread: Option<usize>,
-    finality: (H256, dto::BlockFinalityProof),
+    finality: Option<(H256, dto::BlockFinalityProof)>,
 ) -> anyhow::Result<FinalProof> {
     let (block, block_finality) = match finality {
         Some(finality) => finality,

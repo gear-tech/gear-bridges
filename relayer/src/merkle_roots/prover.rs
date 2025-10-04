@@ -8,7 +8,7 @@ use crate::{
     prover_interface::{self, FinalProof},
 };
 use futures::executor::block_on;
-use gear_rpc_client::GearApi;
+use gear_rpc_client::{dto, GearApi};
 use primitive_types::H256;
 use prover::proving::{GenesisConfig, ProofWithCircuitData};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};

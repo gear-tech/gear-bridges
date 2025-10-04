@@ -11,7 +11,7 @@ const ED25519_SIGNATURE_SIZE: usize = 64;
 const KECCAK_HASH_SIZE: usize = 32;
 const BLAKE2_HASH_SIZE: usize = 32;
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Clone)]
 pub struct PreCommit {
     pub public_key: [u8; ED25519_PUBLIC_KEY_SIZE],
     pub signature: [u8; ED25519_SIGNATURE_SIZE],
@@ -93,7 +93,7 @@ impl<'de> Deserialize<'de> for PreCommit {
     }
 }
 
-#[derive(Encode, Decode, Serialize, Deserialize)]
+#[derive(Encode, Decode, Serialize, Deserialize, Clone)]
 pub struct BlockFinalityProof {
     pub validator_set: Vec<[u8; ED25519_PUBLIC_KEY_SIZE]>,
     pub pre_commits: Vec<PreCommit>,

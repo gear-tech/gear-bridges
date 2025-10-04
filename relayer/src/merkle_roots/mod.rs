@@ -1100,7 +1100,7 @@ impl MerkleRootRelayer {
                         message_nonces: nonces,
                         http_requests: Vec::new(),
                         proof: None,
-                        block_finality_proof,
+                        block_finality_proof: block_finality_proof.clone(),
                         block_finality_hash,
                     });
                 if matches!(batch, Batch::Yes) {

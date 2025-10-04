@@ -9,6 +9,7 @@ mod block_finality;
 pub(crate) mod common;
 mod final_proof;
 mod latest_validator_set;
+pub mod serialization;
 mod storage_inclusion;
 
 pub(crate) mod prelude {

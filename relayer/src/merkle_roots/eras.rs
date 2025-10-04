@@ -151,6 +151,8 @@ impl Eras {
             self.genesis_config,
             block,
             self.count_thread,
+            // just use latest available finality proof
+            None,
         )
         .await?;
         let elapsed_proof = instant.elapsed();

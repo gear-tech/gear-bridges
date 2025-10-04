@@ -262,15 +262,10 @@ impl GearApi {
 
     pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
         let block = self.latest_finalized_block().await?;
-        let block = (*self.api)
-            .blocks()
-            .at(block)
-            .await
-            .context("No block for queue overflowed since")?;
+        let block = (*self.api).blocks().at(block).await?;
         let queue_reset_since = gsdk::Api::storage_root(GearEthBridgeStorage::QueueOverflowedSince);
-        Self::fetch_from_storage(&block, &queue_reset_since)
+        self.maybe_fetch_from_storage(&block, &queue_reset_since)
             .await
-            .context("failed to fetch queue overflowed since")
     }
 
     /// Returns finality proof for block not earlier `after_block`
@@ -604,6 +599,23 @@ impl GearApi {
             leaf_node_data: encoded_leaf,
             leaf_data: storage_data,
         })
+    }
+
+    async fn maybe_fetch_from_storage<T, A>(
+        &self,
+        block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
+        address: &A,
+    ) -> AnyResult<Option<T>>
+    where
+        A: Address<IsFetchable = Yes, Target = DecodedValueThunk>,
+        T: Decode,
+    {
+        let data = match block.storage().fetch(address).await? {
+            Some(data) => data.into_encoded(),
+            None => return Ok(None),
+        };
+
+        Ok(Some(T::decode(&mut &data[..])?))
     }
 
     async fn fetch_from_storage<T, A>(

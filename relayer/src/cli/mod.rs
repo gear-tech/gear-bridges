@@ -42,6 +42,9 @@ pub enum CliCommands {
     /// Start kill switch relayer
     KillSwitch(KillSwitchArgs),
 
+    /// Start queue cleaner
+    QueueCleaner(QueueCleanerArgs),
+
     /// Fetch relayed merkle roots to Ethereum
     FetchMerkleRoots(FetchMerkleRootsArgs),
 }
@@ -329,6 +332,15 @@ pub struct KillSwitchArgs {
 
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
+}
+
+#[derive(Args)]
+pub struct QueueCleanerArgs {
+    #[clap(flatten)]
+    pub gear_args: GearArgs,
+
+    #[arg(long = "suri", env = "GEAR_SURI")]
+    pub suri: String,
 }
 
 #[derive(Args)]

@@ -246,6 +246,28 @@ impl GearApi {
         Ok(stream)
     }
 
+    pub async fn prove_finality(&self, after_block: u32) -> AnyResult<Option<Vec<u8>>> {
+        let Some(finality): Option<String> = self
+            .api
+            .rpc()
+            .request::<Option<String>>("grandpa_proveFinality", rpc_params![after_block])
+            .await?
+        else {
+            return Ok(None);
+        };
+        let finality = hex::decode(finality.strip_prefix("0x").unwrap_or(&finality))?;
+
+        Ok(Some(finality))
+    }
+
+    pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
+        let block = self.latest_finalized_block().await?;
+        let block = (*self.api).blocks().at(block).await?;
+        let queue_reset_since = gsdk::Api::storage_root(GearEthBridgeStorage::QueueOverflowedSince);
+        self.maybe_fetch_from_storage(&block, &queue_reset_since)
+            .await
+    }
+
     /// Returns finality proof for block not earlier `after_block`
     /// and not later the end of session this block belongs to.
     pub async fn fetch_finality_proof(
@@ -577,6 +599,23 @@ impl GearApi {
             leaf_node_data: encoded_leaf,
             leaf_data: storage_data,
         })
+    }
+
+    async fn maybe_fetch_from_storage<T, A>(
+        &self,
+        block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
+        address: &A,
+    ) -> AnyResult<Option<T>>
+    where
+        A: Address<IsFetchable = Yes, Target = DecodedValueThunk>,
+        T: Decode,
+    {
+        let data = match block.storage().fetch(address).await? {
+            Some(data) => data.into_encoded(),
+            None => return Ok(None),
+        };
+
+        Ok(Some(T::decode(&mut &data[..])?))
     }
 
     async fn fetch_from_storage<T, A>(

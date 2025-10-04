@@ -104,9 +104,11 @@ async fn reset_overflowed_queue_from_storage(
 }
 
 fn queue_overflowed(block: &GearBlock) -> bool {
-    block.events().iter().any(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueOverflowed) => true,
-        _ => false,
+    block.events().iter().any(|event| {
+        matches!(
+            event,
+            gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueOverflowed)
+        )
     })
 }
 

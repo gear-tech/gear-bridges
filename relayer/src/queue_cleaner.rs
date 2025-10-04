@@ -5,6 +5,7 @@ use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 pub async fn queue_cleaner(
     mut api_provider: ApiProviderConnection,
     suri: String,
+    delay: u64,
 ) -> anyhow::Result<()> {
     let client = api_provider.client();
 
@@ -26,7 +27,7 @@ pub async fn queue_cleaner(
                 );
                 let start = std::time::Instant::now();
                 if let Err(err) =
-                    reset_overflowed_queue(&mut api_provider, &gear_block, &suri).await
+                    reset_overflowed_queue(&api_provider, &gear_block, &suri, delay).await
                 {
                     log::error!(
                         "Failed to reset overflowed queue at block #{}: {err}",
@@ -100,7 +101,7 @@ async fn reset_overflowed_queue_from_storage(
     let block_hash = client.block_number_to_hash(block).await?;
     let block = client.get_block_at(block_hash).await?;
     let block = GearBlock::from_subxt_block(block).await?;
-    reset_overflowed_queue(api_provider, &block, suri).await
+    reset_overflowed_queue(api_provider, &block, suri, 15).await
 }
 
 fn queue_overflowed(block: &GearBlock) -> bool {
@@ -113,21 +114,42 @@ fn queue_overflowed(block: &GearBlock) -> bool {
 }
 
 async fn reset_overflowed_queue(
-    api_provider: &mut ApiProviderConnection,
+    api_provider: &ApiProviderConnection,
     block: &GearBlock,
+    suri: &str,
+    delay: u64,
+) -> anyhow::Result<()> {
+    let mut api_provider = api_provider.clone();
+    let suri = suri.to_string();
+    let block_number = block.number();
+    // spawn tokio task to avoid blocking the main loop
+    tokio::task::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+        match reset_overflowed_queue_impl(&mut api_provider, block_number, &suri).await {
+            Ok(()) => (),
+            Err(err) => {
+                // If anything goes wrong, we exit the process and just wait
+                // for the orchestrator to restart us.
+                log::error!("Failed to reset overflowed queue at block #{block_number}: {err}",);
+                std::process::exit(1);
+            }
+        }
+    });
+    Ok(())
+}
+
+async fn reset_overflowed_queue_impl(
+    api_provider: &mut ApiProviderConnection,
+    block_number: u32,
     suri: &str,
 ) -> anyhow::Result<()> {
     let client = api_provider.client();
-    let Some(finality) = client.prove_finality(block.number()).await? else {
-        log::error!("No finality proof for block {}", block.number());
-        return Err(anyhow::anyhow!(
-            "No finality proof for block #{}",
-            block.number()
-        ));
+    let Some(finality) = client.prove_finality(block_number).await? else {
+        log::error!("No finality proof for block {block_number}");
+        return Err(anyhow::anyhow!("No finality proof"));
     };
 
     let gclient = api_provider.gclient_client(suri)?;
     gclient.reset_overflowed_queue(finality).await?;
-
     Ok(())
 }

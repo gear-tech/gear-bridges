@@ -341,6 +341,13 @@ pub struct QueueCleanerArgs {
 
     #[arg(long = "suri", env = "GEAR_SURI")]
     pub suri: String,
+
+    #[arg(
+        long,
+        help = "Delay in seconds before processing an overflowed queue event",
+        default_value = "30"
+    )]
+    pub delay: u64,
 }
 
 #[derive(Args)]

@@ -175,7 +175,7 @@ async fn run() -> AnyResult<()> {
             let conn = api_provider.connection();
             api_provider.spawn();
 
-            relayer::queue_cleaner::queue_cleaner(conn, args.suri).await?;
+            relayer::queue_cleaner::queue_cleaner(conn, args.suri, args.delay).await?;
         }
 
         CliCommands::GearEthTokens(args) => {

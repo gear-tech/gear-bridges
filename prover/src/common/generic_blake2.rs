@@ -3,7 +3,7 @@
 use crate::{
     common::{
         targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
-        ProofWithCircuitData,
+        ProofWithCircuitData, BUFFER_SIZE,
     },
     prelude::*,
     serialization::{GateSerializer, GeneratorSerializer, ReadAdapter},
@@ -187,7 +187,7 @@ impl VariativeBlake2 {
                 .read(true)
                 .open(format!("{path}/prover_circuit_data-{index}"))
                 .expect("VariativeBlake2: open a file with correctly formed data for read");
-            let reader = io::BufReader::new(file);
+            let reader = io::BufReader::with_capacity(*BUFFER_SIZE, file);
 
             let mut read_adapter = ReadAdapter::new(reader, None);
 

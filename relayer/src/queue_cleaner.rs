@@ -27,7 +27,7 @@ pub async fn queue_cleaner(
                 );
                 let start = std::time::Instant::now();
                 if let Err(err) =
-                    reset_overflowed_queue(&api_provider, &gear_block, &suri,delay).await
+                    reset_overflowed_queue(&api_provider, &gear_block, &suri, delay).await
                 {
                     log::error!(
                         "Failed to reset overflowed queue at block #{}: {err}",

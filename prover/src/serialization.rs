@@ -13,6 +13,7 @@ use plonky2::{
         constant::ConstantGate,
         coset_interpolation::{CosetInterpolationGate, InterpolationGenerator},
         exponentiation::{ExponentiationGate, ExponentiationGenerator},
+        gate::GateRef,
         lookup::{LookupGate, LookupGenerator},
         lookup_table::{LookupTableGate, LookupTableGenerator},
         multiplication_extension::{MulExtensionGate, MulExtensionGenerator},
@@ -31,18 +32,25 @@ use plonky2::{
     impl_gate_serializer, impl_generator_serializer,
     iop::generator::{
         ConstantGenerator, CopyGenerator, NonzeroTestGenerator, RandomValueGenerator,
+        WitnessGeneratorRef,
     },
-    plonk::config::{AlgebraicHasher, GenericConfig},
+    plonk::{
+        circuit_data::CommonCircuitData,
+        config::{AlgebraicHasher, GenericConfig},
+    },
     read_gate_impl, read_generator_impl,
     recursion::dummy_circuit::DummyProofGenerator,
-    util::serialization::WitnessGeneratorSerializer,
+    util::serialization::{Buffer, IoError, IoResult, Remaining, WitnessGeneratorSerializer},
 };
 use plonky2_field::extension::Extendable;
 use plonky2_u32::gates::{
     add_many_u32::{U32AddManyGate, U32AddManyGenerator},
     arithmetic_u32::{U32ArithmeticGate, U32ArithmeticGenerator},
 };
-use std::marker::PhantomData;
+use std::{
+    io::{Read, Seek},
+    marker::PhantomData,
+};
 
 /// The same as `plonky2::util::serialization::generator_serialization::default::DefaultGeneratorSerializer`
 /// but with added `U32AddManyGenerator` and `U32ArithmeticGenerator`.
@@ -116,5 +124,166 @@ impl<F: RichField + Extendable<D>, const D: usize>
         ReducingGate<D>,
         U32AddManyGate<F, D>,
         U32ArithmeticGate<F, D>
+    }
+}
+
+/// The structure adapts `plonky2::util::serialization::Read` trait
+/// to any type implementing std::io::Read + std::io::Seek.
+///
+/// In practice it is useful to deserialize Plonky2 entities directly
+/// from files.
+pub struct ReadAdapter<Reader: Read + Seek> {
+    pub reader: Reader,
+    pub buffer: Vec<u8>,
+}
+
+impl<Reader: Read + Seek> ReadAdapter<Reader> {
+    pub fn new(reader: Reader, size: Option<usize>) -> Self {
+        Self {
+            reader,
+            buffer: vec![0; size.unwrap_or(1_024)],
+        }
+    }
+}
+
+impl<Reader: Read + Seek> plonky2::util::serialization::Read for ReadAdapter<Reader> {
+    fn read_exact(&mut self, bytes: &mut [u8]) -> IoResult<()> {
+        self.reader.read_exact(bytes).map_err(|e| {
+            log::trace!("read_exact(bytes) failed: {e:?}");
+
+            IoError
+        })
+    }
+
+    fn read_gate<F: RichField + Extendable<D>, const D: usize>(
+        &mut self,
+        gate_serializer: &dyn plonky2::util::serialization::gate_serialization::GateSerializer<
+            F,
+            D,
+        >,
+        common_data: &CommonCircuitData<F, D>,
+    ) -> IoResult<GateRef<F, D>> {
+        let bytes_read = self.reader.read(&mut self.buffer).map_err(|e| {
+            log::trace!("read_gate: read(&mut buffer) failed: {e:?}");
+
+            IoError
+        })?;
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        match gate_serializer
+            .read_gate(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("gate_serializer.read_gate(&mut buffer, common_data) failed: {e:?}");
+            }) {
+            Ok(result) => {
+                self.reader
+                    .seek_relative(-(buffer_plonky.remaining() as i64))
+                    .map_err(|e| {
+                        log::trace!(
+                            "read_gate: seek_relative(-(buffer.remaining() as i64)) failed: {e:?}"
+                        );
+
+                        IoError
+                    })?;
+
+                return Ok(result);
+            }
+
+            // implementation of Read may be buffered so we have to try to read next buffer and
+            // deserialize
+            Err(_e) if bytes_read < self.buffer.len() => {}
+
+            result => return result,
+        }
+
+        let bytes_read = bytes_read
+            + self
+                .reader
+                .read(&mut self.buffer[bytes_read..])
+                .map_err(|e| {
+                    log::trace!("read_gate: read(&mut buffer[bytes_read]) failed 2: {e:?}");
+
+                    IoError
+                })?;
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        let result = gate_serializer
+            .read_gate(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("gate_serializer.read_gate(&mut buffer, common_data) failed 2: {e:?}");
+            })?;
+
+        self.reader
+            .seek_relative(-(buffer_plonky.remaining() as i64))
+            .map_err(|e| {
+                log::trace!(
+                    "read_gate: seek_relative(-(buffer.remaining() as i64)) failed 2: {e:?}"
+                );
+
+                IoError
+            })?;
+
+        Ok(result)
+    }
+
+    fn read_generator<F: RichField + Extendable<D>, const D: usize>(
+        &mut self,
+        generator_serializer: &dyn WitnessGeneratorSerializer<F, D>,
+        common_data: &CommonCircuitData<F, D>,
+    ) -> IoResult<WitnessGeneratorRef<F, D>> {
+        let bytes_read = self.reader.read(&mut self.buffer).map_err(|e| {
+            log::trace!("read_generator: read(&mut buffer) failed: {e:?}");
+
+            IoError
+        })?;
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        match generator_serializer.read_generator(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("generator_serializer.read_generator(&mut buffer_plonky, common_data) failed: {e:?}");
+            })
+        {
+            Ok(result) => {
+                self.reader.seek_relative(-(buffer_plonky.remaining() as i64))
+                    .map_err(|e| {
+                        log::trace!("read_generator: seek_relative(-(buffer.remaining() as i64)) failed: {e:?}");
+
+                        IoError
+                    })?;
+
+                return Ok(result);
+            }
+
+            // implementation of Read may be buffered so we have to try to read next buffer and
+            // deserialize
+            Err(_e) if bytes_read < self.buffer.len() => {}
+
+            result => return result,
+        }
+
+        let bytes_read = bytes_read
+            + self
+                .reader
+                .read(&mut self.buffer[bytes_read..])
+                .map_err(|e| {
+                    log::trace!("read_generator: read(&mut buffer[bytes_read]) failed 2: {e:?}");
+
+                    IoError
+                })?;
+
+        let mut buffer_plonky = Buffer::new(&self.buffer[..bytes_read]);
+        let result = generator_serializer.read_generator(&mut buffer_plonky, common_data)
+            .inspect_err(|e| {
+                log::trace!("generator_serializer.read_generator(&mut buffer_plonky, common_data) failed 2: {e:?}");
+            })?;
+
+        self.reader.seek_relative(-(buffer_plonky.remaining() as i64))
+            .map_err(|e| {
+                log::trace!("generator_serializer: seek_relative(-(buffer.remaining() as i64)) failed 2: {e:?}");
+
+                IoError
+            })?;
+
+        Ok(result)
     }
 }

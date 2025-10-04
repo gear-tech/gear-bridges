@@ -16,6 +16,7 @@ import {TetherToken} from "src/erc20/TetherToken.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
 import {WrappedVara} from "src/erc20/WrappedVara.sol";
 import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
@@ -36,10 +37,13 @@ struct Overrides {
 struct DeploymentArguments {
     uint256 privateKey;
     address deployerAddress;
+    string forkUrlOrAlias;
     Overrides overrides;
     bytes32 vftManager;
     bytes32 governanceAdmin;
     bytes32 governancePauser;
+    address emergencyStopAdmin;
+    address[] emergencyStopObservers;
     uint256 bridgingPaymentFee;
 }
 
@@ -50,10 +54,16 @@ library BaseConstants {
     bytes32 internal constant VFT_MANAGER = 0x2222222222222222222222222222222222222222222222222222222222222222;
     bytes32 internal constant GOVERNANCE_ADMIN = 0x3333333333333333333333333333333333333333333333333333333333333333;
     bytes32 internal constant GOVERNANCE_PAUSER = 0x4444444444444444444444444444444444444444444444444444444444444444;
+    address internal constant EMERGENCY_STOP_ADMIN = 0x5555555555555555555555555555555555555555;
+    address internal constant EMERGENCY_STOP_OBSERVER1 = 0x6666666666666666666666666666666666666666;
+    address internal constant EMERGENCY_STOP_OBSERVER2 = 0x7777777777777777777777777777777777777777;
     uint256 internal constant BRIDGING_PAYMENT_FEE = 1 wei;
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+    uint256 public messageNonce;
+    uint256 public currentBlockNumber;
+
     DeploymentArguments public deploymentArguments;
 
     IERC20Metadata public erc20GearSupply;
@@ -61,7 +71,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     IERC20Metadata public circleToken;
     IERC20Metadata public tetherToken;
     IERC20Metadata public wrappedEther;
-    IERC20Metadata public wrappedVara;
+    WrappedVara public wrappedVara;
 
     GovernanceAdmin public governanceAdmin;
     GovernancePauser public governancePauser;
@@ -77,10 +87,27 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     NewImplementationMock public newImplementationMock;
 
     function deployBridgeFromConstants() public {
+        deployBridgeFromConstants(BaseConstants.DEPLOYER_ADDRESS, "");
+    }
+
+    function deployBridgeFromExistingNetwork() public {
+        address deployerAddress = vm.envAddress("DEPLOYER_ADDRESS");
+        string memory forkUrlOrAlias = vm.envString("FORK_URL_OR_ALIAS");
+
+        deployBridgeFromConstants(deployerAddress, forkUrlOrAlias);
+    }
+
+    function deployBridgeFromConstants(address deployerAddress, string memory forkUrlOrAlias) public {
+        address[] memory emergencyStopObservers = new address[](2);
+
+        emergencyStopObservers[0] = BaseConstants.EMERGENCY_STOP_OBSERVER1;
+        emergencyStopObservers[1] = BaseConstants.EMERGENCY_STOP_OBSERVER2;
+
         deployBridge(
             DeploymentArguments({
                 privateKey: 0,
-                deployerAddress: BaseConstants.DEPLOYER_ADDRESS,
+                deployerAddress: deployerAddress,
+                forkUrlOrAlias: forkUrlOrAlias,
                 overrides: Overrides({
                     circleToken: BaseConstants.ZERO_ADDRESS,
                     tetherToken: BaseConstants.ZERO_ADDRESS,
@@ -89,6 +116,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 vftManager: BaseConstants.VFT_MANAGER,
                 governanceAdmin: BaseConstants.GOVERNANCE_ADMIN,
                 governancePauser: BaseConstants.GOVERNANCE_PAUSER,
+                emergencyStopAdmin: BaseConstants.EMERGENCY_STOP_ADMIN,
+                emergencyStopObservers: emergencyStopObservers,
                 bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE
             })
         );
@@ -102,6 +131,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             DeploymentArguments({
                 privateKey: privateKey,
                 deployerAddress: deployerAddress,
+                forkUrlOrAlias: "",
                 overrides: Overrides({
                     circleToken: vm.envExists("CIRCLE_TOKEN") ? vm.envAddress("CIRCLE_TOKEN") : BaseConstants.ZERO_ADDRESS,
                     tetherToken: vm.envExists("TETHER_TOKEN") ? vm.envAddress("TETHER_TOKEN") : BaseConstants.ZERO_ADDRESS,
@@ -110,18 +140,65 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 vftManager: vm.envBytes32("VFT_MANAGER"),
                 governanceAdmin: vm.envBytes32("GOVERNANCE_ADMIN"),
                 governancePauser: vm.envBytes32("GOVERNANCE_PAUSER"),
+                emergencyStopAdmin: vm.envAddress("EMERGENCY_STOP_ADMIN"),
+                emergencyStopObservers: vm.envAddress("EMERGENCY_STOP_OBSERVERS", ","),
                 bridgingPaymentFee: vm.envUint("BRIDGING_PAYMENT_FEE")
             })
         );
     }
 
     function deployBridge(DeploymentArguments memory _deploymentArguments) public {
-        console.log("Deployment arguments:");
-
         deploymentArguments = _deploymentArguments;
 
         bool isTest = deploymentArguments.privateKey == 0;
         bool isScript = !isTest;
+        bool isFork = bytes(deploymentArguments.forkUrlOrAlias).length != 0;
+
+        if (isFork) {
+            console.log(string.concat("Forking on ", deploymentArguments.forkUrlOrAlias, "..."));
+
+            console.log();
+
+            vm.createSelectFork(deploymentArguments.forkUrlOrAlias);
+
+            governanceAdmin = GovernanceAdmin(vm.envAddress("GOVERNANCE_ADMIN_CONTRACT"));
+            governancePauser = GovernancePauser(vm.envAddress("GOVERNANCE_PAUSER_CONTRACT"));
+
+            wrappedVara = WrappedVara(governanceAdmin.wrappedVara());
+            messageQueue = MessageQueue(governanceAdmin.messageQueue());
+            erc20Manager = ERC20Manager(governanceAdmin.erc20Manager());
+
+            verifier = IVerifier(messageQueue.verifier());
+            vm.etch(address(verifier), type(VerifierMock).runtimeCode);
+            VerifierMock(address(verifier)).setValue(true);
+
+            address[] memory erc20Tokens = erc20Manager.tokens(0, 3);
+            bridgingPayment = BridgingPayment(erc20Manager.bridgingPayments()[0]);
+
+            deploymentArguments = DeploymentArguments({
+                privateKey: 0,
+                deployerAddress: _deploymentArguments.deployerAddress,
+                forkUrlOrAlias: _deploymentArguments.forkUrlOrAlias,
+                overrides: Overrides({
+                    circleToken: erc20Tokens[0],
+                    tetherToken: erc20Tokens[1],
+                    wrappedEther: erc20Tokens[2]
+                }),
+                vftManager: erc20Manager.vftManagers()[0],
+                governanceAdmin: governanceAdmin.governance(),
+                governancePauser: governancePauser.governance(),
+                emergencyStopAdmin: messageQueue.emergencyStopAdmin(),
+                emergencyStopObservers: messageQueue.emergencyStopObservers(),
+                bridgingPaymentFee: bridgingPayment.fee()
+            });
+
+            messageNonce = 10_000;
+            currentBlockNumber = messageQueue.maxBlockNumber() + 1;
+
+            // TODO: all manipulations with the forked contracts should be done here
+        }
+
+        console.log("Deployment arguments:");
 
         console.log("    deployerAddress:     ", deploymentArguments.deployerAddress);
         console.log("    vftManager:          ", vm.toString(deploymentArguments.vftManager));
@@ -130,6 +207,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    bridgingPaymentFee:  ", deploymentArguments.bridgingPaymentFee, "wei");
 
         if (isTest) {
+            if (!isFork) {
+                vm.warp(vm.unixTime() / 1000);
+            }
             vm.deal(deploymentArguments.deployerAddress, BaseConstants.DEPLOYER_INITIAL_BALANCE);
             vm.startPrank(deploymentArguments.deployerAddress, deploymentArguments.deployerAddress);
         } else if (isScript) {
@@ -145,9 +225,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         // for verification purposes on Etherscan
         erc20GearSupply = new ERC20GearSupply(deploymentArguments.deployerAddress, "MyToken", "MTK", 18);
 
-        if (isTest) {
+        if (isTest && !isFork) {
             deployTestTokens();
-        } else if (isScript) {
+        } else if (isScript || isFork) {
             if (shouldUseOverrides()) {
                 circleToken = IERC20Metadata(deploymentArguments.overrides.circleToken);
                 tetherToken = IERC20Metadata(deploymentArguments.overrides.tetherToken);
@@ -162,11 +242,42 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    WETH:                ", address(wrappedEther));
 
         address erc20ManagerAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 7
+            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 8
+        );
+        address governanceAdminAddress = vm.computeCreateAddress(
+            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 2
+        );
+        address governancePauserAddress = vm.computeCreateAddress(
+            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 3
         );
 
-        wrappedVara = new WrappedVara(erc20ManagerAddress);
-        console.log("    WVARA:               ", address(wrappedVara));
+        // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
+        if (!isFork) {
+            wrappedVara = WrappedVara(
+                Upgrades.deployUUPSProxy(
+                    "WrappedVara.sol",
+                    abi.encodeCall(
+                        WrappedVara.initialize,
+                        (IGovernance(governanceAdminAddress), IGovernance(governancePauserAddress), erc20ManagerAddress)
+                    )
+                )
+            );
+        }
+        if (block.chainid == 1) {
+            console.log("    WVARA:               ", address(wrappedVara));
+        } else {
+            console.log("    WTVARA:              ", address(wrappedVara));
+        }
+
+        if (!isFork) {
+            assertEq(wrappedVara.governanceAdmin(), governanceAdminAddress);
+            assertEq(wrappedVara.governancePauser(), governancePauserAddress);
+            assertEq(wrappedVara.minter(), erc20ManagerAddress);
+        } else {
+            assertEq(wrappedVara.governanceAdmin(), address(governanceAdmin));
+            assertEq(wrappedVara.governancePauser(), address(governancePauser));
+            assertEq(wrappedVara.minter(), address(erc20Manager));
+        }
 
         console.log();
 
@@ -178,13 +289,27 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 4
         );
 
-        governanceAdmin =
-            new GovernanceAdmin(deploymentArguments.governanceAdmin, messageQueueAddress, erc20ManagerAddress);
+        if (!isFork) {
+            governanceAdmin = new GovernanceAdmin(
+                deploymentArguments.governanceAdmin, address(wrappedVara), messageQueueAddress, erc20ManagerAddress
+            );
+        }
         console.log("    GovernanceAdmin:     ", address(governanceAdmin));
 
-        governancePauser =
-            new GovernancePauser(deploymentArguments.governancePauser, messageQueueAddress, erc20ManagerAddress);
+        if (!isFork) {
+            assertEq(governanceAdminAddress, address(governanceAdmin));
+        }
+
+        if (!isFork) {
+            governancePauser = new GovernancePauser(
+                deploymentArguments.governancePauser, address(wrappedVara), messageQueueAddress, erc20ManagerAddress
+            );
+        }
         console.log("    GovernancePauser:    ", address(governancePauser));
+
+        if (!isFork) {
+            assertEq(governancePauserAddress, address(governancePauser));
+        }
 
         console.log();
 
@@ -192,28 +317,37 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("Bridge core:");
 
-        if (isTest) {
-            verifier = new VerifierMock(true);
-        } else if (isScript) {
-            verifier = new Verifier();
+        if (!isFork) {
+            if (isTest) {
+                verifier = new VerifierMock(true);
+            } else if (isScript) {
+                verifier = new Verifier();
+            }
         }
 
         console.log("    Verifier:            ", address(verifier));
 
         // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
-        messageQueue = MessageQueue(
-            Upgrades.deployUUPSProxy(
-                "MessageQueue.sol",
-                abi.encodeCall(MessageQueue.initialize, (governanceAdmin, governancePauser, verifier))
-            )
-        );
+        if (!isFork) {
+            messageQueue = MessageQueue(
+                Upgrades.deployUUPSProxy(
+                    "MessageQueue.sol",
+                    abi.encodeCall(
+                        MessageQueue.initialize,
+                        (
+                            governanceAdmin,
+                            governancePauser,
+                            deploymentArguments.emergencyStopAdmin,
+                            deploymentArguments.emergencyStopObservers,
+                            verifier
+                        )
+                    )
+                )
+            );
+        }
         console.log("    MessageQueue:        ", address(messageQueue));
 
-        assertEq(messageQueueAddress, address(messageQueue));
-        assertEq(messageQueue.governanceAdmin(), address(governanceAdmin));
-        assertEq(messageQueue.governancePauser(), address(governancePauser));
-        assertEq(messageQueue.verifier(), address(verifier));
-        assertEq(messageQueue.isEmergencyStopped(), false);
+        messageQueueAssertions(isFork ? address(messageQueue) : messageQueueAddress);
 
         console.log();
 
@@ -221,31 +355,42 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("Bridge:");
 
-        IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](4);
+        if (!isFork) {
+            IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](4);
 
-        tokens[0] = IERC20Manager.TokenInfo(address(circleToken), IERC20Manager.TokenType.Ethereum);
-        tokens[1] = IERC20Manager.TokenInfo(address(tetherToken), IERC20Manager.TokenType.Ethereum);
-        tokens[2] = IERC20Manager.TokenInfo(address(wrappedEther), IERC20Manager.TokenType.Ethereum);
-        tokens[3] = IERC20Manager.TokenInfo(address(wrappedVara), IERC20Manager.TokenType.Gear);
+            tokens[0] = IERC20Manager.TokenInfo(address(circleToken), IERC20Manager.TokenType.Ethereum);
+            tokens[1] = IERC20Manager.TokenInfo(address(tetherToken), IERC20Manager.TokenType.Ethereum);
+            tokens[2] = IERC20Manager.TokenInfo(address(wrappedEther), IERC20Manager.TokenType.Ethereum);
+            tokens[3] = IERC20Manager.TokenInfo(address(wrappedVara), IERC20Manager.TokenType.Gear);
 
-        erc20Manager = ERC20Manager(
-            Upgrades.deployUUPSProxy(
-                "ERC20Manager.sol",
-                abi.encodeCall(
-                    ERC20Manager.initialize,
-                    (governanceAdmin, governancePauser, address(messageQueue), deploymentArguments.vftManager, tokens)
+            erc20Manager = ERC20Manager(
+                Upgrades.deployUUPSProxy(
+                    "ERC20Manager.sol",
+                    abi.encodeCall(
+                        ERC20Manager.initialize,
+                        (
+                            governanceAdmin,
+                            governancePauser,
+                            address(messageQueue),
+                            deploymentArguments.vftManager,
+                            tokens
+                        )
+                    )
                 )
-            )
-        );
+            );
+        }
         console.log("    ERC20Manager:        ", address(erc20Manager));
 
-        erc20ManagerAssertions(address(erc20Manager));
+        erc20ManagerAssertions(isFork ? address(erc20Manager) : erc20ManagerAddress);
 
         //////////////////////////////////////////////////////////////////////////////
 
         console.log("Bridging payment:");
 
-        bridgingPayment = BridgingPayment(erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee));
+        if (!isFork) {
+            bridgingPayment =
+                BridgingPayment(erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee));
+        }
         console.log("    BridgingPayment:     ", address(bridgingPayment));
 
         bridgingPaymentAssertions();
@@ -267,6 +412,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
             console.log("Script specific:");
 
+            printContractInfo(
+                "WrappedVara", address(wrappedVara), Upgrades.getImplementationAddress(address(wrappedVara))
+            );
             printContractInfo(
                 "MessageQueue", address(messageQueue), Upgrades.getImplementationAddress(address(messageQueue))
             );
@@ -294,6 +442,25 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         return deploymentArguments.overrides.circleToken != BaseConstants.ZERO_ADDRESS
             && deploymentArguments.overrides.tetherToken != BaseConstants.ZERO_ADDRESS
             && deploymentArguments.overrides.wrappedEther != BaseConstants.ZERO_ADDRESS;
+    }
+
+    function messageQueueAssertions(address messageQueueAddress) public view {
+        assertEq(messageQueueAddress, address(messageQueue));
+        assertEq(messageQueue.governanceAdmin(), address(governanceAdmin));
+        assertEq(messageQueue.governancePauser(), address(governancePauser));
+        assertEq(messageQueue.emergencyStopAdmin(), deploymentArguments.emergencyStopAdmin);
+        address[] memory emergencyStopObservers = messageQueue.emergencyStopObservers();
+        assertEq(emergencyStopObservers.length, deploymentArguments.emergencyStopObservers.length);
+        for (uint256 i = 0; i < emergencyStopObservers.length; i++) {
+            assertEq(emergencyStopObservers[i], deploymentArguments.emergencyStopObservers[i]);
+        }
+        assertEq(messageQueue.verifier(), address(verifier));
+        assertEq(messageQueue.isChallengingRoot(), false);
+        assertEq(messageQueue.isEmergencyStopped(), false);
+        if (!isFork()) {
+            assertEq(messageQueue.genesisBlock(), 0);
+            assertEq(messageQueue.maxBlockNumber(), 0);
+        }
     }
 
     function erc20ManagerAssertions(address erc20ManagerAddress) public view {

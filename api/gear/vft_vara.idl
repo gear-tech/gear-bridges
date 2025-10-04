@@ -1,5 +1,11 @@
+/// Specifies the network for deployment of VFT-VARA
+type Mainnet = enum {
+  Yes,
+  No,
+};
+
 constructor {
-  New : ();
+  New : (network: Mainnet);
 };
 
 service Vft {
@@ -90,3 +96,13 @@ service VftNativeExchange {
   Mint : () -> null;
 };
 
+service VftNativeExchangeAdmin {
+  BurnFrom : (from: actor_id, value: u256) -> null;
+
+  events {
+    FailedMint: struct {
+      to: actor_id,
+      value: u256,
+    };
+  }
+};

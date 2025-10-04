@@ -226,6 +226,11 @@ contract ERC20Manager is
     }
 
     /**
+     * @custom:oz-upgrades-validate-as-initializer
+     */
+    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(2) {}
+
+    /**
      * @dev Returns governance admin address.
      * @return governanceAdmin Governance admin address.
      */

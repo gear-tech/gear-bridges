@@ -97,6 +97,7 @@ pub struct PaidMessage {
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
     pub block_hash: H256,
+    pub timestamp: u64,
     pub authority_set_id: AuthoritySetId,
     pub merkle_root: H256,
 }
@@ -174,11 +175,11 @@ fn message_queued_events_of(
 ) -> impl Iterator<Item = gear_rpc_client::dto::Message> + use<'_> {
     block.events().iter().filter_map(|event| match event {
         gclient::Event::GearEthBridge(GearEthBridgeEvent::MessageQueued { message, .. }) => {
-            let mut nonce_le = [0; 32];
-            primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
+            let mut nonce_be = [0; 32];
+            primitive_types::U256(message.nonce.0).to_big_endian(&mut nonce_be);
 
             Some(gear_rpc_client::dto::Message {
-                nonce_le,
+                nonce_be,
                 source: message.source.0,
                 destination: message.destination.0,
                 payload: message.payload.clone(),
@@ -190,7 +191,7 @@ fn message_queued_events_of(
 
 pub fn message_hash(message: &Message) -> [u8; 32] {
     let data = [
-        message.nonce_le.as_ref(),
+        message.nonce_be.as_ref(),
         message.source.as_ref(),
         message.destination.as_ref(),
         message.payload.as_ref(),
@@ -234,6 +235,7 @@ pub mod web_request {
     pub enum MerkleRootsResponse {
         MerkleRootProof {
             proof: Vec<u8>,
+            proof_block_number: u32,
             merkle_root: H256,
             block_number: u32,
             block_hash: H256,

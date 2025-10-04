@@ -1265,6 +1265,7 @@ async fn vft_burn_from() -> Result<()> {
     use vft_vara_client::{
         traits::{Vft, VftAdmin, VftExtension, VftVaraFactory},
         vft_2::events::Vft2Events,
+        Mainnet,
     };
 
     let conn = connect_to_node(
@@ -1336,7 +1337,7 @@ async fn vft_burn_from() -> Result<()> {
     // deploy Vara Fungible Token
     let factory = vft_vara_client::VftVaraFactory::new(remoting.clone());
     let vft_id = factory
-        .new()
+        .new(Mainnet::No)
         .with_gas_limit(gas_limit)
         .send_recv(code_id_vft, [])
         .await

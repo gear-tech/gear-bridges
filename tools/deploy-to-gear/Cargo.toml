@@ -14,6 +14,7 @@ dotenv.workspace = true
 gear-common.workspace = true
 gear-core.workspace = true
 gclient.workspace = true
+gsdk.workspace = true
 hex.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true

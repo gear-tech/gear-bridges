@@ -389,7 +389,7 @@ async fn build_inclusion_proof(
         .recv(historical_proxy_id)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Proxy faield to get endpoint for slot #{}: {:?}", slot, e))?;
+        .map_err(|e| anyhow::anyhow!("Proxy faield to get endpoint for slot #{slot}: {e:?}"))?;
 
     let checkpoint_endpoint = eth_events
         .checkpoint_light_client_address()
@@ -403,7 +403,7 @@ async fn build_inclusion_proof(
         .recv(checkpoint_endpoint)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Checkpoint error: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("Checkpoint error: {e:?}"))?;
 
     let block = BlockGenericForBlockBody {
         slot,

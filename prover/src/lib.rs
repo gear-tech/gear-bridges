@@ -9,6 +9,7 @@ mod block_finality;
 pub(crate) mod common;
 mod final_proof;
 mod latest_validator_set;
+pub mod serialization;
 mod storage_inclusion;
 
 pub(crate) mod prelude {
@@ -46,7 +47,7 @@ pub mod consts {
 
     pub const GRANDPA_VOTE_LENGTH: usize = 53;
 
-    pub const MAX_VALIDATOR_COUNT: usize = 6;
+    pub const MAX_VALIDATOR_COUNT: usize = 64;
 
     // 4MiB
     pub const SIZE_THREAD_STACK_MIN: usize = 4_194_304;

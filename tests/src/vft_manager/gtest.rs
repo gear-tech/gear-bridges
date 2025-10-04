@@ -1,11 +1,11 @@
-use gtest::{Program, System};
+use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
     traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
     VftManagerFactory as VftManagerFactoryC,
 };
-use vft_vara_client::traits::VftVaraFactory;
+use vft_vara_client::{traits::VftVaraFactory, Mainnet};
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
@@ -19,8 +19,44 @@ const ETH_TOKEN_RECEIVER: H160 = H160([6; 20]);
 const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
 const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
 
-// TODO: back to WasmProgram when it is available
-// https://github.com/gear-tech/gear/issues/4803
+#[derive(Debug, Clone)]
+struct GearBridgeBuiltinMock;
+
+impl WasmProgram for GearBridgeBuiltinMock {
+    fn init(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        Ok(None)
+    }
+
+    fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        #[derive(Encode)]
+        enum Response {
+            MessageSent {
+                block_number: u32,
+                hash: H256,
+                nonce: U256,
+                queue_id: u64,
+            },
+        }
+
+        Ok(Some(
+            Response::MessageSent {
+                block_number: 1,
+                nonce: U256::from(1),
+                hash: [1; 32].into(),
+                queue_id: 1,
+            }
+            .encode(),
+        ))
+    }
+
+    fn clone_boxed(&self) -> Box<dyn WasmProgram> {
+        Box::new(self.clone())
+    }
+
+    fn state(&mut self) -> Result<Vec<u8>, &'static str> {
+        unimplemented!()
+    }
+}
 
 struct Fixture {
     remoting: GTestRemoting,
@@ -38,42 +74,8 @@ async fn setup_for_test() -> Fixture {
     let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
 
     // Bridge Builtin
-
-    // #[derive(Encode)]
-    // enum Response {
-    //     MessageSent { nonce: U256, hash: H256 },
-    // }
-    //
-    // Response::MessageSent {
-    //     nonce: U256::from(1),
-    //     hash: [1; 32].into(),
-    // }
-    // .encode();
-
-    let wat = r#"
-    (module
-        (import "env" "memory" (memory 1))
-        (import "env" "gr_reply" (func $gr_reply (param i32 i32 i32 i32)))
-        (func $handle (export "handle")
-            (i32.store8 (i32.const 0x01) (i32.const 0x01))
-            (i64.store (i32.const 0x21) (i64.const 0x0101010101010101))
-            (i64.store (i32.const 0x29) (i64.const 0x0101010101010101))
-            (i64.store (i32.const 0x31) (i64.const 0x0101010101010101))
-            (i64.store (i32.const 0x39) (i64.const 0x0101010101010101))
-            (call $gr_reply
-                (i32.const 0x0000)
-                (i32.const 0x0041)
-                (i32.const 0x0100)
-                (i32.const 0x0200)
-            )
-        )
-    )
-    "#;
-    let gear_bridge_builtin = Program::from_binary_with_id(
-        remoting.system(),
-        BRIDGE_BUILTIN_ID,
-        wat::parse_str(wat).unwrap(),
-    );
+    let gear_bridge_builtin =
+        Program::mock_with_id(remoting.system(), BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
     let _ = gear_bridge_builtin.send_bytes(REMOTING_ACTOR_ID, b"INIT");
 
     // Vft Manager
@@ -112,7 +114,7 @@ async fn setup_for_test() -> Fixture {
     // VFT
     let vft_code_id = remoting.system().submit_code(vft_vara::WASM_BINARY);
     let gear_supply_vft = vft_vara_client::VftVaraFactory::new(remoting.clone())
-        .new()
+        .new(Mainnet::No)
         .send_recv(vft_code_id, b"salt")
         .await
         .unwrap();

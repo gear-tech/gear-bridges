@@ -101,10 +101,22 @@ interface IGovernance is IMessageHandler {
     function governance() external view returns (bytes32);
 
     /**
-     * @dev Returns the message queue address.
-     * @return messageQueue The message queue address.
+     * @dev Returns the WrappedVara address.
+     * @return wrappedVara The WrappedVara address.
+     */
+    function wrappedVara() external view returns (address);
+
+    /**
+     * @dev Returns the MessageQueue address.
+     * @return messageQueue The MessageQueue address.
      */
     function messageQueue() external view returns (address);
+
+    /**
+     * @dev Returns the ERC20Manager address.
+     * @return erc20Manager The ERC20Manager address.
+     */
+    function erc20Manager() external view returns (address);
 }
 
 /**

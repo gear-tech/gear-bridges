@@ -149,8 +149,10 @@ async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
             .watch()
             .await?;
 
+        let block_timestamp = this.eth_api.get_block_timestamp(block_number).await?;
+
         log::info!(
-            "Found merkle root {:?} at Ethereum block #{block_number} ({} confirmation(s))",
+            "Found merkle root {:?} at Ethereum block #{block_number} with timestamp {block_timestamp} ({} confirmation(s))",
             (root.blockNumber, root.merkleRoot),
             this.confirmations,
         );
@@ -175,6 +177,7 @@ async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
             block_hash,
             authority_set_id,
             merkle_root: root.merkleRoot.0.into(),
+            timestamp: block_timestamp,
         })?;
     }
 

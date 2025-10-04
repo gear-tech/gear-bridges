@@ -25,6 +25,7 @@ use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
 use primitive_types::H256;
+use sails_rs::ActorId;
 use std::{collections::HashSet, iter, path::Path, sync::Arc};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -78,6 +79,8 @@ impl Relayer {
         excluded_from_fees: HashSet<AccountId32>,
         receiver: UnboundedReceiver<Message>,
         storage_path: impl AsRef<Path>,
+        governance_admin: ActorId,
+        governance_pauser: ActorId,
     ) -> AnyResult<Self> {
         let storage = Arc::new(JSONStorage::new(storage_path));
         let tx_manager = TransactionManager::new(storage.clone());
@@ -109,7 +112,13 @@ impl Relayer {
         let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);
 
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
-        let accumulator = Accumulator::new(roots_receiver, tx_manager.merkle_roots.clone());
+        let accumulator = Accumulator::new(
+            roots_receiver,
+            tx_manager.merkle_roots.clone(),
+            governance_admin,
+            governance_pauser,
+            eth_api.clone(),
+        );
 
         let message_data_extractor =
             MessageDataExtractor::new(api_provider.clone(), messages_sender, receiver);
@@ -209,7 +218,11 @@ async fn fetch_merkle_roots_inner(
 
         let len = merkle_roots.len();
         log::trace!("Found {len} entry(ies) with merkle roots (i = {i})");
-        for (root, _block_number_eth) in merkle_roots {
+        for (root, _block_number_eth) in merkle_roots
+            .into_iter()
+            .filter_map(|(root, block)| block.map(|block| (root, block)))
+        {
+            let timestamp = eth_api.get_block_timestamp(_block_number_eth).await?;
             let block_hash = gear_api
                 .block_number_to_hash(root.block_number as u32)
                 .await?;
@@ -220,6 +233,7 @@ async fn fetch_merkle_roots_inner(
                 block_hash,
                 authority_set_id: AuthoritySetId(authority_set_id),
                 merkle_root: root.merkle_root,
+                timestamp,
             })?;
         }
 

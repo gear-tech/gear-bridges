@@ -123,7 +123,7 @@ impl Eras {
         let block = gear_api.find_era_first_block(authority_set_id + 1).await?;
         let block_number = gear_api.block_hash_to_number(block).await?;
 
-        let queue_merkle_root = gear_api.fetch_queue_merkle_root(block).await?;
+        let (_, queue_merkle_root) = gear_api.fetch_queue_merkle_root(block).await?;
         if queue_merkle_root.is_zero() {
             log::info!("Message queue at block #{block_number} is empty. Skipping sealing");
             return Ok(());
@@ -151,6 +151,8 @@ impl Eras {
             self.genesis_config,
             block,
             self.count_thread,
+            // just use latest available finality proof
+            None,
         )
         .await?;
         let elapsed_proof = instant.elapsed();

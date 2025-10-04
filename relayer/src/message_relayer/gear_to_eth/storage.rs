@@ -48,7 +48,9 @@ impl BlockStorage {
             return;
         };
 
-        block.messages.remove(&U256::from(message.message.nonce_le));
+        block
+            .messages
+            .remove(&U256::from_big_endian(&message.message.nonce_be));
     }
 
     pub async fn add_block(

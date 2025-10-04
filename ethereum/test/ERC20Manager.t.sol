@@ -64,7 +64,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_PauseWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
@@ -73,7 +73,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -81,6 +81,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -116,7 +118,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_PauseWithGovernancePauser() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
@@ -125,7 +127,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -133,6 +135,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -177,7 +181,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_UnpauseWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
@@ -186,7 +190,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -194,6 +198,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -213,7 +219,7 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridging(token, amount, to);
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x13,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UnpauseProxyMessage({proxy: address(erc20Manager)}).pack()
@@ -222,13 +228,15 @@ contract ERC20ManagerTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x55;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         vm.expectEmit(address(erc20Manager));
         emit PausableUpgradeable.Unpaused(address(governanceAdmin));
@@ -239,7 +247,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_UnpauseWithGovernancePauser() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
@@ -248,7 +256,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -256,6 +264,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -275,7 +285,7 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridging(token, amount, to);
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x13,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: UnpauseProxyMessage({proxy: address(erc20Manager)}).pack()
@@ -284,13 +294,15 @@ contract ERC20ManagerTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x55;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         vm.expectEmit(address(erc20Manager));
         emit PausableUpgradeable.Unpaused(address(governancePauser));
@@ -310,7 +322,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_UpgradeToAndCallWithGovernanceAdmin() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
@@ -323,7 +335,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -331,6 +343,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -406,7 +420,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 to = 0;
 
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
@@ -420,7 +434,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -428,6 +442,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -578,7 +594,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithTransferMessageAndNotEnoughPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: ""
@@ -587,7 +603,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -595,6 +611,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -607,7 +625,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithTransferMessageAndInvalidTokenType() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({sender: 0, receiver: address(0), token: address(0), amount: 0}).pack()
@@ -616,7 +634,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -624,6 +642,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -644,7 +664,7 @@ contract ERC20ManagerTest is Test, Base {
         assertEq(circleToken.balanceOf(address(erc20Manager)), amount);
 
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
@@ -658,7 +678,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -666,6 +686,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -680,7 +702,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageAndNotEnoughPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: ""
@@ -689,7 +711,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -697,6 +719,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -708,13 +732,17 @@ contract ERC20ManagerTest is Test, Base {
     }
 
     function test_HandleMessageWithInvalidSource() public {
-        VaraMessage memory message =
-            VaraMessage({nonce: 0x11, source: bytes32(uint256(0x22)), destination: address(erc20Manager), payload: ""});
+        VaraMessage memory message = VaraMessage({
+            nonce: messageNonce++,
+            source: bytes32(uint256(0x22)),
+            destination: address(erc20Manager),
+            payload: ""
+        });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -722,6 +750,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -734,7 +764,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageAndInvalidDiscriminant() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: hex"ff"
@@ -743,7 +773,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -751,6 +781,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -764,7 +796,7 @@ contract ERC20ManagerTest is Test, Base {
     function test_HandleMessageWithGovernanceMessageAddVftManager() public {
         bytes32 newVftManager = bytes32(uint256(0x22));
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: AddVftManagerMessage({vftManager: newVftManager}).pack()
@@ -773,7 +805,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -781,6 +813,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -795,7 +829,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageAddVftManagerWithInvalidSize() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: abi.encodePacked(uint8(0x00)) // ERC20Manager.ADD_VFT_MANAGER = 0x00
@@ -804,7 +838,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -812,6 +846,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -828,7 +864,7 @@ contract ERC20ManagerTest is Test, Base {
         TetherToken newTetherToken = new TetherToken(deploymentArguments.deployerAddress);
 
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: RegisterEthereumTokenMessage({token: address(newTetherToken)}).pack()
@@ -837,7 +873,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -845,6 +881,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -881,7 +919,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageRegisterEthereumTokenWithInvalidSize() public {
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: abi.encodePacked(uint8(0x01)) // TokenType.Ethereum = 0x01
@@ -890,7 +928,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -898,6 +936,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -916,7 +956,7 @@ contract ERC20ManagerTest is Test, Base {
         string memory tokenSymbol = "MTK____________________________";
         uint8 tokenDecimals = 18;
         VaraMessage memory message1 = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: RegisterGearTokenMessage({tokenName: tokenName, tokenSymbol: tokenSymbol, tokenDecimals: tokenDecimals})
@@ -926,7 +966,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message1.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -934,6 +974,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -951,7 +993,7 @@ contract ERC20ManagerTest is Test, Base {
         address bridgingPayment_ = address(bridgingPayment);
 
         VaraMessage memory message2 = VaraMessage({
-            nonce: 0x12,
+            nonce: messageNonce++,
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
@@ -965,13 +1007,15 @@ contract ERC20ManagerTest is Test, Base {
 
         messageHash = message2.hash();
 
-        blockNumber = 0x55;
+        blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
         assertEq(messageQueue.isProcessed(message2.nonce), true);
@@ -993,7 +1037,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageRegisterGearTokenWithInvalidSize() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: abi.encodePacked(uint8(0x02)) // TokenType.Gear = 0x02
@@ -1002,7 +1046,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -1010,6 +1054,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -1022,7 +1068,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageRegisterGearTokenWithInvalidTokenNameLength() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: abi.encodePacked(uint8(0x02), bytes32(0), bytes32(0), uint8(0)) // TokenType.Gear = 0x02
@@ -1031,7 +1077,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -1039,6 +1085,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -1051,7 +1099,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageRegisterGearTokenWithInvalidTokenSymbolLength() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: abi.encodePacked(uint8(0x02), bytes32(uint256(1 << 248)), bytes32(0), uint8(0)) // TokenType.Gear = 0x02
@@ -1060,7 +1108,7 @@ contract ERC20ManagerTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -1068,6 +1116,8 @@ contract ERC20ManagerTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;

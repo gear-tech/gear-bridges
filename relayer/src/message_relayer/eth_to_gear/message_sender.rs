@@ -228,7 +228,7 @@ impl MessageSender {
         log::debug!("Received reply: {}", hex::encode(&receiver_reply));
 
         let reply = SubmitReceipt::decode_reply(&receiver_reply).map_err(|e| {
-            let error = anyhow::anyhow!("Failed to decode reply: {}", e);
+            let error = anyhow::anyhow!("Failed to decode reply: {e}");
             responses
                 .send(Response {
                     tx_uuid,

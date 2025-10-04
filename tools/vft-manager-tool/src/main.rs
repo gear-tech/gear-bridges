@@ -4,7 +4,7 @@ use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::{
     calls::*,
-    gclient::calls::{GClientRemoting, QueryExt},
+    gclient::calls::{GClientRemoting, QueryExtGClient},
     prelude::*,
 };
 use vft_manager::WASM_BINARY;

@@ -1,6 +1,14 @@
 //! ### Commonly used abstractions and wrappers.
 
+#[macro_use]
+pub mod targets;
+pub mod generic_blake2;
+pub mod poseidon_bn128;
+
+use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
+use crate::{prelude::*, proving::ExportedProofWithCircuitData};
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use plonky2::{
     gates::noop::NoopGate,
     iop::{
@@ -16,19 +24,42 @@ use plonky2::{
         proof::{Proof, ProofWithPublicInputs},
     },
 };
-use std::{marker::PhantomData, sync::Arc};
-
-use crate::{prelude::*, proving::ExportedProofWithCircuitData};
-
-#[macro_use]
-pub mod targets;
-pub mod generic_blake2;
-pub mod poseidon_bn128;
-
 use plonky2_field::goldilocks_field::GoldilocksField;
+use std::{
+    env,
+    fmt::{Debug, Display},
+    marker::PhantomData,
+    str::FromStr,
+    sync::Arc,
+};
 use targets::TargetSet;
 
-use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
+lazy_static! {
+    // 4MiB by default
+    static ref BUFFER_SIZE: usize = get_env_variable("BUFFER_SIZE", 4_194_304);
+}
+
+// TODO: introduce `common`/`utils`/etc crate
+pub fn get_env_variable<T>(name: &str, value_default: T) -> T
+where
+    T: FromStr + Display,
+    <T as FromStr>::Err: Debug,
+{
+    let Ok(value) = env::var(name) else {
+        log::debug!(r#""{name}" is not set. Use default value ({value_default})."#);
+        return value_default;
+    };
+
+    let value = match value.parse::<T>() {
+        Ok(value) => value,
+        Err(e) => {
+            log::debug!(r#"Failed to parse "{name}": {e:?}. Use default value ({value_default})."#);
+            return value_default;
+        }
+    };
+
+    value
+}
 
 /// Type-safe wrapper around `ProofWithPublicInputs` and `VerifierCircuitData`.
 #[derive(Clone)]

@@ -89,7 +89,7 @@ async fn run_inner(
                     log::debug!(
                         "Account {} is excluded from paying fees, automatically sending message {}",
                         AccountId32::from(message.message.source),
-                        hex::encode(message.message.nonce_le)
+                        hex::encode(message.message.nonce_be)
                     );
                     sender.send(message)?;
 
@@ -98,11 +98,11 @@ async fn run_inner(
 
                 if let Some(msg) = self_
                     .pending_messages
-                    .insert(message.message.nonce_le, message)
+                    .insert(message.message.nonce_be, message)
                 {
                     panic!(
                         "Received 2 messages with the same nonce: {}",
-                        hex::encode(msg.message.nonce_le)
+                        hex::encode(msg.message.nonce_be)
                     );
                 }
             }
@@ -146,7 +146,7 @@ mod tests {
             message: Message {
                 destination: [0u8; 20],
                 source: account0,
-                nonce_le: [0u8; 32],
+                nonce_be: [0u8; 32],
                 payload: vec![1, 2, 3],
             },
             block: GearBlockNumber(0),
@@ -158,7 +158,7 @@ mod tests {
             message: Message {
                 destination: [0u8; 20],
                 source: account1,
-                nonce_le: [1u8; 32],
+                nonce_be: [1u8; 32],
                 payload: vec![4, 5, 6],
             },
             block: GearBlockNumber(0),
@@ -173,7 +173,7 @@ mod tests {
 
         msg_sender.send(message0).unwrap();
         let res = msg_receiver.recv().await.unwrap();
-        assert_eq!(res.message.nonce_le, [0u8; 32]);
+        assert_eq!(res.message.nonce_be, [0u8; 32]);
         assert_eq!(res.message.source, account0);
         assert_eq!(res.message.payload, vec![1, 2, 3]);
 
@@ -188,7 +188,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let res = msg_receiver.recv().await.unwrap();
-        assert_eq!(res.message.nonce_le, [1u8; 32]);
+        assert_eq!(res.message.nonce_be, [1u8; 32]);
         assert_eq!(res.message.source, account1);
         assert_eq!(res.message.payload, vec![4, 5, 6]);
         assert!(msg_receiver.is_empty(), "No more messages should be sent");

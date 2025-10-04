@@ -18,6 +18,7 @@ use crate::{
     },
 };
 use ethereum_client::EthApi;
+use sails_rs::ActorId;
 use std::{iter, path::Path, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use utils_prometheus::MeteredService;
@@ -60,6 +61,9 @@ impl Relayer {
         confirmations_status: u64,
 
         storage_path: impl AsRef<Path>,
+
+        governance_admin: ActorId,
+        governance_pauser: ActorId,
     ) -> anyhow::Result<Self> {
         let storage = Arc::new(JSONStorage::new(storage_path));
         let tx_manager = TransactionManager::new(storage.clone());
@@ -84,7 +88,13 @@ impl Relayer {
             roots_sender,
         );
 
-        let accumulator = Accumulator::new(roots_receiver, tx_manager.merkle_roots.clone());
+        let accumulator = Accumulator::new(
+            roots_receiver,
+            tx_manager.merkle_roots.clone(),
+            governance_admin,
+            governance_pauser,
+            eth_api.clone(),
+        );
 
         let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
 

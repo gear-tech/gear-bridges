@@ -1,6 +1,8 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
+use std::time::Duration;
+
 use anyhow::{anyhow, Context, Result as AnyResult};
 use blake2::{
     digest::{Update, VariableOutput},
@@ -13,7 +15,7 @@ use gsdk::{
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-        storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage},
+        storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage, TimestampStorage},
         vara_runtime::SessionKeys,
     },
     Event as RuntimeEvent, GearConfig,
@@ -91,7 +93,7 @@ impl GearApi {
             .chain_get_block(Some(block))
             .await?
             .map(|block| block.block.header.number)
-            .ok_or_else(|| anyhow!("Block {} not present on RPC node", block))
+            .ok_or_else(|| anyhow!("Block {block} not present on RPC node"))
     }
 
     pub async fn block_number_to_hash(&self, block: u32) -> AnyResult<H256> {
@@ -99,7 +101,7 @@ impl GearApi {
             .rpc()
             .chain_get_block_hash(Some(block.into()))
             .await?
-            .ok_or_else(|| anyhow!("Block #{} not present on RPC node", block))
+            .ok_or_else(|| anyhow!("Block #{block} not present on RPC node"))
     }
 
     pub async fn latest_finalized_block(&self) -> AnyResult<H256> {
@@ -242,6 +244,28 @@ impl GearApi {
         });
 
         Ok(stream)
+    }
+
+    pub async fn prove_finality(&self, after_block: u32) -> AnyResult<Option<Vec<u8>>> {
+        let Some(finality): Option<String> = self
+            .api
+            .rpc()
+            .request::<Option<String>>("grandpa_proveFinality", rpc_params![after_block])
+            .await?
+        else {
+            return Ok(None);
+        };
+        let finality = hex::decode(finality.strip_prefix("0x").unwrap_or(&finality))?;
+
+        Ok(Some(finality))
+    }
+
+    pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
+        let block = self.latest_finalized_block().await?;
+        let block = (*self.api).blocks().at(block).await?;
+        let queue_reset_since = gsdk::Api::storage_root(GearEthBridgeStorage::QueueOverflowedSince);
+        self.maybe_fetch_from_storage(&block, &queue_reset_since)
+            .await
     }
 
     /// Returns finality proof for block not earlier `after_block`
@@ -493,7 +517,7 @@ impl GearApi {
             .storage()
             .fetch_raw(address)
             .await?
-            .ok_or_else(|| anyhow!("Storage at address {:?} doesn't exist", address))?;
+            .ok_or_else(|| anyhow!("Storage at address {address:?} doesn't exist"))?;
 
         let mut proof = sp_trie::generate_trie_proof::<
             sp_trie::LayoutV1<sp_core::Blake2Hasher>,
@@ -577,6 +601,23 @@ impl GearApi {
         })
     }
 
+    async fn maybe_fetch_from_storage<T, A>(
+        &self,
+        block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
+        address: &A,
+    ) -> AnyResult<Option<T>>
+    where
+        A: Address<IsFetchable = Yes, Target = DecodedValueThunk>,
+        T: Decode,
+    {
+        let data = match block.storage().fetch(address).await? {
+            Some(data) => data.into_encoded(),
+            None => return Ok(None),
+        };
+
+        Ok(Some(T::decode(&mut &data[..])?))
+    }
+
     async fn fetch_from_storage<T, A>(
         block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
         address: &A,
@@ -612,11 +653,7 @@ impl GearApi {
             .await?;
 
         let proof = proof.ok_or_else(|| {
-            anyhow!(
-                "Message with hash {} not found in block {}",
-                message_hash,
-                block
-            )
+            anyhow!("Message with hash {message_hash} not found in block {block}",)
         })?;
 
         Ok(dto::MerkleProof {
@@ -627,11 +664,23 @@ impl GearApi {
         })
     }
 
+    pub async fn fetch_timestamp(&self, block: H256) -> AnyResult<u64> {
+        let block = (*self.api).blocks().at(block).await?;
+        let timestamp_address = gsdk::Api::storage_root(TimestampStorage::Now);
+        Self::fetch_from_storage(&block, &timestamp_address)
+            .await
+            .map(Duration::from_millis)
+            .map(|d| d.as_secs())
+    }
+
     /// Fetch queue merkle root for the given block.
-    pub async fn fetch_queue_merkle_root(&self, block: H256) -> AnyResult<H256> {
+    pub async fn fetch_queue_merkle_root(&self, block: H256) -> AnyResult<(u64, H256)> {
         let block = (*self.api).blocks().at(block).await?;
         let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
-        Self::fetch_from_storage(&block, &set_id_address).await
+        let merkle_root: H256 = Self::fetch_from_storage(&block, &set_id_address).await?;
+        let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueId);
+        let queue_id: u64 = Self::fetch_from_storage(&block, &set_id_address).await?;
+        Ok((queue_id, merkle_root))
     }
 
     pub async fn message_queued_events(&self, block: H256) -> AnyResult<Vec<dto::Message>> {
@@ -641,11 +690,11 @@ impl GearApi {
             if let RuntimeEvent::GearEthBridge(GearBridgeEvent::MessageQueued { message, .. }) =
                 event
             {
-                let mut nonce_le = [0; 32];
-                primitive_types::U256(message.nonce.0).to_little_endian(&mut nonce_le);
+                let mut nonce_be = [0; 32];
+                primitive_types::U256(message.nonce.0).to_big_endian(&mut nonce_be);
 
                 Some(dto::Message {
-                    nonce_le,
+                    nonce_be,
                     source: message.source.0,
                     destination: message.destination.0,
                     payload: message.payload,

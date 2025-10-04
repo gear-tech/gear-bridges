@@ -169,6 +169,7 @@ impl TransactionManager {
                     );
                     if !proof_fetcher.send_request(
                         tx.uuid,
+                        tx.message.block.0,
                         tx.message_hash,
                         tx.message.message.nonce_be,
                         *merkle_root,
@@ -298,8 +299,17 @@ impl TransactionManager {
                 let block = tx.message.block;
                 let uuid = tx.uuid;
 
-                self.add_transaction(tx).await;
 
+                log::info!(
+                    "New transaction {}, nonce={} from source {} at block #{}({})",
+                    uuid,
+                    hex::encode(tx.message.message.nonce_be),
+                    source,
+                    block.0,
+                    block_hash,
+                );
+
+                self.add_transaction(tx).await;
                 if !accumulator.send_message(uuid, authority_set_id, block, block_hash, source) {
                     log::warn!("Failed to send message to accumulator, exiting");
                     return Ok(false);
@@ -316,8 +326,19 @@ impl TransactionManager {
                     accumulator::Response::Success { tx_uuid, merkle_root, ..} => {
                         if let Some(tx) = self.transactions.write().await.get_mut(&tx_uuid) {
                             tx.status = TxStatus::FetchMerkleRoot(merkle_root);
+                            log::info!(
+                                "Transaction {} at block #{}({}), hash={}, nonce={} got merkle root {} for block #{}",
+                                tx_uuid,
+                                tx.message.block.0,
+                                tx.message.block_hash,
+                                hex::encode(message_hash(&tx.message.message)),
+                                hex::encode(tx.message.message.nonce_be),
+                                merkle_root.merkle_root,
+                                merkle_root.block
+                            );
                             if !proof_fetcher.send_request(
                                 tx_uuid,
+                                tx.message.block.0,
                                 tx.message_hash,
                                 tx.message.message.nonce_be,
                                 merkle_root,

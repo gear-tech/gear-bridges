@@ -41,11 +41,11 @@ function useTransaction(id: string) {
 function useOptimisticTxUpdate(id: string) {
   const queryClient = useQueryClient();
 
-  return () =>
+  return (status = StatusEnum.Completed) =>
     queryClient.setQueryData<TransferQueryQuery>(['transaction', id], (data) => {
       if (!data?.transferById) return data;
 
-      return { transferById: { ...data.transferById, status: StatusEnum.Completed } };
+      return { transferById: { ...data.transferById, status } };
     });
 }
 

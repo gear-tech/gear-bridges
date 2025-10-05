@@ -134,7 +134,11 @@ function Transaction() {
           <div className={styles.sidebar}>
             <div className={styles.buttons}>
               {isVaraNetwork && (
-                <PayVaraFeeButton nonce={nonce} onInBlock={optimisticTxUpdate} onFinalization={refetch} />
+                <PayVaraFeeButton
+                  nonce={nonce}
+                  onInBlock={() => optimisticTxUpdate(StatusEnum.Bridging)}
+                  onFinalization={refetch}
+                />
               )}
 
               {isVaraNetwork ? (

@@ -864,6 +864,8 @@ export type Transfer = Node & {
   completedAtTxHash: Maybe<Scalars['String']['output']>;
   destNetwork: NetworkEnum;
   destination: Scalars['String']['output'];
+  ethBridgeBuiltInMsgHash: Maybe<Scalars['String']['output']>;
+  ethBridgeBuiltInQueueId: Maybe<Scalars['BigInt']['output']>;
   id: Scalars['String']['output'];
   /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
   nodeId: Scalars['ID']['output'];
@@ -900,6 +902,10 @@ export type TransferCondition = {
   destNetwork: InputMaybe<NetworkEnum>;
   /** Checks for equality with the object’s `destination` field. */
   destination: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `ethBridgeBuiltInMsgHash` field. */
+  ethBridgeBuiltInMsgHash: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `ethBridgeBuiltInQueueId` field. */
+  ethBridgeBuiltInQueueId: InputMaybe<Scalars['BigInt']['input']>;
   /** Checks for equality with the object’s `id` field. */
   id: InputMaybe<Scalars['String']['input']>;
   /** Checks for equality with the object’s `nonce` field. */
@@ -942,6 +948,10 @@ export type TransferFilter = {
   destNetwork: InputMaybe<NetworkEnumFilter>;
   /** Filter by the object’s `destination` field. */
   destination: InputMaybe<StringFilter>;
+  /** Filter by the object’s `ethBridgeBuiltInMsgHash` field. */
+  ethBridgeBuiltInMsgHash: InputMaybe<StringFilter>;
+  /** Filter by the object’s `ethBridgeBuiltInQueueId` field. */
+  ethBridgeBuiltInQueueId: InputMaybe<BigIntFilter>;
   /** Filter by the object’s `id` field. */
   id: InputMaybe<StringFilter>;
   /** Filter by the object’s `nonce` field. */
@@ -1008,6 +1018,10 @@ export enum TransfersOrderBy {
   DestinationDesc = 'DESTINATION_DESC',
   DestNetworkAsc = 'DEST_NETWORK_ASC',
   DestNetworkDesc = 'DEST_NETWORK_DESC',
+  EthBridgeBuiltInMsgHashAsc = 'ETH_BRIDGE_BUILT_IN_MSG_HASH_ASC',
+  EthBridgeBuiltInMsgHashDesc = 'ETH_BRIDGE_BUILT_IN_MSG_HASH_DESC',
+  EthBridgeBuiltInQueueIdAsc = 'ETH_BRIDGE_BUILT_IN_QUEUE_ID_ASC',
+  EthBridgeBuiltInQueueIdDesc = 'ETH_BRIDGE_BUILT_IN_QUEUE_ID_DESC',
   IdAsc = 'ID_ASC',
   IdDesc = 'ID_DESC',
   Natural = 'NATURAL',

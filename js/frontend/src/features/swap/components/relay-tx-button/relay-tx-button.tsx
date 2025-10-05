@@ -11,7 +11,7 @@ import { getErrorMessage, isUndefined, logger } from '@/utils';
 import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
 
 type VaraProps = {
-  nonce: HexString;
+  nonce: bigint;
   blockNumber: string;
   onReceipt: () => void;
   onConfirmation: () => void;

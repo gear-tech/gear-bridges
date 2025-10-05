@@ -117,7 +117,6 @@ function Transaction() {
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
-  const rawNonce = isVaraNetwork ? `0x${nonce.padStart(64, '0')}` : nonce;
 
   return (
     <Container className={styles.container}>
@@ -135,13 +134,13 @@ function Transaction() {
           <div className={styles.sidebar}>
             <div className={styles.buttons}>
               {isVaraNetwork && (
-                <PayVaraFeeButton nonce={rawNonce} onInBlock={optimisticTxUpdate} onFinalization={refetch} />
+                <PayVaraFeeButton nonce={nonce} onInBlock={optimisticTxUpdate} onFinalization={refetch} />
               )}
 
               {isVaraNetwork ? (
                 bridgingStartedAtBlock && (
                   <RelayTxButton.Vara
-                    nonce={rawNonce as HexString}
+                    nonce={BigInt(nonce)}
                     blockNumber={bridgingStartedAtBlock}
                     onReceipt={optimisticTxUpdate}
                     onConfirmation={refetch}
@@ -251,8 +250,8 @@ function Transaction() {
           </Field>
 
           <Field label="Transaction Nonce">
-            <Address value={rawNonce} />
-            <CopyButton value={rawNonce} message="Transaction nonce copied to clipboard" />
+            <Address value={nonce} />
+            <CopyButton value={nonce} message="Transaction nonce copied to clipboard" />
           </Field>
 
           <Field label="Block Number">

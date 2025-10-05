@@ -400,7 +400,7 @@ impl KillSwitchRelayer {
                 "Block #{} is not present on Gear RPC node, cannot compare merkle roots",
                 event.block_number,
             );
-            return Ok(false);
+            return Ok(true);
         };
 
         let is_matches = merkle_root == event.merkle_root;

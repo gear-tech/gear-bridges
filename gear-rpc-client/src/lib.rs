@@ -676,10 +676,13 @@ impl GearApi {
     /// Fetch queue merkle root for the given block.
     pub async fn fetch_queue_merkle_root(&self, block: H256) -> AnyResult<(u64, H256)> {
         let block = (*self.api).blocks().at(block).await?;
+        log::debug!("111");
         let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
         let merkle_root: H256 = Self::fetch_from_storage(&block, &set_id_address).await?;
+        log::debug!("222");
         let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueId);
         let queue_id: u64 = Self::fetch_from_storage(&block, &set_id_address).await?;
+        log::debug!("333");
         Ok((queue_id, merkle_root))
     }
 

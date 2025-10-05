@@ -1,11 +1,11 @@
-/* eslint-disable @typescript-eslint/no-floating-promises */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, BaseGearProgram, HexString, decodeAddress } from '@gear-js/api';
+/* eslint-disable */
+
+import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
   ActorId,
-  throwOnErrorReply,
+  QueryBuilder,
   getServiceNamePrefix,
   getFnNamePrefix,
   ZERO_ADDRESS,
@@ -17,7 +17,7 @@ export class SailsProgram {
   public readonly vftAdmin: VftAdmin;
   public readonly vftExtension: VftExtension;
   public readonly vftMetadata: VftMetadata;
-  private _program!: BaseGearProgram;
+  private _program?: BaseGearProgram;
 
   constructor(
     public api: GearApi,
@@ -46,7 +46,7 @@ export class SailsProgram {
   newCtorFromCode(
     code: Uint8Array | Buffer | HexString,
     name: string,
-    symbol: string,
+    $symbol: string,
     decimals: number,
   ): TransactionBuilder<null> {
     const builder = new TransactionBuilder<null>(
@@ -55,7 +55,7 @@ export class SailsProgram {
       'upload_program',
       null,
       'New',
-      [name, symbol, decimals],
+      [name, $symbol, decimals],
       '(String, String, u8)',
       'String',
       code,
@@ -66,14 +66,14 @@ export class SailsProgram {
     return builder;
   }
 
-  newCtorFromCodeId(codeId: `0x${string}`, name: string, symbol: string, decimals: number) {
+  newCtorFromCodeId(codeId: `0x${string}`, name: string, $symbol: string, decimals: number) {
     const builder = new TransactionBuilder<null>(
       this.api,
       this.registry,
       'create_program',
       null,
       'New',
-      [name, symbol, decimals],
+      [name, $symbol, decimals],
       '(String, String, u8)',
       'String',
       codeId,
@@ -118,7 +118,7 @@ export class Vft {
     );
   }
 
-  public transferFrom(from: ActorId, to: ActorId, value: number | string | bigint): TransactionBuilder<boolean> {
+  public transferFrom($from: ActorId, to: ActorId, value: number | string | bigint): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<boolean>(
       this._program.api,
@@ -126,75 +126,50 @@ export class Vft {
       'send_message',
       'Vft',
       'TransferFrom',
-      [from, to, value],
+      [$from, to, value],
       '([u8;32], [u8;32], U256)',
       'bool',
       this._program.programId,
     );
   }
 
-  public async allowance(
-    owner: ActorId,
-    spender: ActorId,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<bigint> {
-    const payload = this._program.registry
-      .createType('(String, String, [u8;32], [u8;32])', ['Vft', 'Allowance', owner, spender])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, U256)', reply.payload);
-    return result[2].toBigInt() as unknown as bigint;
+  public allowance(owner: ActorId, spender: ActorId): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft',
+      'Allowance',
+      [owner, spender],
+      '([u8;32], [u8;32])',
+      'U256',
+    );
   }
 
-  public async balanceOf(
-    account: ActorId,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<bigint> {
-    const payload = this._program.registry
-      .createType('(String, String, [u8;32])', ['Vft', 'BalanceOf', account])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, U256)', reply.payload);
-    return result[2].toBigInt() as unknown as bigint;
+  public balanceOf(account: ActorId): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft',
+      'BalanceOf',
+      account,
+      '[u8;32]',
+      'U256',
+    );
   }
 
-  public async totalSupply(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<bigint> {
-    const payload = this._program.registry.createType('(String, String)', ['Vft', 'TotalSupply']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, U256)', reply.payload);
-    return result[2].toBigInt() as unknown as bigint;
+  public totalSupply(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft',
+      'TotalSupply',
+      null,
+      null,
+      'U256',
+    );
   }
 
   public subscribeToApprovalEvent(
@@ -284,7 +259,7 @@ export class VftAdmin {
     );
   }
 
-  public burn(from: ActorId, value: number | string | bigint): TransactionBuilder<null> {
+  public burn($from: ActorId, value: number | string | bigint): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
@@ -292,7 +267,7 @@ export class VftAdmin {
       'send_message',
       'VftAdmin',
       'Burn',
-      [from, value],
+      [$from, value],
       '([u8;32], U256)',
       'Null',
       this._program.programId,
@@ -324,6 +299,36 @@ export class VftAdmin {
       'Mint',
       [to, value],
       '([u8;32], U256)',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  public pause(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftAdmin',
+      'Pause',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  public resume(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftAdmin',
+      'Resume',
+      null,
+      null,
       'Null',
       this._program.programId,
     );
@@ -419,99 +424,69 @@ export class VftAdmin {
     );
   }
 
-  public async admin(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['VftAdmin', 'Admin']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public admin(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftAdmin',
+      'Admin',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
-  public async burner(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['VftAdmin', 'Burner']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public burner(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftAdmin',
+      'Burner',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
-  public async isPaused(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<boolean> {
-    const payload = this._program.registry.createType('(String, String)', ['VftAdmin', 'IsPaused']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, bool)', reply.payload);
-    return result[2].toJSON() as unknown as boolean;
+  public isPaused(): QueryBuilder<boolean> {
+    return new QueryBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftAdmin',
+      'IsPaused',
+      null,
+      null,
+      'bool',
+    );
   }
 
-  public async minter(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['VftAdmin', 'Minter']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public minter(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftAdmin',
+      'Minter',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
-  public async pauser(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['VftAdmin', 'Pauser']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public pauser(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftAdmin',
+      'Pauser',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
   public subscribeToAdminChangedEvent(callback: (data: ActorId) => void | Promise<void>): Promise<() => void> {
@@ -689,6 +664,36 @@ export class VftAdmin {
 export class VftExtension {
   constructor(private _program: SailsProgram) {}
 
+  public allocateNextAllowancesShard(): TransactionBuilder<boolean> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftExtension',
+      'AllocateNextAllowancesShard',
+      null,
+      null,
+      'bool',
+      this._program.programId,
+    );
+  }
+
+  public allocateNextBalancesShard(): TransactionBuilder<boolean> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftExtension',
+      'AllocateNextBalancesShard',
+      null,
+      null,
+      'bool',
+      this._program.programId,
+    );
+  }
+
   public removeExpiredAllowance(owner: ActorId, spender: ActorId): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<boolean>(
@@ -719,7 +724,7 @@ export class VftExtension {
     );
   }
 
-  public transferAllFrom(from: ActorId, to: ActorId): TransactionBuilder<boolean> {
+  public transferAllFrom($from: ActorId, to: ActorId): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<boolean>(
       this._program.api,
@@ -727,162 +732,105 @@ export class VftExtension {
       'send_message',
       'VftExtension',
       'TransferAllFrom',
-      [from, to],
+      [$from, to],
       '([u8;32], [u8;32])',
       'bool',
       this._program.programId,
     );
   }
 
-  public async allowanceOf(
-    owner: ActorId,
-    spender: ActorId,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<[number | string | bigint, number] | null> {
-    const payload = this._program.registry
-      .createType('(String, String, [u8;32], [u8;32])', ['VftExtension', 'AllowanceOf', owner, spender])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, Option<(U256, u32)>)', reply.payload);
-    return result[2].toJSON() as unknown as [number | string | bigint, number] | null;
-  }
-
-  public async allowances(
-    cursor: number,
-    len: number,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Array<[[ActorId, ActorId], [number | string | bigint, number]]>> {
-    const payload = this._program.registry
-      .createType('(String, String, u32, u32)', ['VftExtension', 'Allowances', cursor, len])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType(
-      '(String, String, Vec<(([u8;32], [u8;32]), (U256, u32))>)',
-      reply.payload,
+  public allowanceOf(owner: ActorId, spender: ActorId): QueryBuilder<[number | string | bigint, number] | null> {
+    return new QueryBuilder<[number | string | bigint, number] | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftExtension',
+      'AllowanceOf',
+      [owner, spender],
+      '([u8;32], [u8;32])',
+      'Option<(U256, u32)>',
     );
-    return result[2].toJSON() as unknown as Array<[[ActorId, ActorId], [number | string | bigint, number]]>;
   }
 
-  public async balanceOf(
-    account: ActorId,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<number | string | bigint | null> {
-    const payload = this._program.registry
-      .createType('(String, String, [u8;32])', ['VftExtension', 'BalanceOf', account])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, Option<U256>)', reply.payload);
-    return result[2].toJSON() as unknown as number | string | bigint | null;
-  }
-
-  public async balances(
+  public allowances(
     cursor: number,
     len: number,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Array<[ActorId, number | string | bigint]>> {
-    const payload = this._program.registry
-      .createType('(String, String, u32, u32)', ['VftExtension', 'Balances', cursor, len])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, Vec<([u8;32], U256)>)', reply.payload);
-    return result[2].toJSON() as unknown as Array<[ActorId, number | string | bigint]>;
+  ): QueryBuilder<Array<[[ActorId, ActorId], [number | string | bigint, number]]>> {
+    return new QueryBuilder<Array<[[ActorId, ActorId], [number | string | bigint, number]]>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftExtension',
+      'Allowances',
+      [cursor, len],
+      '(u32, u32)',
+      'Vec<(([u8;32], [u8;32]), (U256, u32))>',
+    );
   }
 
-  public async expiryPeriod(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<number> {
-    const payload = this._program.registry.createType('(String, String)', ['VftExtension', 'ExpiryPeriod']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, u32)', reply.payload);
-    return result[2].toNumber() as unknown as number;
+  public balanceOf(account: ActorId): QueryBuilder<number | string | bigint | null> {
+    return new QueryBuilder<number | string | bigint | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftExtension',
+      'BalanceOf',
+      account,
+      '[u8;32]',
+      'Option<U256>',
+    );
   }
 
-  public async minimumBalance(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<bigint> {
-    const payload = this._program.registry.createType('(String, String)', ['VftExtension', 'MinimumBalance']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, U256)', reply.payload);
-    return result[2].toBigInt() as unknown as bigint;
+  public balances(cursor: number, len: number): QueryBuilder<Array<[ActorId, number | string | bigint]>> {
+    return new QueryBuilder<Array<[ActorId, number | string | bigint]>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftExtension',
+      'Balances',
+      [cursor, len],
+      '(u32, u32)',
+      'Vec<([u8;32], U256)>',
+    );
   }
 
-  public async unusedValue(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<bigint> {
-    const payload = this._program.registry.createType('(String, String)', ['VftExtension', 'UnusedValue']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, U256)', reply.payload);
-    return result[2].toBigInt() as unknown as bigint;
+  public expiryPeriod(): QueryBuilder<number> {
+    return new QueryBuilder<number>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftExtension',
+      'ExpiryPeriod',
+      null,
+      null,
+      'u32',
+    );
+  }
+
+  public minimumBalance(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftExtension',
+      'MinimumBalance',
+      null,
+      null,
+      'U256',
+    );
+  }
+
+  public unusedValue(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftExtension',
+      'UnusedValue',
+      null,
+      null,
+      'U256',
+    );
   }
 }
 
@@ -892,66 +840,48 @@ export class VftMetadata {
   /**
    * Returns the number of decimals of the VFT.
    */
-  public async decimals(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<number> {
-    const payload = this._program.registry.createType('(String, String)', ['VftMetadata', 'Decimals']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, u8)', reply.payload);
-    return result[2].toNumber() as unknown as number;
+  public decimals(): QueryBuilder<number> {
+    return new QueryBuilder<number>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftMetadata',
+      'Decimals',
+      null,
+      null,
+      'u8',
+    );
   }
 
   /**
    * Returns the name of the VFT.
    */
-  public async name(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<string> {
-    const payload = this._program.registry.createType('(String, String)', ['VftMetadata', 'Name']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, String)', reply.payload);
-    return result[2].toString() as unknown as string;
+  public name(): QueryBuilder<string> {
+    return new QueryBuilder<string>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftMetadata',
+      'Name',
+      null,
+      null,
+      'String',
+    );
   }
 
   /**
    * Returns the symbol of the VFT.
    */
-  public async symbol(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<string> {
-    const payload = this._program.registry.createType('(String, String)', ['VftMetadata', 'Symbol']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, String)', reply.payload);
-    return result[2].toString() as unknown as string;
+  public symbol(): QueryBuilder<string> {
+    return new QueryBuilder<string>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftMetadata',
+      'Symbol',
+      null,
+      null,
+      'String',
+    );
   }
 }

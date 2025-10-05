@@ -1,17 +1,20 @@
-/* eslint-disable @typescript-eslint/no-floating-promises */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, BaseGearProgram, HexString, decodeAddress } from '@gear-js/api';
-import { TypeRegistry } from '@polkadot/types';
+/* eslint-disable */
+
 import {
+  ActorId,
   TransactionBuilder,
   H256,
-  ActorId,
-  throwOnErrorReply,
+  QueryBuilder,
   getServiceNamePrefix,
   getFnNamePrefix,
   ZERO_ADDRESS,
 } from 'sails-js';
+import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
+import { TypeRegistry } from '@polkadot/types';
 
+/**
+ * Global state of the Bridging Payment service.
+ */
 export interface State {
   /**
    * Admin of this service. Admin is in charge of:
@@ -33,7 +36,7 @@ export interface State {
 export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly bridgingPayment: BridgingPayment;
-  private _program!: BaseGearProgram;
+  private _program?: BaseGearProgram;
 
   constructor(
     public api: GearApi,
@@ -151,6 +154,26 @@ export class BridgingPayment {
   }
 
   /**
+   * Withdraw fees that were collected from user requests.
+   *
+   * This method can be called only by admin.
+   */
+  public reclaimFee(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'BridgingPayment',
+      'ReclaimFee',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
    * Set new admin.
    *
    * This method can be called only by admin.
@@ -214,7 +237,7 @@ export class BridgingPayment {
   /**
    * Upgrades the program to the provided new address.
    */
-  public upgrade(value: ActorId): TransactionBuilder<null> {
+  public upgrade($new: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
@@ -222,7 +245,7 @@ export class BridgingPayment {
       'send_message',
       'BridgingPayment',
       'Upgrade',
-      value,
+      $new,
       '[u8;32]',
       'Null',
       this._program.programId,
@@ -232,23 +255,17 @@ export class BridgingPayment {
   /**
    * Get current service [State].
    */
-  public async getState(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<State> {
-    const payload = this._program.registry.createType('(String, String)', ['BridgingPayment', 'GetState']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, State)', reply.payload);
-    return result[2].toJSON() as unknown as State;
+  public getState(): QueryBuilder<State> {
+    return new QueryBuilder<State>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'BridgingPayment',
+      'GetState',
+      null,
+      null,
+      'State',
+    );
   }
 
   /**

@@ -679,10 +679,13 @@ impl GearApi {
         let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
         let merkle_root: H256 = Self::fetch_from_storage(&block, &set_id_address).await?;
         let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueId);
-        let queue_id: u64 = self.maybe_fetch_from_storage(&block, &set_id_address).await?.unwrap_or_else(|| {
-            log::warn!("QueueId not found in storage, using 0 as default");
-            0
-        });
+        let queue_id: u64 = self
+            .maybe_fetch_from_storage(&block, &set_id_address)
+            .await?
+            .unwrap_or_else(|| {
+                log::warn!("QueueId not found in storage, using 0 as default");
+                0
+            });
 
         Ok((queue_id, merkle_root))
     }

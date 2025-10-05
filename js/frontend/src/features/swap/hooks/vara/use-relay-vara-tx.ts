@@ -1,4 +1,3 @@
-import { HexString } from '@gear-js/api';
 import { relayVaraToEth } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
 import { useConfig, usePublicClient, useWalletClient } from 'wagmi';
@@ -16,7 +15,7 @@ type Params = {
   onError: (error: Error) => void;
 };
 
-function useRelayVaraTx(nonce: HexString, blockNumber: bigint) {
+function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const config = useConfig();

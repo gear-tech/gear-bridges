@@ -31,6 +31,7 @@ ethereum-common.workspace = true
 futures.workspace = true
 gear-core.workspace = true
 gclient.workspace = true
+humantime.workspace = true
 hex.workspace = true
 keccak-hash.workspace = true
 lazy_static.workspace = true
@@ -54,6 +55,7 @@ subxt.workspace = true
 gsdk.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+zeroize.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true
 

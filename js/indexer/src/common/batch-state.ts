@@ -77,7 +77,8 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
     let pair = this._pairs.get(src);
     while (!pair) {
-      this._log.warn(`Pair not found for ${src}, retrying...`);
+      retryCount++;
+      this._log.error({ token: src, attempt: retryCount, maxAttempts: PAIR_RETRY_LIMIT }, 'Pair not found, retrying');
       await new Promise((resolve) => setTimeout(resolve, PAIR_RETRY_DELAY));
 
       if (this._network === Network.Ethereum) {
@@ -91,9 +92,8 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
           this._pairs.set(pair.varaToken, pair);
         }
       }
-      retryCount++;
       if (retryCount >= PAIR_RETRY_LIMIT) {
-        this._log.error(`Failed to load pair for ${src}. Exiting`);
+        this._log.error({ token: src, attempts: retryCount }, 'Failed to load pair after max retries');
         throw new Error('Pair not found');
       }
     }
@@ -130,11 +130,11 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     }
 
     await this._ctx.store.save(transfers);
-    this._log.info(`${transfers.length} transfers marked as completed`);
+    this._log.info({ count: transfers.length }, 'Transfers marked as completed');
     this._log.debug({ nonces: transfers.map((transfer) => transfer.nonce) });
 
     await this._ctx.store.remove(completedToRemove);
-    this._log.info(`${completedToRemove.length} completed records removed`);
+    this._log.info({ count: completedToRemove.length }, 'Completed records removed');
     this._log.debug({ nonces: completedToRemove.map((transfer) => transfer.id) });
   }
 
@@ -148,7 +148,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     const nonces = duplicates.map((info) => info.id);
 
     if (duplicates.length > 0) {
-      this._log.info(`Found ${duplicates.length} duplicates of completed transfers`);
+      this._log.info({ count: duplicates.length }, 'Found duplicates of completed transfers');
 
       for (const duplicate of duplicates) {
         this._log.info(
@@ -169,7 +169,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     if (completedToSave.length === 0) return;
 
     await this._ctx.store.save(completedToSave);
-    this._log.info(`Saved ${completedToSave.length} completed records`);
+    this._log.info({ count: completedToSave.length }, 'Completed records saved');
     this._log.debug({ nonces: completedToSave.map((info) => info.id) });
   }
 
@@ -188,6 +188,8 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       }
     }
 
+    const notUpdatedTransfers: string[] = [];
+
     for (const [nonce, status] of this._statuses.entries()) {
       const transfer = this._transfers.get(nonce);
       if (transfer) {
@@ -195,8 +197,31 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
           transfer.status = status;
         }
       } else {
-        this._log.error(`${nonce}: Transfer not found in cache or DB for status update`);
+        notUpdatedTransfers.push(nonce);
       }
+    }
+
+    if (notUpdatedTransfers.length > 0) {
+      const transfers = await this._ctx.store.find(Transfer, {
+        where: { nonce: In(notUpdatedTransfers), sourceNetwork: this._network },
+      });
+
+      const notCompletedTransfers = transfers.filter(({ status }) => status !== Status.Completed);
+
+      for (const t of notCompletedTransfers) {
+        this._log.error(
+          { nonce: t.nonce, targetStatus: this._statuses.get(t.nonce) },
+          'Failed to update transfer status',
+        );
+      }
+
+      if (transfers.length === notUpdatedTransfers.length) return;
+
+      const noncesInDb = transfers.map(({ nonce }) => nonce);
+
+      const missingNonces = notUpdatedTransfers.filter((nonce) => !noncesInDb.includes(nonce));
+
+      this._log.error({ nonces: missingNonces }, 'Nonces not found in DB or cache');
     }
   }
 
@@ -209,7 +234,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       await this._ctx.store.save(transfers.slice(i, i + 1000));
     }
 
-    this._log.info(`Saved ${this._transfers.size} transfers`);
+    this._log.info({ count: this._transfers.size }, 'Transfers saved');
   }
 
   public abstract save(): Promise<void>;
@@ -223,21 +248,26 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       transfer.destination = await this._getDestinationAddress(transfer.source);
     } catch (error) {
       this._log.error(
-        { block: transfer.blockNumber, tx: transfer.txHash, nonce: transfer.nonce },
-        `Destination token not found for ${transfer.source}`,
+        {
+          nonce: transfer.nonce,
+          blockNumber: transfer.blockNumber,
+          txHash: transfer.txHash,
+          sourceToken: transfer.source,
+        },
+        'Destination token not found for source token',
       );
       throw error;
     }
     this._transfers.set(transfer.nonce, transfer);
 
-    this._log.info(`${transfer.nonce}: Transfer requested in block ${transfer.blockNumber}`);
+    this._log.info({ nonce: transfer.nonce, blockNumber: transfer.blockNumber }, 'Transfer requested');
   }
 
   public async updateTransferStatus(nonce: string, status: Status) {
     if (this._statuses.get(nonce) === status) return;
 
     this._statuses.set(nonce, status);
-    this._log.debug(`${nonce}: Status changed to ${status}`);
+    this._log.debug({ nonce, status }, 'Transfer status changed');
   }
 
   public setCompletedTransfer(nonce: string, timestamp: Date, blockNumber: bigint, txHash: string) {
@@ -253,7 +283,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       }),
     );
 
-    this._log.info(`${nonce}: Transfer completed at block ${blockNumber} with transaction hash ${txHash}`);
+    this._log.info({ nonce, blockNumber, txHash }, 'Transfer completed');
   }
 
   protected async _getTransfer(nonce: string): Promise<Transfer | undefined> {

@@ -60,7 +60,7 @@ const handler = async (ctx: Context) => {
           if (topic === MSGQ_MESSAGE_PROCESSED) {
             const [_, __, nonce, receiver] = messageQueueAbi.events.MessageProcessed.decode(log);
             if (receiver.toLowerCase() !== ERC20_MANAGER) continue;
-            const _nonce = gearNonce(nonce, false);
+            const _nonce = gearNonce(nonce);
             state.setCompletedTransfer(_nonce, timestamp, blockNumber, txHash);
           } else if (topic === MSGQ_MERKLE_ROOT) {
             const [blockNumber, merkleRoot] = messageQueueAbi.events.MerkleRoot.decode(log);

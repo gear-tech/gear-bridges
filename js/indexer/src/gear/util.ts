@@ -1,4 +1,10 @@
-import { EthBridgeMessageQueuedEvent, MessageQueuedEvent, UserMessageSentEvent } from './types/index.js';
+import {
+  EthBridgeMessageQueuedEvent,
+  MessageQueuedEvent,
+  ProgramChangedEvent,
+  QueueMerkleRootChangedEvent,
+  UserMessageSentEvent,
+} from './types/index.js';
 import { Event } from './processor.js';
 
 export function isMessageQueued(event: Event): event is MessageQueuedEvent {
@@ -9,12 +15,20 @@ export function isUserMessageSent(event: Event): event is UserMessageSentEvent {
   return event.name === 'Gear.UserMessageSent';
 }
 
-export function isProgramChanged(event: Event): boolean {
+export function isProgramChanged(event: Event): event is ProgramChangedEvent {
   return event.name === 'Gear.ProgramChanged';
 }
 
 export function isEthBridgeMessageQueued(event: Event): event is EthBridgeMessageQueuedEvent {
   return event.name === 'GearEthBridge.MessageQueued';
+}
+
+export function isQueueMerkleRootChanged(event: Event): event is QueueMerkleRootChangedEvent {
+  return event.name === 'GearEthBridge.QueueMerkleRootChanged';
+}
+
+export function isQueueReset(event: Event): boolean {
+  return event.name === 'GearEthBridge.QueueReset';
 }
 
 export const enum ProgramName {
@@ -50,10 +64,12 @@ export const enum BridgingPaymentServices {
 
 export const enum BridgingPaymentMethods {
   BridgingPaid = 'BridgingPaid',
+  PriorityBridgingPaid = 'PriorityBridgingPaid',
 }
 
 export const enum CheckpointClientServices {
   ServiceSyncUpdate = 'ServiceSyncUpdate',
+  ServiceReplayBack = 'ServiceReplayBack',
 }
 
 export const enum CheckpointClientMethods {

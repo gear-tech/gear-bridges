@@ -1,4 +1,4 @@
-module.exports = class Subscriptions1753370172700 {
+export default class Subscriptions1753370172700 {
   name = 'Subscriptions1753370172700';
 
   async up(queryRunner) {
@@ -23,4 +23,4 @@ module.exports = class Subscriptions1753370172700 {
     await queryRunner.query(`DROP TRIGGER transfers_notify_trigger ON transfer`);
     await queryRunner.query(`DROP FUNCTION notify_transfers_count()`);
   }
-};
+}

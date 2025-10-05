@@ -89,10 +89,7 @@ function useSignAndSend({ programs }: Parameters) {
       _signAndSend().catch((error: Error) => reject(error));
     });
 
-  return useMutation({
-    mutationKey: ['signAndSend'],
-    mutationFn: signAndSend,
-  });
+  return useMutation({ mutationFn: signAndSend });
 }
 
 export { useSignAndSend };

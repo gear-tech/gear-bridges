@@ -16,7 +16,10 @@ function useGetVaraFTAllowance(address: HexString | undefined) {
     definedAssert(address, 'FT address');
     definedAssert(account?.decodedAddress, 'Account address');
 
-    return program.vft.allowance(account.decodedAddress, CONTRACT_ADDRESS.VFT_MANAGER);
+    return program.vft
+      .allowance(account.decodedAddress, CONTRACT_ADDRESS.VFT_MANAGER)
+      .withAddress(account.decodedAddress)
+      .call();
   };
 }
 

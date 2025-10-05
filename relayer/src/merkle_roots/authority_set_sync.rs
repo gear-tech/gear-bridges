@@ -15,7 +15,12 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct AuthoritySetSyncIo {
     response: UnboundedReceiver<Response>,
-    requests: UnboundedSender<GearBlock>,
+    requests: UnboundedSender<Request>,
+}
+
+pub enum Request {
+    ForceSync(GearBlock),
+    Initialize,
 }
 
 pub enum Response {
@@ -23,10 +28,7 @@ pub enum Response {
 }
 
 impl AuthoritySetSyncIo {
-    pub fn new(
-        response: UnboundedReceiver<Response>,
-        requests: UnboundedSender<GearBlock>,
-    ) -> Self {
+    pub fn new(response: UnboundedReceiver<Response>, requests: UnboundedSender<Request>) -> Self {
         Self { response, requests }
     }
 
@@ -35,7 +37,11 @@ impl AuthoritySetSyncIo {
     }
 
     pub fn send(&self, block: GearBlock) -> bool {
-        self.requests.send(block).is_ok()
+        self.requests.send(Request::ForceSync(block)).is_ok()
+    }
+
+    pub fn initialize(&self) -> bool {
+        self.requests.send(Request::Initialize).is_ok()
     }
 }
 
@@ -80,12 +86,14 @@ impl AuthoritySetSync {
         proof_storage: Arc<dyn ProofStorage>,
 
         genesis_config: GenesisConfig,
+
+        count_thread: Option<usize>,
     ) -> Self {
         Self {
             api_provider,
             proof_storage,
             genesis_config,
-            count_thread: None,
+            count_thread,
 
             metrics: Metrics::new(),
         }
@@ -128,17 +136,34 @@ impl AuthoritySetSync {
         &mut self,
         blocks: &mut Receiver<GearBlock>,
         responses: &UnboundedSender<Response>,
-        force_sync: &mut UnboundedReceiver<GearBlock>,
+        force_sync: &mut UnboundedReceiver<Request>,
     ) -> anyhow::Result<()> {
         loop {
             tokio::select! {
-                block = force_sync.recv() => {
-                    match block {
-                        Some(block) => {
+                req = force_sync.recv() => {
+                    match req {
+                        Some(Request::ForceSync(block)) => {
                             log::info!("Force syncing authority set for block #{}", block.number());
                             let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
                                 return Ok(());
                             };
+                        }
+                        Some(Request::Initialize) => {
+                            let client = self.api_provider.client();
+                            log::info!("Initializing authority set sync");
+                            let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
+                            if latest_proven_authority_set_id.is_none() {
+                                log::info!("No authority set found in proof storage, syncing from genesis");
+                                let genesis_authority_set_id = self.genesis_config.authority_set_id;
+                                let genesis_block_hash = client.find_era_first_block(genesis_authority_set_id + 1).await?;
+                                let genesis_block = client.get_block_at(genesis_block_hash).await?;
+                                let block = GearBlock::from_subxt_block(genesis_block).await?;
+                                let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
+                                    return Ok(());
+                                };
+                            } else {
+                                log::info!("Authority set already initialized in proof storage");
+                            }
                         }
                         None => {
                             log::warn!("Force sync channel closed, exiting");
@@ -182,7 +207,8 @@ impl AuthoritySetSync {
         blocks: &mut Receiver<GearBlock>,
         responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<Option<u64>> {
-        let (sync_steps, authority_set_id) = self.sync_authority_set(initial_block).await?;
+        let (sync_steps, authority_set_id) =
+            self.sync_authority_set(initial_block, responses).await?;
         if sync_steps == 0 {
             log::info!(
                 "Authority set #{authority_set_id} is already in sync at block #{}",
@@ -194,7 +220,7 @@ impl AuthoritySetSync {
         log::info!("Syncing authority set #{authority_set_id}");
         loop {
             let (sync_steps, _) = match blocks.recv().await {
-                Ok(block) => self.sync_authority_set(&block).await?,
+                Ok(block) => self.sync_authority_set(&block, responses).await?,
 
                 Err(RecvError::Closed) => {
                     log::warn!("Gear block listener connection closed");
@@ -234,6 +260,7 @@ impl AuthoritySetSync {
     async fn sync_authority_set(
         &mut self,
         block: &GearBlock,
+        responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<(SyncStepCount, u64)> {
         let gear_api = self.api_provider.client();
 
@@ -256,6 +283,7 @@ impl AuthoritySetSync {
                 self.genesis_config,
                 latest_authority_set_id,
                 latest_proven_authority_set_id,
+                responses,
                 self.count_thread,
             )
             .await?,

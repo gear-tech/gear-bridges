@@ -49,7 +49,7 @@ pub async fn send_message_to_bridge_builtin(
     payload: Payload,
     config: &Config,
     msg_id: MessageId,
-) -> Result<U256, Error> {
+) -> Result<(U256, H256, u64), Error> {
     let msg_tracker = msg_tracker_mut();
 
     let payload_bytes = payload.pack();
@@ -76,9 +76,9 @@ pub async fn send_message_to_bridge_builtin(
 
     if let Some(info) = msg_tracker.get_message_info(&msg_id) {
         match info.status {
-            MessageStatus::BridgeResponseReceived(Some(nonce)) => {
+            MessageStatus::BridgeResponseReceived(Some((nonce, hash, queue_id))) => {
                 msg_tracker.remove_message_info(&msg_id);
-                Ok(nonce)
+                Ok((nonce, hash, queue_id))
             }
             MessageStatus::BridgeResponseReceived(None) => Err(Error::MessageFailed),
             _ => Err(Error::InvalidMessageStatus),
@@ -107,11 +107,16 @@ fn handle_reply_hook(msg_id: MessageId) {
 }
 
 /// Decode reply received from `pallet-gear-eth-bridge` built-in actor.
-fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<U256>, Error> {
+fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<(U256, H256, u64)>, Error> {
     let reply = gbuiltin_eth_bridge::Response::decode(&mut bytes)
         .map_err(|e| Error::BuiltinDecode(format!("{e:?}")))?;
 
     match reply {
-        gbuiltin_eth_bridge::Response::EthMessageQueued { nonce, .. } => Ok(Some(nonce)),
+        gbuiltin_eth_bridge::Response::EthMessageQueued {
+            nonce,
+            hash,
+            queue_id,
+            ..
+        } => Ok(Some((nonce, hash, queue_id))),
     }
 }

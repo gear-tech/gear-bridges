@@ -3,7 +3,7 @@ use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
 use vft_client::traits::*;
-use vft_vara_client::traits::*;
+use vft_vara_client::{traits::*, Mainnet};
 
 const SIZE_MIGRATE_BATCH: u32 = 25;
 
@@ -44,6 +44,12 @@ enum CliCommands {
     Vft(VftArgs),
     /// Deploy VFT-VARA contract
     VftVara(RolesArgs),
+    /// Deploy VFT contract for WUSDT
+    Wusdt(RolesArgs),
+    /// Deploy VFT contract for WUSDC
+    Wusdc(RolesArgs),
+    /// Deploy VFT contract for WETH
+    Weth(RolesArgs),
     AllocateShards {
         /// Program ID of the VFT contract
         program_id: String,
@@ -145,6 +151,36 @@ async fn main() {
             let burner = args.burner.map(str_to_actorid);
             let uploader = Uploader::new(gear_api, minter, burner, salt);
             uploader.upload_vft_vara().await;
+        }
+
+        CliCommands::Wusdt(args) => {
+            let minter = args.minter.map(str_to_actorid);
+            let burner = args.burner.map(str_to_actorid);
+
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
+            uploader
+                .upload_vft("Bridged Tether USD".into(), "WUSDT".into(), 6)
+                .await
+        }
+
+        CliCommands::Wusdc(args) => {
+            let minter = args.minter.map(str_to_actorid);
+            let burner = args.burner.map(str_to_actorid);
+
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
+            uploader
+                .upload_vft("Bridged USD Coin".into(), "WUSDC".into(), 6)
+                .await
+        }
+
+        CliCommands::Weth(args) => {
+            let minter = args.minter.map(str_to_actorid);
+            let burner = args.burner.map(str_to_actorid);
+
+            let uploader = Uploader::new(gear_api, minter, burner, salt);
+            uploader
+                .upload_vft("Bridged Wrapped Ether".into(), "WETH".into(), 18)
+                .await
         }
 
         CliCommands::AllocateShards { program_id } => {
@@ -263,6 +299,10 @@ impl Uploader {
     }
 
     async fn upload_vft(self, name: String, symbol: String, decimals: u8) {
+        println!(
+            r#"Upload VFT with: name = "{name}", symbol = "{symbol}", decimals = "{decimals}""#
+        );
+
         let code_id = self.upload_code(vft::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");
 
@@ -283,6 +323,24 @@ impl Uploader {
     }
 
     async fn upload_vft_vara(self) {
+        let signer: gsdk::signer::Signer = self.api.clone().into();
+        let network = if signer
+            .api()
+            .rpc()
+            .system_chain()
+            .await
+            .expect("Determine chain name")
+            == "Vara Network"
+        {
+            Mainnet::Yes
+        } else {
+            Mainnet::No
+        };
+        println!(
+            "Deploy for the main network: {}",
+            matches!(network, Mainnet::Yes)
+        );
+
         let code_id = self.upload_code(vft_vara::WASM_BINARY).await;
         println!("Code uploaded: {code_id:?}");
 
@@ -294,7 +352,7 @@ impl Uploader {
             .unwrap_or_else(|| H256::random().0.to_vec());
 
         let program_id = factory
-            .new()
+            .new(network)
             .with_gas_limit(self.gas_limit)
             .send_recv(code_id, &salt)
             .await

@@ -63,6 +63,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const varaSymbol = useVaraSymbol();
 
   const { form, amount, formattedValues, handleSubmit, setMaxBalance } = useSwapForm({
+    shouldPayBridgingFee,
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
   });

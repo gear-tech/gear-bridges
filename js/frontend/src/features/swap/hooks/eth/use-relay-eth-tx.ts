@@ -9,19 +9,26 @@ import { definedAssert } from '@/utils';
 import { ETH_BEACON_NODE_ADDRESS, CONTRACT_ADDRESS } from '../../consts';
 import { initArchiveApi } from '../../utils';
 
+type Params = {
+  onLog: (message: string) => void;
+  onInBlock: () => void;
+  onFinalization: () => void;
+  onError: (error: Error) => void;
+};
+
 function useRelayEthTx(txHash: HexString) {
   const { account } = useAccount();
 
   const publicClient = usePublicClient();
 
-  const relay = async (onLog: (message: string) => void) => {
+  const relay = async ({ onLog, onInBlock, onFinalization, onError }: Params) => {
     definedAssert(account, 'Account');
     definedAssert(publicClient, 'Ethereum Public Client');
 
     const archiveApi = await initArchiveApi();
 
     try {
-      const { error, ok, ...result } = await relayEthToVara({
+      const { error, ok, isFinalized } = await relayEthToVara({
         transactionHash: txHash,
         beaconRpcUrl: ETH_BEACON_NODE_ADDRESS,
         ethereumPublicClient: publicClient,
@@ -39,7 +46,15 @@ function useRelayEthTx(txHash: HexString) {
       if (error) throw new Error(JSON.stringify(error));
       if (!ok) throw new Error('Failed to relay Ethereum transaction');
 
-      return result;
+      onInBlock();
+
+      // treat carefully order of execution.
+      // if it's wrong - archiveApi.disconnect will be fired before isFinalized is resolved
+      await isFinalized;
+
+      onFinalization();
+    } catch (error) {
+      onError(error as Error);
     } finally {
       await archiveApi.disconnect();
     }

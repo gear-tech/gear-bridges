@@ -1,19 +1,39 @@
 import { useAccount } from '@gear-js/react-hooks';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useEthAccount } from '@/hooks';
 
+import { TransfersCountQueryQuery } from '../graphql/graphql';
 import { Status, TransferFilter } from '../types';
 
 import { useTransactionsCount } from './use-transactions-count';
 
-function usePendingTxsCount() {
+function usePendingTxsCountFilter() {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
   const accountAddress = account?.decodedAddress || ethAccount.address?.toLowerCase();
-  const filter = { sender: { equalTo: accountAddress }, status: { equalTo: Status.AwaitingPayment } } as TransferFilter;
 
-  return useTransactionsCount({ filter, refetchInterval: 60000, enabled: Boolean(accountAddress) });
+  const filter = { sender: { equalTo: accountAddress }, status: { equalTo: Status.AwaitingPayment } } as TransferFilter;
+  const enabled = Boolean(accountAddress);
+
+  return { filter, enabled };
 }
 
-export { usePendingTxsCount };
+function useOptimisticPendingTxsCountUpdate() {
+  const queryClient = useQueryClient();
+  const { filter } = usePendingTxsCountFilter();
+
+  return () =>
+    queryClient.setQueryData<TransfersCountQueryQuery>(['transactionsCount', filter], (data) => ({
+      allTransfers: { totalCount: (data?.allTransfers?.totalCount || 0) + 1 },
+    }));
+}
+
+function usePendingTxsCount() {
+  const { filter, enabled } = usePendingTxsCountFilter();
+
+  return useTransactionsCount({ filter, enabled, refetchInterval: 60000 });
+}
+
+export { usePendingTxsCount, useOptimisticPendingTxsCountUpdate };

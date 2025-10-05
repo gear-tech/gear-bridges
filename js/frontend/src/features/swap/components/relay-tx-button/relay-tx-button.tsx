@@ -6,17 +6,18 @@ import { useAppKit } from '@reown/appkit/react';
 
 import { Tooltip } from '@/components';
 import { useEthAccount, useModal } from '@/hooks';
-import { getErrorMessage, isUndefined } from '@/utils';
+import { getErrorMessage, isUndefined, logger } from '@/utils';
 
 import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
 
 type VaraProps = {
   nonce: HexString;
   blockNumber: string;
-  onSuccess: () => void;
+  onReceipt: () => void;
+  onConfirmation: () => void;
 };
 
-function RelayVaraTxButton({ nonce, blockNumber, onSuccess }: VaraProps) {
+function RelayVaraTxButton({ nonce, blockNumber, onConfirmation, ...props }: VaraProps) {
   const { account } = useAccount();
 
   const ethAccount = useEthAccount();
@@ -25,20 +26,25 @@ function RelayVaraTxButton({ nonce, blockNumber, onSuccess }: VaraProps) {
   const alert = useAlert();
 
   const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
-  const { mutateAsync, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
+  const { mutate, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (!ethAccount.address) return openEthModal();
 
     const alertId = alert.loading('Relaying Vara transaction...');
     const onLog = (message: string) => alert.update(alertId, message);
 
-    mutateAsync(onLog)
-      .then(() => {
-        onSuccess();
-        alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
-      })
-      .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
+    const onReceipt = () => {
+      props.onReceipt();
+      alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+    };
+
+    const onError = (error: Error) => {
+      logger.error('Vara -> Eth relay', error);
+      alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
+    };
+
+    mutate({ onLog, onReceipt, onConfirmation, onError });
   };
 
   const renderTooltipText = () => {
@@ -80,10 +86,11 @@ function RelayVaraTxButton({ nonce, blockNumber, onSuccess }: VaraProps) {
 type EthProps = {
   blockNumber: bigint;
   txHash: HexString;
-  onSuccess: () => void;
+  onInBlock: () => void;
+  onFinalization: () => void;
 };
 
-function RelayEthTxButton({ txHash, blockNumber, onSuccess }: EthProps) {
+function RelayEthTxButton({ txHash, blockNumber, onFinalization, ...props }: EthProps) {
   const { account } = useAccount();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
@@ -91,20 +98,26 @@ function RelayEthTxButton({ txHash, blockNumber, onSuccess }: EthProps) {
   const alert = useAlert();
 
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
-  const { mutateAsync, isPending } = useRelayEthTx(txHash);
+  const { mutate, isPending } = useRelayEthTx(txHash);
 
   const handleClick = () => {
     if (!account) return openSubstrateModal();
 
     const alertId = alert.loading('Relaying Ethereum transaction...');
+
     const onLog = (message: string) => alert.update(alertId, message);
 
-    mutateAsync(onLog)
-      .then(() => {
-        onSuccess();
-        alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
-      })
-      .catch((error: Error) => alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS));
+    const onInBlock = () => {
+      alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+      props.onInBlock();
+    };
+
+    const onError = (error: Error) => {
+      logger.error('Eth -> Vara relay', error);
+      alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
+    };
+
+    mutate({ onLog, onInBlock, onFinalization, onError });
   };
 
   const renderTooltipText = () => {

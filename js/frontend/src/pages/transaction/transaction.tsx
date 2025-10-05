@@ -6,7 +6,7 @@ import { useParams } from 'react-router-dom';
 import ArrowSVG from '@/assets/arrow.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
 import { useTokens } from '@/context';
-import { useTransaction } from '@/features/history';
+import { useOptimisticTxUpdate, useTransaction } from '@/features/history';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
 import { PayVaraFeeButton, RelayTxButton, RelayTxNote } from '@/features/swap';
@@ -82,6 +82,7 @@ function Transaction() {
 
   const { getHistoryToken } = useTokens();
   const { data, refetch } = useTransaction(id);
+  const optimisticTxUpdate = useOptimisticTxUpdate(id);
 
   if (!data || !getHistoryToken) return <TransactionSkeleton />;
 
@@ -133,18 +134,26 @@ function Transaction() {
         {isAwaitingPayment && (
           <div className={styles.sidebar}>
             <div className={styles.buttons}>
-              {isVaraNetwork && <PayVaraFeeButton transactionId={id} nonce={rawNonce} />}
+              {isVaraNetwork && (
+                <PayVaraFeeButton nonce={rawNonce} onInBlock={optimisticTxUpdate} onFinalization={refetch} />
+              )}
 
               {isVaraNetwork ? (
                 bridgingStartedAtBlock && (
                   <RelayTxButton.Vara
                     nonce={rawNonce as HexString}
                     blockNumber={bridgingStartedAtBlock}
-                    onSuccess={refetch}
+                    onReceipt={optimisticTxUpdate}
+                    onConfirmation={refetch}
                   />
                 )
               ) : (
-                <RelayTxButton.Eth txHash={txHash as HexString} blockNumber={BigInt(blockNumber)} onSuccess={refetch} />
+                <RelayTxButton.Eth
+                  txHash={txHash as HexString}
+                  blockNumber={BigInt(blockNumber)}
+                  onInBlock={optimisticTxUpdate}
+                  onFinalization={refetch}
+                />
               )}
             </div>
 

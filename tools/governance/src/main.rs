@@ -21,6 +21,7 @@ use error::*;
 struct Deployment {
     governance_admin: Address,
     governance_pauser: Address,
+    wrapped_vara: Address,
     message_queue: Address,
     #[serde(rename = "ERC20Manager")]
     erc20_manager: Address,
@@ -110,6 +111,7 @@ fn pause_proxy(
         ),
     };
     let proxy_address = match proxy {
+        ProxyType::WrappedVara => deployment.wrapped_vara,
         ProxyType::MessageQueue => deployment.message_queue,
         ProxyType::ERC20Manager => deployment.erc20_manager,
     };
@@ -141,6 +143,7 @@ fn unpause_proxy(
         ),
     };
     let proxy_address = match proxy {
+        ProxyType::WrappedVara => deployment.wrapped_vara,
         ProxyType::MessageQueue => deployment.message_queue,
         ProxyType::ERC20Manager => deployment.erc20_manager,
     };
@@ -167,6 +170,7 @@ fn upgrade_proxy(
         deployment.governance_admin,
     );
     let proxy_address = match proxy {
+        ProxyType::WrappedVara => deployment.wrapped_vara,
         ProxyType::MessageQueue => deployment.message_queue,
         ProxyType::ERC20Manager => deployment.erc20_manager,
     };

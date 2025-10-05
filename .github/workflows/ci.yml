@@ -17,7 +17,31 @@ env:
   __GEAR_WASM_BUILDER_NO_FEATURES_TRACKING: 1
 
 jobs:
+  check-frontend-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_changed: ${{ steps.filter.outputs.frontend }}
+      non_frontend_changed: ${{ steps.filter.outputs.non_frontend }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Filter files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'js/frontend/**'
+              - 'package.json'
+              - 'yarn.lock'
+            non_frontend:
+              - '**'
+              - '!js/frontend/**'
+              - '!package.json'
+              - '!yarn.lock'
   build:
+    needs: check-frontend-changes
+    if: ${{ github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true' }}
     runs-on: kuberunner
     steps:
       - name: Checkout
@@ -37,8 +61,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -110,6 +132,8 @@ jobs:
           done
 
   lints:
+    needs: check-frontend-changes
+    if: ${{ github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true' }}
     runs-on: kuberunner
     steps:
       - name: Checkout
@@ -129,8 +153,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -158,6 +180,8 @@ jobs:
         run: cargo fmt -- --check
 
   tests:
+    needs: check-frontend-changes
+    if: ${{ github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true' }}
     runs-on: kuberunner
     env:
       NODE_CONTAINER_NAME: gear_node${{ github.run_id }}_${{ github.run_number }}
@@ -179,8 +203,6 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: 'v1.2.3'
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -215,6 +237,9 @@ jobs:
           --exclude plonky2_sha512
           --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
 
+      - name: Run prover asserting tests
+        run: cargo test --release --package prover assert_constants
+
       - name: Run solidity tests
         run: |
           cd ethereum
@@ -243,9 +268,11 @@ jobs:
               - 'prover/**'
 
   zk-tests:
-    runs-on: kuberunner
+    runs-on: zk-tests
+    env:
+      VBLAKE2_CACHE_PATH: "/VariativeBlake2"
     needs: check-zk-circuits-changed
-    if: ${{needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
+    if: ${{ (github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true') && needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

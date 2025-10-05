@@ -86,8 +86,8 @@ pub async fn request_bridging(
     )
     .await;
 
-    let nonce = match bridge_builtin_reply {
-        Ok(nonce) => nonce,
+    let (nonce, hash, queue_id) = match bridge_builtin_reply {
+        Ok(result) => result,
         Err(e) => {
             // Set critical section ensuring the message status is `SendingMessageToReturnTokens`
             // regardless of the result of the next code execution.
@@ -116,6 +116,8 @@ pub async fn request_bridging(
     service
         .emit_event(Event::BridgingRequested {
             nonce,
+            queue_id,
+            hash,
             vara_token_id,
             amount,
             sender,

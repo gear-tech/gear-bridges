@@ -10,7 +10,7 @@ use alloy::{
         Identity, Provider, ProviderBuilder, RootProvider,
     },
     pubsub::Subscription,
-    rpc::types::{Block, BlockId, BlockNumberOrTag, Filter, Log as RpcLog},
+    rpc::types::{Block, BlockId, BlockNumberOrTag, Filter, Header, Log as RpcLog},
     signers::local::PrivateKeySigner,
     sol_types::SolEvent,
     transports::{ws::WsConnect, RpcError, TransportErrorKind},
@@ -18,7 +18,7 @@ use alloy::{
 use anyhow::{Context, Result as AnyResult};
 use primitive_types::{H160, H256};
 use reqwest::Url;
-use std::{ops::Deref, str::FromStr};
+use std::{ops::Deref, str::FromStr, time::Duration};
 
 pub use alloy::primitives::TxHash;
 
@@ -103,6 +103,10 @@ impl PollingEthApi {
 
     pub async fn finalized_block(&self) -> AnyResult<Block> {
         self::finalized_block(&self.provider).await
+    }
+
+    pub async fn safe_block(&self) -> AnyResult<Block> {
+        self::safe_block(&self.provider).await
     }
 
     pub async fn get_block(&self, block: u64) -> AnyResult<Block> {
@@ -191,6 +195,20 @@ pub async fn finalized_block(provider: impl Provider) -> AnyResult<Block> {
         .context("Finalized block is None")
 }
 
+pub async fn latest_block(provider: impl Provider) -> AnyResult<Block> {
+    provider
+        .get_block_by_number(BlockNumberOrTag::Latest)
+        .await?
+        .context("Latest block is None")
+}
+
+pub async fn safe_block(provider: impl Provider) -> AnyResult<Block> {
+    provider
+        .get_block_by_number(BlockNumberOrTag::Safe)
+        .await?
+        .context("Safe block is None")
+}
+
 pub async fn get_block(provider: impl Provider, block: u64) -> AnyResult<Block> {
     provider
         .get_block_by_number(BlockNumberOrTag::Number(block))
@@ -212,6 +230,16 @@ impl EthApi {
         message_queue_address: &str,
         private_key: Option<&str>,
     ) -> Result<EthApi, Error> {
+        Self::new_with_retries(url, message_queue_address, private_key, None, None).await
+    }
+
+    pub async fn new_with_retries(
+        url: &str,
+        message_queue_address: &str,
+        private_key: Option<&str>,
+        ws_max_retry: Option<u32>,
+        ws_retry_interval: Option<Duration>,
+    ) -> Result<EthApi, Error> {
         let signer = match private_key {
             Some(private_key) => {
                 let pk: B256 =
@@ -230,7 +258,17 @@ impl EthApi {
             .map_err(|_| Error::WrongAddress)?;
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
-        let ws = WsConnect::new(url.clone());
+
+        let mut ws = WsConnect::new(url.clone());
+
+        if let Some(ws_max_retry) = ws_max_retry {
+            ws = ws.with_max_retries(ws_max_retry)
+        }
+
+        if let Some(ws_retry_interval) = ws_retry_interval {
+            ws = ws.with_retry_interval(ws_retry_interval)
+        }
+
         let provider: ProviderType = ProviderBuilder::new()
             .wallet(wallet.clone())
             .connect_ws(ws)
@@ -271,6 +309,30 @@ impl EthApi {
         &self.contracts.provider
     }
 
+    /// Returns the maximum block number that can be submitted as part of a
+    /// merkle-root submission into MessageQueue contract.
+    pub async fn max_block_number(&self) -> Result<u32, Error> {
+        self.contracts.max_block_number().await
+    }
+
+    /// Returns the delay (in seconds) requires before merkle-root submitted
+    /// by an admin can be used.
+    pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
+        self.contracts.process_admin_message_delay().await
+    }
+
+    /// Returns the delay (in seconds) requires before merkle-root submitted
+    /// by a pauser can be used.
+    pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
+        self.contracts.process_pauser_message_delay().await
+    }
+
+    /// Returns the delay (in seconds) requires before merkle-root submitted
+    /// by an arbitrary user can be used.
+    pub async fn process_user_message_delay(&self) -> Result<u64, Error> {
+        self.contracts.process_user_message_delay().await
+    }
+
     pub async fn get_approx_balance(&self) -> Result<f64, Error> {
         self.contracts.get_approx_balance(self.public_key).await
     }
@@ -288,6 +350,10 @@ impl EthApi {
                 Bytes::from(proof),
             )
             .await
+    }
+
+    pub async fn send_challenge_root(&self) -> Result<TxHash, Error> {
+        self.contracts.challenge_root().await
     }
 
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
@@ -342,6 +408,14 @@ impl EthApi {
             .number)
     }
 
+    pub async fn latest_block_number(&self) -> AnyResult<u64> {
+        Ok(self::latest_block(self.raw_provider()).await?.header.number)
+    }
+
+    pub async fn safe_block_number(&self) -> AnyResult<u64> {
+        Ok(self::safe_block(self.raw_provider()).await?.header.number)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn provide_content_message(
         &self,
@@ -383,6 +457,12 @@ impl EthApi {
 
         self.raw_provider().clone().subscribe_logs(&filter).await
     }
+
+    pub async fn subscribe_blocks(
+        &self,
+    ) -> Result<Subscription<Header>, RpcError<TransportErrorKind>> {
+        self.raw_provider().clone().subscribe_blocks().await
+    }
 }
 
 impl Contracts {
@@ -394,6 +474,42 @@ impl Contracts {
             provider,
             message_queue_instance,
         })
+    }
+
+    pub async fn max_block_number(&self) -> Result<u32, Error> {
+        self.message_queue_instance
+            .maxBlockNumber()
+            .call()
+            .await
+            .map(|num| num.to())
+            .map_err(Error::ErrorDuringContractExecution)
+    }
+
+    pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
+        self.message_queue_instance
+            .PROCESS_ADMIN_MESSAGE_DELAY()
+            .call()
+            .await
+            .map(|delay| delay.to())
+            .map_err(Error::ErrorDuringContractExecution)
+    }
+
+    pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
+        self.message_queue_instance
+            .PROCESS_PAUSER_MESSAGE_DELAY()
+            .call()
+            .await
+            .map(|delay| delay.to())
+            .map_err(Error::ErrorDuringContractExecution)
+    }
+
+    pub async fn process_user_message_delay(&self) -> Result<u64, Error> {
+        self.message_queue_instance
+            .PROCESS_USER_MESSAGE_DELAY()
+            .call()
+            .await
+            .map(|delay| delay.to())
+            .map_err(Error::ErrorDuringContractExecution)
     }
 
     pub async fn get_approx_balance(&self, address: Address) -> Result<f64, Error> {
@@ -422,6 +538,42 @@ impl Contracts {
                     .send()
                     .await
                 {
+                    Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
+                    Err(e) => {
+                        log::error!("Sending error: {e:?}");
+                        if let Some(e) =
+                            e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                        {
+                            return Err(Error::MessageQueue(e));
+                        }
+
+                        Err(Error::ErrorSendingTransaction(e))
+                    }
+                }
+            }
+
+            Err(e) => {
+                if let Some(e) =
+                    e.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
+                {
+                    return Err(Error::MessageQueue(e));
+                }
+
+                Err(Error::ErrorDuringContractExecution(e))
+            }
+        }
+    }
+
+    pub async fn challenge_root(&self) -> Result<TxHash, Error> {
+        match self
+            .message_queue_instance
+            .challengeRoot()
+            .estimate_gas()
+            .await
+        {
+            Ok(gas_used) => {
+                log::info!("Gas used: {gas_used}");
+                match self.message_queue_instance.challengeRoot().send().await {
                     Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");

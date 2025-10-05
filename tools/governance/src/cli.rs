@@ -89,6 +89,8 @@ pub enum GovernancePauserCommand {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "verbatim")]
 pub enum ProxyType {
+    /// WrappedVara
+    WrappedVara,
     /// MessageQueue
     MessageQueue,
     /// ERC20Manager

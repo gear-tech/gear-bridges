@@ -17,6 +17,15 @@ use awesome_sails_services::{
 use core::cell::RefCell;
 use sails_rs::{gstd::msg, prelude::*};
 
+/// Specifies the network for deployment of VFT-VARA
+#[derive(Decode, TypeInfo)]
+#[scale_info(crate = sails_rs::scale_info)]
+#[codec(crate = sails_rs::scale_codec)]
+pub enum Mainnet {
+    Yes,
+    No,
+}
+
 pub struct Program {
     authorities: RefCell<Authorities>,
     allowances: Pausable<RefCell<Allowances>>,
@@ -27,8 +36,7 @@ pub struct Program {
 
 #[program]
 impl Program {
-    // Program's constructor
-    pub fn new() -> Self {
+    pub fn new(network: Mainnet) -> Self {
         let pause = Pause::default();
 
         // Allowance is represented as 9 bytes unsigned int.
@@ -44,11 +52,11 @@ impl Program {
         let mut balances = Balances::default();
         balances.set_minimum_balance(1_000_000_000_000u64.into());
 
-        let metadata = Metadata::new(
-            String::from("Vara Network Wrapped Token"),
-            String::from("WVARA"),
-            12,
-        );
+        let metadata = match network {
+            Mainnet::Yes => Metadata::new("Wrapped Vara".into(), "WVARA".into(), 12),
+
+            Mainnet::No => Metadata::new("Wrapped Testnet Vara".into(), "WTVARA".into(), 12),
+        };
 
         Self {
             authorities: RefCell::new(Authorities::from_one(msg::source())),
@@ -97,11 +105,5 @@ impl Program {
 
     pub fn vft_native_exchange_admin(&self) -> vft_native_exchange_admin::Service<'_> {
         vft_native_exchange_admin::Service::new(self.vft_admin())
-    }
-}
-
-impl Default for Program {
-    fn default() -> Self {
-        Self::new()
     }
 }

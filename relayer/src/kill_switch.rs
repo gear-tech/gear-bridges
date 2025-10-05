@@ -1,41 +1,29 @@
-use std::{
-    process,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{process, time::Duration};
 
-use block_finality_archiver::{BlockFinalityArchiver, BlockFinalityProofWithHash};
+use reqwest::Client as HttpClient;
+use thiserror::Error;
+
 use ethereum_client::{EthApi, MerkleRootEntry, TxHash, TxStatus};
-use parity_scale_codec::Decode;
 use prometheus::{Gauge, IntCounter, IntGauge};
-use prover::proving::GenesisConfig;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
     common::{
-        self, submit_merkle_root_to_ethereum, sync_authority_set_id, SyncStepCount,
-        BASE_RETRY_DELAY, MAX_RETRIES,
+        is_rpc_transport_error_recoverable, send_challege_root_to_ethereum,
+        submit_merkle_root_to_ethereum,
     },
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
-    proof_storage::ProofStorage,
-    prover_interface::{self, FinalProof},
+    message_relayer::{
+        common::web_request::{MerkleRootBlocks, MerkleRootsResponse},
+        eth_to_gear::api_provider::ApiProviderConnection,
+    },
+    prover_interface::FinalProof,
 };
-use block_finality_archiver::Metrics as BlockFinalityArchiverMetrics;
 
-mod block_finality_archiver;
-
-const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(12);
+const SCAN_EVENTS_PERIOD_SEC: Duration = Duration::from_secs(12);
+const ERROR_REPEAT_DELAY: Duration = Duration::from_secs(3);
 
 impl_metered_service! {
     struct Metrics {
-        latest_proven_era: IntGauge = IntGauge::new(
-            "kill_switch_latest_proven_era",
-            "Latest proven era number",
-        ),
-        latest_observed_gear_era: IntGauge = IntGauge::new(
-            "kill_switch_latest_observed_gear_era",
-            "Latest era number observed by relayer",
-        ),
         fee_payer_balance: Gauge = Gauge::new(
             "kill_switch_fee_payer_balance",
             "Transaction fee payer balance",
@@ -52,180 +40,229 @@ impl_metered_service! {
             "kill_switch_merkle_root_mismatch_cnt",
             "Amount of merkle root mismatches found",
         ),
-        finality_proof_for_mismatched_root_not_found_cnt: IntCounter = IntCounter::new(
-            "kill_switch_finality_proof_for_mismatched_root_not_found_cnt",
-            "Amount of not found finality proofs",
+        challenge_sent_cnt: IntCounter = IntCounter::new(
+            "kill_switch_challenge_sent_cnt",
+            "Amount of challenge sends finalized",
+        ),
+        merkle_root_proof_not_found_on_block_cnt: IntCounter = IntCounter::new(
+            "kill_switch_merkle_root_proof_not_found_on_block",
+            "Amount of merkle root proofs not found on block",
         ),
     }
 }
 
+#[derive(Debug, Error)]
+enum ScanForEventsError {
+    #[error("Ethereum API error: {0}")]
+    EthApi(#[from] ethereum_client::Error),
+    #[error("Gear API error: {0}")]
+    GearApi(#[from] anyhow::Error),
+    #[error("Other error: {0}")]
+    Other(anyhow::Error),
+}
+
+#[derive(Debug, Error)]
+enum ChallengeRootError {
+    #[error("Ethereum API error: {0}")]
+    EthApi(#[from] ethereum_client::Error),
+}
+
+#[derive(Debug, Error)]
+enum SubmitMerkleRootError {
+    #[error("Reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("No merkle root on block {block_number}")]
+    NoMerkleRootOnBlock { block_number: u32 },
+    #[error("Other error: {0}")]
+    Other(String),
+    #[error("Ethereum API error: {0}")]
+    EthApi(#[from] ethereum_client::Error),
+}
+
+#[derive(Debug, Error)]
+enum Error {
+    #[error("Scan for events error: {0}")]
+    ScanForEvents(#[from] ScanForEventsError),
+    #[error("Challenge root error: {0}")]
+    ChallengeRoot(#[from] ChallengeRootError),
+    #[error("Submit merkle root error: {0}")]
+    SubmitMerkleRoot(#[from] SubmitMerkleRootError),
+}
+
 enum State {
-    Normal,
-    // Before exit we need to wait for the kill switch transaction to be finalized.
-    WaitingForKillSwitchTxFin { tx_hash: TxHash, proof: FinalProof },
+    // Scan for events (normal operation)
+    ScanForEvents,
+    // Waiting for challenge root tx to be finalized
+    ChallengeRoot { tx_hash: Option<TxHash> },
+    // Waiting for submit merkle root tx to be finalized
+    SubmitMerkleRoot { tx_hash: Option<TxHash> },
+    // Exit
+    Exit,
 }
 
 pub struct KillSwitchRelayer {
     api_provider: ApiProviderConnection,
-    eth_api: EthApi,
-    genesis_config: GenesisConfig,
-    proof_storage: Arc<dyn ProofStorage>,
+    eth_observer_api: EthApi,
+    eth_admin_api: Option<EthApi>,
+    http_client: HttpClient,
+    relayer_http_url: String,
 
     start_from_eth_block: Option<u64>,
     state: State,
-    block_finality_storage: sled::Db,
+    challenged_block: Option<u64>,
 
     metrics: Metrics,
-    block_finality_metrics: BlockFinalityArchiverMetrics,
-
-    count_thread: Option<usize>,
 }
 
 impl MeteredService for KillSwitchRelayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.metrics
-            .get_sources()
-            .into_iter()
-            .chain(self.block_finality_metrics.get_sources())
-            .chain(prover_interface::Metrics.get_sources())
+        self.metrics.get_sources()
     }
 }
 
 impl KillSwitchRelayer {
     pub async fn new(
         api_provider: ApiProviderConnection,
-        eth_api: EthApi,
-        genesis_config: GenesisConfig,
-        proof_storage: Arc<dyn ProofStorage>,
+        eth_observer_api: EthApi,
+        eth_admin_api: Option<EthApi>,
+        http_client: HttpClient,
         from_eth_block: Option<u64>,
-        block_finality_storage: sled::Db,
-
-        count_thread: Option<usize>,
+        relayer_http_url: String,
     ) -> Self {
         Self {
             api_provider,
-            eth_api,
-            genesis_config,
-            proof_storage,
+            eth_observer_api,
+            eth_admin_api,
+            relayer_http_url,
+            http_client,
             start_from_eth_block: from_eth_block,
-            state: State::Normal,
-            block_finality_storage,
+            state: State::ScanForEvents,
+            challenged_block: None,
             metrics: Metrics::new(),
-            block_finality_metrics: BlockFinalityArchiverMetrics::new(),
-            count_thread,
         }
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        self.spawn_block_finality_archiver()?;
-
-        log::info!("Starting kill switch relayer");
-
-        let mut attempts = 0;
+        log::info!(
+            "Starting kill switch relayer, with {}",
+            if self.eth_admin_api.is_some() {
+                "observer + admin roles"
+            } else {
+                "observer role"
+            }
+        );
 
         loop {
-            attempts += 1;
-            let now = Instant::now();
+            let loop_delay;
+
             let res = match &self.state {
-                State::Normal => self.main_loop().await,
-                State::WaitingForKillSwitchTxFin { tx_hash, .. } => {
-                    self.check_kill_switch_tx_finalized(*tx_hash).await
+                State::ScanForEvents => self.scan_for_events().await.map_err(Error::from),
+                State::ChallengeRoot { .. } => self.challenge_root().await.map_err(Error::from),
+                State::SubmitMerkleRoot { .. } => {
+                    self.submit_merkle_root().await.map_err(Error::from)
+                }
+                State::Exit => {
+                    process::exit(1);
                 }
             };
 
-            if let Err(err) = res {
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                    "Main loop error (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}..."
-                );
-                if attempts >= MAX_RETRIES {
-                    log::error!("Max attempts reached, exiting ..");
-                    return Err(err);
+            match res {
+                Ok(()) => {
+                    loop_delay = if let State::ScanForEvents = self.state {
+                        // Repeat merkle root event scan after a delay
+                        SCAN_EVENTS_PERIOD_SEC
+                    } else {
+                        // New state entered or polling in Challenge/Submit states
+                        Duration::from_secs(5)
+                    };
                 }
+                Err(err) => {
+                    loop_delay = ERROR_REPEAT_DELAY;
 
-                tokio::time::sleep(BASE_RETRY_DELAY * attempts).await;
-                match self.api_provider.reconnect().await {
-                    Ok(()) => {
-                        log::info!("Gear block listener reconnected");
+                    let eth_api = if let State::SubmitMerkleRoot { .. } = self.state {
+                        self.eth_admin_api.as_ref().expect("bad state")
+                    } else {
+                        &self.eth_observer_api
+                    };
+
+                    match err {
+                        Error::ScanForEvents(ScanForEventsError::EthApi(
+                            ethereum_client::Error::ErrorInHTTPTransport(err),
+                        ))
+                        | Error::ChallengeRoot(ChallengeRootError::EthApi(
+                            ethereum_client::Error::ErrorInHTTPTransport(err),
+                        ))
+                        | Error::SubmitMerkleRoot(SubmitMerkleRootError::EthApi(
+                            ethereum_client::Error::ErrorInHTTPTransport(err),
+                        )) => {
+                            if is_rpc_transport_error_recoverable(&err) {
+                                // Reconnect on Ethereum API
+                                log::error!(
+                                    "Recoverable Ethereum transport error: {err}, reconnecting..."
+                                );
+                                if let Err(e) = eth_api.reconnect().await {
+                                    log::error!("Ethereum API reconnect failed: {e}");
+                                }
+                            }
+                        }
+                        Error::ScanForEvents(ScanForEventsError::GearApi(e)) => {
+                            // Reconnect on Gear API
+                            log::error!("Gear API error: {e}, reconnecting...");
+                            if let Err(e) = self.api_provider.reconnect().await {
+                                log::error!("Gear API reconnect failed: {e}");
+                            }
+                        }
+                        e => {
+                            log::error!("Error in kill switch relayer: {e}");
+                        }
                     }
-
-                    Err(err) => {
-                        log::error!("Gear block listener unable to reconnect: {err}");
-                        return Err(anyhow::anyhow!("Failed to reconnect: {}", err));
-                    }
-                }
-
-                if common::is_transport_error_recoverable(&err) {
-                    self.eth_api = self
-                        .eth_api
-                        .reconnect()
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to reconnect: {}", e))?;
                 }
             }
 
-            let main_loop_duration = now.elapsed();
-            if main_loop_duration < MIN_MAIN_LOOP_DURATION {
-                tokio::time::sleep(MIN_MAIN_LOOP_DURATION - main_loop_duration).await;
-            }
+            tokio::time::sleep(loop_delay).await;
         }
     }
 
-    fn spawn_block_finality_archiver(&self) -> anyhow::Result<()> {
-        log::info!("Spawning block finality archiver");
-        let mut block_finality_saver = BlockFinalityArchiver::new(
-            self.api_provider.clone(),
-            self.block_finality_storage.clone(),
-            self.block_finality_metrics.clone(),
-        );
-        tokio::spawn(async move {
-            block_finality_saver.run().await;
-        });
-
-        Ok(())
-    }
-
-    async fn main_loop(&mut self) -> anyhow::Result<()> {
-        let balance = self.eth_api.get_approx_balance().await?;
+    async fn scan_for_events(&mut self) -> Result<(), ScanForEventsError> {
+        let balance = self.eth_observer_api.get_approx_balance().await?;
         self.metrics.fee_payer_balance.set(balance);
 
-        log::info!("Syncing authority set id");
-        loop {
-            let sync_steps = self.sync_authority_set_id().await?;
-            if sync_steps == 0 {
-                break;
-            } else {
-                log::info!("Synced {sync_steps} authority set ids");
-            }
-        }
+        let last_finalized_block = self
+            .eth_observer_api
+            .finalized_block_number()
+            .await
+            .map_err(downcast_anyhow_to_ethereum_client)?;
 
-        let last_finalized_block = self.eth_api.finalized_block_number().await?;
+        let latest_block = self
+            .eth_observer_api
+            .latest_block_number()
+            .await
+            .map_err(downcast_anyhow_to_ethereum_client)?;
 
         // Set the initial value for `from_eth_block` if it's not set yet.
-        if self.start_from_eth_block.is_none() {
-            self.start_from_eth_block = Some(last_finalized_block);
-        }
+        let start_from_eth_block = self.start_from_eth_block.unwrap_or(last_finalized_block);
 
-        let start_from_eth_block = self.start_from_eth_block.expect("should be set above");
-        if last_finalized_block < start_from_eth_block {
-            log::info!(
-                "No new eth block, skipping.. last_processed_eth_block={}, last_finalized_block={}",
-                start_from_eth_block.saturating_sub(1),
-                last_finalized_block,
-            );
+        log::info!(
+            "Scanning.. last_processed_eth_block={}, last_finalized_block={}, latest_block={}",
+            start_from_eth_block.saturating_sub(1),
+            last_finalized_block,
+            latest_block,
+        );
+
+        if latest_block < start_from_eth_block {
+            log::info!("No new eth block, skipping..");
             return Ok(());
         } else {
-            self.metrics
-                .latest_eth_block
-                .set(last_finalized_block as i64);
+            self.metrics.latest_eth_block.set(latest_block as i64);
         }
 
         let events = self
-            .eth_api
-            .fetch_merkle_roots_in_range(start_from_eth_block, last_finalized_block)
+            .eth_observer_api
+            .fetch_merkle_roots_in_range(start_from_eth_block, latest_block)
             .await?;
 
         if !events.is_empty() {
+            // FIXME: doesn't work as intended, discovered events can be duplicated
             self.metrics
                 .merkle_roots_discovered_cnt
                 .inc_by(events.len() as u64);
@@ -234,140 +271,137 @@ impl KillSwitchRelayer {
         for (event, _block_number_eth) in events {
             if !self.compare_merkle_roots(&event).await? {
                 // Okay, we have a mismatch,
-                // that means for some reason the proof with incorrect merkle root was submitted to relayer contract.
-                // We need to generate the correct proof and submit it to the relayer contract.
+                // that means for some reason the proof with incorrect merkle root was submitted to relayer MQ contract.
+                // We need to challenge it by submitting the correct merkle root.
                 log::debug!("Got event with mismatched merkle root: {:?}", &event);
 
-                let Some(block_finality) = self
-                    .get_block_finality_from_storage(event.block_number)
-                    .await?
-                else {
-                    log::error!(
-                        "Block finality proof not found for block #{}",
-                        event.block_number
-                    );
-                    self.metrics
-                        .finality_proof_for_mismatched_root_not_found_cnt
-                        .inc();
-                    continue;
-                };
+                // Switch to challenge root state
+                self.state = State::ChallengeRoot { tx_hash: None };
+                self.challenged_block = Some(event.block_number);
 
-                log::info!("Proving merkle root presence");
-                let proof = self
-                    .generate_proof(event.block_number, block_finality)
-                    .await?;
-                log::info!("Proven merkle root presence");
-
-                log::info!("Submitting new proof to ethereum");
-                let tx_hash = submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
-                log::info!("New proof submitted to ethereum, tx hash: {:X?}", &tx_hash);
-
-                // Resubmitting the correct proof instead of the incorrect one
-                // will trigger the emergency stop condition (i.e. the kill switch) in relayer contract.
-                // After that, there's no point in continuing because the relayer will be stopped/in emergency mode.
-                // Though, we need to wait for the kill switch transaction to be finalized.
-                self.state = State::WaitingForKillSwitchTxFin { tx_hash, proof };
                 return Ok(());
             }
         }
 
-        // After processing all events, `last_finalized_block` is the last block we've processed.
+        // After processing events till `latest` block, due to possible reorgs we cannot count them as processed.
+        // Instead we set the last finalized block as processed.
         // So, we need to increment it by 1 to set the next block to process.
         self.start_from_eth_block = Some(last_finalized_block.saturating_add(1));
 
         Ok(())
     }
 
-    async fn sync_authority_set_id(&mut self) -> anyhow::Result<SyncStepCount> {
-        let gear_api = self.api_provider.client();
-        let finalized_head = gear_api
-            .latest_finalized_block()
-            .await
-            .expect("should not fail");
-        let latest_authority_set_id = gear_api
-            .authority_set_id(finalized_head)
-            .await
-            .expect("should not fail");
+    async fn challenge_root(&mut self) -> Result<(), ChallengeRootError> {
+        if let State::ChallengeRoot {
+            tx_hash: Some(tx_hash),
+        } = &self.state
+        {
+            let tx_status = self.eth_observer_api.get_tx_status(*tx_hash).await?;
 
-        self.metrics
-            .latest_observed_gear_era
-            .set(latest_authority_set_id as i64);
+            match tx_status {
+                TxStatus::Finalized => {
+                    // For submit merkle root we need admin role
+                    if self.eth_admin_api.is_some() {
+                        log::info!("Challenge root TX {tx_hash:#x} finalized, switching to submit merkle root state");
+                        self.state = State::SubmitMerkleRoot { tx_hash: None };
+                    } else {
+                        log::info!("Challenge root TX {tx_hash:#x} finalized, exiting ..");
+                        self.state = State::Exit;
+                    }
+                    self.metrics.challenge_sent_cnt.inc();
 
-        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
-
-        if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
-            self.metrics.latest_proven_era.set(latest_proven as i64);
-        }
-
-        sync_authority_set_id(
-            &gear_api,
-            &self.proof_storage,
-            self.genesis_config,
-            latest_authority_set_id,
-            latest_proven_authority_set_id,
-            self.count_thread,
-        )
-        .await
-    }
-
-    async fn check_kill_switch_tx_finalized(&mut self, tx_hash: TxHash) -> anyhow::Result<()> {
-        log::info!("Checking for kill switch tx to be finalized");
-
-        let tx_status = self.eth_api.get_tx_status(tx_hash).await?;
-
-        match tx_status {
-            TxStatus::Finalized => {
-                log::info!("Kill switch tx finalized, exiting ..");
-                process::exit(0);
+                    return Ok(());
+                }
+                TxStatus::Pending => {
+                    log::info!("Challenge root TX {tx_hash:#x} is still pending, waiting ..");
+                    return Ok(());
+                }
+                TxStatus::Failed => {
+                    log::warn!("Challenge root TX {tx_hash:#x} failed. Re-trying challenge root tx finalization");
+                }
             }
-            TxStatus::Pending => (),
-            TxStatus::Failed => {
-                log::warn!("Re-trying kill switch tx #{tx_hash} finalization");
+        };
 
-                let State::WaitingForKillSwitchTxFin { tx_hash, proof } = &mut self.state else {
-                    unreachable!("Invalid state");
-                };
-
-                let new_tx_hash =
-                    submit_merkle_root_to_ethereum(&self.eth_api, proof.clone()).await?;
-                // Update hash of the new kill switch transaction
-                *tx_hash = new_tx_hash;
-            }
-        }
+        self.state = State::ChallengeRoot { tx_hash: None };
+        let tx_hash = send_challege_root_to_ethereum(&self.eth_observer_api).await?;
+        self.state = State::ChallengeRoot {
+            tx_hash: Some(tx_hash),
+        };
 
         Ok(())
     }
 
-    async fn get_block_finality_from_storage(
-        &mut self,
-        block_number: u64,
-    ) -> anyhow::Result<Option<BlockFinalityProofWithHash>> {
-        // NOTE: we use 32-bit BE keys for block finality storage.
-        let key_bytes = (block_number as u32).to_be_bytes();
+    async fn submit_merkle_root(&mut self) -> Result<(), SubmitMerkleRootError> {
+        let eth_admin_api = self
+            .eth_admin_api
+            .as_ref()
+            .expect("PK for admin role is required to submit merkle root");
 
-        let block_finality = self
-            .block_finality_storage
-            .get(key_bytes)?
-            .map(|value_bytes| BlockFinalityProofWithHash::decode(&mut &value_bytes[..]))
-            .inspect(|block_finality| {
-                if let Ok(block_finality) = block_finality {
-                    log::debug!(
-                        "Block finality proof found with block hash {:X?}",
-                        block_finality.hash
+        if let State::SubmitMerkleRoot {
+            tx_hash: Some(tx_hash),
+        } = &self.state
+        {
+            let tx_status = eth_admin_api.get_tx_status(*tx_hash).await?;
+
+            match tx_status {
+                TxStatus::Finalized => {
+                    log::info!("Submit merkle root TX {tx_hash:#x} finalized, exiting ..");
+                    self.state = State::Exit;
+                    return Ok(());
+                }
+                TxStatus::Pending => {
+                    log::info!("Submit merkle root TX {tx_hash:#x} is still pending, waiting ..");
+                    return Ok(());
+                }
+                TxStatus::Failed => {
+                    log::warn!(
+                        "Submit merkle root TX {tx_hash:#x} failed. Re-trying submit merkle root tx finalization"
                     );
                 }
-            })
-            .transpose();
+            }
+        };
 
-        Ok(block_finality?)
+        self.state = State::SubmitMerkleRoot { tx_hash: None };
+        let proof = self
+            .fetch_merkle_root_proof_from_relayer(self.challenged_block.expect("bad state"))
+            .await?;
+        let tx_hash = submit_merkle_root_to_ethereum(eth_admin_api, proof).await?;
+        self.state = State::SubmitMerkleRoot {
+            tx_hash: Some(tx_hash),
+        };
+
+        Ok(())
     }
 
-    async fn compare_merkle_roots(&self, event: &MerkleRootEntry) -> anyhow::Result<bool> {
+    async fn compare_merkle_roots(
+        &self,
+        event: &MerkleRootEntry,
+    ) -> Result<bool, ScanForEventsError> {
         let gear_api = self.api_provider.client();
-        let block_hash = gear_api
+        let res = gear_api
             .block_number_to_hash(event.block_number as u32)
-            .await?;
-        let merkle_root = gear_api.fetch_queue_merkle_root(block_hash).await?;
+            .await
+            .convert()?;
+
+        let Some(block_hash) = res else {
+            log::info!(
+                "Block #{} is not present on Gear RPC node, cannot compare merkle roots",
+                event.block_number,
+            );
+            return Ok(false);
+        };
+
+        let Some((_, merkle_root)) = gear_api
+            .fetch_queue_merkle_root(block_hash)
+            .await
+            .convert()?
+        else {
+            log::info!(
+                "Block #{} is not present on Gear RPC node, cannot compare merkle roots",
+                event.block_number,
+            );
+            return Ok(false);
+        };
 
         let is_matches = merkle_root == event.merkle_root;
 
@@ -385,31 +419,84 @@ impl KillSwitchRelayer {
         Ok(is_matches)
     }
 
-    async fn generate_proof(
+    async fn fetch_merkle_root_proof_from_relayer(
         &self,
-        block_number: u64,
-        BlockFinalityProofWithHash {
-            hash: block_hash,
-            proof: block_finality,
-        }: BlockFinalityProofWithHash,
-    ) -> anyhow::Result<FinalProof> {
-        log::info!("Proving merkle root presence in block #{block_number} with hash {block_hash}",);
+        block: u64,
+    ) -> Result<FinalProof, SubmitMerkleRootError> {
+        let body = MerkleRootBlocks {
+            blocks: vec![block as u32],
+        };
 
-        let gear_api = self.api_provider.client();
-
-        let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-        let inner_proof = self
-            .proof_storage
-            .get_proof_for_authority_set_id(authority_set_id)
+        let response: Vec<MerkleRootsResponse> = self
+            .http_client
+            .post(format!(
+                "{}/get_merkle_root_proof",
+                self.relayer_http_url.as_str()
+            ))
+            .json(&body)
+            .send()
+            .await?
+            .json()
             .await?;
 
-        prover_interface::prove_final_with_block_finality(
-            &gear_api,
-            inner_proof,
-            self.genesis_config,
-            (block_hash, block_finality),
-            self.count_thread,
-        )
-        .await
+        let response = response
+            .first()
+            .ok_or_else(|| SubmitMerkleRootError::Other("Empty response from relayer".to_string()))?
+            .clone();
+
+        let proof = match response {
+            MerkleRootsResponse::MerkleRootProof {
+                proof,
+                proof_block_number: _,
+                merkle_root,
+                block_number,
+                block_hash,
+            } => {
+                log::debug!("Fetched proof for block {block_number}: {:?}", &proof);
+                log::debug!("Merkle root: {:?}", &merkle_root);
+                log::debug!("Block hash: {block_hash:?}");
+                FinalProof {
+                    proof,
+                    merkle_root: merkle_root.to_fixed_bytes(),
+                    block_number,
+                }
+            }
+            MerkleRootsResponse::NoMerkleRootOnBlock { block_number } => {
+                log::error!("No Merkle proof root found on block {block_number}");
+                self.metrics.merkle_root_proof_not_found_on_block_cnt.inc();
+                return Err(SubmitMerkleRootError::NoMerkleRootOnBlock { block_number });
+            }
+            MerkleRootsResponse::Failed { message } => {
+                log::error!("Fetch merkle root request failed: {message}");
+                return Err(SubmitMerkleRootError::Other(message));
+            }
+        };
+
+        Ok(proof)
+    }
+}
+
+fn is_block_no_present_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains("not present on RPC node")
+}
+
+trait ConvertToOptGearApiError<T> {
+    fn convert(self) -> anyhow::Result<Option<T>>;
+}
+
+impl<T> ConvertToOptGearApiError<T> for anyhow::Result<T> {
+    fn convert(self) -> anyhow::Result<Option<T>> {
+        match self {
+            Err(err) if is_block_no_present_error(&err) => Ok(None),
+            Err(err) => Err(err),
+            Ok(val) => Ok(Some(val)),
+        }
+    }
+}
+
+fn downcast_anyhow_to_ethereum_client(err: anyhow::Error) -> ScanForEventsError {
+    match err.downcast::<ethereum_client::Error>() {
+        Ok(e) => ScanForEventsError::EthApi(e),
+        Err(e) => ScanForEventsError::Other(e),
     }
 }

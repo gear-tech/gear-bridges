@@ -37,10 +37,6 @@ const [txHash, programId] = process.argv.slice(2).map((arg) => {
   return match ? (match[2] as HexString) : undefined;
 });
 
-console.log(process.argv.slice(2));
-
-console.log(txHash, programId);
-
 if (!programId && !fs.existsSync(PING_WASM_PATH)) {
   console.log(`Ping wasm wasn't found. Building the program...`);
   execSync('cargo build -p ping --release', { stdio: 'inherit' });

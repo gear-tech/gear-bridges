@@ -32,7 +32,7 @@ contract GovernancePauserTest is Test, Base {
 
     function test_HandleMessageWithInvalidSource() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: bytes32(uint256(0x22)),
             destination: address(governancePauser),
             payload: ""
@@ -41,7 +41,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -49,6 +49,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -61,7 +63,7 @@ contract GovernancePauserTest is Test, Base {
 
     function test_HandleMessageWithEmptyPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: ""
@@ -70,7 +72,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -78,6 +80,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -90,7 +94,7 @@ contract GovernancePauserTest is Test, Base {
 
     function test_HandleMessageWithInvalidDiscriminant() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: abi.encodePacked(uint8(GovernanceConstants.UNPAUSE_PROXY + 1))
@@ -99,7 +103,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -107,6 +111,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -117,12 +123,12 @@ contract GovernancePauserTest is Test, Base {
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
 
-    function test_HandleMessageWithChangeGovernance() public {
+    function test_HandleMessageWithChangeGovernance111() public {
         bytes32 previousGovernance = governancePauser.governance();
         bytes32 newGovernance = bytes32(uint256(0x22));
         assertEq(ChangeGovernanceMessage({newGovernance: newGovernance}).pack().length, 33);
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: previousGovernance,
             destination: address(governancePauser),
             payload: ChangeGovernanceMessage({newGovernance: newGovernance}).pack()
@@ -131,7 +137,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -139,6 +145,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -154,7 +162,7 @@ contract GovernancePauserTest is Test, Base {
 
     function test_HandleMessageWithChangeGovernanceAndNotEnoughPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: abi.encodePacked(uint8(GovernanceConstants.CHANGE_GOVERNANCE))
@@ -163,7 +171,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -171,6 +179,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -183,7 +193,7 @@ contract GovernancePauserTest is Test, Base {
 
     function test_HandleMessageWithPauseAndNotEnoughPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: abi.encodePacked(uint8(GovernanceConstants.PAUSE_PROXY))
@@ -192,7 +202,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -200,6 +210,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -213,7 +225,7 @@ contract GovernancePauserTest is Test, Base {
     function test_HandleMessageWithPauseAndInvalidProxy() public {
         address invalidProxy = address(0x22);
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: PauseProxyMessage({proxy: invalidProxy}).pack()
@@ -222,7 +234,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -230,6 +242,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
@@ -242,7 +256,7 @@ contract GovernancePauserTest is Test, Base {
 
     function test_HandleMessageWithPauseAndInvalidMessageSize() public {
         VaraMessage memory message = VaraMessage({
-            nonce: 0x11,
+            nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
             payload: bytes.concat(PauseProxyMessage({proxy: address(messageQueue)}).pack(), "ff")
@@ -251,7 +265,7 @@ contract GovernancePauserTest is Test, Base {
 
         bytes32 messageHash = message.hash();
 
-        uint256 blockNumber = 0x44;
+        uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
@@ -259,6 +273,8 @@ contract GovernancePauserTest is Test, Base {
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;

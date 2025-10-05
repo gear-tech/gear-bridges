@@ -95,10 +95,10 @@ vft-vara-client = { path = "gear-programs/vft-vara/client" }
 
 # Contracts' deps
 
-plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
-plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "4a620f4d79efe9233d0e7682df5a2fc625b5420e" }
+plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
+plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
+plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
+plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
 
 # Coordinates of `EdwardsPoint` made public in fork.
 curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek", rev = "f63777fbeeb181944097bdcaeb9384ac158ec931" }
@@ -122,6 +122,7 @@ clap = { version = "4.5.41", features = ["derive", "env"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.9.0"
+humantime = "2.2.0"
 ethereum-types = { version = "0.14.1", default-features = false, features = [
     "serialize",
     "codec",
@@ -160,7 +161,7 @@ scale-info = { version = "2.10", default-features = false, features = [
     "derive",
 ] }
 
-serde = { version = "1.0.215", default-features = false, features = [
+serde = { version = "1.0", default-features = false, features = [
     "alloc",
     "derive",
 ] }
@@ -177,24 +178,25 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
+zeroize = "1.8.1"
 async-trait = "0.1.88"
 # Gear/Substrate deps
-gprimitives = "=1.9.0"
-gstd = { version = "=1.9.0", features = ["nightly"] }
-gtest = "=1.9.0"
-gear-wasm-builder = { version = "=1.9.0", default-features = false }
-gsdk = "=1.9.0"
-gclient = "=1.9.0"
-gear-core = "=1.9.0"
-gbuiltin-bls381 = "=1.9.0"
-gbuiltin-eth-bridge = "=1.9.0"
-pallet-gear-eth-bridge-primitives = "=1.9.0"
+gprimitives = "1.9.2"
+gstd = { version = "1.9.2", features = ["nightly"] }
+gtest = "1.9.2"
+gear-wasm-builder = { version = "1.9.2", default-features = false }
+gsdk = "1.9.2"
+gclient = "1.9.2"
+gear-core = "1.9.2"
+gbuiltin-bls381 = "1.9.2"
+gbuiltin-eth-bridge = "1.9.2"
+pallet-gear-eth-bridge-primitives = "1.9.2"
 # TODO: remove idl-gen and client-gen
-sails-idl-gen = "0.9.0"
-sails-client-gen = "0.9.0"
-sails-rs = "0.9.0"
-awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", rev = "d2afdad65e1f447d254c4795c3687da6fc54fb41", default-features = false }
-awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", rev = "d2afdad65e1f447d254c4795c3687da6fc54fb41", default-features = false, features = [
+sails-idl-gen = { version = "0.9.2" }
+sails-client-gen = { version = "0.9.2" }
+sails-rs = { version = "0.9.2" }
+awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", rev = "269014d", default-features = false }
+awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", rev = "269014d", default-features = false, features = [
     "vft",
     "vft-admin",
     "vft-extension",
@@ -214,15 +216,16 @@ trie-db = { version = "0.29.0", default-features = false }
 sp-trie = { version = "37.0.0", default-features = false }
 sp-core = { version = "34.0.0", default-features = false }
 primitive-types = { version = "0.12.2", default-features = false }
-wat = "1.236.0"
 
 # Alloy deps
-alloy-consensus = { version = "=1.0.9", default-features = false }
-alloy-eips = { version = "=1.0.9", default-features = false }
-alloy-rlp = { version = "=0.3.12", default-features = false }
-alloy-primitives = { version = "=1.1.2", default-features = false }
-alloy-sol-types = { version = "=1.1.2", default-features = false }
-alloy = { version = "=1.0.9", package = "alloy", features = [
+alloy-consensus = { version = "1.0", default-features = false, features = [
+    "serde",
+] }
+alloy-eips = { version = "1.0", default-features = false }
+alloy-rlp = { version = "0.3.12", default-features = false }
+alloy-primitives = { version = "1.1", default-features = false }
+alloy-sol-types = { version = "1.1", default-features = false }
+alloy = { version = "1.0", package = "alloy", features = [
     "sol-types",
     "contract",
     "pubsub",
@@ -238,4 +241,5 @@ alloy = { version = "=1.0.9", package = "alloy", features = [
     "rpc-client",
     "json-rpc",
     "rpc-types",
+    "serde",
 ] }

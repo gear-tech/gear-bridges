@@ -3,9 +3,8 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands,
-    GearSignerArgs, GenesisConfigArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
-    DEFAULT_COUNT_THREADS,
+    EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs,
+    GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -18,11 +17,16 @@ use message_relayer::{
 };
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
-use prover::{consts::SIZE_THREAD_STACK_MIN, proving::GenesisConfig};
-use relayer::*;
-use std::{collections::HashSet, env, net::TcpListener, str::FromStr, sync::Arc, time::Duration};
+use prover::consts::SIZE_THREAD_STACK_MIN;
+use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
+use sails_rs::ActorId;
+use std::{
+    collections::HashSet, env, fs::File, io::Read as _, net::TcpListener, path::Path, str::FromStr,
+    sync::Arc, time::Duration,
+};
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
+use zeroize::Zeroizing;
 
 fn main() -> AnyResult<()> {
     // we need at least 2 native threads to run some of the blocking tasks like proof composition
@@ -79,7 +83,7 @@ async fn run() -> AnyResult<()> {
             let storage =
                 relayer::merkle_roots::storage::MerkleRootStorage::new(proof_storage, path);
 
-            let genesis_config = create_genesis_config(&args.genesis_config_args);
+            let options = MerkleRootRelayerOptions::from_cli(&args)?;
 
             let tcp_listener = TcpListener::bind(&args.web_server_address)?;
 
@@ -95,14 +99,7 @@ async fn run() -> AnyResult<()> {
                 eth_api,
                 receiver,
                 storage,
-                genesis_config,
-                args.start_authority_set_id,
-                args.confirmations_merkle_root
-                    .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
-                match args.thread_count {
-                    None => Some(DEFAULT_COUNT_THREADS),
-                    Some(thread_count) => thread_count.into(),
-                },
+                options,
             )
             .await;
 
@@ -119,11 +116,7 @@ async fn run() -> AnyResult<()> {
         }
 
         CliCommands::KillSwitch(args) => {
-            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
-            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
-            if rust_min_stack < SIZE_THREAD_STACK_MIN {
-                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
-            }
+            use reqwest::header;
 
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
@@ -131,28 +124,35 @@ async fn run() -> AnyResult<()> {
                 args.gear_args.retries,
             )
             .await
-            .expect("Failed to connec to Gear API");
+            .expect("Failed to connect to Gear API");
 
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let (eth_observer_api, eth_admin_api) =
+                create_eth_killswitch_client(&args.ethereum_args)
+                    .await
+                    .expect("Failed to create Ethereum client");
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(args.relayer_http_args.timeout_secs))
+                .default_headers({
+                    let mut headers = header::HeaderMap::new();
+                    headers.insert(
+                        "X-Token",
+                        header::HeaderValue::from_str(&args.relayer_http_args.access_token)
+                            .expect("Invalid token"),
+                    );
+                    headers
+                })
+                .build()
+                .expect("Failed to create HTTP client");
 
             let metrics = MetricsBuilder::new();
 
-            let (proof_storage, metrics) =
-                create_proof_storage(&args.proof_storage_args, &args.gear_args, metrics).await;
-
-            let genesis_config = create_genesis_config(&args.genesis_config_args);
-
-            let block_finality_storage =
-                sled::open("./block_finality_storage").expect("Db not corrupted");
-
             let mut kill_switch = KillSwitchRelayer::new(
                 api_provider.connection(),
-                eth_api,
-                genesis_config,
-                proof_storage,
+                eth_observer_api,
+                eth_admin_api,
+                http_client,
                 args.from_eth_block,
-                block_finality_storage,
-                Some(DEFAULT_COUNT_THREADS),
+                args.relayer_http_args.url,
             )
             .await;
 
@@ -163,6 +163,19 @@ async fn run() -> AnyResult<()> {
                 .await;
             api_provider.spawn();
             kill_switch.run().await.expect("Kill switch relayer failed");
+        }
+
+        CliCommands::QueueCleaner(args) => {
+            let api_provider = ApiProvider::new(
+                args.gear_args.domain.clone(),
+                args.gear_args.port,
+                args.gear_args.retries,
+            )
+            .await?;
+            let conn = api_provider.connection();
+            api_provider.spawn();
+
+            relayer::queue_cleaner::queue_cleaner(conn, args.suri, args.delay).await?;
         }
 
         CliCommands::GearEthTokens(args) => {
@@ -183,12 +196,20 @@ async fn run() -> AnyResult<()> {
             .context("Failed to create API provider")?;
 
             let api = provider.connection().client();
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
 
             let mut excluded_from_fees = HashSet::new();
             match args.no_fee {
                 None => {
                     log::warn!("No free from charge accounts listed, using default: bridgeAdmin and bridgePauser from chain constants");
-                    match api.bridge_admin().await.map(AccountId32::from) {
+                    match api.bridge_admin().await {
                         Ok(admin) => {
                             log::info!("Bridge admin: {admin}");
                             excluded_from_fees.insert(admin);
@@ -198,7 +219,7 @@ async fn run() -> AnyResult<()> {
                         }
                     };
 
-                    match api.bridge_pauser().await.map(AccountId32::from) {
+                    match api.bridge_pauser().await {
                         Ok(pauser) => {
                             log::info!("Bridge pauser: {pauser}");
                             excluded_from_fees.insert(pauser);
@@ -238,6 +259,8 @@ async fn run() -> AnyResult<()> {
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.storage_path,
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -281,6 +304,8 @@ async fn run() -> AnyResult<()> {
                         excluded_from_fees,
                         receiver,
                         args.storage_path.clone(),
+                        governance_admin,
+                        governance_pauser,
                     )
                     .await
                     .unwrap();
@@ -444,6 +469,15 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to create API provider");
 
+            let governance_admin: [u8; 32] = AccountId32::from_str(&args.governance_admin)
+                .expect("Failed to parse governance admin address")
+                .into();
+            let governance_admin: ActorId = ActorId::from(governance_admin);
+            let governance_pauser: [u8; 32] = AccountId32::from_str(&args.governance_pauser)
+                .expect("Failed to parse governance pauser address")
+                .into();
+            let governance_pauser: ActorId = ActorId::from(governance_pauser);
+
             let connection = api_provider.connection();
             api_provider.spawn();
 
@@ -455,6 +489,8 @@ async fn run() -> AnyResult<()> {
                 args.from_eth_block,
                 args.confirmations_status
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                governance_admin,
+                governance_pauser,
             )
             .await;
         }
@@ -548,14 +584,71 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
 async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     let EthereumArgs {
         eth_endpoint,
-
         mq_address,
+        eth_max_retries,
+        eth_retry_interval_ms,
         ..
     } = &args.ethereum_args;
 
-    EthApi::new(eth_endpoint, mq_address, Some(&args.fee_payer))
-        .await
-        .expect("Error while creating ethereum client")
+    EthApi::new_with_retries(
+        eth_endpoint,
+        mq_address,
+        Some(&args.eth_fee_payer),
+        *eth_max_retries,
+        eth_retry_interval_ms.map(Duration::from_millis),
+    )
+    .await
+    .expect("Error while creating ethereum client")
+}
+
+async fn create_eth_killswitch_client(
+    args: &EthereumKillSwitchArgs,
+) -> AnyResult<(EthApi, Option<EthApi>)> {
+    fn read_pk_bytes<P: AsRef<Path>>(path: P, buf: &mut Zeroizing<[u8; 32]>) -> AnyResult<()> {
+        let path = path.as_ref();
+        let mut file = File::open(path)?;
+        if file.read(buf.as_mut())? != 32 {
+            return Err(anyhow!("Invalid key length in file: {path:?}"));
+        }
+
+        Ok(())
+    }
+
+    let mut buf = Zeroizing::<[u8; 32]>::default();
+
+    read_pk_bytes(&args.eth_observer_pk_path, &mut buf).with_context(|| {
+        format!(
+            "Failed to read ETH_OBSERVER_PK_PATH file: {:?}",
+            &args.eth_observer_pk_path
+        )
+    })?;
+    let observer_pk_str = format!("0x{}", hex::encode(buf.as_ref()));
+
+    let observer_api = create_eth_signer_client(&EthereumSignerArgs {
+        ethereum_args: args.ethereum_args.clone(),
+        eth_fee_payer: observer_pk_str,
+    })
+    .await;
+
+    let is_admin_pk_set = args
+        .eth_admin_pk_path
+        .as_deref()
+        .and_then(|path| read_pk_bytes(path, &mut buf).ok());
+
+    let maybe_admin_api = if is_admin_pk_set.is_some() {
+        let admin_pk_str = format!("0x{}", hex::encode(buf.as_ref()));
+        Some(
+            create_eth_signer_client(&EthereumSignerArgs {
+                ethereum_args: args.ethereum_args.clone(),
+                eth_fee_payer: admin_pk_str,
+            })
+            .await,
+        )
+    } else {
+        None
+    };
+
+    Ok((observer_api, maybe_admin_api))
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {
@@ -604,19 +697,6 @@ async fn create_proof_storage(
         };
 
     (proof_storage, metrics)
-}
-
-fn create_genesis_config(genesis_config_args: &GenesisConfigArgs) -> GenesisConfig {
-    let authority_set_hash = hex::decode(&genesis_config_args.authority_set_hash)
-        .expect("Incorrect format for authority set hash: hex-encoded hash is expected");
-    let authority_set_hash = authority_set_hash
-        .try_into()
-        .expect("Incorrect format for authority set hash: wrong length");
-
-    GenesisConfig {
-        authority_set_id: genesis_config_args.authority_set_id,
-        authority_set_hash,
-    }
 }
 
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {

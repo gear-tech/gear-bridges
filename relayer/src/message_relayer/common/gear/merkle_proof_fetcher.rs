@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 pub struct Request {
     pub tx_uuid: Uuid,
+    pub message_block: u32,
     pub message_hash: [u8; 32],
     pub message_nonce: [u8; 32],
     pub merkle_root: RelayedMerkleRoot,
@@ -27,12 +28,14 @@ impl MerkleRootFetcherIo {
     pub fn send_request(
         &self,
         tx_uuid: Uuid,
+        message_block: u32,
         message_hash: [u8; 32],
         message_nonce: [u8; 32],
         merkle_root: RelayedMerkleRoot,
     ) -> bool {
         let request = Request {
             tx_uuid,
+            message_block,
             message_hash,
             message_nonce,
             merkle_root,
@@ -102,10 +105,14 @@ async fn task_inner(
     let gear_api = this.api_provider.client();
     while let Some(request) = requests.recv().await {
         let message_hash = request.message_hash;
-        log::debug!(
-            "Fetch inclusion merkle proof for message with hash {} and nonce {}",
+        log::info!(
+            "Fetch inclusion merkle proof for message at block #{}, message hash={}, message nonce={}, merkle-root {} at block #{}({})",
+            request.message_block,
             hex::encode(message_hash),
-            hex::encode(request.message_nonce)
+            hex::encode(request.message_nonce),
+            request.merkle_root.merkle_root,
+            request.merkle_root.block,
+            request.merkle_root.block_hash,
         );
 
         let proof = gear_api

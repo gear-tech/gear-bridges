@@ -9,7 +9,7 @@ use plonky2::{
 
 use crate::{
     common::{
-        generic_blake2::GenericBlake2,
+        generic_blake2::{GenericBlake2, MAX_DATA_BYTES},
         targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
@@ -27,10 +27,6 @@ use crate::{
 // - digest                 (generic)
 const BLOCK_NUMBER_OFFSET_IN_BLOCK_HEADER: usize = 32;
 const MAX_BLOCK_NUMBER_DATA_LENGTH: usize = 4;
-// This estimation is used to check that `GenericBlake2` will be able to accept
-// entire encoded header data. Most probably 1KiB will be sufficient to store any
-// possible block header.
-const MAX_ENCODED_HEADER_LENGTH: usize = 1024;
 
 impl_parsable_target_set! {
     /// Public inputs for `BlockHeaderParser` circuit.
@@ -49,10 +45,7 @@ pub struct BlockHeaderParser {
 
 impl BlockHeaderParser {
     pub fn prove(self) -> ProofWithCircuitData<BlockHeaderParserTarget> {
-        assert!(self.header_data.len() <= MAX_ENCODED_HEADER_LENGTH);
-
-        let hasher_proof =
-            GenericBlake2::new::<MAX_ENCODED_HEADER_LENGTH>(self.header_data).prove();
+        let hasher_proof = GenericBlake2::new::<MAX_DATA_BYTES>(self.header_data).prove();
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);

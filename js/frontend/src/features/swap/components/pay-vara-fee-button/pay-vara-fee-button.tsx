@@ -11,10 +11,9 @@ import { usePayVaraFee, useVaraFee } from '../../hooks';
 type Props = {
   nonce: string;
   onInBlock: () => void;
-  onFinalization: () => void;
 };
 
-function PayVaraFeeButton({ nonce, onInBlock, onFinalization }: Props) {
+function PayVaraFeeButton({ nonce, onInBlock }: Props) {
   const { account } = useAccount();
   const ethAccount = useEthAccount();
 
@@ -30,13 +29,10 @@ function PayVaraFeeButton({ nonce, onInBlock, onFinalization }: Props) {
     if (isUndefined(bridgingFee.value)) throw new Error('Fee is not found');
 
     sendTransactionAsync({ args: [nonce], value: bridgingFee.value })
-      .then(({ isFinalized }) => {
+      .then(() => {
         alert.success('Fee paid successfully');
         onInBlock();
-
-        return isFinalized;
       })
-      .then(() => onFinalization())
       .catch((error: Error) => alert.error(getErrorMessage(error)));
   };
 

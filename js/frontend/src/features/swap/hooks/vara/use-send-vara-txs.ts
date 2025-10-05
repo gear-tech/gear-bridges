@@ -17,20 +17,35 @@ import { useSignAndSend } from './use-sign-and-send';
 type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
+  priorityFee: bigint | undefined;
+  shouldPayPriorityFee: boolean;
   vftManagerFee: bigint | undefined;
   onTransactionStart: (values: FormattedValues) => void;
 };
 
-function useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, onTransactionStart }: Params) {
+function useSendVaraTxs({
+  bridgingFee,
+  shouldPayBridgingFee,
+  priorityFee,
+  shouldPayPriorityFee,
+  vftManagerFee,
+  onTransactionStart,
+}: Params) {
   const { api } = useApi();
 
-  const prepareTxs = usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee });
+  const prepareTxs = usePrepareVaraTxs({
+    bridgingFee,
+    shouldPayBridgingFee,
+    priorityFee,
+    shouldPayPriorityFee,
+    vftManagerFee,
+  });
 
   const mint = usePrepareMint();
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
 
-  const payFees = usePayFeesWithAwait({ fee: bridgingFee, shouldPayBridgingFee });
+  const payFees = usePayFeesWithAwait({ fee: bridgingFee, shouldPayBridgingFee, priorityFee, shouldPayPriorityFee });
   const signAndSend = useSignAndSend({ programs: [mint.program, approve.program, requestBridging.program] });
 
   const resetState = () => {

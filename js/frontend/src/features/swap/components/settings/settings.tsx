@@ -11,8 +11,8 @@ import styles from './settings.module.scss';
 import { TooltipContent } from './tooltip-content';
 
 const PRIORITY_BUTTONS = [
-  { value: PRIORITY.DEFAULT, text: 'Common', SVG: ClockSVG },
   { value: PRIORITY.HIGH, text: 'Fast', SVG: LightningSVG },
+  { value: PRIORITY.DEFAULT, text: 'Common', SVG: ClockSVG },
 ];
 
 const CLAIM_TYPE_BUTTONS = [

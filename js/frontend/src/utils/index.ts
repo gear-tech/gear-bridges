@@ -54,8 +54,11 @@ const getErrorMessage = (error: Error | WriteContractErrorType | ExtrinsicFailed
   return typeof error === 'string' ? error : (error as BaseError).shortMessage || error.message;
 };
 
-const getTruncatedText = (value: string, prefixLength: number = 6) =>
-  `${value.substring(0, prefixLength)}...${value.slice(-prefixLength)}`;
+const getTruncatedText = (value: string, prefixLength: number = 6) => {
+  if (value.length <= prefixLength) return value;
+
+  return `${value.substring(0, prefixLength)}...${value.slice(-prefixLength)}`;
+};
 
 export {
   cx,

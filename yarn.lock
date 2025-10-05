@@ -1028,9 +1028,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@gear-js/react-hooks@npm:0.18.3":
-  version: 0.18.3
-  resolution: "@gear-js/react-hooks@npm:0.18.3"
+"@gear-js/react-hooks@npm:0.19.0":
+  version: 0.19.0
+  resolution: "@gear-js/react-hooks@npm:0.19.0"
   dependencies:
     "@polkadot/extension-inject": "npm:0.61.7"
     "@polkadot/util": "npm:13.5.6"
@@ -1038,16 +1038,16 @@ __metadata:
     bignumber.js: "npm:9.3.1"
     nanoid: "npm:5.1.6"
     react-transition-group: "npm:4.4.5"
-    sails-js-parser: "npm:0.4.3"
+    sails-js-parser: "npm:0.5.0"
   peerDependencies:
-    "@gear-js/api": ^0.44.1
+    "@gear-js/api": ^0.44.2
     "@polkadot/api": ^16.4.6
     "@polkadot/api-derive": ^16.4.6
     "@tanstack/react-query": ^5.56.2
     react: ^18 || ^19
     react-dom: ^18 || ^19
-    sails-js: ^0.4.3
-  checksum: 10c0/5783622396d1f0a35fb142d98a88e2e667247bd0c30e791d4d03c55515351a2f8229844777ff9489664ab4e02f7030d7250e55a4e415d2a12bc274b7e0188af1
+    sails-js: ^0.5.0
+  checksum: 10c0/42020e1aaa5df26605a76b5fdb72ff2979052731b598ae5380bc71d24a8ab1fca71eb2c3d484d5c5434b5f2c4c0467ac656e683b4f640d40df391e55fcd387b6
   languageName: node
   linkType: hard
 
@@ -11622,7 +11622,7 @@ __metadata:
     "@gear-js/api": "npm:0.44.1"
     "@gear-js/bridge": "workspace:*"
     "@gear-js/frontend-configs": "npm:0.1.2"
-    "@gear-js/react-hooks": "npm:0.18.3"
+    "@gear-js/react-hooks": "npm:0.19.0"
     "@gear-js/ui": "npm:0.7.0"
     "@gear-js/vara-ui": "npm:0.3.1"
     "@gear-js/wallet-connect": "npm:0.4.2"
@@ -11650,7 +11650,7 @@ __metadata:
     react-hook-form: "npm:7.62.0"
     react-number-format: "npm:5.4.4"
     react-router-dom: "npm:7.8.2"
-    sails-js: "npm:0.5.0"
+    sails-js: "npm:0.5.1"
     sass: "npm:1.92.1"
     viem: "npm:2.37.5"
     vite: "npm:7.1.5"
@@ -17807,6 +17807,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"sails-js-types@npm:0.5.1":
+  version: 0.5.1
+  resolution: "sails-js-types@npm:0.5.1"
+  checksum: 10c0/945d99c74c3dfaa5ec9e3d7803750b1ad844a7653ec3667e7ef3e49e8739e9f487876c2c957ed5319a5ba57612220adb304dd22ce2c7b184b9ea8bd94ad5045f
+  languageName: node
+  linkType: hard
+
 "sails-js-types@npm:^0.4.2":
   version: 0.4.3
   resolution: "sails-js-types@npm:0.4.3"
@@ -17818,6 +17825,13 @@ __metadata:
   version: 0.5.0
   resolution: "sails-js-util@npm:0.5.0"
   checksum: 10c0/121bbcf9089f50f3ab66a5dc34e7e66e86af601187aee43d3d06a646e211ca13d9e7061a4d2922649860ae3b412d0e41b8a827a1bc1c8d9308a8af9c3215d2c7
+  languageName: node
+  linkType: hard
+
+"sails-js-util@npm:0.5.1":
+  version: 0.5.1
+  resolution: "sails-js-util@npm:0.5.1"
+  checksum: 10c0/95f794a97a4c24a8172f5ee5f539ffed2f5a047f63ee05c3ef2aaaf141d6c92f9a216f8d19394e13e8ceca1eb8de8280d10f306ec33a57dba6e11df6c5a4635f
   languageName: node
   linkType: hard
 
@@ -17857,6 +17871,23 @@ __metadata:
     sails-js-types:
       optional: true
   checksum: 10c0/db20cac74f539e81ddc6c10a44c0b01adb5c5fe1151b15e2a55119c0c5388740e5d28bf58d996375426071bf44bceecaa2927825b6e0960caeefb7b65961e3a4
+  languageName: node
+  linkType: hard
+
+"sails-js@npm:0.5.1":
+  version: 0.5.1
+  resolution: "sails-js@npm:0.5.1"
+  dependencies:
+    sails-js-types: "npm:0.5.1"
+    sails-js-util: "npm:0.5.1"
+  peerDependencies:
+    "@gear-js/api": ^0.44.1
+    "@polkadot/api": ^16.4.1
+    "@polkadot/util": ^13.5.1
+  dependenciesMeta:
+    sails-js-types:
+      optional: true
+  checksum: 10c0/164761939feeed3fa411057d8b59e7ab09a470f7e5b8224de1a87cc8af11a24f98c81da969cd482c62e2da631e6f7e0eb05ea419278256f4a30913fee59476cc
   languageName: node
   linkType: hard
 

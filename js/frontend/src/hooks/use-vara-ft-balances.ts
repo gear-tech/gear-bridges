@@ -19,7 +19,11 @@ function useVaraFTBalances() {
 
     for (const token of tokens.vara) {
       const { address } = token;
-      const balance = await new VftProgram(api, address).vft.balanceOf(account.decodedAddress);
+
+      const balance = await new VftProgram(api, address).vft
+        .balanceOf(account.decodedAddress)
+        .withAddress(account.decodedAddress)
+        .call();
 
       result[address] = balance;
     }

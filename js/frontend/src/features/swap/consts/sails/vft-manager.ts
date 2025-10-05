@@ -1,18 +1,22 @@
-/* eslint-disable @typescript-eslint/no-floating-promises */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { GearApi, BaseGearProgram, HexString, decodeAddress } from '@gear-js/api';
-import { TypeRegistry } from '@polkadot/types';
+/* eslint-disable */
+
 import {
+  ActorId,
+  H256,
+  H160,
   TransactionBuilder,
   MessageId,
-  ActorId,
-  H160,
-  throwOnErrorReply,
+  QueryBuilder,
   getServiceNamePrefix,
   getFnNamePrefix,
   ZERO_ADDRESS,
 } from 'sails-js';
+import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
+import { TypeRegistry } from '@polkadot/types';
 
+/**
+ * Config that should be provided to this service on initialization.
+ */
 export interface InitConfig {
   /**
    * Address of the gear-eth-bridge built-in actor.
@@ -191,7 +195,7 @@ export type MessageStatus =
   /**
    * Reply is received for a message to the `pallet-gear-eth-bridge`.
    */
-  | { BridgeResponseReceived: number | string | bigint | null }
+  | { BridgeResponseReceived: [number | string | bigint, H256, number | string | bigint] | null }
   /**
    * Message to refund tokens is sent.
    */
@@ -246,7 +250,7 @@ export type Order = 'Direct' | 'Reverse';
 export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly vftManager: VftManager;
-  private _program!: BaseGearProgram;
+  private _program?: BaseGearProgram;
 
   constructor(
     public api: GearApi,
@@ -296,7 +300,7 @@ export class SailsProgram {
           SendingMessageToDepositTokens: 'Null',
           TokenDepositCompleted: 'bool',
           SendingMessageToBridgeBuiltin: 'Null',
-          BridgeResponseReceived: 'Option<U256>',
+          BridgeResponseReceived: 'Option<(U256, H256, u64)>',
           SendingMessageToReturnTokens: 'Null',
           TokensReturnComplete: 'bool',
         },
@@ -447,6 +451,48 @@ export class VftManager {
   }
 
   /**
+   * The method is intended for tests and is available only when the feature `mocks`
+   * is enabled.
+   *
+   * Swaps internal hash maps of the TokenMap instance.
+   */
+  public calculateGasForTokenMapSwap(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'CalculateGasForTokenMapSwap',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * The method is intended for tests and is available only when the feature `mocks`
+   * is enabled. Populates the collection with processed transactions.
+   *
+   * Returns false when the collection is populated.
+   */
+  public fillTransactions(): TransactionBuilder<boolean> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'FillTransactions',
+      null,
+      null,
+      'bool',
+      this._program.programId,
+    );
+  }
+
+  /**
    * Process message further if some error was encountered during the `request_bridging`.
    *
    * This method should be called only to recover funds that were stuck in the middle of the bridging
@@ -526,6 +572,30 @@ export class VftManager {
       'MapVaraToEthAddress',
       [vara_token_id, eth_token_id, supply_type],
       '([u8;32], H160, TokenSupply)',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Pause the `vft-manager`.
+   *
+   * When `vft-manager` is paused it means that any requests to
+   * `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
+   * will be rejected.
+   *
+   * Can be called only by a [State::admin] or [State::pause_admin].
+   */
+  public pause(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'Pause',
+      null,
+      null,
       'Null',
       this._program.programId,
     );
@@ -638,6 +708,48 @@ export class VftManager {
   }
 
   /**
+   * Unpause the `vft-manager`.
+   *
+   * It will effectively cancel effect of the [VftManager::pause].
+   *
+   * Can be called only by a [State::admin] or [State::pause_admin].
+   */
+  public unpause(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'Unpause',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Change [Config]. Can be called only by a [State::admin].
+   *
+   * For more info see [Config] docs.
+   */
+  public updateConfig(config: Config): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'UpdateConfig',
+      config,
+      'Config',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
    * Change [State::erc20_manager_address]. Can be called only by a [State::admin].
    */
   public updateErc20ManagerAddress(erc20_manager_address_new: H160): TransactionBuilder<null> {
@@ -706,234 +818,162 @@ export class VftManager {
   /**
    * Get current [State::admin] address.
    */
-  public async admin(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['VftManager', 'Admin']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public admin(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'Admin',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
   /**
    * Get current [State::erc20_manager_address] address.
    */
-  public async erc20ManagerAddress(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<H160 | null> {
-    const payload = this._program.registry
-      .createType('(String, String)', ['VftManager', 'Erc20ManagerAddress'])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, Option<H160>)', reply.payload);
-    return result[2].toJSON() as unknown as H160 | null;
+  public erc20ManagerAddress(): QueryBuilder<H160 | null> {
+    return new QueryBuilder<H160 | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'Erc20ManagerAddress',
+      null,
+      null,
+      'Option<H160>',
+    );
   }
 
   /**
    * Get current [State::gear_bridge_builtin] address.
    */
-  public async gearBridgeBuiltin(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['VftManager', 'GearBridgeBuiltin']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public gearBridgeBuiltin(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'GearBridgeBuiltin',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
   /**
    * Get current [Config].
    */
-  public async getConfig(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Config> {
-    const payload = this._program.registry.createType('(String, String)', ['VftManager', 'GetConfig']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, Config)', reply.payload);
-    return result[2].toJSON() as unknown as Config;
+  public getConfig(): QueryBuilder<Config> {
+    return new QueryBuilder<Config>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'GetConfig',
+      null,
+      null,
+      'Config',
+    );
   }
 
   /**
    * Get current [State::historical_proxy_address].
    */
-  public async historicalProxyAddress(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry
-      .createType('(String, String)', ['VftManager', 'HistoricalProxyAddress'])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public historicalProxyAddress(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'HistoricalProxyAddress',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
   /**
    * Check if `vft-manager` is currently paused.
    */
-  public async isPaused(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<boolean> {
-    const payload = this._program.registry.createType('(String, String)', ['VftManager', 'IsPaused']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, bool)', reply.payload);
-    return result[2].toJSON() as unknown as boolean;
+  public isPaused(): QueryBuilder<boolean> {
+    return new QueryBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'IsPaused',
+      null,
+      null,
+      'bool',
+    );
   }
 
   /**
    * Get current [State::pause_admin] address.
    */
-  public async pauseAdmin(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<ActorId> {
-    const payload = this._program.registry.createType('(String, String)', ['VftManager', 'PauseAdmin']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, [u8;32])', reply.payload);
-    return result[2].toJSON() as unknown as ActorId;
+  public pauseAdmin(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'PauseAdmin',
+      null,
+      null,
+      '[u8;32]',
+    );
   }
 
   /**
    * Get state of a `request_bridging` message tracker.
    */
-  public async requestBridingMsgTrackerState(
-    start: number,
-    count: number,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Array<[MessageId, MessageInfo]>> {
-    const payload = this._program.registry
-      .createType('(String, String, u32, u32)', ['VftManager', 'RequestBridingMsgTrackerState', start, count])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, Vec<([u8;32], MessageInfo)>)', reply.payload);
-    return result[2].toJSON() as unknown as Array<[MessageId, MessageInfo]>;
+  public requestBridingMsgTrackerState(start: number, count: number): QueryBuilder<Array<[MessageId, MessageInfo]>> {
+    return new QueryBuilder<Array<[MessageId, MessageInfo]>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'RequestBridingMsgTrackerState',
+      [start, count],
+      '(u32, u32)',
+      'Vec<([u8;32], MessageInfo)>',
+    );
   }
 
-  public async transactions(
+  public transactions(
     order: Order,
     start: number,
     count: number,
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Array<[number | string | bigint, number | string | bigint]>> {
-    const payload = this._program.registry
-      .createType('(String, String, Order, u32, u32)', ['VftManager', 'Transactions', order, start, count])
-      .toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType('(String, String, Vec<(u64, u64)>)', reply.payload);
-    return result[2].toJSON() as unknown as Array<[number | string | bigint, number | string | bigint]>;
+  ): QueryBuilder<Array<[number | string | bigint, number | string | bigint]>> {
+    return new QueryBuilder<Array<[number | string | bigint, number | string | bigint]>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'Transactions',
+      [order, start, count],
+      '(Order, u32, u32)',
+      'Vec<(u64, u64)>',
+    );
   }
 
   /**
    * Get current [token mapping](State::token_map).
    */
-  public async varaToEthAddresses(
-    originAddress?: string,
-    value?: number | string | bigint,
-    atBlock?: `0x${string}`,
-  ): Promise<Array<[ActorId, H160, TokenSupply]>> {
-    const payload = this._program.registry.createType('(String, String)', ['VftManager', 'VaraToEthAddresses']).toHex();
-    const reply = await this._program.api.message.calculateReply({
-      destination: this._program.programId,
-      origin: originAddress ? decodeAddress(originAddress) : ZERO_ADDRESS,
-      payload,
-      value: value || 0,
-      gasLimit: this._program.api.blockGasLimit.toBigInt(),
-      at: atBlock,
-    });
-    throwOnErrorReply(reply.code, reply.payload.toU8a(), this._program.api.specVersion, this._program.registry);
-    const result = this._program.registry.createType(
-      '(String, String, Vec<([u8;32], H160, TokenSupply)>)',
-      reply.payload,
+  public varaToEthAddresses(): QueryBuilder<Array<[ActorId, H160, TokenSupply]>> {
+    return new QueryBuilder<Array<[ActorId, H160, TokenSupply]>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'VaraToEthAddresses',
+      null,
+      null,
+      'Vec<([u8;32], H160, TokenSupply)>',
     );
-    return result[2].toJSON() as unknown as Array<[ActorId, H160, TokenSupply]>;
   }
 
   /**
@@ -1002,6 +1042,8 @@ export class VftManager {
   public subscribeToBridgingRequestedEvent(
     callback: (data: {
       nonce: number | string | bigint;
+      queue_id: number | string | bigint;
+      hash: H256;
       vara_token_id: ActorId;
       amount: number | string | bigint;
       sender: ActorId;
@@ -1018,11 +1060,13 @@ export class VftManager {
         callback(
           this._program.registry
             .createType(
-              '(String, String, {"nonce":"U256","vara_token_id":"[u8;32]","amount":"U256","sender":"[u8;32]","receiver":"H160"})',
+              '(String, String, {"nonce":"U256","queue_id":"u64","hash":"H256","vara_token_id":"[u8;32]","amount":"U256","sender":"[u8;32]","receiver":"H160"})',
               message.payload,
             )[2]
             .toJSON() as unknown as {
             nonce: number | string | bigint;
+            queue_id: number | string | bigint;
+            hash: H256;
             vara_token_id: ActorId;
             amount: number | string | bigint;
             sender: ActorId;

@@ -80,6 +80,7 @@ function usePayFeesWithAwait({ fee, priorityFee, shouldPayBridgingFee, shouldPay
               const { transaction } = await payPriorityFees.prepareTransactionAsync({
                 args: [requestBridgingBlockHash, nonce],
                 value: priorityFee,
+                gasLimit: { increaseGas: 10 }, // may require higher gas after bridging fee payment is made, initial estimate done without it
               });
 
               extrinsics.push(transaction.extrinsic);

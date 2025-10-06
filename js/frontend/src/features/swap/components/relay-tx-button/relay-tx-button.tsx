@@ -14,10 +14,9 @@ type VaraProps = {
   nonce: bigint;
   blockNumber: string;
   onReceipt: () => void;
-  onConfirmation: () => void;
 };
 
-function RelayVaraTxButton({ nonce, blockNumber, onConfirmation, ...props }: VaraProps) {
+function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
   const { account } = useAccount();
 
   const ethAccount = useEthAccount();
@@ -44,7 +43,7 @@ function RelayVaraTxButton({ nonce, blockNumber, onConfirmation, ...props }: Var
       alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
     };
 
-    mutate({ onLog, onReceipt, onConfirmation, onError });
+    mutate({ onLog, onReceipt, onError });
   };
 
   const renderTooltipText = () => {
@@ -87,10 +86,9 @@ type EthProps = {
   blockNumber: bigint;
   txHash: HexString;
   onInBlock: () => void;
-  onFinalization: () => void;
 };
 
-function RelayEthTxButton({ txHash, blockNumber, onFinalization, ...props }: EthProps) {
+function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
   const { account } = useAccount();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
@@ -117,7 +115,7 @@ function RelayEthTxButton({ txHash, blockNumber, onFinalization, ...props }: Eth
       alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
     };
 
-    mutate({ onLog, onInBlock, onFinalization, onError });
+    mutate({ onLog, onInBlock, onError });
   };
 
   const renderTooltipText = () => {

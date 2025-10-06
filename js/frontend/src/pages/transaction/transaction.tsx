@@ -81,7 +81,7 @@ function Transaction() {
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
-  const { data, refetch } = useTransaction(id);
+  const { data } = useTransaction(id);
   const optimisticTxUpdate = useOptimisticTxUpdate(id);
 
   if (!data || !getHistoryToken) return <TransactionSkeleton />;
@@ -134,11 +134,7 @@ function Transaction() {
           <div className={styles.sidebar}>
             <div className={styles.buttons}>
               {isVaraNetwork && (
-                <PayVaraFeeButton
-                  nonce={nonce}
-                  onInBlock={() => optimisticTxUpdate(StatusEnum.Bridging)}
-                  onFinalization={refetch}
-                />
+                <PayVaraFeeButton nonce={nonce} onInBlock={() => optimisticTxUpdate(StatusEnum.Bridging)} />
               )}
 
               {isVaraNetwork ? (
@@ -147,7 +143,6 @@ function Transaction() {
                     nonce={BigInt(nonce)}
                     blockNumber={bridgingStartedAtBlock}
                     onReceipt={optimisticTxUpdate}
-                    onConfirmation={refetch}
                   />
                 )
               ) : (
@@ -155,7 +150,6 @@ function Transaction() {
                   txHash={txHash as HexString}
                   blockNumber={BigInt(blockNumber)}
                   onInBlock={optimisticTxUpdate}
-                  onFinalization={refetch}
                 />
               )}
             </div>

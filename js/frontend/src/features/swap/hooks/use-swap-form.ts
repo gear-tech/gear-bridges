@@ -6,7 +6,7 @@ import { formatUnits } from 'viem';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
 
-import { usePendingTxsCount, useOptimisticPendingTxsCountUpdate } from '@/features/history/hooks';
+import { useOptimisticPendingTxsCountUpdate } from '@/features/history/hooks';
 import { useEthAccount } from '@/hooks';
 import { isUndefined, logger, getErrorMessage } from '@/utils';
 
@@ -28,7 +28,6 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
   const { token, network } = useBridgeContext();
   const alert = useAlert();
 
-  const pendingTxsCount = usePendingTxsCount();
   const optimisticPendingTxsCountUpdate = useOptimisticPendingTxsCountUpdate();
 
   const valueSchema = getAmountSchema(
@@ -69,9 +68,6 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
         if (shouldPayBridgingFee) return;
 
         optimisticPendingTxsCountUpdate();
-
-        // better to refetch after finalization, but it's hard with current send txs implementation
-        setTimeout(() => void pendingTxsCount.refetch(), 5000);
       };
 
       const onError = (error: WriteContractErrorType | string) => {

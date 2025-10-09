@@ -6,6 +6,8 @@ import { Status } from '../../model/index.js';
 export function handleBridgingPaymentEvents(ctx: UserMessageSentHandlerContext) {
   if (ctx.service !== BridgingPaymentServices.BridgingPayment) return;
 
+  const isPriority = ctx.method === BridgingPaymentMethods.PriorityBridgingPaid;
+
   switch (ctx.method) {
     case BridgingPaymentMethods.BridgingPaid:
     case BridgingPaymentMethods.PriorityBridgingPaid: {
@@ -15,7 +17,7 @@ export function handleBridgingPaymentEvents(ctx: UserMessageSentHandlerContext) 
         ctx.event.args.message.payload,
       );
 
-      ctx.state.updateTransferStatus(gearNonce(BigInt(nonce)), Status.Bridging);
+      ctx.state.updateTransferStatus(gearNonce(BigInt(nonce)), Status.Bridging, isPriority);
     }
   }
 }

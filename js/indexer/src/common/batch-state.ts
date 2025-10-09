@@ -5,7 +5,7 @@ import { FindManyOptions, Store } from '@subsquid/typeorm-store';
 import { Logger } from '@subsquid/logger';
 
 import { CompletedTransfer, Network, Pair, Status, Transfer } from '../model/index.js';
-import { mapKeys, mapValues } from './map.js';
+import { mapKeys, mapValues, setValues } from './map.js';
 
 const PAIR_RETRY_LIMIT = 5;
 const PAIR_RETRY_DELAY = 1000;
@@ -15,6 +15,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
   protected _completed: Map<string, CompletedTransfer>;
   protected _pairs: Map<string, Pair>;
   protected _statuses: Map<string, Status>;
+  protected _priorityRequests: Set<string>;
   protected _ctx: Context;
   protected _log: Logger;
 
@@ -26,6 +27,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     this._completed = new Map();
     this._statuses = new Map();
     this._pairs = new Map();
+    this._priorityRequests = new Set();
   }
 
   protected _clear() {
@@ -33,6 +35,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     this._completed.clear();
     this._pairs.clear();
     this._statuses.clear();
+    this._priorityRequests.clear();
   }
 
   public async new(ctx: Context) {
@@ -177,16 +180,8 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     if (this._statuses.size === 0) return;
 
     const noncesToUpdate = mapKeys(this._statuses);
-    const noncesNotInCache = noncesToUpdate.filter((nonce) => !this._transfers.has(nonce));
 
-    if (noncesNotInCache.length > 0) {
-      const transfers = await this._ctx.store.find(Transfer, {
-        where: { nonce: In(noncesNotInCache), sourceNetwork: this._network, status: Not(Status.Completed) },
-      });
-      for (const transfer of transfers) {
-        this._transfers.set(transfer.nonce, transfer);
-      }
-    }
+    await this._updateCachedTransfers(noncesToUpdate);
 
     const notUpdatedTransfers: string[] = [];
 
@@ -225,6 +220,25 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     }
   }
 
+  protected async _processPriorityRequests() {
+    if (this._priorityRequests.size === 0) return;
+
+    const noncesToUpdate = setValues(this._priorityRequests);
+
+    await this._updateCachedTransfers(noncesToUpdate);
+
+    for (const nonce of noncesToUpdate) {
+      const transfer = this._transfers.get(nonce);
+
+      if (!transfer) {
+        this._log.error({ nonce }, 'Transfer not found for updating priority status');
+        continue;
+      }
+
+      transfer.isPriorityFeePaid = true;
+    }
+  }
+
   protected async _saveTransfers() {
     if (this._transfers.size === 0) return;
 
@@ -238,6 +252,21 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
   }
 
   public abstract save(): Promise<void>;
+
+  protected async _updateCachedTransfers(nonces: string[]) {
+    if (nonces.length === 0) return;
+
+    const notCachedNonces = nonces.filter((nonce) => !this._transfers.has(nonce));
+
+    if (notCachedNonces.length > 0) {
+      const transfers = await this._ctx.store.find(Transfer, {
+        where: { nonce: In(notCachedNonces), sourceNetwork: this._network, status: Not(Status.Completed) },
+      });
+      for (const transfer of transfers) {
+        this._transfers.set(transfer.nonce, transfer);
+      }
+    }
+  }
 
   public async addTransfer(transfer: Transfer) {
     transfer.txHash = transfer.txHash.toLowerCase();
@@ -263,11 +292,16 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     this._log.info({ nonce: transfer.nonce, blockNumber: transfer.blockNumber }, 'Transfer requested');
   }
 
-  public async updateTransferStatus(nonce: string, status: Status) {
+  public async updateTransferStatus(nonce: string, status: Status, isPriority = false) {
     if (this._statuses.get(nonce) === status) return;
 
     this._statuses.set(nonce, status);
-    this._log.debug({ nonce, status }, 'Transfer status changed');
+    if (isPriority) {
+      this._priorityRequests.add(nonce);
+      this._log.info({ nonce }, 'Request marked as priority');
+    }
+
+    this._log.debug({ nonce, status }, 'Request status changed');
   }
 
   public setCompletedTransfer(nonce: string, timestamp: Date, blockNumber: bigint, txHash: string) {

@@ -73,4 +73,7 @@ export class Transfer {
 
   @Column({ nullable: true, name: 'eth_bridge_built_in_msg_hash', length: 66 })
   ethBridgeBuiltInMsgHash?: `0x${string}`;
+
+  @Column({ default: false, name: 'is_priority_fee_paid' })
+  isPriorityFeePaid?: boolean;
 }

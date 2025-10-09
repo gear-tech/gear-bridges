@@ -187,6 +187,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       this._saveSlots(),
     ]);
     await this._processStatuses();
+    await this._processPriorityRequests();
     await this._saveTransfers();
     await this._saveInitiatedTransfers();
     await this._processCompletedTransfers();

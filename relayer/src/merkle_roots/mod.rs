@@ -305,7 +305,6 @@ impl MerkleRootRelayer {
                                 hash,
                                 authority_set_proof,
                                 merkle_root.queue_id,
-                                false,
                                 true,
                                 (
                                     merkle_root.block_finality_hash,
@@ -376,7 +375,6 @@ impl MerkleRootRelayer {
                         hash,
                         inner_proof,
                         merkle_root.queue_id,
-                        false,
                         true,
                         (
                             merkle_root.block_finality_hash,
@@ -642,10 +640,15 @@ impl MerkleRootRelayer {
             _ = self.main_interval.tick() => {
                 // prune old timestamps to not trigger spike when not necessary
                 self.prune_old_timestamps();
-
+                let has_priority = self.merkle_root_batch.iter().any(|root| root.priority);
+                let timeout = if has_priority {
+                    self.options.spike_config.priority_timeout
+                } else {
+                    self.options.spike_config.timeout
+                };
                 let is_spike = self.merkle_root_batch.iter().map(|root| root.nonces_count).sum::<usize>() >= self.options.spike_config.threshold;
                 let is_timeout = self.first_pending_timestamp
-                    .is_some_and(|t| t.elapsed() >= self.options.spike_config.timeout);
+                    .is_some_and(|t| t.elapsed() >= timeout);
 
                 if is_spike || is_timeout {
                     // consume the timestamp to not trigger timeout again immediately.
@@ -664,7 +667,6 @@ impl MerkleRootRelayer {
                             pending.merkle_root,
                             pending.inner_proof,
                             pending.queue_id,
-                            false,
                             /* request is part of the batch: */
                             true,
                             (merkle_root.block_finality_hash, merkle_root.block_finality_proof.clone()),
@@ -761,7 +763,7 @@ impl MerkleRootRelayer {
                                 let pblock = GearBlock::from_subxt_block(pblock).await?;
                                 log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
                                 let timestamp = self.api_provider.client().fetch_timestamp(pblock.hash()).await?;
-                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::No, Priority::Yes, ForceGeneration::Yes, timestamp).await?;
+                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes, timestamp).await?;
                             }
                         }
 
@@ -1130,6 +1132,7 @@ impl MerkleRootRelayer {
                         inner_proof,
                         nonces_count,
                         queue_id,
+                        priority: matches!(priority, Priority::Yes),
                     });
                     return Ok(Some((queue_id, merkle_root)));
                 }
@@ -1140,7 +1143,6 @@ impl MerkleRootRelayer {
                     merkle_root,
                     inner_proof,
                     queue_id,
-                    priority == Priority::Yes,
                     /* non batching request: should be processed separately */
                     false,
                     (block_finality_hash, block_finality_proof.clone()),
@@ -1287,6 +1289,7 @@ impl MerkleRootRelayerOptions {
             critical_threshold: config.critical_threshold,
             spike_config: SpikeConfig {
                 timeout: config.spike_timeout,
+                priority_timeout: config.priority_spike_timeout,
                 window: config.spike_window,
                 threshold: config.spike_threshold,
             },
@@ -1321,8 +1324,12 @@ impl MerkleRootRelayerOptions {
 
 #[derive(Copy, Clone)]
 pub struct SpikeConfig {
-    /// Timeout after which we start relaying merkle-root
+    /// Timeout after which we start generating proof
+    /// for batch of requests without priority requests.
     pub timeout: Duration,
+    /// Timeout after which we start generating proof
+    /// for batch of requests with at least one priority request.
+    pub priority_timeout: Duration,
     /// Spike window, used to cutoff old merkle-roots
     pub window: Duration,
     /// Spike threshold: after threshold is reached we enter "spike"
@@ -1333,6 +1340,7 @@ pub struct SpikeConfig {
 impl Default for SpikeConfig {
     fn default() -> Self {
         Self {
+            priority_timeout: Duration::from_secs(5 * 60),
             timeout: Duration::from_secs(30 * 60),
             window: Duration::from_secs(15 * 60),
             threshold: 8,
@@ -1350,6 +1358,9 @@ pub struct PendingMerkleRoot {
     /// Used to check for spike.
     pub nonces_count: usize,
     pub queue_id: u64,
+    /// Is this request marked as prioritized. If so,
+    /// we will take the batch immediately and process it.
+    pub priority: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]

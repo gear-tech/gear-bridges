@@ -86,6 +86,12 @@ pub struct GearEthCoreArgs {
     )]
     pub spike_timeout: Duration,
     #[arg(
+        help = "Timeout after which we start processing events if there is at least one priority event",
+        value_parser = humantime::parse_duration, default_value="10m"
+    )]
+    pub priority_spike_timeout: Duration,
+
+    #[arg(
         help = "After threshold is reached we enter \"spike\" mode
         where events are processed immediately",
         default_value = "8"

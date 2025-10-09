@@ -20,7 +20,6 @@ pub struct Request {
     pub merkle_root: H256,
     pub queue_id: u64,
     pub inner_proof: ProofWithCircuitData,
-    pub priority: bool,
     pub batch: bool,
     pub block_finality: (H256, dto::BlockFinalityProof),
 }
@@ -66,7 +65,6 @@ impl FinalityProverIo {
         merkle_root: H256,
         inner_proof: ProofWithCircuitData,
         queue_id: u64,
-        priority: bool,
         batch: bool,
         block_finality: (H256, dto::BlockFinalityProof),
     ) -> bool {
@@ -77,7 +75,6 @@ impl FinalityProverIo {
                 merkle_root,
                 inner_proof,
                 queue_id,
-                priority,
                 batch,
                 block_finality,
             })
@@ -146,8 +143,6 @@ impl FinalityProver {
         // Use BTreeMap to have a deterministic order of processing: from older to newer authority sets.
         let mut request_groups: BTreeMap<(u64, u64), BatchProofRequest> = BTreeMap::new();
 
-        let mut priority_requests: BTreeMap<(u64, u64), BatchProofRequest> = BTreeMap::new();
-
         let mut non_batch_requests: Vec<Request> = Vec::new();
 
         loop {
@@ -211,13 +206,9 @@ impl FinalityProver {
                     non_batch_requests.push(request);
                     continue;
                 }
-                let group = if request.priority {
-                    &mut priority_requests
-                } else {
-                    &mut request_groups
-                };
+
                 let authority_set_id = gear_api.authority_set_id(request.block_hash).await?;
-                match group.entry((authority_set_id, request.queue_id)) {
+                match request_groups.entry((authority_set_id, request.queue_id)) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().add_request(request);
                     }
@@ -230,12 +221,12 @@ impl FinalityProver {
             // sort by block number ascending to process older requests first
             non_batch_requests.sort_by_key(|r| r.block_number);
 
-            // First process all non-batched requests, then priority batched requests, and only
-            // then normal batched requests.
+            // First process all non-batched requests, then batched requests.
             // Non batched requests are processed first as they're the most important ones, and
             // can only be created in two scenarios:
             // - kill-switch relayer requested proof
             // - relayer restarted and needs to catch up
+            // - authority set changed and there are some old requests left
             for request in non_batch_requests.drain(..) {
                 log::info!(
                     "Proving finality for block #{block_number} with merkle-root {merkle_root} (non-batched)",
@@ -266,9 +257,7 @@ impl FinalityProver {
                 }
             }
 
-            for ((authority_set_id, queue_id), request) in
-                priority_requests.iter().chain(request_groups.iter())
-            {
+            for ((authority_set_id, queue_id), request) in request_groups.iter() {
                 let BatchProofRequest {
                     block_number,
                     block_hash,
@@ -307,7 +296,6 @@ impl FinalityProver {
                 }
             }
 
-            priority_requests.clear();
             request_groups.clear();
         }
 

@@ -7,14 +7,16 @@ type Props = {
   value: ReactNode;
   children: ReactElement;
   side?: ComponentProps<typeof BaseTooltip.Positioner>['side'];
+  isOpen?: boolean;
+  onOpenChange?: (value: boolean) => void;
 };
 
-function Tooltip({ value, children, side }: Props) {
+function Tooltip({ value, children, side, isOpen, onOpenChange }: Props) {
   if (!value) return children;
 
   return (
     <BaseTooltip.Provider>
-      <BaseTooltip.Root>
+      <BaseTooltip.Root open={isOpen} onOpenChange={onOpenChange}>
         <BaseTooltip.Trigger render={children as ReactElement<Record<string, unknown>>} />
 
         <BaseTooltip.Portal>

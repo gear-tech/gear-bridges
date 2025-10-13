@@ -1,4 +1,5 @@
-import { JSX } from 'react';
+import { Button } from '@gear-js/vara-ui';
+import { JSX, useState } from 'react';
 
 import { Tooltip } from '@/components';
 import { SVGComponent } from '@/types';
@@ -18,6 +19,8 @@ type Props<T extends string> = {
 };
 
 function Setting<T extends string>({ value, heading, tooltip: TooltipContent, buttons, disabled, onChange }: Props<T>) {
+  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
+
   const isFirstSelected = value === buttons[0].value;
 
   const renderButtons = () =>
@@ -38,9 +41,14 @@ function Setting<T extends string>({ value, heading, tooltip: TooltipContent, bu
       <h4 className={styles.heading}>
         {heading}
 
-        <Tooltip value={<TooltipContent />}>
-          <OutlineWarningSVG className={styles.tooltip} />
-        </Tooltip>
+        {/* is it the right way to support tooltips at mobile devices? */}
+        {/* feels like tooltip -> button makes more sense, but clicks aren't affecting tooltip visibility then */}
+        {/* https://github.com/mui/base-ui/issues/559 */}
+        <Button color="transparent" onClick={() => setIsTooltipOpen((prevValue) => !prevValue)}>
+          <Tooltip value={<TooltipContent />} isOpen={isTooltipOpen} onOpenChange={setIsTooltipOpen}>
+            <OutlineWarningSVG className={styles.tooltip} />
+          </Tooltip>
+        </Button>
       </h4>
 
       <div className={cx(styles.buttons, isFirstSelected && styles.active, disabled && styles.disabled)}>

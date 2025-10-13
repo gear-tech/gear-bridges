@@ -71,6 +71,7 @@ function useVaraTxsEstimate({
       debouncedAmount,
       debouncedAccountAddress,
       shouldPayBridgingFee,
+      shouldPayPriorityFee,
       token?.address,
       account?.address,
     ],
@@ -80,6 +81,7 @@ function useVaraTxsEstimate({
     enabled:
       !isUndefined(bridgingFee) &&
       !isUndefined(vftManagerFee) &&
+      !isUndefined(priorityFee) &&
       Boolean(api && formValues && token && prepareTxs) &&
       isAccountReady,
   });

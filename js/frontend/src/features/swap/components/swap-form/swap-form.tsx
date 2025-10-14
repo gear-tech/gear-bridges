@@ -55,7 +55,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.DEFAULT);
   const shouldPayPriorityFee = priority === PRIORITY.HIGH;
-  const time = shouldPayPriorityFee ? '20 mins' : '1 hour';
+  const time = shouldPayPriorityFee || !network.isVara ? '20 mins' : '1 hour';
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
   const shouldPayBridgingFee = claimType === CLAIM_TYPE.AUTO;

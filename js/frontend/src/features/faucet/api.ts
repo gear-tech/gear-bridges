@@ -32,7 +32,7 @@ type GetBalanceParameters<T> = {
 } & T;
 
 const getVaraAccountBalance = (parameters: GetBalanceParameters<VaraPayload>) =>
-  fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/vara-testnet/request`, parameters });
+  fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/bridge/request`, parameters });
 
 const getEthTokenBalance = (parameters: GetBalanceParameters<EthPayload>) =>
   fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/bridge/request`, parameters });

@@ -8,6 +8,7 @@ contract MessageQueueScriptTest is Test {
     function setUp() public {}
 
     function test_Upgrade() public {
+        /// forge-lint: disable-next-line(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         MessageQueueScript upgradeScript = new MessageQueueScript();
         upgradeScript.setUp();

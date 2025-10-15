@@ -32,10 +32,7 @@ contract GovernancePauserTest is Test, Base {
 
     function test_HandleMessageWithInvalidSource() public {
         VaraMessage memory message = VaraMessage({
-            nonce: messageNonce++,
-            source: bytes32(uint256(0x22)),
-            destination: address(governancePauser),
-            payload: ""
+            nonce: messageNonce++, source: bytes32(uint256(0x22)), destination: address(governancePauser), payload: ""
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 

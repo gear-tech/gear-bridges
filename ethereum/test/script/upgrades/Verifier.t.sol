@@ -8,6 +8,7 @@ contract VerifierScriptTest is Test {
     function setUp() public {}
 
     function test_Upgrade() public {
+        /// forge-lint: disable-next-line(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         VerifierScript upgradeScript = new VerifierScript();
         upgradeScript.setUp();

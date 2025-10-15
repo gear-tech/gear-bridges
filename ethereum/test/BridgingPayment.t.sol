@@ -66,9 +66,9 @@ contract BridgingPaymentTest is Test, Base {
         address bridgingPayment_ = bridgingPaymentOwner.createBridgingPayment(deploymentArguments.bridgingPaymentFee);
 
         vm.expectRevert(IBridgingPayment.PayFeeFailed.selector);
-        erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
-            token, amount, to, bridgingPayment_
-        );
+        erc20Manager.requestBridgingPayingFee{
+            value: deploymentArguments.bridgingPaymentFee
+        }(token, amount, to, bridgingPayment_);
 
         vm.stopPrank();
     }

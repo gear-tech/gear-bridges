@@ -11,6 +11,7 @@ contract DeploymentScriptTest is Test {
     function test_DeploymentMainnet() public {
         vm.chainId(1);
         vm.warp(vm.unixTime() / 1000);
+        /// forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("CIRCLE_TOKEN", vm.toString(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48));
         vm.setEnv("TETHER_TOKEN", vm.toString(0xdAC17F958D2ee523a2206206994597C13D831ec7));
@@ -28,6 +29,7 @@ contract DeploymentScriptTest is Test {
             )
         );
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
+        /// forge-lint: disable-end(unsafe-cheatcode)
         DeploymentScript deploymentScript = new DeploymentScript();
         deploymentScript.setUp();
         deploymentScript.run();
@@ -36,6 +38,7 @@ contract DeploymentScriptTest is Test {
     function test_DeploymentHoodi() public {
         vm.chainId(560048);
         vm.warp(vm.unixTime() / 1000);
+        /// forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("VFT_MANAGER", vm.toString(BaseConstants.VFT_MANAGER));
         vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
@@ -50,6 +53,7 @@ contract DeploymentScriptTest is Test {
             )
         );
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
+        /// forge-lint: disable-end(unsafe-cheatcode)
         DeploymentScript deploymentScript = new DeploymentScript();
         deploymentScript.setUp();
         deploymentScript.run();

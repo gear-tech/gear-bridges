@@ -284,10 +284,8 @@ contract MessageQueueTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                proxy: address(messageQueue),
-                newImplementation: address(newImplementationMock),
-                data: ""
-            }).pack()
+                    proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
+                }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -456,10 +454,8 @@ contract MessageQueueTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                proxy: address(messageQueue),
-                newImplementation: address(newImplementationMock),
-                data: ""
-            }).pack()
+                    proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
+                }).pack()
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 

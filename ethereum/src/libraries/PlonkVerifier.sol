@@ -28,15 +28,19 @@ contract PlonkVerifier is IPlonkVerifier {
         11559732032986387107991004021392285783925812861821192530917403151452391805634;
     uint256 private constant G2_SRS_0_X_1 =
         10857046999023057135944570762232829481370756359578518086990519993285655852781;
-    uint256 private constant G2_SRS_0_Y_0 = 4082367875863433681332203403145435568316851327593401208105741076214120093531;
-    uint256 private constant G2_SRS_0_Y_1 = 8495653923123431417604973247489272438418190587263600148770280649306958101930;
+    uint256 private constant G2_SRS_0_Y_0 =
+        4082367875863433681332203403145435568316851327593401208105741076214120093531;
+    uint256 private constant G2_SRS_0_Y_1 =
+        8495653923123431417604973247489272438418190587263600148770280649306958101930;
 
     uint256 private constant G2_SRS_1_X_0 =
         15805639136721018565402881920352193254830339253282065586954346329754995870280;
     uint256 private constant G2_SRS_1_X_1 =
         19089565590083334368588890253123139704298730990782503769911324779715431555531;
-    uint256 private constant G2_SRS_1_Y_0 = 9779648407879205346559610309258181044130619080926897934572699915909528404984;
-    uint256 private constant G2_SRS_1_Y_1 = 6779728121489434657638426458390319301070371227460768374343986326751507916979;
+    uint256 private constant G2_SRS_1_Y_0 =
+        9779648407879205346559610309258181044130619080926897934572699915909528404984;
+    uint256 private constant G2_SRS_1_Y_1 =
+        6779728121489434657638426458390319301070371227460768374343986326751507916979;
 
     uint256 private constant G1_SRS_X = 14312776538779914388377568895031746459131577658076416373430523308756343304251;
     uint256 private constant G1_SRS_Y = 11763105256161367503191792604679297387056316997144156930871823008787082098465;
@@ -51,21 +55,28 @@ contract PlonkVerifier is IPlonkVerifier {
     uint256 private constant VK_QL_COM_Y = 8858993227530927120179212220225110200455783923154389098077647079543812507346;
     uint256 private constant VK_QR_COM_X = 5995666133180000820789835491784338333702034602727105370265423698164484193461;
     uint256 private constant VK_QR_COM_Y = 6015852916734829908690633413804334290457163063407829121372596373731349715572;
-    uint256 private constant VK_QM_COM_X = 16585542426788090481910888362572441247012564686689959863112139436907519862035;
-    uint256 private constant VK_QM_COM_Y = 14329313695986554679500867184364102111346826480414227660573424046767442892985;
+    uint256 private constant VK_QM_COM_X =
+        16585542426788090481910888362572441247012564686689959863112139436907519862035;
+    uint256 private constant VK_QM_COM_Y =
+        14329313695986554679500867184364102111346826480414227660573424046767442892985;
     uint256 private constant VK_QO_COM_X = 4166512812663112397191859597547150136308925512949907629628261039244202560204;
-    uint256 private constant VK_QO_COM_Y = 10634459059554147778115887862529134477832584464771163398244417609055229015218;
+    uint256 private constant VK_QO_COM_Y =
+        10634459059554147778115887862529134477832584464771163398244417609055229015218;
     uint256 private constant VK_QK_COM_X = 8156377053823136973071573954139507624928720444207977309485810933822618716655;
     uint256 private constant VK_QK_COM_Y = 7024148089537578121052270799858306628956979785931046651870204381339875165221;
 
-    uint256 private constant VK_S1_COM_X = 14668757368193418218302507515680144302114783799310578098395191690088432599791;
+    uint256 private constant VK_S1_COM_X =
+        14668757368193418218302507515680144302114783799310578098395191690088432599791;
     uint256 private constant VK_S1_COM_Y = 9152231620889024871996362374078426720059919678282095847343698067320452547802;
 
-    uint256 private constant VK_S2_COM_X = 17475728587689666768826669409814656052757270714601068564457455493114242806162;
+    uint256 private constant VK_S2_COM_X =
+        17475728587689666768826669409814656052757270714601068564457455493114242806162;
     uint256 private constant VK_S2_COM_Y = 4768974847800363849904839888387984556680315874238986515091695902554921466498;
 
-    uint256 private constant VK_S3_COM_X = 10896535026703489103639571082918765017957101484574275063874839329413371332761;
-    uint256 private constant VK_S3_COM_Y = 13435787114561034596462515708219101064054202538760544180276642906725849032892;
+    uint256 private constant VK_S3_COM_X =
+        10896535026703489103639571082918765017957101484574275063874839329413371332761;
+    uint256 private constant VK_S3_COM_Y =
+        13435787114561034596462515708219101064054202538760544180276642906725849032892;
 
     uint256 private constant VK_COSET_SHIFT = 5;
 
@@ -802,7 +813,10 @@ contract PlonkVerifier is IPlonkVerifier {
                 let zeta_omega := mulmod(mload(add(state, STATE_ZETA)), VK_OMEGA, R_MOD)
                 random := mulmod(random, zeta_omega, R_MOD)
                 point_acc_mul_calldata(
-                    folded_points_quotients, add(aproof, PROOF_OPENING_AT_ZETA_OMEGA_X), random, mPtr
+                    folded_points_quotients,
+                    add(aproof, PROOF_OPENING_AT_ZETA_OMEGA_X),
+                    random,
+                    mPtr
                 )
 
                 point_add(folded_digests, folded_digests, folded_points_quotients, mPtr)
@@ -864,7 +878,9 @@ contract PlonkVerifier is IPlonkVerifier {
 
                 point_acc_mul(state_folded_digests, add(state, STATE_LINEARISED_POLYNOMIAL_X), acc_gamma, mPtr)
                 fr_acc_mul_calldata(
-                    add(state, STATE_FOLDED_CLAIMED_VALUES), add(aproof, PROOF_LINEARISED_POLYNOMIAL_AT_ZETA), acc_gamma
+                    add(state, STATE_FOLDED_CLAIMED_VALUES),
+                    add(aproof, PROOF_LINEARISED_POLYNOMIAL_AT_ZETA),
+                    acc_gamma
                 )
 
                 acc_gamma := mulmod(acc_gamma, l_gamma_kzg, R_MOD)
@@ -989,7 +1005,11 @@ contract PlonkVerifier is IPlonkVerifier {
                 )
 
                 let rl :=
-                    mulmod(calldataload(add(aproof, PROOF_L_AT_ZETA)), calldataload(add(aproof, PROOF_R_AT_ZETA)), R_MOD)
+                    mulmod(
+                        calldataload(add(aproof, PROOF_L_AT_ZETA)),
+                        calldataload(add(aproof, PROOF_R_AT_ZETA)),
+                        R_MOD
+                    )
                 mstore(mPtr, VK_QM_COM_X)
                 mstore(add(mPtr, 0x20), VK_QM_COM_Y)
                 point_acc_mul(add(state, STATE_LINEARISED_POLYNOMIAL_X), mPtr, rl, add(mPtr, 0x40))
@@ -1100,11 +1120,17 @@ contract PlonkVerifier is IPlonkVerifier {
                 let zeta_power_n_plus_two := pow(mload(add(state, STATE_ZETA)), n_plus_two, mPtr)
                 point_mul_calldata(add(state, STATE_FOLDED_H_X), add(aproof, PROOF_H_2_X), zeta_power_n_plus_two, mPtr)
                 point_add_calldata(
-                    add(state, STATE_FOLDED_H_X), add(state, STATE_FOLDED_H_X), add(aproof, PROOF_H_1_X), mPtr
+                    add(state, STATE_FOLDED_H_X),
+                    add(state, STATE_FOLDED_H_X),
+                    add(aproof, PROOF_H_1_X),
+                    mPtr
                 )
                 point_mul(add(state, STATE_FOLDED_H_X), add(state, STATE_FOLDED_H_X), zeta_power_n_plus_two, mPtr)
                 point_add_calldata(
-                    add(state, STATE_FOLDED_H_X), add(state, STATE_FOLDED_H_X), add(aproof, PROOF_H_0_X), mPtr
+                    add(state, STATE_FOLDED_H_X),
+                    add(state, STATE_FOLDED_H_X),
+                    add(aproof, PROOF_H_0_X),
+                    mPtr
                 )
             }
 
@@ -1155,7 +1181,9 @@ contract PlonkVerifier is IPlonkVerifier {
                 mstore(
                     computed_quotient,
                     addmod(
-                        mload(computed_quotient), sub(R_MOD, mload(add(state, STATE_ALPHA_SQUARE_LAGRANGE_0))), R_MOD
+                        mload(computed_quotient),
+                        sub(R_MOD, mload(add(state, STATE_ALPHA_SQUARE_LAGRANGE_0))),
+                        R_MOD
                     )
                 )
                 mstore(

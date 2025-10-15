@@ -64,7 +64,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       savedBlockNumbers.push(...savedBlocks.map(({ blockNumber }) => blockNumber));
     }
 
-    await this._ctx.store.save(values.filter(({ blockNumber }) => savedBlockNumbers.includes(blockNumber)));
+    await this._ctx.store.save(values.filter(({ blockNumber }) => !savedBlockNumbers.includes(blockNumber)));
 
     this._log.info({ count: this._merkleRoots.size }, 'Merkle roots saved');
   }

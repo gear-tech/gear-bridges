@@ -7,5 +7,5 @@ export * from './pair.model.js';
 export * from './completedTransfer.model.js';
 export * from './varaBridgeProgram.model.js';
 export * from './ethBridgeProgram.model.js';
-export * from './messageQueue.model.js';
+export * from './merkleRoot.js';
 export * from './checkpoint.model.js';

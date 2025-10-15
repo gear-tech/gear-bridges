@@ -133,9 +133,15 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 deployerAddress: deployerAddress,
                 forkUrlOrAlias: "",
                 overrides: Overrides({
-                    circleToken: vm.envExists("CIRCLE_TOKEN") ? vm.envAddress("CIRCLE_TOKEN") : BaseConstants.ZERO_ADDRESS,
-                    tetherToken: vm.envExists("TETHER_TOKEN") ? vm.envAddress("TETHER_TOKEN") : BaseConstants.ZERO_ADDRESS,
-                    wrappedEther: vm.envExists("WRAPPED_ETHER") ? vm.envAddress("WRAPPED_ETHER") : BaseConstants.ZERO_ADDRESS
+                    circleToken: vm.envExists("CIRCLE_TOKEN")
+                        ? vm.envAddress("CIRCLE_TOKEN")
+                        : BaseConstants.ZERO_ADDRESS,
+                    tetherToken: vm.envExists("TETHER_TOKEN")
+                        ? vm.envAddress("TETHER_TOKEN")
+                        : BaseConstants.ZERO_ADDRESS,
+                    wrappedEther: vm.envExists("WRAPPED_ETHER")
+                        ? vm.envAddress("WRAPPED_ETHER")
+                        : BaseConstants.ZERO_ADDRESS
                 }),
                 vftManager: vm.envBytes32("VFT_MANAGER"),
                 governanceAdmin: vm.envBytes32("GOVERNANCE_ADMIN"),
@@ -180,9 +186,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 deployerAddress: _deploymentArguments.deployerAddress,
                 forkUrlOrAlias: _deploymentArguments.forkUrlOrAlias,
                 overrides: Overrides({
-                    circleToken: erc20Tokens[0],
-                    tetherToken: erc20Tokens[1],
-                    wrappedEther: erc20Tokens[2]
+                    circleToken: erc20Tokens[0], tetherToken: erc20Tokens[1], wrappedEther: erc20Tokens[2]
                 }),
                 vftManager: erc20Manager.vftManagers()[0],
                 governanceAdmin: governanceAdmin.governance(),

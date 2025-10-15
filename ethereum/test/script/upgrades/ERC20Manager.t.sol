@@ -8,6 +8,7 @@ contract ERC20ManagerScriptTest is Test {
     function setUp() public {}
 
     function test_Upgrade() public {
+        /// forge-lint: disable-next-line(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         ERC20ManagerScript upgradeScript = new ERC20ManagerScript();
         upgradeScript.setUp();

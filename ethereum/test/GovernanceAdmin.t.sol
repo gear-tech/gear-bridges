@@ -32,10 +32,7 @@ contract GovernanceAdminTest is Test, Base {
 
     function test_HandleMessageWithInvalidSource() public {
         VaraMessage memory message = VaraMessage({
-            nonce: messageNonce++,
-            source: bytes32(uint256(0x22)),
-            destination: address(governanceAdmin),
-            payload: ""
+            nonce: messageNonce++, source: bytes32(uint256(0x22)), destination: address(governanceAdmin), payload: ""
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 

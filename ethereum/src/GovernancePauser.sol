@@ -101,9 +101,8 @@ contract GovernancePauser is IMessageHandler, IGovernance {
             discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
         }
 
-        if (
-            !(discriminant >= GovernanceConstants.CHANGE_GOVERNANCE && discriminant <= GovernanceConstants.UNPAUSE_PROXY)
-        ) {
+        if (!(discriminant >= GovernanceConstants.CHANGE_GOVERNANCE
+                    && discriminant <= GovernanceConstants.UNPAUSE_PROXY)) {
             return false;
         }
 

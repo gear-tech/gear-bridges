@@ -26,8 +26,5 @@ interface IVerifier {
      * @dev Actually, it is a wrapper around `IPlonkVerifier.verifyProof` function.
      *      It is used to avoid reverts in case of invalid proof.
      */
-    function safeVerifyProof(bytes calldata proof, uint256[] calldata publicInputs)
-        external
-        view
-        returns (bool success);
+    function safeVerifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool success);
 }

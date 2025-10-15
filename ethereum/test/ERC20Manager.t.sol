@@ -326,10 +326,8 @@ contract ERC20ManagerTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                proxy: address(erc20Manager),
-                newImplementation: address(newImplementationMock),
-                data: ""
-            }).pack()
+                    proxy: address(erc20Manager), newImplementation: address(newImplementationMock), data: ""
+                }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -424,11 +422,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                sender: to,
-                receiver: deploymentArguments.deployerAddress,
-                token: token,
-                amount: amount
-            }).pack()
+                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+                }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -490,9 +485,9 @@ contract ERC20ManagerTest is Test, Base {
         vm.expectEmit(address(erc20Manager));
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
-        erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
-            token, amount, to, bridgingPayment_
-        );
+        erc20Manager.requestBridgingPayingFee{
+            value: deploymentArguments.bridgingPaymentFee
+        }(token, amount, to, bridgingPayment_);
 
         assertEq(tetherToken.balanceOf(deploymentArguments.deployerAddress), 0);
         assertEq(tetherToken.balanceOf(address(erc20Manager)), amount);
@@ -566,9 +561,9 @@ contract ERC20ManagerTest is Test, Base {
         vm.expectEmit(address(erc20Manager));
         emit IERC20Manager.BridgingRequested(owner, to, token, value);
 
-        erc20Manager.requestBridgingPayingFeeWithPermit{value: deploymentArguments.bridgingPaymentFee}(
-            token, value, to, deadline, v, r, s, bridgingPayment_
-        );
+        erc20Manager.requestBridgingPayingFeeWithPermit{
+            value: deploymentArguments.bridgingPaymentFee
+        }(token, value, to, deadline, v, r, s, bridgingPayment_);
 
         vm.stopPrank();
     }
@@ -668,11 +663,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                sender: to,
-                receiver: deploymentArguments.deployerAddress,
-                token: token,
-                amount: amount
-            }).pack()
+                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+                }).pack()
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -702,10 +694,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithGovernanceMessageAndNotEnoughPayload() public {
         VaraMessage memory message = VaraMessage({
-            nonce: messageNonce++,
-            source: governanceAdmin.governance(),
-            destination: address(erc20Manager),
-            payload: ""
+            nonce: messageNonce++, source: governanceAdmin.governance(), destination: address(erc20Manager), payload: ""
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -733,10 +722,7 @@ contract ERC20ManagerTest is Test, Base {
 
     function test_HandleMessageWithInvalidSource() public {
         VaraMessage memory message = VaraMessage({
-            nonce: messageNonce++,
-            source: bytes32(uint256(0x22)),
-            destination: address(erc20Manager),
-            payload: ""
+            nonce: messageNonce++, source: bytes32(uint256(0x22)), destination: address(erc20Manager), payload: ""
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -907,9 +893,9 @@ contract ERC20ManagerTest is Test, Base {
         vm.expectEmit(address(erc20Manager));
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
-        erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
-            token, amount, to, bridgingPayment_
-        );
+        erc20Manager.requestBridgingPayingFee{
+            value: deploymentArguments.bridgingPaymentFee
+        }(token, amount, to, bridgingPayment_);
 
         assertEq(newTetherToken.balanceOf(deploymentArguments.deployerAddress), 0);
         assertEq(newTetherToken.balanceOf(address(erc20Manager)), amount);
@@ -959,8 +945,9 @@ contract ERC20ManagerTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
-            payload: RegisterGearTokenMessage({tokenName: tokenName, tokenSymbol: tokenSymbol, tokenDecimals: tokenDecimals})
-                .pack()
+            payload: RegisterGearTokenMessage({
+                    tokenName: tokenName, tokenSymbol: tokenSymbol, tokenDecimals: tokenDecimals
+                }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -997,11 +984,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                sender: to,
-                receiver: deploymentArguments.deployerAddress,
-                token: token,
-                amount: amount
-            }).pack()
+                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+                }).pack()
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -1026,9 +1010,9 @@ contract ERC20ManagerTest is Test, Base {
         vm.expectEmit(address(erc20Manager));
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
-        erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
-            token, amount, to, bridgingPayment_
-        );
+        erc20Manager.requestBridgingPayingFee{
+            value: deploymentArguments.bridgingPaymentFee
+        }(token, amount, to, bridgingPayment_);
 
         assertEq(IERC20Metadata(token).balanceOf(deploymentArguments.deployerAddress), 0);
 

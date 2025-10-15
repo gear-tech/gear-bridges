@@ -2,8 +2,7 @@ import { DataHandlerContext } from '@subsquid/evm-processor';
 import { Store } from '@subsquid/typeorm-store';
 
 import { MerkleRootInMessageQueue, Network, Status } from '../model/index.js';
-import { BaseBatchState, mapKeys, mapValues } from '../common/index.js';
-import { In } from 'typeorm';
+import { BaseBatchState, mapValues, hash } from '../common/index.js';
 
 export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private _paidRequests: Set<string>;
@@ -42,29 +41,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private async _saveMerkleRoots() {
     if (this._merkleRoots.size === 0) return;
 
-    const savedBlocks = await this._ctx.store.findBy(MerkleRootInMessageQueue, {
-      blockNumber: In(mapKeys(this._merkleRoots)),
-    });
-
-    const values = mapValues(this._merkleRoots);
-    const savedBlockNumbers: bigint[] = [];
-
-    if (savedBlocks.length > 0) {
-      this._log.warn(
-        {
-          saved: savedBlocks.map(({ blockNumber, merkleRoot }) => ({ bn: blockNumber, mr: merkleRoot })),
-          duplicates: values.map(({ blockNumber, merkleRoot }) => ({
-            bn: blockNumber,
-            mr: merkleRoot,
-          })),
-        },
-        `Merkle root duplicates found`,
-      );
-
-      savedBlockNumbers.push(...savedBlocks.map(({ blockNumber }) => blockNumber));
-    }
-
-    await this._ctx.store.save(values.filter(({ blockNumber }) => !savedBlockNumbers.includes(blockNumber)));
+    await this._ctx.store.save(mapValues(this._merkleRoots));
 
     this._log.info({ count: this._merkleRoots.size }, 'Merkle roots saved');
   }
@@ -74,8 +51,12 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._paidRequests.add(txHash.toLowerCase());
   }
 
-  public newMerkleRoot(blockNumber: bigint, merkleRoot: string) {
+  public newMerkleRoot(blockNumber: bigint, merkleRoot: string, submittedAtBlock: bigint, submittedAtTxHash: string) {
     this._log.info({ blockNumber, merkleRoot }, 'Merkle root received');
-    this._merkleRoots.set(blockNumber.toString(), new MerkleRootInMessageQueue({ blockNumber, merkleRoot }));
+    const id = hash(blockNumber, submittedAtBlock, submittedAtTxHash);
+    this._merkleRoots.set(
+      id,
+      new MerkleRootInMessageQueue({ id, blockNumber, merkleRoot, submittedAtBlock, submittedAtTxHash }),
+    );
   }
 }

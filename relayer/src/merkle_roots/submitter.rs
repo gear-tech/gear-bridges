@@ -150,6 +150,11 @@ impl_metered_service!(
             "merkle_root_relayer_pending_submissions",
             "Total number of pending merkle root submissions",
         ),
+        
+        last_submitted_block: IntGauge = IntGauge::new(
+            "merkle_root_relayer_last_submitted_block",
+            "Last submitted merkle root block number",
+        ),
     }
 );
 
@@ -325,7 +330,7 @@ impl MerkleRootSubmitter {
                             }).is_err() {
                                 return Ok(());
                             };
-
+                            self.metrics.last_submitted_block.set(submitted.merkle_root_block as i64);
                             log::info!(
                                 "Merkle root {} for block #{} submission confirmed after {} confirmations",
                                 submitted.merkle_root,

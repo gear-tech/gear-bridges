@@ -148,27 +148,27 @@ impl_metered_service!(
         last_submitted_timestamp: IntGauge = IntGauge::new(
             "merkle_root_relayer_last_submitted_timestamp",
             "Timestamp of the last submitted merkle root"
-        ).unwrap(),
+        ),
         first_pending_timestamp: IntGauge = IntGauge::new(
             "merkle_root_relayer_first_pending_timestamp",
             "Timestamp of the first pending merkle root"
-        ).unwrap(),
+        ),
         batch_delay: IntGauge = IntGauge::new(
             "merkle_root_relayer_batch_delay",
             "Delay until the current batch is processed (in seconds)"
-        ).unwrap(),
+        ),
         batch_size: IntGauge = IntGauge::new(
             "merkle_root_relayer_batch_size",
             "Current size of the merkle root batch"
-        ).unwrap(),
+        ),
         total_merkle_roots: IntGauge = IntGauge::new(
             "merkle_root_relayer_total_roots",
             "Total number of merkle roots in storage"
-        ).unwrap(),
+        ),
         total_waiting_for_authority_set_sync: IntGauge = IntGauge::new(
             "merkle_root_relayer_waiting_for_authority_set_sync",
             "Number of blocks waiting for authority set sync"
-        ).unwrap(),
+        ),
     }
 );
 

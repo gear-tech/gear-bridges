@@ -92,27 +92,27 @@ impl_metered_service!(
         pending_requests: IntGauge = IntGauge::new(
             "merkle_root_relayer_pending_requests",
             "Number of pending merkle root requests"
-        ).unwrap(),
+        ),
         currently_processing: IntGauge = IntGauge::new(
             "merkle_root_relayer_currently_processing",
             "Number of merkle root requests currently being processed"
-        ).unwrap(),
+        ),
         current_root_block: IntGauge = IntGauge::new(
             "merkle_root_relayer_current_root_block",
             "Block number of the current merkle root being processed"
-        ).unwrap(),
+        ),
         max_proof_time: IntGauge = IntGauge::new(
             "merkle_root_relayer_max_proof_time_seconds",
             "Maximum time taken to generate a proof (in seconds)"
-        ).unwrap(),
+        ),
         last_proof_time: IntGauge = IntGauge::new(
             "merkle_root_relayer_last_proof_time_seconds",
             "Time taken to generate the last proof (in seconds)"
-        ).unwrap(),
+        ),
         min_proof_time: IntGauge = IntGauge::new(
             "merkle_root_relayer_min_proof_time_seconds",
             "Minimum time taken to generate a proof (in seconds)"
-        ).unwrap(),
+        ),
     }
 );
 

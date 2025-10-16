@@ -394,8 +394,7 @@ impl FinalityProver {
         .await?;
         let elapsed = start.elapsed().as_secs_f64();
         log::info!(
-            "Proof for {merkle_root} generated (block #{block_number}) in {:.3} seconds",
-            elapsed
+            "Proof for {merkle_root} generated (block #{block_number}) in {elapsed:.3} seconds",
         );
 
         self.metrics.last_proof_time.set(elapsed.ceil() as i64);

@@ -150,7 +150,6 @@ impl_metered_service!(
             "merkle_root_relayer_pending_submissions",
             "Total number of pending merkle root submissions",
         ),
-        
         last_submitted_block: IntGauge = IntGauge::new(
             "merkle_root_relayer_last_submitted_block",
             "Last submitted merkle root block number",

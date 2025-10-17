@@ -2,10 +2,7 @@ use crate::{
     cli::{GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS},
     common::{BASE_RETRY_DELAY, MAX_RETRIES},
     hex_utils,
-    merkle_roots::{
-        authority_set_sync::AuthoritySetSyncIo, eras::SealedNotFinalizedEra,
-        prover::FinalityProverIo,
-    },
+    merkle_roots::{authority_set_sync::AuthoritySetSyncIo, prover::FinalityProverIo},
     message_relayer::{
         common::{
             gear::block_listener::BlockListener,
@@ -25,6 +22,7 @@ use anyhow::Context;
 use ethereum_client::EthApi;
 use gear_rpc_client::dto;
 use primitive_types::{H256, U256};
+use prometheus::IntGauge;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -40,10 +38,9 @@ use tokio::{
     },
     time::{Interval, MissedTickBehavior},
 };
-use utils_prometheus::MeteredService;
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub mod authority_set_sync;
-pub mod eras;
 pub mod prover;
 pub mod storage;
 pub mod submitter;
@@ -64,7 +61,9 @@ impl MeteredService for Relayer {
         self.authority_set_sync
             .get_sources()
             .into_iter()
+            .chain(self.merkle_roots.get_sources())
             .chain(self.submitter.get_sources())
+            .chain(self.prover.get_sources())
     }
 }
 
@@ -125,7 +124,6 @@ impl Relayer {
 
         let [blocks0, blocks1] = block_listener.run().await;
 
-        //let sealed_eras = eras.seal(merkle_roots.storage.proofs.clone());
         let authority_set_sync = authority_set_sync.run(blocks1);
         let prover = prover.run();
         let submitter = submitter.run();
@@ -144,6 +142,35 @@ impl Relayer {
 }
 
 const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
+
+impl_metered_service!(
+    struct Metrics {
+        last_submitted_timestamp: IntGauge = IntGauge::new(
+            "merkle_root_relayer_last_submitted_timestamp",
+            "Timestamp of the last submitted merkle root"
+        ),
+        first_pending_timestamp: IntGauge = IntGauge::new(
+            "merkle_root_relayer_first_pending_timestamp",
+            "Timestamp of the first pending merkle root"
+        ),
+        batch_delay: IntGauge = IntGauge::new(
+            "merkle_root_relayer_batch_delay",
+            "Delay until the current batch is processed (in seconds)"
+        ),
+        batch_size: IntGauge = IntGauge::new(
+            "merkle_root_relayer_batch_size",
+            "Current size of the merkle root batch"
+        ),
+        total_merkle_roots: IntGauge = IntGauge::new(
+            "merkle_root_relayer_total_roots",
+            "Total number of merkle roots in storage"
+        ),
+        total_waiting_for_authority_set_sync: IntGauge = IntGauge::new(
+            "merkle_root_relayer_waiting_for_authority_set_sync",
+            "Number of blocks waiting for authority set sync"
+        ),
+    }
+);
 
 pub struct MerkleRootRelayer {
     api_provider: ApiProviderConnection,
@@ -164,6 +191,14 @@ pub struct MerkleRootRelayer {
 
     save_interval: Interval,
     main_interval: Interval,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for MerkleRootRelayer {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl MerkleRootRelayer {
@@ -194,6 +229,8 @@ impl MerkleRootRelayer {
             options,
             save_interval,
             main_interval,
+
+            metrics: Metrics::new(),
         }
     }
 
@@ -525,16 +562,6 @@ impl MerkleRootRelayer {
             }
         }
 
-        let mut sealed_eras = eras::Eras::new(
-            Some(last_sealed),
-            self.api_provider.clone(),
-            eth_api,
-            self.options.genesis_config,
-            self.options.count_thread,
-        )
-        .await?
-        .seal(self.storage.proofs.clone());
-
         let mut attempts = 0;
 
         loop {
@@ -547,7 +574,6 @@ impl MerkleRootRelayer {
                     &mut prover,
                     &mut blocks_rx,
                     &mut authority_set_sync,
-                    &mut sealed_eras,
                     &mut http,
                 )
                 .await
@@ -590,19 +616,12 @@ impl MerkleRootRelayer {
         prover: &mut FinalityProverIo,
         blocks_rx: &mut Receiver<GearBlock>,
         authority_set_sync: &mut AuthoritySetSyncIo,
-        sealed_eras: &mut UnboundedReceiver<SealedNotFinalizedEra>,
+
         http: &mut UnboundedReceiver<MerkleRootsRequest>,
     ) -> anyhow::Result<()> {
         loop {
             let result = self
-                .process(
-                    submitter,
-                    prover,
-                    blocks_rx,
-                    authority_set_sync,
-                    sealed_eras,
-                    http,
-                )
+                .process(submitter, prover, blocks_rx, authority_set_sync, http)
                 .await;
 
             if let Err(err) = self.storage.save(&self.roots).await {
@@ -626,7 +645,7 @@ impl MerkleRootRelayer {
         prover: &mut FinalityProverIo,
         blocks_rx: &mut Receiver<GearBlock>,
         authority_set_sync: &mut AuthoritySetSyncIo,
-        sealed_eras: &mut UnboundedReceiver<SealedNotFinalizedEra>,
+
         http: &mut UnboundedReceiver<MerkleRootsRequest>,
     ) -> anyhow::Result<bool> {
         tokio::select! {
@@ -640,6 +659,20 @@ impl MerkleRootRelayer {
             _ = self.main_interval.tick() => {
                 // prune old timestamps to not trigger spike when not necessary
                 self.prune_old_timestamps();
+
+                // update metrics
+                self.metrics.total_merkle_roots.set(self.roots.len() as i64);
+                self.metrics.total_waiting_for_authority_set_sync.set(self.waiting_for_authority_set_sync.values().map(|v| v.len()).sum::<usize>() as i64);
+                self.metrics.last_submitted_timestamp.set(self.last_submitted_timestamp.unwrap_or(0) as i64);
+                self.metrics.first_pending_timestamp.set(self.first_pending_timestamp.map(|t| t.elapsed().as_secs() as i64).unwrap_or(0));
+                self.metrics.batch_size.set(self.merkle_root_batch.len() as i64);
+                if let Some(first) = self.first_pending_timestamp {
+                    self.metrics.batch_delay.set((self.options.spike_config.timeout.as_secs() as i64) - (first.elapsed().as_secs() as i64));
+                } else {
+                    self.metrics.batch_delay.set(0);
+                }
+
+
                 let has_priority = self.merkle_root_batch.iter().any(|root| root.priority);
                 let timeout = if has_priority {
                     self.options.spike_config.priority_timeout
@@ -880,19 +913,6 @@ impl MerkleRootRelayer {
             }
 
 
-            Some(sealed_era) = sealed_eras.recv(), if !sealed_eras.is_closed() => {
-                log::info!(
-                    "Sealed era #{} at block #{} with merkle root {} received",
-                    sealed_era.era,
-                    sealed_era.merkle_root_block,
-                    H256::from(sealed_era.proof.merkle_root)
-                );
-
-                if !submitter.submit_era_root(sealed_era.era, sealed_era.merkle_root_block, sealed_era.proof) {
-                    log::warn!("Proof submitter connection closed, exiting");
-                    return Ok(false);
-                }
-            }
 
             response = authority_set_sync.recv() => {
                 let Some(response) = response else {

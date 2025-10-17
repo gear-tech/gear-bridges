@@ -1,8 +1,3 @@
-use std::{
-    collections::{btree_map::Entry, BTreeMap},
-    time::{Duration, Instant},
-};
-
 use crate::{
     message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     prover_interface::{self, FinalProof},
@@ -10,8 +5,14 @@ use crate::{
 use futures::executor::block_on;
 use gear_rpc_client::{dto, GearApi};
 use primitive_types::H256;
+use prometheus::IntGauge;
 use prover::proving::{GenesisConfig, ProofWithCircuitData};
+use std::{
+    collections::{btree_map::Entry, BTreeMap},
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use utils_prometheus::{impl_metered_service, MeteredService};
 
 #[derive(Clone)]
 pub struct Request {
@@ -86,12 +87,49 @@ impl FinalityProverIo {
     }
 }
 
+impl_metered_service!(
+    struct Metrics {
+        pending_requests: IntGauge = IntGauge::new(
+            "merkle_root_relayer_pending_requests",
+            "Number of pending merkle root requests"
+        ),
+        currently_processing: IntGauge = IntGauge::new(
+            "merkle_root_relayer_currently_processing",
+            "Number of merkle root requests currently being processed"
+        ),
+        current_root_block: IntGauge = IntGauge::new(
+            "merkle_root_relayer_current_root_block",
+            "Block number of the current merkle root being processed"
+        ),
+        max_proof_time: IntGauge = IntGauge::new(
+            "merkle_root_relayer_max_proof_time_seconds",
+            "Maximum time taken to generate a proof (in seconds)"
+        ),
+        last_proof_time: IntGauge = IntGauge::new(
+            "merkle_root_relayer_last_proof_time_seconds",
+            "Time taken to generate the last proof (in seconds)"
+        ),
+        min_proof_time: IntGauge = IntGauge::new(
+            "merkle_root_relayer_min_proof_time_seconds",
+            "Minimum time taken to generate a proof (in seconds)"
+        ),
+    }
+);
+
 /// A separate thread responsible for running block finality prover.
 pub struct FinalityProver {
     api_provider: ApiProviderConnection,
     genesis_config: GenesisConfig,
 
     count_thread: Option<usize>,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for FinalityProver {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
 }
 
 impl FinalityProver {
@@ -106,6 +144,8 @@ impl FinalityProver {
             genesis_config,
 
             count_thread,
+
+            metrics: Metrics::new(),
         }
     }
 
@@ -166,6 +206,13 @@ impl FinalityProver {
                     Err(_) => {
                         log::info!("Only one request received, processing it immediately");
                         let request = batch_vec.pop().expect("at least one request is received");
+
+                        self.metrics.pending_requests.set(0);
+                        self.metrics.currently_processing.set(1);
+                        self.metrics
+                            .current_root_block
+                            .set(request.block_number as i64);
+
                         let proof = self
                             .generate_proof(
                                 &gear_api,
@@ -218,6 +265,10 @@ impl FinalityProver {
                 }
             }
 
+            self.metrics
+                .pending_requests
+                .set((non_batch_requests.len() + request_groups.len()) as i64);
+
             // sort by block number ascending to process older requests first
             non_batch_requests.sort_by_key(|r| r.block_number);
 
@@ -233,6 +284,13 @@ impl FinalityProver {
                     block_number = request.block_number,
                     merkle_root = request.merkle_root,
                 );
+                self.metrics.currently_processing.set(1);
+                self.metrics
+                    .current_root_block
+                    .set(request.block_number as i64);
+                self.metrics
+                    .pending_requests
+                    .set(self.metrics.pending_requests.get() - 1);
                 let proof = self
                     .generate_proof(
                         &gear_api,
@@ -243,6 +301,8 @@ impl FinalityProver {
                         request.block_finality,
                     )
                     .await?;
+                self.metrics.currently_processing.set(0);
+                self.metrics.current_root_block.set(0);
 
                 if responses
                     .send(Response::Single {
@@ -270,6 +330,13 @@ impl FinalityProver {
                     "Proving finality for latest block #{block_number} with authority set #{authority_set_id}, merkle-root {merkle_root} and queue #{queue_id} (will apply to {} blocks)",
                     batch_roots.len()
                 );
+                self.metrics
+                    .currently_processing
+                    .set(batch_roots.len() as i64 + 1);
+                self.metrics.current_root_block.set(block_number as i64);
+                self.metrics
+                    .pending_requests
+                    .set(self.metrics.pending_requests.get() - 1);
 
                 let proof = self
                     .generate_proof(
@@ -325,10 +392,21 @@ impl FinalityProver {
             Some(block_finality),
         )
         .await?;
+        let elapsed = start.elapsed().as_secs_f64();
         log::info!(
-            "Proof for {merkle_root} generated (block #{block_number}) in {:.3} seconds",
-            start.elapsed().as_secs_f64()
+            "Proof for {merkle_root} generated (block #{block_number}) in {elapsed:.3} seconds",
         );
+
+        self.metrics.last_proof_time.set(elapsed.ceil() as i64);
+        if self.metrics.min_proof_time.get() == 0
+            || elapsed < self.metrics.min_proof_time.get() as f64
+        {
+            self.metrics.min_proof_time.set(elapsed.ceil() as i64);
+        }
+        if elapsed > self.metrics.max_proof_time.get() as f64 {
+            self.metrics.max_proof_time.set(elapsed.ceil() as i64);
+        }
+
         Ok(proof)
     }
 }

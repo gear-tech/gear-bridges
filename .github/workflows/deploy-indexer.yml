@@ -6,12 +6,10 @@ on:
       environment:
         description: 'Deployment environment'
         required: true
-        default: 'stg'
+        default: 'mainnet'
         type: choice
         options:
-          - stg
-          - prod
-          - temp
+          - mainnet
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -51,8 +49,8 @@ jobs:
           file: js/indexer/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer-hoodi:${{ github.event.inputs.environment }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer-hoodi:${{ github.event.inputs.environment }}-${{ env.COMMIT_SHA }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.environment }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-indexer:${{ github.event.inputs.environment }}-${{ env.COMMIT_SHA }}
 
   deploy-to-k8s:
     needs: build-image
@@ -69,7 +67,7 @@ jobs:
       - name: Deploy to Kubernetes
         uses: sergeyfilyanin/kubectl-aws-eks@master
         with:
-          args: rollout restart deployment hoodi-eth-${{ github.event.inputs.environment }} hoodi-gear-${{ github.event.inputs.environment }} hoodi-graphql-${{ github.event.inputs.environment }} -n gear-bridges
+          args: rollout restart deployment ${{ github.event.inputs.environment }}-eth ${{ github.event.inputs.environment }}-gear ${{ github.event.inputs.environment }}-graphql -n gear-bridges
 
       - name: Check rollout status
         uses: sergeyfilyanin/kubectl-aws-eks@master

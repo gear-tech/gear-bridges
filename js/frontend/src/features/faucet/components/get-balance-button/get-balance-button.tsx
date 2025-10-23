@@ -6,6 +6,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useRef } from 'react';
 
 import { LinkButton } from '@/components';
+import { NETWORK_TYPE, networkType } from '@/consts';
 import { useEthAccount } from '@/hooks';
 
 import { GetBalanceParameters, getEthTokenBalance, getVaraAccountBalance } from '../../api';
@@ -54,6 +55,8 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
 
         alert.error(error instanceof Error ? error.message : error);
       });
+
+  if (networkType !== NETWORK_TYPE.TESTNET) return;
 
   return (
     <div>

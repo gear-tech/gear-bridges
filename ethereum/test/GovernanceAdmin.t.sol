@@ -19,7 +19,7 @@ contract GovernanceAdminTest is Test, Base {
     using GovernancePacker for PauseProxyMessage;
 
     function setUp() public {
-        deployBridgeFromConstants();
+        deployBridgeDependsOnEnvironment();
     }
 
     function test_HandleMessageWithInvalidSender() public {

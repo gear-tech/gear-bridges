@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 
 import ArrowSVG from '@/assets/arrow.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
+import { ETH_EXPLORER_URL, NETWORK_NAME, VARA_ARCHIVE_NODE_ADDRESS, VARA_NODE_ADDRESS } from '@/consts';
 import { useTokens } from '@/context';
 import { useOptimisticTxUpdate, useTransaction } from '@/features/history';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
@@ -27,8 +28,8 @@ const INDEXED_NETWORK_TO_NETWORK = {
 } as const;
 
 const INDEXED_NETWORK_TO_FULL_NETWORK_NAME = {
-  [NetworkEnum.Vara]: 'Vara Testnet',
-  [NetworkEnum.Ethereum]: 'Ethereum Hoodi',
+  [NetworkEnum.Vara]: NETWORK_NAME.VARA,
+  [NetworkEnum.Ethereum]: NETWORK_NAME.ETH,
 } as const;
 
 const INDEXED_NETWORK_TO_NETWORK_NAME = {
@@ -38,24 +39,24 @@ const INDEXED_NETWORK_TO_NETWORK_NAME = {
 
 const CONTRACT_URL = {
   [NetworkEnum.Vara]: (programId: string) =>
-    `https://idea.gear-tech.io/programs/${programId}?node=wss://testnet.vara.network`,
-  [NetworkEnum.Ethereum]: (programId: string) => `https://hoodi.etherscan.io/address/${programId}`,
+    `https://idea.gear-tech.io/programs/${programId}?node=${VARA_NODE_ADDRESS}`,
+  [NetworkEnum.Ethereum]: (programId: string) => `${ETH_EXPLORER_URL}/address/${programId}`,
 } as const;
 
 const ACCOUNT_URL = {
   [NetworkEnum.Vara]: () => undefined,
-  [NetworkEnum.Ethereum]: (address: string) => `https://hoodi.etherscan.io/address/${address}`,
+  [NetworkEnum.Ethereum]: (address: string) => `${ETH_EXPLORER_URL}/address/${address}`,
 } as const;
 
 const TX_URL = {
   [NetworkEnum.Vara]: () => undefined,
-  [NetworkEnum.Ethereum]: `https://hoodi.etherscan.io/tx`,
+  [NetworkEnum.Ethereum]: `${ETH_EXPLORER_URL}/tx`,
 } as const;
 
 const BLOCK_URL = {
   [NetworkEnum.Vara]: (blockNumber: string) =>
-    `https://idea.gear-tech.io/explorer/${blockNumber}?node=wss://testnet-archive.vara.network`,
-  [NetworkEnum.Ethereum]: (blockNumber: string) => `https://hoodi.etherscan.io/block/${blockNumber}`,
+    `https://idea.gear-tech.io/explorer/${blockNumber}?${VARA_ARCHIVE_NODE_ADDRESS}`,
+  [NetworkEnum.Ethereum]: (blockNumber: string) => `${ETH_EXPLORER_URL}/block/${blockNumber}`,
 } as const;
 
 type ExplorerLinkProps = PropsWithChildren & {

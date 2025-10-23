@@ -2,6 +2,7 @@ import { GearApi } from '@gear-js/api';
 import { formatUnits, parseUnits } from 'viem';
 import { z } from 'zod';
 
+import { VARA_ARCHIVE_NODE_ADDRESS } from '@/consts';
 import { isUndefined } from '@/utils';
 
 import { ERROR_MESSAGE } from './consts';
@@ -42,8 +43,7 @@ const getAmountSchema = (
     .refine((value) => value <= ftBalanceValue, { message: ERROR_MESSAGE.NO_FT_BALANCE });
 };
 
-const initArchiveApi = () =>
-  GearApi.create({ providerAddress: import.meta.env.VITE_VARA_ARCHIVE_NODE_ADDRESS as string });
+const initArchiveApi = () => GearApi.create({ providerAddress: VARA_ARCHIVE_NODE_ADDRESS });
 
 const estimateBridging = (txs: { gasLimit: bigint; value?: bigint }[], valuePerGas: bigint) => {
   const totalGasLimit = txs.reduce((sum, { gasLimit }) => sum + gasLimit, 0n) * valuePerGas;

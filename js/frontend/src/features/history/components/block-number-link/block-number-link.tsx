@@ -1,20 +1,16 @@
 import { LinkButton, Tooltip } from '@/components';
-import { ETH_EXPLORER_URL, NETWORK_TYPE, networkType, VARA_ARCHIVE_NODE_ADDRESS } from '@/consts';
+import { ETH_EXPLORER_URL, VARA_ARCHIVE_NODE_ADDRESS, VARA_EXPLORER_URL } from '@/consts';
 
 import CubeSVG from '../../assets/cube.svg?react';
 import { Network, Transfer } from '../../types';
 
 import styles from './block-number-link.module.scss';
 
-const NETWORK_TYPE_TO_VARA_EXPLORER_URL = {
-  [NETWORK_TYPE.MAINNET]: `https://vara.subscan.io/block`,
-  [NETWORK_TYPE.TESTNET]: `https://polkadot.js.org/apps/?rpc=${VARA_ARCHIVE_NODE_ADDRESS}#/explorer/query`,
-} as const;
-
-const VARA_EXPLORER_URL = NETWORK_TYPE_TO_VARA_EXPLORER_URL[networkType];
-
 const EXPLORER_URL = {
-  [Network.Vara]: VARA_EXPLORER_URL,
+  [Network.Vara]: VARA_EXPLORER_URL
+    ? `${VARA_EXPLORER_URL}/block`
+    : `https://polkadot.js.org/apps/?rpc=${VARA_ARCHIVE_NODE_ADDRESS}#/explorer/query`,
+
   [Network.Ethereum]: `${ETH_EXPLORER_URL}/block`,
 } as const;
 

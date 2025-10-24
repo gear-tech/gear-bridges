@@ -106,6 +106,18 @@ pub struct EthereumArgs {
     /// Ethereum address of message queue contract
     #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     pub mq_address: String,
+
+    /// Max fee per gas (in wei) for transactions sent to Ethereum. Default is
+    /// 2_000_000_000 (2 Gwei).
+    #[arg(long = "max-fee-per-gas", env = "ETH_MAX_FEE_PER_GAS")]
+    pub max_fee_per_gas: Option<u128>,
+    /// Max priority fee per gas (in wei) for transactions sent to Ethereum. Default is
+    /// 500_000_000 (0.5 Gwei).
+    #[arg(
+        long = "max-priority-fee-per-gas",
+        env = "ETH_MAX_PRIORITY_FEE_PER_GAS"
+    )]
+    pub max_priority_fee_per_gas: Option<u128>,
 }
 
 #[derive(Args)]

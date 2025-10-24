@@ -596,6 +596,8 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         Some(&args.eth_fee_payer),
         *eth_max_retries,
         eth_retry_interval_ms.map(Duration::from_millis),
+        args.ethereum_args.max_fee_per_gas,
+        args.ethereum_args.max_priority_fee_per_gas,
     )
     .await
     .expect("Error while creating ethereum client")
@@ -658,9 +660,15 @@ async fn create_eth_client(args: &EthereumArgs) -> EthApi {
         ..
     } = args;
 
-    EthApi::new(eth_endpoint, mq_address, None)
-        .await
-        .expect("Error while creating ethereum client")
+    EthApi::new(
+        eth_endpoint,
+        mq_address,
+        None,
+        args.max_fee_per_gas,
+        args.max_priority_fee_per_gas,
+    )
+    .await
+    .expect("Error while creating ethereum client")
 }
 
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {

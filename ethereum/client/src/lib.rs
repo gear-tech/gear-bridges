@@ -51,6 +51,8 @@ type ProviderType = FillProvider<
 pub struct Contracts {
     provider: ProviderType,
     message_queue_instance: IMessageQueueInstance<ProviderType, Ethereum>,
+    max_fee_per_gas: u128,
+    max_priority_fee_per_gas: u128,
 }
 
 #[derive(Debug, Clone)]
@@ -229,8 +231,19 @@ impl EthApi {
         url: &str,
         message_queue_address: &str,
         private_key: Option<&str>,
+        max_fee_per_gas: Option<u128>,
+        max_priority_fee_per_gas: Option<u128>,
     ) -> Result<EthApi, Error> {
-        Self::new_with_retries(url, message_queue_address, private_key, None, None).await
+        Self::new_with_retries(
+            url,
+            message_queue_address,
+            private_key,
+            None,
+            None,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+        )
+        .await
     }
 
     pub async fn new_with_retries(
@@ -239,6 +252,8 @@ impl EthApi {
         private_key: Option<&str>,
         ws_max_retry: Option<u32>,
         ws_retry_interval: Option<Duration>,
+        max_fee_per_gas: Option<u128>,
+        max_priority_fee_per_gas: Option<u128>,
     ) -> Result<EthApi, Error> {
         let signer = match private_key {
             Some(private_key) => {
@@ -274,7 +289,12 @@ impl EthApi {
             .connect_ws(ws)
             .await?;
 
-        let contracts = Contracts::new(provider, message_queue_address.into_array())?;
+        let contracts = Contracts::new(
+            provider,
+            message_queue_address.into_array(),
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+        )?;
 
         Ok(EthApi {
             contracts,
@@ -294,6 +314,8 @@ impl EthApi {
         let contracts = Contracts::new(
             provider,
             self.contracts.message_queue_instance.address().0 .0,
+            Some(self.contracts.max_fee_per_gas),
+            Some(self.contracts.max_priority_fee_per_gas),
         )?;
 
         Ok(EthApi {
@@ -466,13 +488,20 @@ impl EthApi {
 }
 
 impl Contracts {
-    pub fn new(provider: ProviderType, message_queue_address: [u8; 20]) -> Result<Self, Error> {
+    pub fn new(
+        provider: ProviderType,
+        message_queue_address: [u8; 20],
+        max_fee_per_gas: Option<u128>,
+        max_priority_fee_per_gas: Option<u128>,
+    ) -> Result<Self, Error> {
         let message_queue_address = Address::from(message_queue_address);
         let message_queue_instance = IMessageQueue::new(message_queue_address, provider.clone());
 
         Ok(Contracts {
             provider,
             message_queue_instance,
+            max_fee_per_gas: max_fee_per_gas.unwrap_or(MAX_FEE_PER_GAS),
+            max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(MAX_PRIORITY_FEE_PER_GAS),
         })
     }
 

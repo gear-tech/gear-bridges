@@ -56,8 +56,6 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
         alert.error(error instanceof Error ? error.message : error);
       });
 
-  if (networkType !== NETWORK_TYPE.TESTNET) return;
-
   return (
     <div>
       <Button onClick={handleClick} isLoading={isPending} {...BUTTON_PROPS} />
@@ -70,7 +68,7 @@ function GetVaraAccountBalanceButton() {
   const { api } = useApi();
   const { account } = useAccount();
 
-  if (!account || !api) return;
+  if (!account || !api || networkType !== NETWORK_TYPE.TESTNET) return;
 
   return (
     <ButtonComponent getBalance={getVaraAccountBalance} address={account.address} genesis={api.genesisHash.toHex()} />
@@ -88,7 +86,7 @@ function GetEthTokenBalanceButton({
 }) {
   const ethAccount = useEthAccount();
 
-  if (!ethAccount.address) return;
+  if (!ethAccount.address || networkType !== NETWORK_TYPE.TESTNET) return;
 
   const lowerCaseSymbol = symbol.toLowerCase();
 

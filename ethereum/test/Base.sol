@@ -10,6 +10,8 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
+import {ICircleToken} from "src/erc20/interfaces/ICircleToken.sol";
+import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
 import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
@@ -85,6 +87,14 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
     MessageHandlerMock public messageHandlerMock;
     NewImplementationMock public newImplementationMock;
+
+    function deployBridgeDependsOnEnvironment() public {
+        if (vm.envExists("FORK_URL_OR_ALIAS")) {
+            deployBridgeFromExistingNetwork();
+        } else {
+            deployBridgeFromConstants();
+        }
+    }
 
     function deployBridgeFromConstants() public {
         deployBridgeFromConstants(BaseConstants.DEPLOYER_ADDRESS, "");
@@ -181,13 +191,27 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             address[] memory erc20Tokens = erc20Manager.tokens(0, 3);
             bridgingPayment = BridgingPayment(erc20Manager.bridgingPayments()[0]);
 
+            Overrides memory overrides =
+                Overrides({circleToken: erc20Tokens[0], tetherToken: erc20Tokens[1], wrappedEther: erc20Tokens[2]});
+
+            bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
+            bytes32 value = ((vm.load(address(overrides.circleToken), slot) >> 160) << 160)
+                | bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+            vm.store(address(overrides.circleToken), slot, value);
+
+            vm.prank(deploymentArguments.deployerAddress);
+            ICircleToken(address(overrides.circleToken))
+                .configureMinter(deploymentArguments.deployerAddress, type(uint256).max);
+
+            slot = bytes32(0x00); // address owner
+            value = bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+            vm.store(overrides.tetherToken, slot, value);
+
             deploymentArguments = DeploymentArguments({
                 privateKey: 0,
                 deployerAddress: _deploymentArguments.deployerAddress,
                 forkUrlOrAlias: _deploymentArguments.forkUrlOrAlias,
-                overrides: Overrides({
-                    circleToken: erc20Tokens[0], tetherToken: erc20Tokens[1], wrappedEther: erc20Tokens[2]
-                }),
+                overrides: overrides,
                 vftManager: erc20Manager.vftManagers()[0],
                 governanceAdmin: governanceAdmin.governance(),
                 governancePauser: governancePauser.governance(),

@@ -6,6 +6,7 @@ import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
+import { NETWORK_NAME } from '@/consts';
 import { TokenPrice } from '@/features/token-price';
 import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
@@ -160,7 +161,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
                   type="select"
                   address={token?.address}
                   symbol={token?.displaySymbol}
-                  networkText={network.isVara ? 'Vara Testnet' : 'Ethereum Hoodi'}
+                  networkText={network.isVara ? NETWORK_NAME.VARA : NETWORK_NAME.ETH}
                   network={network.name}
                 />
 
@@ -183,7 +184,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
                   type="text"
                   address={destinationToken?.address}
                   symbol={destinationToken?.displaySymbol}
-                  networkText={network.isVara ? 'Ethereum Hoodi' : 'Vara Testnet'}
+                  networkText={network.isVara ? NETWORK_NAME.ETH : NETWORK_NAME.VARA}
                   network={network.name === NETWORK.VARA ? NETWORK.ETH : NETWORK.VARA}
                 />
 

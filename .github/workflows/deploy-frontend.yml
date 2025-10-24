@@ -73,6 +73,7 @@ jobs:
           tags: ${{ needs.prepair.outputs.image_name }}
           push: true
           build-args: |
+            VITE_NETWORK_TYPE=${{ secrets.VITE_NETWORK_TYPE }}
             VITE_VARA_NODE_ADDRESS=${{ secrets.VITE_VARA_NODE_ADDRESS }}
             VITE_ETH_NODE_ADDRESS=${{ secrets.VITE_ETH_NODE_ADDRESS }}
             VITE_ETH_CHAIN_ID=${{ secrets.VITE_ETH_CHAIN_ID }}

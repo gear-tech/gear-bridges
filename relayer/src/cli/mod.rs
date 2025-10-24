@@ -57,9 +57,7 @@ pub struct UpdateVerifierSolArgs {
     #[clap(flatten)]
     pub gear_args: GearArgs,
 
-    #[arg(
-        long
-    )]
+    #[arg(long)]
     pub block_number: Option<u32>,
 
     #[arg(
@@ -69,7 +67,6 @@ pub struct UpdateVerifierSolArgs {
     )]
     pub thread_count: Option<ThreadCount>,
 }
-
 
 #[derive(Args)]
 pub struct GearEthCoreArgs {

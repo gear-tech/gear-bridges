@@ -61,6 +61,13 @@ pub struct UpdateVerifierSolArgs {
         long
     )]
     pub block_number: Option<u32>,
+
+    #[arg(
+        long,
+        help = format!("Count of worker threads for generating signing proofs.\n\nNote that each thread allocates memory, which can lead to an out-of-memory error with a large number of threads.\n\nDefault is: {DEFAULT_COUNT_THREADS}. The value is safe to run the relayer on a machine with 96 CPU cores and 256GiB of RAM."),
+        value_parser = parse_thread_count,
+    )]
+    pub thread_count: Option<ThreadCount>,
 }
 
 

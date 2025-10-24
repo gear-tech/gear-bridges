@@ -1,4 +1,4 @@
-use crate::cli::FeePayers;
+use crate::cli::{DEFAULT_COUNT_THREADS, FeePayers};
 use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use cli::{
@@ -98,9 +98,6 @@ async fn run() -> AnyResult<()> {
 
             log::info!("Its authority set id is: {auth_set_id}");
 
-            // TODO: add cli argument
-            let count_thread = Some(20);
-
             // find block with auth_set_id_target
             let mut genesis_config = None;
             for n in [0, 1, 2] {
@@ -128,6 +125,11 @@ async fn run() -> AnyResult<()> {
 
             let Some(genesis_config) = genesis_config else {
                 return Err(anyhow!("Unable to find the required block header"));
+            };
+
+            let count_thread = match args.thread_count {
+                None => Some(DEFAULT_COUNT_THREADS),
+                Some(thread_count) => thread_count.into(),
             };
 
             let proof_previous = crate::prover_interface::prove_genesis(

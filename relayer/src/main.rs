@@ -21,7 +21,7 @@ use prover::consts::SIZE_THREAD_STACK_MIN;
 use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
 use sails_rs::ActorId;
 use std::{
-    collections::HashSet, env, fs::File, io::Read as _, net::TcpListener, path::Path, str::FromStr,
+    collections::HashSet, env, fs::{self, File}, io::Read as _, net::TcpListener, path::Path, str::FromStr,
     sync::Arc, time::Duration,
 };
 use tokio::{sync::mpsc, task, time};
@@ -56,6 +56,24 @@ async fn run() -> AnyResult<()> {
 
     match cli.command {
         CliCommands::UpdateVerifierSol(args) => {
+            let working_directory = env::current_dir()?;
+            let path_srs_setup = {
+                let mut path = working_directory.join("data");
+                path.push("srs_setup");
+
+                path
+            };
+            let path_main_ignition = {
+                let mut path = working_directory.join("data");
+                path.push("MAIN IGNITION");
+
+                path
+            };
+
+            if !fs::exists(&path_srs_setup)? || !fs::exists(&path_main_ignition)? {
+                log::warn!(r#"There are no "data/srs_setup"/"data/MAIN IGNITION" in the working directory ("{}"). Generation may take longer time."#, working_directory.display());
+            }
+
             let gear_api = gear_rpc_client::GearApi::new(
                 &args.gear_args.domain,
                 args.gear_args.port,
@@ -80,7 +98,6 @@ async fn run() -> AnyResult<()> {
 
             log::info!("Its authority set id is: {auth_set_id}");
 
-            // TODO: check that 'srs_setup'/'MAIN IGNITION' are in the working directory
             // TODO: add cli argument
             let count_thread = Some(20);
 
@@ -132,6 +149,7 @@ async fn run() -> AnyResult<()> {
                 genesis_config,
                 block_hash,
                 count_thread,
+                None,
             ).await?;
 
             log::info!("proof = '{}'", hex::encode(&proof.proof));

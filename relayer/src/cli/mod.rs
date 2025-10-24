@@ -47,7 +47,22 @@ pub enum CliCommands {
 
     /// Fetch relayed merkle roots to Ethereum
     FetchMerkleRoots(FetchMerkleRootsArgs),
+
+    /// Regenerate PlonkVerifier.sol
+    UpdateVerifierSol(UpdateVerifierSolArgs),
 }
+
+#[derive(Args)]
+pub struct UpdateVerifierSolArgs {
+    #[clap(flatten)]
+    pub gear_args: GearArgs,
+
+    #[arg(
+        long
+    )]
+    pub block_number: Option<u32>,
+}
+
 
 #[derive(Args)]
 pub struct GearEthCoreArgs {

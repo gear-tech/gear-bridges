@@ -4,6 +4,7 @@ import { hexToNumber, slice } from 'viem';
 import { useConfig, useSignTypedData } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
+import { ETH_CHAIN_ID, NETWORK_TYPE, networkType } from '@/consts';
 import { useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
 import { definedAssert } from '@/utils';
@@ -47,6 +48,15 @@ function usePermitUSDC() {
 
   const getDomain = async () => {
     definedAssert(usdcToken, 'USDC token');
+
+    // TODO: query from contract, there's no eip712Domain function on mainnet USDC
+    if (networkType === NETWORK_TYPE.MAINNET)
+      return {
+        name: usdcToken.name,
+        version: '2',
+        chainId: ETH_CHAIN_ID,
+        verifyingContract: usdcToken.address,
+      };
 
     const [, name, version, chainId, verifyingContract] = await readContract(config, {
       abi: ERC5267_ABI,

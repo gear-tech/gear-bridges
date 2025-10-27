@@ -1,10 +1,10 @@
-use crate::cli::FeePayers;
 use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use cli::{
     BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FetchMerkleRootsArgs, GearArgs,
-    GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+    EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FeePayers, FetchMerkleRootsArgs,
+    GearArgs, GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
+    DEFAULT_COUNT_THREADS,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
@@ -21,8 +21,15 @@ use prover::consts::SIZE_THREAD_STACK_MIN;
 use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
 use sails_rs::ActorId;
 use std::{
-    collections::HashSet, env, fs::File, io::Read as _, net::TcpListener, path::Path, str::FromStr,
-    sync::Arc, time::Duration,
+    collections::HashSet,
+    env,
+    fs::{self, File},
+    io::Read as _,
+    net::TcpListener,
+    path::Path,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
 };
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
@@ -55,6 +62,124 @@ async fn run() -> AnyResult<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        CliCommands::UpdateVerifierSol(args) => {
+            let working_directory = env::current_dir()?;
+            let path_srs_setup = {
+                let mut path = working_directory.join("data");
+                path.push("srs_setup");
+
+                path
+            };
+            let path_main_ignition = {
+                let mut path = working_directory.join("data");
+                path.push("MAIN IGNITION");
+
+                path
+            };
+
+            if !fs::exists(&path_srs_setup)? || !fs::exists(&path_main_ignition)? {
+                log::warn!(
+                    r#"There are no "data/srs_setup"/"data/MAIN IGNITION" in the working directory ("{}"). Generation may take longer time."#,
+                    working_directory.display()
+                );
+            }
+
+            let gear_api = gear_rpc_client::GearApi::new(
+                &args.gear_args.domain,
+                args.gear_args.port,
+                args.gear_args.retries,
+            )
+            .await?;
+
+            let finalized_head = gear_api.api.rpc().chain_get_finalized_head().await?;
+            let header_finalized = gear_api
+                .api
+                .rpc()
+                .chain_get_header(Some(finalized_head))
+                .await?
+                .expect("Finalized header");
+
+            let (block_number, block_hash) = match args.block_number {
+                None => (header_finalized.number, finalized_head),
+                Some(block_number) => (
+                    block_number,
+                    gear_api
+                        .block_number_to_hash(block_number)
+                        .await
+                        .context("Unable to determine hash of block with merkle root")?,
+                ),
+            };
+
+            log::info!("Block number with merkle root (for fn prove_final): {block_number}");
+
+            let auth_set_id = gear_api.authority_set_id(block_hash).await?;
+            let auth_set_id_target = auth_set_id - 1;
+
+            log::info!("Its authority set id is: {auth_set_id}");
+
+            // find block with auth_set_id_target
+            let mut genesis_config = None;
+            for n in [0, 1, 2] {
+                let block_number_to_check =
+                    (block_number as u64 / auth_set_id * (auth_set_id_target - n)) as u32;
+                let Ok(block_hash) = gear_api.block_number_to_hash(block_number_to_check).await
+                else {
+                    continue;
+                };
+
+                let state = gear_api.authority_set_state(Some(block_hash)).await?;
+                log::debug!("block_number_to_check = {block_number_to_check}");
+                log::debug!("authority_set_id = {}", state.authority_set_id);
+                log::debug!(
+                    "authority_set_hash = {}",
+                    hex::encode(state.authority_set_hash)
+                );
+
+                if state.authority_set_id == auth_set_id_target {
+                    genesis_config = Some(prover::proving::GenesisConfig {
+                        authority_set_id: state.authority_set_id,
+                        authority_set_hash: state.authority_set_hash,
+                    });
+
+                    break;
+                }
+            }
+
+            let Some(genesis_config) = genesis_config else {
+                return Err(anyhow!("Unable to find the required block header"));
+            };
+
+            let count_thread = match args.thread_count {
+                None => Some(DEFAULT_COUNT_THREADS),
+                Some(thread_count) => thread_count.into(),
+            };
+
+            let proof_previous =
+                crate::prover_interface::prove_genesis(&gear_api, genesis_config, count_thread)
+                    .await?;
+
+            let gear_api = gear_rpc_client::GearApi::new(
+                &args.gear_args.domain,
+                args.gear_args.port,
+                args.gear_args.retries,
+            )
+            .await?;
+
+            let proof = crate::prover_interface::prove_final(
+                &gear_api,
+                proof_previous,
+                genesis_config,
+                block_hash,
+                count_thread,
+                None,
+            )
+            .await?;
+
+            log::info!("proof = '{}'", hex::encode(&proof.proof));
+            log::info!("block_number = {}", proof.block_number);
+            log::info!("merkle_root = '{}'", hex::encode(proof.merkle_root));
+        }
+
         CliCommands::GearEthCore(mut args) => {
             let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
             let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;

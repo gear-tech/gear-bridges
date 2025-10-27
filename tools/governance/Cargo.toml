@@ -1,5 +1,5 @@
 [package]
-name = "governance-tools"
+name = "governance-tool"
 version.workspace = true
 edition.workspace = true
 

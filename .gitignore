@@ -17,6 +17,7 @@ ethereum/coverage
 ethereum/lcov.info
 
 .env
+deployment.toml
 .DS_Store
 
 .direnv/

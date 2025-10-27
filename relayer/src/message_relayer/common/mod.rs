@@ -112,7 +112,6 @@ pub struct TxHashWithSlot {
 pub struct GSdkArgs {
     pub vara_domain: String,
     pub vara_port: u16,
-    pub vara_rpc_retries: u8,
 }
 
 #[derive(Clone, Debug)]

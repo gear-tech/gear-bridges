@@ -56,13 +56,13 @@ pub struct GearArgs {
     #[arg(long = "gear-port", default_value = "9944", env = "GEAR_PORT")]
     pub port: u16,
 
-    /// Retry count of the Gear RPC client
+    /// Reconnect attempts for the Gear RPC.
     #[arg(
-        long = "gear-rpc-retries",
+        long = "gear-max-reconnect-attempts",
         default_value = "3",
-        env = "GEAR_RPC_RETRIES"
+        env = "GEAR_MAX_RECONNECT_ATTEMPTS"
     )]
-    pub retries: u8,
+    pub max_reconnect_attempts: u8,
 }
 
 #[derive(Args)]

@@ -21,7 +21,7 @@ const getAmountSchema = (
     isUndefined(decimals) ||
     isUndefined(eDeposit)
   )
-    return z.string().transform((value) => BigInt(value));
+    return;
 
   const schema = z
     .string()

@@ -8,8 +8,6 @@ use tokio::sync::{
     oneshot,
 };
 
-/// Max reconnection attempts before failing. Default: 10.
-const MAX_RECONNECT_ATTEMPTS: usize = 10;
 /// Timeout between reconnects. Default: 1m30s.
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -131,7 +129,7 @@ impl ApiProvider {
     async fn reconnect(&mut self) -> bool {
         let uri: &str = &format!("{}:{}", self.domain, self.port);
 
-        for attempt in 0..MAX_RECONNECT_ATTEMPTS {
+        for attempt in 0..self.retries {
             match Api::builder().retries(self.retries).build(uri).await {
                 Ok(api) => {
                     self.api = api;
@@ -139,7 +137,8 @@ impl ApiProvider {
                 }
                 Err(err) => {
                     log::error!(
-                        "Failed to create API connection (attempt {attempt}/{MAX_RECONNECT_ATTEMPTS}): {err}"
+                        "Failed to create API connection (attempt {attempt}/{retries}): {err}",
+                        retries = self.retries
                     );
 
                     tokio::time::sleep(RECONNECT_TIMEOUT).await;

@@ -352,7 +352,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             if (isTest) {
                 verifier = new VerifierMock(true);
             } else if (isScript) {
-                verifier = chainId == 1 ? new VerifierMainnet() : new VerifierTestnet();
+                if (chainId == 1) {
+                    verifier = new VerifierMainnet();
+                } else {
+                    verifier = new VerifierTestnet();
+                }
             }
         }
 

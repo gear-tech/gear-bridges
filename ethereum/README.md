@@ -79,10 +79,20 @@ $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
 ### Coverage

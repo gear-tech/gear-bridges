@@ -11,7 +11,6 @@ import {StdUtils} from "forge-std/StdUtils.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
 import {ICircleToken} from "src/erc20/interfaces/ICircleToken.sol";
-import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
 import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
@@ -28,7 +27,8 @@ import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
-import {Verifier} from "src/Verifier.sol";
+import {VerifierMainnet} from "src/VerifierMainnet.sol";
+import {VerifierTestnet} from "src/VerifierTestnet.sol";
 
 struct Overrides {
     address circleToken;
@@ -291,7 +291,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 )
             );
         }
-        if (block.chainid == 1) {
+
+        uint256 chainId = block.chainid;
+
+        if (chainId == 1) {
             console.log("    WVARA:               ", address(wrappedVara));
         } else {
             console.log("    WTVARA:              ", address(wrappedVara));
@@ -349,7 +352,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             if (isTest) {
                 verifier = new VerifierMock(true);
             } else if (isScript) {
-                verifier = new Verifier();
+                verifier = chainId == 1 ? new VerifierMainnet() : new VerifierTestnet();
             }
         }
 

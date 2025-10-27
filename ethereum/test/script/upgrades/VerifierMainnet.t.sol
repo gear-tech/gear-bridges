@@ -2,15 +2,15 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {VerifierScript} from "script/upgrades/Verifier.s.sol";
+import {VerifierMainnetScript} from "script/upgrades/VerifierMainnet.s.sol";
 
-contract VerifierScriptTest is Test {
+contract VerifierMainnetScriptTest is Test {
     function setUp() public {}
 
     function test_Upgrade() public {
         /// forge-lint: disable-next-line(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
-        VerifierScript upgradeScript = new VerifierScript();
+        VerifierMainnetScript upgradeScript = new VerifierMainnetScript();
         upgradeScript.setUp();
         upgradeScript.run();
     }

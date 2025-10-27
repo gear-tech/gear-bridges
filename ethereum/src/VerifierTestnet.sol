@@ -3,13 +3,13 @@ pragma solidity ^0.8.30;
 
 import {IPlonkVerifier} from "./interfaces/IPlonkVerifier.sol";
 import {IVerifier} from "./interfaces/IVerifier.sol";
-import {PlonkVerifier} from "./libraries/PlonkVerifier.sol";
+import {PlonkVerifierTestnet} from "./libraries/PlonkVerifierTestnet.sol";
 
 /**
- * @dev Verifier smart contract is responsible for verifying zk-SNARK Plonk proofs.
- *      This is done with help of PlonkVerifier smart contract.
+ * @dev VerifierTestnet smart contract is responsible for verifying zk-SNARK Plonk proofs.
+ *      This is done with help of PlonkVerifierTestnet smart contract.
  */
-contract Verifier is IVerifier, IPlonkVerifier, PlonkVerifier {
+contract VerifierTestnet is IVerifier, IPlonkVerifier, PlonkVerifierTestnet {
     /**
      * @dev See {IVerifier-safeVerifyProof}.
      */

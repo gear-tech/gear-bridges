@@ -18,19 +18,21 @@ use error::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct Deployment {
+struct DeploymentConfig {
     governance_admin: Address,
     governance_pauser: Address,
-    wrapped_vara: Address,
-    message_queue: Address,
-    #[serde(rename = "ERC20Manager")]
-    erc20_manager: Address,
 }
 
 sol! {
     #[sol(rpc)]
     interface IGovernance {
         function governance() external view returns (bytes32);
+
+        function wrappedVara() external view returns (address);
+
+        function messageQueue() external view returns (address);
+
+        function erc20Manager() external view returns (address);
     }
 }
 
@@ -46,10 +48,55 @@ async fn query_governance(
         .into())
 }
 
+async fn query_wrapped_vara(
+    governance: Address,
+    provider: &DynProvider<Ethereum>,
+) -> Result<Address, ContractError> {
+    Ok(IGovernance::new(governance, provider)
+        .wrappedVara()
+        .call()
+        .await?
+        .0
+        .into())
+}
+
+async fn query_message_queue(
+    governance: Address,
+    provider: &DynProvider<Ethereum>,
+) -> Result<Address, ContractError> {
+    Ok(IGovernance::new(governance, provider)
+        .messageQueue()
+        .call()
+        .await?
+        .0
+        .into())
+}
+
+async fn query_erc20_manager(
+    governance: Address,
+    provider: &DynProvider<Ethereum>,
+) -> Result<Address, ContractError> {
+    Ok(IGovernance::new(governance, provider)
+        .erc20Manager()
+        .call()
+        .await?
+        .0
+        .into())
+}
+
 #[derive(Debug)]
 struct GovernanceInfo {
     governance_admin: ActorId,
     governance_pauser: ActorId,
+}
+
+#[derive(Debug)]
+struct Deployment {
+    governance_admin: Address,
+    governance_pauser: Address,
+    wrapped_vara: Address,
+    message_queue: Address,
+    erc20_manager: Address,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -261,17 +308,29 @@ fn register_gear_token(
 async fn main() -> Result<(), Error> {
     let Cli { rpc_url, command } = Cli::parse();
 
-    let deployment: Deployment = toml::from_str(&fs::read_to_string("deployment.toml")?)?;
+    let DeploymentConfig {
+        governance_admin,
+        governance_pauser,
+    } = toml::from_str(&fs::read_to_string("deployment.toml")?)?;
 
     let provider: DynProvider<Ethereum> =
         ProviderBuilder::default().connect(&rpc_url).await?.erased();
 
-    let governance_admin = query_governance(deployment.governance_admin, &provider).await?;
-    let governance_pauser = query_governance(deployment.governance_pauser, &provider).await?;
-
     let governance_info = GovernanceInfo {
+        governance_admin: query_governance(governance_admin, &provider).await?,
+        governance_pauser: query_governance(governance_pauser, &provider).await?,
+    };
+
+    let wrapped_vara = query_wrapped_vara(governance_admin, &provider).await?;
+    let message_queue = query_message_queue(governance_admin, &provider).await?;
+    let erc20_manager = query_erc20_manager(governance_admin, &provider).await?;
+
+    let deployment = Deployment {
         governance_admin,
         governance_pauser,
+        wrapped_vara,
+        message_queue,
+        erc20_manager,
     };
 
     let Message {

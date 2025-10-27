@@ -23,7 +23,7 @@ contract WrappedVaraTest is Test, Base {
     using GovernancePacker for UpgradeProxyMessage;
 
     function setUp() public {
-        deployBridgeFromConstants();
+        deployBridgeDependsOnEnvironment();
     }
 
     function test_PauseWithGovernanceAdmin() public {

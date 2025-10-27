@@ -11,6 +11,7 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {UnsafeUpgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
+import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
 import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
 import {
@@ -44,7 +45,7 @@ contract ERC20ManagerTest is Test, Base {
     using ERC20ManagerPacker for RegisterGearTokenMessage;
 
     function setUp() public {
-        deployBridgeFromConstants();
+        deployBridgeDependsOnEnvironment();
     }
 
     function test_InitializeWithInvalidTokenType() public {
@@ -395,19 +396,21 @@ contract ERC20ManagerTest is Test, Base {
     }
 
     function test_RequestBridgingWithEthereumTokenWithZeroAmount() public {
-        vm.startPrank(deploymentArguments.deployerAddress);
+        if (!isFork()) {
+            vm.startPrank(deploymentArguments.deployerAddress);
 
-        address token = address(circleToken);
-        uint256 amount = 0;
-        bytes32 to = 0;
+            address token = address(circleToken);
+            uint256 amount = 0;
+            bytes32 to = 0;
 
-        IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, amount);
-        circleToken.approve(address(erc20Manager), amount);
+            IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, amount);
+            circleToken.approve(address(erc20Manager), amount);
 
-        vm.expectRevert(IERC20Manager.InvalidAmount.selector);
-        erc20Manager.requestBridging(token, amount, to);
+            vm.expectRevert(IERC20Manager.InvalidAmount.selector);
+            erc20Manager.requestBridging(token, amount, to);
 
-        vm.stopPrank();
+            vm.stopPrank();
+        }
     }
 
     function test_RequestBridgingWithGearToken() public {
@@ -479,8 +482,13 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 to = 0;
         address bridgingPayment_ = address(bridgingPayment);
 
-        IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-        tetherToken.approve(address(erc20Manager), amount);
+        if (isFork()) {
+            ITetherToken(address(tetherToken)).issue(amount);
+            ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+        } else {
+            IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
+            tetherToken.approve(address(erc20Manager), amount);
+        }
 
         vm.expectEmit(address(erc20Manager));
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
@@ -513,8 +521,13 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 to = 0;
         address bridgingPayment_ = address(bridgingPayment);
 
-        IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-        tetherToken.approve(address(erc20Manager), amount);
+        if (isFork()) {
+            ITetherToken(address(tetherToken)).issue(amount);
+            ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+        } else {
+            IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
+            tetherToken.approve(address(erc20Manager), amount);
+        }
 
         vm.expectRevert(IBridgingPayment.IncorrectFeeAmount.selector);
         erc20Manager.requestBridgingPayingFee(token, amount, to, bridgingPayment_);

@@ -87,7 +87,7 @@ async fn run() -> AnyResult<()> {
             let gear_api = gear_rpc_client::GearApi::new(
                 &args.gear_args.domain,
                 args.gear_args.port,
-                args.gear_args.retries,
+                args.gear_args.max_reconnect_attempts,
             )
             .await?;
 
@@ -161,7 +161,7 @@ async fn run() -> AnyResult<()> {
             let gear_api = gear_rpc_client::GearApi::new(
                 &args.gear_args.domain,
                 args.gear_args.port,
-                args.gear_args.retries,
+                args.gear_args.max_reconnect_attempts,
             )
             .await?;
 
@@ -190,7 +190,7 @@ async fn run() -> AnyResult<()> {
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
-                args.gear_args.retries,
+                args.gear_args.max_reconnect_attempts,
             )
             .await
             .expect("Failed to connect to Gear API");
@@ -246,7 +246,7 @@ async fn run() -> AnyResult<()> {
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
-                args.gear_args.retries,
+                args.gear_args.max_reconnect_attempts,
             )
             .await
             .expect("Failed to connect to Gear API");
@@ -294,7 +294,7 @@ async fn run() -> AnyResult<()> {
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
-                args.gear_args.retries,
+                args.gear_args.max_reconnect_attempts,
             )
             .await?;
             let conn = api_provider.connection();
@@ -309,13 +309,12 @@ async fn run() -> AnyResult<()> {
             let gsdk_args = message_relayer::common::GSdkArgs {
                 vara_domain: args.gear_args.domain,
                 vara_port: args.gear_args.port,
-                vara_rpc_retries: args.gear_args.retries,
             };
 
             let provider = ApiProvider::new(
                 gsdk_args.vara_domain.clone(),
                 gsdk_args.vara_port,
-                gsdk_args.vara_rpc_retries,
+                args.gear_args.max_reconnect_attempts,
             )
             .await
             .context("Failed to create API provider")?;
@@ -492,12 +491,11 @@ async fn run() -> AnyResult<()> {
             let gsdk_args = message_relayer::common::GSdkArgs {
                 vara_domain: gear_args.common.domain,
                 vara_port: gear_args.common.port,
-                vara_rpc_retries: gear_args.common.retries,
             };
             let provider = ApiProvider::new(
                 gsdk_args.vara_domain.clone(),
                 gsdk_args.vara_port,
-                gsdk_args.vara_rpc_retries,
+                gear_args.common.max_reconnect_attempts,
             )
             .await
             .expect("Failed to create API provider");
@@ -589,7 +587,7 @@ async fn run() -> AnyResult<()> {
             let api_provider = ApiProvider::new(
                 args.gear_args.domain.clone(),
                 args.gear_args.port,
-                args.gear_args.retries,
+                args.gear_args.max_reconnect_attempts,
             )
             .await
             .expect("Failed to create API provider");
@@ -635,7 +633,6 @@ async fn run() -> AnyResult<()> {
             let gear_client_args = message_relayer::common::GSdkArgs {
                 vara_domain: gear_args.common.domain,
                 vara_port: gear_args.common.port,
-                vara_rpc_retries: gear_args.common.retries,
             };
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_args).await;
@@ -660,7 +657,7 @@ async fn run() -> AnyResult<()> {
             let provider = ApiProvider::new(
                 gear_client_args.vara_domain.clone(),
                 gear_client_args.vara_port,
-                gear_client_args.vara_rpc_retries,
+                gear_args.common.max_reconnect_attempts,
             )
             .await
             .context("Failed to create API provider")?;
@@ -696,7 +693,7 @@ async fn run() -> AnyResult<()> {
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
     gclient::GearApi::builder()
-        .retries(args.common.retries)
+        .retries(args.common.max_reconnect_attempts)
         .suri(&args.suri)
         .build(gclient::WSAddress::new(
             &args.common.domain,
@@ -814,7 +811,7 @@ async fn create_proof_storage(
             let proof_storage = GearProofStorage::new(
                 &gear_args.domain,
                 gear_args.port,
-                gear_args.retries,
+                gear_args.max_reconnect_attempts,
                 fee_payer,
                 "./onchain_proof_storage_data".into(),
             )
@@ -848,7 +845,7 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     let gear_api = gear_rpc_client::GearApi::new(
         &args.gear_args.domain,
         args.gear_args.port,
-        args.gear_args.retries,
+        args.gear_args.max_reconnect_attempts,
     )
     .await?;
 

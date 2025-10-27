@@ -8,8 +8,6 @@ use tokio::sync::{
     oneshot,
 };
 
-/// Max reconnection attempts before failing. Default: 10.
-const MAX_RECONNECT_ATTEMPTS: usize = 10;
 /// Timeout between reconnects. Default: 1m30s.
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -92,7 +90,7 @@ pub struct ApiProvider {
     session: u64,
     domain: String,
     port: u16,
-    retries: u8,
+    max_reconnect_attempts: u8,
     api: Api,
 
     receiver: UnboundedReceiver<ApiConnectionRequest>,
@@ -100,11 +98,14 @@ pub struct ApiProvider {
 }
 
 impl ApiProvider {
-    pub async fn new(domain: String, port: u16, retries: u8) -> anyhow::Result<Self> {
+    pub async fn new(
+        domain: String,
+        port: u16,
+        max_reconnect_attempts: u8,
+    ) -> anyhow::Result<Self> {
         let (sender, receiver) = mpsc::unbounded_channel();
         let uri: &str = &format!("{domain}:{port}");
         let api = Api::builder()
-            .retries(retries)
             .build(uri)
             .await
             .context("failed to connect to API")?;
@@ -113,7 +114,7 @@ impl ApiProvider {
             session: 0,
             domain,
             port,
-            retries,
+            max_reconnect_attempts,
             api,
             receiver,
             sender,
@@ -131,15 +132,16 @@ impl ApiProvider {
     async fn reconnect(&mut self) -> bool {
         let uri: &str = &format!("{}:{}", self.domain, self.port);
 
-        for attempt in 0..MAX_RECONNECT_ATTEMPTS {
-            match Api::builder().retries(self.retries).build(uri).await {
+        for attempt in 0..self.max_reconnect_attempts {
+            match Api::builder().build(uri).await {
                 Ok(api) => {
                     self.api = api;
                     return true;
                 }
                 Err(err) => {
                     log::error!(
-                        "Failed to create API connection (attempt {attempt}/{MAX_RECONNECT_ATTEMPTS}): {err}"
+                        "Failed to create API connection (attempt {attempt}/{max_reconnect_attempts}): {err}",
+                        max_reconnect_attempts = self.max_reconnect_attempts
                     );
 
                     tokio::time::sleep(RECONNECT_TIMEOUT).await;
@@ -147,7 +149,10 @@ impl ApiProvider {
             }
         }
 
-        log::error!("All {MAX_RECONNECT_ATTEMPTS} attempts to connect to API failed. Giving up.");
+        log::error!(
+            "All {max_reconnect_attempts} attempts to connect to API failed. Giving up.",
+            max_reconnect_attempts = self.max_reconnect_attempts
+        );
         false
     }
 

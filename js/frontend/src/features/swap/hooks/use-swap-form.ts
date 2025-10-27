@@ -40,14 +40,16 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
 
   const addressSchema = network.isVara ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
 
-  const schema = z.object({
-    [FIELD_NAME.VALUE]: valueSchema,
-    [FIELD_NAME.ADDRESS]: addressSchema,
-  });
+  const schema = valueSchema
+    ? z.object({
+        [FIELD_NAME.VALUE]: valueSchema,
+        [FIELD_NAME.ADDRESS]: addressSchema,
+      })
+    : undefined;
 
   const form = useForm({
     defaultValues: DEFAULT_VALUES,
-    resolver: zodResolver(schema),
+    resolver: schema ? zodResolver(schema) : undefined,
     mode: 'onChange',
   });
 
@@ -56,7 +58,7 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
 
   const formValues = form.watch();
   const { amount } = formValues;
-  const formattedValues = isValid ? schema.safeParse(formValues).data : undefined;
+  const formattedValues = isValid ? schema?.safeParse(formValues).data : undefined;
 
   const handleSubmit = (onSubmit: (values: FormattedValues) => Promise<unknown>) =>
     form.handleSubmit((values) => {

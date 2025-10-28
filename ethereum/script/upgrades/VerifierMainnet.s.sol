@@ -3,9 +3,9 @@ pragma solidity ^0.8.30;
 
 import {console, Script} from "forge-std/Script.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
-import {Verifier} from "src/Verifier.sol";
+import {VerifierMainnet} from "src/VerifierMainnet.sol";
 
-contract VerifierScript is Script {
+contract VerifierMainnetScript is Script {
     IVerifier public verifier;
 
     function setUp() public {}
@@ -15,8 +15,8 @@ contract VerifierScript is Script {
 
         vm.startBroadcast(privateKey);
 
-        verifier = new Verifier();
-        console.log("Verifier:", address(verifier));
+        verifier = new VerifierMainnet();
+        console.log("VerifierMainnet:", address(verifier));
 
         vm.stopBroadcast();
     }

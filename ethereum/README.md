@@ -60,6 +60,7 @@ $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL
 
 > [!WARNING]
 > Before you run upgrade scripts, edit `reinitialize` method depending on how you want to perform upgrade (only for `WrappedVara`, `ERC20Manager`, `MessageQueue`)!
+> If this is not first update, then do not forget to bump version in `reinitializer(/*version*/)` modifier.
 
 ```shell
 $ source .env
@@ -79,11 +80,47 @@ $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/Verifier.s.sol:VerifierScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOLESKY_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
+
+### Example of changing `Verifier*.sol`
+
+1. deploy new `Verifier*` (see the previous chapter for details)
+
+2. add the method to the `MessageQueue`:
+
+   ```solidity
+   /**
+    * @custom:oz-upgrades-validate-as-initializer
+    */
+   function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(/*version*/ 2) {
+       _verifier = IVerifier(/*address of `Verifier*`*/ 0x0000000000000000000000000000000000000000);
+   }
+   ```
+
+3. deploy the new `MessageQueue` and write the address to `NEW_IMPLEMENTATION`
+
+4. generate an update message with the help of `governance-tool` (see `tools/governance/README.md`):
+
+   ```bash
+   NEW_IMPLEMENTATION="0x0000000000000000000000000000000000000000" # must exist on https://etherscan.io
+   cargo run --package governance-tool --release -- --rpc-url $MAINNET_RPC_URL GovernanceAdmin UpgradeProxy MessageQueue $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
+   ```
+
+5. send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`
 
 ### Coverage
 

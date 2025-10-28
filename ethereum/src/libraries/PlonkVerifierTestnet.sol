@@ -20,7 +20,7 @@ pragma solidity ^0.8.19;
 
 import {IPlonkVerifier} from "src/interfaces/IPlonkVerifier.sol";
 
-contract PlonkVerifier is IPlonkVerifier {
+contract PlonkVerifierTestnet is IPlonkVerifier {
     uint256 private constant R_MOD = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
     uint256 private constant P_MOD = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
 

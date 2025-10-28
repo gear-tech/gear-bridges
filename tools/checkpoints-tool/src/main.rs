@@ -92,13 +92,14 @@ async fn main() -> AnyResult<()> {
 
     let genesis = beacon_client.get_genesis().await?;
 
-    let network = Network::from_genesis_validators_root(&genesis.data.genesis_validators_root)
-        .ok_or_else(|| {
-            anyhow!(
-                "Failed to determine network from genesis validators root: {}",
-                hex::encode(genesis.data.genesis_validators_root)
-            )
-        })?;
+    let network =
+        Network::from_genesis_validators_root(genesis.data.genesis_validators_root[..].try_into()?)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Failed to determine network from genesis validators root: {}",
+                    hex::encode(genesis.data.genesis_validators_root)
+                )
+            })?;
 
     println!("Using Ethereum network: '{network:?}'");
 

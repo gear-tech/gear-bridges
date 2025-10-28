@@ -1,49 +1,8 @@
 ## Foundry
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
-
-Foundry consists of:
-
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
+We use Foundry - https://book.getfoundry.sh/
 
 ## Usage
-
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
 
 ### Deploy
 
@@ -95,6 +54,26 @@ $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc
 $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
+### Example of changing Verifier.sol
+
+1. deploy new `Verifier` (see the previous chapter for details)
+1. add the method to the `MessageQueue`:
+```
+    /**
+     * @custom:oz-upgrades-validate-as-initializer
+     */
+    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(2) {
+        _verifier = IVerifier(0x0001...09);
+    }
+```
+1. deploy the new `MessageQueue`
+1. generate an update message with the help of `governance-tool`:
+```
+./target/release/governance-tool --rpc-url $RPC_URL GovernanceAdmin UpgradeProxy MessageQueue <MQ_IMPL> $(cast calldata "function reinitialize()")
+```
+1. send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`
+
+
 ### Coverage
 
 We use Docker image and slightly modified sources to produce coverage report in HTML format.
@@ -116,18 +95,4 @@ $ docker buildx prune --all
 
 $ sudo chown -R $(whoami):$(whoami) coverage
 $ firefox coverage/index.html
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
 ```

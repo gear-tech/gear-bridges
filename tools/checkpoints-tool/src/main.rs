@@ -10,6 +10,7 @@ use checkpoint_light_client_io::{
 use clap::Parser;
 use ethereum_beacon_client::{utils, BeaconClient};
 use gclient::{GearApi, WSAddress};
+use gear_core::ids::prelude::*;
 use parity_scale_codec::Encode;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use std::time::Duration;
@@ -22,14 +23,10 @@ const GEAR_API_RETRIES: u8 = 3;
 #[command(propagate_version = true)]
 struct Cli {
     /// Perform a dry run without actual deployment
-    #[arg(long = "dry-run", default_value_t = true, env = "DRY_RUN", num_args=0..=1)]
+    #[arg(long = "dry-run", default_value_t = false, env, num_args=0..=1)]
     dry_run: bool,
     /// Address of the Gear RPC endpoint
-    #[arg(
-        long = "gear-url",
-        default_value = "wss://testnet.vara.network:443",
-        env = "GEAR_RPC"
-    )]
+    #[arg(long, default_value = "wss://testnet.vara.network:443", env)]
     gear_url: Url,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or
@@ -60,17 +57,9 @@ struct Cli {
     #[arg(long, env = "SLOT_CHECKPOINT")]
     slot_checkpoint: Option<u64>,
 
-    /// Skip code upload if the code already exists (prevents duplicate uploads)
-    #[arg(long, default_value_t = false, env = "SKIP_CODE_UPLOAD")]
-    skip_code_upload: bool,
-
     /// Specify salt for the send_recv call (hex string)
     #[arg(long, env = "SALT")]
     salt: Option<String>,
-
-    /// Specify the code ID to use when skipping code upload (hex string)
-    #[arg(long, env = "CODE_ID")]
-    code_id: Option<String>,
 }
 
 #[tokio::main]
@@ -177,32 +166,11 @@ async fn main() -> AnyResult<()> {
         .build(WSAddress::new(endpoint, gear_port))
         .await?;
 
-    let code_id = if cli.skip_code_upload {
-        // When skipping upload, use the provided code_id
-        match &cli.code_id {
-            Some(code_id_str) => {
-                let hex_str = code_id_str.trim().strip_prefix("0x").unwrap_or(code_id_str);
-                let code_id_bytes = hex::decode(hex_str)
-                    .map_err(|e| anyhow!("Invalid hex code_id '{hex_str}': {e}"))?;
-
-                if code_id_bytes.len() != 32 {
-                    return Err(anyhow!("Code ID must be 32 bytes (64 hex characters)"));
-                }
-
-                let mut code_id_array = [0u8; 32];
-                code_id_array.copy_from_slice(&code_id_bytes);
-                code_id_array.into()
-            }
-            None => {
-                return Err(anyhow!(
-                    "--code-id must be provided when using --skip-code-upload"
-                ));
-            }
-        }
-    } else {
-        let (code_id, _) = api.upload_code(WASM_BINARY).await?;
-        code_id
-    };
+    let code_id = api
+        .upload_code(WASM_BINARY)
+        .await
+        .map(|(code_id, _)| code_id)
+        .unwrap_or_else(|_| CodeId::generate(WASM_BINARY));
 
     println!("Using code_id = {code_id:?}");
 

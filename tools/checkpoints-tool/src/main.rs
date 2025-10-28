@@ -23,7 +23,7 @@ const GEAR_API_RETRIES: u8 = 3;
 #[command(propagate_version = true)]
 struct Cli {
     /// Perform a dry run without actual deployment
-    #[arg(long = "dry-run", default_value_t = false, env, num_args=0..=1)]
+    #[arg(long, default_value_t = false, env, num_args=0..=1)]
     dry_run: bool,
     /// Address of the Gear RPC endpoint
     #[arg(long, default_value = "ws://127.0.0.1:9944", env)]

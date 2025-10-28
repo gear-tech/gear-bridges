@@ -66,12 +66,12 @@ $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc
         _verifier = IVerifier(0x0001...09);
     }
 ```
-1. deploy the new `MessageQueue`
-1. generate an update message with the help of `governance-tool`:
+3. deploy the new `MessageQueue`
+3. generate an update message with the help of `governance-tool`:
 ```
 ./target/release/governance-tool --rpc-url $RPC_URL GovernanceAdmin UpgradeProxy MessageQueue <MQ_IMPL> $(cast calldata "function reinitialize()")
 ```
-1. send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`
+5. send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`
 
 
 ### Coverage

@@ -26,7 +26,7 @@ struct Cli {
     #[arg(long = "dry-run", default_value_t = false, env, num_args=0..=1)]
     dry_run: bool,
     /// Address of the Gear RPC endpoint
-    #[arg(long, default_value = "wss://testnet.vara.network:443", env)]
+    #[arg(long, default_value = "ws://127.0.0.1:9944", env)]
     gear_url: Url,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or

@@ -91,9 +91,9 @@ async fn main() -> AnyResult<()> {
 
     let scheme = cli.gear_url.scheme();
 
-    let endpoint = format!("{}://{}", scheme, gear_host);
+    let endpoint = format!("{scheme}://{gear_host}");
 
-    println!("Using Gear endpoint: {}:{}", endpoint, gear_port);
+    println!("Using Gear endpoint: {endpoint}:{gear_port}");
 
     let beacon_client = BeaconClient::new(
         cli.beacon_endpoint,
@@ -111,7 +111,7 @@ async fn main() -> AnyResult<()> {
             )
         })?;
 
-    println!("Using Ethereum network: '{:?}'", network);
+    println!("Using Ethereum network: '{network:?}'");
 
     let slot = match cli.slot_checkpoint {
         Some(slot) => slot,
@@ -183,7 +183,7 @@ async fn main() -> AnyResult<()> {
             Some(code_id_str) => {
                 let hex_str = code_id_str.trim().strip_prefix("0x").unwrap_or(code_id_str);
                 let code_id_bytes = hex::decode(hex_str)
-                    .map_err(|e| anyhow!("Invalid hex code_id '{}': {}", hex_str, e))?;
+                    .map_err(|e| anyhow!("Invalid hex code_id '{hex_str}': {e}"))?;
 
                 if code_id_bytes.len() != 32 {
                     return Err(anyhow!("Code ID must be 32 bytes (64 hex characters)"));
@@ -204,7 +204,7 @@ async fn main() -> AnyResult<()> {
         code_id
     };
 
-    println!("Using code_id = {:?}", hex::encode(code_id));
+    println!("Using code_id = {code_id:?}");
 
     let gas_limit = {
         let payload = {
@@ -226,7 +226,7 @@ async fn main() -> AnyResult<()> {
     let salt = match &cli.salt {
         Some(salt_str) => {
             let hex_str = salt_str.trim().strip_prefix("0x").unwrap_or(salt_str);
-            hex::decode(hex_str).map_err(|e| anyhow!("Invalid hex salt '{}': {}", hex_str, e))?
+            hex::decode(hex_str).map_err(|e| anyhow!("Invalid hex salt '{hex_str}': {e}"))?
         }
         None => vec![],
     };
@@ -238,7 +238,7 @@ async fn main() -> AnyResult<()> {
         .await
         .map_err(|e| anyhow!("Failed to construct program: {e:?}"))?;
 
-    println!("program_id = {:?}", hex::encode(program_id));
+    println!("program_id = {program_id:?}");
 
     Ok(())
 }

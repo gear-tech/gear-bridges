@@ -292,16 +292,16 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     this._log.info({ nonce: transfer.nonce, blockNumber: transfer.blockNumber }, 'Transfer requested');
   }
 
-  public async updateTransferStatus(nonce: string, status: Status, isPriority = false) {
+  public updateTransferStatus(nonce: string, status: Status, isPriority = false) {
     if (this._statuses.get(nonce) === status) return;
 
     this._statuses.set(nonce, status);
     if (isPriority) {
       this._priorityRequests.add(nonce);
-      this._log.info({ nonce }, 'Request marked as priority');
+      this._log.info({ nonce }, 'Request marked as for priority');
     }
 
-    this._log.debug({ nonce, status }, 'Request status changed');
+    this._log.info({ nonce, status }, 'Request status changed');
   }
 
   public setCompletedTransfer(nonce: string, timestamp: Date, blockNumber: bigint, txHash: string) {

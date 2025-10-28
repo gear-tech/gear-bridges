@@ -116,9 +116,8 @@ $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc
 4. generate an update message with the help of `governance-tool` (see `tools/governance/README.md`):
 
    ```bash
-   PROXY_MQ=""
    NEW_IMPLEMENTATION="0x0000000000000000000000000000000000000000" # must exist on https://etherscan.io
-   cargo run --package governance-tool --release -- --rpc-url $MAINNET_RPC_URL GovernanceAdmin UpgradeProxy $PROXY_MQ $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
+   cargo run --package governance-tool --release -- --rpc-url $MAINNET_RPC_URL GovernanceAdmin UpgradeProxy MessageQueue $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
    ```
 
 5. send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`

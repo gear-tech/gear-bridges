@@ -433,10 +433,11 @@ impl MerkleRootRelayer {
                         .expect("proof should be available if root is in SubmitProof state; check your storage");
 
                     reinstate(MerkleRootStatus::SubmitProof);
-
-                    if !submitter.submit_merkle_root(block_number, hash, proof) {
-                        log::error!("Proof submitter connection closed, exiting");
-                        return Ok(());
+                    if false {
+                        if !submitter.submit_merkle_root(block_number, hash, proof) {
+                            log::error!("Proof submitter connection closed, exiting");
+                            return Ok(());
+                        }
                     }
                 }
 
@@ -848,10 +849,11 @@ impl MerkleRootRelayer {
                                 }
                             });
 
-
-                        if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
-                            log::warn!("Proof submitter connection closed, exiting");
-                            return Ok(false);
+                        if false {
+                            if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
+                                log::warn!("Proof submitter connection closed, exiting");
+                                return Ok(false);
+                            }
                         }
                     }
 
@@ -904,9 +906,11 @@ impl MerkleRootRelayer {
                                 }
                             });
 
-                        if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
-                            log::warn!("Proof submitter connection closed, exiting");
-                            return Ok(false);
+                        if false {
+                            if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
+                                log::warn!("Proof submitter connection closed, exiting");
+                                return Ok(false);
+                            }
                         }
                     }
                 }

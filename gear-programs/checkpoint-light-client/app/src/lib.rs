@@ -35,7 +35,7 @@ impl CheckpointLightClientProgram {
             sync_committee_current_aggregate_pubkey,
             &sync_committee_current_pub_keys,
         ) else {
-            panic!("Wrong public committee keys");
+            panic!("Wrong public committee keys for {network:?} network");
         };
 
         if !merkle::is_current_committee_proof_valid(
@@ -44,7 +44,7 @@ impl CheckpointLightClientProgram {
             &sync_committee_current,
             &sync_committee_current_branch,
         ) {
-            panic!("Current sync committee proof is not valid");
+            panic!("Current sync committee proof is not valid for {network:?} network");
         }
 
         let period = eth_utils::calculate_period(update.finalized_header.slot) - 1;
@@ -58,7 +58,7 @@ impl CheckpointLightClientProgram {
         )
         .await
         {
-            Err(e) => panic!("Failed to verify sync committee update: {e:?}"),
+            Err(e) => panic!("Failed to verify sync committee update for {network:?} network: {e:?}"),
 
             Ok((Some(finalized_header), Some(sync_committee_next))) => Self(RefCell::new(State {
                 network,
@@ -75,7 +75,7 @@ impl CheckpointLightClientProgram {
             })),
 
             Ok((finalized_header, sync_committee_next)) => panic!(
-                "Incorrect initial sync committee update ({}, {})",
+                "Incorrect initial sync committee update for {network:?} network ({}, {})",
                 finalized_header.is_some(),
                 sync_committee_next.is_some()
             ),

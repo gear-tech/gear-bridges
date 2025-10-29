@@ -4,7 +4,10 @@ use futures::executor::block_on;
 use gclient::GearApi;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
-use prometheus::IntGauge;
+use prometheus::{
+    core::{AtomicU64, GenericCounter, GenericGauge},
+    IntCounter, IntGauge,
+};
 use sails_rs::{
     calls::{Action, ActionIo, Call},
     gclient::calls::GClientRemoting,
@@ -81,6 +84,27 @@ impl_metered_service!(
         fee_payer_balance: IntGauge = IntGauge::new(
             "gear_message_sender_fee_payer_balance",
             "Balance of the fee payer account",
+        ),
+
+        total_gas_used: GenericCounter<AtomicU64> = GenericCounter::new(
+            "gear_message_sender_total_gas_used",
+            "Total gas used by gear message sender",
+        ),
+        min_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "gear_message_sender_min_gas_used",
+            "Minimum gas used by gear message sender",
+        ),
+        max_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "gear_message_sender_max_gas_used",
+            "Maximum gas used by gear message sender",
+        ),
+        last_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "gear_message_sender_last_gas_used",
+            "Last gas used by gear message sender",
+        ),
+        total_submissions: IntCounter = IntCounter::new(
+            "gear_message_sender_total_submissions",
+            "Total number of messages sent to Gear",
         ),
     }
 );
@@ -225,6 +249,19 @@ impl MessageSender {
 
                 error
             })?;
+
+        self.metrics.total_submissions.inc();
+        self.metrics.last_gas_used.set(gas_limit);
+        self.metrics.total_gas_used.inc_by(gas_limit);
+
+        if self.metrics.min_gas_used.get() == 0 || gas_limit < self.metrics.min_gas_used.get() {
+            self.metrics.min_gas_used.set(gas_limit);
+        }
+
+        if gas_limit > self.metrics.max_gas_used.get() {
+            self.metrics.max_gas_used.set(gas_limit);
+        }
+
         log::debug!("Received reply: {}", hex::encode(&receiver_reply));
 
         let reply = SubmitReceipt::decode_reply(&receiver_reply).map_err(|e| {

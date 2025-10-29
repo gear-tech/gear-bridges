@@ -4,7 +4,7 @@ use crate::{
 };
 use ethereum_client::{abi::IMessageQueue::IMessageQueueErrors, EthApi, TxHash};
 use gear_rpc_client::dto::{MerkleProof, Message};
-use prometheus::Gauge;
+use prometheus::{Gauge, IntCounter};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
@@ -74,6 +74,11 @@ impl_metered_service! {
         fee_payer_balance: Gauge = Gauge::new(
             "ethereum_message_sender_fee_payer_balance",
             "Transaction fee payer balance",
+        ),
+
+        total_submissions: IntCounter = IntCounter::new(
+            "ethereum_message_sender_total_submissions",
+            "Total number of merkle root submissions to Ethereum",
         ),
     }
 }
@@ -196,6 +201,8 @@ async fn task_inner(
             "Message with nonce {} relaying started: tx_hash = {tx_hash}",
             hex::encode(message.nonce_be)
         );
+
+        this.metrics.total_submissions.inc();
 
         if responses
             .send(Response::ProcessingStarted(tx_hash, tx_uuid))

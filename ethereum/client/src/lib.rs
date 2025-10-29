@@ -7,7 +7,7 @@ use alloy::{
             BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
             WalletFiller,
         },
-        Identity, Provider, ProviderBuilder, RootProvider,
+        Identity, PendingTransactionBuilder, Provider, ProviderBuilder, RootProvider,
     },
     pubsub::Subscription,
     rpc::types::{Block, BlockId, BlockNumberOrTag, Filter, Header, Log as RpcLog},
@@ -364,7 +364,7 @@ impl EthApi {
         block_number: u32,
         merkle_root: [u8; 32],
         proof: Vec<u8>,
-    ) -> Result<TxHash, Error> {
+    ) -> Result<PendingTransactionBuilder<Ethereum>, Error> {
         self.contracts
             .provide_merkle_root(
                 U256::from(block_number),
@@ -552,7 +552,7 @@ impl Contracts {
         block_number: U256,
         merkle_root: B256,
         proof: Bytes,
-    ) -> Result<TxHash, Error> {
+    ) -> Result<PendingTransactionBuilder<Ethereum>, Error> {
         match self
             .message_queue_instance
             .submitMerkleRoot(block_number, merkle_root, proof.clone())
@@ -567,7 +567,7 @@ impl Contracts {
                     .send()
                     .await
                 {
-                    Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
+                    Ok(pending_tx) => Ok(pending_tx),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
                         if let Some(e) =

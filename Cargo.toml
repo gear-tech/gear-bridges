@@ -30,7 +30,7 @@ members = [
     "gear-programs/vft-vara/app",
     "gear-programs/vft-vara/client",
     "utils-prometheus",
-    "tools/deploy-checkpoints",
+    "tools/checkpoints-tool",
     "tools/deploy-to-gear",
     "tools/genesis-config",
     "tools/governance",
@@ -180,6 +180,7 @@ uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
 zeroize = "1.8.1"
 async-trait = "0.1.88"
+url = "2.5.7"
 # Gear/Substrate deps
 gprimitives = "1.9.2"
 gstd = { version = "1.9.2", features = ["nightly"] }

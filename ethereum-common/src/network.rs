@@ -23,6 +23,26 @@ impl Network {
         .into()
     }
 
+    pub fn from_genesis_validators_root(root: [u8; 32]) -> Option<Self> {
+        if root == Self::Mainnet.genesis_validators_root().0 {
+            return Some(Mainnet);
+        }
+
+        if root == Self::Sepolia.genesis_validators_root().0 {
+            return Some(Sepolia);
+        }
+
+        if root == Self::Holesky.genesis_validators_root().0 {
+            return Some(Holesky);
+        }
+
+        if root == Self::Hoodi.genesis_validators_root().0 {
+            return Some(Hoodi);
+        }
+
+        None
+    }
+
     pub fn fork_version(&self, slot: u64) -> [u8; 4] {
         let epoch_electra = self.epoch_electra();
         let epoch = utils::calculate_epoch(slot);

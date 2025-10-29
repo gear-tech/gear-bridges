@@ -10,9 +10,11 @@ use checkpoint_light_client_io::{
 use clap::Parser;
 use ethereum_beacon_client::{utils, BeaconClient};
 use gclient::{GearApi, WSAddress};
+use gear_core::ids::prelude::*;
 use parity_scale_codec::Encode;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use std::time::Duration;
+use url::Url;
 
 const GEAR_API_RETRIES: u8 = 3;
 
@@ -20,17 +22,12 @@ const GEAR_API_RETRIES: u8 = 3;
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Cli {
+    /// Perform a dry run without actual deployment
+    #[arg(long, default_value_t = false, env, num_args=0..=1)]
+    dry_run: bool,
     /// Address of the Gear RPC endpoint
-    #[arg(
-        long = "gear-endpoint",
-        default_value = "wss://testnet.vara.network",
-        env = "GEAR_RPC"
-    )]
-    gear_endpoint: String,
-
-    /// Port of the Gear RPC endpoint
-    #[arg(long = "gear-port", default_value = "443", env = "GEAR_PORT")]
-    gear_port: u16,
+    #[arg(long, default_value = "ws://127.0.0.1:9944", env)]
+    gear_url: Url,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
@@ -42,7 +39,7 @@ struct Cli {
     /// Specify the endpoint providing Beacon API
     #[arg(
         long,
-        default_value = "https://www.lightclientdata.org",
+        default_value = "https://ethereum-beacon-api.publicnode.com",
         env = "BEACON_ENDPOINT"
     )]
     beacon_endpoint: String,
@@ -59,6 +56,10 @@ struct Cli {
     /// the latest finality update is used to get the slot.
     #[arg(long, env = "SLOT_CHECKPOINT")]
     slot_checkpoint: Option<u64>,
+
+    /// Specify salt for the send_recv call (hex string)
+    #[arg(long, env)]
+    salt: Option<String>,
 }
 
 #[tokio::main]
@@ -66,24 +67,41 @@ async fn main() -> AnyResult<()> {
     let _ = dotenv::dotenv();
 
     let cli = Cli::parse();
-    let network = cli.network.to_lowercase();
-    let network = if network == "mainnet" {
-        Network::Mainnet
-    } else if network == "holesky" {
-        Network::Holesky
-    } else if network == "sepolia" {
-        Network::Sepolia
-    } else if network == "hoodi" {
-        Network::Hoodi
-    } else {
-        return Err(anyhow!("Network '{network}' is not supported"));
-    };
+
+    let gear_host = cli
+        .gear_url
+        .host_str()
+        .ok_or_else(|| anyhow!("Invalid Gear URL: {}", cli.gear_url))?
+        .to_string();
+    let gear_port = cli
+        .gear_url
+        .port_or_known_default()
+        .ok_or_else(|| anyhow!("Cannot determine port from Gear URL: {}", cli.gear_url))?;
+
+    let scheme = cli.gear_url.scheme();
+
+    let endpoint = format!("{scheme}://{gear_host}");
+
+    println!("Using Gear endpoint: {endpoint}:{gear_port}");
 
     let beacon_client = BeaconClient::new(
         cli.beacon_endpoint,
         Some(Duration::from_secs(cli.beacon_timeout)),
     )
     .await?;
+
+    let genesis = beacon_client.get_genesis().await?;
+
+    let network =
+        Network::from_genesis_validators_root(genesis.data.genesis_validators_root[..].try_into()?)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Failed to determine network from genesis validators root: {}",
+                    hex::encode(genesis.data.genesis_validators_root)
+                )
+            })?;
+
+    println!("Using Ethereum network: '{network:?}'");
 
     let slot = match cli.slot_checkpoint {
         Some(slot) => slot,
@@ -136,11 +154,27 @@ async fn main() -> AnyResult<()> {
         sync_aggregate_encoded,
     };
 
+    if cli.dry_run {
+        println!(
+            "Dry run enabled, not deploying the program, run with `--dry-run false` to deploy."
+        );
+        return Ok(());
+    }
+
     let api = GearApi::builder()
         .retries(GEAR_API_RETRIES)
         .suri(cli.gear_suri)
-        .build(WSAddress::new(&cli.gear_endpoint, cli.gear_port))
+        .build(WSAddress::new(endpoint, gear_port))
         .await?;
+
+    let code_id = api
+        .upload_code(WASM_BINARY)
+        .await
+        .map(|(code_id, _)| code_id)
+        .unwrap_or_else(|_| CodeId::generate(WASM_BINARY));
+
+    println!("Using code_id = {code_id:?}");
+
     let gas_limit = {
         let payload = {
             let mut result = checkpoint_light_client_factory::io::Init::ROUTE.to_vec();
@@ -153,18 +187,27 @@ async fn main() -> AnyResult<()> {
             .await?
             .min_limit
     };
-    let (code_id, _) = api.upload_code(WASM_BINARY).await?;
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
+
+    // Parse salt from hex string if provided
+    let salt = match &cli.salt {
+        Some(salt_str) => {
+            let hex_str = salt_str.trim().strip_prefix("0x").unwrap_or(salt_str);
+            hex::decode(hex_str).map_err(|e| anyhow!("Invalid hex salt '{hex_str}': {e}"))?
+        }
+        None => vec![],
+    };
+
     let program_id = factory
         .init(init)
         .with_gas_limit(gas_limit)
-        .send_recv(code_id, [])
+        .send_recv(code_id, salt)
         .await
         .map_err(|e| anyhow!("Failed to construct program: {e:?}"))?;
 
-    println!("program_id = {:?}", hex::encode(program_id));
+    println!("program_id = {program_id:?}");
 
     Ok(())
 }

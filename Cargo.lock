@@ -2542,6 +2542,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "checkpoints-tool"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "ark-serialize 0.4.2",
+ "checkpoint-light-client",
+ "checkpoint-light-client-client",
+ "checkpoint-light-client-io",
+ "clap",
+ "dotenv",
+ "ethereum_beacon_client",
+ "gclient",
+ "gear-core",
+ "hex",
+ "parity-scale-codec",
+ "sails-rs",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3306,25 +3327,6 @@ name = "defer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "930c7171c8df9fb1782bdf9b918ed9ed2d33d1d22300abb754f9085bc48bf8e8"
-
-[[package]]
-name = "deploy-checkpoints"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "ark-serialize 0.4.2",
- "checkpoint-light-client",
- "checkpoint-light-client-client",
- "checkpoint-light-client-io",
- "clap",
- "dotenv",
- "ethereum_beacon_client",
- "gclient",
- "hex",
- "parity-scale-codec",
- "sails-rs",
- "tokio",
-]
 
 [[package]]
 name = "deploy-to-gear"

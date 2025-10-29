@@ -58,7 +58,9 @@ impl CheckpointLightClientProgram {
         )
         .await
         {
-            Err(e) => panic!("Failed to verify sync committee update for {network:?} network: {e:?}"),
+            Err(e) => {
+                panic!("Failed to verify sync committee update for {network:?} network: {e:?}")
+            }
 
             Ok((Some(finalized_header), Some(sync_committee_next))) => Self(RefCell::new(State {
                 network,

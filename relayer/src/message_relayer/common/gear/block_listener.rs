@@ -196,7 +196,7 @@ impl BlockListener {
                             gear_api.api.blocks().at(missing_block_hash).await?;
                         let gear_block =
                             GearBlock::from_subxt_block(&gear_api, missing_block_data).await?;
-
+                        self.block_storage.add_block(&gear_api, &gear_block).await?;
                         match tx.send(gear_block) {
                             Ok(_) => (),
                             Err(broadcast::error::SendError(_)) => {
@@ -213,7 +213,7 @@ impl BlockListener {
             // Process the current block
             let block = gear_api.api.blocks().at(block_hash).await?;
             let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
-
+            self.block_storage.add_block(&gear_api, &gear_block).await?;
             match tx.send(gear_block) {
                 Ok(_) => (),
                 Err(broadcast::error::SendError(_)) => {

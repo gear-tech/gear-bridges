@@ -27,11 +27,14 @@ pub struct MerkleRootStorage {
     pub path: PathBuf,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Block {
     pub block_hash: H256,
     pub merkle_root_changed: Option<(u64, H256)>,
     pub authority_set_changed: bool,
+    pub finality_block: u32,
+    pub finality_proof: gear_rpc_client::dto::BlockFinalityProof,
+    pub finality_hash: H256,
 }
 
 impl Block {
@@ -102,15 +105,17 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
         }
     }
 
-    async fn add_block(&self, block: &GearBlock) {
+    async fn add_block(
+        &self,
+        api: &gear_rpc_client::GearApi,
+        block: &GearBlock,
+    ) -> anyhow::Result<()> {
         let merkle_root_changed = queue_merkle_root_changed(block);
         let authority_set_changed = authority_set_changed(block);
 
-        // in case there are no merkle-root related changes we can just skip the block saving.
-        if merkle_root_changed.is_none() && !authority_set_changed {
-            return;
-        }
-
+        let finality = api
+            .produce_finality_proof(&block.grandpa_justification)
+            .await?;
         let block_hash = block.hash();
         let block_number = block.number();
 
@@ -118,7 +123,6 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
         match blocks.entry(block_number) {
             Entry::Occupied(_) => {
                 log::warn!("Block #{block_number} already exists in storage");
-                return;
             }
 
             Entry::Vacant(entry) => {
@@ -126,9 +130,14 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
                     block_hash,
                     merkle_root_changed,
                     authority_set_changed,
+                    finality_block: block.grandpa_justification.commit.target_number,
+                    finality_proof: finality.1,
+                    finality_hash: finality.0,
                 });
             }
         }
+
+        return Ok(());
     }
 }
 

@@ -25,6 +25,7 @@ impl Network {
 
     pub fn fork_version(&self, slot: u64) -> [u8; 4] {
         let epoch_electra = self.epoch_electra();
+        let epoch_fulu = self.epoch_fulu();
         let epoch = utils::calculate_epoch(slot);
         match self {
             Mainnet => {
@@ -36,6 +37,10 @@ impl Network {
             }
 
             Sepolia => {
+                if epoch >= epoch_fulu {
+                    return hex!("90000075");
+                }
+
                 if epoch >= epoch_electra {
                     return hex!("90000074");
                 }
@@ -44,6 +49,10 @@ impl Network {
             }
 
             Holesky => {
+                if epoch >= epoch_fulu {
+                    return hex!("07017000");
+                }
+
                 if epoch >= epoch_electra {
                     return hex!("06017000");
                 }
@@ -52,7 +61,10 @@ impl Network {
             }
 
             Hoodi => {
-                // According to https://github.com/eth-clients/hoodi/blob/2b03cffba84b50759b3476a69334fac8412e217c/metadata/config.yaml
+                if epoch >= epoch_fulu {
+                    return hex!("70000910");
+                }
+
                 if epoch >= epoch_electra {
                     return hex!("60000910");
                 }
@@ -65,10 +77,25 @@ impl Network {
     // https://github.com/ethereum/EIPs/blob/55ec2d12e4738585338acdabd1c6400dc7235144/EIPS/eip-7600.md#activation
     pub const fn epoch_electra(&self) -> u64 {
         match self {
-            Holesky => 115_968,
-            Sepolia => 222_464,
-            Hoodi => 2_048,
             Mainnet => 364_032,
+            Sepolia => 222_464,
+            Holesky => 115_968,
+            Hoodi => 2_048,
+        }
+    }
+
+    pub const fn epoch_fulu(&self) -> u64 {
+        match self {
+            Mainnet => todo!(),
+
+            // https://github.com/eth-clients/sepolia/blob/56f0bff41cecab6c661251d72b73ceecc52c5701/metadata/config.yaml#L43
+            Sepolia => 272_640,
+
+            // https://github.com/eth-clients/holesky/blob/8aec65f11f0c986d6b76b2eb902420635eb9b815/metadata/config.yaml#L44
+            Holesky => 165_120,
+
+            // https://github.com/eth-clients/hoodi/blob/21a110a60e6558a2ba7c819fa4b80029d49ab205/metadata/config.yaml#L43
+            Hoodi => 50_688,
         }
     }
 }

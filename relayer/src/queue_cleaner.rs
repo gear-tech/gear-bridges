@@ -16,7 +16,7 @@ pub async fn queue_cleaner(
     loop {
         match blocks.next().await {
             Some(Ok(block)) => {
-                let gear_block = GearBlock::from_subxt_block(block).await?;
+                let gear_block = GearBlock::from_subxt_block(&client, block).await?;
                 if !queue_overflowed(&gear_block) {
                     continue;
                 }
@@ -100,7 +100,7 @@ async fn reset_overflowed_queue_from_storage(
     log::info!("Found unprocessed overflowed queue event at block #{block}",);
     let block_hash = client.block_number_to_hash(block).await?;
     let block = client.get_block_at(block_hash).await?;
-    let block = GearBlock::from_subxt_block(block).await?;
+    let block = GearBlock::from_subxt_block(&client, block).await?;
     reset_overflowed_queue(api_provider, &block, suri, 15).await
 }
 

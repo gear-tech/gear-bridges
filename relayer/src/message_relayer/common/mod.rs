@@ -1,6 +1,6 @@
 use ethereum_client::TxHash;
 use ethereum_common::Hash256;
-use gear_rpc_client::dto::Message;
+use gear_rpc_client::{dto::Message, GearApi, GearHeader};
 use gsdk::{
     config::Header,
     metadata::{
@@ -13,6 +13,7 @@ use gsdk::{
 };
 use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
+use sp_consensus_grandpa::GrandpaJustification;
 use subxt::{blocks::Block, config::Header as _, OnlineClient};
 
 pub mod ethereum;
@@ -118,11 +119,20 @@ pub struct GSdkArgs {
 pub struct GearBlock {
     pub header: Header,
     pub events: Vec<gsdk::Event>,
+    pub grandpa_justification: GrandpaJustification<GearHeader>,
 }
 
 impl GearBlock {
-    pub fn new(header: Header, events: Vec<gsdk::Event>) -> Self {
-        Self { header, events }
+    pub fn new(
+        header: Header,
+        events: Vec<gsdk::Event>,
+        grandpa_justification: GrandpaJustification<GearHeader>,
+    ) -> Self {
+        Self {
+            header,
+            events,
+            grandpa_justification,
+        }
     }
 
     pub fn number(&self) -> u32 {
@@ -160,12 +170,30 @@ impl GearBlock {
     }
 
     pub async fn from_subxt_block(
+        api: &GearApi,
         block: Block<GearConfig, OnlineClient<GearConfig>>,
     ) -> anyhow::Result<Self> {
+        let justification = api.get_justification(block.hash()).await?;
         let header = block.header().clone();
         let events = BlockEvents::new(block).await?;
         let events = events.events()?;
-        Ok(Self::new(header, events))
+        Ok(Self::new(header, events, justification))
+    }
+
+    pub async fn from_justification(
+        api: &GearApi,
+        justification: GrandpaJustification<GearHeader>,
+    ) -> anyhow::Result<Self> {
+        let block = api
+            .api
+            .blocks()
+            .at(justification.commit.target_hash)
+            .await?;
+
+        let header = block.header().clone();
+        let events = BlockEvents::new(block).await?;
+        let events = events.events()?;
+        Ok(Self::new(header, events, justification))
     }
 }
 

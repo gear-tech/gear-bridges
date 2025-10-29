@@ -298,13 +298,13 @@ impl GearApi {
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let justification = self.get_justification(after_block).await?;
 
-        self.produce_finality_proof(justification).await
+        self.produce_finality_proof(&justification).await
     }
 
     // Produces block finality proof for the given justification.
     pub async fn produce_finality_proof(
         &self,
-        justification: GrandpaJustification<GearHeader>,
+        justification: &GrandpaJustification<GearHeader>,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let block_number = justification.commit.target_number;
         let block_hash = justification.commit.target_hash;
@@ -330,7 +330,7 @@ impl GearApi {
         let pre_commits: Vec<_> = justification
             .commit
             .precommits
-            .into_iter()
+            .iter()
             .map(|pc| dto::PreCommit {
                 public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                 signature: pc.signature.as_inner_ref().0.to_owned(),

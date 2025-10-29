@@ -1067,7 +1067,7 @@ impl MerkleRootRelayer {
             None => self
                 .api_provider
                 .client()
-                .fetch_finality_proof(block.hash())
+                .produce_finality_proof(&block.grandpa_justification)
                 .await
                 .with_context(|| {
                     format!(

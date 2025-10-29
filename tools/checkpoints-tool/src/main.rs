@@ -58,7 +58,7 @@ struct Cli {
     slot_checkpoint: Option<u64>,
 
     /// Specify salt for the send_recv call (hex string)
-    #[arg(long, env = "SALT")]
+    #[arg(long, env)]
     salt: Option<String>,
 }
 

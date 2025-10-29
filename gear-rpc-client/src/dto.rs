@@ -25,6 +25,7 @@ impl Serialize for PreCommit {
         let mut state = serializer.serialize_struct("PreCommit", 2)?;
         state.serialize_field("public_key", &hex::encode(self.public_key))?;
         state.serialize_field("signature", &hex::encode(self.signature))?;
+
         state.end()
     }
 }
@@ -49,7 +50,7 @@ impl<'de> Deserialize<'de> for PreCommit {
             {
                 let mut public_key = None;
                 let mut signature = None;
-
+                let mut id = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         "public_key" => {

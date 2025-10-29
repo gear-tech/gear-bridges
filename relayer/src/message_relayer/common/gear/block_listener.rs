@@ -146,7 +146,7 @@ impl BlockListener {
             log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
             let block = gear_api.api.blocks().at(block_hash).await?;
 
-            let gear_block = GearBlock::from_subxt_block(block).await?;
+            let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
 
             match tx.send(gear_block) {
                 Ok(_) => (),
@@ -168,7 +168,7 @@ impl BlockListener {
                 Some(Ok(block)) => {
                     self.metrics.latest_block.set(block.number() as i64);
 
-                    let block = GearBlock::from_subxt_block(block).await?;
+                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
                     self.block_storage.add_block(&block).await;
 
                     match tx.send(block) {

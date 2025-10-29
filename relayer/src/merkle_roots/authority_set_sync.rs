@@ -157,7 +157,7 @@ impl AuthoritySetSync {
                                 let genesis_authority_set_id = self.genesis_config.authority_set_id;
                                 let genesis_block_hash = client.find_era_first_block(genesis_authority_set_id + 1).await?;
                                 let genesis_block = client.get_block_at(genesis_block_hash).await?;
-                                let block = GearBlock::from_subxt_block(genesis_block).await?;
+                                let block = GearBlock::from_subxt_block(&client, genesis_block).await?;
                                 let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
                                     return Ok(());
                                 };

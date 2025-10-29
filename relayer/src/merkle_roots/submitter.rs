@@ -68,14 +68,18 @@ impl SubmitterIo {
         merkle_root: H256,
         proof: FinalProof,
     ) -> bool {
-        self.requests
-            .send(Request {
-                era: None,
-                merkle_root_block,
-                merkle_root,
-                proof,
-            })
-            .is_ok()
+        return true;
+        let _ = merkle_root;
+        let _ = proof;
+
+        /*self.requests
+        .send(Request {
+            era: None,
+            merkle_root_block,
+            merkle_root,
+            proof,
+        })
+        .is_ok()*/
     }
 
     pub async fn recv(&mut self) -> Option<Response> {

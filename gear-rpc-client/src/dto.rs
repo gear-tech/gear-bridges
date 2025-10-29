@@ -50,7 +50,7 @@ impl<'de> Deserialize<'de> for PreCommit {
             {
                 let mut public_key = None;
                 let mut signature = None;
-                let mut id = None;
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         "public_key" => {

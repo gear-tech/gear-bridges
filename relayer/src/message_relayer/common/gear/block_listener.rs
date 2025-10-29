@@ -157,32 +157,76 @@ impl BlockListener {
             }
         }
 
-        let mut finalized_blocks = gear_api.api.subscribe_finalized_blocks().await?;
-        loop {
-            match finalized_blocks.next().await {
-                Some(Err(err)) => {
-                    log::error!("Error receiving finalized block: {err}");
-                    break Err(err);
+        let mut last_finalized_block_number = None;
+        let mut sub = gear_api.subscribe_grandpa_justifications().await?;
+
+        while let Some(justification) = sub.next().await {
+            let justification = justification?;
+
+            let block_hash = justification.commit.target_hash;
+            let block_number = match gear_api.block_hash_to_number(block_hash).await {
+                Ok(number) => number,
+                Err(err) => {
+                    log::error!("Failed to get block number for hash {block_hash:?}: {err}");
+                    continue;
                 }
+            };
 
-                Some(Ok(block)) => {
-                    self.metrics.latest_block.set(block.number() as i64);
+            // Check if there are missing blocks and fetch them
+            if let Some(last_finalized) = last_finalized_block_number {
+                if last_finalized + 1 != block_number {
+                    log::info!("Detected gap: last finalized block was #{last_finalized}, current block is #{block_number}");
 
-                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
-                    self.block_storage.add_block(&block).await;
+                    // Fetch missing blocks
+                    for missing_block in (last_finalized + 1)..block_number {
+                        log::trace!("Fetching missing block #{missing_block}");
 
-                    match tx.send(block) {
-                        Ok(_) => (),
-                        Err(broadcast::error::SendError(_)) => {
-                            log::error!("No active receivers for Gear block listener, stopping");
-                            return Ok(false);
+                        let missing_block_hash = match gear_api
+                            .block_number_to_hash(missing_block)
+                            .await
+                        {
+                            Ok(hash) => hash,
+                            Err(err) => {
+                                log::error!("Failed to get block hash for missing block #{missing_block}: {err}");
+                                continue;
+                            }
+                        };
+
+                        let missing_block_data =
+                            gear_api.api.blocks().at(missing_block_hash).await?;
+                        let gear_block =
+                            GearBlock::from_subxt_block(&gear_api, missing_block_data).await?;
+
+                        match tx.send(gear_block) {
+                            Ok(_) => (),
+                            Err(broadcast::error::SendError(_)) => {
+                                log::error!(
+                                    "No active receivers for Gear block listener, stopping"
+                                );
+                                return Ok(false);
+                            }
                         }
                     }
-                    self.metrics.latest_block.inc();
                 }
-
-                None => break Ok(true),
             }
+
+            // Process the current block
+            let block = gear_api.api.blocks().at(block_hash).await?;
+            let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
+
+            match tx.send(gear_block) {
+                Ok(_) => (),
+                Err(broadcast::error::SendError(_)) => {
+                    log::error!("No active receivers for Gear block listener, stopping");
+                    return Ok(false);
+                }
+            }
+
+            // Update the last finalized block number
+            last_finalized_block_number = Some(block_number);
+            self.metrics.latest_block.set(block_number as i64);
         }
+
+        Ok(true)
     }
 }

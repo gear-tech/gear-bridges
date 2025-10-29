@@ -10183,6 +10183,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled",
+ "sp-consensus-grandpa",
  "sp-core",
  "subxt",
  "thiserror 2.0.12",

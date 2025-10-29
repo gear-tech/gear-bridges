@@ -126,7 +126,7 @@ impl GearBlock {
     pub fn new(
         header: Header,
         events: Vec<gsdk::Event>,
-        grandpa_justification: GrandpaJustification,
+        grandpa_justification: GrandpaJustification<GearHeader>,
     ) -> Self {
         Self {
             header,

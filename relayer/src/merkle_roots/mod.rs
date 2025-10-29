@@ -1046,7 +1046,7 @@ impl MerkleRootRelayer {
             match storage::queue_merkle_root_changed(&block) {
                 Some(merkle_root) => merkle_root,
                 None => {
-                    log::debug!(
+                    log::trace!(
                         "Skipping block #{} as there are no new messages",
                         block.number()
                     );

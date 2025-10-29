@@ -19,7 +19,7 @@ pub struct AuthoritySetSyncIo {
 }
 
 pub enum Request {
-    ForceSync(GearBlock),
+    ForceSync(Box<GearBlock>),
     Initialize,
 }
 
@@ -37,7 +37,9 @@ impl AuthoritySetSyncIo {
     }
 
     pub fn send(&self, block: GearBlock) -> bool {
-        self.requests.send(Request::ForceSync(block)).is_ok()
+        self.requests
+            .send(Request::ForceSync(Box::new(block)))
+            .is_ok()
     }
 
     pub fn initialize(&self) -> bool {

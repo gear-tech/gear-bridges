@@ -246,13 +246,6 @@ impl GearApi {
         Ok(stream)
     }
 
-    pub fn grandpa_justification(
-        &self,
-        block_hash: H256,
-    ) -> AnyResult<GrandpaJustification<GearHeader>> {
-        self.api.rpc().client().request(method, params)
-    }
-
     pub async fn prove_finality(&self, after_block: u32) -> AnyResult<Option<Vec<u8>>> {
         let Some(finality): Option<String> = self
             .api
@@ -304,10 +297,6 @@ impl GearApi {
         after_block: H256,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let justification = self.get_justification(after_block).await?;
-        for pc in &justification.commit.precommits {
-            assert_eq!(pc.precommit.target_hash, finality.block);
-            assert_eq!(pc.precommit.target_number, fetched_block_number);
-        }
 
         self.produce_finality_proof(justification).await
     }

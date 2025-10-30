@@ -32,7 +32,6 @@ function useRelayEthTx(txHash: HexString) {
         beaconRpcUrl: ETH_BEACON_NODE_ADDRESS,
         ethereumPublicClient: publicClient,
         gearApi: archiveApi,
-        checkpointClientId: CONTRACT_ADDRESS.CHECKPOINT_CLIENT,
         historicalProxyId: CONTRACT_ADDRESS.HISTORICAL_PROXY,
         clientId: CONTRACT_ADDRESS.VFT_MANAGER,
         clientServiceName: 'VftManager',

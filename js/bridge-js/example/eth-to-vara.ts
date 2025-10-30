@@ -16,8 +16,6 @@ dotenv.config();
 const assertEnv = (name: string) =>
   assert.notStrictEqual(process.env[name], undefined, `Missing ${name} environment variable`);
 
-assertEnv('CHECKPOINT_CLIENT_ID');
-const CHECKPOINT_CLIENT_ID = process.env.CHECKPOINT_CLIENT_ID! as `0x${string}`;
 assertEnv('HISTORICAL_PROXY_ID');
 const HISTORICAL_PROXY_ID = process.env.HISTORICAL_PROXY_ID! as `0x${string}`;
 assertEnv('BEACON_RPC_URL');
@@ -55,12 +53,12 @@ const main = async () => {
       beaconRpcUrl: BEACON_RPC,
       ethereumPublicClient: publicClient,
       gearApi,
-      checkpointClientId: CHECKPOINT_CLIENT_ID,
       historicalProxyId: HISTORICAL_PROXY_ID,
       clientId: programId,
       clientServiceName: PING_SERVICE_NAME,
       clientMethodName: PING_METHOD_NAME,
       signer: account,
+      wait: true,
       statusCb: (status, details) => {
         console.log(`[relayEthToVara]: ${status}`, details || '');
       },
@@ -111,7 +109,6 @@ const main = async () => {
     beaconRpcUrl: BEACON_RPC,
     ethereumPublicClient: publicClient,
     gearApi,
-    checkpointClientId: CHECKPOINT_CLIENT_ID,
     historicalProxyId: HISTORICAL_PROXY_ID,
     clientId: pingProgramId,
     clientServiceName: PING_SERVICE_NAME,

@@ -136,9 +136,21 @@ pub mod full {
         builder.assert_zero(target_is_mode_multi_bytes.target);
 
         // decode SCALE-encoded value in compact mode
-        let target_result_two_bytes = builder.mul_const_add(F::from_canonical_u64(1 << 6), input.padded_bytes.constant_read(1).as_target(), value);
-        let target_result_three_bytes = builder.mul_const_add(F::from_canonical_u64(1 << 14), input.padded_bytes.constant_read(2).as_target(), target_result_two_bytes);
-        let target_result_four_bytes = builder.mul_const_add(F::from_canonical_u64(1 << 22), input.padded_bytes.constant_read(3).as_target(), target_result_three_bytes);
+        let target_result_two_bytes = builder.mul_const_add(
+            F::from_canonical_u64(1 << 6),
+            input.padded_bytes.constant_read(1).as_target(),
+            value,
+        );
+        let target_result_three_bytes = builder.mul_const_add(
+            F::from_canonical_u64(1 << 14),
+            input.padded_bytes.constant_read(2).as_target(),
+            target_result_two_bytes,
+        );
+        let target_result_four_bytes = builder.mul_const_add(
+            F::from_canonical_u64(1 << 22),
+            input.padded_bytes.constant_read(3).as_target(),
+            target_result_three_bytes,
+        );
 
         let target_output_one_byte = OutputTarget {
             decoded: value,
@@ -155,9 +167,17 @@ pub mod full {
 
         let target_is_mode_one_byte = builder.is_equal(mode, mode_one_byte);
         let target_is_mode_two_bytes = builder.is_equal(mode, mode_two_bytes);
-        let target_out = builder.select_target_set(target_is_mode_one_byte, &target_output_one_byte, &target_output_four_bytes);
+        let target_out = builder.select_target_set(
+            target_is_mode_one_byte,
+            &target_output_one_byte,
+            &target_output_four_bytes,
+        );
 
-        builder.select_target_set(target_is_mode_two_bytes, &target_output_two_bytes, &target_out)
+        builder.select_target_set(
+            target_is_mode_two_bytes,
+            &target_output_two_bytes,
+            &target_out,
+        )
     }
 
     #[cfg(test)]

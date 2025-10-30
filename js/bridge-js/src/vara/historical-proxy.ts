@@ -1,6 +1,13 @@
 import { GearApi, BaseGearProgram } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import { TransactionBuilder, ActorId, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import {
+  TransactionBuilder,
+  ActorId,
+  getServiceNamePrefix,
+  getFnNamePrefix,
+  ZERO_ADDRESS,
+  QueryBuilder,
+} from 'sails-js';
 
 export type ProxyError =
   /**
@@ -31,7 +38,7 @@ export class HistoricalProxyClient {
 
   constructor(
     public api: GearApi,
-    programId?: `0x${string}`,
+    programId: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       ProxyError: {
@@ -61,9 +68,7 @@ export class HistoricalProxyClient {
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
-    if (programId) {
-      this._program = new BaseGearProgram(programId, api);
-    }
+    this._program = new BaseGearProgram(programId, api);
 
     this.historicalProxy = new HistoricalProxy(this);
   }
@@ -111,6 +116,38 @@ export class HistoricalProxy {
       '(u64, Vec<u8>, [u8;32], Vec<u8>)',
       'Result<(Vec<u8>, Vec<u8>), ProxyError>',
       this._program.programId,
+    );
+  }
+
+  /**
+   * Get endpoint for the specified `slot`.
+   */
+  public endpointFor(slot: number): QueryBuilder<{ ok: ActorId } | { err: ProxyError }> {
+    return new QueryBuilder<{ ok: ActorId } | { err: ProxyError }>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'HistoricalProxy',
+      'EndpointFor',
+      slot,
+      'u64',
+      'Result<[u8;32], ProxyError>',
+    );
+  }
+
+  /**
+   * Get endpoint map stored in this service.
+   */
+  public endpoints(): QueryBuilder<Array<[number, ActorId]>> {
+    return new QueryBuilder<Array<[number, ActorId]>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'HistoricalProxy',
+      'Endpoints',
+      null,
+      null,
+      'Vec<(u64, [u8;32])>',
     );
   }
 

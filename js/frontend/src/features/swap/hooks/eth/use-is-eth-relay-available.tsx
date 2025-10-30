@@ -15,8 +15,23 @@ import {
   HistoricalProxyProgram,
 } from '../../consts';
 
-function useSlot(blockNumber: bigint) {
+function useErrorLoggingQuery<T>(query: T & { error: Error | null }, errorName: string) {
   const alert = useAlert();
+
+  const { error } = query;
+
+  useEffect(() => {
+    if (!error) return;
+
+    logger.error(errorName, error);
+    alert.error(error.message);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]);
+
+  return query;
+}
+
+function useSlot(blockNumber: bigint) {
   const publicClient = usePublicClient();
 
   const query = useQuery({
@@ -25,17 +40,7 @@ function useSlot(blockNumber: bigint) {
     enabled: Boolean(publicClient),
   });
 
-  const { error } = query;
-
-  useEffect(() => {
-    if (!error) return;
-
-    logger.error('Get slot by block number', error);
-    alert.error(error.message);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [error]);
-
-  return query;
+  return useErrorLoggingQuery(query, 'Get slot by block number');
 }
 
 function useEthEventsContractAddress(slot: number | undefined) {
@@ -44,13 +49,15 @@ function useEthEventsContractAddress(slot: number | undefined) {
     library: HistoricalProxyProgram,
   });
 
-  return useProgramQuery({
+  const query = useProgramQuery({
     program: historicalProxyProgram,
     serviceName: 'historicalProxy',
     functionName: 'endpointFor',
     args: [slot!],
     query: { enabled: !isUndefined(slot), select: (data) => ('ok' in data ? data.ok : undefined) },
   });
+
+  return useErrorLoggingQuery(query, 'Get EthEvents contract address');
 }
 
 function useCheckpointClientContractAddress(ethEventsContractAddress: HexString | undefined) {
@@ -59,12 +66,14 @@ function useCheckpointClientContractAddress(ethEventsContractAddress: HexString 
     library: EthEventsProgram,
   });
 
-  return useProgramQuery({
+  const query = useProgramQuery({
     program: ethEventsProgram,
     serviceName: 'ethereumEventClient',
     functionName: 'checkpointLightClientAddress',
     args: [],
   });
+
+  return useErrorLoggingQuery(query, 'Get CheckpointClient contract address');
 }
 
 function useIsEthRelayAvailable(blockNumber: bigint) {
@@ -77,13 +86,15 @@ function useIsEthRelayAvailable(blockNumber: bigint) {
     library: CheckpointClientProgram,
   });
 
-  return useProgramQuery({
+  const query = useProgramQuery({
     program: checkpointClientProgram,
     serviceName: 'serviceCheckpointFor',
     functionName: 'get',
     args: [slot!],
     query: { enabled: !isUndefined(slot), select: (data) => 'ok' in data },
   });
+
+  return useErrorLoggingQuery(query, 'Check if Eth relay is available');
 }
 
 export { useIsEthRelayAvailable };

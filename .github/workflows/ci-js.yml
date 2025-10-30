@@ -10,11 +10,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-files-changed:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_changed: ${{ steps.changed.outputs.frontend }}
+      indexer_changed: ${{ steps.changed.outputs.indexer }}
+      common_changed: ${{ steps.changed.outputs.common }}
+      bridge_js_changed: ${{ steps.changed.outputs.bridge_js }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check changed files
+        id: changed
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'js/frontend/**'
+            indexer:
+              - 'js/indexer/**'
+            common:
+              - 'js/common/**'
+            bridge_js:
+              - 'js/bridge-js/**'
+
   bridge-js:
     runs-on: ubuntu-latest
     environment: bridge-js-test
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.bridge_js_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
 
     steps:
       - name: Checkout
@@ -66,32 +92,6 @@ jobs:
 
       - name: 'Lint'
         run: yarn lint:bridge-js
-
-  check-files-changed:
-    runs-on: ubuntu-latest
-    outputs:
-      frontend_changed: ${{ steps.changed.outputs.frontend }}
-      indexer_changed: ${{ steps.changed.outputs.indexer }}
-      common_changed: ${{ steps.changed.outputs.common }}
-      bridge_js_changed: ${{ steps.changed.outputs.bridge_js }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Check changed files
-        id: changed
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            frontend:
-              - 'js/frontend/**'
-            indexer:
-              - 'js/indexer/**'
-            common:
-              - 'js/common/**'
-            bridge_js:
-              - 'js/bridge-js/**'
 
   build-indexer:
     runs-on: ubuntu-latest

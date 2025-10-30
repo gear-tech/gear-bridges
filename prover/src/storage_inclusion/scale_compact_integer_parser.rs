@@ -238,7 +238,7 @@ pub mod full {
 
         #[test]
         #[should_panic(
-            expected = "Partition containing Wire(Wire { row: 3, column: 63 }) was set twice with different values: 5 != 4"
+            expected = "assertion `left == right` failed: Partition containing VirtualTarget { index: 9 } was set twice with different values: 0 != 1\n  left: 1\n right: 0"
         )]
         fn test_scale_compact_integer_parser_fails_on_unsupported_prefix() {
             test_case(Compact::<u32>(u32::MAX).encode(), None);

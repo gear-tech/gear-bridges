@@ -7,11 +7,13 @@ import { usePublicClient } from 'wagmi';
 
 import { isUndefined, logger } from '@/utils';
 
-import { CONTRACT_ADDRESS, ETH_BEACON_NODE_ADDRESS } from '../../consts';
-
-import { CheckpointClient } from './check-client';
-import { EthEventsClient } from './eth-events';
-import { HistoricalProxyClient } from './hist-proxy';
+import {
+  CONTRACT_ADDRESS,
+  ETH_BEACON_NODE_ADDRESS,
+  CheckpointClientProgram,
+  EthEventsProgram,
+  HistoricalProxyProgram,
+} from '../../consts';
 
 function useSlot(blockNumber: bigint) {
   const alert = useAlert();
@@ -39,7 +41,7 @@ function useSlot(blockNumber: bigint) {
 function useEthEventsContractAddress(slot: number | undefined) {
   const { data: historicalProxyProgram } = useProgram({
     id: CONTRACT_ADDRESS.HISTORICAL_PROXY,
-    library: HistoricalProxyClient,
+    library: HistoricalProxyProgram,
   });
 
   return useProgramQuery({
@@ -54,7 +56,7 @@ function useEthEventsContractAddress(slot: number | undefined) {
 function useCheckpointClientContractAddress(ethEventsContractAddress: HexString | undefined) {
   const { data: ethEventsProgram } = useProgram({
     id: ethEventsContractAddress,
-    library: EthEventsClient,
+    library: EthEventsProgram,
   });
 
   return useProgramQuery({
@@ -72,7 +74,7 @@ function useIsEthRelayAvailable(blockNumber: bigint) {
 
   const { data: checkpointClientProgram } = useProgram({
     id: checkpointClientContractAddress,
-    library: CheckpointClient,
+    library: CheckpointClientProgram,
   });
 
   return useProgramQuery({

@@ -96,7 +96,7 @@ jobs:
   build-indexer:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' }} || ${{ needs.check-files-changed.outputs.common_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -119,7 +119,7 @@ jobs:
   build-frontend:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' }} || ${{ needs.check-files-changed.outputs.common_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
 
     steps:
       - name: Checkout repository

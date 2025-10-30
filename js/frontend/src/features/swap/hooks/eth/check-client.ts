@@ -1,0 +1,128 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-floating-promises */
+import { GearApi, BaseGearProgram } from '@gear-js/api';
+import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
+import { H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+
+export type CheckpointError = 'OutDated' | 'NotPresent';
+
+export type Order = 'Direct' | 'Reverse';
+
+export interface ReplayBack {
+  finalized_header: number | string | bigint;
+  last_header: number | string | bigint;
+}
+
+export interface StateData {
+  checkpoints: Array<[number | string | bigint, H256]>;
+  /**
+   * The field contains the data if the program is
+   * replaying checkpoints back.
+   */
+  replay_back: ReplayBack | null;
+}
+
+interface NewCheckpointEventData extends Struct {
+  slot: u64;
+  tree_hash_root: Bytes;
+}
+
+export class CheckpointClient {
+  public readonly registry: TypeRegistry;
+  public readonly serviceCheckpointFor: ServiceCheckpointFor;
+  public readonly serviceSyncUpdate: ServiceSyncUpdate;
+  public readonly serviceState: ServiceState;
+  private _program?: BaseGearProgram;
+
+  constructor(
+    public api: GearApi,
+    programId?: `0x${string}`,
+  ) {
+    const types: Record<string, any> = {
+      CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
+      ReplayBack: { finalized_header: 'u64', last_header: 'u64' },
+      Order: { _enum: ['Direct', 'Reverse'] },
+      StateData: { checkpoints: 'Vec<(u64, H256)>', replay_back: 'Option<ReplayBack>' },
+    };
+
+    this.registry = new TypeRegistry();
+    this.registry.setKnownTypes({ types });
+    this.registry.register(types);
+
+    if (programId) {
+      this._program = new BaseGearProgram(programId, api);
+    }
+
+    this.serviceCheckpointFor = new ServiceCheckpointFor(this);
+    this.serviceState = new ServiceState(this);
+    this.serviceSyncUpdate = new ServiceSyncUpdate(this);
+  }
+
+  public get programId(): `0x${string}` {
+    if (!this._program) throw new Error(`Program ID is not set`);
+    return this._program.id;
+  }
+}
+
+export class ServiceCheckpointFor {
+  constructor(private _program: CheckpointClient) {}
+
+  public get(slot: number): QueryBuilder<{ ok: [number, H256] } | { err: CheckpointError }> {
+    return new QueryBuilder<{ ok: [number, H256] } | { err: CheckpointError }>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'ServiceCheckpointFor',
+      'Get',
+      slot,
+      'u64',
+      'Result<(u64, H256), CheckpointError>',
+    );
+  }
+}
+
+export class ServiceSyncUpdate {
+  constructor(private _program: CheckpointClient) {}
+
+  public subscribeToNewCheckpointEvent(
+    callback: (data: { slot: number; tree_hash_root: H256 }) => void | Promise<void>,
+  ): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const _payload = message.payload.toHex();
+      const service = getServiceNamePrefix(_payload, true);
+      const method = getFnNamePrefix(_payload, true);
+
+      if (service.service === 'ServiceSyncUpdate' && method.fn === 'NewCheckpoint') {
+        const payload = this._program.registry.createType<NewCheckpointEventData>(
+          '{"slot":"u64","tree_hash_root":"H256"}',
+          message.payload.slice(service.bytesLength + method.bytesLength),
+        );
+
+        callback({ slot: payload['slot'].toNumber(), tree_hash_root: payload['tree_hash_root'].toHex() });
+      }
+    });
+  }
+}
+
+export class ServiceState {
+  constructor(private _program: CheckpointClient) {}
+
+  public getLatestSlot(): Promise<StateData> {
+    const query = new QueryBuilder<StateData>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'ServiceState',
+      'Get',
+      ['Reverse', 0, 1],
+      '(Order, u32, u32)',
+      'StateData',
+    );
+
+    return query.call();
+  }
+}

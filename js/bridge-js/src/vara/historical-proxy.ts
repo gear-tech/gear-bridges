@@ -138,8 +138,8 @@ export class HistoricalProxy {
   /**
    * Get endpoint map stored in this service.
    */
-  public endpoints(): QueryBuilder<Array<[number | string | bigint, ActorId]>> {
-    return new QueryBuilder<Array<[number | string | bigint, ActorId]>>(
+  public endpoints(): QueryBuilder<Array<[number, ActorId]>> {
+    return new QueryBuilder<Array<[number, ActorId]>>(
       this._program.api,
       this._program.registry,
       this._program.programId,

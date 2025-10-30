@@ -250,7 +250,7 @@ pub mod full {
             let proof = circuit.prove(pw).expect("Failed to prove");
 
             if let Some(expected) = expected {
-                let decoded = proof.public_inputs[0].to_canonical_u64();
+                let decoded = proof.public_inputs[0].to_noncanonical_u64();
                 assert_eq!(decoded, expected as u64);
             }
 

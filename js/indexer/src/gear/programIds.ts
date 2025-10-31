@@ -52,13 +52,6 @@ export async function init(programs: Record<string, string>): Promise<Map<string
   return new Map(ids.rows.map((row) => [row.program_id, row.name]));
 }
 
-export async function updateId(name: string, programId: string) {
-  const client = createClient();
-  await client.connect();
-  await client.query('UPDATE gear_programs SET program_id = $1 WHERE name = $2', [programId, name]);
-  await client.end();
-}
-
 export let programs: Map<string, ProgramName>;
 
 export async function setPrograms() {
@@ -66,6 +59,13 @@ export async function setPrograms() {
     [ProgramName.VftManager]: config.vftManager,
     [ProgramName.HistoricalProxy]: config.historicalProxy,
     [ProgramName.BridgingPayment]: config.bridgingPayment,
-    [ProgramName.CheckpointClient]: config.checkpointClient,
   });
+}
+
+export async function updateId(name: string, programId: string) {
+  const client = createClient();
+  await client.connect();
+  await client.query('UPDATE gear_programs SET program_id = $1 WHERE name = $2', [programId, name]);
+  await client.end();
+  programs[name] = programId;
 }

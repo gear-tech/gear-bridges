@@ -1,17 +1,19 @@
 import { Menu } from '@base-ui-components/react';
-import { useState } from 'react';
 
 import ArrowSVG from '@/features/swap/assets/arrow.svg?react';
 
 import styles from './dropdown.module.scss';
 
-function Dropdown() {
-  const [value, setValue] = useState('date');
+type Props = {
+  value: string;
+  onChange: (value: 'mainnet' | 'testnet') => void;
+};
 
+function Dropdown({ value, onChange }: Props) {
   return (
     <Menu.Root>
       <Menu.Trigger className={styles.Button}>
-        Network <ArrowSVG className={styles.ButtonIcon} />
+        {value === 'mainnet' ? 'Mainnet' : 'Testnet'} <ArrowSVG className={styles.ButtonIcon} />
       </Menu.Trigger>
 
       <Menu.Portal>
@@ -21,15 +23,15 @@ function Dropdown() {
               <ArrowSvg />
             </Menu.Arrow>
 
-            <Menu.RadioGroup value={value} onValueChange={setValue}>
-              <Menu.RadioItem className={styles.RadioItem} value="date">
+            <Menu.RadioGroup value={value} onValueChange={onChange}>
+              <Menu.RadioItem className={styles.RadioItem} value="mainnet">
                 <Menu.RadioItemIndicator className={styles.RadioItemIndicator}>
                   <CheckIcon className={styles.RadioItemIndicatorIcon} />
                 </Menu.RadioItemIndicator>
                 <span className={styles.RadioItemText}>Mainnet</span>
               </Menu.RadioItem>
 
-              <Menu.RadioItem className={styles.RadioItem} value="name">
+              <Menu.RadioItem className={styles.RadioItem} value="testnet">
                 <Menu.RadioItemIndicator className={styles.RadioItemIndicator}>
                   <CheckIcon className={styles.RadioItemIndicatorIcon} />
                 </Menu.RadioItemIndicator>

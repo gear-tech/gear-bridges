@@ -1,6 +1,7 @@
 import { ERC20_ABI, WRAPPED_ETH_ABI } from './abi';
 import { VARA_NODE_ADDRESS, VARA_ARCHIVE_NODE_ADDRESS, ETH_NODE_ADDRESS, ETH_CHAIN_ID, GTM_ID } from './env';
 import { NETWORK_TYPE, networkType, NETWORK_NAME, VARA_EXPLORER_URL, ETH_EXPLORER_URL } from './network';
+import { NETWORK_PRESET } from './network-preset';
 import { ROUTE } from './routing';
 import { VftProgram, WrappedVaraProgram } from './sails';
 
@@ -18,6 +19,7 @@ export {
   NETWORK_NAME,
   VARA_EXPLORER_URL,
   ETH_EXPLORER_URL,
+  NETWORK_PRESET,
   VftProgram,
   WrappedVaraProgram,
 };

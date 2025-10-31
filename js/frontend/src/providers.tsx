@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
-import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, VARA_NODE_ADDRESS } from './consts';
+import { NETWORK_PRESET, VARA_NODE_ADDRESS } from './consts';
 import { TokensProvider } from './context';
 
 function ApiProvider({ children }: ProviderProps) {
@@ -41,22 +41,31 @@ const getNetwork = (id: number) => {
 
   if (!result) throw new Error(`Chain with id ${id} not found`);
 
-  return result as AppKitNetwork;
+  return result;
 };
 
-const networks = [getNetwork(ETH_CHAIN_ID)] as [AppKitNetwork];
+const networks: [AppKitNetwork, AppKitNetwork] = [
+  getNetwork(NETWORK_PRESET.MAINNET.ETH_CHAIN_ID),
+  getNetwork(NETWORK_PRESET.TESTNET.ETH_CHAIN_ID),
+];
 
 const metadata = {
-  name: 'AppKit',
-  description: 'AppKit Example',
-  url: 'https://vara.network/',
-  icons: ['https://avatars.githubusercontent.com/u/179229932'],
+  name: 'Vara Network Bridge',
+  description: 'Bridge Vara and Ethereum with ease',
+  url: 'https://bridge.vara.network',
+  icons: [
+    'https://raw.githubusercontent.com/gear-tech/gear-bridges/refs/heads/main/js/frontend/public/favicons/web-app-manifest-512x512.png',
+  ],
 };
 
 const adapter = new WagmiAdapter({
   networks,
   projectId,
-  transports: { [ETH_CHAIN_ID]: http(ETH_NODE_ADDRESS) },
+
+  transports: {
+    [NETWORK_PRESET.MAINNET.ETH_CHAIN_ID]: http(NETWORK_PRESET.MAINNET.ETH_NODE_ADDRESS),
+    [NETWORK_PRESET.TESTNET.ETH_CHAIN_ID]: http(NETWORK_PRESET.TESTNET.ETH_NODE_ADDRESS),
+  },
 });
 
 const METAMASK_WALLET_ID = 'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96';
@@ -103,4 +112,5 @@ const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, Que
 const WithProviders = (Component: ComponentType) => () =>
   providers.reduceRight((children, Provider) => <Provider>{children}</Provider>, <Component />);
 
-export { WithProviders };
+// eslint-disable-next-line react-refresh/only-export-components
+export { WithProviders, getNetwork };

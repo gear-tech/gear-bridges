@@ -8,12 +8,12 @@ import { usePublicClient } from 'wagmi';
 import { isUndefined, logger } from '@/utils';
 
 import {
-  CONTRACT_ADDRESS,
   ETH_BEACON_NODE_ADDRESS,
   CheckpointClientProgram,
   EthEventsProgram,
   HistoricalProxyProgram,
 } from '../../consts';
+import { useHistoricalProxyContractAddress } from '../vara';
 
 function useErrorLoggingQuery<T>(query: T & { error: Error | null }, errorName: string) {
   const alert = useAlert();
@@ -44,8 +44,10 @@ function useSlot(blockNumber: bigint) {
 }
 
 function useEthEventsContractAddress(slot: number | undefined) {
+  const { data: historicalProxyContractAddress } = useHistoricalProxyContractAddress();
+
   const { data: historicalProxyProgram } = useProgram({
-    id: CONTRACT_ADDRESS.HISTORICAL_PROXY,
+    id: historicalProxyContractAddress,
     library: HistoricalProxyProgram,
   });
 

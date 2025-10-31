@@ -6,18 +6,23 @@ import {
 } from '@gear-js/react-hooks';
 import { Alert, alertStyles } from '@gear-js/vara-ui';
 import { AppKitNetwork } from '@reown/appkit/networks';
-import * as allNetworks from '@reown/appkit/networks';
 import { createAppKit } from '@reown/appkit/react';
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
-import { NETWORK_PRESET, VARA_NODE_ADDRESS } from './consts';
-import { TokensProvider } from './context';
+import { DEFAULT_NETWORK_TYPE, NETWORK_PRESET, NetworkTypeProvider, TokensProvider } from './context';
 
 function ApiProvider({ children }: ProviderProps) {
-  return <GearApiProvider initialArgs={{ endpoint: VARA_NODE_ADDRESS }}>{children}</GearApiProvider>;
+  return (
+    <GearApiProvider
+      initialArgs={{
+        endpoint: NETWORK_PRESET[DEFAULT_NETWORK_TYPE.toUpperCase() as keyof typeof NETWORK_PRESET].NODE_ADDRESS,
+      }}>
+      {children}
+    </GearApiProvider>
+  );
 }
 
 function AccountProvider({ children }: ProviderProps) {
@@ -34,19 +39,9 @@ function AlertProvider({ children }: ProviderProps) {
 
 const projectId = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID as string;
 
-const getNetwork = (id: number) => {
-  const result = Object.values(allNetworks)
-    .filter((network) => 'id' in network)
-    .find((network) => network.id === id);
-
-  if (!result) throw new Error(`Chain with id ${id} not found`);
-
-  return result;
-};
-
 const networks: [AppKitNetwork, AppKitNetwork] = [
-  getNetwork(NETWORK_PRESET.MAINNET.ETH_CHAIN_ID),
-  getNetwork(NETWORK_PRESET.TESTNET.ETH_CHAIN_ID),
+  NETWORK_PRESET.MAINNET.ETH_NETWORK,
+  NETWORK_PRESET.TESTNET.ETH_NETWORK,
 ];
 
 const metadata = {
@@ -107,10 +102,17 @@ function QueryProvider({ children }: ProviderProps) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, QueryProvider, TokensProvider];
+const providers = [
+  ApiProvider,
+  AccountProvider,
+  AlertProvider,
+  EthProvider,
+  QueryProvider,
+  NetworkTypeProvider,
+  TokensProvider,
+];
 
 const WithProviders = (Component: ComponentType) => () =>
   providers.reduceRight((children, Provider) => <Provider>{children}</Provider>, <Component />);
 
-// eslint-disable-next-line react-refresh/only-export-components
-export { WithProviders, getNetwork };
+export { WithProviders };

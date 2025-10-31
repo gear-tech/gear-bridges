@@ -1,18 +1,20 @@
 import { useBalanceFormat, useProgram, useProgramQuery } from '@gear-js/react-hooks';
 
+import { useNetworkType } from '@/context';
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram, CONTRACT_ADDRESS } from '../../consts';
+import { BridgingPaymentProgram } from '../../consts';
 
 import { useVFTManagerProgram } from './use-vft-manager-program';
 
 function useVaraFee() {
+  const { NETWORK_PRESET } = useNetworkType();
   const { getFormattedBalanceValue } = useBalanceFormat();
   const { data: vftManagerProgram } = useVFTManagerProgram();
 
   const { data: bridgingPaymentProgram } = useProgram({
     library: BridgingPaymentProgram,
-    id: CONTRACT_ADDRESS.BRIDGING_PAYMENT,
+    id: NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   });
 
   const vftManagerConfig = useProgramQuery({

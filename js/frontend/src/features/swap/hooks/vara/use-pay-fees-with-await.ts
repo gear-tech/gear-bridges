@@ -1,9 +1,10 @@
 import { HexString } from '@gear-js/api';
 import { useApi, useAccount } from '@gear-js/react-hooks';
 
+import { useNetworkType } from '@/context';
 import { isUndefined } from '@/utils';
 
-import { VftManagerProgram, CONTRACT_ADDRESS } from '../../consts';
+import { VftManagerProgram } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { Extrinsic, FormattedValues } from '../../types';
 
@@ -25,6 +26,7 @@ type Params = {
 function usePayFeesWithAwait({ fee, priorityFee, shouldPayBridgingFee, shouldPayPriorityFee }: Params) {
   const { api, isApiReady } = useApi();
   const { account } = useAccount();
+  const { NETWORK_PRESET } = useNetworkType();
   const { token } = useBridgeContext();
 
   const payFee = usePreparePayVaraFee();
@@ -50,7 +52,7 @@ function usePayFeesWithAwait({ fee, priorityFee, shouldPayBridgingFee, shouldPay
     if (!shouldPayBridgingFee && !shouldPayPriorityFee)
       return { result: () => Promise.resolve(undefined), unsubscribe: () => {} };
 
-    const vftManagerProgram = new VftManagerProgram(api, CONTRACT_ADDRESS.VFT_MANAGER);
+    const vftManagerProgram = new VftManagerProgram(api, NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS);
     let unsubscribe: (() => void) | undefined;
 
     const result = (requestBridgingBlockHash: HexString) =>

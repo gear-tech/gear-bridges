@@ -4,12 +4,11 @@ import { hexToNumber, slice } from 'viem';
 import { useConfig, useSignTypedData } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
-import { ETH_CHAIN_ID, NETWORK_TYPE, networkType } from '@/consts';
-import { useTokens } from '@/context';
+import { useNetworkType, useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
 import { definedAssert } from '@/utils';
 
-import { CONTRACT_ADDRESS, ERC20PERMIT_NONCES_ABI, ERC5267_ABI } from '../../consts';
+import { ERC20PERMIT_NONCES_ABI, ERC5267_ABI } from '../../consts';
 
 const PERMIT_DURATION_SECONDS = 60 * 60;
 
@@ -29,6 +28,8 @@ function usePermitUSDC() {
   const config = useConfig();
 
   const { tokens } = useTokens();
+  const { NETWORK_PRESET, isMainnet } = useNetworkType();
+
   const usdcToken = useMemo(
     () => tokens.eth?.find(({ symbol }) => symbol.toLowerCase().includes('usdc')),
     [tokens.eth],
@@ -50,11 +51,11 @@ function usePermitUSDC() {
     definedAssert(usdcToken, 'USDC token');
 
     // TODO: query from contract, there's no eip712Domain function on mainnet USDC
-    if (networkType === NETWORK_TYPE.MAINNET)
+    if (isMainnet)
       return {
         name: usdcToken.name,
         version: '2',
-        chainId: ETH_CHAIN_ID,
+        chainId: NETWORK_PRESET.ETH_CHAIN_ID,
         verifyingContract: usdcToken.address,
       };
 
@@ -76,7 +77,7 @@ function usePermitUSDC() {
 
     const message = {
       owner: ethAccount.address,
-      spender: CONTRACT_ADDRESS.ERC20_MANAGER,
+      spender: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
       value,
       nonce,
       deadline,

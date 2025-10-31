@@ -5,14 +5,7 @@ import { useParams } from 'react-router-dom';
 
 import ArrowSVG from '@/assets/arrow.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
-import {
-  ETH_EXPLORER_URL,
-  NETWORK_NAME,
-  VARA_ARCHIVE_NODE_ADDRESS,
-  VARA_EXPLORER_URL,
-  VARA_NODE_ADDRESS,
-} from '@/consts';
-import { useTokens } from '@/context';
+import { useNetworkType, useTokens } from '@/context';
 import { useOptimisticTxUpdate, useTransaction } from '@/features/history';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
@@ -33,46 +26,76 @@ const INDEXED_NETWORK_TO_NETWORK = {
   [NetworkEnum.Ethereum]: NETWORK.ETH,
 } as const;
 
-const INDEXED_NETWORK_TO_FULL_NETWORK_NAME = {
-  [NetworkEnum.Vara]: NETWORK_NAME.VARA,
-  [NetworkEnum.Ethereum]: NETWORK_NAME.ETH,
-} as const;
+function useGetFullNetworkName() {
+  const { NETWORK_PRESET } = useNetworkType();
+
+  const indexedNetworkToNetworkName = {
+    [NetworkEnum.Vara]: NETWORK_PRESET.NETWORK_NAME.VARA,
+    [NetworkEnum.Ethereum]: NETWORK_PRESET.NETWORK_NAME.ETH,
+  };
+
+  return (network: NetworkEnum) => indexedNetworkToNetworkName[network];
+}
 
 const INDEXED_NETWORK_TO_NETWORK_NAME = {
   [NetworkEnum.Vara]: 'Vara',
   [NetworkEnum.Ethereum]: 'Ethereum',
 } as const;
 
-const CONTRACT_URL = {
-  [NetworkEnum.Vara]: (programId: string) =>
-    `https://idea.gear-tech.io/programs/${programId}?node=${VARA_NODE_ADDRESS}`,
-  [NetworkEnum.Ethereum]: (programId: string) => `${ETH_EXPLORER_URL}/address/${programId}`,
-} as const;
+function useContractUrl(network: NetworkEnum) {
+  const { NETWORK_PRESET } = useNetworkType();
 
-const ACCOUNT_URL = {
-  [NetworkEnum.Vara]: VARA_EXPLORER_URL ? `${VARA_EXPLORER_URL}/account` : undefined,
-  [NetworkEnum.Ethereum]: `${ETH_EXPLORER_URL}/address`,
-} as const;
+  const networkToContractUrl = {
+    [NetworkEnum.Vara]: (programId: string) =>
+      `https://idea.gear-tech.io/programs/${programId}?node=${NETWORK_PRESET.NODE_ADDRESS}`,
+    [NetworkEnum.Ethereum]: (programId: string) => `${NETWORK_PRESET.EXPLORER_URL.ETH}/address/${programId}`,
+  };
 
-const TX_URL = {
-  [NetworkEnum.Vara]: VARA_EXPLORER_URL ? `${VARA_EXPLORER_URL}/extrinsic` : undefined,
-  [NetworkEnum.Ethereum]: `${ETH_EXPLORER_URL}/tx`,
-} as const;
+  return networkToContractUrl[network];
+}
 
-const BLOCK_URL = {
-  [NetworkEnum.Vara]: (blockNumber: string) =>
-    `https://idea.gear-tech.io/explorer/${blockNumber}?node=${VARA_ARCHIVE_NODE_ADDRESS}`,
-  [NetworkEnum.Ethereum]: (blockNumber: string) => `${ETH_EXPLORER_URL}/block/${blockNumber}`,
-} as const;
+function useAccountUrl(network: NetworkEnum) {
+  const { NETWORK_PRESET } = useNetworkType();
+
+  const networkToAccountUrl = {
+    [NetworkEnum.Vara]: NETWORK_PRESET.EXPLORER_URL.VARA ? `${NETWORK_PRESET.EXPLORER_URL.VARA}/account` : undefined,
+    [NetworkEnum.Ethereum]: `${NETWORK_PRESET.EXPLORER_URL.ETH}/address`,
+  };
+
+  return networkToAccountUrl[network];
+}
+
+function useTxUrl(network: NetworkEnum) {
+  const { NETWORK_PRESET } = useNetworkType();
+
+  const networkToTxUrl = {
+    [NetworkEnum.Vara]: NETWORK_PRESET.EXPLORER_URL.VARA ? `${NETWORK_PRESET.EXPLORER_URL.VARA}/extrinsic` : undefined,
+    [NetworkEnum.Ethereum]: `${NETWORK_PRESET.EXPLORER_URL.ETH}/tx`,
+  };
+
+  return networkToTxUrl[network];
+}
+
+function useBlockUrl(network: NetworkEnum) {
+  const { NETWORK_PRESET } = useNetworkType();
+
+  const networkToBlockUrl = {
+    [NetworkEnum.Vara]: (blockNumber: string) =>
+      `https://idea.gear-tech.io/explorer/${blockNumber}?node=${NETWORK_PRESET.ARCHIVE_NODE_ADDRESS}`,
+    [NetworkEnum.Ethereum]: (blockNumber: string) => `${NETWORK_PRESET.EXPLORER_URL.ETH}/block/${blockNumber}`,
+  };
+
+  return networkToBlockUrl[network];
+}
 
 type ExplorerLinkProps = PropsWithChildren & {
   network: NetworkEnum;
   id: string;
-  urls: typeof TX_URL | typeof BLOCK_URL | typeof ACCOUNT_URL;
+  useUrl: typeof useAccountUrl | typeof useContractUrl | typeof useTxUrl | typeof useBlockUrl;
 };
 
-function ExplorerLink({ children, network, id, urls }: ExplorerLinkProps) {
-  const urlOrGetUrl = urls[network];
+function ExplorerLink({ children, network, id, useUrl }: ExplorerLinkProps) {
+  const urlOrGetUrl = useUrl(network);
   const url = typeof urlOrGetUrl === 'string' ? `${urlOrGetUrl}/${id}` : urlOrGetUrl?.(id);
 
   if (!url) return <span>{children}</span>;
@@ -90,6 +113,7 @@ function Transaction() {
   const { getHistoryToken } = useTokens();
   const { data } = useTransaction(id);
   const optimisticTxUpdate = useOptimisticTxUpdate(id);
+  const getFullNetworkName = useGetFullNetworkName();
 
   if (!data || !getHistoryToken) return <TransactionSkeleton />;
 
@@ -185,7 +209,7 @@ function Transaction() {
                   className={styles.amount}
                 />
 
-                <span className={styles.network}>{INDEXED_NETWORK_TO_FULL_NETWORK_NAME[sourceNetwork]}</span>
+                <span className={styles.network}>{getFullNetworkName(sourceNetwork)}</span>
               </div>
             </div>
 
@@ -205,7 +229,7 @@ function Transaction() {
                   className={styles.amount}
                 />
 
-                <span className={styles.network}>{INDEXED_NETWORK_TO_FULL_NETWORK_NAME[destNetwork]}</span>
+                <span className={styles.network}>{getFullNetworkName(destNetwork)}</span>
               </div>
             </div>
           </Card>
@@ -213,7 +237,7 @@ function Transaction() {
 
         <SectionCard heading="Addresses">
           <Field label="From Address">
-            <ExplorerLink network={sourceNetwork} id={sender} urls={ACCOUNT_URL}>
+            <ExplorerLink network={sourceNetwork} id={sender} useUrl={useAccountUrl}>
               <Address value={formattedSenderAddress} />
             </ExplorerLink>
 
@@ -221,7 +245,7 @@ function Transaction() {
           </Field>
 
           <Field label="To Address">
-            <ExplorerLink network={destNetwork} id={receiver} urls={ACCOUNT_URL}>
+            <ExplorerLink network={destNetwork} id={receiver} useUrl={useAccountUrl}>
               <Address value={formattedReceiverAddress} />
             </ExplorerLink>
 
@@ -229,7 +253,7 @@ function Transaction() {
           </Field>
 
           <Field label={`${INDEXED_NETWORK_TO_NETWORK_NAME[sourceNetwork]} Contract Address`}>
-            <ExplorerLink network={sourceNetwork} id={sourceHex} urls={CONTRACT_URL}>
+            <ExplorerLink network={sourceNetwork} id={sourceHex} useUrl={useContractUrl}>
               <Address value={sourceHex} />
             </ExplorerLink>
 
@@ -237,7 +261,7 @@ function Transaction() {
           </Field>
 
           <Field label={`${INDEXED_NETWORK_TO_NETWORK_NAME[destNetwork]} Contract Address`}>
-            <ExplorerLink network={destNetwork} id={destinationHex} urls={CONTRACT_URL}>
+            <ExplorerLink network={destNetwork} id={destinationHex} useUrl={useContractUrl}>
               <Address value={destinationHex} />
             </ExplorerLink>
 
@@ -247,7 +271,7 @@ function Transaction() {
 
         <SectionCard heading="Identifiers">
           <Field label="Transaction Hash">
-            <ExplorerLink network={sourceNetwork} id={txHash} urls={TX_URL}>
+            <ExplorerLink network={sourceNetwork} id={txHash} useUrl={useTxUrl}>
               <Address value={txHash} />
             </ExplorerLink>
 
@@ -260,14 +284,14 @@ function Transaction() {
           </Field>
 
           <Field label="Block Number">
-            <ExplorerLink network={sourceNetwork} id={blockNumber.toString()} urls={BLOCK_URL}>
+            <ExplorerLink network={sourceNetwork} id={blockNumber.toString()} useUrl={useBlockUrl}>
               #{blockNumber}
             </ExplorerLink>
           </Field>
 
           <Field label="Vara Block Number">
             {bridgingStartedAtBlock ? (
-              <ExplorerLink network={NetworkEnum.Vara} id={bridgingStartedAtBlock.toString()} urls={BLOCK_URL}>
+              <ExplorerLink network={NetworkEnum.Vara} id={bridgingStartedAtBlock.toString()} useUrl={useBlockUrl}>
                 #{bridgingStartedAtBlock}
               </ExplorerLink>
             ) : (
@@ -298,7 +322,7 @@ function Transaction() {
 
           <Field label="Completed At Block">
             {completedAtBlock ? (
-              <ExplorerLink network={destNetwork} id={completedAtBlock} urls={BLOCK_URL}>
+              <ExplorerLink network={destNetwork} id={completedAtBlock} useUrl={useBlockUrl}>
                 #{completedAtBlock.toLocaleString()}
               </ExplorerLink>
             ) : (
@@ -309,7 +333,7 @@ function Transaction() {
           <Field label="Completed At Transaction Hash">
             {completedAtTxHash ? (
               <>
-                <ExplorerLink network={destNetwork} id={completedAtTxHash} urls={TX_URL}>
+                <ExplorerLink network={destNetwork} id={completedAtTxHash} useUrl={useTxUrl}>
                   <Address value={completedAtTxHash} />
                 </ExplorerLink>
 

@@ -6,7 +6,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useRef } from 'react';
 
 import { LinkButton } from '@/components';
-import { NETWORK_TYPE, networkType } from '@/consts';
+import { useNetworkType } from '@/context';
 import { useEthAccount } from '@/hooks';
 
 import { GetBalanceParameters, getEthTokenBalance, getVaraAccountBalance } from '../../api';
@@ -67,8 +67,9 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
 function GetVaraAccountBalanceButton() {
   const { api } = useApi();
   const { account } = useAccount();
+  const { isMainnet } = useNetworkType();
 
-  if (!account || !api || networkType !== NETWORK_TYPE.TESTNET) return;
+  if (isMainnet || !api || !account) return;
 
   return (
     <ButtonComponent getBalance={getVaraAccountBalance} address={account.address} genesis={api.genesisHash.toHex()} />
@@ -85,8 +86,9 @@ function GetEthTokenBalanceButton({
   onSuccess: () => void;
 }) {
   const ethAccount = useEthAccount();
+  const { isMainnet } = useNetworkType();
 
-  if (!ethAccount.address || networkType !== NETWORK_TYPE.TESTNET) return;
+  if (isMainnet || !ethAccount.address) return;
 
   const lowerCaseSymbol = symbol.toLowerCase();
 

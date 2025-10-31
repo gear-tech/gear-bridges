@@ -1,11 +1,15 @@
 import { useProgram } from '@gear-js/react-hooks';
 
-import { VftManagerProgram, CONTRACT_ADDRESS } from '../../consts';
+import { useNetworkType } from '@/context';
+
+import { VftManagerProgram } from '../../consts';
 
 function useVFTManagerProgram() {
+  const { NETWORK_PRESET } = useNetworkType();
+
   return useProgram({
     library: VftManagerProgram,
-    id: CONTRACT_ADDRESS.VFT_MANAGER,
+    id: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS,
   });
 }
 

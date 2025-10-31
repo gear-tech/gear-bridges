@@ -2,10 +2,10 @@ import { relayVaraToEth } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
 import { usePublicClient, useWalletClient } from 'wagmi';
 
+import { useNetworkType } from '@/context';
 import { definedAssert } from '@/utils';
 
-import { CONTRACT_ADDRESS } from '../../consts';
-import { initArchiveApi } from '../../utils';
+import { useInitArchiveApi } from './use-init-archive-api';
 
 type Params = {
   onLog: (message: string) => void;
@@ -14,8 +14,10 @@ type Params = {
 };
 
 function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
+  const { NETWORK_PRESET } = useNetworkType();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
+  const initArchiveApi = useInitArchiveApi();
 
   const relay = async ({ onLog, onReceipt, onError }: Params) => {
     definedAssert(publicClient, 'Ethereum Public Client');
@@ -31,7 +33,7 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
         ethereumWalletClient: walletClient,
         ethereumAccount: walletClient.account,
         gearApi: archiveApi,
-        messageQueueAddress: CONTRACT_ADDRESS.ETH_MESSAGE_QUEUE,
+        messageQueueAddress: NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
         statusCb: onLog,
       });
 

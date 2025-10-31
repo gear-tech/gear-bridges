@@ -1,5 +1,4 @@
 import { BRIDGING_PAYMENT_ABI, ERC20_MANAGER_ABI, ERC20PERMIT_NONCES_ABI, ERC5267_ABI } from './abi';
-import { CONTRACT_ADDRESS, ETH_BEACON_NODE_ADDRESS } from './env';
 import { EVENT_NAME } from './eth';
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE, SUBMIT_STATUS } from './form';
 import {
@@ -18,7 +17,6 @@ const NETWORK = {
 } as const;
 
 export {
-  CONTRACT_ADDRESS,
   BRIDGING_PAYMENT_ABI,
   ERC20_MANAGER_ABI,
   ERC20PERMIT_NONCES_ABI,
@@ -34,7 +32,6 @@ export {
   SUBMIT_STATUS,
   PRIORITY,
   CLAIM_TYPE,
-  ETH_BEACON_NODE_ADDRESS,
   BridgingPaymentProgram,
   VftManagerProgram,
   HistoricalProxyProgram,

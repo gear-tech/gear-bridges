@@ -6,7 +6,7 @@ import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
-import { NETWORK_NAME } from '@/consts';
+import { useNetworkType } from '@/context';
 import { TokenPrice } from '@/features/token-price';
 import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
@@ -35,6 +35,7 @@ type Props = {
 };
 
 function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsEstimate }: Props) {
+  const { NETWORK_PRESET } = useNetworkType();
   const { network, token, destinationToken } = useBridgeContext();
 
   const { api } = useApi();
@@ -161,7 +162,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
                   type="select"
                   address={token?.address}
                   symbol={token?.displaySymbol}
-                  networkText={network.isVara ? NETWORK_NAME.VARA : NETWORK_NAME.ETH}
+                  networkText={network.isVara ? NETWORK_PRESET.NETWORK_NAME.VARA : NETWORK_PRESET.NETWORK_NAME.ETH}
                   network={network.name}
                 />
 
@@ -184,7 +185,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
                   type="text"
                   address={destinationToken?.address}
                   symbol={destinationToken?.displaySymbol}
-                  networkText={network.isVara ? NETWORK_NAME.ETH : NETWORK_NAME.VARA}
+                  networkText={network.isVara ? NETWORK_PRESET.NETWORK_NAME.ETH : NETWORK_PRESET.NETWORK_NAME.VARA}
                   network={network.name === NETWORK.VARA ? NETWORK.ETH : NETWORK.VARA}
                 />
 

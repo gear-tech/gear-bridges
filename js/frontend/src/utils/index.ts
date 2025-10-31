@@ -1,4 +1,5 @@
 import { decodeAddress, encodeAddress, ExtrinsicFailedData } from '@gear-js/api';
+import * as ethNetworks from '@reown/appkit/networks';
 import { BaseError } from 'wagmi';
 import { WriteContractErrorType } from 'wagmi/actions';
 import { z } from 'zod';
@@ -60,6 +61,16 @@ const getTruncatedText = (value: string, prefixLength: number = 6) => {
   return `${value.substring(0, prefixLength)}...${value.slice(-prefixLength)}`;
 };
 
+const getEthNetwork = (id: number) => {
+  const result = Object.values(ethNetworks)
+    .filter((network) => 'id' in network)
+    .find((network) => network.id === id);
+
+  if (!result) throw new Error(`Chain with id ${id} not found`);
+
+  return result;
+};
+
 export {
   cx,
   isValidAddress,
@@ -72,4 +83,5 @@ export {
   definedAssert,
   fetchWithGuard,
   getTruncatedText,
+  getEthNetwork,
 };

@@ -1,14 +1,17 @@
+import { HexString } from '@gear-js/api';
 import { useApi, useAlert } from '@gear-js/react-hooks';
+import { AppKitNetwork } from '@reown/appkit/networks';
 import { useAppKitNetwork } from '@reown/appkit/react';
 import { createContext, PropsWithChildren, useContext, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { NETWORK_PRESET, NETWORK_TYPE } from '@/consts';
-import { getNetwork } from '@/providers';
-import { logger } from '@/utils';
+import { getEthNetwork, logger } from '@/utils';
 
 type Value = {
   networkType: NetworkType;
+  NETWORK_PRESET: (typeof NETWORK_PRESET)[keyof typeof NETWORK_PRESET];
+  isMainnet: boolean;
+  isTestnet: boolean;
   switchNetworks: (value: NetworkType) => void;
 };
 
@@ -22,6 +25,11 @@ const useNetworkType = () => {
 
   return context;
 };
+
+const NETWORK_TYPE = {
+  MAINNET: 'mainnet',
+  TESTNET: 'testnet',
+} as const;
 
 type NetworkType = (typeof NETWORK_TYPE)[keyof typeof NETWORK_TYPE];
 
@@ -39,6 +47,37 @@ const getNetworkTypeFromUrl = (params = new URLSearchParams(window.location.sear
 const DEFAULT_NETWORK_TYPE =
   getNetworkTypeFromUrl() || (localStorage[NETWORK_LOCAL_STORAGE_KEY] as NetworkType | null) || NETWORK_TYPE.MAINNET;
 
+type Preset = {
+  NODE_ADDRESS: string;
+  ARCHIVE_NODE_ADDRESS: string;
+
+  ETH_NODE_ADDRESS: string;
+  ETH_BEACON_NODE_ADDRESS: string;
+  ETH_CHAIN_ID: number;
+
+  INDEXER_ADDRESS: string;
+
+  BRIDGING_PAYMENT_CONTRACT_ADDRESS: HexString;
+  VFT_MANAGER_CONTRACT_ADDRESS: HexString;
+
+  ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS: HexString;
+  ERC20_MANAGER_CONTRACT_ADDRESS: HexString;
+
+  ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS: HexString;
+  CHECKPOINT_CLIENT_CONTRACT_ADDRESS: HexString;
+  HISTORICAL_PROXY_CONTRACT_ADDRESS: HexString;
+
+  NETWORK_NAME: { VARA: string; ETH: string };
+  EXPLORER_URL: { VARA: string | undefined; ETH: string };
+
+  ETH_NETWORK: AppKitNetwork;
+};
+
+const NETWORK_PRESET = {
+  MAINNET: MAINNET_PRESET,
+  TESTNET: TESTNET_PRESET,
+} as const;
+
 function NetworkTypeProvider({ children }: PropsWithChildren) {
   const { switchNetwork } = useApi();
   const ethNetwork = useAppKitNetwork();
@@ -46,6 +85,9 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   const alert = useAlert();
 
   const [networkType, setNetworkType] = useState(DEFAULT_NETWORK_TYPE);
+  const isMainnet = networkType === NETWORK_TYPE.MAINNET;
+  const isTestnet = networkType === NETWORK_TYPE.TESTNET;
+  const PRESET = NETWORK_PRESET[networkType.toUpperCase() as keyof typeof NETWORK_PRESET];
 
   useEffect(() => {
     if (getNetworkTypeFromUrl(searchParams)) return;
@@ -56,7 +98,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   }, [searchParams]);
 
   const switchNetworks = (value: NetworkType) => {
-    const PRESET = NETWORK_PRESET[value.toUpperCase() as keyof typeof NETWORK_PRESET];
+    const NEXT_PRESET = NETWORK_PRESET[value.toUpperCase() as keyof typeof NETWORK_PRESET];
 
     setNetworkType(value);
 
@@ -66,16 +108,20 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     localStorage.setItem(NETWORK_LOCAL_STORAGE_KEY, value);
 
     Promise.all([
-      switchNetwork({ endpoint: PRESET.NODE_ADDRESS }),
-      ethNetwork.switchNetwork(getNetwork(PRESET.ETH_CHAIN_ID)),
+      switchNetwork({ endpoint: NEXT_PRESET.NODE_ADDRESS }),
+      ethNetwork.switchNetwork(NEXT_PRESET.ETH_NETWORK),
     ]).catch((error: Error) => {
       alert.error(`Failed to switch network. ${error.message}`);
       logger.error('Network switch', error);
     });
   };
 
-  return <Provider value={{ networkType, switchNetworks }}>{children}</Provider>;
+  return (
+    <Provider value={{ networkType, isMainnet, isTestnet, NETWORK_PRESET: PRESET, switchNetworks }}>
+      {children}
+    </Provider>
+  );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export { NetworkTypeProvider, useNetworkType };
+export { NetworkTypeProvider, useNetworkType, NETWORK_PRESET, DEFAULT_NETWORK_TYPE };

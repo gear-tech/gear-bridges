@@ -5,14 +5,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { usePublicClient } from 'wagmi';
 
+import { useNetworkType } from '@/context';
 import { isUndefined, logger } from '@/utils';
 
-import {
-  ETH_BEACON_NODE_ADDRESS,
-  CheckpointClientProgram,
-  EthEventsProgram,
-  HistoricalProxyProgram,
-} from '../../consts';
+import { CheckpointClientProgram, EthEventsProgram, HistoricalProxyProgram } from '../../consts';
 import { useHistoricalProxyContractAddress } from '../vara';
 
 function useErrorLoggingQuery<T>(query: T & { error: Error | null }, errorName: string) {
@@ -32,11 +28,18 @@ function useErrorLoggingQuery<T>(query: T & { error: Error | null }, errorName: 
 }
 
 function useSlot(blockNumber: bigint) {
+  const { NETWORK_PRESET } = useNetworkType();
   const publicClient = usePublicClient();
 
   const query = useQuery({
-    queryKey: ['slotByBlockNumber', blockNumber.toString()],
-    queryFn: () => getSlotByBlockNumber(ETH_BEACON_NODE_ADDRESS, publicClient!, blockNumber),
+    queryKey: [
+      'slotByBlockNumber',
+      NETWORK_PRESET.ETH_BEACON_NODE_ADDRESS,
+      publicClient?.chain.id,
+      blockNumber.toString(),
+    ],
+
+    queryFn: () => getSlotByBlockNumber(NETWORK_PRESET.ETH_BEACON_NODE_ADDRESS, publicClient!, blockNumber),
     enabled: Boolean(publicClient),
   });
 

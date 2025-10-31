@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { INDEXER_ADDRESS } from '../consts';
+import { useNetworkType } from '@/context';
+
 import { graphql } from '../graphql';
 import { TransferFilter } from '../types';
 
@@ -20,11 +21,13 @@ type Params = {
 };
 
 function useTransactionsCount({ filter, refetchInterval, enabled }: Params = {}) {
+  const { NETWORK_PRESET } = useNetworkType();
+
   return useQuery({
-    queryKey: ['transactionsCount', filter],
+    queryKey: ['transactionsCount', NETWORK_PRESET.INDEXER_ADDRESS, filter],
 
     queryFn: () =>
-      request(INDEXER_ADDRESS, TRANSFERS_COUNT_QUERY, {
+      request(NETWORK_PRESET.INDEXER_ADDRESS, TRANSFERS_COUNT_QUERY, {
         // assertion because postgraphile throws error on null or empty objects,
         // but we can't use undefined because graphlq-request requires exact arguments
         filter: filter!,

@@ -10,7 +10,6 @@ import {
   handleVftManagerInMsg,
   handleHistoricalProxyEvents,
   handleBridgingPaymentEvents,
-  handleCheckpointClientEvents,
   handleEthBridgeMessage,
   handleProgramChangedEvent,
 } from './handlers/index.js';
@@ -58,7 +57,6 @@ const handler = async (ctx: ProcessorContext) => {
         if (name === ProgramName.VftManager) await handleVftManagerEvents(eventCtx);
         else if (name === ProgramName.HistoricalProxy) handleHistoricalProxyEvents(eventCtx);
         else if (name === ProgramName.BridgingPayment) handleBridgingPaymentEvents(eventCtx);
-        else if (name === ProgramName.CheckpointClient) handleCheckpointClientEvents(eventCtx);
         else ctx.log.error({ programName: name }, 'Unknown program name');
 
         continue;

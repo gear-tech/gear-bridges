@@ -298,7 +298,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     this._statuses.set(nonce, status);
     if (isPriority) {
       this._priorityRequests.add(nonce);
-      this._log.info({ nonce }, 'Request marked as for priority');
+      this._log.info({ nonce }, 'Request marked as priority');
     }
 
     this._log.info({ nonce, status }, 'Request status changed');

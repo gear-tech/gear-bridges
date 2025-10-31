@@ -3,7 +3,7 @@ import { Store } from '@subsquid/typeorm-store';
 import { createPairHash } from 'gear-bridge-common';
 import { In } from 'typeorm';
 
-import { CheckpointSlot, GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model/index.js';
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model/index.js';
 import { BaseBatchState, mapKeys, mapValues, setValues } from '../common/index.js';
 import {
   getEthTokenDecimals,
@@ -37,7 +37,6 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private _initiatedTransfers: Map<string, InitiatedTransfer>;
   private _transfersToRemove: Set<Transfer>;
   private _ethBridgeMessages: Map<string, GearEthBridgeMessage>;
-  private _slots: Map<bigint, CheckpointSlot>;
 
   constructor() {
     super(NETWORK, COUNTERPART_NETWORK);
@@ -47,7 +46,6 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._initiatedTransfers = new Map();
     this._transfersToRemove = new Set();
     this._ethBridgeMessages = new Map();
-    this._slots = new Map();
   }
 
   protected _clear(): void {
@@ -57,7 +55,6 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._upgradedPairs.clear();
     this._initiatedTransfers.clear();
     this._ethBridgeMessages.clear();
-    this._slots.clear();
   }
 
   public async new(ctx: DataHandlerContext<Store, any>) {
@@ -162,30 +159,12 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await super._saveTransfers();
   }
 
-  private async _saveSlots() {
-    if (this._slots.size === 0) return;
-
-    const existingRecords = await this._ctx.store.find(CheckpointSlot, { where: { slot: In(mapKeys(this._slots)) } });
-
-    const existingSlots = existingRecords.map(({ slot }) => slot);
-
-    const slotsToSave = mapValues(this._slots).filter(({ slot }) => !existingSlots.includes(slot));
-
-    await this._ctx.store.save(slotsToSave);
-    this._log.info({ count: slotsToSave.length }, 'Slots saved');
-  }
-
   public async save() {
     if (this._transfersToRemove.size > 0) {
       await this._ctx.store.remove(setValues(this._transfersToRemove));
     }
 
-    await Promise.all([
-      this._saveEthBridgeMessages(),
-      this._saveCompletedTransfers(),
-      this._savePairs(),
-      this._saveSlots(),
-    ]);
+    await Promise.all([this._saveEthBridgeMessages(), this._saveCompletedTransfers(), this._savePairs()]);
     await this._processStatuses();
     await this._processPriorityRequests();
     await this._saveTransfers();
@@ -329,20 +308,6 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this.addPair(vftAddr, pair.ethToken, pair.tokenSupply, block);
 
     this._log.info({ varaToken: vftAddr, newProgramId: newId }, 'Vara token upgraded');
-  }
-
-  public async newSlot(slot: bigint, treeHashRoot: string) {
-    if (this._slots.has(slot)) return;
-
-    this._log.info({ slot, treeHashRoot }, 'Checkpoint slot received');
-
-    this._slots.set(
-      slot,
-      new CheckpointSlot({
-        slot,
-        treeHashRoot,
-      }),
-    );
   }
 
   private async _fetchVaraMetadata(varaTokenId: string, blockHeader: BlockHeader): Promise<TokenMetadata> {

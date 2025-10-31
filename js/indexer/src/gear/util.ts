@@ -35,7 +35,6 @@ export const enum ProgramName {
   VftManager = 'vft_manager',
   HistoricalProxy = 'historical_proxy',
   BridgingPayment = 'bridging_payment',
-  CheckpointClient = 'checkpoint_client',
 }
 
 export const enum VftManagerServices {
@@ -54,7 +53,7 @@ export const enum HistoricalProxyServices {
   HistoricalProxy = 'HistoricalProxy',
 }
 
-export const enum HistoricalProxyMethods {
+export const enum HistoricalProxyEvents {
   Relayed = 'Relayed',
 }
 
@@ -65,13 +64,4 @@ export const enum BridgingPaymentServices {
 export const enum BridgingPaymentMethods {
   BridgingPaid = 'BridgingPaid',
   PriorityBridgingPaid = 'PriorityBridgingPaid',
-}
-
-export const enum CheckpointClientServices {
-  ServiceSyncUpdate = 'ServiceSyncUpdate',
-  ServiceReplayBack = 'ServiceReplayBack',
-}
-
-export const enum CheckpointClientMethods {
-  NewCheckpoint = 'NewCheckpoint',
 }

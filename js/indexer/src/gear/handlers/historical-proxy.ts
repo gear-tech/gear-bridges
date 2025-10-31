@@ -1,11 +1,11 @@
 import { ethNonce } from '../../common/index.js';
 import { Relayed, UserMessageSentHandlerContext } from '../types/index.js';
-import { HistoricalProxyMethods, HistoricalProxyServices } from '../util.js';
+import { HistoricalProxyEvents, HistoricalProxyServices } from '../util.js';
 
 export function handleHistoricalProxyEvents(ctx: UserMessageSentHandlerContext) {
   const { service, method } = ctx;
   if (service !== HistoricalProxyServices.HistoricalProxy) return;
-  if (method !== HistoricalProxyMethods.Relayed) return;
+  if (method !== HistoricalProxyEvents.Relayed) return;
 
   const { block_number, transaction_index } = ctx.decoder.decodeEvent<Relayed>(
     service,

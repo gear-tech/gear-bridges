@@ -1,4 +1,5 @@
+import { NetworkTypeProvider, useNetworkType } from './network-type';
 import { useTokens, TokensProvider, Token } from './tokens';
 
-export { useTokens, TokensProvider };
+export { NetworkTypeProvider, useNetworkType, useTokens, TokensProvider };
 export type { Token };

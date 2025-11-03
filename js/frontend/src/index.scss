@@ -60,7 +60,7 @@ a {
   color: inherit;
   transition: all 0.25s;
 
-  &:not(.linkButton) {
+  &:not(.linkButton, .faqLink) {
     // currently only logo
     svg path {
       transition: fill 0.25s;

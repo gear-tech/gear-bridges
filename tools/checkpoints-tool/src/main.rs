@@ -48,10 +48,6 @@ struct Cli {
     #[arg(long, default_value = "120", env = "BEACON_TIMEOUT")]
     beacon_timeout: u64,
 
-    /// Specify the Ethereum network (Mainnet, Holesky or Sepolia)
-    #[arg(long, default_value = "Mainnet", env = "NETWORK")]
-    network: String,
-
     /// Specify the checkpoint slot for bootstrapping. If it is None then the header from
     /// the latest finality update is used to get the slot.
     #[arg(long, env = "SLOT_CHECKPOINT")]

@@ -12,6 +12,7 @@ use dto::{AuthoritySetState, BranchNodeData};
 use futures_util::{Stream, StreamExt};
 use gsdk::{
     metadata::{
+        errors::Gear,
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
@@ -51,11 +52,6 @@ struct StorageTrieInclusionProof {
 
 const VOTE_LENGTH_IN_BITS: usize = 424;
 const APPROX_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
-
-const MERKLE_ROOT_STORAGE_ADDRESS: &str =
-    "fd6e027f7a1bd8baa6406cea4d80d932df509310bc655bbf75a5b563fc3c8eee";
-const NEXT_VALIDATOR_SET_ADDRESS: &str =
-    "fd6e027f7a1bd8baa6406cea4d80d9327120fd2add6d1249bf1b6bfc3bdf510f";
 
 type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -437,16 +433,19 @@ impl GearApi {
         &self,
         block: H256,
     ) -> AnyResult<dto::StorageInclusionProof> {
-        let address = hex::decode(MERKLE_ROOT_STORAGE_ADDRESS).unwrap();
-        self.fetch_block_inclusion_proof(block, &address).await
+        let address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
+
+        self.fetch_block_inclusion_proof(block, &address.to_root_bytes())
+            .await
     }
 
     pub async fn fetch_next_session_keys_inclusion_proof(
         &self,
         block: H256,
     ) -> AnyResult<dto::StorageInclusionProof> {
-        let address = hex::decode(NEXT_VALIDATOR_SET_ADDRESS).unwrap();
-        self.fetch_block_inclusion_proof(block, &address).await
+        let address = gsdk::Api::storage_root(GearEthBridgeStorage::AuthoritySetHash);
+        self.fetch_block_inclusion_proof(block, &address.to_root_bytes())
+            .await
     }
 
     async fn fetch_block_inclusion_proof(
@@ -781,5 +780,33 @@ impl GearApi {
                 AccountId32::decode(&mut res.encoded())
                     .context("Failed to decode BridgePauser address")
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gsdk::metadata::storage::GearEthBridgeStorage;
+
+    #[test]
+    fn storage_correct() {
+        const MERKLE_ROOT_STORAGE_ADDRESS: &str =
+            "fd6e027f7a1bd8baa6406cea4d80d932df509310bc655bbf75a5b563fc3c8eee";
+        const NEXT_VALIDATOR_SET_ADDRESS: &str =
+            "fd6e027f7a1bd8baa6406cea4d80d9327120fd2add6d1249bf1b6bfc3bdf510f";
+
+        let merkle_root_address = hex::decode(MERKLE_ROOT_STORAGE_ADDRESS).unwrap();
+        let expected_merkle_root_address =
+            gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
+        assert_eq!(
+            merkle_root_address,
+            expected_merkle_root_address.to_root_bytes()
+        );
+        let next_validator_set_address = hex::decode(NEXT_VALIDATOR_SET_ADDRESS).unwrap();
+        let expected_next_validator_set_address =
+            gsdk::Api::storage_root(GearEthBridgeStorage::AuthoritySetHash);
+        assert_eq!(
+            next_validator_set_address,
+            expected_next_validator_set_address.to_root_bytes()
+        );
     }
 }

@@ -1,7 +1,7 @@
 import { HexString } from '@gear-js/api';
 import { useAccount } from '@gear-js/react-hooks';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { useVFTProgram } from '@/hooks';
 import { definedAssert } from '@/utils';
 

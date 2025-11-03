@@ -4,7 +4,7 @@ import { useAccount } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 import { useHistoricalProxyContractAddress, useInitArchiveApi } from '../vara';

@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 
 import { TRANSFERS_QUERY, TRANSACTIONS_LIMIT } from '../consts';
 import { TransferFilter, TransfersQueryQuery } from '../graphql/graphql';

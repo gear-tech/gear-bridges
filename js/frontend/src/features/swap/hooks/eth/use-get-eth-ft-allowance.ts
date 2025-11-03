@@ -3,7 +3,7 @@ import { useConfig } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
 import { ERC20_ABI } from '@/consts';
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { useEthAccount } from '@/hooks';
 import { definedAssert } from '@/utils';
 

@@ -2,7 +2,7 @@ import { relayVaraToEth } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
 import { usePublicClient, useWalletClient } from 'wagmi';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 import { useInitArchiveApi } from './use-init-archive-api';

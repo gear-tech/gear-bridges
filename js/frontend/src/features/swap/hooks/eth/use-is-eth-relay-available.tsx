@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { usePublicClient } from 'wagmi';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { isUndefined, logger } from '@/utils';
 
 import { CheckpointClientProgram, EthEventsProgram, HistoricalProxyProgram } from '../../consts';

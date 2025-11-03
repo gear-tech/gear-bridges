@@ -1,5 +1,6 @@
 import { Menu } from '@base-ui-components/react';
 
+import { NETWORK_TYPE } from '@/context/network-type/consts';
 import ArrowSVG from '@/features/swap/assets/arrow.svg?react';
 
 import styles from './dropdown.module.scss';
@@ -13,7 +14,7 @@ function Dropdown({ value, onChange }: Props) {
   return (
     <Menu.Root>
       <Menu.Trigger className={styles.Button}>
-        {value === 'mainnet' ? 'Mainnet' : 'Testnet'} <ArrowSVG className={styles.ButtonIcon} />
+        {value === NETWORK_TYPE.MAINNET ? 'Mainnet' : 'Testnet'} <ArrowSVG className={styles.ButtonIcon} />
       </Menu.Trigger>
 
       <Menu.Portal>
@@ -24,14 +25,14 @@ function Dropdown({ value, onChange }: Props) {
             </Menu.Arrow>
 
             <Menu.RadioGroup value={value} onValueChange={onChange}>
-              <Menu.RadioItem className={styles.RadioItem} value="mainnet">
+              <Menu.RadioItem className={styles.RadioItem} value="mainnet" closeOnClick>
                 <Menu.RadioItemIndicator className={styles.RadioItemIndicator}>
                   <CheckIcon className={styles.RadioItemIndicatorIcon} />
                 </Menu.RadioItemIndicator>
                 <span className={styles.RadioItemText}>Mainnet</span>
               </Menu.RadioItem>
 
-              <Menu.RadioItem className={styles.RadioItem} value="testnet">
+              <Menu.RadioItem className={styles.RadioItem} value="testnet" closeOnClick>
                 <Menu.RadioItemIndicator className={styles.RadioItemIndicator}>
                   <CheckIcon className={styles.RadioItemIndicatorIcon} />
                 </Menu.RadioItemIndicator>

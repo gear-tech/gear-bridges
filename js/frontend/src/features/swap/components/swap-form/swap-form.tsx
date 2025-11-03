@@ -6,7 +6,7 @@ import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { TokenPrice } from '@/features/token-price';
 import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';

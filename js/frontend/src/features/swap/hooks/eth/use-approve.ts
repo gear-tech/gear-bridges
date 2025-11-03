@@ -4,7 +4,7 @@ import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
 import { ERC20_ABI } from '@/consts';
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 import { FUNCTION_NAME } from '../../consts/eth';

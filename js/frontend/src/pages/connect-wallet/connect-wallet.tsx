@@ -1,5 +1,5 @@
 import { Container } from '@/components';
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { Wallet } from '@/features/wallet';
 
 import styles from './connect-wallet.module.scss';

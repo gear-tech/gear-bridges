@@ -1,6 +1,6 @@
 import { GearApi } from '@gear-js/api';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 
 function useInitArchiveApi() {
   const { NETWORK_PRESET } = useNetworkType();

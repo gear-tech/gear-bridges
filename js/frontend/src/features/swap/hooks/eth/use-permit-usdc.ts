@@ -4,7 +4,8 @@ import { hexToNumber, slice } from 'viem';
 import { useConfig, useSignTypedData } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
-import { useNetworkType, useTokens } from '@/context';
+import { useTokens } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { useEthAccount } from '@/hooks';
 import { definedAssert } from '@/utils';
 

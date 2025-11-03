@@ -12,7 +12,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
-import { DEFAULT_NETWORK_TYPE, NETWORK_PRESET, NetworkTypeProvider, TokensProvider } from './context';
+import { DEFAULT_NETWORK_TYPE, NETWORK_PRESET, NetworkTypeProvider } from './context/network-type';
+import { TokensProvider } from './context/tokens';
 
 function ApiProvider({ children }: ProviderProps) {
   return (

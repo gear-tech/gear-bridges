@@ -6,7 +6,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useRef } from 'react';
 
 import { LinkButton } from '@/components';
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { useEthAccount } from '@/hooks';
 
 import { GetBalanceParameters, getEthTokenBalance, getVaraAccountBalance } from '../../api';

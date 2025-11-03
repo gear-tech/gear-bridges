@@ -5,7 +5,8 @@ import { useParams } from 'react-router-dom';
 
 import ArrowSVG from '@/assets/arrow.svg?react';
 import { Container, Card, CopyButton, Address, FormattedBalance, TokenSVG, Skeleton } from '@/components';
-import { useNetworkType, useTokens } from '@/context';
+import { useTokens } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { useOptimisticTxUpdate, useTransaction } from '@/features/history';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';

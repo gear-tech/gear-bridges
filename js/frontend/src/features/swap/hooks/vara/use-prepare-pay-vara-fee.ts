@@ -1,6 +1,6 @@
 import { useProgram, usePrepareProgramTransaction } from '@gear-js/react-hooks';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 
 import { BridgingPaymentProgram } from '../../consts';
 

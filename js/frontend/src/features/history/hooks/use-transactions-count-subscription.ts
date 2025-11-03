@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createClient } from 'graphql-ws';
 import { useEffect } from 'react';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { logger } from '@/utils';
 
 const TRANSFERS_COUNT_SUBSCRIPTION = `

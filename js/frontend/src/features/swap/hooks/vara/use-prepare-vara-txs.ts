@@ -1,6 +1,6 @@
 import { Extrinsic } from '@polkadot/types/interfaces';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { isUndefined } from '@/utils';
 
 import { useBridgeContext } from '../../context';

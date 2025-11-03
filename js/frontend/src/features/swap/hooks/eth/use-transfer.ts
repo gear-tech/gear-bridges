@@ -4,7 +4,7 @@ import { encodeFunctionData } from 'viem';
 import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 import { ERC20_MANAGER_ABI } from '../../consts';

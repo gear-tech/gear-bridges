@@ -1,6 +1,6 @@
 import { useProgram } from '@gear-js/react-hooks';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 
 import { VftManagerProgram } from '../../consts';
 

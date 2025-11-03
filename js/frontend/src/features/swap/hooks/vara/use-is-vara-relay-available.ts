@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { graphql } from '@/features/history/graphql';
 
 const MERKLE_ROOT_IN_MESSAGE_QUEUES_QUERY = graphql(`

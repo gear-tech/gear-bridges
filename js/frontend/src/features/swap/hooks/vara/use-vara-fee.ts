@@ -1,6 +1,6 @@
 import { useBalanceFormat, useProgram, useProgramQuery } from '@gear-js/react-hooks';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { isUndefined } from '@/utils';
 
 import { BridgingPaymentProgram } from '../../consts';

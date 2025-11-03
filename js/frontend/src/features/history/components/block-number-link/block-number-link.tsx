@@ -1,5 +1,5 @@
 import { LinkButton, Tooltip } from '@/components';
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 
 import CubeSVG from '../../assets/cube.svg?react';
 import { Network, Transfer } from '../../types';

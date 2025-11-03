@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 
 import { graphql } from '../graphql';
 import { StatusEnum, TransferQueryQuery } from '../graphql/graphql';

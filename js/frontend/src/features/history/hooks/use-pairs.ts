@@ -2,7 +2,7 @@ import { HexString } from '@gear-js/api';
 import { useQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { useNetworkType } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 
 import { graphql } from '../graphql';
 import { Pair, PairsQueryQuery } from '../graphql/graphql';

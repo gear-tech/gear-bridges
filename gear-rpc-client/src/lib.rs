@@ -12,7 +12,6 @@ use dto::{AuthoritySetState, BranchNodeData};
 use futures_util::{Stream, StreamExt};
 use gsdk::{
     metadata::{
-        errors::Gear,
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},

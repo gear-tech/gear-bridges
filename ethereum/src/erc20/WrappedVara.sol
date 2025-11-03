@@ -12,8 +12,8 @@ import {
 import {
     ERC20PermitUpgradeable
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
@@ -74,7 +74,6 @@ contract WrappedVara is
         __ERC20Pausable_init();
         __AccessControl_init();
         __ERC20Permit_init(tokenName);
-        __UUPSUpgradeable_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin_));
 

@@ -8,11 +8,9 @@
 //!   range (0..=2^30 - 1).
 
 use crate::{
-    common::{
-        targets::{impl_target_set, ArrayTarget, ByteTarget},
-        BuilderExt,
-    },
+    common::targets::{impl_target_set, ArrayTarget, ByteTarget},
     prelude::*,
+    utils::CanonicalizeGenerator,
 };
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
@@ -152,32 +150,27 @@ pub mod full {
             target_result_three_bytes,
         );
 
-        let target_output_one_byte = OutputTarget {
-            decoded: value,
-            length: builder.one(),
-        };
-        let target_output_two_bytes = OutputTarget {
-            decoded: target_result_two_bytes,
-            length: builder.two(),
-        };
-        let target_output_four_bytes = OutputTarget {
-            decoded: target_result_four_bytes,
-            length: builder.constant(F::from_canonical_usize(4)),
-        };
-
         let target_is_mode_one_byte = builder.is_equal(mode, mode_one_byte);
         let target_is_mode_two_bytes = builder.is_equal(mode, mode_two_bytes);
-        let target_out = builder.select_target_set(
-            target_is_mode_one_byte,
-            &target_output_one_byte,
-            &target_output_four_bytes,
-        );
+        let target_result = builder.select(target_is_mode_one_byte, value, target_result_four_bytes);
+        let target_result = builder.select(target_is_mode_two_bytes, target_result_two_bytes, target_result);
 
-        builder.select_target_set(
-            target_is_mode_two_bytes,
-            &target_output_two_bytes,
-            &target_out,
-        )
+        let one = builder.one();
+        let two = builder.two();
+        let four = builder.constant(F::from_canonical_usize(4));
+        let target_length_out = builder.select(target_is_mode_one_byte, one, four);
+        let target_length_out = builder.select(target_is_mode_two_bytes, two, target_length_out);
+
+        OutputTarget {
+            decoded: {
+                let target_out = builder.add_virtual_target();
+                builder.add_simple_generator(CanonicalizeGenerator { target: target_result, target_out });
+
+                target_out
+            },
+            length: target_length_out,
+        }
+
     }
 
     #[cfg(test)]

@@ -152,8 +152,13 @@ pub mod full {
 
         let target_is_mode_one_byte = builder.is_equal(mode, mode_one_byte);
         let target_is_mode_two_bytes = builder.is_equal(mode, mode_two_bytes);
-        let target_result = builder.select(target_is_mode_one_byte, value, target_result_four_bytes);
-        let target_result = builder.select(target_is_mode_two_bytes, target_result_two_bytes, target_result);
+        let target_result =
+            builder.select(target_is_mode_one_byte, value, target_result_four_bytes);
+        let target_result = builder.select(
+            target_is_mode_two_bytes,
+            target_result_two_bytes,
+            target_result,
+        );
 
         let one = builder.one();
         let two = builder.two();
@@ -164,13 +169,15 @@ pub mod full {
         OutputTarget {
             decoded: {
                 let target_out = builder.add_virtual_target();
-                builder.add_simple_generator(CanonicalizeGenerator { target: target_result, target_out });
+                builder.add_simple_generator(CanonicalizeGenerator {
+                    target: target_result,
+                    target_out,
+                });
 
                 target_out
             },
             length: target_length_out,
         }
-
     }
 
     #[cfg(test)]

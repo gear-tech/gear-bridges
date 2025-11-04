@@ -2,11 +2,6 @@
 //!
 //! Extracts state root from encoded block header and asserts that block hash equals to claimed.
 
-use plonky2::{
-    iop::witness::PartialWitness,
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
-};
-
 use crate::{
     common::{
         generic_blake2::{GenericBlake2, MAX_DATA_BYTES},
@@ -17,6 +12,10 @@ use crate::{
     storage_inclusion::scale_compact_integer_parser::full::{
         define as define_full_int_parser, InputTarget as FullIntParserInput,
     },
+};
+use plonky2::{
+    iop::{target::Target, witness::PartialWitness},
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
 // Block header have the folowing structure:
@@ -35,6 +34,8 @@ impl_parsable_target_set! {
         pub block_hash: Blake2Target,
         /// Storage trie root.
         pub state_root: Blake2Target,
+        /// Number of the block.
+        pub block_number: Target,
     }
 }
 
@@ -85,6 +86,7 @@ impl BlockHeaderParser {
         BlockHeaderParserTarget {
             block_hash: hasher_target.hash,
             state_root,
+            block_number: parsed_block_number.decoded,
         }
         .register_as_public_inputs(&mut builder);
 

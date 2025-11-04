@@ -11,7 +11,7 @@ function useEthFee() {
 
   const { data, isLoading } = useReadContract({
     abi: BRIDGING_PAYMENT_ABI,
-    address: NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+    address: NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
     functionName: 'fee',
   });
 

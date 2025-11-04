@@ -30,7 +30,7 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
     const encodedData = encodeFunctionData({
       abi: ERC20_MANAGER_ABI,
       functionName: 'requestBridgingPayingFee',
-      args: [token.address, amount, accountAddress, NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS],
+      args: [token.address, amount, accountAddress, NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
     });
 
     return estimateGas(config, {
@@ -56,13 +56,13 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
             amount,
             accountAddress,
             ...permitArgs,
-            NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+            NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
           ],
         })
       : await writeContractAsync({
           ...tx,
           functionName: 'requestBridgingPayingFee',
-          args: [token.address, amount, accountAddress, NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS],
+          args: [token.address, amount, accountAddress, NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
         });
 
     return waitForTransactionReceipt(config, { hash });

@@ -1,7 +1,6 @@
 import { DataSource } from 'typeorm';
 import dotenv from 'dotenv';
 import {
-  CheckpointSlot,
   CompletedTransfer,
   EthBridgeProgram,
   GearEthBridgeMessage,
@@ -28,7 +27,6 @@ const AppDataSource = new DataSource({
     Pair,
     Transfer,
     VaraBridgeProgram,
-    CheckpointSlot,
     MerkleRootInMessageQueue,
   ],
   migrations: ['db/migrations/*.js'],

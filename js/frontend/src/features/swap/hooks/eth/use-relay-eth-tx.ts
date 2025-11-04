@@ -8,6 +8,7 @@ import { definedAssert } from '@/utils';
 
 import { ETH_BEACON_NODE_ADDRESS, CONTRACT_ADDRESS } from '../../consts';
 import { initArchiveApi } from '../../utils';
+import { useHistoricalProxyContractAddress } from '../vara';
 
 type Params = {
   onLog: (message: string) => void;
@@ -17,12 +18,13 @@ type Params = {
 
 function useRelayEthTx(txHash: HexString) {
   const { account } = useAccount();
-
   const publicClient = usePublicClient();
+  const { data: historicalProxyContractAddress } = useHistoricalProxyContractAddress();
 
   const relay = async ({ onLog, onInBlock, onError }: Params) => {
     definedAssert(account, 'Account');
     definedAssert(publicClient, 'Ethereum Public Client');
+    definedAssert(historicalProxyContractAddress, 'Historical Proxy Contract Address');
 
     const archiveApi = await initArchiveApi();
 
@@ -32,8 +34,7 @@ function useRelayEthTx(txHash: HexString) {
         beaconRpcUrl: ETH_BEACON_NODE_ADDRESS,
         ethereumPublicClient: publicClient,
         gearApi: archiveApi,
-        checkpointClientId: CONTRACT_ADDRESS.CHECKPOINT_CLIENT,
-        historicalProxyId: CONTRACT_ADDRESS.HISTORICAL_PROXY,
+        historicalProxyId: historicalProxyContractAddress,
         clientId: CONTRACT_ADDRESS.VFT_MANAGER,
         clientServiceName: 'VftManager',
         clientMethodName: 'SubmitReceipt',

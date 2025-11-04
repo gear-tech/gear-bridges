@@ -2,15 +2,13 @@ import { useBalanceFormat, useProgram, useProgramQuery } from '@gear-js/react-ho
 
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram, CONTRACT_ADDRESS, VftManagerProgram } from '../../consts';
+import { BridgingPaymentProgram, CONTRACT_ADDRESS } from '../../consts';
+
+import { useVFTManagerProgram } from './use-vft-manager-program';
 
 function useVaraFee() {
   const { getFormattedBalanceValue } = useBalanceFormat();
-
-  const { data: vftManagerProgram } = useProgram({
-    library: VftManagerProgram,
-    id: CONTRACT_ADDRESS.VFT_MANAGER,
-  });
+  const { data: vftManagerProgram } = useVFTManagerProgram();
 
   const { data: bridgingPaymentProgram } = useProgram({
     library: BridgingPaymentProgram,

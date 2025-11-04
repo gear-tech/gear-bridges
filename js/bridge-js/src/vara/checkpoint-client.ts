@@ -35,7 +35,7 @@ export class CheckpointClient {
 
   constructor(
     public api: GearApi,
-    programId?: `0x${string}`,
+    programId: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
@@ -47,9 +47,7 @@ export class CheckpointClient {
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
-    if (programId) {
-      this._program = new BaseGearProgram(programId, api);
-    }
+    this._program = new BaseGearProgram(programId, api);
 
     this.serviceCheckpointFor = new ServiceCheckpointFor(this);
     this.serviceState = new ServiceState(this);

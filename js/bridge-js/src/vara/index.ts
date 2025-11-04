@@ -4,3 +4,4 @@ export * from './historical-proxy-types.js';
 export * from './eth-to-vara.js';
 export * from './util.js';
 export * from './gear-client.js';
+export * from './eth-events.js';

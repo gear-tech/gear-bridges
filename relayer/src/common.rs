@@ -1,6 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use alloy::transports::{RpcError, TransportErrorKind};
+use alloy::{
+    network::Ethereum,
+    providers::PendingTransactionBuilder,
+    transports::{RpcError, TransportErrorKind},
+};
 use prover::proving::GenesisConfig;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -96,18 +100,18 @@ pub(crate) async fn sync_authority_set_id(
 pub(crate) async fn submit_merkle_root_to_ethereum(
     eth_api: &EthApi,
     proof: FinalProof,
-) -> Result<TxHash, ethereum_client::Error> {
+) -> Result<PendingTransactionBuilder<Ethereum>, ethereum_client::Error> {
     log::info!(
         "Submitting merkle root {} at block #{} to ethereum",
         hex::encode(proof.merkle_root),
         proof.block_number
     );
 
-    let tx_hash = eth_api
+    let pending_tx = eth_api
         .provide_merkle_root(proof.block_number, proof.merkle_root, proof.proof)
         .await?;
 
-    Ok(tx_hash)
+    Ok(pending_tx)
 }
 
 pub(crate) async fn send_challege_root_to_ethereum(

@@ -2,7 +2,13 @@ import { BRIDGING_PAYMENT_ABI, ERC20_MANAGER_ABI, ERC20PERMIT_NONCES_ABI, ERC526
 import { CONTRACT_ADDRESS, ETH_BEACON_NODE_ADDRESS } from './env';
 import { EVENT_NAME } from './eth';
 import { FIELD_NAME, DEFAULT_VALUES, ADDRESS_SCHEMA, ERROR_MESSAGE, SUBMIT_STATUS } from './form';
-import { BridgingPaymentProgram, VftManagerProgram } from './sails';
+import {
+  BridgingPaymentProgram,
+  VftManagerProgram,
+  HistoricalProxyProgram,
+  EthEventsProgram,
+  CheckpointClientProgram,
+} from './sails';
 import { PRIORITY, CLAIM_TYPE } from './settings';
 import { SERVICE_NAME, QUERY_NAME } from './vara';
 
@@ -31,4 +37,7 @@ export {
   ETH_BEACON_NODE_ADDRESS,
   BridgingPaymentProgram,
   VftManagerProgram,
+  HistoricalProxyProgram,
+  EthEventsProgram,
+  CheckpointClientProgram,
 };

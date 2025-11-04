@@ -1,11 +1,15 @@
 use alloy::{
-    providers::{PendingTransactionBuilder, PendingTransactionError, Provider},
+    network::Ethereum,
+    providers::{PendingTransactionBuilder, PendingTransactionError},
     rpc::types::TransactionReceipt,
 };
-use ethereum_client::{EthApi, TxHash};
+use ethereum_client::EthApi;
 use futures::{stream::FuturesUnordered, StreamExt};
 use primitive_types::H256;
-use prometheus::{Gauge, IntCounter, IntGauge};
+use prometheus::{
+    core::{AtomicU64, GenericCounter, GenericGauge},
+    Gauge, IntCounter, IntGauge,
+};
 use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -101,8 +105,7 @@ struct SubmissionError {
 
 impl SubmittedMerkleRoot {
     async fn new(
-        eth_api: &EthApi,
-        tx_hash: TxHash,
+        pending_tx: PendingTransactionBuilder<Ethereum>,
         era: Option<u64>,
         merkle_root_block: u32,
         merkle_root: H256,
@@ -114,7 +117,7 @@ impl SubmittedMerkleRoot {
             merkle_root,
             era,
             proof: proof.clone(),
-            receipt: PendingTransactionBuilder::new(eth_api.raw_provider().root().clone(), tx_hash)
+            receipt: pending_tx
                 .with_required_confirmations(confirmations)
                 .get_receipt()
                 .await
@@ -153,6 +156,26 @@ impl_metered_service!(
         last_submitted_block: IntGauge = IntGauge::new(
             "merkle_root_relayer_last_submitted_block",
             "Last submitted merkle root block number",
+        ),
+
+        total_gas_used: GenericCounter<AtomicU64> = GenericCounter::new(
+            "merkle_root_relayer_total_gas_used",
+            "Total gas used for merkle root submissions since relayer start",
+        ),
+
+        max_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "merkle_root_relayer_max_gas_used",
+            "Maximum gas used for a single merkle root submission",
+        ),
+
+        min_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "merkle_root_relayer_min_gas_used",
+            "Minimum gas used for a single merkle root submission",
+        ),
+
+        last_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "merkle_root_relayer_last_gas_used",
+            "Gas used for the last merkle root submission",
         ),
     }
 );
@@ -218,12 +241,11 @@ impl MerkleRootSubmitter {
                     self.storage.submitted_merkle_root(request.merkle_root_block, H256::from(request.proof.merkle_root)).await;
 
                     match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
-                        Ok(tx_hash) => {
-                            log::info!("Submitted merkle root to Ethereum, tx hash: {tx_hash}");
+                        Ok(pending_tx) => {
+                            log::info!("Submitted merkle root to Ethereum, tx hash: {}", pending_tx.tx_hash());
                             self.metrics.total_submissions.inc();
                             pending_transactions.push(SubmittedMerkleRoot::new(
-                                &self.eth_api,
-                                tx_hash,
+                                pending_tx,
                                 request.era,
                                 request.merkle_root_block,
                                 request.merkle_root,
@@ -289,6 +311,18 @@ impl MerkleRootSubmitter {
                 Some(result) = pending_transactions.next() => {
                     match result {
                         Ok(submitted) => {
+                            // update gas used metrics
+                            let gas_used = submitted.receipt.gas_used;
+                            self.metrics.total_gas_used.inc_by(gas_used);
+                            if self.metrics.max_gas_used.get() < gas_used {
+                                self.metrics.max_gas_used.set(gas_used);
+                            }
+                            if self.metrics.min_gas_used.get() == 0 || self.metrics.min_gas_used.get() > gas_used {
+                                self.metrics.min_gas_used.set(gas_used);
+                            }
+
+                            self.metrics.last_gas_used.set(gas_used);
+
                             if !submitted.receipt.status() {
                                 let root_exists = self.eth_api
                                     .read_finalized_merkle_root(submitted.proof.block_number)

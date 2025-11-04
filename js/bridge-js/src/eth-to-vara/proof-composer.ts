@@ -11,6 +11,8 @@ import {
   BlockHeader,
   BlockInclusionProof,
   CheckpointClient,
+  EthEventsClient,
+  HistoricalProxyClient,
   ProofResult,
 } from '../vara/index.js';
 import { StatusCb } from '../util.js';
@@ -60,7 +62,7 @@ function txTypeToBytes(txType: TransactionType): Uint8Array {
 export async function composeProof(
   beaconClient: BeaconClient,
   ethClient: EthereumClient,
-  checkpointClient: CheckpointClient,
+  historicalProxyClient: HistoricalProxyClient,
   txHash: `0x${string}`,
   wait = false,
   statusCb: StatusCb = () => {},
@@ -80,7 +82,17 @@ export async function composeProof(
 
   const { proof, receiptRlp } = await generateMerkleProof(receipt.transactionIndex, receipts);
 
-  statusCb(`Building inclusion proof`, { slot: slot.toString() });
+  statusCb(`Looking for checkpoint client`, { slot: slot.toString() });
+  const endpoint = await historicalProxyClient.historicalProxy.endpointFor(slot).call();
+  if ('err' in endpoint) {
+    throw new Error(`Failed to get endpoint for slot ${slot}. Error: ${JSON.stringify(endpoint.err)}`);
+  }
+  const ethEventsClient = new EthEventsClient(historicalProxyClient.api, endpoint.ok);
+
+  const checkpointAddr = await ethEventsClient.ethereumEventClient.checkpointLightClientAddress().call();
+  const checkpointClient = new CheckpointClient(historicalProxyClient.api, checkpointAddr);
+
+  statusCb(`Building inclusion proof`, { slot: slot.toString(), checkpointClient: checkpointAddr });
   const proofBlock = await buildInclusionProof(beaconClient, checkpointClient, slot, wait, statusCb);
 
   return {

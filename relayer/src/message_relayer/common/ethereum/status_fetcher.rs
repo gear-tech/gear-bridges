@@ -2,7 +2,10 @@ use crate::common::{self, BASE_RETRY_DELAY, MAX_RETRIES};
 use alloy::providers::{PendingTransactionBuilder, PendingTransactionError, Provider};
 use ethereum_client::{EthApi, TxHash};
 use futures::{stream::FuturesUnordered, StreamExt};
-use prometheus::{IntCounter, IntGauge};
+use prometheus::{
+    core::{AtomicU64, GenericCounter, GenericGauge},
+    IntCounter, IntGauge,
+};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
@@ -55,6 +58,23 @@ impl_metered_service! {
         total_failed_txs: IntCounter = IntCounter::new(
             "ethereum_message_sender_total_failed_txs",
             "Total amount of txs sent to ethereum and failed",
+        ),
+
+        total_gas_used: GenericCounter<AtomicU64> = GenericCounter::new(
+            "ethereum_message_sender_total_gas_used",
+            "Total gas used by ethereum message sender",
+        ),
+        min_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "ethereum_message_sender_min_gas_used",
+            "Minimum gas used by ethereum message sender",
+        ),
+        max_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "ethereum_message_sender_max_gas_used",
+            "Maximum gas used by ethereum message sender",
+        ),
+        last_gas_used: GenericGauge<AtomicU64> = GenericGauge::new(
+            "ethereum_message_sender_last_gas_used",
+            "Last gas used by ethereum message sender",
         ),
     }
 }
@@ -144,13 +164,28 @@ async fn task_inner(
 
                 let confirmations = this.confirmations;
                 txs.push(async move {
-                    Ok((tx_uuid, pending.with_required_confirmations(confirmations).watch().await.map_err(|e| (tx_uuid, e))?))
+                    Ok((tx_uuid, pending.with_required_confirmations(confirmations).get_receipt().await.map_err(|e| (tx_uuid, e))?))
                 });
             }
 
             Some(tx) = txs.next(), if !txs.is_empty() => {
                 match tx {
-                    Ok((uuid, tx_hash)) => {
+                    Ok((uuid, receipt)) => {
+                        let tx_hash = receipt.transaction_hash;
+                        let gas_used = receipt.gas_used;
+
+                        this.metrics.total_gas_used.inc_by(gas_used);
+                        this.metrics.last_gas_used.set(gas_used);
+
+                        if this.metrics.min_gas_used.get() == 0 || gas_used < this.metrics.min_gas_used.get() {
+                            this.metrics.min_gas_used.set(gas_used);
+                        }
+
+                        if gas_used > this.metrics.max_gas_used.get() {
+                            this.metrics.max_gas_used.set(gas_used);
+                        }
+
+
                         this.metrics.pending_tx_count.dec();
                         responses.send(Response::Success(uuid, tx_hash))?;
                     }

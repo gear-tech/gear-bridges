@@ -1,47 +1,102 @@
+import { HexString } from '@gear-js/api';
 import { getSlotByBlockNumber } from '@gear-js/bridge';
-import { useAlert } from '@gear-js/react-hooks';
+import { useAlert, useProgram, useProgramQuery } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
-import { request } from 'graphql-request';
 import { useEffect } from 'react';
 import { usePublicClient } from 'wagmi';
 
-import { INDEXER_ADDRESS } from '@/features/history/consts';
-import { graphql } from '@/features/history/graphql';
+import { isUndefined, logger } from '@/utils';
 
-import { ETH_BEACON_NODE_ADDRESS } from '../../consts';
+import {
+  ETH_BEACON_NODE_ADDRESS,
+  CheckpointClientProgram,
+  EthEventsProgram,
+  HistoricalProxyProgram,
+} from '../../consts';
+import { useHistoricalProxyContractAddress } from '../vara';
 
-const CHECKPOINT_SLOTS_QUERY = graphql(`
-  query CheckpointSlotsQuery($slot: BigInt!) {
-    allCheckpointSlots(filter: { slot: { greaterThanOrEqualTo: $slot } }) {
-      totalCount
-    }
-  }
-`);
-
-function useIsEthRelayAvailable(blockNumber: bigint) {
+function useErrorLoggingQuery<T>(query: T & { error: Error | null }, errorName: string) {
   const alert = useAlert();
-  const publicClient = usePublicClient();
 
-  const { data: slot, error } = useQuery({
-    queryKey: ['slotByBlockNumber', blockNumber.toString()],
-    queryFn: () => getSlotByBlockNumber(ETH_BEACON_NODE_ADDRESS, publicClient!, blockNumber),
-    enabled: Boolean(publicClient),
-    select: (data) => data?.toString(),
-  });
+  const { error } = query;
 
   useEffect(() => {
     if (!error) return;
 
+    logger.error(errorName, error);
     alert.error(error.message);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
 
-  return useQuery({
-    queryKey: ['isEthRelayAvailable', slot],
-    queryFn: () => request(INDEXER_ADDRESS, CHECKPOINT_SLOTS_QUERY, { slot: slot! }),
-    enabled: Boolean(slot),
-    select: (data) => Boolean(data.allCheckpointSlots?.totalCount),
+  return query;
+}
+
+function useSlot(blockNumber: bigint) {
+  const publicClient = usePublicClient();
+
+  const query = useQuery({
+    queryKey: ['slotByBlockNumber', blockNumber.toString()],
+    queryFn: () => getSlotByBlockNumber(ETH_BEACON_NODE_ADDRESS, publicClient!, blockNumber),
+    enabled: Boolean(publicClient),
   });
+
+  return useErrorLoggingQuery(query, 'Get slot by block number');
+}
+
+function useEthEventsContractAddress(slot: number | undefined) {
+  const { data: historicalProxyContractAddress } = useHistoricalProxyContractAddress();
+
+  const { data: historicalProxyProgram } = useProgram({
+    id: historicalProxyContractAddress,
+    library: HistoricalProxyProgram,
+  });
+
+  const query = useProgramQuery({
+    program: historicalProxyProgram,
+    serviceName: 'historicalProxy',
+    functionName: 'endpointFor',
+    args: [slot!],
+    query: { enabled: !isUndefined(slot), select: (data) => ('ok' in data ? data.ok : undefined) },
+  });
+
+  return useErrorLoggingQuery(query, 'Get EthEvents contract address');
+}
+
+function useCheckpointClientContractAddress(ethEventsContractAddress: HexString | undefined) {
+  const { data: ethEventsProgram } = useProgram({
+    id: ethEventsContractAddress,
+    library: EthEventsProgram,
+  });
+
+  const query = useProgramQuery({
+    program: ethEventsProgram,
+    serviceName: 'ethereumEventClient',
+    functionName: 'checkpointLightClientAddress',
+    args: [],
+  });
+
+  return useErrorLoggingQuery(query, 'Get CheckpointClient contract address');
+}
+
+function useIsEthRelayAvailable(blockNumber: bigint) {
+  const { data: slot } = useSlot(blockNumber);
+  const { data: ethEventsContractAddress } = useEthEventsContractAddress(slot);
+  const { data: checkpointClientContractAddress } = useCheckpointClientContractAddress(ethEventsContractAddress);
+
+  const { data: checkpointClientProgram } = useProgram({
+    id: checkpointClientContractAddress,
+    library: CheckpointClientProgram,
+  });
+
+  const query = useProgramQuery({
+    program: checkpointClientProgram,
+    serviceName: 'serviceCheckpointFor',
+    functionName: 'get',
+    args: [slot!],
+    query: { enabled: !isUndefined(slot), select: (data) => 'ok' in data },
+  });
+
+  return useErrorLoggingQuery(query, 'Check if Eth relay is available');
 }
 
 export { useIsEthRelayAvailable };

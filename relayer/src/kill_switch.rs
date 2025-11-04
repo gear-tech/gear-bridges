@@ -365,7 +365,9 @@ impl KillSwitchRelayer {
         let proof = self
             .fetch_merkle_root_proof_from_relayer(self.challenged_block.expect("bad state"))
             .await?;
-        let tx_hash = submit_merkle_root_to_ethereum(eth_admin_api, proof).await?;
+        let tx_hash = *submit_merkle_root_to_ethereum(eth_admin_api, proof)
+            .await?
+            .tx_hash();
         self.state = State::SubmitMerkleRoot {
             tx_hash: Some(tx_hash),
         };

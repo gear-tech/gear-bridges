@@ -3,7 +3,7 @@ import { SignerOptions } from '@polkadot/api/types';
 import { GearApi } from '@gear-js/api';
 import { PublicClient } from 'viem';
 
-import { CheckpointClient, encodeEthToVaraEvent, getPrefix, HistoricalProxyClient, ProxyError } from '../vara/index.js';
+import { encodeEthToVaraEvent, getPrefix, HistoricalProxyClient, ProxyError } from '../vara/index.js';
 import { createBeaconClient, createEthereumClient } from '../ethereum/index.js';
 import { composeProof } from './proof-composer.js';
 import { StatusCb } from '../util.js';
@@ -39,10 +39,6 @@ export type RelayEthToVaraParams = {
    * Gear API instance for Vara network operations
    */
   gearApi: GearApi;
-  /**
-   * ID of the checkpoint client program on Vara
-   */
-  checkpointClientId: `0x${string}`;
   /**
    * ID of the historical proxy program on Vara
    */
@@ -137,13 +133,13 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
   const beaconClient = await createBeaconClient(params.beaconRpcUrl);
   const ethClient = createEthereumClient(params.ethereumPublicClient, beaconClient);
 
-  const checkpointClient = new CheckpointClient(params.gearApi, params.checkpointClientId);
+  const historicalProxyClient = new HistoricalProxyClient(params.gearApi, params.historicalProxyId);
 
   statusCb(`Composing proof`, { txHash: params.transactionHash });
   const composeResult = await composeProof(
     beaconClient,
     ethClient,
-    checkpointClient,
+    historicalProxyClient,
     params.transactionHash,
     wait,
     statusCb,
@@ -151,8 +147,6 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
 
   statusCb(`Building transaction`, { slot: composeResult.proofBlock.block.slot.toString() });
   const encodedEthToVaraEvent = encodeEthToVaraEvent(composeResult);
-
-  const historicalProxyClient = new HistoricalProxyClient(params.gearApi, params.historicalProxyId);
 
   const tx = historicalProxyClient.historicalProxy
     .redirect(

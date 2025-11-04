@@ -1,5 +1,5 @@
 [package]
-name = "deploy-checkpoints"
+name = "checkpoints-tool"
 version.workspace = true
 edition.workspace = true
 
@@ -17,3 +17,5 @@ hex = { workspace = true, features = ["std"] }
 parity-scale-codec = { workspace = true, features = ["std"] }
 sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true
+url.workspace = true
+gear-core.workspace = true

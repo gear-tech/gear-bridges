@@ -1,14 +1,19 @@
-import { GearApi, BaseGearProgram } from '@gear-js/api';
+/* eslint-disable */
+
+import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
   ActorId,
+  QueryBuilder,
   getServiceNamePrefix,
   getFnNamePrefix,
   ZERO_ADDRESS,
-  QueryBuilder,
 } from 'sails-js';
 
+/**
+ * Errors returned by the Historical Proxy service.
+ */
 export type ProxyError =
   /**
    * Endpoint for requested slot not found.
@@ -31,14 +36,25 @@ export type ProxyError =
    */
   | { EthereumEventClient: Error };
 
-export class HistoricalProxyClient {
+export type Error =
+  | 'DecodeReceiptEnvelopeFailure'
+  | 'FailedEthTransaction'
+  | 'SendFailure'
+  | 'ReplyFailure'
+  | 'HandleResultDecodeFailure'
+  | 'MissingCheckpoint'
+  | 'InvalidBlockProof'
+  | 'TrieDbFailure'
+  | 'InvalidReceiptProof';
+
+export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly historicalProxy: HistoricalProxy;
-  private _program: BaseGearProgram;
+  private _program?: BaseGearProgram;
 
   constructor(
     public api: GearApi,
-    programId: `0x${string}`,
+    programId?: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       ProxyError: {
@@ -68,7 +84,9 @@ export class HistoricalProxyClient {
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
-    this._program = new BaseGearProgram(programId, api);
+    if (programId) {
+      this._program = new BaseGearProgram(programId, api);
+    }
 
     this.historicalProxy = new HistoricalProxy(this);
   }
@@ -77,10 +95,67 @@ export class HistoricalProxyClient {
     if (!this._program) throw new Error(`Program ID is not set`);
     return this._program.id;
   }
+
+  newCtorFromCode(code: Uint8Array | Buffer | HexString): TransactionBuilder<null> {
+    const builder = new TransactionBuilder<null>(
+      this.api,
+      this.registry,
+      'upload_program',
+      null,
+      'New',
+      null,
+      null,
+      'String',
+      code,
+      async (programId) => {
+        this._program = await BaseGearProgram.new(programId, this.api);
+      },
+    );
+    return builder;
+  }
+
+  newCtorFromCodeId(codeId: `0x${string}`) {
+    const builder = new TransactionBuilder<null>(
+      this.api,
+      this.registry,
+      'create_program',
+      null,
+      'New',
+      null,
+      null,
+      'String',
+      codeId,
+      async (programId) => {
+        this._program = await BaseGearProgram.new(programId, this.api);
+      },
+    );
+    return builder;
+  }
 }
 
 export class HistoricalProxy {
-  constructor(private _program: HistoricalProxyClient) {}
+  constructor(private _program: SailsProgram) {}
+
+  /**
+   * Add new endpoint to the map. Endpoint will be effective for all the
+   * requests with slots starting from `slot`.
+   *
+   * This function can be called only by an admin.
+   */
+  public addEndpoint(slot: number | string | bigint, endpoint: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'HistoricalProxy',
+      'AddEndpoint',
+      [slot, endpoint],
+      '(u64, [u8;32])',
+      'Null',
+      this._program.programId,
+    );
+  }
 
   /**
    * Redirect message to `eth-events-*` program which is valid for `slot`.
@@ -120,9 +195,45 @@ export class HistoricalProxy {
   }
 
   /**
+   * Update the current service admin to `admin_new`.
+   *
+   * This function can be called only by the admin.
+   */
+  public updateAdmin(admin_new: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'HistoricalProxy',
+      'UpdateAdmin',
+      admin_new,
+      '[u8;32]',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Get current service admin.
+   */
+  public admin(): QueryBuilder<ActorId> {
+    return new QueryBuilder<ActorId>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'HistoricalProxy',
+      'Admin',
+      null,
+      null,
+      '[u8;32]',
+    );
+  }
+
+  /**
    * Get endpoint for the specified `slot`.
    */
-  public endpointFor(slot: number): QueryBuilder<{ ok: ActorId } | { err: ProxyError }> {
+  public endpointFor(slot: number | string | bigint): QueryBuilder<{ ok: ActorId } | { err: ProxyError }> {
     return new QueryBuilder<{ ok: ActorId } | { err: ProxyError }>(
       this._program.api,
       this._program.registry,
@@ -138,8 +249,8 @@ export class HistoricalProxy {
   /**
    * Get endpoint map stored in this service.
    */
-  public endpoints(): QueryBuilder<Array<[number, ActorId]>> {
-    return new QueryBuilder<Array<[number, ActorId]>>(
+  public endpoints(): QueryBuilder<Array<[number | string | bigint, ActorId]>> {
+    return new QueryBuilder<Array<[number | string | bigint, ActorId]>>(
       this._program.api,
       this._program.registry,
       this._program.programId,

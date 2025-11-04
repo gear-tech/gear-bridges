@@ -20,7 +20,6 @@ Before using this library, ensure you have:
 2. A Viem public client configured for Ethereum
 3. A Gear API instance connected to the Vara network
 4. Deployed program IDs for:
-   - Checkpoint client program
    - Historical proxy program
 
 ## Quick Start
@@ -48,7 +47,6 @@ const result = await relayEthToVara(
   'https://beacon-node.example.com', // Beacon chain RPC URL
   ethereumClient,
   gearApi,
-  '0xabcd...', // Checkpoint client program ID
   '0xefgh...', // Historical proxy program ID
   '0xijkl...', // Target client program ID
   'MyService', // Service name on target client
@@ -87,7 +85,6 @@ Relays an Ethereum transaction to the Vara network by creating a proof and submi
 | `beaconRpcUrl` | `string` | RPC URL for the Ethereum beacon chain client |
 | `ethereumPublicClient` | `PublicClient` | Viem public client for Ethereum network interactions |
 | `gearApi` | `GearApi` | Gear API instance for Vara network operations |
-| `checkpointClientId` | `0x${string}` | ID of the checkpoint client program on Vara |
 | `historicalProxyId` | `0x${string}` | ID of the historical proxy program on Vara |
 | `clientId` | `0x${string}` | ID of the target client program on Vara |
 | `clientServiceName` | `string` | Name of the service to call on the target client |

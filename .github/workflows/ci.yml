@@ -63,9 +63,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22.x
+          node-version: 24.x
 
       - name: Install OpenZeppelin Foundry Upgrades
         run: |
@@ -155,9 +155,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22.x
+          node-version: 24.x
 
       - name: Install OpenZeppelin Foundry Upgrades
         run: |
@@ -205,9 +205,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 22.x
+          node-version: 24.x
 
       - name: Install OpenZeppelin Foundry Upgrades
         run: |

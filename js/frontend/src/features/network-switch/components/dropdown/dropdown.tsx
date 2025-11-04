@@ -25,7 +25,7 @@ function Dropdown({ value, isLoading, onChange }: Props) {
         render={(props, state) => (
           <button {...props}>
             {isLoading ? <SpinnerSVG className={styles.spinnerSvg} /> : <WorldSVG className={styles.networkSvg} />}
-            {value === NETWORK_TYPE.MAINNET ? 'Mainnet' : 'Testnet'}
+            <span>{value === NETWORK_TYPE.MAINNET ? 'Mainnet' : 'Testnet'}</span>
             <ActionArrowSVG className={cx(styles.arrowSvg, isLoading && styles.loading, state.open && styles.open)} />
           </button>
         )}

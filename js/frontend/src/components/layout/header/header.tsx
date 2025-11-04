@@ -69,13 +69,11 @@ function Header() {
   return (
     <header className={styles.header}>
       <Container className={styles.mainContainer}>
-        <div className={styles.logoContainer}>
-          <Link to={ROUTE.HOME} className={styles.logo}>
-            <LogoSVG />
-          </Link>
+        <Link to={ROUTE.HOME} className={styles.logo}>
+          <LogoSVG />
+        </Link>
 
-          <NetworkSwitch />
-        </div>
+        <NetworkSwitch />
 
         <Wallet />
       </Container>

@@ -17,8 +17,10 @@ import { NetworkType } from './types';
 import { getNetworkTypeFromUrl } from './utils';
 
 function NetworkTypeProvider({ children }: PropsWithChildren) {
-  const { switchNetwork } = useApi();
+  const { isApiReady, switchNetwork } = useApi();
   const ethNetwork = useAppKitNetwork();
+  const isLoading = !isApiReady;
+
   const [searchParams, setSearchParams] = useSearchParams();
   const alert = useAlert();
 
@@ -55,9 +57,9 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   };
 
   const value = useMemo(
-    () => ({ networkType, isMainnet, isTestnet, NETWORK_PRESET: PRESET, switchNetworks }),
+    () => ({ networkType, isMainnet, isTestnet, isLoading, NETWORK_PRESET: PRESET, switchNetworks }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [networkType, searchParams],
+    [networkType, searchParams, isLoading],
   );
 
   return <Provider value={value}>{children}</Provider>;

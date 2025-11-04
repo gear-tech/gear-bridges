@@ -13,6 +13,10 @@
 
   transition: background-color 0.25s;
 
+  &:disabled {
+    pointer-events: none;
+  }
+
   &:hover,
   &[data-popup-open] {
     background-color: #00473766;
@@ -27,18 +31,38 @@
 
     path {
       fill: #f6f6f6e5;
+
+      transition: opacity 0.25s;
     }
 
     &.open {
       rotate: 180deg;
     }
+
+    &.loading path {
+      opacity: 0.25;
+    }
   }
 
-  .networkSvg {
+  .networkSvg,
+  .spinnerSvg {
     width: 14px;
     height: 14px;
 
     stroke: #00ffc4;
+  }
+
+  .spinnerSvg {
+    animation: spin 1s linear infinite;
+  }
+}
+
+@keyframes spin {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
   }
 }
 
@@ -95,15 +119,19 @@
 
     border-radius: 4px;
 
-    cursor: pointer;
     transition:
       color 0.25s,
       background-color 0.25s;
+
+    cursor: pointer;
+  }
+
+  &[data-checked],
+  &[data-disabled] {
+    pointer-events: none;
   }
 
   &[data-checked] {
-    pointer-events: none;
-
     color: #00ffc4;
   }
 

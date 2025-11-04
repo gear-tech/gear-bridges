@@ -7,6 +7,7 @@ type Value = {
   networkType: NetworkType;
   isMainnet: boolean;
   isTestnet: boolean;
+  isLoading: boolean;
   switchNetworks: (value: NetworkType) => void;
 };
 

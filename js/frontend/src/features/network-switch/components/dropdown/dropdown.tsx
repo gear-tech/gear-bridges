@@ -5,25 +5,28 @@ import ActionArrowSVG from '@/features/swap/assets/arrow.svg?react';
 import { cx } from '@/utils';
 
 import ArrowSVG from '../../assets/arrow.svg?react';
+import SpinnerSVG from '../../assets/spinner.svg?react';
 import WorldSVG from '../../assets/world.svg?react';
 
 import styles from './dropdown.module.scss';
 
 type Props = {
   value: string;
+  isLoading: boolean;
   onChange: (value: 'mainnet' | 'testnet') => void;
 };
 
-function Dropdown({ value, onChange }: Props) {
+function Dropdown({ value, isLoading, onChange }: Props) {
   return (
     <Menu.Root>
       <Menu.Trigger
         className={styles.button}
+        disabled={isLoading}
         render={(props, state) => (
           <button {...props}>
-            <WorldSVG className={styles.networkSvg} />
+            {isLoading ? <SpinnerSVG className={styles.spinnerSvg} /> : <WorldSVG className={styles.networkSvg} />}
             {value === NETWORK_TYPE.MAINNET ? 'Mainnet' : 'Testnet'}
-            <ActionArrowSVG className={cx(styles.arrowSvg, state.open && styles.open)} />
+            <ActionArrowSVG className={cx(styles.arrowSvg, isLoading && styles.loading, state.open && styles.open)} />
           </button>
         )}
       />
@@ -36,7 +39,7 @@ function Dropdown({ value, onChange }: Props) {
             </Menu.Arrow>
 
             <Menu.RadioGroup value={value} onValueChange={onChange}>
-              <Menu.RadioItem className={styles.item} value="mainnet" closeOnClick>
+              <Menu.RadioItem className={styles.item} value="mainnet" disabled={isLoading} closeOnClick>
                 <span className={styles.itemContent}>
                   <span>Mainnet</span>
                   <Menu.RadioItemIndicator className={styles.indicator} />
@@ -45,7 +48,7 @@ function Dropdown({ value, onChange }: Props) {
 
               <Separator className={styles.separator} />
 
-              <Menu.RadioItem className={styles.item} value="testnet" closeOnClick>
+              <Menu.RadioItem className={styles.item} value="testnet" disabled={isLoading} closeOnClick>
                 <span className={styles.itemContent}>
                   <span>Testnet</span>
                   <Menu.RadioItemIndicator className={styles.indicator} />

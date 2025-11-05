@@ -75,6 +75,7 @@ createAppKit({
   projectId,
   features: { analytics: false, email: false, socials: false },
   enableWalletGuide: false,
+  enableNetworkSwitch: false,
   allWallets: 'HIDE',
   excludeWalletIds: [TRUST_WALLET_ID],
   includeWalletIds: [METAMASK_WALLET_ID, COINBASE_WALLET_ID],

@@ -2,6 +2,7 @@ import { useApi, useAlert } from '@gear-js/react-hooks';
 import { useAppKitNetwork } from '@reown/appkit/react';
 import { PropsWithChildren, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useChainId } from 'wagmi';
 
 import { logger } from '@/utils';
 
@@ -14,12 +15,25 @@ import {
 } from './consts';
 import { Provider } from './context';
 import { NetworkType } from './types';
+import { UnsupportedNetworkModal } from './unsupported-network-modal';
 import { getNetworkTypeFromUrl } from './utils';
+
+function useChainIdLogs() {
+  const appKitNetwork = useAppKitNetwork();
+  const wagmiChainId = useChainId();
+
+  useEffect(() => {
+    logger.info('AppKit Network Chain ID: ', appKitNetwork.chainId);
+    logger.info('Wagmi Chain ID: ', wagmiChainId);
+  }, [appKitNetwork.chainId, wagmiChainId]);
+}
 
 function NetworkTypeProvider({ children }: PropsWithChildren) {
   const { isApiReady, switchNetwork } = useApi();
   const ethNetwork = useAppKitNetwork();
   const isLoading = !isApiReady;
+
+  useChainIdLogs();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const alert = useAlert();
@@ -62,7 +76,12 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     [networkType, searchParams, isLoading],
   );
 
-  return <Provider value={value}>{children}</Provider>;
+  return (
+    <Provider value={value}>
+      {children}
+      <UnsupportedNetworkModal />
+    </Provider>
+  );
 }
 
 export { NetworkTypeProvider };

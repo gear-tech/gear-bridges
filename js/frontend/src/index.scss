@@ -42,6 +42,16 @@ body {
       color: #f6f6f6e5;
     }
   }
+
+  :has(.unsupportedNetworkModal) {
+    header {
+      justify-content: center;
+
+      button {
+        display: none;
+      }
+    }
+  }
 }
 
 main {

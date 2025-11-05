@@ -12,20 +12,14 @@ use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
 use anyhow::Context;
-use checkpoint_light_client_client::ServiceCheckpointFor;
 use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::{beacon, tree_hash::TreeHash, utils as eth_utils, utils::MerkleProof};
 use futures::executor::block_on;
-use historical_proxy_client::HistoricalProxy;
 use primitive_types::H256;
 use prometheus::IntGauge;
-use sails_rs::{
-    calls::{Action, Query},
-    gclient::calls::GClientRemoting,
-    ActorId,
-};
+use sails_rs::gclient::calls::GClientRemoting;
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
@@ -369,8 +363,6 @@ async fn build_inclusion_proof(
 
     gear_actor: &Addr<GearApiActor>,
 ) -> anyhow::Result<BlockInclusionProof> {
-    let remoting = GClientRemoting::new(gear_api.clone());
-
     let beacon_block_parent = beacon_client
         .get_block_by_hash::<beacon::electra::Block>(beacon_root_parent)
         .await?;

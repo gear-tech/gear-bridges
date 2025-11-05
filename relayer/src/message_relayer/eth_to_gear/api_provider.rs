@@ -1,12 +1,26 @@
+use actix::{Message, ResponseFuture};
+use alloy_primitives::FixedBytes;
 use anyhow::Context;
+use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
+use eth_events_electra_client::{traits::EthereumEventClient, EthToVaraEvent};
 use gear_rpc_client::GearApi;
 use gsdk::Api;
+use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
+use primitive_types::H256;
+use sails_rs::{
+    calls::{Action, Query},
+    gclient::calls::GClientRemoting,
+    ActorId,
+};
 use std::time::Duration;
 use tokio::sync::{
     mpsc,
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
+use uuid::Uuid;
+
+use crate::message_relayer::eth_to_gear::message_sender::MessageStatus;
 
 /// Timeout between reconnects. Default: 1m30s.
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
@@ -215,5 +229,156 @@ impl ApiProvider {
                 }
             }
         });
+    }
+}
+
+/// An Actix actor that provides Gear API connectivity. Instead
+/// of actors using Gear API directly, they should send requests
+/// to this actor to perform Gear API operations on their behalf.
+///
+/// When there is Sails operation to be performed, client should
+/// send a message to this actor and await the response.
+pub struct GearApiActor {
+    api: Api,
+    suri: String,
+    historical_proxy_id: ActorId,
+}
+
+impl GearApiActor {
+    pub fn new(api: Api, suri: String, historical_proxy_id: ActorId) -> Self {
+        Self {
+            api,
+            suri,
+            historical_proxy_id,
+        }
+    }
+}
+
+/// Fetch checkpoint at specified slot.
+///
+/// This makes use of Historical Proxy & eth-events services.
+#[derive(Message)]
+#[rtype(result = "anyhow::Result<(u64, H256)>")]
+pub struct GetCheckpointSlot {
+    pub slot: u64,
+}
+
+impl actix::Actor for GearApiActor {
+    type Context = actix::Context<Self>;
+}
+
+impl actix::Handler<GetCheckpointSlot> for GearApiActor {
+    type Result = ResponseFuture<anyhow::Result<(u64, H256)>>;
+
+    fn handle(&mut self, msg: GetCheckpointSlot, _ctx: &mut Self::Context) -> Self::Result {
+        let api = self.api.clone();
+        let suri = self.suri.clone();
+        let historical_proxy_id = self.historical_proxy_id;
+        // we don't access actor ctx: can just return a future
+        Box::pin(async move {
+            let api = gclient::GearApi::from(api)
+                .with(&suri)
+                .context("failed to create gclient with provided suri")?;
+            let gas_limit = api.block_gas_limit()?;
+
+            let remoting = GClientRemoting::new(api);
+            let historical_proxy = HistoricalProxy::new(remoting.clone());
+            let eth_events = eth_events_electra_client::EthereumEventClient::new(remoting.clone());
+            let service_checkpoint = ServiceCheckpointFor::new(remoting);
+
+            let endpoint = historical_proxy
+                .endpoint_for(msg.slot)
+                .recv(historical_proxy_id)
+                .await
+                .context("failed to query historical proxy")?
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Proxy failed to get endpoint for slot #{slot}: {e:?}",
+                        slot = msg.slot
+                    )
+                })?;
+
+            let checkpoint_endpoint = eth_events
+                .checkpoint_light_client_address()
+                .recv(endpoint)
+                .await
+                .context("failed to get checkpoint light client address")?;
+
+            let (checkpoint_slot, checkpoint) = service_checkpoint
+                .get(msg.slot)
+                .with_gas_limit(gas_limit)
+                .recv(checkpoint_endpoint)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
+                .map_err(|e| anyhow::anyhow!("Checkpoint error: {e:?}"))?;
+
+            Ok((checkpoint_slot, checkpoint))
+        })
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "(Uuid, MessageStatus)")]
+pub struct RelayGearMessage {
+    pub suri: String,
+    pub payload: EthToVaraEvent,
+    pub tx_hash: FixedBytes<32>,
+    pub tx_uuid: Uuid,
+}
+
+/*
+impl actix::Handler<RelayGearMessage> for GearApiActor {
+    type Result = ResponseFuture<(Uuid, MessageStatus)>;
+
+    fn handle(&mut self, msg: RelayGearMessage, ctx: &mut Self::Context) -> Self::Result {
+        let api = self.api.clone();
+        Box::pin(async move {
+            let api = gclient::GearApi::from(api)
+                .with(msg.suri)
+                .context("failed to create gclient with provided suri")?;
+            let gas_limit_block = api.block_gas_limit()?;
+            let gas_limit = gas_limit_block / 100 * 95;
+            let remoting = GClientRemoting::new(api);
+
+            let mut proxy_service = HistoricalProxy::new(remoting.clone());
+
+            let (_, receiver_reply) = proxy_service
+                .redirect(
+                    payload.proof_block.block.slot,
+                    payload.encode(),
+                    self.receiver_address
+                )
+        })
+    }
+}
+*/
+
+pub struct SailsQuery<Q, R, A>
+where
+    Q: Query<Output = R, Args = A>,
+{
+    pub query: Q,
+    pub target: ActorId,
+}
+
+impl<Q, R: 'static, A> actix::Message for SailsQuery<Q, R, A>
+where
+    Q: Query<Output = R, Args = A>,
+{
+    type Result = sails_rs::Result<R, sails_rs::errors::Error>;
+}
+
+impl<Q, R: 'static, A> actix::Handler<SailsQuery<Q, R, A>> for GearApiActor
+where
+    Q: Query<Output = R, Args = A> + 'static,
+{
+    type Result = ResponseFuture<sails_rs::Result<R, sails_rs::errors::Error>>;
+
+    fn handle(&mut self, msg: SailsQuery<Q, R, A>, _ctx: &mut Self::Context) -> Self::Result {
+        Box::pin(async move {
+            let query = msg.query;
+            let result = query.recv(msg.target).await;
+            result
+        })
     }
 }

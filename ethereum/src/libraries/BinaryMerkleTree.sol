@@ -52,12 +52,11 @@ library BinaryMerkleTree {
      * @param leafHash Hash of the leaf to verify.
      * @return computed Root hash of the Merkle tree.
      */
-    function processProofCalldata(
-        bytes32[] calldata proof,
-        uint256 numberOfLeaves,
-        uint256 leafIndex,
-        bytes32 leafHash
-    ) internal pure returns (bytes32) {
+    function processProofCalldata(bytes32[] calldata proof, uint256 numberOfLeaves, uint256 leafIndex, bytes32 leafHash)
+        internal
+        pure
+        returns (bytes32)
+    {
         uint256 position = leafIndex;
         uint256 width = numberOfLeaves;
         bytes32 computed = leafHash;

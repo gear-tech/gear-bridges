@@ -15,6 +15,7 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber,
 };
+use actix::Actor;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::PollingEthApi;
 use primitive_types::{H160, H256};
@@ -64,6 +65,12 @@ impl Relayer {
         storage_path: String,
         genesis_time: u64,
     ) -> anyhow::Result<Self> {
+        let gear_api_actor = crate::message_relayer::eth_to_gear::api_provider::GearApiActor::new(
+            api_provider.client().api,
+            suri.clone(),
+            historical_proxy_address.into(),
+        )
+        .start();
         let gear_block_listener = GearBlockListener::new(api_provider.clone(), Arc::new(NoStorage));
 
         let from_eth_block = eth_api.finalized_block().await?.header.number;
@@ -104,6 +111,7 @@ impl Relayer {
             eth_api,
             historical_proxy_address,
             suri,
+            gear_api_actor,
         );
 
         let tx_manager = TransactionManager::new(storage.clone());

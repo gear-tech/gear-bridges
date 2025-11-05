@@ -57,6 +57,7 @@ uuid.workspace = true
 chrono.workspace = true
 zeroize.workspace = true
 actix-web.workspace = true
+actix.workspace = true
 async-trait.workspace = true
 
 [build-dependencies]

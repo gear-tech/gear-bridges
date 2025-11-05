@@ -4,22 +4,21 @@ use crate::{
     common,
     message_relayer::{
         common::{EthereumSlotNumber, TxHashWithSlot},
-        eth_to_gear::api_provider::ApiProviderConnection,
+        eth_to_gear::api_provider::{ApiProviderConnection, GearApiActor, GetCheckpointSlot},
     },
 };
+use actix::Addr;
 use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
 use anyhow::Context;
-use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
-use eth_events_electra_client::{
-    traits::EthereumEventClient, BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent,
-};
+use checkpoint_light_client_client::ServiceCheckpointFor;
+use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::{beacon, tree_hash::TreeHash, utils as eth_utils, utils::MerkleProof};
 use futures::executor::block_on;
-use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
+use historical_proxy_client::HistoricalProxy;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use sails_rs::{
@@ -104,6 +103,7 @@ pub struct ProofComposer {
     pub historical_proxy_address: H256,
     pub suri: String,
     pub to_process: Vec<(Uuid, TxHashWithSlot)>,
+    pub gear_actor: Addr<GearApiActor>,
 
     metrics: Metrics,
 }
@@ -121,6 +121,7 @@ impl ProofComposer {
         eth_api: PollingEthApi,
         historical_proxy_address: H256,
         suri: String,
+        gear_actor: Addr<GearApiActor>,
     ) -> Self {
         Self {
             api_provider,
@@ -131,6 +132,7 @@ impl ProofComposer {
             historical_proxy_address,
             suri,
             to_process: Vec::with_capacity(100),
+            gear_actor,
 
             metrics: Metrics::new(),
         }
@@ -160,7 +162,7 @@ impl ProofComposer {
             &gear_api,
             &self.eth_api,
             tx.tx_hash,
-            self.historical_proxy_address.into(),
+            &self.gear_actor,
         )
         .await
         {
@@ -288,7 +290,8 @@ pub async fn compose(
     gear_api: &gclient::GearApi,
     eth_client: &PollingEthApi,
     tx_hash: TxHash,
-    historical_proxy_id: ActorId,
+
+    gear_actor: &Addr<GearApiActor>,
 ) -> anyhow::Result<EthToVaraEvent> {
     let receipt = eth_client
         .get_transaction_receipt(tx_hash)
@@ -322,7 +325,7 @@ pub async fn compose(
         gear_api,
         &beacon_root_parent,
         block_number,
-        historical_proxy_id,
+        gear_actor,
     )
     .await?;
 
@@ -363,13 +366,10 @@ async fn build_inclusion_proof(
     gear_api: &gclient::GearApi,
     beacon_root_parent: &[u8; 32],
     block_number: u64,
-    historical_proxy_id: ActorId,
+
+    gear_actor: &Addr<GearApiActor>,
 ) -> anyhow::Result<BlockInclusionProof> {
     let remoting = GClientRemoting::new(gear_api.clone());
-
-    let historical_proxy = HistoricalProxy::new(remoting.clone());
-    let eth_events = eth_events_electra_client::EthereumEventClient::new(remoting.clone());
-    let service_checkpoint = ServiceCheckpointFor::new(remoting);
 
     let beacon_block_parent = beacon_client
         .get_block_by_hash::<beacon::electra::Block>(beacon_root_parent)
@@ -383,27 +383,8 @@ async fn build_inclusion_proof(
         .await?;
 
     let slot = beacon_block.slot;
-    let gas_limit = gear_api.block_gas_limit()?;
-    let endpoint = historical_proxy
-        .endpoint_for(slot)
-        .recv(historical_proxy_id)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Proxy faield to get endpoint for slot #{slot}: {e:?}"))?;
 
-    let checkpoint_endpoint = eth_events
-        .checkpoint_light_client_address()
-        .recv(endpoint)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint endpoint: {e:?}"))?;
-
-    let (checkpoint_slot, checkpoint) = service_checkpoint
-        .get(slot)
-        .with_gas_limit(gas_limit)
-        .recv(checkpoint_endpoint)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Checkpoint error: {e:?}"))?;
+    let (checkpoint_slot, checkpoint) = gear_actor.send(GetCheckpointSlot { slot }).await??;
 
     let block = BlockGenericForBlockBody {
         slot,

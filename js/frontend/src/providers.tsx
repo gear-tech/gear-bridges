@@ -13,6 +13,7 @@ import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
 import { DEFAULT_NETWORK_TYPE, NETWORK_PRESET, NetworkTypeProvider } from './context/network-type';
+import { NETWORK_TYPE } from './context/network-type/consts';
 import { TokensProvider } from './context/tokens';
 
 function ApiProvider({ children }: ProviderProps) {
@@ -40,10 +41,10 @@ function AlertProvider({ children }: ProviderProps) {
 
 const projectId = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID as string;
 
-const networks: [AppKitNetwork, AppKitNetwork] = [
-  NETWORK_PRESET.MAINNET.ETH_NETWORK,
-  NETWORK_PRESET.TESTNET.ETH_NETWORK,
-];
+const networks: [AppKitNetwork, AppKitNetwork] =
+  DEFAULT_NETWORK_TYPE === NETWORK_TYPE.MAINNET
+    ? [NETWORK_PRESET.MAINNET.ETH_NETWORK, NETWORK_PRESET.TESTNET.ETH_NETWORK]
+    : [NETWORK_PRESET.TESTNET.ETH_NETWORK, NETWORK_PRESET.MAINNET.ETH_NETWORK];
 
 const metadata = {
   name: 'Vara Network Bridge',
@@ -54,9 +55,32 @@ const metadata = {
   ],
 };
 
+// createConfig uses first item in chains as default chain,
+// but WagmiAdapter gets latest stored chain from localStorage
+function setDefaultWagmiChain() {
+  const storage = JSON.parse(localStorage.getItem('wagmi.store') || 'null') as unknown;
+
+  if (
+    typeof storage === 'object' &&
+    storage !== null &&
+    'state' in storage &&
+    typeof storage.state === 'object' &&
+    storage.state !== null &&
+    'chainId' in storage.state
+  ) {
+    storage.state.chainId =
+      NETWORK_PRESET[DEFAULT_NETWORK_TYPE.toUpperCase() as keyof typeof NETWORK_PRESET].ETH_CHAIN_ID;
+
+    localStorage.setItem('wagmi.store', JSON.stringify(storage));
+  }
+}
+
+setDefaultWagmiChain();
+
 const adapter = new WagmiAdapter({
   networks,
   projectId,
+  syncConnectedChain: false,
 
   transports: {
     [NETWORK_PRESET.MAINNET.ETH_CHAIN_ID]: http(NETWORK_PRESET.MAINNET.ETH_NODE_ADDRESS),

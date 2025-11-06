@@ -2,7 +2,7 @@ import { useApi, useAlert } from '@gear-js/react-hooks';
 import { useAppKitNetwork } from '@reown/appkit/react';
 import { PropsWithChildren, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useChainId } from 'wagmi';
+import { useChainId, useConfig } from 'wagmi';
 
 import { logger } from '@/utils';
 
@@ -30,7 +30,8 @@ function useChainIdLogs() {
 
 function NetworkTypeProvider({ children }: PropsWithChildren) {
   const { isApiReady, switchNetwork } = useApi();
-  const ethNetwork = useAppKitNetwork();
+  const appKitNetwork = useAppKitNetwork();
+  const config = useConfig();
   const isLoading = !isApiReady;
 
   useChainIdLogs();
@@ -51,6 +52,12 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  // useSwitchChain switches connector's network if wallet is connected,
+  // so setting config directly to avoid it
+  const switchWagmiNetwork = (chainId: number) => {
+    config.setState((prevConfig) => ({ ...prevConfig, chainId }));
+  };
+
   const switchNetworks = (value: NetworkType) => {
     const NEXT_PRESET = NETWORK_PRESET[value.toUpperCase() as keyof typeof NETWORK_PRESET];
 
@@ -63,7 +70,8 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
 
     Promise.all([
       switchNetwork({ endpoint: NEXT_PRESET.NODE_ADDRESS }),
-      ethNetwork.switchNetwork(NEXT_PRESET.ETH_NETWORK),
+      appKitNetwork.switchNetwork(NEXT_PRESET.ETH_NETWORK),
+      switchWagmiNetwork(NEXT_PRESET.ETH_CHAIN_ID),
     ]).catch((error: Error) => {
       alert.error(`Failed to switch network. ${error.message}`);
       logger.error('Network switch', error);
@@ -73,7 +81,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   const value = useMemo(
     () => ({ networkType, isMainnet, isTestnet, isLoading, NETWORK_PRESET: PRESET, switchNetworks }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [networkType, searchParams, isLoading],
+    [networkType, searchParams, config, isLoading],
   );
 
   return (

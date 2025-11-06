@@ -525,6 +525,9 @@ pub enum ComposedProof {
     },
 }
 
+/// Compose proof for the given transaction.
+///
+/// Instead of returning result directly, it sends it to the specified recipient.
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct ComposeProof {
@@ -533,6 +536,7 @@ pub struct ComposeProof {
     pub recipient: Recipient<ComposedProof>,
 }
 
+/// New checkpoint discovered on Ethereum network.
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct NewCheckpoint {
@@ -558,9 +562,10 @@ impl Handler<NewCheckpoint> for ProofComposerActor {
                 }
             });
 
+        // Send all ready transactions to composer. We do not wait for reply
+        // but instead let composer handle them asynchronously and send replies to specified recipient.
         while let Some((tx_uuid, tx, recipient)) = self.to_process.pop() {
-            let composer = self.composer.clone();
-            composer.do_send(ComposeProof {
+            self.composer.do_send(ComposeProof {
                 tx,
                 tx_uuid,
                 recipient,
@@ -578,8 +583,7 @@ impl Handler<ComposeProof> for ProofComposerActor {
             .filter(|&last_checkpoint| msg.tx.slot_number <= last_checkpoint)
             .is_some()
         {
-            let composer = self.composer.clone();
-            composer.do_send(msg);
+            self.composer.do_send(msg);
         } else {
             log::debug!(
                 "Transaction {} is waiting for checkpoint, adding to queue",
@@ -603,6 +607,9 @@ impl Handler<ComposeProof> for Composer {
         let eth_api = self.eth_api.clone();
         let historical_proxy_address = self.historical_proxy_address;
         let suri = self.suri.clone();
+
+        // Create a future that composes the proof and sends it to the recipient.
+        // Does not block the actor and allows it to process other messages.
         Box::pin(async move {
             match compose(
                 &beacon_client,

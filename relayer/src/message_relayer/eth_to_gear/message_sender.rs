@@ -447,6 +447,8 @@ impl Handler<SendEthToGearMessage> for MessageSenderActor {
         let historical_proxy_address = self.historical_proxy_address;
         let suri = self.suri.clone();
 
+        // Send the message asynchronously in order to not block the actor
+        // and allow sending multiple messages concurrently.
         Box::pin(async move {
             let (_, reply) = match gear_api
                 .send(ProxyRedirect {

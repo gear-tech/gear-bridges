@@ -52,7 +52,7 @@ struct StorageTrieInclusionProof {
 const VOTE_LENGTH_IN_BITS: usize = 424;
 const APPROX_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
-type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
+pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
 #[derive(Clone)]
 pub struct GearApi {
@@ -263,12 +263,11 @@ impl GearApi {
             .await
     }
 
-    /// Returns finality proof for block not earlier `after_block`
-    /// and not later the end of session this block belongs to.
-    pub async fn fetch_finality_proof(
+    /// Returns GRANDPA justification for block not earlier `after_block`
+    pub async fn get_justification(
         &self,
         after_block: H256,
-    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
+    ) -> AnyResult<GrandpaJustification<GearHeader>> {
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self
             .api
@@ -281,21 +280,26 @@ impl GearApi {
         let fetched_block_number = self.block_hash_to_number(finality.block).await?;
         assert!(fetched_block_number >= after_block_number);
 
-        let justification = finality.justification;
-        let justification = GrandpaJustification::<GearHeader>::decode(&mut &justification[..])?;
+        Ok(GrandpaJustification::<GearHeader>::decode(
+            &mut &finality.justification[..],
+        )?)
+    }
 
-        for pc in &justification.commit.precommits {
-            assert_eq!(pc.precommit.target_hash, finality.block);
-            assert_eq!(pc.precommit.target_number, fetched_block_number);
-        }
+    /// Returns finality proof for block not earlier `after_block`
+    /// and not later the end of session this block belongs to.
+    pub async fn fetch_finality_proof(
+        &self,
+        after_block: H256,
+    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
+        let justification = self.get_justification(after_block).await?;
 
-        self.produce_finality_proof(justification).await
+        self.produce_finality_proof(&justification).await
     }
 
     // Produces block finality proof for the given justification.
     pub async fn produce_finality_proof(
         &self,
-        justification: GrandpaJustification<GearHeader>,
+        justification: &GrandpaJustification<GearHeader>,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let block_number = justification.commit.target_number;
         let block_hash = justification.commit.target_hash;
@@ -321,7 +325,7 @@ impl GearApi {
         let pre_commits: Vec<_> = justification
             .commit
             .precommits
-            .into_iter()
+            .iter()
             .map(|pc| dto::PreCommit {
                 public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                 signature: pc.signature.as_inner_ref().0.to_owned(),

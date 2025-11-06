@@ -58,6 +58,7 @@ chrono.workspace = true
 zeroize.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true
+sp-consensus-grandpa = { workspace = true, features = ["std"] }
 
 [build-dependencies]
 cgo_oligami.workspace = true

@@ -25,6 +25,7 @@ impl Serialize for PreCommit {
         let mut state = serializer.serialize_struct("PreCommit", 2)?;
         state.serialize_field("public_key", &hex::encode(self.public_key))?;
         state.serialize_field("signature", &hex::encode(self.signature))?;
+
         state.end()
     }
 }

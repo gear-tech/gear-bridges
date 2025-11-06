@@ -322,7 +322,7 @@ impl MerkleRootRelayer {
                     );
 
                     let block = gear_api.get_block_at(block_hash).await?;
-                    let block = GearBlock::from_subxt_block(block).await?;
+                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
 
                     match self
                         .storage
@@ -485,7 +485,7 @@ impl MerkleRootRelayer {
                     log::info!("Processing block #{block_number}");
                     let block_hash = gear_api.block_number_to_hash(block_number).await?;
                     let block = gear_api.get_block_at(block_hash).await?;
-                    let block = GearBlock::from_subxt_block(block).await?;
+                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
                     let timestamp = gear_api.fetch_timestamp(block.hash()).await?;
 
                     self.try_proof_merkle_root(
@@ -502,7 +502,7 @@ impl MerkleRootRelayer {
                     if block_number >= last_block {
                         log::info!("Reached the latest finalized block, generating merkle-root for it: #{last_block}");
                         let block = gear_api.get_block_at(last_block_hash).await?;
-                        let block = GearBlock::from_subxt_block(block).await?;
+                        let block = GearBlock::from_subxt_block(&gear_api, block).await?;
                         self.try_proof_merkle_root(
                             &mut prover,
                             &mut authority_set_sync,
@@ -525,7 +525,7 @@ impl MerkleRootRelayer {
                     // max_block_number of MessageQueue contract minus some safety margin.
                     let block_hash = gear_api.block_number_to_hash(target_block).await?;
                     let block = gear_api.get_block_at(block_hash).await?;
-                    let block = GearBlock::from_subxt_block(block).await?;
+                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
                     let timestamp = gear_api.fetch_timestamp(block.hash()).await?;
 
                     self.try_proof_merkle_root(
@@ -542,7 +542,7 @@ impl MerkleRootRelayer {
                     if target_block >= last_block {
                         log::info!("Reached the latest finalized block, generating merkle-root for it: #{last_block}");
                         let block = gear_api.get_block_at(last_block_hash).await?;
-                        let block = GearBlock::from_subxt_block(block).await?;
+                        let block = GearBlock::from_subxt_block(&gear_api, block).await?;
                         self.try_proof_merkle_root(
                             &mut prover,
                             &mut authority_set_sync,
@@ -615,6 +615,7 @@ impl MerkleRootRelayer {
 
         http: &mut UnboundedReceiver<MerkleRootsRequest>,
     ) -> anyhow::Result<bool> {
+        let client = self.api_provider.client();
         tokio::select! {
             _ = self.save_interval.tick() => {
                 log::trace!("60 seconds passed, saving current state");
@@ -707,7 +708,7 @@ impl MerkleRootRelayer {
                                 let api = self.api_provider.client();
                                 let block_hash = api.block_number_to_hash(block_number).await?;
                                 let block = api.get_block_at(block_hash).await?;
-                                let block = GearBlock::from_subxt_block(block).await?;
+                                let block = GearBlock::from_subxt_block(&client, block).await?;
                                 let timestamp = api.fetch_timestamp(block.hash()).await?;
 
                                 match self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes, timestamp).await {
@@ -760,7 +761,7 @@ impl MerkleRootRelayer {
                         if let Some(bridging_payment_address) = self.options.bridging_payment_address {
                             for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
                                 let pblock = self.api_provider.client().get_block_at(pblock).await?;
-                                let pblock = GearBlock::from_subxt_block(pblock).await?;
+                                let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
                                 log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
                                 let timestamp = self.api_provider.client().fetch_timestamp(pblock.hash()).await?;
                                 self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes, timestamp).await?;
@@ -1012,7 +1013,7 @@ impl MerkleRootRelayer {
             match storage::queue_merkle_root_changed(&block) {
                 Some(merkle_root) => merkle_root,
                 None => {
-                    log::debug!(
+                    log::trace!(
                         "Skipping block #{} as there are no new messages",
                         block.number()
                     );
@@ -1033,7 +1034,7 @@ impl MerkleRootRelayer {
             None => self
                 .api_provider
                 .client()
-                .fetch_finality_proof(block.hash())
+                .produce_finality_proof(&block.grandpa_justification)
                 .await
                 .with_context(|| {
                     format!(

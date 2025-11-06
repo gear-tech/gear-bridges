@@ -78,8 +78,10 @@ impl MessageDataExtractor {
         let block_events = BlockEvents::new(block).await?;
         let events = block_events.events()?;
 
+        let justification = gear_api.get_justification(block_hash).await?;
+
         let block_data = (
-            GearBlock::new(header, events),
+            GearBlock::new(header, events, justification),
             AuthoritySetId(authority_set_id),
         );
         self.blocks.push(block_data.clone());

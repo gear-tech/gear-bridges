@@ -199,8 +199,12 @@ impl<T: Storage> UnprocessedBlocksStorage for T {
         self.block_storage().unprocessed_blocks().await
     }
 
-    async fn add_block(&self, block: &GearBlock) {
-        let _ = block;
+    async fn add_block(
+        &self,
+        _api: &gear_rpc_client::GearApi,
+        _block: &GearBlock,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 

@@ -71,12 +71,7 @@ impl Relayer {
         storage_path: String,
         genesis_time: u64,
     ) -> anyhow::Result<Self> {
-        let gear_api_actor = GearApiActor::new(
-            api_provider.client().api,
-            suri.clone(),
-            historical_proxy_address.into(),
-        )
-        .start();
+        let gear_api_actor = GearApiActor::new(api_provider.client().api).start();
 
         let gear_block_listener = GearBlockListener::new(
             api_provider.clone(),

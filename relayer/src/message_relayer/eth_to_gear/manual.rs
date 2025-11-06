@@ -38,12 +38,7 @@ pub async fn relay(
 
     tx_hash: TxHash,
 ) -> AnyResult<()> {
-    let gear_actor = GearApiActor::new(
-        provider_connection.client().api,
-        gear_suri.clone(),
-        historical_proxy_address.into(),
-    )
-    .start();
+    let gear_actor = GearApiActor::new(provider_connection.client().api).start();
 
     let tx = eth_api
         .get_transaction_by_hash(tx_hash)

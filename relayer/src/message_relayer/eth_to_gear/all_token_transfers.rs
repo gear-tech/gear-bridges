@@ -67,8 +67,6 @@ impl Relayer {
     ) -> anyhow::Result<Self> {
         let gear_api_actor = crate::message_relayer::eth_to_gear::api_provider::GearApiActor::new(
             api_provider.client().api,
-            suri.clone(),
-            historical_proxy_address.into(),
         )
         .start();
         let gear_block_listener = GearBlockListener::new(api_provider.clone(), Arc::new(NoStorage));

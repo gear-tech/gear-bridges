@@ -1,6 +1,5 @@
 use crate::{
     cli::{GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS},
-    common::{BASE_RETRY_DELAY, MAX_RETRIES},
     hex_utils,
     merkle_roots::{authority_set_sync::AuthoritySetSyncIo, prover::FinalityProverIo},
     message_relayer::{
@@ -140,8 +139,6 @@ impl Relayer {
             .await
     }
 }
-
-const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 
 impl_metered_service!(
     struct Metrics {
@@ -573,9 +570,10 @@ impl MerkleRootRelayer {
             .await
         {
             log::error!("Merkle root relayer encountered an error: {err}");
+            Err(err)
         } else {
             log::warn!("Gear block listener connection closed, exiting");
-            return Ok(());
+            Ok(())
         }
     }
 

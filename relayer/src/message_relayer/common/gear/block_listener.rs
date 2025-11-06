@@ -158,19 +158,12 @@ impl BlockListener {
         }
 
         let mut last_finalized_block_number = None;
-        let mut sub = gear_api.subscribe_grandpa_justifications().await?;
+        let mut subscription = gear_api.subscribe_grandpa_justifications().await?;
 
-        while let Some(justification) = sub.next().await {
+        while let Some(justification) = subscription.next().await {
             let justification = justification?;
 
-            let block_hash = justification.commit.target_hash;
-            let block_number = match gear_api.block_hash_to_number(block_hash).await {
-                Ok(number) => number,
-                Err(err) => {
-                    log::error!("Failed to get block number for hash {block_hash:?}: {err}");
-                    continue;
-                }
-            };
+            let block_number = justification.commit.target_number;
 
             // Check if there are missing blocks and fetch them
             if let Some(last_finalized) = last_finalized_block_number {
@@ -198,7 +191,7 @@ impl BlockListener {
                             GearBlock::from_subxt_block(&gear_api, missing_block_data).await?;
                         self.block_storage.add_block(&gear_api, &gear_block).await?;
                         match tx.send(gear_block) {
-                            Ok(_) => (),
+                            Ok(_) => {}
                             Err(broadcast::error::SendError(_)) => {
                                 log::error!(
                                     "No active receivers for Gear block listener, stopping"
@@ -215,7 +208,7 @@ impl BlockListener {
             let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
             self.block_storage.add_block(&gear_api, &gear_block).await?;
             match tx.send(gear_block) {
-                Ok(_) => (),
+                Ok(_) => {}
                 Err(broadcast::error::SendError(_)) => {
                     log::error!("No active receivers for Gear block listener, stopping");
                     return Ok(false);

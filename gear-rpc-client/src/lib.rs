@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Ok, Result as AnyResult};
+use anyhow::{anyhow, Context, Result as AnyResult};
 use blake2::{
     digest::{Update, VariableOutput},
     Blake2bVar,
@@ -53,7 +53,6 @@ const VOTE_LENGTH_IN_BITS: usize = 424;
 const APPROX_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
 pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
-
 
 #[derive(Clone)]
 pub struct GearApi {
@@ -281,9 +280,9 @@ impl GearApi {
         let fetched_block_number = self.block_hash_to_number(finality.block).await?;
         assert!(fetched_block_number >= after_block_number);
 
-        let justification = finality.justification;
-        let justification = GrandpaJustification::<GearHeader>::decode(&mut &justification[..])?;
-        Ok(justification)
+        Ok(GrandpaJustification::<GearHeader>::decode(
+            &mut &finality.justification[..],
+        )?)
     }
 
     /// Returns finality proof for block not earlier `after_block`

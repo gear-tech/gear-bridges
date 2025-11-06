@@ -336,7 +336,8 @@ async fn run() -> AnyResult<()> {
                     match api.bridge_admin().await {
                         Ok(admin) => {
                             log::info!("Bridge admin: {admin}");
-                            excluded_from_fees.insert(admin);
+                            let acc: [u8; 32] = admin.into();
+                            excluded_from_fees.insert(acc.into());
                         }
                         Err(e) => {
                             log::error!("Failed to get bridge admin: {e}");
@@ -346,7 +347,8 @@ async fn run() -> AnyResult<()> {
                     match api.bridge_pauser().await {
                         Ok(pauser) => {
                             log::info!("Bridge pauser: {pauser}");
-                            excluded_from_fees.insert(pauser);
+                            let acc: [u8; 32] = pauser.into();
+                            excluded_from_fees.insert(acc.into());
                         }
                         Err(e) => {
                             log::error!("Failed to get bridge pauser: {e}");
@@ -368,7 +370,8 @@ async fn run() -> AnyResult<()> {
                             .map_err(|e| anyhow!(r#"Failed to decode address "{id}": {e:?}"#))?;
 
                         log::debug!("Account {account_id} is excluded from paying fees");
-                        excluded_from_fees.insert(account_id);
+                        let acc: [u8; 32] = account_id.into();
+                        excluded_from_fees.insert(acc.into());
                     }
                 }
             }

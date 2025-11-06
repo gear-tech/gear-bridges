@@ -182,22 +182,24 @@ zeroize = "1.8.1"
 async-trait = "0.1.88"
 url = "2.5.7"
 # Gear/Substrate deps
-gprimitives = "1.9.2"
-gstd = { version = "1.9.2", features = ["nightly"] }
-gtest = "1.9.2"
-gear-wasm-builder = { version = "1.9.2", default-features = false }
-gsdk = "1.9.2"
-gclient = "1.9.2"
-gear-core = "1.9.2"
-gbuiltin-bls381 = "1.9.2"
-gbuiltin-eth-bridge = "1.9.2"
-pallet-gear-eth-bridge-primitives = "1.9.2"
+gprimitives = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
+gstd = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3", features = [
+    "nightly",
+] }
+gtest = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
+gear-wasm-builder = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3", default-features = false }
+gsdk = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
+gclient = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
+gear-core = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
+gbuiltin-bls381 = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
+gbuiltin-eth-bridge = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
+pallet-gear-eth-bridge-primitives = { git = "https://github.com/gear-tech/gear.git", rev = "8cf962cbb036fc8b1400900fb560b33b8261bcc3" }
 # TODO: remove idl-gen and client-gen
-sails-idl-gen = { version = "0.9.2" }
-sails-client-gen = { version = "0.9.2" }
-sails-rs = { version = "0.9.2" }
-awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", rev = "269014d", default-features = false }
-awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", rev = "269014d", default-features = false, features = [
+sails-idl-gen = { git = "https://github.com/gear-tech/sails.git", branch = "ap-git-gear" }
+sails-client-gen = { git = "https://github.com/gear-tech/sails.git", branch = "ap-git-gear" }
+sails-rs = { git = "https://github.com/gear-tech/sails.git", branch = "ap-git-gear" }
+awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", branch = "ap-git-gear", default-features = false }
+awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", branch = "ap-git-gear", default-features = false, features = [
     "vft",
     "vft-admin",
     "vft-extension",

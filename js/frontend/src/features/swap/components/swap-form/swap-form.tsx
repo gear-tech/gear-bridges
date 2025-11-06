@@ -1,14 +1,12 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
-import { WalletModal } from '@gear-js/wallet-connect';
-import { useAppKit } from '@reown/appkit/react';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
 
 import { Input } from '@/components';
 import { useNetworkType } from '@/context/network-type';
 import { TokenPrice } from '@/features/token-price';
-import { useEthAccount, useModal, useVaraSymbol } from '@/hooks';
+import { useEthAccount, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
@@ -19,6 +17,7 @@ import { UseSendTxs, UseAccountBalance, UseFTBalance, UseFee, FormattedValues, U
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { Settings } from '../settings';
+import { ConnectWalletButton, SwitchEthWalletNetworkButton } from '../submit-button';
 import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
@@ -47,9 +46,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const isNetworkAccountConnected = (network.isVara && Boolean(account)) || (!network.isVara && ethAccount.isConnected);
-
-  const { open: openEthWalletModal } = useAppKit();
-  const [isSubstrateWalletModalOpen, openSubstrateWalletModal, closeSubstrateWalletModal] = useModal();
+  const isValidEthNetwork = ethAccount.chainId === NETWORK_PRESET.ETH_CHAIN_ID;
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
@@ -137,14 +134,18 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     return 'Transfer';
   };
 
-  const handleConnectWalletButtonClick = () => {
-    const openWalletModal = network.isVara ? openSubstrateWalletModal : openEthWalletModal;
-
-    void openWalletModal();
-  };
-
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
   const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...sendTxs} />;
+
+  const renderButton = () => {
+    if (isNetworkAccountConnected) {
+      if (!network.isVara && !isValidEthNetwork) return <SwitchEthWalletNetworkButton />;
+
+      return <Button type="submit" text={getButtonText()} disabled={!isEnoughBalance()} isLoading={isLoading} block />;
+    }
+
+    return <ConnectWalletButton />;
+  };
 
   return (
     <>
@@ -217,15 +218,9 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
             time={time}
           />
 
-          {isNetworkAccountConnected ? (
-            <Button type="submit" text={getButtonText()} disabled={!isEnoughBalance()} isLoading={isLoading} block />
-          ) : (
-            <Button text="Connect Wallet" onClick={handleConnectWalletButtonClick} block />
-          )}
+          {renderButton()}
         </form>
       </FormProvider>
-
-      {isSubstrateWalletModalOpen && <WalletModal close={closeSubstrateWalletModal} />}
 
       {/* passing renderProgressBar explicitly to avoid state closure */}
       {transactionModal && <TransactionModal renderProgressBar={renderProgressBar} {...transactionModal} />}

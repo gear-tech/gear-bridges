@@ -4,6 +4,7 @@ import { PropsWithChildren, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useChainId, useConfig } from 'wagmi';
 
+import { useEthAccount } from '@/hooks';
 import { logger } from '@/utils';
 
 import {
@@ -21,11 +22,13 @@ import { getNetworkTypeFromUrl } from './utils';
 function useChainIdLogs() {
   const appKitNetwork = useAppKitNetwork();
   const wagmiChainId = useChainId();
+  const ethAccount = useEthAccount();
 
   useEffect(() => {
     logger.info('AppKit Network Chain ID: ', appKitNetwork.chainId);
     logger.info('Wagmi Chain ID: ', wagmiChainId);
-  }, [appKitNetwork.chainId, wagmiChainId]);
+    logger.info('Connector Chain ID: ', ethAccount.chainId);
+  }, [appKitNetwork.chainId, wagmiChainId, ethAccount.chainId]);
 }
 
 function NetworkTypeProvider({ children }: PropsWithChildren) {
@@ -62,6 +65,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     const NEXT_PRESET = NETWORK_PRESET[value.toUpperCase() as keyof typeof NETWORK_PRESET];
 
     setNetworkType(value);
+    switchWagmiNetwork(NEXT_PRESET.ETH_CHAIN_ID);
 
     searchParams.set(NETWORK_SEARCH_PARAM, value);
     setSearchParams(searchParams);
@@ -71,7 +75,6 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     Promise.all([
       switchNetwork({ endpoint: NEXT_PRESET.NODE_ADDRESS }),
       appKitNetwork.switchNetwork(NEXT_PRESET.ETH_NETWORK),
-      switchWagmiNetwork(NEXT_PRESET.ETH_CHAIN_ID),
     ]).catch((error: Error) => {
       alert.error(`Failed to switch network. ${error.message}`);
       logger.error('Network switch', error);

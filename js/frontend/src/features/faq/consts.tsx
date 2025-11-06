@@ -174,8 +174,8 @@ const QUESTIONS = [
       <>
         <ul>
           <li>
-            <span className={styles.bold}>On the transport layer:</span> Technically yes — arbitrary data can be
-            transported.
+            <span className={styles.bold}>On the transport layer:</span> Technically yes — the bridge enables
+            transmission of arbitrary data between applications running on Vara network and Ethereum.
           </li>
           <li>
             <span className={styles.bold}>On the bridging layer:</span> Currently, only fungible tokens (ERC-20 style)
@@ -184,9 +184,37 @@ const QUESTIONS = [
         </ul>
 
         <p>
-          <span className={styles.bold}>Good news:</span> Adding support for NFTs and other asset types is
-          straightforward. If you are interested in integrating your assets,{' '}
-          <span className={styles.bold}>please contact us via our official social media channels.</span>
+          <span className={styles.bold}>Good news:</span> The bridge supports cross-chain communication with arbitrary
+          data. Developer guides with integration examples:
+        </p>
+
+        <ul>
+          <li>
+            <a
+              href="https://wiki.gear.foundation/docs/bridge/developer-guide-vara-eth"
+              target="_blank"
+              rel="noreferrer"
+              className="faqLink">
+              Vara <ArrowsDoubleSVG className={styles.inlineIcon} /> Ethereum
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://wiki.gear.foundation/docs/bridge/developer-guide-eth-vara"
+              target="_blank"
+              rel="noreferrer"
+              className="faqLink">
+              Ethereum <ArrowsDoubleSVG className={styles.inlineIcon} /> Vara
+            </a>
+          </li>
+        </ul>
+
+        <p>
+          For questions or assistance, contact via official social media{' '}
+          <a href="https://vara.network" target="_blank" rel="noreferrer">
+            channels
+          </a>
+          .
         </p>
       </>
     ),

@@ -1,6 +1,5 @@
 use crate::{
     cli::{GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS},
-    common::{BASE_RETRY_DELAY, MAX_RETRIES},
     hex_utils,
     merkle_roots::{authority_set_sync::AuthoritySetSyncIo, prover::FinalityProverIo},
     message_relayer::{
@@ -140,8 +139,6 @@ impl Relayer {
             .await
     }
 }
-
-const MIN_MAIN_LOOP_DURATION: Duration = Duration::from_secs(5);
 
 impl_metered_service!(
     struct Metrics {
@@ -562,51 +559,21 @@ impl MerkleRootRelayer {
             }
         }
 
-        let mut attempts = 0;
-
-        loop {
-            attempts += 1;
-            let now = Instant::now();
-
-            if let Err(err) = self
-                .run_inner(
-                    &mut submitter,
-                    &mut prover,
-                    &mut blocks_rx,
-                    &mut authority_set_sync,
-                    &mut http,
-                )
-                .await
-            {
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                    "Main loop error (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}..."
-                );
-                if attempts >= MAX_RETRIES {
-                    log::error!("Max attempts reached. Exiting...");
-                    return Err(err.context("Max attempts reached"));
-                }
-                tokio::time::sleep(delay).await;
-
-                match self.api_provider.reconnect().await {
-                    Ok(()) => {
-                        log::info!("Merkle root relayer reconnected successfully");
-                    }
-
-                    Err(err) => {
-                        log::error!("Failed to reconnect to Gear API: {err}");
-                        return Err(err.context("Failed to reconnect to Gear API"));
-                    }
-                }
-            } else {
-                log::warn!("Gear block listener connection closed, exiting");
-                return Ok(());
-            }
-
-            let main_loop_duration = now.elapsed();
-            if main_loop_duration < MIN_MAIN_LOOP_DURATION {
-                tokio::time::sleep(MIN_MAIN_LOOP_DURATION - main_loop_duration).await;
-            }
+        if let Err(err) = self
+            .run_inner(
+                &mut submitter,
+                &mut prover,
+                &mut blocks_rx,
+                &mut authority_set_sync,
+                &mut http,
+            )
+            .await
+        {
+            log::error!("Merkle root relayer encountered an error: {err}");
+            Err(err)
+        } else {
+            log::warn!("Gear block listener connection closed, exiting");
+            Ok(())
         }
     }
 

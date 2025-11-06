@@ -163,6 +163,7 @@ impl BlockListener {
         while let Some(justification) = subscription.next().await {
             let justification = justification?;
 
+            let block_hash = justification.commit.target_hash;
             let block_number = justification.commit.target_number;
 
             // Check if there are missing blocks and fetch them

@@ -226,7 +226,7 @@ impl GearApi {
             let hex_string = res?;
             let bytes = hex::decode(&hex_string[2..]).context("failed to decoded hex")?;
             let justification = GrandpaJustification::<GearHeader>::decode(&mut &bytes[..])?;
-            
+
             Ok(justification)
         });
 

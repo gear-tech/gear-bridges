@@ -91,7 +91,13 @@ function GetEthTokenBalanceButton({
   const lowerCaseSymbol = symbol.toLowerCase();
 
   if (lowerCaseSymbol.includes('eth'))
-    return <LinkButton type="external" to="https://hoodi-faucet.pk910.de" {...BUTTON_PROPS} />;
+    return (
+      <LinkButton
+        type="external"
+        to="https://cloud.google.com/application/web3/faucet/ethereum/hoodi"
+        {...BUTTON_PROPS}
+      />
+    );
 
   if (!lowerCaseSymbol.includes('usdc') && !lowerCaseSymbol.includes('usdt')) return;
 

@@ -19,7 +19,7 @@ function EthNetworkMismatchModal({ onButtonClick }: Props) {
   return (
     <Modal heading="Network Mismatch" className={cx('unsupportedNetworkModal', styles.modal)} close={() => {}}>
       <div className={styles.text}>
-        <p>You are connected to different Ethereum network.</p>
+        <p>You are connected to a different Ethereum network.</p>
 
         <p>
           Switch to {NETWORK_PRESET.ETH_NETWORK.name} {isMainnet ? 'Mainnet' : 'Testnet'} to match the selected network

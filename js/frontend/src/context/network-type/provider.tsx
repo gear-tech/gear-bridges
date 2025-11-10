@@ -63,7 +63,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   };
 
   const syncEthWalletNetwork = () => {
-    if (ethAccount.chainId === PRESET.ETH_CHAIN_ID) return;
+    if (ethAccount.chainId === PRESET.ETH_CHAIN_ID) return Promise.resolve();
 
     return switchChainAsync({ chainId: PRESET.ETH_CHAIN_ID });
   };

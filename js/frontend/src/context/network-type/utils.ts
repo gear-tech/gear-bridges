@@ -1,6 +1,6 @@
 import * as ethNetworks from '@reown/appkit/networks';
 
-import { NETWORK_SEARCH_PARAM, NETWORK_TYPE } from './consts';
+import { NETWORK_LOCAL_STORAGE_KEY, NETWORK_SEARCH_PARAM, NETWORK_TYPE } from './consts';
 
 const getEthNetwork = (id: number) => {
   const result = Object.values(ethNetworks)
@@ -19,15 +19,21 @@ function getNetworkEnv<T>(name: string, format?: (value: string) => T) {
 
   if (!value) throw new Error(`Environment variable ${name} is not defined`);
 
-  const [MAINNET, TESTNET] = value.split(',');
+  const [MAINNET, TESTNET] = value.split(',').map((v) => v.trim());
 
-  if (!MAINNET) throw new Error(`Env ${name} is missing Mainnet value: ${value}`);
-  if (!TESTNET) throw new Error(`Env ${name} is missing Testnet value: ${value}`);
+  if (!MAINNET) throw new Error(`Env VITE_${name} is missing Mainnet value: ${value}`);
+  if (!TESTNET) throw new Error(`Env VITE_${name} is missing Testnet value: ${value}`);
 
   if (format) return { MAINNET: format(MAINNET), TESTNET: format(TESTNET) } as const;
 
   return { MAINNET, TESTNET } as const;
 }
+
+const getNetworkTypeFromStorage = () => {
+  const value = localStorage.getItem(NETWORK_LOCAL_STORAGE_KEY);
+
+  if (value === NETWORK_TYPE.MAINNET || value === NETWORK_TYPE.TESTNET) return value;
+};
 
 const getNetworkTypeFromUrl = (params = new URLSearchParams(window.location.search)) => {
   const network = params.get(NETWORK_SEARCH_PARAM);
@@ -37,4 +43,4 @@ const getNetworkTypeFromUrl = (params = new URLSearchParams(window.location.sear
   return network;
 };
 
-export { getEthNetwork, getNetworkEnv, getNetworkTypeFromUrl };
+export { getEthNetwork, getNetworkEnv, getNetworkTypeFromStorage, getNetworkTypeFromUrl };

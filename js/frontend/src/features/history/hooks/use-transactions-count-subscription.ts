@@ -37,8 +37,8 @@ function useTransactionsCountSubscription() {
     );
 
     return () => {
-      void wsClient.dispose();
       unsubscribe();
+      void wsClient.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [NETWORK_PRESET.INDEXER_ADDRESS]);

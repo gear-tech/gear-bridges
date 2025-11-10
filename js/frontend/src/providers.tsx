@@ -12,19 +12,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
-import { DEFAULT_NETWORK_TYPE, NETWORK_PRESET, NetworkTypeProvider } from './context/network-type';
-import { NETWORK_TYPE } from './context/network-type/consts';
+import {
+  DEFAULT_NETWORK_PRESET,
+  DEFAULT_NETWORK_TYPE,
+  NETWORK_PRESET,
+  NETWORK_TYPE,
+  NetworkTypeProvider,
+} from './context/network-type';
 import { TokensProvider } from './context/tokens';
 
 function ApiProvider({ children }: ProviderProps) {
-  return (
-    <GearApiProvider
-      initialArgs={{
-        endpoint: NETWORK_PRESET[DEFAULT_NETWORK_TYPE.toUpperCase() as keyof typeof NETWORK_PRESET].NODE_ADDRESS,
-      }}>
-      {children}
-    </GearApiProvider>
-  );
+  return <GearApiProvider initialArgs={{ endpoint: DEFAULT_NETWORK_PRESET.NODE_ADDRESS }}>{children}</GearApiProvider>;
 }
 
 function AccountProvider({ children }: ProviderProps) {
@@ -68,8 +66,7 @@ function setDefaultWagmiChain() {
     storage.state !== null &&
     'chainId' in storage.state
   ) {
-    storage.state.chainId =
-      NETWORK_PRESET[DEFAULT_NETWORK_TYPE.toUpperCase() as keyof typeof NETWORK_PRESET].ETH_CHAIN_ID;
+    storage.state.chainId = DEFAULT_NETWORK_PRESET.ETH_CHAIN_ID;
 
     localStorage.setItem('wagmi.store', JSON.stringify(storage));
   }

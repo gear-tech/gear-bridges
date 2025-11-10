@@ -9,6 +9,7 @@ type Value = {
   isTestnet: boolean;
   isLoading: boolean;
   switchNetworks: (value: NetworkType) => void;
+  syncEthWalletNetwork: () => Promise<unknown> | undefined;
 };
 
 const Context = createContext<Value | undefined>(undefined);

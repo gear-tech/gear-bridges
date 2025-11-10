@@ -17,7 +17,7 @@ import { UseSendTxs, UseAccountBalance, UseFTBalance, UseFee, FormattedValues, U
 import { AmountInput } from '../amount-input';
 import { Balance } from '../balance';
 import { Settings } from '../settings';
-import { ConnectWalletButton, SwitchEthWalletNetworkButton } from '../submit-button';
+import { ConnectWalletButton } from '../submit-button';
 import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
@@ -46,7 +46,6 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const { account } = useAccount();
   const ethAccount = useEthAccount();
   const isNetworkAccountConnected = (network.isVara && Boolean(account)) || (!network.isVara && ethAccount.isConnected);
-  const isValidEthNetwork = ethAccount.chainId === NETWORK_PRESET.ETH_CHAIN_ID;
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
@@ -137,16 +136,6 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
   const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...sendTxs} />;
 
-  const renderButton = () => {
-    if (isNetworkAccountConnected) {
-      if (!network.isVara && !isValidEthNetwork) return <SwitchEthWalletNetworkButton />;
-
-      return <Button type="submit" text={getButtonText()} disabled={!isEnoughBalance()} isLoading={isLoading} block />;
-    }
-
-    return <ConnectWalletButton />;
-  };
-
   return (
     <>
       <FormProvider {...form}>
@@ -218,7 +207,11 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
             time={time}
           />
 
-          {renderButton()}
+          {isNetworkAccountConnected ? (
+            <Button type="submit" text={getButtonText()} disabled={!isEnoughBalance()} isLoading={isLoading} block />
+          ) : (
+            <ConnectWalletButton />
+          )}
         </form>
       </FormProvider>
 

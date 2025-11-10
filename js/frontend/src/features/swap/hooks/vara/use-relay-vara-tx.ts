@@ -14,7 +14,7 @@ type Params = {
 };
 
 function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
-  const { NETWORK_PRESET } = useNetworkType();
+  const { NETWORK_PRESET, syncEthWalletNetwork } = useNetworkType();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const initArchiveApi = useInitArchiveApi();
@@ -26,6 +26,8 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
     const archiveApi = await initArchiveApi();
 
     try {
+      await syncEthWalletNetwork();
+
       const { error, success } = await relayVaraToEth({
         nonce,
         blockNumber,

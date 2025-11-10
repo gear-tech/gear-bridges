@@ -2,7 +2,7 @@ import { useApi, useAlert } from '@gear-js/react-hooks';
 import { useAppKitNetwork } from '@reown/appkit/react';
 import { PropsWithChildren, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useChainId, useConfig } from 'wagmi';
+import { useChainId, useConfig, useSwitchChain } from 'wagmi';
 
 import { useEthAccount } from '@/hooks';
 import { logger } from '@/utils';
@@ -33,19 +33,20 @@ function useChainIdLogs() {
 
 function NetworkTypeProvider({ children }: PropsWithChildren) {
   const { isApiReady, switchNetwork } = useApi();
-  const appKitNetwork = useAppKitNetwork();
-  const config = useConfig();
-  const isLoading = !isApiReady;
-
-  useChainIdLogs();
-
+  const ethAccount = useEthAccount();
+  const { switchChainAsync } = useSwitchChain();
   const [searchParams, setSearchParams] = useSearchParams();
   const alert = useAlert();
+
+  const config = useConfig();
+  const isLoading = !isApiReady;
 
   const [networkType, setNetworkType] = useState(DEFAULT_NETWORK_TYPE);
   const isMainnet = networkType === NETWORK_TYPE.MAINNET;
   const isTestnet = networkType === NETWORK_TYPE.TESTNET;
   const PRESET = NETWORK_PRESET[networkType.toUpperCase() as keyof typeof NETWORK_PRESET];
+
+  useChainIdLogs();
 
   useEffect(() => {
     if (getNetworkTypeFromUrl(searchParams)) return;
@@ -61,6 +62,12 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     config.setState((prevConfig) => ({ ...prevConfig, chainId }));
   };
 
+  const syncEthWalletNetwork = () => {
+    if (ethAccount.chainId === PRESET.ETH_CHAIN_ID) return;
+
+    return switchChainAsync({ chainId: PRESET.ETH_CHAIN_ID });
+  };
+
   const switchNetworks = (value: NetworkType) => {
     const NEXT_PRESET = NETWORK_PRESET[value.toUpperCase() as keyof typeof NETWORK_PRESET];
 
@@ -72,19 +79,24 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
 
     localStorage.setItem(NETWORK_LOCAL_STORAGE_KEY, value);
 
-    Promise.all([
-      switchNetwork({ endpoint: NEXT_PRESET.NODE_ADDRESS }),
-      appKitNetwork.switchNetwork(NEXT_PRESET.ETH_NETWORK),
-    ]).catch((error: Error) => {
+    switchNetwork({ endpoint: NEXT_PRESET.NODE_ADDRESS }).catch((error: Error) => {
       alert.error(`Failed to switch network. ${error.message}`);
       logger.error('Network switch', error);
     });
   };
 
   const value = useMemo(
-    () => ({ networkType, isMainnet, isTestnet, isLoading, NETWORK_PRESET: PRESET, switchNetworks }),
+    () => ({
+      networkType,
+      isMainnet,
+      isTestnet,
+      isLoading,
+      NETWORK_PRESET: PRESET,
+      switchNetworks,
+      syncEthWalletNetwork,
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [networkType, searchParams, config, isLoading],
+    [networkType, searchParams, config, isLoading, ethAccount.chainId],
   );
 
   return (

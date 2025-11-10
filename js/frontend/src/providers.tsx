@@ -75,21 +75,7 @@ function setDefaultWagmiChain() {
   }
 }
 
-function setDefaultAppkitChain() {
-  const id = localStorage.getItem('@appkit/active_caip_network_id');
-
-  if (id) {
-    const splitted = id.split(':');
-
-    splitted[1] =
-      NETWORK_PRESET[DEFAULT_NETWORK_TYPE.toUpperCase() as keyof typeof NETWORK_PRESET].ETH_CHAIN_ID.toString();
-
-    localStorage.setItem('@appkit/active_caip_network_id', splitted.join(':'));
-  }
-}
-
 setDefaultWagmiChain();
-setDefaultAppkitChain();
 
 const adapter = new WagmiAdapter({
   networks,

@@ -697,6 +697,18 @@ impl MerkleRootRelayer {
                         }
                     }
                 }
+
+                let last_block = client.latest_finalized_block().await?;
+                let last_block_number = client.block_hash_to_number(last_block).await?;
+                if let Some(last_submitted) = self.last_submitted_block {
+                    if last_submitted + self.options.critical_threshold <= last_block_number {
+                        log::warn!("Last submitted block {last_submitted} is older than latest finalized block {last_block_number} by more than {}, generating merkle root for latest finalized block", self.options.critical_threshold);
+                        let block = client.get_block_at(last_block).await?;
+                        let block = GearBlock::from_subxt_block(&client, block).await?;
+
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await?;
+                    }
+                }
             }
 
             req = http.recv() => {

@@ -142,9 +142,9 @@ impl Relayer {
 
 impl_metered_service!(
     struct Metrics {
-        last_submitted_timestamp: IntGauge = IntGauge::new(
-            "merkle_root_relayer_last_submitted_timestamp",
-            "Timestamp of the last submitted merkle root"
+        last_submitted_block: IntGauge = IntGauge::new(
+            "merkle_root_relayer_last_submitted_block",
+            "Block number of the last submitted merkle root"
         ),
         first_pending_timestamp: IntGauge = IntGauge::new(
             "merkle_root_relayer_first_pending_timestamp",
@@ -179,7 +179,7 @@ pub struct MerkleRootRelayer {
     /// Set of blocks that are waiting for authority set sync.
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
-    last_submitted_timestamp: Option<u64>,
+    last_submitted_block: Option<u32>,
     first_pending_timestamp: Option<Instant>,
     queued_root_timestamps: VecDeque<Instant>,
     merkle_root_batch: Vec<PendingMerkleRoot>,
@@ -218,7 +218,7 @@ impl MerkleRootRelayer {
 
             waiting_for_authority_set_sync: BTreeMap::new(),
 
-            last_submitted_timestamp: None,
+            last_submitted_block: None,
             first_pending_timestamp: None,
             queued_root_timestamps: VecDeque::with_capacity(8),
             merkle_root_batch: Vec::with_capacity(8),
@@ -294,14 +294,12 @@ impl MerkleRootRelayer {
 
         for ((block_number, hash), merkle_root) in roots.drain() {
             let block_hash = merkle_root.block_hash;
-            let timestamp = merkle_root.timestamp;
 
             let mut reinstate = |status: MerkleRootStatus| {
                 self.roots.insert(
                     (block_number, hash),
                     MerkleRoot {
                         queue_id: 0,
-                        timestamp,
                         block_number,
                         block_hash,
                         status,
@@ -474,20 +472,29 @@ impl MerkleRootRelayer {
         if last_block > max_block_number {
             if let Some(max_stored) = max_block_number_in_storage {
                 // If we have some finalized merkle roots in storage, we can start from
-                // max stored + 1 to catch up.
-                let start_block = max_stored + 1;
-                log::info!("Resuming merkle root processing from block #{start_block} to catch up");
-                let mut block_number = start_block;
-                // step is a number of blocks to skip ahead
-                let step = (self.options.critical_threshold.as_secs() / 3) as u32;
-                log::info!("Processing every {step}th block to catch up");
-                loop {
-                    log::info!("Processing block #{block_number}");
-                    let block_hash = gear_api.block_number_to_hash(block_number).await?;
-                    let block = gear_api.get_block_at(block_hash).await?;
-                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
-                    let timestamp = gear_api.fetch_timestamp(block.hash()).await?;
+                // the next block that aligns with our step size to catch up.
+                let step = self.options.critical_threshold;
+                let aligned_start = ((max_stored / step) + 1) * step;
 
+                // Ensure we don't start after the last block
+                let start_block = if aligned_start > last_block {
+                    log::info!("Aligned start block #{aligned_start} is after last block #{last_block}, processing last block only");
+                    last_block
+                } else {
+                    log::info!(
+                        "Resuming merkle root processing from block #{aligned_start} to catch up"
+                    );
+                    aligned_start
+                };
+
+                let mut block_number = start_block;
+                log::info!("Processing every {step}th block to catch up");
+
+                // If we're starting at last_block, process it and finish
+                if start_block == last_block {
+                    log::info!("Processing last block #{last_block}");
+                    let block = gear_api.get_block_at(last_block_hash).await?;
+                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
                     self.try_proof_merkle_root(
                         &mut prover,
                         &mut authority_set_sync,
@@ -495,14 +502,15 @@ impl MerkleRootRelayer {
                         Batch::No,
                         Priority::No,
                         ForceGeneration::Yes,
-                        timestamp,
                     )
                     .await?;
-                    block_number += step;
-                    if block_number >= last_block {
-                        log::info!("Reached the latest finalized block, generating merkle-root for it: #{last_block}");
-                        let block = gear_api.get_block_at(last_block_hash).await?;
+                } else {
+                    loop {
+                        log::info!("Processing block #{block_number}");
+                        let block_hash = gear_api.block_number_to_hash(block_number).await?;
+                        let block = gear_api.get_block_at(block_hash).await?;
                         let block = GearBlock::from_subxt_block(&gear_api, block).await?;
+
                         self.try_proof_merkle_root(
                             &mut prover,
                             &mut authority_set_sync,
@@ -510,15 +518,30 @@ impl MerkleRootRelayer {
                             Batch::No,
                             Priority::No,
                             ForceGeneration::Yes,
-                            timestamp,
                         )
                         .await?;
-                        break;
+
+                        block_number += step;
+                        if block_number >= last_block {
+                            log::info!("Reached the latest finalized block, generating merkle-root for it: #{last_block}");
+                            let block = gear_api.get_block_at(last_block_hash).await?;
+                            let block = GearBlock::from_subxt_block(&gear_api, block).await?;
+                            self.try_proof_merkle_root(
+                                &mut prover,
+                                &mut authority_set_sync,
+                                block,
+                                Batch::No,
+                                Priority::No,
+                                ForceGeneration::Yes,
+                            )
+                            .await?;
+                            break;
+                        }
                     }
                 }
             } else if max_block_number != 0 {
                 let mut target_block = max_block_number.saturating_sub(300);
-                let step = (self.options.critical_threshold.as_secs() / 3) as u32;
+                let step = self.options.critical_threshold;
                 log::info!("No finalized merkle roots in storage, starting from #{target_block}");
                 loop {
                     // If there are no finalized merkle roots in storage, we need to start from
@@ -526,7 +549,6 @@ impl MerkleRootRelayer {
                     let block_hash = gear_api.block_number_to_hash(target_block).await?;
                     let block = gear_api.get_block_at(block_hash).await?;
                     let block = GearBlock::from_subxt_block(&gear_api, block).await?;
-                    let timestamp = gear_api.fetch_timestamp(block.hash()).await?;
 
                     self.try_proof_merkle_root(
                         &mut prover,
@@ -535,7 +557,6 @@ impl MerkleRootRelayer {
                         Batch::No,
                         Priority::No,
                         ForceGeneration::Yes,
-                        timestamp,
                     )
                     .await?;
                     target_block += step;
@@ -550,7 +571,6 @@ impl MerkleRootRelayer {
                             Batch::No,
                             Priority::No,
                             ForceGeneration::Yes,
-                            timestamp,
                         )
                         .await?;
                         break;
@@ -631,7 +651,7 @@ impl MerkleRootRelayer {
                 // update metrics
                 self.metrics.total_merkle_roots.set(self.roots.len() as i64);
                 self.metrics.total_waiting_for_authority_set_sync.set(self.waiting_for_authority_set_sync.values().map(|v| v.len()).sum::<usize>() as i64);
-                self.metrics.last_submitted_timestamp.set(self.last_submitted_timestamp.unwrap_or(0) as i64);
+                self.metrics.last_submitted_block.set(self.last_submitted_block.unwrap_or(0) as i64);
                 self.metrics.first_pending_timestamp.set(self.first_pending_timestamp.map(|t| t.elapsed().as_secs() as i64).unwrap_or(0));
                 self.metrics.batch_size.set(self.merkle_root_batch.len() as i64);
                 if let Some(first) = self.first_pending_timestamp {
@@ -709,9 +729,8 @@ impl MerkleRootRelayer {
                                 let block_hash = api.block_number_to_hash(block_number).await?;
                                 let block = api.get_block_at(block_hash).await?;
                                 let block = GearBlock::from_subxt_block(&client, block).await?;
-                                let timestamp = api.fetch_timestamp(block.hash()).await?;
 
-                                match self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes, timestamp).await {
+                                match self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await {
                                     Ok(Some((_, merkle_root))) => {
                                         if let Some(r) = self.roots.get_mut(&(block_number, merkle_root)) { r.http_requests.push(response) } else {
                                             response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
@@ -749,10 +768,10 @@ impl MerkleRootRelayer {
                     Ok(block) => {
                         let mut force = ForceGeneration::No;
                         let mut batch = Batch::Yes;
-                        let timestamp = self.api_provider.client().fetch_timestamp(block.hash()).await?;
-                        if let Some(last_submitted_timestamp) = self.last_submitted_timestamp {
-                            if last_submitted_timestamp + self.options.critical_threshold.as_secs() <= timestamp {
-                                log::warn!("Last submitted timestamp {last_submitted_timestamp} is older than current block timestamp {timestamp} by more than {threshold:?}, forcing proof generation", threshold = self.options.critical_threshold.as_secs());
+                        let number = block.number();
+                        if let Some(last_submitted_block) = self.last_submitted_block {
+                            if last_submitted_block + self.options.critical_threshold <= number {
+                                log::warn!("Last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation", threshold = self.options.critical_threshold);
                                 force = ForceGeneration::Yes;
                                 batch = Batch::No;
                             }
@@ -763,12 +782,12 @@ impl MerkleRootRelayer {
                                 let pblock = self.api_provider.client().get_block_at(pblock).await?;
                                 let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
                                 log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
-                                let timestamp = self.api_provider.client().fetch_timestamp(pblock.hash()).await?;
-                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes, timestamp).await?;
+
+                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes).await?;
                             }
                         }
 
-                        self.try_proof_merkle_root(prover, authority_set_sync, block, batch, Priority::No, force, timestamp).await?;
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, batch, Priority::No, force,).await?;
                     }
 
                     Err(RecvError::Lagged(n)) => {
@@ -899,8 +918,7 @@ impl MerkleRootRelayer {
 
                         log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
                         while let Some(block) = to_submit.pop() {
-                            let timestamp = self.api_provider.client().fetch_timestamp(block.hash()).await?;
-                            self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::Yes, Priority::No, ForceGeneration::Yes, timestamp).await?;
+                            self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::Yes, Priority::No, ForceGeneration::Yes).await?;
                         }
                     }
                 }
@@ -934,9 +952,9 @@ impl MerkleRootRelayer {
         {
             match response.status {
                 submitter::ResponseStatus::Submitted => {
-                    self.last_submitted_timestamp = match self.last_submitted_timestamp {
-                        Some(ts) if merkle_root.timestamp > ts => Some(merkle_root.timestamp),
-                        _ => Some(merkle_root.timestamp),
+                    self.last_submitted_block = match self.last_submitted_block {
+                        Some(n) if merkle_root.block_number > n => Some(merkle_root.block_number),
+                        _ => Some(merkle_root.block_number),
                     };
                     merkle_root.status = MerkleRootStatus::Finalized;
                     log::info!(
@@ -1002,7 +1020,6 @@ impl MerkleRootRelayer {
         batch: Batch,
         priority: Priority,
         force_generation: ForceGeneration,
-        timestamp: u64,
     ) -> anyhow::Result<Option<(u64, H256)>> {
         let (queue_id, merkle_root) = if force_generation == ForceGeneration::Yes {
             self.api_provider
@@ -1085,15 +1102,15 @@ impl MerkleRootRelayer {
             Ok(inner_proof) => {
                 let block_hash = block.hash();
                 let nonces_count = nonces.len();
-                self.last_submitted_timestamp = match self.last_submitted_timestamp {
-                    Some(ts) if timestamp > ts => Some(timestamp),
-                    _ => Some(timestamp),
+                self.last_submitted_block = match self.last_submitted_block {
+                    Some(n) if block.number() > n => Some(block.number()),
+                    _ => Some(block.number()),
                 };
                 self.roots
                     .entry((block_number, merkle_root))
                     .or_insert(MerkleRoot {
                         queue_id,
-                        timestamp,
+
                         block_number,
                         block_hash,
                         status: MerkleRootStatus::GenerateProof,
@@ -1160,7 +1177,6 @@ impl MerkleRootRelayer {
                         message_nonces: nonces,
                         http_requests: Vec::new(),
                         proof: None,
-                        timestamp,
                         block_finality_proof,
                         block_finality_hash,
                     });
@@ -1177,9 +1193,9 @@ impl MerkleRootRelayer {
                     .entry(signed_by_authority_set_id)
                     .or_insert_with(|| {
                         if force_sync {
-                            self.last_submitted_timestamp = match self.last_submitted_timestamp {
-                                Some(ts) if timestamp > ts => Some(timestamp),
-                                _ => Some(timestamp),
+                            self.last_submitted_block = match self.last_submitted_block {
+                                Some(n) if block.number() > n => Some(block.number()),
+                                _ => Some(block.number()),
                             };
                             authority_set_sync.send(block.clone());
                         }
@@ -1193,7 +1209,7 @@ impl MerkleRootRelayer {
                     (block_number, merkle_root),
                     MerkleRoot {
                         queue_id,
-                        timestamp,
+
                         block_number: block.number(),
                         block_hash: block.hash(),
                         status: MerkleRootStatus::Failed(err.to_string()),
@@ -1221,7 +1237,6 @@ pub struct MerkleRoot {
     pub block_number: u32,
     pub block_hash: H256,
     pub queue_id: u64,
-    pub timestamp: u64,
     pub message_nonces: Vec<U256>,
     #[serde(skip)]
     pub http_requests: Vec<tokio::sync::oneshot::Sender<MerkleRootsResponse>>,
@@ -1238,7 +1253,6 @@ impl Clone for MerkleRoot {
             block_number: self.block_number,
             block_hash: self.block_hash,
             queue_id: self.queue_id,
-            timestamp: self.timestamp,
             message_nonces: self.message_nonces.clone(),
             http_requests: Vec::new(),
             proof: self.proof.clone(),
@@ -1268,13 +1282,15 @@ pub struct MerkleRootRelayerOptions {
     pub confirmations: u64,
     pub count_thread: Option<usize>,
     pub bridging_payment_address: Option<H256>,
-    pub critical_threshold: Duration,
+    /// How many blocks can pass without submitting merkle root
+    /// before we force generation of the proof.
+    pub critical_threshold: u32,
 }
 
 impl MerkleRootRelayerOptions {
     pub fn from_cli(config: &GearEthCoreArgs) -> anyhow::Result<Self> {
         Ok(Self {
-            critical_threshold: config.critical_threshold,
+            critical_threshold: (config.critical_threshold.as_secs() / 3) as u32,
             spike_config: SpikeConfig {
                 timeout: config.spike_timeout,
                 priority_timeout: config.priority_spike_timeout,

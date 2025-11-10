@@ -154,8 +154,8 @@ impl_metered_service!(
             "Total number of pending merkle root submissions",
         ),
         last_submitted_block: IntGauge = IntGauge::new(
-            "merkle_root_relayer_last_submitted_block",
-            "Last submitted merkle root block number",
+            "merkle_root_relayer_last_submitted_block_to_eth",
+            "Last submitted merkle root block number to Ethereum",
         ),
 
         total_gas_used: GenericCounter<AtomicU64> = GenericCounter::new(

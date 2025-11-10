@@ -3,7 +3,7 @@
 Utility for generating payloads for Ethereum contracts
 
 ```bash
-cp deployment.example.toml deployment.toml
+cp deployment.example.mainnet.toml deployment.toml
 # Fill `deployment.toml` with addresses from mainnet!
 
 MAINNET_RPC_URL="https://ethereum-rpc.publicnode.com"

@@ -381,6 +381,7 @@ contract ERC20ManagerTest is Test, Base {
         uint256 amount = 100 * (10 ** circleToken.decimals());
         bytes32 to = 0;
 
+        uint256 balanceBeforeMint = circleToken.balanceOf(address(erc20Manager));
         IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, amount);
         circleToken.approve(address(erc20Manager), amount);
 
@@ -390,7 +391,8 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridging(token, amount, to);
 
         assertEq(circleToken.balanceOf(deploymentArguments.deployerAddress), 0);
-        assertEq(circleToken.balanceOf(address(erc20Manager)), amount);
+        uint256 balanceAfterMint = circleToken.balanceOf(address(erc20Manager));
+        assertEq(balanceAfterMint, balanceBeforeMint + amount);
 
         vm.stopPrank();
     }
@@ -482,6 +484,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 to = 0;
         address bridgingPayment_ = address(bridgingPayment);
 
+        uint256 balanceBeforeMint = tetherToken.balanceOf(address(erc20Manager));
         if (isFork()) {
             ITetherToken(address(tetherToken)).issue(amount);
             ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
@@ -498,7 +501,8 @@ contract ERC20ManagerTest is Test, Base {
         );
 
         assertEq(tetherToken.balanceOf(deploymentArguments.deployerAddress), 0);
-        assertEq(tetherToken.balanceOf(address(erc20Manager)), amount);
+        uint256 balanceAfterMint = tetherToken.balanceOf(address(erc20Manager));
+        assertEq(balanceAfterMint, balanceBeforeMint + amount);
 
         vm.stopPrank();
     }
@@ -536,7 +540,7 @@ contract ERC20ManagerTest is Test, Base {
     }
 
     function test_RequestBridgingPayingFeeWithPermit() public {
-        (address owner, uint256 ownerPrivateKey) = makeAddrAndKey("owner");
+        (address owner, uint256 ownerPrivateKey) = makeAddrAndKey("ownerOfCircleToken");
         uint256 value = 100 * (10 ** circleToken.decimals());
 
         vm.startPrank(deploymentArguments.deployerAddress);
@@ -668,8 +672,11 @@ contract ERC20ManagerTest is Test, Base {
         address token = address(circleToken);
         uint256 amount = 100 * (10 ** circleToken.decimals());
         bytes32 to = 0;
+
+        uint256 balanceBeforeMint = circleToken.balanceOf(address(erc20Manager));
         IERC20Mintable(address(circleToken)).mint(address(erc20Manager), amount);
-        assertEq(circleToken.balanceOf(address(erc20Manager)), amount);
+        uint256 balanceAfterMint = circleToken.balanceOf(address(erc20Manager));
+        assertEq(balanceAfterMint, balanceBeforeMint + amount);
 
         VaraMessage memory message = VaraMessage({
             nonce: messageNonce++,

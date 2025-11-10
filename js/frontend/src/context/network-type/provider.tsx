@@ -15,8 +15,8 @@ import {
   NETWORK_LOCAL_STORAGE_KEY,
 } from './consts';
 import { Provider } from './context';
+import { EthNetworkMismatchModal } from './eth-network-mismatch-modal';
 import { NetworkType } from './types';
-import { UnsupportedNetworkModal } from './unsupported-network-modal';
 import { getNetworkTypeFromUrl } from './utils';
 
 function useChainIdLogs() {
@@ -102,7 +102,8 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   return (
     <Provider value={value}>
       {children}
-      <UnsupportedNetworkModal />
+
+      <EthNetworkMismatchModal onButtonClick={() => switchWagmiNetwork(PRESET.ETH_CHAIN_ID)} />
     </Provider>
   );
 }

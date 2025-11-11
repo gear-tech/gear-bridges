@@ -234,16 +234,6 @@ pub struct EthGearTokensArgs {
     #[command(subcommand)]
     pub command: EthGearTokensCommands,
 
-    /// Address of the checkpoint-light-client program on gear
-    #[arg(
-        long = "checkpoint-light-client-address",
-        env = "CHECKPOINT_LIGHT_CLIENT_ADDRESS"
-    )]
-    pub checkpoint_light_client_address: String,
-
-    #[arg(long = "historical-proxy-address", env = "HISTORICAL_PROXY_ADDRESS")]
-    pub historical_proxy_address: String,
-
     #[arg(long = "vft-manager-address", env = "VFT_MANAGER_ADDRESS")]
     pub vft_manager_address: String,
 
@@ -316,11 +306,11 @@ pub struct EthGearManualArgs {
 
     /// ProgramId of the checkpoint-light-client program
     #[arg(long = "checkpoint-light-client")]
-    pub checkpoint_light_client: String,
+    pub checkpoint_light_client: Option<String>,
 
     /// ProgramId of the historical-proxy program
     #[arg(long = "historical-proxy")]
-    pub historical_proxy: String,
+    pub historical_proxy: Option<String>,
 
     /// ProgramId of the program that will receive target message
     #[arg(long = "receiver-program")]

@@ -6,10 +6,12 @@ use cli::{
     GearArgs, GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
     DEFAULT_COUNT_THREADS,
 };
+use eth_events_electra_client::traits::EthereumEventClient;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
-use ethereum_common::SLOTS_PER_EPOCH;
+use ethereum_common::{beacon, SLOTS_PER_EPOCH};
 use gclient::ext::sp_runtime::AccountId32;
+use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use kill_switch::KillSwitchRelayer;
 use message_relayer::{
     eth_to_gear::{self, api_provider::ApiProvider},
@@ -18,8 +20,11 @@ use message_relayer::{
 use primitive_types::U256;
 use proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage};
 use prover::consts::SIZE_THREAD_STACK_MIN;
-use relayer::{merkle_roots::MerkleRootRelayerOptions, *};
-use sails_rs::ActorId;
+use relayer::{
+    merkle_roots::MerkleRootRelayerOptions,
+    message_relayer::eth_to_gear::api_provider::ApiProviderConnection, *,
+};
+use sails_rs::{calls::Query, gclient::calls::GClientRemoting, ActorId};
 use std::{
     collections::HashSet,
     env,
@@ -33,6 +38,7 @@ use std::{
 };
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
+use vft_manager_client::traits::VftManager;
 use zeroize::Zeroizing;
 
 fn main() -> AnyResult<()> {
@@ -476,8 +482,6 @@ async fn run() -> AnyResult<()> {
         }
         CliCommands::EthGearTokens(EthGearTokensArgs {
             command,
-            checkpoint_light_client_address,
-            historical_proxy_address,
             vft_manager_address,
             gear_args,
             ethereum_rpc,
@@ -499,13 +503,21 @@ async fn run() -> AnyResult<()> {
             )
             .await
             .expect("Failed to create API provider");
-            let checkpoint_light_client_address =
-                hex_utils::decode_h256(&checkpoint_light_client_address)
-                    .expect("Failed to parse address");
-            let historical_proxy_address =
-                hex_utils::decode_h256(&historical_proxy_address).expect("Failed to parse address");
+            let connection = provider.connection();
+            provider.spawn();
+
             let vft_manager_address =
                 hex_utils::decode_h256(&vft_manager_address).expect("Failed to parse address");
+
+            let (historical_proxy_address, checkpoint_light_client_address) =
+                fetch_historical_proxy_and_checkpoints(
+                    connection.clone(),
+                    &beacon_client,
+                    vft_manager_address.into(),
+                    &gear_args.suri,
+                )
+                .await
+                .expect("Failed to fetch historical proxy");
 
             let genesis_time = beacon_client
                 .get_genesis()
@@ -528,10 +540,10 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         beacon_client,
                         erc20_manager_address,
-                        checkpoint_light_client_address,
-                        historical_proxy_address,
+                        checkpoint_light_client_address.into(),
+                        historical_proxy_address.into(),
                         vft_manager_address,
-                        provider.connection(),
+                        connection,
                         storage_path,
                         genesis_time,
                     )
@@ -544,7 +556,6 @@ async fn run() -> AnyResult<()> {
                         .run(prometheus_args.endpoint)
                         .await;
 
-                    provider.spawn();
                     relayer.run().await;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
@@ -559,10 +570,10 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         beacon_client,
                         bridging_payment_address,
-                        checkpoint_light_client_address,
-                        historical_proxy_address,
+                        checkpoint_light_client_address.into(),
+                        historical_proxy_address.into(),
                         vft_manager_address,
-                        provider.connection(),
+                        connection,
                         storage_path,
                         genesis_time,
                     )
@@ -574,7 +585,7 @@ async fn run() -> AnyResult<()> {
                         .build()
                         .run(prometheus_args.endpoint)
                         .await;
-                    provider.spawn();
+
                     relayer.run().await;
                 }
             }
@@ -636,24 +647,6 @@ async fn run() -> AnyResult<()> {
             };
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_args).await;
-
-            let checkpoint_light_client_address = hex_utils::decode_h256(&checkpoint_light_client)
-                .expect("Failed to parse checkpoint light client address");
-            let historical_proxy_address = hex_utils::decode_h256(&historical_proxy)
-                .expect("Failed to parse historical proxy address");
-            let receiver_address = hex_utils::decode_h256(&receiver_program)
-                .expect("Failed to parse receiver program address");
-            let receiver_route = receiver_route
-                .map(|receiver_route| {
-                    hex_utils::decode_byte_vec(&receiver_route)
-                        .expect("Failed to decode receiver route")
-                })
-                .unwrap_or(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec());
-            let tx_hash = hex_utils::decode_h256(&tx_hash)
-                .expect("Failed to decode tx hash")
-                .0
-                .into();
-
             let provider = ApiProvider::new(
                 gear_client_args.vara_domain.clone(),
                 gear_client_args.vara_port,
@@ -666,13 +659,59 @@ async fn run() -> AnyResult<()> {
 
             provider.spawn();
 
+            let receiver_address = hex_utils::decode_h256(&receiver_program)
+                .expect("Failed to decode receiver program address");
+
+            let (historical_proxy_address, checkpoint_light_client_address) = if receiver_route
+                .is_none()
+            {
+                let historical_proxy_address = historical_proxy
+                    .as_ref()
+                    .map(|address| {
+                        hex_utils::decode_h256(address)
+                            .expect("Failed to parse historical proxy address")
+                    })
+                    .ok_or_else(|| anyhow!("historical-proxy argument is required if receiver-route is not specified"))?;
+                let checkpoint_light_client_address = checkpoint_light_client
+                    .as_ref()
+                    .map(|address| {
+                        hex_utils::decode_h256(address) 
+                            .expect("Failed to parse checkpoint light client address")
+                    })
+                    .ok_or_else(|| anyhow!("checkpoint-light-client argument is required if receiver-route is not specified"))?;
+                (
+                    historical_proxy_address.into(),
+                    checkpoint_light_client_address.into(),
+                )
+            } else {
+                fetch_historical_proxy_and_checkpoints(
+                    provider_connection.clone(),
+                    &beacon_client,
+                    receiver_address.into(),
+                    &gear_args.suri,
+                )
+                .await?
+            };
+
+            let tx_hash = hex_utils::decode_h256(&tx_hash)
+                .expect("Failed to decode tx hash")
+                .0
+                .into();
+
+            let receiver_route = receiver_route
+                .map(|receiver_route| {
+                    hex_utils::decode_byte_vec(&receiver_route)
+                        .expect("Failed to decode receiver route")
+                })
+                .unwrap_or(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec());
+
             eth_to_gear::manual::relay(
                 provider_connection,
                 gear_args.suri,
                 eth_api,
                 beacon_client,
-                checkpoint_light_client_address,
-                historical_proxy_address,
+                checkpoint_light_client_address.into(),
+                historical_proxy_address.into(),
                 receiver_address,
                 receiver_route,
                 tx_hash,
@@ -859,4 +898,49 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     }
 
     Ok(())
+}
+
+async fn fetch_historical_proxy_and_checkpoints(
+    mut api_provider: ApiProviderConnection,
+    beacon_client: &BeaconClient,
+    vft_manager_address: ActorId,
+    suri: &str,
+) -> anyhow::Result<(ActorId, ActorId)> {
+    log::info!("Fetching historical proxy address and checkpoint light client address from VFT Manager at {vft_manager_address:#?}");
+    let client = api_provider.gclient_client(suri)?;
+    let remoting = GClientRemoting::new(client);
+    let vft_manager = vft_manager_client::VftManager::new(remoting.clone());
+    let historical_proxy = HistoricalProxy::new(remoting.clone());
+    let eth_events = eth_events_electra_client::EthereumEventClient::new(remoting);
+
+    let historical_proxy_address = vft_manager
+        .historical_proxy_address()
+        .recv(vft_manager_address)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to receive historical proxy address: {e:?}"))?;
+    log::info!("Historical proxy address is {historical_proxy_address:#?}");
+    let latest_block = beacon_client
+        .get_block_finalized::<beacon::electra::Block>()
+        .await?;
+
+    let slot = latest_block.slot;
+
+    let endpoint = historical_proxy
+        .endpoint_for(slot)
+        .recv(historical_proxy_address)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
+        .map_err(|e| anyhow::anyhow!("Proxy failed to get endpoint for slot #{slot}: {e:?}"))?;
+
+   
+
+    let checkpoints_address = eth_events
+        .checkpoint_light_client_address()
+        .recv(endpoint)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?;
+
+    log::info!("Checkpoint light client address is {checkpoints_address:#?} for slot #{slot}");
+
+    Ok((historical_proxy_address, checkpoints_address))
 }

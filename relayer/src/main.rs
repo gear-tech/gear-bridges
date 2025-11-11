@@ -675,7 +675,7 @@ async fn run() -> AnyResult<()> {
                 let checkpoint_light_client_address = checkpoint_light_client
                     .as_ref()
                     .map(|address| {
-                        hex_utils::decode_h256(address) 
+                        hex_utils::decode_h256(address)
                             .expect("Failed to parse checkpoint light client address")
                     })
                     .ok_or_else(|| anyhow!("checkpoint-light-client argument is required if receiver-route is not specified"))?;

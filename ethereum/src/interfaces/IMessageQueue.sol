@@ -5,7 +5,7 @@ import {IPausable} from "./IPausable.sol";
 
 /**
  * @dev Type representing message being bridged from Gear-based chain (Vara Network) to Ethereum.
- *      - https://github.com/gear-tech/gear/blob/v1.8.1/pallets/gear-eth-bridge/src/internal.rs#L58
+ *      - https://github.com/gear-tech/gear/blob/v1.9.2/pallets/gear-eth-bridge/primitives/src/lib.rs#L65
  */
 struct VaraMessage {
     uint256 nonce;

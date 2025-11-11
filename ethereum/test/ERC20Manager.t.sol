@@ -374,7 +374,7 @@ contract ERC20ManagerTest is Test, Base {
         vm.stopPrank();
     }
 
-    function test_RequestBridgingWithEthereumToken() public {
+    function test_RequestBridgingWithEthereumTokenCircleToken() public {
         vm.startPrank(deploymentArguments.deployerAddress);
 
         address token = address(circleToken);
@@ -392,6 +392,30 @@ contract ERC20ManagerTest is Test, Base {
 
         assertEq(circleToken.balanceOf(deploymentArguments.deployerAddress), 0);
         uint256 balanceAfterMint = circleToken.balanceOf(address(erc20Manager));
+        assertEq(balanceAfterMint, balanceBeforeMint + amount);
+
+        vm.stopPrank();
+    }
+
+    function test_RequestBridgingWithEthereumTokenWrappedBitcoin() public {
+        vm.startPrank(deploymentArguments.deployerAddress);
+
+        address token = address(wrappedBitcoin);
+        uint256 amount = 100 * (10 ** wrappedBitcoin.decimals());
+        bytes32 to = 0;
+
+        uint256 balanceBeforeMint = wrappedBitcoin.balanceOf(address(erc20Manager));
+        IERC20Mintable(address(wrappedBitcoin)).mint(deploymentArguments.deployerAddress, amount);
+        wrappedBitcoin.approve(address(erc20Manager), amount);
+
+        vm.expectEmit(address(erc20Manager));
+        emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
+
+        erc20Manager.requestBridging(token, amount, to);
+
+        assertEq(wrappedBitcoin.balanceOf(deploymentArguments.deployerAddress), 0);
+        uint256 balanceAfterMint = wrappedBitcoin.balanceOf(address
+        (erc20Manager));
         assertEq(balanceAfterMint, balanceBeforeMint + amount);
 
         vm.stopPrank();

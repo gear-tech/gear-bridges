@@ -93,7 +93,8 @@ function GetEthTokenBalanceButton({
   if (lowerCaseSymbol.includes('eth'))
     return <LinkButton type="external" to="https://hoodi-faucet.pk910.de" {...BUTTON_PROPS} />;
 
-  if (!lowerCaseSymbol.includes('usdc') && !lowerCaseSymbol.includes('usdt')) return;
+  if (!lowerCaseSymbol.includes('usdc') && !lowerCaseSymbol.includes('usdt') && !lowerCaseSymbol.includes('btc'))
+    return;
 
   return (
     <ButtonComponent

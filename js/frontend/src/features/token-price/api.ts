@@ -9,6 +9,7 @@ const TOKEN_ID = {
   ETH: 'ethereum',
   USDT: 'tether',
   USDC: 'usd-coin',
+  BTC: 'wrapped-bitcoin',
 } as const;
 
 const PARAMS = new URLSearchParams({

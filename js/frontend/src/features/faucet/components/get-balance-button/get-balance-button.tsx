@@ -99,7 +99,8 @@ function GetEthTokenBalanceButton({
       />
     );
 
-  if (!lowerCaseSymbol.includes('usdc') && !lowerCaseSymbol.includes('usdt')) return;
+  if (!lowerCaseSymbol.includes('usdc') && !lowerCaseSymbol.includes('usdt') && !lowerCaseSymbol.includes('btc'))
+    return;
 
   return (
     <ButtonComponent

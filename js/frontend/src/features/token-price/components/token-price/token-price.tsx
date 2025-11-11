@@ -32,6 +32,7 @@ function TokenPrice({ amount, className, fraction = 2, ...props }: Props) {
       if (lowerCaseSymbol?.includes('eth')) return TOKEN_ID.ETH;
       if (lowerCaseSymbol?.includes('usdc')) return TOKEN_ID.USDC;
       if (lowerCaseSymbol?.includes('usdt')) return TOKEN_ID.USDT;
+      if (lowerCaseSymbol?.includes('btc')) return TOKEN_ID.BTC;
 
       return;
     }

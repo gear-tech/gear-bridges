@@ -414,8 +414,7 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridging(token, amount, to);
 
         assertEq(wrappedBitcoin.balanceOf(deploymentArguments.deployerAddress), 0);
-        uint256 balanceAfterMint = wrappedBitcoin.balanceOf(address
-        (erc20Manager));
+        uint256 balanceAfterMint = wrappedBitcoin.balanceOf(address(erc20Manager));
         assertEq(balanceAfterMint, balanceBeforeMint + amount);
 
         vm.stopPrank();

@@ -14,10 +14,7 @@ use gsdk::{
     metadata::{
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
-        runtime_types::{
-            gear_core::message::user::UserMessage, gprimitives::ActorId,
-            pallet_election_provider_multi_phase::signed,
-        },
+        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
         storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage, TimestampStorage},
         vara_runtime::SessionKeys,
     },
@@ -290,9 +287,7 @@ impl GearApi {
         let fetched_block_number = self.block_hash_to_number(finality.block).await?;
         if fetched_block_number < after_block_number {
             return Err(anyhow!(
-                "Fetched finality for block #{}, which is earlier than requested after_block #{}",
-                fetched_block_number,
-                after_block_number
+                "Fetched finality for block #{fetched_block_number}, which is earlier than requested after_block #{after_block_number}",
             ));
         }
 
@@ -519,8 +514,8 @@ impl GearApi {
 
         let block_number_length = Compact::<u32>(block.number()).encode().len();
 
-        if &encoded_header[32 + block_number_length..32 + block_number_length + 32]
-            != &fetched_storage_root_hash.0
+        if encoded_header[32 + block_number_length..32 + block_number_length + 32]
+            != fetched_storage_root_hash.0
         {
             return Err(anyhow!(
                 "Storage root hash mismatch: expected {:x?}, got {:x?}",
@@ -585,8 +580,7 @@ impl GearApi {
         let encoded_leaf = if let Node::Leaf(nibbles, value) = leaf {
             if !matches!(value, Value::Inline(b) if b.is_empty()) {
                 return Err(anyhow!(
-                    "Expected leaf node to have empty value, got {:?}",
-                    value
+                    "Expected leaf node to have empty value, got {value:?}",
                 ));
             }
 

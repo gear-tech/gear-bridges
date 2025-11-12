@@ -236,7 +236,14 @@ async fn run() -> AnyResult<()> {
             api_provider.spawn();
 
             let res = relayer.run().await;
-            handle_server.stop(true).await;
+
+            if tokio::time::timeout(Duration::from_secs(5 * 60), handle_server.stop(true))
+                .await
+                .is_err()
+            {
+                log::error!("Failed to stop web server within timeout");
+                std::process::exit(1);
+            }
             return res;
         }
 
@@ -443,7 +450,13 @@ async fn run() -> AnyResult<()> {
                     provider.spawn();
                     relayer.run().await;
 
-                    handle_server.stop(true).await;
+                    if tokio::time::timeout(Duration::from_secs(5 * 60), handle_server.stop(true))
+                        .await
+                        .is_err()
+                    {
+                        log::error!("Failed to stop web server within timeout");
+                        std::process::exit(1);
+                    }
                 }
             }
         }

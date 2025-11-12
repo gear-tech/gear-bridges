@@ -37,7 +37,7 @@ function Wallet() {
   // it's probably worth to check isConnecting too, but there is a bug:
   // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
   if (!isAccountReady || ethAccount.isReconnecting || !api || !varaSymbol)
-    return <Skeleton width="11rem" height="2rem" />;
+    return <Skeleton width="11rem" height="2rem" className={styles.skeleton} />;
 
   const address = account?.address || ethAccount.address;
   const balance = account ? varaAccountBalance : ethAccountBalance;
@@ -54,7 +54,7 @@ function Wallet() {
               <FormattedBalance value={balance.data} decimals={decimals} symbol={symbol} />
             </span>
           ) : (
-            <Skeleton width="9rem" />
+            <Skeleton width="9rem" className={styles.skeleton} />
           )}
 
           <span className={styles.account}>
@@ -67,7 +67,7 @@ function Wallet() {
           </span>
         </button>
       ) : (
-        <Button text="Connect Wallet" size="x-small" onClick={openModal} />
+        <Button text="Connect Wallet" size="x-small" onClick={openModal} className={styles.button} />
       )}
 
       {isModalOpen && <NetworkWalletModal close={closeModal} />}

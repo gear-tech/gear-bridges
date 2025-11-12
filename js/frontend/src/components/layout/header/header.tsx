@@ -5,6 +5,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
 import { TransactionsCounter } from '@/features/history';
+import { NetworkSwitch } from '@/features/network-switch';
 import { LockedBalanceTooltip } from '@/features/token-tracker';
 import { Wallet } from '@/features/wallet';
 import { useEthAccount } from '@/hooks';
@@ -71,6 +72,8 @@ function Header() {
         <Link to={ROUTE.HOME} className={styles.logo}>
           <LogoSVG />
         </Link>
+
+        <NetworkSwitch />
 
         <Wallet />
       </Container>

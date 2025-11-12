@@ -1,14 +1,13 @@
 import { HexString } from '@gear-js/api';
 import { useAccount } from '@gear-js/react-hooks';
 
+import { useNetworkType } from '@/context/network-type';
 import { useVFTProgram } from '@/hooks';
 import { definedAssert } from '@/utils';
 
-import { CONTRACT_ADDRESS } from '../../consts';
-
 function useGetVaraFTAllowance(address: HexString | undefined) {
+  const { NETWORK_PRESET } = useNetworkType();
   const { account } = useAccount();
-
   const { data: program } = useVFTProgram(address);
 
   return () => {
@@ -17,7 +16,7 @@ function useGetVaraFTAllowance(address: HexString | undefined) {
     definedAssert(account?.decodedAddress, 'Account address');
 
     return program.vft
-      .allowance(account.decodedAddress, CONTRACT_ADDRESS.VFT_MANAGER)
+      .allowance(account.decodedAddress, NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS)
       .withAddress(account.decodedAddress)
       .call();
   };

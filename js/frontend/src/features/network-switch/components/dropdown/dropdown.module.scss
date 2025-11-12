@@ -1,0 +1,167 @@
+.button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 6px 16px;
+
+  font-size: 14px;
+
+  background-color: #13191e;
+  border: 1px solid rgba(0, 255, 196, 0.4);
+  border-radius: 4px;
+
+  transition: background-color 0.25s;
+
+  @include breakpoint(555px) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+
+    justify-content: center;
+  }
+
+  &:disabled {
+    pointer-events: none;
+  }
+
+  &:hover,
+  &[data-popup-open] {
+    background-color: #00473766;
+  }
+
+  .arrowSvg {
+    width: 12px;
+    height: 12px;
+    margin-top: 2px;
+
+    transition: rotate 0.25s;
+
+    path {
+      fill: #f6f6f6e5;
+
+      transition: opacity 0.25s;
+    }
+
+    &.open {
+      rotate: 180deg;
+    }
+
+    &.loading path {
+      opacity: 0.25;
+    }
+  }
+
+  .networkSvg,
+  .spinnerSvg {
+    width: 14px;
+    height: 14px;
+
+    stroke: #00ffc4;
+  }
+
+  .spinnerSvg {
+    animation: spin 1s linear infinite;
+  }
+}
+
+@keyframes spin {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
+}
+
+.popup {
+  padding-block: 4px;
+
+  font-size: 14px;
+  color: #f6f6f6e5;
+
+  background-color: #13191e;
+  border: 1px solid #00ffc466;
+  border-radius: 6px;
+
+  transition:
+    transform 0.15s,
+    opacity 0.15s;
+
+  &[data-starting-style],
+  &[data-ending-style] {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+.arrow {
+  top: -12px;
+
+  svg path {
+    &:first-child {
+      fill: #11161a;
+    }
+
+    // outer stroke
+    &:nth-child(2) {
+      fill: #00ffc466;
+    }
+
+    // inner stroke
+    &:last-child {
+      fill: #11161a;
+    }
+  }
+}
+
+.item {
+  padding: 4px;
+
+  &Content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    padding: 4px 12px;
+
+    border-radius: 4px;
+
+    transition:
+      color 0.25s,
+      background-color 0.25s;
+
+    cursor: pointer;
+  }
+
+  &[data-checked],
+  &[data-disabled] {
+    pointer-events: none;
+  }
+
+  &[data-checked] {
+    color: #00ffc4;
+  }
+
+  &:not([data-checked]):hover &Content {
+    color: #09091ae5;
+    background-color: #00ffc4;
+  }
+
+  .indicator {
+    width: 6px;
+    height: 6px;
+
+    background-color: #00ffc4;
+    box-shadow: #00ffc4 0px 0px 10px;
+    border-radius: 50%;
+  }
+}
+
+.separator {
+  width: calc(100% - 16px);
+  height: 1px;
+
+  margin: 0 auto;
+
+  background-color: #cccccc1a;
+}

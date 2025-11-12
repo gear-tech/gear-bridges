@@ -2,10 +2,15 @@
   padding-top: 20px;
   padding-bottom: 20px;
 
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content 1fr;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 32px;
+
+  @include breakpoint(555px) {
+    grid-template-columns: minmax(0, max-content) 1fr;
+    gap: 16px;
+  }
 }
 
 .logo {

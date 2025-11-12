@@ -4,15 +4,16 @@ import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
 import { ERC20_ABI } from '@/consts';
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
-import { CONTRACT_ADDRESS } from '../../consts';
 import { FUNCTION_NAME } from '../../consts/eth';
 import { useBridgeContext } from '../../context';
 
 const abi = ERC20_ABI;
 
 function useApprove() {
+  const { NETWORK_PRESET } = useNetworkType();
   const { token } = useBridgeContext();
   const { address } = token || {};
 
@@ -23,7 +24,7 @@ function useApprove() {
     definedAssert(address, 'Fungible token address');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
-    const args = [CONTRACT_ADDRESS.ERC20_MANAGER, amount] as const;
+    const args = [NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS, amount] as const;
     const to = address;
     const data = encodeFunctionData({ abi, functionName, args });
 
@@ -34,7 +35,7 @@ function useApprove() {
     definedAssert(address, 'Fungible token address');
 
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
-    const args = [CONTRACT_ADDRESS.ERC20_MANAGER, amount] as const;
+    const args = [NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS, amount] as const;
 
     const hash = await writeContractAsync({ address, abi, functionName, args });
 

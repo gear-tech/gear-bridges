@@ -1,4 +1,4 @@
-import { useTokens, TokensProvider, Token } from './tokens';
+import { Token, useTokens } from './tokens';
 
-export { useTokens, TokensProvider };
+export { useTokens };
 export type { Token };

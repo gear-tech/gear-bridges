@@ -1,4 +1,5 @@
 import { useHistoricalProxyContractAddress } from './use-historical-proxy-contract-address';
+import { useInitArchiveApi } from './use-init-archive-api';
 import { useIsVaraRelayAvailable } from './use-is-vara-relay-available';
 import { usePayVaraFee } from './use-pay-vara-fee';
 import { useRelayVaraTx } from './use-relay-vara-tx';
@@ -14,4 +15,5 @@ export {
   useRelayVaraTx,
   useIsVaraRelayAvailable,
   useHistoricalProxyContractAddress,
+  useInitArchiveApi,
 };

@@ -3,12 +3,12 @@ import { useConfig } from 'wagmi';
 import { readContract } from 'wagmi/actions';
 
 import { ERC20_ABI } from '@/consts';
+import { useNetworkType } from '@/context/network-type';
 import { useEthAccount } from '@/hooks';
 import { definedAssert } from '@/utils';
 
-import { CONTRACT_ADDRESS } from '../../consts';
-
 function useGetEthAllowance(address: HexString | undefined) {
+  const { NETWORK_PRESET } = useNetworkType();
   const ethAccount = useEthAccount();
   const config = useConfig();
 
@@ -20,7 +20,7 @@ function useGetEthAllowance(address: HexString | undefined) {
       address,
       abi: ERC20_ABI,
       functionName: 'allowance',
-      args: [ethAccount.address, CONTRACT_ADDRESS.ERC20_MANAGER],
+      args: [ethAccount.address, NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS],
     });
   };
 }

@@ -6,18 +6,23 @@ import {
 } from '@gear-js/react-hooks';
 import { Alert, alertStyles } from '@gear-js/vara-ui';
 import { AppKitNetwork } from '@reown/appkit/networks';
-import * as allNetworks from '@reown/appkit/networks';
 import { createAppKit } from '@reown/appkit/react';
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
-import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, VARA_NODE_ADDRESS } from './consts';
-import { TokensProvider } from './context';
+import {
+  DEFAULT_NETWORK_PRESET,
+  DEFAULT_NETWORK_TYPE,
+  NETWORK_PRESET,
+  NETWORK_TYPE,
+  NetworkTypeProvider,
+} from './context/network-type';
+import { TokensProvider } from './context/tokens';
 
 function ApiProvider({ children }: ProviderProps) {
-  return <GearApiProvider initialArgs={{ endpoint: VARA_NODE_ADDRESS }}>{children}</GearApiProvider>;
+  return <GearApiProvider initialArgs={{ endpoint: DEFAULT_NETWORK_PRESET.NODE_ADDRESS }}>{children}</GearApiProvider>;
 }
 
 function AccountProvider({ children }: ProviderProps) {
@@ -34,29 +39,50 @@ function AlertProvider({ children }: ProviderProps) {
 
 const projectId = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID as string;
 
-const getNetwork = (id: number) => {
-  const result = Object.values(allNetworks)
-    .filter((network) => 'id' in network)
-    .find((network) => network.id === id);
-
-  if (!result) throw new Error(`Chain with id ${id} not found`);
-
-  return result as AppKitNetwork;
-};
-
-const networks = [getNetwork(ETH_CHAIN_ID)] as [AppKitNetwork];
+const networks: [AppKitNetwork, AppKitNetwork] =
+  DEFAULT_NETWORK_TYPE === NETWORK_TYPE.MAINNET
+    ? [NETWORK_PRESET.MAINNET.ETH_NETWORK, NETWORK_PRESET.TESTNET.ETH_NETWORK]
+    : [NETWORK_PRESET.TESTNET.ETH_NETWORK, NETWORK_PRESET.MAINNET.ETH_NETWORK];
 
 const metadata = {
-  name: 'AppKit',
-  description: 'AppKit Example',
-  url: 'https://vara.network/',
-  icons: ['https://avatars.githubusercontent.com/u/179229932'],
+  name: 'Vara Network Bridge',
+  description: 'Bridge Vara and Ethereum with ease',
+  url: 'https://bridge.vara.network',
+  icons: [
+    'https://raw.githubusercontent.com/gear-tech/gear-bridges/refs/heads/main/js/frontend/public/favicons/web-app-manifest-512x512.png',
+  ],
 };
+
+// createConfig uses first item in chains as default chain,
+// but WagmiAdapter gets latest stored chain from localStorage
+function setDefaultWagmiChain() {
+  const storage = JSON.parse(localStorage.getItem('wagmi.store') || 'null') as unknown;
+
+  if (
+    typeof storage === 'object' &&
+    storage !== null &&
+    'state' in storage &&
+    typeof storage.state === 'object' &&
+    storage.state !== null &&
+    'chainId' in storage.state
+  ) {
+    storage.state.chainId = DEFAULT_NETWORK_PRESET.ETH_CHAIN_ID;
+
+    localStorage.setItem('wagmi.store', JSON.stringify(storage));
+  }
+}
+
+setDefaultWagmiChain();
 
 const adapter = new WagmiAdapter({
   networks,
   projectId,
-  transports: { [ETH_CHAIN_ID]: http(ETH_NODE_ADDRESS) },
+  syncConnectedChain: false,
+
+  transports: {
+    [NETWORK_PRESET.MAINNET.ETH_CHAIN_ID]: http(NETWORK_PRESET.MAINNET.ETH_NODE_ADDRESS),
+    [NETWORK_PRESET.TESTNET.ETH_CHAIN_ID]: http(NETWORK_PRESET.TESTNET.ETH_NODE_ADDRESS),
+  },
 });
 
 const METAMASK_WALLET_ID = 'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96';
@@ -70,6 +96,7 @@ createAppKit({
   projectId,
   features: { analytics: false, email: false, socials: false },
   enableWalletGuide: false,
+  enableNetworkSwitch: false,
   allWallets: 'HIDE',
   excludeWalletIds: [TRUST_WALLET_ID],
   includeWalletIds: [METAMASK_WALLET_ID, COINBASE_WALLET_ID],
@@ -98,7 +125,15 @@ function QueryProvider({ children }: ProviderProps) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-const providers = [ApiProvider, AccountProvider, AlertProvider, EthProvider, QueryProvider, TokensProvider];
+const providers = [
+  ApiProvider,
+  AccountProvider,
+  AlertProvider,
+  EthProvider,
+  QueryProvider,
+  NetworkTypeProvider,
+  TokensProvider,
+];
 
 const WithProviders = (Component: ComponentType) => () =>
   providers.reduceRight((children, Provider) => <Provider>{children}</Provider>, <Component />);

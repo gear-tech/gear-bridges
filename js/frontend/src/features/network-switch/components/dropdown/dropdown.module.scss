@@ -118,10 +118,6 @@
   padding: 4px;
 
   &Content {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-
     padding: 4px 12px;
 
     border-radius: 4px;
@@ -145,6 +141,24 @@
   &:not([data-checked]):hover &Content {
     color: #09091ae5;
     background-color: #00ffc4;
+
+    .subheading {
+      color: #09091a84;
+    }
+  }
+
+  .heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .subheading {
+    font-size: 10px;
+    color: #999999;
+    letter-spacing: -0.03rem;
+
+    transition: color 0.25s;
   }
 
   .indicator {
@@ -155,6 +169,12 @@
     box-shadow: #00ffc4 0px 0px 10px;
     border-radius: 50%;
   }
+}
+
+.networks {
+  font-size: 12px;
+  color: #999999;
+  margin-left: 8px;
 }
 
 .separator {

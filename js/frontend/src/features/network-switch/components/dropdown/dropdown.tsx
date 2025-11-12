@@ -1,6 +1,6 @@
 import { Menu, Separator } from '@base-ui-components/react';
 
-import { NETWORK_TYPE } from '@/context/network-type/consts';
+import { NETWORK_PRESET, NETWORK_TYPE } from '@/context/network-type';
 import ActionArrowSVG from '@/features/swap/assets/arrow.svg?react';
 import { cx } from '@/utils';
 
@@ -40,19 +40,29 @@ function Dropdown({ value, isLoading, onChange }: Props) {
 
             <Menu.RadioGroup value={value} onValueChange={onChange}>
               <Menu.RadioItem className={styles.item} value="mainnet" disabled={isLoading} closeOnClick>
-                <span className={styles.itemContent}>
-                  <span>Mainnet</span>
-                  <Menu.RadioItemIndicator className={styles.indicator} />
-                </span>
+                <div className={styles.itemContent}>
+                  <p className={styles.heading}>
+                    Mainnet <Menu.RadioItemIndicator className={styles.indicator} />
+                  </p>
+
+                  <p className={styles.subheading}>
+                    {NETWORK_PRESET.MAINNET.NETWORK_NAME.VARA} • {NETWORK_PRESET.MAINNET.NETWORK_NAME.ETH}
+                  </p>
+                </div>
               </Menu.RadioItem>
 
               <Separator className={styles.separator} />
 
               <Menu.RadioItem className={styles.item} value="testnet" disabled={isLoading} closeOnClick>
-                <span className={styles.itemContent}>
-                  <span>Testnet</span>
-                  <Menu.RadioItemIndicator className={styles.indicator} />
-                </span>
+                <div className={styles.itemContent}>
+                  <p className={styles.heading}>
+                    Testnet <Menu.RadioItemIndicator className={styles.indicator} />
+                  </p>
+
+                  <p className={styles.subheading}>
+                    {NETWORK_PRESET.TESTNET.NETWORK_NAME.VARA} • {NETWORK_PRESET.TESTNET.NETWORK_NAME.ETH}
+                  </p>
+                </div>
               </Menu.RadioItem>
             </Menu.RadioGroup>
           </Menu.Popup>

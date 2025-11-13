@@ -17,9 +17,8 @@ import {TetherToken} from "src/erc20/TetherToken.sol";
 import {WrappedBitcoin} from "src/erc20/WrappedBitcoin.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
 import {WrappedVara} from "src/erc20/WrappedVara.sol";
-import {IERC20Manager, RegisterEthereumTokenMessage, ERC20ManagerPacker} from "src/interfaces/IERC20Manager.sol";
+import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
-import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
@@ -66,10 +65,6 @@ library BaseConstants {
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
-    using Hasher for VaraMessage;
-
-    using ERC20ManagerPacker for RegisterEthereumTokenMessage;
-
     uint256 public messageNonce;
     uint256 public currentBlockNumber;
 
@@ -204,43 +199,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             messageNonce = 100_000_000;
             currentBlockNumber = messageQueue.maxBlockNumber() + 1;
 
-            vm.startPrank(deploymentArguments.deployerAddress);
-
-            address wrappedBitcoinAddress = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
-
-            VaraMessage memory message1 = VaraMessage({
-                nonce: messageNonce++,
-                source: governanceAdmin.governance(),
-                destination: address(erc20Manager),
-                payload: RegisterEthereumTokenMessage({token: address(wrappedBitcoinAddress)}).pack()
-            });
-            assertEq(messageQueue.isProcessed(message1.nonce), false);
-
-            bytes32 messageHash = message1.hash();
-
-            uint256 blockNumber = currentBlockNumber++;
-            bytes32 merkleRoot = messageHash;
-            bytes memory proof1 = "";
-
-            vm.expectEmit(address(messageQueue));
-            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
-
-            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
-
-            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
-
-            uint256 totalLeaves = 1;
-            uint256 leafIndex = 0;
-            bytes32[] memory proof2 = new bytes32[](0);
-
-            vm.expectEmit(address(erc20Manager));
-            emit IERC20Manager.EthereumTokenRegistered(wrappedBitcoinAddress);
-
-            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
-            assertEq(messageQueue.isProcessed(message1.nonce), true);
-
-            vm.stopPrank();
-
             address[] memory erc20Tokens = erc20Manager.tokens(0, 5);
             bridgingPayment = BridgingPayment(erc20Manager.bridgingPayments()[0]);
 
@@ -267,6 +225,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             slot = bytes32(uint256(0x05)); // address owner
             value = ((vm.load(address(overrides.wrappedBitcoin), slot) << 248) >> 248)
                 | (bytes32(uint256(uint160(deploymentArguments.deployerAddress))) << 8);
+            vm.store(overrides.wrappedBitcoin, slot, value);
 
             deploymentArguments = DeploymentArguments({
                 privateKey: 0,

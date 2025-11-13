@@ -75,7 +75,7 @@ function Header() {
 
         <NetworkSwitch />
 
-        <Wallet />
+        <Wallet className={styles.wallet} />
       </Container>
 
       <nav className={styles.nav}>

@@ -1,0 +1,3 @@
+# https://wiki.vara.network/docs/bridge/developer_hub#ethereum-testnet-hoodi
+GovernanceAdmin = "0x3288b744ADbC25f07b636718d72ec07F8C77E5E9"
+GovernancePauser = "0x384B68Fc08c59Df51694f7F6A24A112B8331eEb0"

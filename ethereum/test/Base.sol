@@ -14,6 +14,7 @@ import {ICircleToken} from "src/erc20/interfaces/ICircleToken.sol";
 import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
+import {WrappedBitcoin} from "src/erc20/WrappedBitcoin.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
 import {WrappedVara} from "src/erc20/WrappedVara.sol";
 import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
@@ -34,6 +35,7 @@ struct Overrides {
     address circleToken;
     address tetherToken;
     address wrappedEther;
+    address wrappedBitcoin;
 }
 
 struct DeploymentArguments {
@@ -73,6 +75,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     IERC20Metadata public circleToken;
     IERC20Metadata public tetherToken;
     IERC20Metadata public wrappedEther;
+    IERC20Metadata public wrappedBitcoin;
+
     WrappedVara public wrappedVara;
 
     GovernanceAdmin public governanceAdmin;
@@ -121,7 +125,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 overrides: Overrides({
                     circleToken: BaseConstants.ZERO_ADDRESS,
                     tetherToken: BaseConstants.ZERO_ADDRESS,
-                    wrappedEther: BaseConstants.ZERO_ADDRESS
+                    wrappedEther: BaseConstants.ZERO_ADDRESS,
+                    wrappedBitcoin: BaseConstants.ZERO_ADDRESS
                 }),
                 vftManager: BaseConstants.VFT_MANAGER,
                 governanceAdmin: BaseConstants.GOVERNANCE_ADMIN,
@@ -151,6 +156,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                         : BaseConstants.ZERO_ADDRESS,
                     wrappedEther: vm.envExists("WRAPPED_ETHER")
                         ? vm.envAddress("WRAPPED_ETHER")
+                        : BaseConstants.ZERO_ADDRESS,
+                    wrappedBitcoin: vm.envExists("WRAPPED_BITCOIN")
+                        ? vm.envAddress("WRAPPED_BITCOIN")
                         : BaseConstants.ZERO_ADDRESS
                 }),
                 vftManager: vm.envBytes32("VFT_MANAGER"),
@@ -188,11 +196,18 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             vm.etch(address(verifier), type(VerifierMock).runtimeCode);
             VerifierMock(address(verifier)).setValue(true);
 
-            address[] memory erc20Tokens = erc20Manager.tokens(0, 3);
+            messageNonce = 100_000_000;
+            currentBlockNumber = messageQueue.maxBlockNumber() + 1;
+
+            address[] memory erc20Tokens = erc20Manager.tokens(0, 5);
             bridgingPayment = BridgingPayment(erc20Manager.bridgingPayments()[0]);
 
-            Overrides memory overrides =
-                Overrides({circleToken: erc20Tokens[0], tetherToken: erc20Tokens[1], wrappedEther: erc20Tokens[2]});
+            Overrides memory overrides = Overrides({
+                circleToken: erc20Tokens[0],
+                tetherToken: erc20Tokens[1],
+                wrappedEther: erc20Tokens[2],
+                wrappedBitcoin: erc20Tokens[4]
+            });
 
             bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
             bytes32 value = ((vm.load(address(overrides.circleToken), slot) >> 160) << 160)
@@ -207,6 +222,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             value = bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
             vm.store(overrides.tetherToken, slot, value);
 
+            slot = bytes32(uint256(0x05)); // address owner
+            value = ((vm.load(address(overrides.wrappedBitcoin), slot) << 248) >> 248)
+                | (bytes32(uint256(uint160(deploymentArguments.deployerAddress))) << 8);
+            vm.store(overrides.wrappedBitcoin, slot, value);
+
             deploymentArguments = DeploymentArguments({
                 privateKey: 0,
                 deployerAddress: _deploymentArguments.deployerAddress,
@@ -219,9 +239,6 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 emergencyStopObservers: messageQueue.emergencyStopObservers(),
                 bridgingPaymentFee: bridgingPayment.fee()
             });
-
-            messageNonce = 10_000;
-            currentBlockNumber = messageQueue.maxBlockNumber() + 1;
 
             // TODO: all manipulations with the forked contracts should be done here
         }
@@ -260,6 +277,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 circleToken = IERC20Metadata(deploymentArguments.overrides.circleToken);
                 tetherToken = IERC20Metadata(deploymentArguments.overrides.tetherToken);
                 wrappedEther = IERC20Metadata(deploymentArguments.overrides.wrappedEther);
+                wrappedBitcoin = IERC20Metadata(deploymentArguments.overrides.wrappedBitcoin);
             } else {
                 deployTestTokens();
             }
@@ -268,6 +286,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("    USDC:                ", address(circleToken));
         console.log("    USDT:                ", address(tetherToken));
         console.log("    WETH:                ", address(wrappedEther));
+        console.log("    WBTC:                ", address(wrappedBitcoin));
 
         address erc20ManagerAddress = vm.computeCreateAddress(
             deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 8
@@ -391,12 +410,13 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridge:");
 
         if (!isFork) {
-            IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](4);
+            IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](5);
 
             tokens[0] = IERC20Manager.TokenInfo(address(circleToken), IERC20Manager.TokenType.Ethereum);
             tokens[1] = IERC20Manager.TokenInfo(address(tetherToken), IERC20Manager.TokenType.Ethereum);
             tokens[2] = IERC20Manager.TokenInfo(address(wrappedEther), IERC20Manager.TokenType.Ethereum);
             tokens[3] = IERC20Manager.TokenInfo(address(wrappedVara), IERC20Manager.TokenType.Gear);
+            tokens[4] = IERC20Manager.TokenInfo(address(wrappedBitcoin), IERC20Manager.TokenType.Ethereum);
 
             erc20Manager = ERC20Manager(
                 Upgrades.deployUUPSProxy(
@@ -471,12 +491,14 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         circleToken = new CircleToken(deploymentArguments.deployerAddress);
         tetherToken = new TetherToken(deploymentArguments.deployerAddress);
         wrappedEther = new WrappedEther();
+        wrappedBitcoin = new WrappedBitcoin(deploymentArguments.deployerAddress);
     }
 
     function shouldUseOverrides() public view returns (bool) {
         return deploymentArguments.overrides.circleToken != BaseConstants.ZERO_ADDRESS
             && deploymentArguments.overrides.tetherToken != BaseConstants.ZERO_ADDRESS
-            && deploymentArguments.overrides.wrappedEther != BaseConstants.ZERO_ADDRESS;
+            && deploymentArguments.overrides.wrappedEther != BaseConstants.ZERO_ADDRESS
+            && deploymentArguments.overrides.wrappedBitcoin != BaseConstants.ZERO_ADDRESS;
     }
 
     function messageQueueAssertions(address messageQueueAddress) public view {
@@ -516,33 +538,37 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(vftManagers4.length, 1);
         assertEq(vftManagers4[0], deploymentArguments.vftManager);
         assertTrue(erc20Manager.isVftManager(deploymentArguments.vftManager));
-        assertEq(erc20Manager.totalTokens(), 4);
+        assertEq(erc20Manager.totalTokens(), 5);
         address[] memory tokens1 = erc20Manager.tokens();
-        assertEq(tokens1.length, 4);
+        assertEq(tokens1.length, 5);
         assertEq(tokens1[0], address(circleToken));
         assertEq(tokens1[1], address(tetherToken));
         assertEq(tokens1[2], address(wrappedEther));
         assertEq(tokens1[3], address(wrappedVara));
-        address[] memory tokens2 = erc20Manager.tokens(4, 4);
+        assertEq(tokens1[4], address(wrappedBitcoin));
+        address[] memory tokens2 = erc20Manager.tokens(5, 5);
         assertEq(tokens2.length, 0);
         address[] memory tokens3 = erc20Manager.tokens(0, 2);
         assertEq(tokens3.length, 2);
         assertEq(tokens3[0], address(circleToken));
         assertEq(tokens3[1], address(tetherToken));
-        address[] memory tokens4 = erc20Manager.tokens(2, 2);
-        assertEq(tokens4.length, 2);
+        address[] memory tokens4 = erc20Manager.tokens(2, 3);
+        assertEq(tokens4.length, 3);
         assertEq(tokens4[0], address(wrappedEther));
         assertEq(tokens4[1], address(wrappedVara));
-        address[] memory tokens5 = erc20Manager.tokens(0, 5);
-        assertEq(tokens5.length, 4);
+        assertEq(tokens4[2], address(wrappedBitcoin));
+        address[] memory tokens5 = erc20Manager.tokens(0, 6);
+        assertEq(tokens5.length, 5);
         assertEq(tokens5[0], address(circleToken));
         assertEq(tokens5[1], address(tetherToken));
         assertEq(tokens5[2], address(wrappedEther));
         assertEq(tokens5[3], address(wrappedVara));
+        assertEq(tokens5[4], address(wrappedBitcoin));
         assertTrue(erc20Manager.getTokenType(address(circleToken)) == IERC20Manager.TokenType.Ethereum);
         assertTrue(erc20Manager.getTokenType(address(tetherToken)) == IERC20Manager.TokenType.Ethereum);
         assertTrue(erc20Manager.getTokenType(address(wrappedEther)) == IERC20Manager.TokenType.Ethereum);
         assertTrue(erc20Manager.getTokenType(address(wrappedVara)) == IERC20Manager.TokenType.Gear);
+        assertTrue(erc20Manager.getTokenType(address(wrappedBitcoin)) == IERC20Manager.TokenType.Ethereum);
         assertTrue(erc20Manager.getTokenType(address(0)) == IERC20Manager.TokenType.Unknown);
     }
 

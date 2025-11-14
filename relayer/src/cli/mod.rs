@@ -145,11 +145,25 @@ pub struct GearEthCoreArgs {
 
     #[arg(
         long,
-        help = "Critical threshold duration. If latest submitted merkle-root timestamp is older than current time minus threshold, will force generate new merkle-root.",
-        value_parser = humantime::parse_duration,
+        help = "Critical threshold after which relayer will force generate merkle-root proof",
+        value_parser = parse_critical_threshold,
         default_value = "4h"
     )]
-    pub critical_threshold: Duration,
+    pub critical_threshold: CriticalThreshold,
+}
+
+#[derive(Debug, Clone)]
+pub enum CriticalThreshold {
+    Timeout(Duration),
+    AuthoritySetChange,
+}
+
+pub fn parse_critical_threshold(s: &str) -> anyhow::Result<CriticalThreshold> {
+    if s.trim().eq_ignore_ascii_case("authority_set_change") {
+        return Ok(CriticalThreshold::AuthoritySetChange);
+    }
+
+    Ok(CriticalThreshold::Timeout(humantime::parse_duration(s)?))
 }
 
 #[derive(Args)]

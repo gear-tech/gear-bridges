@@ -4,29 +4,22 @@ use crate::{
     common,
     message_relayer::{
         common::{EthereumSlotNumber, TxHashWithSlot},
-        eth_to_gear::api_provider::ApiProviderConnection,
+        eth_to_gear::api_provider::{ApiProviderConnection, GearApiActor, GetCheckpointSlot},
     },
 };
+use actix::{Actor, Addr, Context, Handler, Message, Recipient, ResponseFuture};
 use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
-use anyhow::Context;
-use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
-use eth_events_electra_client::{
-    traits::EthereumEventClient, BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent,
-};
+use anyhow::Context as _;
+use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::{beacon, tree_hash::TreeHash, utils as eth_utils, utils::MerkleProof};
 use futures::executor::block_on;
-use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
+
 use primitive_types::H256;
 use prometheus::IntGauge;
-use sails_rs::{
-    calls::{Action, Query},
-    gclient::calls::GClientRemoting,
-    ActorId,
-};
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
@@ -104,6 +97,7 @@ pub struct ProofComposer {
     pub historical_proxy_address: H256,
     pub suri: String,
     pub to_process: Vec<(Uuid, TxHashWithSlot)>,
+    pub gear_actor: Addr<GearApiActor>,
 
     metrics: Metrics,
 }
@@ -121,6 +115,7 @@ impl ProofComposer {
         eth_api: PollingEthApi,
         historical_proxy_address: H256,
         suri: String,
+        gear_actor: Addr<GearApiActor>,
     ) -> Self {
         Self {
             api_provider,
@@ -131,6 +126,7 @@ impl ProofComposer {
             historical_proxy_address,
             suri,
             to_process: Vec::with_capacity(100),
+            gear_actor,
 
             metrics: Metrics::new(),
         }
@@ -153,14 +149,13 @@ impl ProofComposer {
         tx: TxHashWithSlot,
         tx_uuid: Uuid,
     ) -> anyhow::Result<()> {
-        let gear_api = self.api_provider.gclient_client(&self.suri)?;
-
         match compose(
             &self.beacon_client,
-            &gear_api,
             &self.eth_api,
             tx.tx_hash,
-            self.historical_proxy_address.into(),
+            &self.gear_actor,
+            self.historical_proxy_address,
+            &self.suri,
         )
         .await
         {
@@ -285,10 +280,14 @@ async fn handle_requests(
 
 pub async fn compose(
     beacon_client: &BeaconClient,
-    gear_api: &gclient::GearApi,
+
     eth_client: &PollingEthApi,
     tx_hash: TxHash,
-    historical_proxy_id: ActorId,
+
+    gear_actor: &Addr<GearApiActor>,
+
+    historical_proxy: H256,
+    suri: &String,
 ) -> anyhow::Result<EthToVaraEvent> {
     let receipt = eth_client
         .get_transaction_receipt(tx_hash)
@@ -319,10 +318,11 @@ pub async fn compose(
 
     let proof_block = build_inclusion_proof(
         beacon_client,
-        gear_api,
         &beacon_root_parent,
         block_number,
-        historical_proxy_id,
+        gear_actor,
+        historical_proxy,
+        suri,
     )
     .await?;
 
@@ -360,17 +360,14 @@ pub async fn compose(
 
 async fn build_inclusion_proof(
     beacon_client: &BeaconClient,
-    gear_api: &gclient::GearApi,
+
     beacon_root_parent: &[u8; 32],
     block_number: u64,
-    historical_proxy_id: ActorId,
+
+    gear_actor: &Addr<GearApiActor>,
+    historical_proxy_id: H256,
+    suri: &String,
 ) -> anyhow::Result<BlockInclusionProof> {
-    let remoting = GClientRemoting::new(gear_api.clone());
-
-    let historical_proxy = HistoricalProxy::new(remoting.clone());
-    let eth_events = eth_events_electra_client::EthereumEventClient::new(remoting.clone());
-    let service_checkpoint = ServiceCheckpointFor::new(remoting);
-
     let beacon_block_parent = beacon_client
         .get_block_by_hash::<beacon::electra::Block>(beacon_root_parent)
         .await?;
@@ -383,27 +380,14 @@ async fn build_inclusion_proof(
         .await?;
 
     let slot = beacon_block.slot;
-    let gas_limit = gear_api.block_gas_limit()?;
-    let endpoint = historical_proxy
-        .endpoint_for(slot)
-        .recv(historical_proxy_id)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Proxy faield to get endpoint for slot #{slot}: {e:?}"))?;
 
-    let checkpoint_endpoint = eth_events
-        .checkpoint_light_client_address()
-        .recv(endpoint)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint endpoint: {e:?}"))?;
-
-    let (checkpoint_slot, checkpoint) = service_checkpoint
-        .get(slot)
-        .with_gas_limit(gas_limit)
-        .recv(checkpoint_endpoint)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Checkpoint error: {e:?}"))?;
+    let (checkpoint_slot, checkpoint) = gear_actor
+        .send(GetCheckpointSlot {
+            slot,
+            suri: suri.clone(),
+            historical_proxy_id: historical_proxy_id.into(),
+        })
+        .await??;
 
     let block = BlockGenericForBlockBody {
         slot,
@@ -444,4 +428,224 @@ async fn build_inclusion_proof(
     };
 
     Ok(BlockInclusionProof { block, headers })
+}
+
+pub struct ProofComposerActor {
+    pub beacon_client: BeaconClient,
+    pub eth_api: PollingEthApi,
+    pub waiting_for_checkpoints: Vec<(Uuid, TxHashWithSlot, Recipient<ComposedProof>)>,
+    pub last_checkpoint: Option<EthereumSlotNumber>,
+    pub historical_proxy_address: H256,
+    pub suri: String,
+    pub to_process: Vec<(Uuid, TxHashWithSlot, Recipient<ComposedProof>)>,
+    pub gear_actor: Addr<GearApiActor>,
+    composer: Addr<Composer>,
+    metrics: Metrics,
+}
+
+impl ProofComposerActor {
+    pub fn new(
+        beacon_client: BeaconClient,
+        eth_api: PollingEthApi,
+        historical_proxy_address: H256,
+        suri: String,
+        gear_actor: Addr<GearApiActor>,
+    ) -> Self {
+        let composer = Composer::new(
+            gear_actor.clone(),
+            beacon_client.clone(),
+            eth_api.clone(),
+            historical_proxy_address,
+            suri.clone(),
+        )
+        .start();
+
+        Self {
+            beacon_client,
+            eth_api,
+            waiting_for_checkpoints: Vec::new(),
+            last_checkpoint: None,
+            historical_proxy_address,
+            suri,
+            to_process: Vec::with_capacity(100),
+            gear_actor,
+            composer,
+
+            metrics: Metrics::new(),
+        }
+    }
+}
+
+impl Actor for ProofComposerActor {
+    type Context = Context<Self>;
+}
+
+/// An actual actor that composes proofs.
+struct Composer {
+    gear_actor: Addr<GearApiActor>,
+    beacon_client: BeaconClient,
+    eth_api: PollingEthApi,
+    historical_proxy_address: H256,
+    suri: String,
+}
+
+impl Composer {
+    pub fn new(
+        gear_actor: Addr<GearApiActor>,
+        beacon_client: BeaconClient,
+        eth_api: PollingEthApi,
+        historical_proxy_address: H256,
+        suri: String,
+    ) -> Self {
+        Self {
+            gear_actor,
+            beacon_client,
+            eth_api,
+            historical_proxy_address,
+            suri,
+        }
+    }
+}
+
+impl Actor for Composer {
+    type Context = Context<Self>;
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+
+pub enum ComposedProof {
+    Success {
+        payload: EthToVaraEvent,
+        tx_uuid: Uuid,
+    },
+    Failure {
+        tx_uuid: Uuid,
+        error: anyhow::Error,
+    },
+}
+
+/// Compose proof for the given transaction.
+///
+/// Instead of returning result directly, it sends it to the specified recipient.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ComposeProof {
+    pub tx: TxHashWithSlot,
+    pub tx_uuid: Uuid,
+    pub recipient: Recipient<ComposedProof>,
+}
+
+/// New checkpoint discovered on Ethereum network.
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct NewCheckpoint {
+    pub slot: EthereumSlotNumber,
+}
+
+impl Handler<NewCheckpoint> for ProofComposerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NewCheckpoint, _ctx: &mut Self::Context) -> Self::Result {
+        log::info!("Received new checkpoint: {}", msg.slot);
+
+        self.last_checkpoint = Some(msg.slot);
+        self.metrics.last_checkpoint.set(msg.slot.0 as i64);
+        self.waiting_for_checkpoints
+            .retain(|(tx_uuid, tx, recipient)| {
+                if tx.slot_number <= msg.slot {
+                    self.to_process
+                        .push((*tx_uuid, tx.clone(), recipient.clone()));
+                    false
+                } else {
+                    true
+                }
+            });
+
+        // Send all ready transactions to composer. We do not wait for reply
+        // but instead let composer handle them asynchronously and send replies to specified recipient.
+        while let Some((tx_uuid, tx, recipient)) = self.to_process.pop() {
+            self.composer.do_send(ComposeProof {
+                tx,
+                tx_uuid,
+                recipient,
+            });
+        }
+    }
+}
+
+impl Handler<ComposeProof> for ProofComposerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ComposeProof, _ctx: &mut Self::Context) -> Self::Result {
+        if self
+            .last_checkpoint
+            .filter(|&last_checkpoint| msg.tx.slot_number <= last_checkpoint)
+            .is_some()
+        {
+            self.composer.do_send(msg);
+        } else {
+            log::debug!(
+                "Transaction {} is waiting for checkpoint, adding to queue",
+                msg.tx_uuid
+            );
+            self.waiting_for_checkpoints
+                .push((msg.tx_uuid, msg.tx, msg.recipient));
+        }
+    }
+}
+
+impl Handler<ComposeProof> for Composer {
+    type Result = ResponseFuture<()>;
+
+    /// Compose proof for the given transaction and send it to the recipient.
+    ///
+    /// Doe not block the actor, instead returns a future which is executed asynchronously.
+    fn handle(&mut self, msg: ComposeProof, _ctx: &mut Self::Context) -> Self::Result {
+        let gear_actor = self.gear_actor.clone();
+        let beacon_client = self.beacon_client.clone();
+        let eth_api = self.eth_api.clone();
+        let historical_proxy_address = self.historical_proxy_address;
+        let suri = self.suri.clone();
+
+        // Create a future that composes the proof and sends it to the recipient.
+        // Does not block the actor and allows it to process other messages.
+        Box::pin(async move {
+            match compose(
+                &beacon_client,
+                &eth_api,
+                msg.tx.tx_hash,
+                &gear_actor,
+                historical_proxy_address,
+                &suri,
+            )
+            .await
+            {
+                Ok(payload) => {
+                    let _ = msg
+                        .recipient
+                        .send(ComposedProof::Success {
+                            payload,
+                            tx_uuid: msg.tx_uuid,
+                        })
+                        .await;
+                }
+                Err(err) => {
+                    log::error!(
+                        "Failed to compose proof for transaction {}: {:?}",
+                        msg.tx_uuid,
+                        err
+                    );
+
+                    let _ = msg
+                        .recipient
+                        .send(ComposedProof::Failure {
+                            tx_uuid: msg.tx_uuid,
+                            error: err,
+                        })
+                        .await;
+                }
+            }
+        })
+    }
 }

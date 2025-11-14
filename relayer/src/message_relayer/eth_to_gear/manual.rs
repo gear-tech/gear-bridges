@@ -2,13 +2,17 @@ use super::{
     api_provider::ApiProviderConnection, message_sender::MessageSender,
     proof_composer::ProofComposer, storage::NoStorage, tx_manager::TransactionManager,
 };
-use crate::message_relayer::common::{
-    gear::{
-        block_listener::BlockListener as GearBlockListener,
-        checkpoints_extractor::CheckpointsExtractor,
+use crate::message_relayer::{
+    common::{
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            checkpoints_extractor::CheckpointsExtractor,
+        },
+        EthereumSlotNumber, TxHashWithSlot,
     },
-    EthereumSlotNumber, TxHashWithSlot,
+    eth_to_gear::api_provider::GearApiActor,
 };
+use actix::Actor;
 use alloy::{network::TransactionResponse, providers::Provider};
 use anyhow::{Context, Result as AnyResult};
 use ethereum_beacon_client::BeaconClient;
@@ -34,6 +38,8 @@ pub async fn relay(
 
     tx_hash: TxHash,
 ) -> AnyResult<()> {
+    let gear_actor = GearApiActor::new(provider_connection.client().api).start();
+
     let tx = eth_api
         .get_transaction_by_hash(tx_hash)
         .await?
@@ -82,6 +88,7 @@ pub async fn relay(
         eth_api,
         historical_proxy_address,
         gear_suri.clone(),
+        gear_actor,
     );
     let [gear_blocks] = gear_block_listener.run().await;
     let (deposit_events_sender, deposit_events_receiver) = unbounded_channel();

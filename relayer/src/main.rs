@@ -9,7 +9,7 @@ use cli::{
 use eth_events_electra_client::traits::EthereumEventClient;
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
-use ethereum_common::{beacon, SLOTS_PER_EPOCH};
+use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use kill_switch::KillSwitchRelayer;
@@ -512,7 +512,6 @@ async fn run() -> AnyResult<()> {
             let (historical_proxy_address, checkpoint_light_client_address) =
                 fetch_historical_proxy_and_checkpoints(
                     connection.clone(),
-                    &beacon_client,
                     vft_manager_address.into(),
                     &gear_args.suri,
                 )
@@ -663,7 +662,7 @@ async fn run() -> AnyResult<()> {
                 .expect("Failed to decode receiver program address");
 
             let (historical_proxy_address, checkpoint_light_client_address) = if receiver_route
-                .is_none()
+                .is_some()
             {
                 let historical_proxy_address = historical_proxy
                     .as_ref()
@@ -671,14 +670,18 @@ async fn run() -> AnyResult<()> {
                         hex_utils::decode_h256(address)
                             .expect("Failed to parse historical proxy address")
                     })
-                    .ok_or_else(|| anyhow!("historical-proxy argument is required if receiver-route is not specified"))?;
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "historical-proxy argument is required if receiver-route is specified"
+                        )
+                    })?;
                 let checkpoint_light_client_address = checkpoint_light_client
                     .as_ref()
                     .map(|address| {
                         hex_utils::decode_h256(address)
                             .expect("Failed to parse checkpoint light client address")
                     })
-                    .ok_or_else(|| anyhow!("checkpoint-light-client argument is required if receiver-route is not specified"))?;
+                    .ok_or_else(|| anyhow!("checkpoint-light-client argument is required if receiver-route is specified"))?;
                 (
                     historical_proxy_address.into(),
                     checkpoint_light_client_address.into(),
@@ -686,7 +689,6 @@ async fn run() -> AnyResult<()> {
             } else {
                 fetch_historical_proxy_and_checkpoints(
                     provider_connection.clone(),
-                    &beacon_client,
                     receiver_address.into(),
                     &gear_args.suri,
                 )
@@ -902,7 +904,6 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
 
 async fn fetch_historical_proxy_and_checkpoints(
     mut api_provider: ApiProviderConnection,
-    beacon_client: &BeaconClient,
     vft_manager_address: ActorId,
     suri: &str,
 ) -> anyhow::Result<(ActorId, ActorId)> {
@@ -919,11 +920,16 @@ async fn fetch_historical_proxy_and_checkpoints(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to receive historical proxy address: {e:?}"))?;
     log::info!("Historical proxy address is {historical_proxy_address:#?}");
-    let latest_block = beacon_client
-        .get_block_finalized::<beacon::electra::Block>()
-        .await?;
-
-    let slot = latest_block.slot;
+    let endpoints = historical_proxy
+        .endpoints()
+        .recv(historical_proxy_address)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to receive endpoints: {e:?}"))?;
+    let slot = endpoints
+        .into_iter()
+        .map(|(slot, _)| slot)
+        .max()
+        .ok_or_else(|| anyhow::anyhow!("No endpoints found in historical proxy"))?;
 
     let endpoint = historical_proxy
         .endpoint_for(slot)

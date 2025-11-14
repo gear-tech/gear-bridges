@@ -145,7 +145,7 @@ pub struct GearEthCoreArgs {
 
     #[arg(
         long,
-        help = "Critical threshold after which relayer will start processing events immediately",
+        help = "Critical threshold after which relayer will force generate merkle-root proof",
         value_parser = parse_critical_threshold,
         default_value = "4h"
     )]

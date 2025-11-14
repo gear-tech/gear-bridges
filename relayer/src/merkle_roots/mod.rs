@@ -581,6 +581,28 @@ impl MerkleRootRelayer {
                     }
                 }
             }
+        } else {
+            let client = self.api_provider.client();
+            let max_block_hash = client.block_number_to_hash(max_block_number).await?;
+            let authority_set_eth = client.authority_set_id(max_block_hash).await?;
+            let latest_authority_set_id = client.authority_set_id(last_block_hash).await?;
+            if authority_set_eth < latest_authority_set_id {
+                log::info!("Syncing authority sets from id #{authority_set_eth} to #{latest_authority_set_id}");
+                for id in authority_set_eth..=latest_authority_set_id {
+                    let block_hash = client.search_for_authority_set_block(id).await?;
+                    let block = client.get_block_at(block_hash).await?;
+                    let block = GearBlock::from_subxt_block(&client, block).await?;
+                    self.try_proof_merkle_root(
+                        &mut prover,
+                        &mut authority_set_sync,
+                        block,
+                        Batch::No,
+                        Priority::No,
+                        ForceGeneration::Yes,
+                    )
+                    .await?;
+                }
+            }
         }
 
         if let Err(err) = self

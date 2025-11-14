@@ -925,18 +925,10 @@ async fn fetch_historical_proxy_and_checkpoints(
         .recv(historical_proxy_address)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to receive endpoints: {e:?}"))?;
-    let slot = endpoints
+    let (slot, endpoint) = endpoints
         .into_iter()
-        .map(|(slot, _)| slot)
-        .max()
+        .max_by_key(|(slot, _)| *slot)
         .ok_or_else(|| anyhow::anyhow!("No endpoints found in historical proxy"))?;
-
-    let endpoint = historical_proxy
-        .endpoint_for(slot)
-        .recv(historical_proxy_address)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
-        .map_err(|e| anyhow::anyhow!("Proxy failed to get endpoint for slot #{slot}: {e:?}"))?;
 
     let checkpoints_address = eth_events
         .checkpoint_light_client_address()

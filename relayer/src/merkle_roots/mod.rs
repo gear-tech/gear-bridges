@@ -637,76 +637,42 @@ impl MerkleRootRelayer {
     ) -> anyhow::Result<bool> {
         let client = self.api_provider.client();
         tokio::select! {
-            _ = self.save_interval.tick() => {
-                log::trace!("60 seconds passed, saving current state");
-                if let Err(err) = self.storage.save(&self.roots).await {
-                    log::error!("Failed to save block state: {err:?}");
-                }
-            }
+            biased;
+            block = blocks_rx.recv() => {
+                match block {
+                    Ok(block) => {
+                        let mut force = ForceGeneration::No;
+                        let mut batch = Batch::Yes;
+                        let number = block.number();
+                        if let Some(last_submitted_block) = self.last_submitted_block {
+                            if last_submitted_block + self.options.critical_threshold <= number {
+                                log::warn!("Last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation", threshold = self.options.critical_threshold);
+                                force = ForceGeneration::Yes;
+                                batch = Batch::No;
+                            }
+                        }
 
-            _ = self.main_interval.tick() => {
-                // prune old timestamps to not trigger spike when not necessary
-                self.prune_old_timestamps();
+                        if let Some(bridging_payment_address) = self.options.bridging_payment_address {
+                            for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
+                                let pblock = self.api_provider.client().get_block_at(pblock).await?;
+                                let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
+                                log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
 
-                // update metrics
-                self.metrics.total_merkle_roots.set(self.roots.len() as i64);
-                self.metrics.total_waiting_for_authority_set_sync.set(self.waiting_for_authority_set_sync.values().map(|v| v.len()).sum::<usize>() as i64);
-                self.metrics.last_submitted_block.set(self.last_submitted_block.unwrap_or(0) as i64);
-                self.metrics.first_pending_timestamp.set(self.first_pending_timestamp.map(|t| t.elapsed().as_secs() as i64).unwrap_or(0));
-                self.metrics.batch_size.set(self.merkle_root_batch.len() as i64);
-                if let Some(first) = self.first_pending_timestamp {
-                    self.metrics.batch_delay.set((self.options.spike_config.timeout.as_secs() as i64) - (first.elapsed().as_secs() as i64));
-                } else {
-                    self.metrics.batch_delay.set(0);
-                }
+                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes).await?;
+                            }
+                        }
 
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, batch, Priority::No, force,).await?;
+                    }
 
-                let has_priority = self.merkle_root_batch.iter().any(|root| root.priority);
-                let timeout = if has_priority {
-                    self.options.spike_config.priority_timeout
-                } else {
-                    self.options.spike_config.timeout
-                };
-                let is_spike = self.merkle_root_batch.iter().map(|root| root.nonces_count).sum::<usize>() >= self.options.spike_config.threshold;
-                let is_timeout = self.first_pending_timestamp
-                    .is_some_and(|t| t.elapsed() >= timeout);
-
-                if is_spike || is_timeout {
-                    // consume the timestamp to not trigger timeout again immediately.
-                    self.first_pending_timestamp.take();
-                    let batch_size = self.merkle_root_batch.len();
-                    if batch_size == 0 {
+                    Err(RecvError::Lagged(n)) => {
+                        log::warn!("Merkle root relayer lagged behind {n} blocks");
                         return Ok(true);
                     }
-                    log::info!("Triggering proof generation. Batch size: {batch_size}, Reason: Spike={is_spike}, Timeout={is_timeout}");
-                    // do not group blocks by authority set id, prover will do this for us.
-                    for pending in self.merkle_root_batch.drain(..) {
-                        let merkle_root = &self.roots[&(pending.block_number, pending.merkle_root)];
-                        if !prover.prove(
-                            pending.block_number,
-                            pending.block_hash,
-                            pending.merkle_root,
-                            pending.inner_proof,
-                            pending.queue_id,
-                            /* request is part of the batch: */
-                            true,
-                            (merkle_root.block_finality_hash, merkle_root.block_finality_proof.clone()),
-                        ) {
-                            log::warn!("Prover connection closed, exiting");
-                            return Ok(false);
-                        }
-                    }
-                }
 
-                let last_block = client.latest_finalized_block().await?;
-                let last_block_number = client.block_hash_to_number(last_block).await?;
-                if let Some(last_submitted) = self.last_submitted_block {
-                    if last_submitted + self.options.critical_threshold <= last_block_number {
-                        log::warn!("Last submitted block {last_submitted} is older than latest finalized block {last_block_number} by more than {}, generating merkle root for latest finalized block", self.options.critical_threshold);
-                        let block = client.get_block_at(last_block).await?;
-                        let block = GearBlock::from_subxt_block(&client, block).await?;
-
-                        self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await?;
+                    Err(RecvError::Closed) => {
+                        log::warn!("Block listener connection closed, exiting");
+                        return Ok(false);
                     }
                 }
             }
@@ -775,44 +741,7 @@ impl MerkleRootRelayer {
                 }
             }
 
-            block = blocks_rx.recv() => {
-                match block {
-                    Ok(block) => {
-                        let mut force = ForceGeneration::No;
-                        let mut batch = Batch::Yes;
-                        let number = block.number();
-                        if let Some(last_submitted_block) = self.last_submitted_block {
-                            if last_submitted_block + self.options.critical_threshold <= number {
-                                log::warn!("Last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation", threshold = self.options.critical_threshold);
-                                force = ForceGeneration::Yes;
-                                batch = Batch::No;
-                            }
-                        }
 
-                        if let Some(bridging_payment_address) = self.options.bridging_payment_address {
-                            for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
-                                let pblock = self.api_provider.client().get_block_at(pblock).await?;
-                                let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
-                                log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
-
-                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes).await?;
-                            }
-                        }
-
-                        self.try_proof_merkle_root(prover, authority_set_sync, block, batch, Priority::No, force,).await?;
-                    }
-
-                    Err(RecvError::Lagged(n)) => {
-                        log::warn!("Merkle root relayer lagged behind {n} blocks");
-                        return Ok(true);
-                    }
-
-                    Err(RecvError::Closed) => {
-                        log::warn!("Block listener connection closed, exiting");
-                        return Ok(false);
-                    }
-                }
-            }
 
             response = prover.recv() => {
                 let Some(response) = response else {
@@ -944,6 +873,87 @@ impl MerkleRootRelayer {
 
                 self.finalize_merkle_root(response).await?;
             }
+
+            _ = self.main_interval.tick() => {
+                // prune old timestamps to not trigger spike when not necessary
+                self.prune_old_timestamps();
+
+                // update metrics
+                self.metrics.total_merkle_roots.set(self.roots.len() as i64);
+                self.metrics.total_waiting_for_authority_set_sync.set(self.waiting_for_authority_set_sync.values().map(|v| v.len()).sum::<usize>() as i64);
+                self.metrics.last_submitted_block.set(self.last_submitted_block.unwrap_or(0) as i64);
+                self.metrics.first_pending_timestamp.set(self.first_pending_timestamp.map(|t| t.elapsed().as_secs() as i64).unwrap_or(0));
+                self.metrics.batch_size.set(self.merkle_root_batch.len() as i64);
+                if let Some(first) = self.first_pending_timestamp {
+                    self.metrics.batch_delay.set((self.options.spike_config.timeout.as_secs() as i64) - (first.elapsed().as_secs() as i64));
+                } else {
+                    self.metrics.batch_delay.set(0);
+                }
+
+
+                let has_priority = self.merkle_root_batch.iter().any(|root| root.priority);
+                let timeout = if has_priority {
+                    self.options.spike_config.priority_timeout
+                } else {
+                    self.options.spike_config.timeout
+                };
+                let is_spike = self.merkle_root_batch.iter().map(|root| root.nonces_count).sum::<usize>() >= self.options.spike_config.threshold;
+                let is_timeout = self.first_pending_timestamp
+                    .is_some_and(|t| t.elapsed() >= timeout);
+
+                if is_spike || is_timeout {
+                    // consume the timestamp to not trigger timeout again immediately.
+                    self.first_pending_timestamp.take();
+                    let batch_size = self.merkle_root_batch.len();
+                    if batch_size == 0 {
+                        return Ok(true);
+                    }
+                    log::info!("Triggering proof generation. Batch size: {batch_size}, Reason: Spike={is_spike}, Timeout={is_timeout}");
+                    // do not group blocks by authority set id, prover will do this for us.
+                    for pending in self.merkle_root_batch.drain(..) {
+                        let merkle_root = &self.roots[&(pending.block_number, pending.merkle_root)];
+                        if !prover.prove(
+                            pending.block_number,
+                            pending.block_hash,
+                            pending.merkle_root,
+                            pending.inner_proof,
+                            pending.queue_id,
+                            /* request is part of the batch: */
+                            true,
+                            (merkle_root.block_finality_hash, merkle_root.block_finality_proof.clone()),
+                        ) {
+                            log::warn!("Prover connection closed, exiting");
+                            return Ok(false);
+                        }
+                    }
+                }
+
+                let last_block = client.latest_finalized_block().await?;
+                let last_block_number = client.block_hash_to_number(last_block).await?;
+                if let Some(last_submitted) = self.last_submitted_block {
+                    if last_submitted + self.options.critical_threshold <= last_block_number {
+                        log::warn!("Last submitted block {last_submitted} is older than latest finalized block {last_block_number} by more than {}, generating merkle root for latest finalized block", self.options.critical_threshold);
+                        let block = client.get_block_at(last_block).await?;
+                        let block = GearBlock::from_subxt_block(&client, block).await?;
+
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await?;
+                    }
+                }
+            }
+
+            _ = self.save_interval.tick() => {
+                log::trace!("60 seconds passed, saving current state");
+                let storage = self.storage.clone();
+                let roots = self.roots.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = storage.save(&roots).await {
+                        log::error!("Failed to save block state: {err:?}");
+                    }
+                });
+            }
+
+
+
         }
         Ok(true)
     }

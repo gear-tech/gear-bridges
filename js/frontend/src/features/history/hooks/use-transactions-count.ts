@@ -20,11 +20,18 @@ type Params = {
   enabled?: boolean;
 };
 
+function useTransactionsCountQueryKey(filter: TransferFilter | undefined) {
+  const { NETWORK_PRESET } = useNetworkType();
+
+  return ['transactionsCount', NETWORK_PRESET.INDEXER_ADDRESS, filter];
+}
+
 function useTransactionsCount({ filter, refetchInterval, enabled }: Params = {}) {
+  const queryKey = useTransactionsCountQueryKey(filter);
   const { NETWORK_PRESET } = useNetworkType();
 
   return useQuery({
-    queryKey: ['transactionsCount', NETWORK_PRESET.INDEXER_ADDRESS, filter],
+    queryKey,
 
     queryFn: () =>
       request(NETWORK_PRESET.INDEXER_ADDRESS, TRANSFERS_COUNT_QUERY, {
@@ -39,4 +46,4 @@ function useTransactionsCount({ filter, refetchInterval, enabled }: Params = {})
   });
 }
 
-export { useTransactionsCount };
+export { useTransactionsCountQueryKey, useTransactionsCount };

@@ -174,6 +174,9 @@ pub mod full {
                     target_out,
                 });
 
+                let target_difference = builder.sub(target_out, target_result);
+                builder.assert_zero(target_difference);
+
                 target_out
             },
             length: target_length_out,

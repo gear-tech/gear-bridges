@@ -1,6 +1,8 @@
+import { GearApi } from '@gear-js/api';
 import { relayVaraToEth } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
-import { usePublicClient, useWalletClient } from 'wagmi';
+import { useConfig, usePublicClient } from 'wagmi';
+import { getWalletClient } from 'wagmi/actions';
 
 import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
@@ -15,18 +17,21 @@ type Params = {
 
 function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
   const { NETWORK_PRESET, syncEthWalletNetwork } = useNetworkType();
+  const config = useConfig();
   const publicClient = usePublicClient();
-  const { data: walletClient } = useWalletClient();
   const initArchiveApi = useInitArchiveApi();
 
   const relay = async ({ onLog, onReceipt, onError }: Params) => {
-    definedAssert(publicClient, 'Ethereum Public Client');
-    definedAssert(walletClient, 'Wallet Client');
-
-    const archiveApi = await initArchiveApi();
+    let archiveApi: GearApi | undefined;
 
     try {
+      definedAssert(publicClient, 'Ethereum Public Client');
+
       await syncEthWalletNetwork();
+
+      // fetching wallet client after wallet network sync, otherwise it throws network mismatch error
+      const walletClient = await getWalletClient(config);
+      archiveApi = await initArchiveApi();
 
       const { error, success } = await relayVaraToEth({
         nonce,
@@ -46,7 +51,7 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
     } catch (error) {
       onError(error as Error);
     } finally {
-      await archiveApi.disconnect();
+      await archiveApi?.disconnect();
     }
   };
 

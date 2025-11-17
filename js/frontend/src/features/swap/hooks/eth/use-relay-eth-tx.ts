@@ -1,4 +1,4 @@
-import { HexString } from '@gear-js/api';
+import { GearApi, HexString } from '@gear-js/api';
 import { relayEthToVara } from '@gear-js/bridge';
 import { useAccount } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
@@ -23,13 +23,15 @@ function useRelayEthTx(txHash: HexString) {
   const initArchiveApi = useInitArchiveApi();
 
   const relay = async ({ onLog, onInBlock, onError }: Params) => {
-    definedAssert(account, 'Account');
-    definedAssert(publicClient, 'Ethereum Public Client');
-    definedAssert(historicalProxyContractAddress, 'Historical Proxy Contract Address');
-
-    const archiveApi = await initArchiveApi();
+    let archiveApi: GearApi | undefined;
 
     try {
+      definedAssert(account, 'Account');
+      definedAssert(publicClient, 'Ethereum Public Client');
+      definedAssert(historicalProxyContractAddress, 'Historical Proxy Contract Address');
+
+      archiveApi = await initArchiveApi();
+
       const { error, ok } = await relayEthToVara({
         transactionHash: txHash,
         beaconRpcUrl: NETWORK_PRESET.ETH_BEACON_NODE_ADDRESS,
@@ -51,7 +53,7 @@ function useRelayEthTx(txHash: HexString) {
     } catch (error) {
       onError(error as Error);
     } finally {
-      await archiveApi.disconnect();
+      await archiveApi?.disconnect();
     }
   };
 

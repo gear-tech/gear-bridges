@@ -638,111 +638,6 @@ impl MerkleRootRelayer {
         let client = self.api_provider.client();
         tokio::select! {
             biased;
-            block = blocks_rx.recv() => {
-                match block {
-                    Ok(block) => {
-                        let mut force = ForceGeneration::No;
-                        let mut batch = Batch::Yes;
-                        let number = block.number();
-                        if let Some(last_submitted_block) = self.last_submitted_block {
-                            if last_submitted_block + self.options.critical_threshold <= number {
-                                log::warn!("Last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation", threshold = self.options.critical_threshold);
-                                force = ForceGeneration::Yes;
-                                batch = Batch::No;
-                            }
-                        }
-
-                        if let Some(bridging_payment_address) = self.options.bridging_payment_address {
-                            for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
-                                let pblock = self.api_provider.client().get_block_at(pblock).await?;
-                                let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
-                                log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
-
-                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes).await?;
-                            }
-                        }
-
-                        self.try_proof_merkle_root(prover, authority_set_sync, block, batch, Priority::No, force,).await?;
-                    }
-
-                    Err(RecvError::Lagged(n)) => {
-                        log::warn!("Merkle root relayer lagged behind {n} blocks");
-                        return Ok(true);
-                    }
-
-                    Err(RecvError::Closed) => {
-                        log::warn!("Block listener connection closed, exiting");
-                        return Ok(false);
-                    }
-                }
-            }
-
-            req = http.recv() => {
-                match req {
-                    Some(req) => {
-                        match req {
-                            MerkleRootsRequest::GetMerkleRootProof {
-                                block_number,
-                                response
-                            } => {
-                                // filter by `proof.is_some()` since some old storage entries do not contain proofs in them.
-                                if let Some((&(_, merkle_root), root)) = self.roots.iter().find(|(_, r)| r.block_number == block_number || r.proof.as_ref().filter(|proof| proof.block_number == block_number).is_some()).filter(|(_, r)| r.proof.is_some()) {
-                                    if let MerkleRootStatus::Finalized = root.status {
-                                        let proof = root.proof.as_ref().expect("proof availability is checked above");
-                                        let Ok(_) = response.send(MerkleRootsResponse::MerkleRootProof {
-                                            proof: proof.proof.clone(),
-                                            proof_block_number: proof.block_number,
-                                            block_number: root.block_number,
-                                            block_hash: root.block_hash,
-                                            merkle_root,
-                                        }) else {
-                                            log::error!("HTTP response send failed");
-                                            return Ok(false);
-                                        };
-                                        return Ok(true);
-                                    }
-                                }
-
-                                let api = self.api_provider.client();
-                                let block_hash = api.block_number_to_hash(block_number).await?;
-                                let block = api.get_block_at(block_hash).await?;
-                                let block = GearBlock::from_subxt_block(&client, block).await?;
-
-                                match self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await {
-                                    Ok(Some((_, merkle_root))) => {
-                                        if let Some(r) = self.roots.get_mut(&(block_number, merkle_root)) { r.http_requests.push(response) } else {
-                                            response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
-                                        }
-                                    }
-
-                                    Ok(None) => {
-                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
-                                            log::error!("HTTP response send failed");
-                                            return Ok(false);
-                                        };
-                                    }
-                                    Err(err) => {
-                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
-                                            log::error!("HTTP response send failed");
-                                            return Ok(false);
-                                        };
-                                        return Err(err);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-
-                    None => {
-                        log::error!("Failed to receive HTTP request");
-                        return Ok(false);
-                    }
-                }
-            }
-
-
-
             response = prover.recv() => {
                 let Some(response) = response else {
                     log::warn!("Finality prover connection closed, exiting");
@@ -873,6 +768,111 @@ impl MerkleRootRelayer {
 
                 self.finalize_merkle_root(response).await?;
             }
+
+            block = blocks_rx.recv() => {
+                match block {
+                    Ok(block) => {
+                        let mut force = ForceGeneration::No;
+                        let mut batch = Batch::Yes;
+                        let number = block.number();
+                        if let Some(last_submitted_block) = self.last_submitted_block {
+                            if last_submitted_block + self.options.critical_threshold <= number {
+                                log::warn!("Last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation", threshold = self.options.critical_threshold);
+                                force = ForceGeneration::Yes;
+                                batch = Batch::No;
+                            }
+                        }
+
+                        if let Some(bridging_payment_address) = self.options.bridging_payment_address {
+                            for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
+                                let pblock = self.api_provider.client().get_block_at(pblock).await?;
+                                let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
+                                log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
+
+                                self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes).await?;
+                            }
+                        }
+
+                        self.try_proof_merkle_root(prover, authority_set_sync, block, batch, Priority::No, force,).await?;
+                    }
+
+                    Err(RecvError::Lagged(n)) => {
+                        log::warn!("Merkle root relayer lagged behind {n} blocks");
+                        return Ok(true);
+                    }
+
+                    Err(RecvError::Closed) => {
+                        log::warn!("Block listener connection closed, exiting");
+                        return Ok(false);
+                    }
+                }
+            }
+
+            req = http.recv() => {
+                match req {
+                    Some(req) => {
+                        match req {
+                            MerkleRootsRequest::GetMerkleRootProof {
+                                block_number,
+                                response
+                            } => {
+                                // filter by `proof.is_some()` since some old storage entries do not contain proofs in them.
+                                if let Some((&(_, merkle_root), root)) = self.roots.iter().find(|(_, r)| r.block_number == block_number || r.proof.as_ref().filter(|proof| proof.block_number == block_number).is_some()).filter(|(_, r)| r.proof.is_some()) {
+                                    if let MerkleRootStatus::Finalized = root.status {
+                                        let proof = root.proof.as_ref().expect("proof availability is checked above");
+                                        let Ok(_) = response.send(MerkleRootsResponse::MerkleRootProof {
+                                            proof: proof.proof.clone(),
+                                            proof_block_number: proof.block_number,
+                                            block_number: root.block_number,
+                                            block_hash: root.block_hash,
+                                            merkle_root,
+                                        }) else {
+                                            log::error!("HTTP response send failed");
+                                            return Ok(false);
+                                        };
+                                        return Ok(true);
+                                    }
+                                }
+
+                                let api = self.api_provider.client();
+                                let block_hash = api.block_number_to_hash(block_number).await?;
+                                let block = api.get_block_at(block_hash).await?;
+                                let block = GearBlock::from_subxt_block(&client, block).await?;
+
+                                match self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await {
+                                    Ok(Some((_, merkle_root))) => {
+                                        if let Some(r) = self.roots.get_mut(&(block_number, merkle_root)) { r.http_requests.push(response) } else {
+                                            response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
+                                        }
+                                    }
+
+                                    Ok(None) => {
+                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
+                                            log::error!("HTTP response send failed");
+                                            return Ok(false);
+                                        };
+                                    }
+                                    Err(err) => {
+                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
+                                            log::error!("HTTP response send failed");
+                                            return Ok(false);
+                                        };
+                                        return Err(err);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+
+                    None => {
+                        log::error!("Failed to receive HTTP request");
+                        return Ok(false);
+                    }
+                }
+            }
+
+
 
             _ = self.main_interval.tick() => {
                 // prune old timestamps to not trigger spike when not necessary

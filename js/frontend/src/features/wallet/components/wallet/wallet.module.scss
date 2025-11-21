@@ -1,6 +1,11 @@
+.container {
+  display: flex;
+  gap: 16px;
+}
+
 .wallet {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 .balance {

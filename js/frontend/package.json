@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "start": "vite",
+    "start": "vite --port",
     "build": "vite build",
     "preview": "vite preview",
     "codegen": "graphql-codegen --require dotenv/config"

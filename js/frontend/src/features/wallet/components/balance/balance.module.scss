@@ -1,0 +1,19 @@
+.balance {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 6px 16px;
+
+  font-size: 14px;
+
+  background-color: #13191e;
+  border: 1px solid #00ffc466;
+  border-radius: 4px;
+  transition: background-color 0.25s;
+  cursor: pointer;
+
+  &:hover {
+    background-color: #00473766;
+  }
+}

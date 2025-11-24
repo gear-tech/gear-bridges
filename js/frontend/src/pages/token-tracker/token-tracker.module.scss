@@ -1,0 +1,11 @@
+.container {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+
+  > * {
+    flex: 1;
+
+    max-width: 490px;
+  }
+}

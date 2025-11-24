@@ -12,7 +12,7 @@ use sp_core::blake2_256;
 
 use crate::{
     common::{
-        blake2::GenericBlake2,
+        blake2::CircuitTargets as Blake2CircuitTargets,
         targets::{Blake2Target, PaddedValidatorSetTarget, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
@@ -58,10 +58,15 @@ impl ValidatorSetHash {
         let validator_count = self.validator_set.len();
 
         const MAX_DATA_LENGTH_ESTIMATION: usize = ED25519_PUBLIC_KEY_SIZE * MAX_VALIDATOR_COUNT;
-        let hasher_proof = GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(
-            self.validator_set.into_iter().flatten().collect(),
-        )
-        .prove();
+
+        let circuit = Blake2CircuitTargets::new();
+        let hasher_proof = circuit.prove::<MAX_DATA_LENGTH_ESTIMATION>(
+            self.validator_set
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .as_ref(),
+        );
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         let mut pw = PartialWitness::new();

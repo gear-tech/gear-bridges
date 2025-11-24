@@ -19,8 +19,11 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, VerifierCircuitData, VerifierOnlyCircuitData},
-        proof::ProofWithPublicInputs,
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
+            VerifierOnlyCircuitData,
+        },
+        proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     util::serialization::{Buffer, Read},
 };
@@ -56,6 +59,19 @@ lazy_static! {
     };
 }
 
+lazy_static! {
+    static ref COMMON_CIRCUIT_DATA: CommonCircuitData<F, D> = {
+        let path = env::var("VBLAKE2_CACHE_PATH").expect("VBLAKE2_CACHE_PATH is set");
+
+        let serialized = fs::read(format!("{path}/common_circuit_data"))
+            .expect("Correctly formed file with serialized data");
+        let serializer_gate = crate::serialization::GateSerializer;
+
+        CommonCircuitData::from_bytes(serialized, &serializer_gate)
+            .expect("Correctly formed serialized data")
+    };
+}
+
 impl_parsable_target_set! {
     /// Public inputs for `GenericBlake2`.
     pub struct GenericBlake2Target {
@@ -68,54 +84,31 @@ impl_parsable_target_set! {
     }
 }
 
-// Unlike `VariativeBlake2`, this circuit will have constant `VerifierOnlyCircuitData` across all
-// the valid inputs.
-pub struct GenericBlake2 {
-    /// Data to be hashed.
-    data: Vec<u8>,
-}
-
-impl GenericBlake2 {
-    /// Create new `GenericBlake2` circuit.
-    ///
-    /// This function will statically check that `MAX_DATA_LENGTH_ESTIMATION`
-    /// don't exceed `MAX_DATA_BYTES`.
-    pub fn new<const MAX_DATA_LENGTH_ESTIMATION: usize>(data: Vec<u8>) -> Self {
-        #[allow(clippy::let_unit_value)]
-        let _ = AssertDataLengthValid::<MAX_DATA_LENGTH_ESTIMATION>::VALID;
-
-        assert!(
-            data.len() <= MAX_DATA_LENGTH_ESTIMATION,
-            "data.len() = {}, MAX_DATA_LENGTH_ESTIMATION = {MAX_DATA_LENGTH_ESTIMATION}",
-            data.len()
-        );
-
-        Self { data }
-    }
-}
-
 struct AssertDataLengthValid<const DATA_LENGTH: usize>;
 
 impl<const DATA_LENGTH: usize> AssertDataLengthValid<DATA_LENGTH> {
     const VALID: () = assert!(DATA_LENGTH <= MAX_DATA_BYTES);
 }
 
-impl GenericBlake2 {
-    pub fn prove(self) -> ProofWithCircuitData<GenericBlake2Target> {
-        let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
-        assert!(block_count <= MAX_BLOCK_COUNT);
+/// Contains builder and required targets for generic blake2.
+pub struct BuilderTargets {
+    builder: CircuitBuilder<F, D>,
+    target_block_count: Target,
+    target_proof: ProofWithPublicInputsTarget<D>,
+}
 
-        let variative_proof = VariativeBlake2::prove(&self.data);
+impl BuilderTargets {
+    pub fn new() -> Self {
+        log::trace!("BuilderTargets::new enter");
+
+        let now = Instant::now();
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
-        let mut witness = PartialWitness::new();
 
-        let block_count_target = builder.add_virtual_target();
-        witness.set_target(block_count_target, F::from_canonical_usize(block_count));
+        let target_block_count = builder.add_virtual_target();
 
-        let proof_with_pis_target =
-            builder.add_virtual_proof_with_pis(&variative_proof.circuit_data().common);
+        let proof_with_pis_target = builder.add_virtual_proof_with_pis(&COMMON_CIRCUIT_DATA);
 
         let mut verifier_data_targets = VERIFIER_DATA_BY_BLOCK_COUNT
             .iter()
@@ -134,19 +127,18 @@ impl GenericBlake2 {
         // public inputs of `VariativeBlake2`, so we need to check just that it's contained in
         // pre-computed verifier data array. All the other assertions must be performed in
         // `VariativeBlake2`.
-        let verifier_data_idx = builder.add_const(block_count_target, F::NEG_ONE);
+        let verifier_data_idx = builder.add_const(target_block_count, F::NEG_ONE);
         let verifier_data_target =
             builder.random_access_verifier_data(verifier_data_idx, verifier_data_targets);
 
-        witness.set_proof_with_pis_target(&proof_with_pis_target, &variative_proof.proof());
         builder.verify_proof::<C>(
             &proof_with_pis_target,
             &verifier_data_target,
-            &variative_proof.circuit_data().common,
+            &COMMON_CIRCUIT_DATA,
         );
 
         let inner_pis = VariativeBlake2Target::parse_exact(
-            &mut proof_with_pis_target.public_inputs.into_iter(),
+            &mut proof_with_pis_target.public_inputs.clone().into_iter(),
         );
 
         GenericBlake2Target {
@@ -156,7 +148,102 @@ impl GenericBlake2 {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::prove_from_builder(builder, witness)
+        log::trace!(
+            "BuilderTargets::new exit. Time: {}ms",
+            now.elapsed().as_millis()
+        );
+
+        Self {
+            builder,
+            target_block_count,
+            target_proof: proof_with_pis_target,
+        }
+    }
+}
+
+/// Contains the circuit and the required targets for generic blake2.
+///
+/// Unlike `VariativeBlake2`, this circuit will have constant `VerifierOnlyCircuitData` across all
+/// the valid inputs.
+pub struct CircuitTargets {
+    circuit: CircuitData<F, C, D>,
+    target_block_count: Target,
+    target_proof: ProofWithPublicInputsTarget<D>,
+}
+
+impl From<BuilderTargets> for CircuitTargets {
+    fn from(value: BuilderTargets) -> Self {
+        log::trace!("From<BuilderTargets> for CircuitTargets enter");
+
+        let now = Instant::now();
+
+        let circuit = value.builder.build::<C>();
+
+        log::trace!(
+            "From<BuilderTargets> for CircuitTargets exit. Time: {}ms",
+            now.elapsed().as_millis()
+        );
+
+        Self {
+            circuit,
+            target_block_count: value.target_block_count,
+            target_proof: value.target_proof,
+        }
+    }
+}
+
+impl CircuitTargets {
+    pub fn new() -> Self {
+        let builder_targets = BuilderTargets::new();
+
+        builder_targets.into()
+    }
+
+    pub fn prove<const MAX_DATA_LENGTH_ESTIMATION: usize>(
+        &self,
+        data: &[u8],
+    ) -> ProofWithCircuitData<GenericBlake2Target> {
+        #[allow(clippy::let_unit_value)]
+        let _ = AssertDataLengthValid::<MAX_DATA_LENGTH_ESTIMATION>::VALID;
+
+        assert!(
+            data.len() <= MAX_DATA_LENGTH_ESTIMATION,
+            "data.len() = {}, MAX_DATA_LENGTH_ESTIMATION = {MAX_DATA_LENGTH_ESTIMATION}",
+            data.len()
+        );
+
+        log::trace!("CircuitTargets::prove enter");
+
+        let now = Instant::now();
+
+        let block_count = data.len().div_ceil(BLOCK_BYTES).max(1);
+        assert!(block_count <= MAX_BLOCK_COUNT);
+
+        let mut witness = PartialWitness::new();
+        witness.set_target(
+            self.target_block_count,
+            F::from_canonical_usize(block_count),
+        );
+
+        let proof_inner = VariativeBlake2::prove(data);
+        witness.set_proof_with_pis_target(&self.target_proof, &proof_inner.proof());
+
+        let ProofWithPublicInputs {
+            proof,
+            public_inputs,
+        } = self.circuit.prove(witness).unwrap();
+
+        log::trace!(
+            "CircuitTargets::prove exit. Time: {}ms",
+            now.elapsed().as_millis()
+        );
+
+        ProofWithCircuitData {
+            proof,
+            circuit_data: Arc::from(self.circuit.verifier_data()),
+            public_inputs,
+            public_inputs_parser: PhantomData,
+        }
     }
 }
 
@@ -184,7 +271,11 @@ mod tests {
             vec![0xA; BLOCK_BYTES * MAX_BLOCK_COUNT],
         ];
 
-        let verifier_data = test_data.into_iter().map(test_case).collect::<Vec<_>>();
+        let circuit = CircuitTargets::from(BuilderTargets::new());
+        let verifier_data = test_data
+            .into_iter()
+            .map(|data| test_case(&circuit, &data))
+            .collect::<Vec<_>>();
 
         for i in 1..verifier_data.len() {
             assert_eq!(
@@ -197,21 +288,21 @@ mod tests {
         }
     }
 
-    fn test_case(data: Vec<u8>) -> VerifierCircuitData<F, C, D> {
+    fn test_case(circuit: &CircuitTargets, data: &[u8]) -> VerifierCircuitData<F, C, D> {
         let mut hasher = Blake2bVar::new(32).expect("Blake2bVar instantiated");
-        hasher.update(&data);
+        hasher.update(data);
         let mut real_hash = [0; 32];
         hasher
             .finalize_variable(&mut real_hash)
             .expect("Hash of correct length");
 
-        let proof = GenericBlake2 { data: data.clone() }.prove();
+        let proof = circuit.prove::<MAX_DATA_BYTES>(data);
         let public_inputs =
             GenericBlake2Target::parse_public_inputs_exact(&mut proof.public_inputs().into_iter());
 
         assert_eq!(public_inputs.hash.to_vec(), array_to_bits(&real_hash));
         assert_eq!(public_inputs.length as usize, data.len());
-        assert_eq!(&public_inputs.data[..data.len()], &data[..]);
+        assert_eq!(&public_inputs.data[..data.len()], data);
 
         proof.circuit_data().clone()
     }

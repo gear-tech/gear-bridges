@@ -1,5 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 import { FormattedValues } from '../../types';
@@ -14,10 +15,14 @@ type Params = {
 };
 
 function useSendEthTxs({ bridgingFee, shouldPayBridgingFee, ftBalance, onTransactionStart }: Params) {
+  const { syncEthWalletNetwork } = useNetworkType();
+
   const ethTsx = usePrepareEthTxs({ bridgingFee, shouldPayBridgingFee, ftBalance });
 
   const sendTxs = async (values: FormattedValues) => {
     definedAssert(ethTsx.prepare, 'Prepared transactions');
+
+    await syncEthWalletNetwork();
 
     const txs = await ethTsx.prepare(values);
 

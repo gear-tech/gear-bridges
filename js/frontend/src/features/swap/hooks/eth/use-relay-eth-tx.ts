@@ -1,14 +1,13 @@
-import { HexString } from '@gear-js/api';
+import { GearApi, HexString } from '@gear-js/api';
 import { relayEthToVara } from '@gear-js/bridge';
 import { useAccount } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
 
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
-import { ETH_BEACON_NODE_ADDRESS, CONTRACT_ADDRESS } from '../../consts';
-import { initArchiveApi } from '../../utils';
-import { useHistoricalProxyContractAddress } from '../vara';
+import { useHistoricalProxyContractAddress, useInitArchiveApi } from '../vara';
 
 type Params = {
   onLog: (message: string) => void;
@@ -17,25 +16,29 @@ type Params = {
 };
 
 function useRelayEthTx(txHash: HexString) {
+  const { NETWORK_PRESET } = useNetworkType();
   const { account } = useAccount();
   const publicClient = usePublicClient();
   const { data: historicalProxyContractAddress } = useHistoricalProxyContractAddress();
+  const initArchiveApi = useInitArchiveApi();
 
   const relay = async ({ onLog, onInBlock, onError }: Params) => {
-    definedAssert(account, 'Account');
-    definedAssert(publicClient, 'Ethereum Public Client');
-    definedAssert(historicalProxyContractAddress, 'Historical Proxy Contract Address');
-
-    const archiveApi = await initArchiveApi();
+    let archiveApi: GearApi | undefined;
 
     try {
+      definedAssert(account, 'Account');
+      definedAssert(publicClient, 'Ethereum Public Client');
+      definedAssert(historicalProxyContractAddress, 'Historical Proxy Contract Address');
+
+      archiveApi = await initArchiveApi();
+
       const { error, ok } = await relayEthToVara({
         transactionHash: txHash,
-        beaconRpcUrl: ETH_BEACON_NODE_ADDRESS,
+        beaconRpcUrl: NETWORK_PRESET.ETH_BEACON_NODE_ADDRESS,
         ethereumPublicClient: publicClient,
         gearApi: archiveApi,
         historicalProxyId: historicalProxyContractAddress,
-        clientId: CONTRACT_ADDRESS.VFT_MANAGER,
+        clientId: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS,
         clientServiceName: 'VftManager',
         clientMethodName: 'SubmitReceipt',
         signer: account.decodedAddress,
@@ -50,7 +53,7 @@ function useRelayEthTx(txHash: HexString) {
     } catch (error) {
       onError(error as Error);
     } finally {
-      await archiveApi.disconnect();
+      await archiveApi?.disconnect();
     }
   };
 

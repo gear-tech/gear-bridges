@@ -1,0 +1,3 @@
+# https://wiki.vara.network/docs/bridge/developer_hub#ethereum-mainnet
+GovernanceAdmin = "0x3681A3e25F5652389B8f52504D517E96352830C3"
+GovernancePauser = "0x257936C55518609E47eAab53f40a6e19437BEF47"

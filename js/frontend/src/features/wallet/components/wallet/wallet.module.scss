@@ -50,7 +50,7 @@
     background-color: #d4d4d4;
   }
 
-  @include sm {
+  @include md {
     padding: 4px;
   }
 
@@ -60,7 +60,7 @@
 }
 
 .address {
-  @include sm {
+  @include md {
     display: none;
   }
 }

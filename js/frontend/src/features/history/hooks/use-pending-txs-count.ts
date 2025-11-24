@@ -6,7 +6,7 @@ import { useEthAccount } from '@/hooks';
 import { TransfersCountQueryQuery } from '../graphql/graphql';
 import { Status, TransferFilter } from '../types';
 
-import { useTransactionsCount } from './use-transactions-count';
+import { useTransactionsCountQueryKey, useTransactionsCount } from './use-transactions-count';
 
 function usePendingTxsCountFilter() {
   const { account } = useAccount();
@@ -23,9 +23,10 @@ function usePendingTxsCountFilter() {
 function useOptimisticPendingTxsCountUpdate() {
   const queryClient = useQueryClient();
   const { filter } = usePendingTxsCountFilter();
+  const queryKey = useTransactionsCountQueryKey(filter);
 
   return () =>
-    queryClient.setQueryData<TransfersCountQueryQuery>(['transactionsCount', filter], (data) => ({
+    queryClient.setQueryData<TransfersCountQueryQuery>(queryKey, (data) => ({
       allTransfers: { totalCount: (data?.allTransfers?.totalCount || 0) + 1 },
     }));
 }

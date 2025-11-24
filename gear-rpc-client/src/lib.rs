@@ -52,7 +52,7 @@ struct StorageTrieInclusionProof {
 const VOTE_LENGTH_IN_BITS: usize = 424;
 const APPROX_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
-type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
+pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
 #[derive(Clone)]
 pub struct GearApi {
@@ -225,15 +225,22 @@ impl GearApi {
         let stream = stream.map(|res: Result<String, _>| -> AnyResult<_, _> {
             let hex_string = res?;
             let bytes = hex::decode(&hex_string[2..]).context("failed to decoded hex")?;
-            let justification = GrandpaJustification::<GearHeader>::decode(&mut &bytes[..])?;
+            let mut justification = GrandpaJustification::<GearHeader>::decode(&mut &bytes[..])?;
 
-            for pc in &justification.commit.precommits {
-                assert_eq!(pc.precommit.target_hash, justification.commit.target_hash);
-                assert_eq!(
-                    pc.precommit.target_number,
-                    justification.commit.target_number
-                );
-            }
+            justification.commit.precommits.retain(|pc| {
+                if pc.precommit.target_hash == justification.commit.target_hash
+                    && pc.precommit.target_number == justification.commit.target_number
+                {
+                    true
+                } else {
+                    log::warn!(
+                        "Filtered out precommit for potentially future block #{}, hash {:?} from justification stream",
+                        pc.precommit.target_number,
+                        pc.precommit.target_hash
+                    );
+                    false
+                }
+            });
 
             Ok(justification)
         });
@@ -263,12 +270,11 @@ impl GearApi {
             .await
     }
 
-    /// Returns finality proof for block not earlier `after_block`
-    /// and not later the end of session this block belongs to.
-    pub async fn fetch_finality_proof(
+    /// Returns GRANDPA justification for block not earlier `after_block`
+    pub async fn get_justification(
         &self,
         after_block: H256,
-    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
+    ) -> AnyResult<GrandpaJustification<GearHeader>> {
         let after_block_number = self.block_hash_to_number(after_block).await?;
         let finality: Option<String> = self
             .api
@@ -279,23 +285,48 @@ impl GearApi {
         let finality = FinalityProof::<GearHeader>::decode(&mut &finality[..])?;
 
         let fetched_block_number = self.block_hash_to_number(finality.block).await?;
-        assert!(fetched_block_number >= after_block_number);
-
-        let justification = finality.justification;
-        let justification = GrandpaJustification::<GearHeader>::decode(&mut &justification[..])?;
-
-        for pc in &justification.commit.precommits {
-            assert_eq!(pc.precommit.target_hash, finality.block);
-            assert_eq!(pc.precommit.target_number, fetched_block_number);
+        if fetched_block_number < after_block_number {
+            return Err(anyhow!(
+                "Fetched finality for block #{fetched_block_number}, which is earlier than requested after_block #{after_block_number}",
+            ));
         }
 
-        self.produce_finality_proof(justification).await
+        let mut justification =
+            GrandpaJustification::<GearHeader>::decode(&mut &finality.justification[..])?;
+
+        justification.commit.precommits.retain(|pc| {
+            if pc.precommit.target_hash == finality.block
+                && pc.precommit.target_number == fetched_block_number
+            {
+                true
+            } else {
+                log::warn!(
+                    "Filtered out precommit for potentially future block #{}, hash {:?} from justification",
+                    pc.precommit.target_number,
+                    pc.precommit.target_hash
+                );
+                false
+            }
+        });
+
+        Ok(justification)
+    }
+
+    /// Returns finality proof for block not earlier `after_block`
+    /// and not later the end of session this block belongs to.
+    pub async fn fetch_finality_proof(
+        &self,
+        after_block: H256,
+    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
+        let justification = self.get_justification(after_block).await?;
+
+        self.produce_finality_proof(&justification).await
     }
 
     // Produces block finality proof for the given justification.
     pub async fn produce_finality_proof(
         &self,
-        justification: GrandpaJustification<GearHeader>,
+        justification: &GrandpaJustification<GearHeader>,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let block_number = justification.commit.target_number;
         let block_hash = justification.commit.target_hash;
@@ -310,10 +341,23 @@ impl GearApi {
                 block_number,
             )),
         );
-        assert_eq!(signed_data.len() * 8, VOTE_LENGTH_IN_BITS);
+        if signed_data.len() * 8 != VOTE_LENGTH_IN_BITS {
+            return Err(anyhow!(
+                "Signed data length in bits mismatch: expected {}, got {}",
+                VOTE_LENGTH_IN_BITS,
+                signed_data.len() * 8
+            ));
+        }
 
         for pc in &justification.commit.precommits {
-            assert!(pc.signature.verify(&signed_data[..], &pc.id));
+            if !pc.signature.verify(&signed_data[..], &pc.id) {
+                return Err(anyhow!(
+                    "Invalid signature in precommit from {:?} for block #{}, hash {:?}",
+                    pc.id,
+                    block_number,
+                    block_hash
+                ));
+            }
         }
 
         let validator_set = self.fetch_authority_set(required_authority_set_id).await?;
@@ -321,7 +365,7 @@ impl GearApi {
         let pre_commits: Vec<_> = justification
             .commit
             .precommits
-            .into_iter()
+            .iter()
             .map(|pc| dto::PreCommit {
                 public_key: pc.id.as_inner_ref().as_array_ref().to_owned(),
                 signature: pc.signature.as_inner_ref().0.to_owned(),
@@ -469,10 +513,16 @@ impl GearApi {
         let fetched_storage_root_hash = Blake2Hasher::hash(&root_node.data);
 
         let block_number_length = Compact::<u32>(block.number()).encode().len();
-        assert_eq!(
-            &encoded_header[32 + block_number_length..32 + block_number_length + 32],
-            &fetched_storage_root_hash.0
-        );
+
+        if encoded_header[32 + block_number_length..32 + block_number_length + 32]
+            != fetched_storage_root_hash.0
+        {
+            return Err(anyhow!(
+                "Storage root hash mismatch: expected {:x?}, got {:x?}",
+                &encoded_header[32 + block_number_length..32 + block_number_length + 32],
+                &fetched_storage_root_hash.0
+            ));
+        }
 
         Ok(StorageInclusionProof {
             address: address.to_vec(),
@@ -528,7 +578,11 @@ impl GearApi {
         let leaf = proof.pop().expect("At least one node in trie proof");
         let leaf = TrieCodec::decode(&leaf).expect("Failed to decode last node in trie proof");
         let encoded_leaf = if let Node::Leaf(nibbles, value) = leaf {
-            assert!(matches!(value.clone(), Value::Inline(b) if b.is_empty()));
+            if !matches!(value, Value::Inline(b) if b.is_empty()) {
+                return Err(anyhow!(
+                    "Expected leaf node to have empty value, got {value:?}",
+                ));
+            }
 
             let storage_data_hash = Blake2Hasher::hash(&storage_data).0;
 
@@ -590,7 +644,13 @@ impl GearApi {
             };
         }
 
-        assert_eq!(state_root.0, current_hash);
+        if state_root.0 != current_hash {
+            return Err(anyhow!(
+                "State root hash mismatch: expected {:x?}, got {:x?}",
+                state_root.0,
+                current_hash
+            ));
+        }
 
         Ok(StorageTrieInclusionProof {
             branch_nodes_data: branch_nodes,

@@ -25,7 +25,11 @@ pub trait UnprocessedBlocksStorage: Send + Sync {
     async fn unprocessed_blocks(&self) -> UnprocessedBlocks;
     /// Adds a block to the storage. Implementer of the trait
     /// is responsible for processing the block later on.
-    async fn add_block(&self, block: &GearBlock);
+    async fn add_block(
+        &self,
+        api: &gear_rpc_client::GearApi,
+        block: &GearBlock,
+    ) -> anyhow::Result<()>;
 }
 
 /// A no-op implementation of `UnprocessedBlocksStorage` that does nothing.
@@ -41,5 +45,11 @@ impl UnprocessedBlocksStorage for NoStorage {
         }
     }
 
-    async fn add_block(&self, _block: &GearBlock) {}
+    async fn add_block(
+        &self,
+        _api: &gear_rpc_client::GearApi,
+        _block: &GearBlock,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

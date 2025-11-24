@@ -6,18 +6,13 @@ import TagManager from 'react-gtm-module';
 import { Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
 
 import { App } from './app';
-import { ETH_CHAIN_ID, ETH_NODE_ADDRESS, ROUTE, VARA_NODE_ADDRESS, GTM_ID } from './consts';
+import { ROUTE, GTM_ID } from './consts';
 import { useEthAccount } from './hooks';
 import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction } from './pages';
-import { logger } from './utils';
 
 import './index.scss';
 
 if (GTM_ID) TagManager.initialize({ gtmId: GTM_ID });
-
-logger.info('Vara network address', VARA_NODE_ADDRESS);
-logger.info('Eth network address', ETH_NODE_ADDRESS);
-logger.info('Eth chain id', ETH_CHAIN_ID);
 
 // eslint-disable-next-line react-refresh/only-export-components
 function PrivateRoute() {

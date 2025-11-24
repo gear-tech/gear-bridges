@@ -60,7 +60,7 @@ function TokensCard() {
 
   const renderBalances = () => {
     if (!networkTokens || !ftBalances || !networkSymbol)
-      return new Array(4).fill(null).map((_item, index) => <BalanceCard.Skeleton key={index} />);
+      return new Array(5).fill(null).map((_item, index) => <BalanceCard.Skeleton key={index} />);
 
     return networkTokens.map(({ address, decimals, symbol, isNative }) => {
       const balance = ftBalances[address];

@@ -2,9 +2,11 @@ import EthSVG from '@/assets/eth.svg?react';
 import TokenPlaceholderSVG from '@/assets/token-placeholder.svg?react';
 import UsdcSVG from '@/assets/usdc.svg?react';
 import UsdtSVG from '@/assets/usdt.svg?react';
+import VaraBtcSVG from '@/assets/vara-btc.svg?react';
 import VaraUsdcSVG from '@/assets/vara-usdc.svg?react';
 import VaraUsdtSVG from '@/assets/vara-usdt.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
+import WrappedBtcSVG from '@/assets/wrapped-btc.svg?react';
 import WrappedEthSVG from '@/assets/wrapped-eth.svg?react';
 import WrappedVaraSVG from '@/assets/wrapped-vara.svg?react';
 import { NETWORK } from '@/features/swap/consts';
@@ -37,6 +39,7 @@ function TokenSVG({ symbol, network, className, displayNetwork = true }: Props) 
       if (lowerCaseSymbol.includes('eth')) return WrappedEthSVG;
       if (lowerCaseSymbol.includes('usdc')) return VaraUsdcSVG;
       if (lowerCaseSymbol.includes('usdt')) return VaraUsdtSVG;
+      if (lowerCaseSymbol.includes('btc')) return VaraBtcSVG;
     }
 
     if (network === NETWORK.ETH) {
@@ -44,6 +47,7 @@ function TokenSVG({ symbol, network, className, displayNetwork = true }: Props) 
       if (lowerCaseSymbol.includes('eth')) return EthSVG;
       if (lowerCaseSymbol.includes('usdc')) return UsdcSVG;
       if (lowerCaseSymbol.includes('usdt')) return UsdtSVG;
+      if (lowerCaseSymbol.includes('btc')) return WrappedBtcSVG;
     }
 
     return TokenPlaceholderSVG;

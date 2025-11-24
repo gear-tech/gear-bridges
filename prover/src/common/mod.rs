@@ -2,7 +2,7 @@
 
 #[macro_use]
 pub mod targets;
-pub mod generic_blake2;
+pub mod blake2;
 pub mod poseidon_bn128;
 
 use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;

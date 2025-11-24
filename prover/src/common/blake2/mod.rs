@@ -1,5 +1,7 @@
 //! ### Contains circuit that's used to compute blake2 hash of generic-length data.
 
+pub mod variative;
+
 use crate::{
     common::{
         targets::{ArrayTarget, Blake2Target, ByteTarget, TargetSet},
@@ -27,12 +29,32 @@ use plonky2_blake2b256::circuit::{
 };
 use plonky2_field::types::Field;
 use std::{env, fs, io, iter, marker::PhantomData, sync::Arc, time::Instant};
+use variative::{VariativeBlake2, VariativeBlake2Target};
 
 const MAX_BLOCK_COUNT: usize = 50;
 const NUM_GATES: usize = 655_360;
 
 /// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
+
+lazy_static! {
+    /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
+    static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = {
+        let path = env::var("VBLAKE2_CACHE_PATH").expect("VBLAKE2_CACHE_PATH is set");
+
+        let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
+
+        for i in 1..=MAX_BLOCK_COUNT {
+            let serialized = fs::read(format!("{path}/verifier_only_circuit_data-{i}")).expect("Correctly formed file with serialized data");
+            let data = VerifierOnlyCircuitData::<C, D>::from_bytes(serialized).expect("Correctly formed serialized data");
+            verifier_data.push(data);
+        }
+
+        verifier_data
+            .try_into()
+            .expect("Correct max block count")
+    };
+}
 
 impl_parsable_target_set! {
     /// Public inputs for `GenericBlake2`.
@@ -83,7 +105,7 @@ impl GenericBlake2 {
         let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
         assert!(block_count <= MAX_BLOCK_COUNT);
 
-        let variative_proof = VariativeBlake2 { data: self.data }.prove();
+        let variative_proof = VariativeBlake2::prove(&self.data);
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -135,211 +157,6 @@ impl GenericBlake2 {
         .register_as_public_inputs(&mut builder);
 
         ProofWithCircuitData::prove_from_builder(builder, witness)
-    }
-}
-
-lazy_static! {
-    /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
-    static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = {
-        let path = env::var("VBLAKE2_CACHE_PATH").expect("VBLAKE2_CACHE_PATH is set");
-
-        let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
-
-        for i in 1..=MAX_BLOCK_COUNT {
-            let serialized = fs::read(format!("{path}/verifier_only_circuit_data-{i}")).expect("Correctly formed file with serialized data");
-            let data = VerifierOnlyCircuitData::<C, D>::from_bytes(serialized).expect("Correctly formed serialized data");
-            verifier_data.push(data);
-        }
-
-        verifier_data
-            .try_into()
-            .expect("Correct max block count")
-    };
-}
-
-impl_target_set! {
-    struct VariativeBlake2Target {
-        data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
-        length: Target,
-        hash: Blake2Target
-    }
-}
-
-/// Inner circuit that will have different `VerifierOnlyCircuitData` for each block count.
-/// This circuit asserts that data padding is zeroed(it applies to targets, not the `data` field).
-struct VariativeBlake2 {
-    data: Vec<u8>,
-}
-
-impl VariativeBlake2 {
-    // The function uses cached circuit data from files.
-    pub fn prove(&self) -> ProofWithCircuitData<VariativeBlake2Target> {
-        let index = self.data.len().div_ceil(BLOCK_BYTES).max(1);
-
-        let path = env::var("VBLAKE2_CACHE_PATH")
-            .expect(r#"VariativeBlake2: "VBLAKE2_CACHE_PATH" is set"#);
-        let serializer_gate = GateSerializer;
-        let serializer_generator = GeneratorSerializer::<C, D>::default();
-
-        let now = Instant::now();
-        let prover_data = {
-            let file = fs::OpenOptions::new()
-                .read(true)
-                .open(format!("{path}/prover_circuit_data-{index}"))
-                .expect("VariativeBlake2: open a file with correctly formed data for read");
-            let reader = io::BufReader::with_capacity(*BUFFER_SIZE, file);
-
-            let mut read_adapter = ReadAdapter::new(reader, None);
-
-            read_adapter
-                .read_prover_circuit_data::<F, C, D>(&serializer_gate, &serializer_generator)
-                .expect("Correctly formed serialized data")
-        };
-
-        log::trace!(
-            "Loading circuit data directly time: {}ms",
-            now.elapsed().as_millis()
-        );
-
-        let serialized = fs::read(format!("{path}/prover_circuit_data-targets-{index}"))
-            .expect("VariativeBlake2: Good file with serialized data");
-        let mut buffer_read = Buffer::new(&serialized[..]);
-        let targets = buffer_read
-            .read_target_vec()
-            .expect("VariativeBlake2: buffer_read.read_target_vec()");
-
-        let mut witness = PartialWitness::new();
-        witness.set_target(targets[0], F::from_canonical_usize(self.data.len()));
-        for i in 0..self.data.len() {
-            witness.set_target(targets[i + 1], F::from_canonical_u8(self.data[i]));
-        }
-        // zero the remaining tail
-        for target in targets.iter().skip(1 + self.data.len()) {
-            witness.set_target(*target, F::from_canonical_u8(0));
-        }
-
-        let now = Instant::now();
-
-        let ProofWithPublicInputs {
-            proof,
-            public_inputs,
-        } = prover_data.prove(witness).unwrap();
-
-        log::trace!(
-            "VariativeBlake2 prove time: {}ms",
-            now.elapsed().as_millis()
-        );
-
-        ProofWithCircuitData {
-            proof,
-            circuit_data: Arc::from(VerifierCircuitData {
-                verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index - 1].clone(),
-                common: prover_data.common.clone(),
-            }),
-            public_inputs,
-            public_inputs_parser: PhantomData,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn prove_non_cached(&self) -> ProofWithCircuitData<VariativeBlake2Target> {
-        let (mut builder, targets) = self.create_builder_targets();
-
-        let mut witness = PartialWitness::new();
-        witness.set_target(targets[0], F::from_canonical_usize(self.data.len()));
-
-        for i in 0..self.data.len() {
-            witness.set_target(targets[i + 1], F::from_canonical_u8(self.data[i]));
-        }
-        // zero the remaining tail
-        for target in targets.iter().skip(1 + self.data.len()) {
-            witness.set_target(*target, F::from_canonical_u8(0));
-        }
-
-        // Standardize degree.
-        while builder.num_gates() < NUM_GATES {
-            builder.add_gate(NoopGate, vec![]);
-        }
-
-        ProofWithCircuitData::prove_from_builder(builder, witness)
-    }
-
-    fn create_builder_targets(&self) -> (CircuitBuilder<F, D>, Vec<Target>) {
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::new(config);
-
-        let block_count = self.data.len().div_ceil(BLOCK_BYTES).max(1);
-
-        let length_target = builder.add_virtual_target();
-
-        let mut targets = Vec::with_capacity(MAX_DATA_BYTES + 1);
-        targets.push(length_target);
-
-        let data_target: [ByteTarget; MAX_DATA_BYTES] = iter::repeat_n((), MAX_DATA_BYTES)
-            .map(|_| {
-                let target = builder.add_virtual_target();
-                targets.push(target);
-
-                ByteTarget::from_target_safe(target, &mut builder)
-            })
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("Size of the vec is correct");
-
-        // Assert that padding is zeroed.
-        let mut data_end = builder._false();
-        let mut current_idx = builder.zero();
-        let zero = builder.zero();
-        for byte in data_target.iter().take(block_count * BLOCK_BYTES) {
-            let len_exceeded = builder.is_equal(current_idx, length_target);
-            data_end = builder.or(len_exceeded, data_end);
-
-            let byte_is_zero = builder.is_equal(byte.as_target(), zero);
-            let byte_is_not_zero = builder.not(byte_is_zero);
-
-            let byte_invalid = builder.and(data_end, byte_is_not_zero);
-            builder.assert_zero(byte_invalid.target);
-
-            current_idx = builder.add_const(current_idx, F::ONE);
-        }
-
-        // Assert upper bound for length.
-        let length_is_max = builder.is_equal(current_idx, length_target);
-        let length_valid = builder.or(length_is_max, data_end);
-        builder.assert_one(length_valid.target);
-
-        // Assert lower bound for length.
-        let max_length = builder.constant(F::from_canonical_usize(block_count * BLOCK_BYTES));
-        let padded_length = builder.sub(max_length, length_target);
-        let block_bytes_target = builder.constant(F::from_canonical_usize(BLOCK_BYTES));
-        let compare_with_zero = builder.sub(block_bytes_target, padded_length);
-        builder.range_check(compare_with_zero, 32);
-
-        let data_target = ArrayTarget(data_target);
-        let data_target_bits = data_target
-            .0
-            .iter()
-            .flat_map(|t| t.as_bit_targets(&mut builder).0.into_iter().rev());
-
-        let hasher_input = data_target_bits
-            .take(BLOCK_BITS * block_count)
-            .collect::<Vec<_>>();
-
-        let hash = blake2_circuit_from_message_targets_and_length_target(
-            &mut builder,
-            hasher_input,
-            length_target,
-        );
-        let hash = Blake2Target::parse_exact(&mut hash.into_iter().map(|t| t.target));
-
-        VariativeBlake2Target {
-            data: data_target,
-            length: length_target,
-            hash,
-        }
-        .register_as_public_inputs(&mut builder);
-
-        (builder, targets)
     }
 }
 
@@ -429,10 +246,7 @@ To change the MAX_BLOCK_COUNT constant please use the test `determine_num_gates`
     #[ignore = "Use to determine maximum number of gates"]
     #[test]
     fn determine_num_gates() {
-        let (builder, _targets) = VariativeBlake2 {
-            data: vec![0; MAX_DATA_BYTES],
-        }
-        .create_builder_targets();
+        let (builder, _targets) = VariativeBlake2::create_builder_targets(MAX_DATA_BYTES);
 
         println!(
             "builder.num_gates() = {} (MAX_BLOCK_COUNT = {MAX_BLOCK_COUNT})",

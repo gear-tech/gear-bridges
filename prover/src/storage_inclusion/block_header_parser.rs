@@ -4,7 +4,7 @@
 
 use crate::{
     common::{
-        generic_blake2::{GenericBlake2, MAX_DATA_BYTES},
+        blake2::{GenericBlake2, MAX_DATA_BYTES},
         targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },

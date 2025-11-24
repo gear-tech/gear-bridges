@@ -12,7 +12,7 @@ use sp_core::blake2_256;
 
 use crate::{
     common::{
-        generic_blake2::GenericBlake2,
+        blake2::GenericBlake2,
         targets::{Blake2Target, PaddedValidatorSetTarget, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },

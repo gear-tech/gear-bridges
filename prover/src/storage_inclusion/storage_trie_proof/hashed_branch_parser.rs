@@ -7,7 +7,7 @@ use plonky2::{
 
 use crate::{
     common::{
-        generic_blake2::GenericBlake2,
+        blake2::GenericBlake2,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },

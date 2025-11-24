@@ -16,7 +16,7 @@ type Props = {
 
 function ConnectButton({ icon: Icon, onClick }: Props) {
   return (
-    <Button size="x-small" onClick={onClick}>
+    <Button size="x-small" onClick={() => onClick()}>
       <Icon className={styles.icon} />
       <span>Connect</span>
     </Button>

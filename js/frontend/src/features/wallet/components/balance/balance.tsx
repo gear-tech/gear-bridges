@@ -23,7 +23,7 @@ function BalanceComponent({ symbol, decimals, useBalance, onClick }: Props) {
   if (isUndefined(data)) return <Skeleton width="9rem" />;
 
   return (
-    <button type="button" className={styles.balance} onClick={onClick}>
+    <button type="button" className={styles.balance} onClick={() => onClick()}>
       <WalletSVG />
       <FormattedBalance value={data} decimals={decimals} symbol={symbol} />
     </button>

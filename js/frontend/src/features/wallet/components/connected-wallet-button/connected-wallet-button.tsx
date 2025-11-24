@@ -20,7 +20,7 @@ type Props = {
 
 function ConnectedButton({ icon: Icon, address, onClick }: Props) {
   return (
-    <Button size="x-small" color="contrast" className={styles.button} onClick={onClick}>
+    <Button size="x-small" color="contrast" className={styles.button} onClick={() => onClick()}>
       {typeof Icon === 'string' ? <img src={Icon} alt="wallet icon" /> : <Icon />}
       {getTruncatedText(address)}
     </Button>

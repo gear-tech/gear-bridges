@@ -1,7 +1,5 @@
-import { useAccount } from '@gear-js/react-hooks';
-
 import { Skeleton } from '@/components';
-import { useEthAccount } from '@/hooks';
+import { useAccountsConnection } from '@/hooks';
 import { cx } from '@/utils';
 
 import { Balance } from '../balance';
@@ -15,18 +13,14 @@ type Props = {
 };
 
 function Wallet({ className }: Props) {
-  const { account, isAccountReady } = useAccount();
-  const ethAccount = useEthAccount();
+  const { isAnyAccountLoading, isVaraAccount, isEthAccount } = useAccountsConnection();
 
-  // it's probably worth to check isConnecting too, but there is a bug:
-  // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-  if (!isAccountReady || ethAccount.isReconnecting)
-    return <Skeleton width="11rem" height="2rem" className={className} />;
+  if (isAnyAccountLoading) return <Skeleton width="11rem" height="2rem" className={className} />;
 
   return (
     <div className={cx(styles.container, className)}>
       <div className={styles.wallet}>
-        {account ? (
+        {isVaraAccount ? (
           <>
             <Balance.Vara />
             <ConnectedWalletButton.Vara />
@@ -37,7 +31,7 @@ function Wallet({ className }: Props) {
       </div>
 
       <div className={styles.wallet}>
-        {ethAccount.address ? (
+        {isEthAccount ? (
           <>
             <Balance.Eth />
             <ConnectedWalletButton.Eth />

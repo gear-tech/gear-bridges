@@ -141,13 +141,15 @@
   }
 
   .heading {
+    margin-bottom: 2px;
+
     display: flex;
     align-items: center;
     gap: 8px;
   }
 
   .subheading {
-    font-size: 10px;
+    font-size: 11px;
     color: #999999;
     letter-spacing: -0.03rem;
 

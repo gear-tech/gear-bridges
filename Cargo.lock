@@ -2230,6 +2230,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs",
  "scale-info",
+ "zerocopy",
 ]
 
 [[package]]
@@ -4082,6 +4083,7 @@ dependencies = [
  "tree_hash",
  "tree_hash_derive",
  "trie-db 0.22.6",
+ "zerocopy",
 ]
 
 [[package]]
@@ -8956,6 +8958,7 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs",
  "scale-info",
+ "zerocopy",
 ]
 
 [[package]]
@@ -9622,6 +9625,8 @@ dependencies = [
  "blake2",
  "env_logger 0.9.3",
  "ff",
+ "hex",
+ "hex-literal",
  "itertools 0.10.5",
  "jemallocator",
  "keccak-hash 0.10.0",
@@ -9636,12 +9641,14 @@ dependencies = [
  "plonky2_field",
  "plonky2_u32",
  "plonky2_util",
+ "pretty_env_logger",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
  "serde",
  "serde_json",
  "sp-core",
+ "sp-runtime",
  "sp-trie",
  "static_assertions",
  "trie-db 0.29.1",
@@ -14369,6 +14376,7 @@ dependencies = [
  "awesome-sails",
  "awesome-sails-services",
  "sails-rs",
+ "zerocopy",
 ]
 
 [[package]]

@@ -303,6 +303,24 @@ impl Blake2Target {
 
         equal
     }
+
+    /// The same as `CircuitBuilder::select` but for high-level Blake2Target.
+    pub fn select(
+        builder: &mut CircuitBuilder<F, D>,
+        condition: BoolTarget,
+        x: Self,
+        y: Self,
+    ) -> Self {
+        Self(crate::common::targets::ArrayTarget(core::array::from_fn(
+            |i| {
+                BoolTarget::new_unsafe(builder.select(
+                    condition,
+                    x.0 .0[i].target,
+                    y.0 .0[i].target,
+                ))
+            },
+        )))
+    }
 }
 
 impl_array_target_wrapper!(

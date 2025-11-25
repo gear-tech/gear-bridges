@@ -8,6 +8,22 @@
   }
 }
 
+.skeleton {
+  width: 9rem;
+}
+
+.container,
+.wallet,
+.skeleton {
+  @include sm {
+    width: 100%;
+
+    * {
+      width: 100%;
+    }
+  }
+}
+
 .wallet {
   display: flex;
   gap: 8px;
@@ -16,14 +32,5 @@
 .balance {
   @include sm {
     justify-content: center;
-  }
-}
-
-.container,
-.wallet,
-.balance,
-.connectButton {
-  @include sm {
-    width: 100%;
   }
 }

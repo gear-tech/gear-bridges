@@ -5,41 +5,40 @@ import { useAppKit } from '@reown/appkit/react';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { useModal } from '@/hooks';
-import { PropsWithClassName, SVGComponent } from '@/types';
-import { cx } from '@/utils';
+import { SVGComponent } from '@/types';
 
 import styles from './connect-wallet-button.module.scss';
 
-type Props = PropsWithClassName & {
+type Props = {
   icon: SVGComponent;
   onClick: () => void;
 };
 
-function ConnectButton({ icon: Icon, className, onClick }: Props) {
+function ConnectButton({ icon: Icon, onClick }: Props) {
   return (
-    <Button size="x-small" className={cx(styles.button, className)} onClick={() => onClick()}>
+    <Button size="x-small" className={styles.button} onClick={() => onClick()}>
       <Icon />
       <span>Connect</span>
     </Button>
   );
 }
 
-function ConnectVaraWalletButton(props: PropsWithClassName) {
+function ConnectVaraWalletButton() {
   const [isModalOpen, openModal, closeModal] = useModal();
 
   return (
     <>
-      <ConnectButton icon={VaraSVG} onClick={openModal} {...props} />
+      <ConnectButton icon={VaraSVG} onClick={openModal} />
 
       {isModalOpen && <WalletModal close={closeModal} />}
     </>
   );
 }
 
-function ConnectEthWalletButton(props: PropsWithClassName) {
+function ConnectEthWalletButton() {
   const { open } = useAppKit();
 
-  return <ConnectButton icon={EthSVG} onClick={open} {...props} />;
+  return <ConnectButton icon={EthSVG} onClick={open} />;
 }
 
 const ConnectWalletButton = {

@@ -22,3 +22,12 @@
     height: 16px;
   }
 }
+
+.skeleton {
+  width: 9rem;
+
+  // should match wallet skeleton
+  @include sm {
+    width: 100%;
+  }
+}

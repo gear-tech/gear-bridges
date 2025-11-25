@@ -28,7 +28,7 @@
     transition: opacity 0.25s ease-in-out;
   }
 
-  &:hover {
+  &:hover:not(.skeleton) {
     &::before {
       opacity: 1;
     }

@@ -4,7 +4,7 @@ import { generatePath, Link } from 'react-router-dom';
 import { Card, CopyButton, Skeleton } from '@/components';
 import { ROUTE } from '@/consts';
 import { Token } from '@/context';
-import { getTruncatedText } from '@/utils';
+import { cx, getTruncatedText } from '@/utils';
 
 import { Transfer } from '../../types';
 import { BlockNumberLink } from '../block-number-link';
@@ -56,7 +56,7 @@ function TransactionCard(props: Props) {
 
 function TransactionCardSkeleton() {
   return (
-    <Card className={styles.card}>
+    <Card className={cx(styles.card, styles.skeleton)}>
       <TransactionDate.Skeleton />
 
       <p className={styles.transactionHash}>

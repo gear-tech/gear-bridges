@@ -1,5 +1,6 @@
 import { useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
+import { MouseEvent } from 'react';
 
 import { SVGComponent } from '@/types';
 import { cx, logger } from '@/utils';
@@ -12,10 +13,18 @@ type Props = {
   message?: string;
   SVG?: SVGComponent;
   className?: string;
+  stopPropagation?: boolean;
   onCopy?: () => void;
 };
 
-function CopyButton({ value, message = 'Copied', SVG = CopySVG, className, onCopy = () => {} }: Props) {
+function CopyButton({
+  value,
+  message = 'Copied',
+  SVG = CopySVG,
+  className,
+  stopPropagation,
+  onCopy = () => {},
+}: Props) {
   const alert = useAlert();
 
   const onSuccess = () => {
@@ -30,7 +39,14 @@ function CopyButton({ value, message = 'Copied', SVG = CopySVG, className, onCop
     logger.error('Copy to clipboard', error instanceof Error ? error : new Error(errorMessage));
   };
 
-  const copyToClipboard = () => navigator.clipboard.writeText(value).then(onSuccess, onError);
+  const copyToClipboard = (event: MouseEvent) => {
+    if (stopPropagation) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    navigator.clipboard.writeText(value).then(onSuccess, onError);
+  };
 
   return (
     <Button

@@ -37,6 +37,7 @@ function BlockNumberLink({ blockNumber, sourceNetwork }: Props) {
         color="transparent"
         size="x-small"
         className={styles.link}
+        onClick={(e) => e.stopPropagation()}
       />
     </Tooltip>
   );

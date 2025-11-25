@@ -37,17 +37,15 @@ function TransactionCard(props: Props) {
   const { id, timestamp, blockNumber, txHash, status, sourceNetwork } = props;
 
   return (
-    <Card className={styles.card}>
+    <Card as={Link} to={generatePath(ROUTE.TRANSACTION, { id })} className={styles.card}>
       <div className={styles.dateContainer}>
         <TransactionDate timestamp={timestamp} className={styles.date} />
         <BlockNumberLink blockNumber={blockNumber} sourceNetwork={sourceNetwork} />
       </div>
 
       <p className={styles.transactionHash}>
-        <Link to={generatePath(ROUTE.TRANSACTION, { id })} className={styles.link}>
-          {getTruncatedText(txHash)}
-        </Link>
-        <CopyButton value={txHash} />
+        {getTruncatedText(txHash)}
+        <CopyButton value={txHash} stopPropagation />
       </p>
 
       <TransactionPair {...props} />

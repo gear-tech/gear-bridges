@@ -1,4 +1,5 @@
 import { ButtonProps, buttonStyles } from '@gear-js/vara-ui';
+import { MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 
 import { cx } from '@/utils';
@@ -9,6 +10,7 @@ type Props = Pick<
 > & {
   to: string;
   type?: 'internal' | 'external';
+  onClick?: (event: MouseEvent) => void; // stop propagation for BlockNumberLink
 };
 
 function LinkButton({

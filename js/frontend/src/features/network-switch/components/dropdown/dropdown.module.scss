@@ -13,13 +13,6 @@
 
   transition: background-color 0.25s;
 
-  @include breakpoint(555px) {
-    grid-column: 1 / -1;
-    grid-row: 2;
-
-    justify-content: center;
-  }
-
   &:disabled {
     pointer-events: none;
   }

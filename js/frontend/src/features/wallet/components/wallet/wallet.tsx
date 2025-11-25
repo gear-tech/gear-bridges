@@ -22,22 +22,22 @@ function Wallet({ className }: Props) {
       <div className={styles.wallet}>
         {isVaraAccount ? (
           <>
-            <Balance.Vara />
+            <Balance.Vara className={styles.balance} />
             <ConnectedWalletButton.Vara />
           </>
         ) : (
-          <ConnectWalletButton.Vara />
+          <ConnectWalletButton.Vara className={styles.connectButton} />
         )}
       </div>
 
       <div className={styles.wallet}>
         {isEthAccount ? (
           <>
-            <Balance.Eth />
+            <Balance.Eth className={styles.balance} />
             <ConnectedWalletButton.Eth />
           </>
         ) : (
-          <ConnectWalletButton.Eth />
+          <ConnectWalletButton.Eth className={styles.connectButton} />
         )}
       </div>
     </div>

@@ -22,7 +22,7 @@ function ConnectedButton({ icon: Icon, address, onClick }: Props) {
   return (
     <Button size="x-small" color="contrast" className={styles.button} onClick={() => onClick()}>
       {typeof Icon === 'string' ? <img src={Icon} alt="wallet icon" /> : <Icon />}
-      {getTruncatedText(address)}
+      <span className={styles.address}>{getTruncatedText(address, 4)}</span>
     </Button>
   );
 }

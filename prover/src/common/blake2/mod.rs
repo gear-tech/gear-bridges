@@ -245,6 +245,10 @@ impl CircuitTargets {
             public_inputs_parser: PhantomData,
         }
     }
+
+    pub fn into_inner(self) -> (CircuitData<F, C, D>, Target, ProofWithPublicInputsTarget<D>) {
+        (self.circuit, self.target_block_count, self.target_proof)
+    }
 }
 
 #[cfg(test)]

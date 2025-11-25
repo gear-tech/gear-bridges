@@ -310,13 +310,16 @@ impl Blake2Target {
         condition: BoolTarget,
         x: Self,
         y: Self,
-    ) -> Self
-    {
-        Self(
-            crate::common::targets::ArrayTarget(
-                core::array::from_fn(|i| BoolTarget::new_unsafe(builder.select(condition, x.0.0[i].target, y.0.0[i].target)))
-            )
-        )
+    ) -> Self {
+        Self(crate::common::targets::ArrayTarget(core::array::from_fn(
+            |i| {
+                BoolTarget::new_unsafe(builder.select(
+                    condition,
+                    x.0 .0[i].target,
+                    y.0 .0[i].target,
+                ))
+            },
+        )))
     }
 }
 

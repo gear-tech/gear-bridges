@@ -8,6 +8,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 mod block_finality;
 pub(crate) mod common;
 mod final_proof;
+pub mod header_chain;
 mod latest_validator_set;
 pub mod serialization;
 mod storage_inclusion;

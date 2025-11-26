@@ -1,7 +1,7 @@
 import { HexString } from '@gear-js/api';
 import { generatePath, Link } from 'react-router-dom';
 
-import { Card, CopyButton, Skeleton } from '@/components';
+import { Card, CopyButton, Skeleton, Tooltip } from '@/components';
 import { ROUTE } from '@/consts';
 import { Token } from '@/context';
 import { cx, getTruncatedText } from '@/utils';
@@ -37,19 +37,23 @@ function TransactionCard(props: Props) {
   const { id, timestamp, blockNumber, txHash, status, sourceNetwork } = props;
 
   return (
-    <Card as={Link} to={generatePath(ROUTE.TRANSACTION, { id })} className={styles.card}>
-      <div className={styles.dateContainer}>
+    <Card className={styles.card}>
+      <Link to={generatePath(ROUTE.TRANSACTION, { id })} className={styles.info}>
         <TransactionDate timestamp={timestamp} className={styles.date} />
+
+        <p className={styles.hash}>{getTruncatedText(txHash)}</p>
+
+        <TransactionPair {...props} />
+        <TransactionStatus status={status} />
+      </Link>
+
+      <div className={styles.actions}>
+        <Tooltip value="Copy Transaction Hash">
+          <CopyButton value={txHash} />
+        </Tooltip>
+
         <BlockNumberLink blockNumber={blockNumber} sourceNetwork={sourceNetwork} />
       </div>
-
-      <p className={styles.transactionHash}>
-        {getTruncatedText(txHash)}
-        <CopyButton value={txHash} stopPropagation />
-      </p>
-
-      <TransactionPair {...props} />
-      <TransactionStatus status={status} />
     </Card>
   );
 }
@@ -57,18 +61,21 @@ function TransactionCard(props: Props) {
 function TransactionCardSkeleton() {
   return (
     <Card className={cx(styles.card, styles.skeleton)}>
-      <TransactionDate.Skeleton />
+      <div className={styles.info}>
+        <TransactionDate.Skeleton />
 
-      <p className={styles.transactionHash}>
         <Skeleton>
-          <span className={styles.link}>0x000000000</span>
+          <span className={styles.hash}>0x000000000</span>
         </Skeleton>
 
-        <Skeleton width="18px" height="18px" />
-      </p>
+        <TransactionPair.Skeleton />
+        <TransactionStatus.Skeleton />
+      </div>
 
-      <TransactionPair.Skeleton />
-      <TransactionStatus.Skeleton />
+      <div className={styles.actions}>
+        <Skeleton width="16px" height="16px" borderRadius="50%" />
+        <Skeleton width="16px" height="16px" borderRadius="50%" />
+      </div>
     </Card>
   );
 }

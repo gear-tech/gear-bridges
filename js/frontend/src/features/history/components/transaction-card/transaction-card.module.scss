@@ -1,6 +1,20 @@
 .card {
+  display: flex;
+
+  padding: 0;
+
+  @include md {
+    flex-direction: column;
+  }
+}
+
+.info {
+  flex: 1;
+
+  padding: 20px 24px;
+
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.25fr) minmax(0, 3fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 3fr) minmax(0, 1.25fr);
   align-items: center;
   gap: 16px;
 
@@ -35,20 +49,33 @@
   }
 }
 
-.date {
-  color: #f6f6f6e5;
+.actions {
+  margin: 20px 0;
+  padding: 0 24px;
 
-  &Container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+
+  border-left: 1px solid rgba(#fff, 0.1);
+
+  @include md {
+    flex-direction: row;
+
+    border-left: none;
+    border-top: 1px solid rgba(#fff, 0.1);
+
+    margin: 0 24px;
+    padding: 20px 0;
   }
 }
 
-.transactionHash {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
+.date {
   color: #f6f6f6e5;
+}
+
+.hash {
+  color: #f6f6f6e5;
+  word-break: break-all;
 }

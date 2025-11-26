@@ -15,7 +15,7 @@ type Props = {
   onCopy?: () => void;
 };
 
-function CopyButton({ value, message = 'Copied', SVG = CopySVG, className, onCopy = () => {} }: Props) {
+function CopyButton({ value, message = 'Copied', SVG = CopySVG, className, onCopy = () => {}, ...props }: Props) {
   const alert = useAlert();
 
   const onSuccess = () => {
@@ -30,13 +30,14 @@ function CopyButton({ value, message = 'Copied', SVG = CopySVG, className, onCop
     logger.error('Copy to clipboard', error instanceof Error ? error : new Error(errorMessage));
   };
 
-  const copyToClipboard = () => navigator.clipboard.writeText(value).then(onSuccess, onError);
+  const handleClick = () => navigator.clipboard.writeText(value).then(onSuccess, onError);
 
   return (
     <Button
+      {...props} // spreading props for tooltip to work
       icon={SVG}
       color="transparent"
-      onClick={copyToClipboard}
+      onClick={handleClick}
       size="x-small"
       className={cx(styles.button, className)}
     />

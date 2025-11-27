@@ -1,4 +1,3 @@
-import { useAccount } from '@gear-js/react-hooks';
 import { useMemo } from 'react';
 import { FormProvider } from 'react-hook-form';
 
@@ -17,14 +16,12 @@ import {
   TRANSACTIONS_LIMIT,
   usePairs,
 } from '@/features/history';
-import { useEthAccount, useVaraSymbol } from '@/hooks';
+import { useAccountsConnection, useVaraSymbol } from '@/hooks';
 
 import styles from './transactions.module.scss';
 
 function Transactions() {
-  const { account } = useAccount();
-  const ethAccount = useEthAccount();
-  const isAccountConnected = Boolean(account || ethAccount.address);
+  const { isAnyAccount } = useAccountsConnection();
 
   const { form, filters } = useTransactionFilters();
   const [txsData, isFetching, hasNextPage, fetchNextPage] = useTransactions(filters);
@@ -58,7 +55,7 @@ function Transactions() {
             <p className={styles.counter}>
               {isFetching ? <Skeleton width="100px" /> : `${transactionsCount} results`}
 
-              {isAccountConnected && (
+              {isAnyAccount && (
                 <Checkbox name={FIELD_NAME.OWNER} type="switch" label="My Transactions" className={styles.switch} />
               )}
             </p>

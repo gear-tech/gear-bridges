@@ -2,14 +2,12 @@
   padding-top: 20px;
   padding-bottom: 20px;
 
-  display: grid;
-  grid-template-columns: minmax(0, max-content) max-content 1fr;
+  display: flex;
   align-items: center;
   gap: 32px;
 
-  @include breakpoint(555px) {
-    grid-template-columns: minmax(0, max-content) 1fr;
-    gap: 16px;
+  @include sm {
+    flex-direction: column;
   }
 }
 
@@ -26,10 +24,20 @@
       fill: #00ffc4;
     }
   }
+
+  &Container {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+  }
 }
 
 .wallet {
   margin-left: auto;
+
+  @include sm {
+    margin-left: 0;
+  }
 }
 
 .nav {

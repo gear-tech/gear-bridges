@@ -1,13 +1,13 @@
 import '@gear-js/vara-ui/dist/style.css';
-import { useAccount } from '@gear-js/react-hooks';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import TagManager from 'react-gtm-module';
 import { Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
 
+import { useAccountsConnection } from '@/hooks';
+
 import { App } from './app';
 import { ROUTE, GTM_ID } from './consts';
-import { useEthAccount } from './hooks';
 import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction } from './pages';
 
 import './index.scss';
@@ -16,14 +16,13 @@ if (GTM_ID) TagManager.initialize({ gtmId: GTM_ID });
 
 // eslint-disable-next-line react-refresh/only-export-components
 function PrivateRoute() {
-  const { account, isAccountReady } = useAccount();
-  const ethAccount = useEthAccount();
+  const { isAnyAccount, isAnyAccountLoading } = useAccountsConnection();
 
   // it's probably worth to check isConnecting too, but there is a bug:
   // no extensions -> open any wallet's QR code -> close modal -> isConnecting is still true
-  if (!isAccountReady || ethAccount.isReconnecting) return null;
+  if (isAnyAccountLoading) return null;
 
-  return account || ethAccount.address ? <Outlet /> : <ConnectWallet />;
+  return isAnyAccount ? <Outlet /> : <ConnectWallet />;
 }
 
 const PUBLIC_ROUTES = [

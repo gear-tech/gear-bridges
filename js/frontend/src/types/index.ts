@@ -7,8 +7,12 @@ type SVGComponent = FunctionComponent<
   }
 >;
 
+type PropsWithClassName = {
+  className?: string;
+};
+
 type VaraAddress = HexString;
 type EthAddress = HexString;
 type FTAddressPair = [VaraAddress, EthAddress];
 
-export type { SVGComponent, FTAddressPair };
+export type { SVGComponent, PropsWithClassName, FTAddressPair };

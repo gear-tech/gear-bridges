@@ -176,10 +176,16 @@ pub async fn prove_final(
     count_thread: Option<usize>,
     finality: Option<(H256, dto::BlockFinalityProof)>,
 ) -> anyhow::Result<FinalProof> {
+    log::trace!("prove_final; finality = {}", finality.is_some());
+
     let (block, block_finality) = match finality {
         Some(finality) => finality,
         None => gear_api.fetch_finality_proof(at_block).await?,
     };
+
+    log::trace!("at_block = {at_block:?}");
+    log::trace!("block = {block:?}");
+
     prove_final_with_block_finality(
         gear_api,
         previous_proof,

@@ -15,14 +15,13 @@ use gsdk::{
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-        storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage, TimestampStorage},
-        vara_runtime::SessionKeys,
+        storage::{GearEthBridgeStorage, GrandpaStorage, TimestampStorage},
     },
     Event as RuntimeEvent, GearConfig,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
-use sp_consensus_grandpa::GrandpaJustification;
+use sp_consensus_grandpa::{AuthorityId, GrandpaJustification};
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
 use sp_runtime::{traits::AppVerify, AccountId32};
 use subxt::{
@@ -462,14 +461,14 @@ impl GearApi {
     async fn fetch_authority_set_in_block(&self, block: H256) -> AnyResult<Vec<[u8; 32]>> {
         let block = (*self.api).blocks().at(block).await?;
 
-        let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
-        let session_keys: Vec<(AccountId32, SessionKeys)> =
-            Self::fetch_from_storage(&block, &session_keys_address).await?;
+        let address = gsdk::Api::storage_root(GrandpaStorage::Authorities);
+        let authorities: Vec<(AuthorityId, u64)> =
+            Self::fetch_from_storage(&block, &address).await?;
 
-        Ok(session_keys
+        Ok(authorities
             .into_iter()
-            .map(|sc| sc.1.grandpa.0)
-            .collect::<Vec<_>>())
+            .map(|(grandpa, _)| <[u8; 32]>::try_from(grandpa.as_ref()))
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     pub async fn fetch_sent_message_inclusion_proof(

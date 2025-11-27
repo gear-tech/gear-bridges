@@ -1,10 +1,10 @@
 import { HexString } from '@gear-js/api';
 import { generatePath, Link } from 'react-router-dom';
 
-import { Card, CopyButton, Skeleton, Tooltip } from '@/components';
+import { Address, Card, CopyButton, Skeleton, Tooltip } from '@/components';
 import { ROUTE } from '@/consts';
 import { Token } from '@/context';
-import { cx, getTruncatedText } from '@/utils';
+import { cx } from '@/utils';
 
 import { Transfer } from '../../types';
 import { BlockNumberLink } from '../block-number-link';
@@ -41,7 +41,7 @@ function TransactionCard(props: Props) {
       <Link to={generatePath(ROUTE.TRANSACTION, { id })} className={styles.info}>
         <TransactionDate timestamp={timestamp} className={styles.date} />
 
-        <p className={styles.hash}>{getTruncatedText(txHash)}</p>
+        <Address value={txHash} className={styles.hash} />
 
         <TransactionPair {...props} />
         <TransactionStatus status={status} />

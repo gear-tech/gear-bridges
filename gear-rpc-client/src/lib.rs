@@ -199,9 +199,7 @@ impl GearApi {
         &self,
         authority_set_id: u64,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
-        let block = self
-            .search_for_authority_set_block(authority_set_id)
-            .await?;
+        let block = self.find_era_first_block(authority_set_id).await?;
 
         self.fetch_finality_proof(block).await
     }

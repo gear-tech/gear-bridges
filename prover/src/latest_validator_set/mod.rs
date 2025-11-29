@@ -141,12 +141,10 @@ impl LatestValidatorSet {
         let next_authority_set_public_inputs =
             builder.recursively_verify_constant_proof(&next_validator_set_proof, &mut witness);
 
-        let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
-        let next_set_id = builder.add(current_set_id, one);
-
         let current_set_hash = next_authority_set_public_inputs.current_validator_set_hash;
+        let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
+        builder.register_public_input(current_set_id);
 
-        builder.register_public_input(next_set_id);
         next_authority_set_public_inputs
             .next_validator_set
             .register_as_public_inputs(&mut builder);
@@ -174,11 +172,9 @@ impl LatestValidatorSet {
 
         genesis_authority_set_hash.connect(&inner_cyclic_targets.genesis_hash, &mut builder);
 
-        let actual_current_authority_set_id = builder.select(
-            condition,
-            inner_cyclic_targets.current_set_id,
-            genesis_authority_set_id,
-        );
+        let set_id_next = builder.add(inner_cyclic_targets.current_set_id, one);
+        let actual_current_authority_set_id =
+            builder.select(condition, set_id_next, genesis_authority_set_id);
         builder.connect(actual_current_authority_set_id, current_set_id);
 
         let actual_current_authority_set_hash = Blake2TargetGoldilocks::parse_exact(

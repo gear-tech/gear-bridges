@@ -110,7 +110,10 @@ impl LatestValidatorSet {
         self,
         config: GenesisConfig,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
-        log::debug!("LatestValidatorSet; prove_genesis, config = {:?}", config.authority_set_id);
+        log::debug!(
+            "LatestValidatorSet; prove_genesis, config = {:?}",
+            config.authority_set_id
+        );
 
         let circuit = self.build_circuit();
         circuit.prove_genesis(config)
@@ -180,8 +183,11 @@ impl LatestValidatorSet {
 
         genesis_authority_set_hash.connect(&inner_cyclic_targets.genesis_hash, &mut builder);
 
-        let actual_current_authority_set_id =
-            builder.select(condition, inner_cyclic_targets.current_set_id, genesis_authority_set_id);
+        let actual_current_authority_set_id = builder.select(
+            condition,
+            inner_cyclic_targets.current_set_id,
+            genesis_authority_set_id,
+        );
         builder.connect(actual_current_authority_set_id, current_set_id);
 
         let actual_current_authority_set_hash = Blake2TargetGoldilocks::parse_exact(

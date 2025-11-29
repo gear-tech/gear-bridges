@@ -118,7 +118,6 @@ impl NextValidatorSet {
         }
         .register_as_public_inputs(&mut builder);
 
-
         log::debug!("NextValidatorSet; before proof");
 
         let result = ProofWithCircuitData::prove_from_builder(builder, witness);

@@ -38,7 +38,7 @@ pub async fn prove_genesis(
     );
 
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(genesis_config.authority_set_id)
+        .fetch_finality_proof_for_session(genesis_config.authority_set_id + 1)
         .await?;
 
     log::info!(

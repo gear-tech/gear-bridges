@@ -110,6 +110,8 @@ impl LatestValidatorSet {
         self,
         config: GenesisConfig,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        log::debug!("LatestValidatorSet; prove_genesis, config = {:?}", config.authority_set_id);
+
         let circuit = self.build_circuit();
         circuit.prove_genesis(config)
     }
@@ -124,10 +126,13 @@ impl LatestValidatorSet {
     }
 
     fn build_circuit(self) -> Circuit {
+        log::debug!("LatestValidatorSet; build circuit");
+
         let next_validator_set_proof = self.change_proof.prove();
 
+        log::debug!("LatestValidatorSet; next_validator_set_proof proven");
+
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let one = builder.one();
 
         let genesis_authority_set_id = builder.add_virtual_public_input();
         let genesis_authority_set_hash = Blake2TargetGoldilocks::parse(
@@ -143,7 +148,10 @@ impl LatestValidatorSet {
 
         let current_set_hash = next_authority_set_public_inputs.current_validator_set_hash;
         let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
-        builder.register_public_input(current_set_id);
+
+        let one = builder.one();
+        let next_set_id = builder.add(current_set_id, one);
+        builder.register_public_input(next_set_id);
 
         next_authority_set_public_inputs
             .next_validator_set
@@ -172,9 +180,8 @@ impl LatestValidatorSet {
 
         genesis_authority_set_hash.connect(&inner_cyclic_targets.genesis_hash, &mut builder);
 
-        let set_id_next = builder.add(inner_cyclic_targets.current_set_id, one);
         let actual_current_authority_set_id =
-            builder.select(condition, set_id_next, genesis_authority_set_id);
+            builder.select(condition, inner_cyclic_targets.current_set_id, genesis_authority_set_id);
         builder.connect(actual_current_authority_set_id, current_set_id);
 
         let actual_current_authority_set_hash = Blake2TargetGoldilocks::parse_exact(

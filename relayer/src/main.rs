@@ -125,9 +125,15 @@ async fn run() -> AnyResult<()> {
                 .find_era_first_block(auth_set_id)
                 .await
                 .context("Unable to find the first block of an era")?;
+            let auth_set_id_block_number_first = gear_api.block_hash_to_number(auth_set_id_block_first).await?;
+
+            let aut_set_id_previous_block_number = auth_set_id_block_number_first - 1;
+            let aut_set_id_previous_block = gear_api
+                        .block_number_to_hash(aut_set_id_previous_block_number)
+                        .await?;
 
             let state = gear_api
-                .authority_set_state(Some(auth_set_id_block_first))
+                .authority_set_state(Some(aut_set_id_previous_block))
                 .await?;
             log::debug!("auth_set_id_block_first = {auth_set_id_block_first}");
             log::debug!("authority_set_id = {}", state.authority_set_id);

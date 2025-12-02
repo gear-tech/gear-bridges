@@ -150,17 +150,27 @@ pub struct GearEthCoreArgs {
         default_value = "4h"
     )]
     pub critical_threshold: CriticalThreshold,
+
+    #[arg(
+        long,
+        help = "Whether to skip catching up to the latest block on startup or no",
+        default_value_t = false
+    )]
+    pub skip_catchup: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum CriticalThreshold {
     Timeout(Duration),
     AuthoritySetChange,
+    None,
 }
 
 pub fn parse_critical_threshold(s: &str) -> anyhow::Result<CriticalThreshold> {
     if s.trim().eq_ignore_ascii_case("authority_set_change") {
         return Ok(CriticalThreshold::AuthoritySetChange);
+    } else if s.trim().eq_ignore_ascii_case("none") {
+        return Ok(CriticalThreshold::None);
     }
 
     Ok(CriticalThreshold::Timeout(humantime::parse_duration(s)?))

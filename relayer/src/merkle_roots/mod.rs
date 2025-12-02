@@ -278,6 +278,7 @@ impl MerkleRootRelayer {
         };
 
         let max_block_number = eth_api.max_block_number().await?;
+        let max_block_distance = eth_api.max_block_distance().await?;
 
         if self
             .storage
@@ -462,7 +463,7 @@ impl MerkleRootRelayer {
             .block_hash_to_number(last_block_hash)
             .await?;
 
-        log::info!("Latest finalized block is #{last_block}, max block number in Ethereum MessageQueue contract is #{max_block_number}");
+        log::info!("Latest finalized block is #{last_block}, max block number in Ethereum MessageQueue contract is #{max_block_number} (MAX_BLOCK_DISTANCE={max_block_distance})");
         if let Some(max_stored) = max_block_number_in_storage {
             log::info!("Max finalized merkle root in storage is at block #{max_stored}");
         } else {
@@ -470,7 +471,7 @@ impl MerkleRootRelayer {
         }
         if !self.options.skip_catchup {
             if let CriticalThreshold::Timeout(timeout) = self.options.critical_threshold {
-                if last_block > max_block_number {
+                if last_block > max_block_number + max_block_distance {
                     if let Some(max_stored) = max_block_number_in_storage {
                         // If we have some finalized merkle roots in storage, we can start from
                         // the next block that aligns with our step size to catch up.

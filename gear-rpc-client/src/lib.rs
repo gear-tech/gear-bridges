@@ -15,14 +15,13 @@ use gsdk::{
         gear::Event as GearEvent,
         gear_eth_bridge::Event as GearBridgeEvent,
         runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-        storage::{GearEthBridgeStorage, GrandpaStorage, SessionStorage, TimestampStorage},
-        vara_runtime::SessionKeys,
+        storage::{GearEthBridgeStorage, GrandpaStorage, TimestampStorage},
     },
     Event as RuntimeEvent, GearConfig,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
-use sp_consensus_grandpa::GrandpaJustification;
+use sp_consensus_grandpa::{AuthorityId, GrandpaJustification};
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
 use sp_runtime::{traits::AppVerify, AccountId32};
 use subxt::{
@@ -50,7 +49,6 @@ struct StorageTrieInclusionProof {
 }
 
 const VOTE_LENGTH_IN_BITS: usize = 424;
-const APPROX_SESSION_DURATION_IN_BLOCKS: u32 = 1_000;
 
 pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -151,42 +149,59 @@ impl GearApi {
         })
     }
 
-    pub async fn find_era_first_block(&self, authority_set_id: u64) -> AnyResult<H256> {
-        let current_set_block = self
-            .search_for_authority_set_block(authority_set_id)
-            .await?;
-        let mut current_set_block = self.block_hash_to_number(current_set_block).await?;
+    pub async fn find_era_first_block(&self, requested_authority_set_id: u64) -> AnyResult<H256> {
+        if requested_authority_set_id == 0 {
+            return self.block_number_to_hash(0).await;
+        }
 
-        let mut prev_set_block =
-            current_set_block.saturating_sub(APPROX_SESSION_DURATION_IN_BLOCKS);
+        let block_requested_auth_set_id = self
+            .search_for_authority_set_block(requested_authority_set_id)
+            .await?;
+        let block_number_requested_auth_set_id = self
+            .block_hash_to_number(block_requested_auth_set_id)
+            .await?;
+
+        let approx_session_duration_in_blocks =
+            block_number_requested_auth_set_id / requested_authority_set_id as u32;
+        let mut block_number_lower =
+            block_number_requested_auth_set_id.saturating_sub(approx_session_duration_in_blocks);
 
         loop {
-            let prev_set_block_hash = self.block_number_to_hash(prev_set_block).await?;
+            let prev_set_block_hash = self.block_number_to_hash(block_number_lower).await?;
             let prev_set_id = self.authority_set_id(prev_set_block_hash).await?;
 
-            if prev_set_id < authority_set_id {
+            if prev_set_id < requested_authority_set_id {
                 break;
             }
 
-            prev_set_block = prev_set_block.saturating_sub(APPROX_SESSION_DURATION_IN_BLOCKS);
+            block_number_lower =
+                block_number_lower.saturating_sub(approx_session_duration_in_blocks);
         }
 
+        let mut block_number_higher = block_number_requested_auth_set_id;
         loop {
-            let mid_block = (current_set_block + prev_set_block) / 2;
+            if block_number_lower + 1 == block_number_higher {
+                // we don't have to check authority set if of the block since it is
+                // guaranteed that auth set if of the lower block is less and hence
+                // the higher block number is the result.
+                return self.block_number_to_hash(block_number_higher).await;
+            }
+
+            let mid_block = (block_number_lower + block_number_higher) / 2;
             let mid_block_hash = self.block_number_to_hash(mid_block).await?;
             let mid_set_id = self.authority_set_id(mid_block_hash).await?;
 
-            if mid_set_id == authority_set_id {
-                current_set_block = mid_block;
+            if mid_set_id == requested_authority_set_id {
+                block_number_higher = mid_block;
 
                 let mid_prev = self.previous_block(mid_block_hash).await?;
                 let mid_prev_set_id = self.authority_set_id(mid_prev).await?;
 
-                if mid_prev_set_id + 1 == authority_set_id {
+                if mid_prev_set_id + 1 == requested_authority_set_id {
                     return Ok(mid_block_hash);
                 }
             } else {
-                prev_set_block = mid_block;
+                block_number_lower = mid_block;
             }
         }
     }
@@ -200,9 +215,7 @@ impl GearApi {
         &self,
         authority_set_id: u64,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
-        let block = self
-            .search_for_authority_set_block(authority_set_id)
-            .await?;
+        let block = self.find_era_first_block(authority_set_id).await?;
 
         self.fetch_finality_proof(block).await
     }
@@ -389,12 +402,22 @@ impl GearApi {
         self.fetch_authority_set_in_block(block).await
     }
 
-    pub async fn search_for_authority_set_block(&self, authority_set_id: u64) -> AnyResult<H256> {
-        let latest_block = self.latest_finalized_block().await?;
-        let latest_vs_id = self.authority_set_id(latest_block).await?;
+    pub async fn search_for_authority_set_block(
+        &self,
+        requested_authority_set_id: u64,
+    ) -> AnyResult<H256> {
+        if requested_authority_set_id == 0 {
+            return self.block_number_to_hash(0).await;
+        }
 
-        if latest_vs_id == authority_set_id {
+        let latest_block = self.latest_finalized_block().await?;
+        let latest_as_id = self.authority_set_id(latest_block).await?;
+        if latest_as_id == requested_authority_set_id {
             return Ok(latest_block);
+        }
+
+        if latest_as_id < requested_authority_set_id {
+            return Err(anyhow!("Authority set id of the latest finalized block ({latest_block:?}) is {latest_as_id} but request is to search for {requested_authority_set_id}"));
         }
 
         #[derive(Clone, Copy)]
@@ -403,9 +426,11 @@ impl GearApi {
             BinarySearch { lower_bn: u32, higher_bn: u32 },
         }
 
+        let latest_block_number = self.block_hash_to_number(latest_block).await?;
+        let approx_session_duration_in_blocks = latest_block_number / latest_as_id as u32;
         let mut state = State::SearchBack {
             latest_bn: self.block_hash_to_number(latest_block).await?,
-            step: APPROX_SESSION_DURATION_IN_BLOCKS,
+            step: approx_session_duration_in_blocks,
         };
 
         loop {
@@ -413,13 +438,13 @@ impl GearApi {
                 State::SearchBack { latest_bn, step } => {
                     let next_bn = latest_bn.saturating_sub(step);
                     let next_block = self.block_number_to_hash(next_bn).await?;
-                    let next_vs = self.authority_set_id(next_block).await?;
+                    let next_as = self.authority_set_id(next_block).await?;
 
-                    if next_vs == authority_set_id {
+                    if next_as == requested_authority_set_id {
                         return Ok(next_block);
                     }
 
-                    if next_vs > authority_set_id {
+                    if next_as > requested_authority_set_id {
                         State::SearchBack {
                             latest_bn: next_bn,
                             step: step * 2,
@@ -431,19 +456,32 @@ impl GearApi {
                         }
                     }
                 }
+
                 State::BinarySearch {
                     lower_bn,
                     higher_bn,
                 } => {
+                    if lower_bn + 1 == higher_bn {
+                        let block = self.block_number_to_hash(higher_bn).await?;
+                        let auth_set_id = self.authority_set_id(block).await?;
+                        if auth_set_id == requested_authority_set_id {
+                            return Ok(block);
+                        }
+
+                        // we don't have to check `lower_bn` since in that case
+                        // (lower_bn + higher_bn) / 2 equals to lower_bn and so will be
+                        // checked below.
+                    }
+
                     let mid_bn = (lower_bn + higher_bn) / 2;
                     let mid_block = self.block_number_to_hash(mid_bn).await?;
                     let mid_vs = self.authority_set_id(mid_block).await?;
 
-                    if mid_vs == authority_set_id {
+                    if mid_vs == requested_authority_set_id {
                         return Ok(mid_block);
                     }
 
-                    if mid_vs > authority_set_id {
+                    if mid_vs > requested_authority_set_id {
                         State::BinarySearch {
                             lower_bn,
                             higher_bn: mid_bn,
@@ -462,14 +500,14 @@ impl GearApi {
     async fn fetch_authority_set_in_block(&self, block: H256) -> AnyResult<Vec<[u8; 32]>> {
         let block = (*self.api).blocks().at(block).await?;
 
-        let session_keys_address = gsdk::Api::storage_root(SessionStorage::QueuedKeys);
-        let session_keys: Vec<(AccountId32, SessionKeys)> =
-            Self::fetch_from_storage(&block, &session_keys_address).await?;
+        let address = gsdk::Api::storage_root(GrandpaStorage::Authorities);
+        let authorities: Vec<(AuthorityId, u64)> =
+            Self::fetch_from_storage(&block, &address).await?;
 
-        Ok(session_keys
+        Ok(authorities
             .into_iter()
-            .map(|sc| sc.1.grandpa.0)
-            .collect::<Vec<_>>())
+            .map(|(grandpa, _)| <[u8; 32]>::try_from(grandpa.as_ref()))
+            .collect::<Result<Vec<_>, _>>()?)
     }
 
     pub async fn fetch_sent_message_inclusion_proof(

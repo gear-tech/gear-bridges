@@ -42,6 +42,16 @@ body {
       color: #f6f6f6e5;
     }
   }
+
+  :has(.unsupportedNetworkModal) {
+    header {
+      justify-content: center;
+
+      button {
+        display: none;
+      }
+    }
+  }
 }
 
 main {
@@ -60,18 +70,9 @@ a {
   color: inherit;
   transition: all 0.25s;
 
-  &:not(.linkButton) {
-    // currently only logo
-    svg path {
-      transition: fill 0.25s;
-    }
-
+  &:not(.linkButton, .faqLink) {
     &:hover {
       color: #00ffc4;
-
-      svg path {
-        fill: #00ffc4;
-      }
     }
   }
 }

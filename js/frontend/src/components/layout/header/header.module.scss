@@ -4,14 +4,39 @@
 
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 32px;
+
+  @include sm {
+    flex-direction: column;
+  }
 }
 
 .logo {
   svg {
     width: 100%;
     height: auto;
+
+    path {
+      transition: fill 0.25s;
+    }
+
+    &:hover path {
+      fill: #00ffc4;
+    }
+  }
+
+  &Container {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+  }
+}
+
+.wallet {
+  margin-left: auto;
+
+  @include sm {
+    margin-left: 0;
   }
 }
 

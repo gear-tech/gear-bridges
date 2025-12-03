@@ -49,6 +49,10 @@ impl Network {
         let epoch = utils::calculate_epoch(slot);
         match self {
             Mainnet => {
+                if epoch >= epoch_fulu {
+                    return hex!("06000000");
+                }
+
                 if epoch >= epoch_electra {
                     return hex!("05000000");
                 }
@@ -106,7 +110,8 @@ impl Network {
 
     pub const fn epoch_fulu(&self) -> u64 {
         match self {
-            Mainnet => todo!(),
+            // https://github.com/eth-clients/mainnet/blob/980aee8893a2291d473c38f63797d5bc370fa381/metadata/config.yaml#L57
+            Mainnet => 411_392,
 
             // https://github.com/eth-clients/sepolia/blob/56f0bff41cecab6c661251d72b73ceecc52c5701/metadata/config.yaml#L43
             Sepolia => 272_640,

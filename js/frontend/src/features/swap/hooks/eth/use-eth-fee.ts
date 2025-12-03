@@ -1,14 +1,17 @@
 import { formatEther } from 'viem';
 import { useReadContract } from 'wagmi';
 
+import { useNetworkType } from '@/context/network-type';
 import { isUndefined } from '@/utils';
 
-import { CONTRACT_ADDRESS, BRIDGING_PAYMENT_ABI } from '../../consts';
+import { BRIDGING_PAYMENT_ABI } from '../../consts';
 
 function useEthFee() {
+  const { NETWORK_PRESET } = useNetworkType();
+
   const { data, isLoading } = useReadContract({
     abi: BRIDGING_PAYMENT_ABI,
-    address: CONTRACT_ADDRESS.ETH_BRIDGING_PAYMENT,
+    address: NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
     functionName: 'fee',
   });
 

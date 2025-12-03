@@ -1,13 +1,13 @@
-import { useAccount } from '@gear-js/react-hooks';
 import { CSSProperties, useRef, useState, useEffect } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 
 import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
 import { TransactionsCounter } from '@/features/history';
+import { NetworkSwitch } from '@/features/network-switch';
 import { LockedBalanceTooltip } from '@/features/token-tracker';
 import { Wallet } from '@/features/wallet';
-import { useEthAccount } from '@/hooks';
+import { useAccountsConnection } from '@/hooks';
 
 import { Container } from '../container';
 
@@ -15,9 +15,7 @@ import { LINKS } from './consts';
 import styles from './header.module.scss';
 
 function Header() {
-  const { account } = useAccount();
-  const ethAccount = useEthAccount();
-  const isAnyAccount = account || ethAccount.isConnected;
+  const { isAnyAccount } = useAccountsConnection();
 
   const { pathname } = useLocation();
   const [linksStyle, setLinksStyle] = useState<CSSProperties>();
@@ -68,11 +66,15 @@ function Header() {
   return (
     <header className={styles.header}>
       <Container className={styles.mainContainer}>
-        <Link to={ROUTE.HOME} className={styles.logo}>
-          <LogoSVG />
-        </Link>
+        <div className={styles.logoContainer}>
+          <Link to={ROUTE.HOME} className={styles.logo}>
+            <LogoSVG />
+          </Link>
 
-        <Wallet />
+          <NetworkSwitch />
+        </div>
+
+        <Wallet className={styles.wallet} />
       </Container>
 
       <nav className={styles.nav}>

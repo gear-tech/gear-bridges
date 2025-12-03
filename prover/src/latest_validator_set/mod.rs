@@ -110,6 +110,11 @@ impl LatestValidatorSet {
         self,
         config: GenesisConfig,
     ) -> ProofWithCircuitData<LatestValidatorSetTarget> {
+        log::debug!(
+            "LatestValidatorSet; prove_genesis, config = {:?}",
+            config.authority_set_id
+        );
+
         let circuit = self.build_circuit();
         circuit.prove_genesis(config)
     }
@@ -124,10 +129,13 @@ impl LatestValidatorSet {
     }
 
     fn build_circuit(self) -> Circuit {
+        log::debug!("LatestValidatorSet; build circuit");
+
         let next_validator_set_proof = self.change_proof.prove();
 
+        log::debug!("LatestValidatorSet; next_validator_set_proof proven");
+
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
-        let one = builder.one();
 
         let genesis_authority_set_id = builder.add_virtual_public_input();
         let genesis_authority_set_hash = Blake2TargetGoldilocks::parse(
@@ -141,12 +149,13 @@ impl LatestValidatorSet {
         let next_authority_set_public_inputs =
             builder.recursively_verify_constant_proof(&next_validator_set_proof, &mut witness);
 
-        let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
-        let next_set_id = builder.add(current_set_id, one);
-
         let current_set_hash = next_authority_set_public_inputs.current_validator_set_hash;
+        let current_set_id = next_authority_set_public_inputs.current_authority_set_id;
 
+        let one = builder.one();
+        let next_set_id = builder.add(current_set_id, one);
         builder.register_public_input(next_set_id);
+
         next_authority_set_public_inputs
             .next_validator_set
             .register_as_public_inputs(&mut builder);

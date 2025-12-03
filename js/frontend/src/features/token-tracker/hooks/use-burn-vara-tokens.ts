@@ -5,11 +5,15 @@ import { useWrappedVaraProgram } from '@/hooks';
 function useBurnVaraTokens() {
   const { data: program } = useWrappedVaraProgram();
 
-  return useSendProgramTransaction({
+  const { sendTransactionAsync, isPending } = useSendProgramTransaction({
     program,
     serviceName: 'vftNativeExchange',
     functionName: 'burn',
   });
+
+  const mutateAsync = async (value: bigint) => sendTransactionAsync({ args: [value] });
+
+  return { isPending, mutateAsync };
 }
 
 export { useBurnVaraTokens };

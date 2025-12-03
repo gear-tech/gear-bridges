@@ -1,16 +1,17 @@
 import { HexString } from '@gear-js/api';
-import { useAccount } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 
-import { useDebounce, useEthAccount } from '@/hooks';
+import { useDebounce } from '@/hooks';
 import { asOptionalField, isNumeric } from '@/utils';
 
 import { DEFAULT_VALUES, FIELD_NAME } from '../consts';
 import { Status, TransferFilter } from '../types';
+
+import { useAccountsFilter } from './use-accounts-filter';
 
 const SCHEMA = z.object({
   [FIELD_NAME.TIMESTAMP]: z.string(),
@@ -30,14 +31,11 @@ const SCHEMA = z.object({
 });
 
 function useTransactionFilters() {
-  const { account } = useAccount();
-  const ethAccount = useEthAccount();
-  const accountAddress = account?.decodedAddress || ethAccount.address;
-
+  const accountsFilter = useAccountsFilter();
   const [searchParams] = useSearchParams();
 
   const getOwnerDefaultValue = () => {
-    if (!accountAddress) return DEFAULT_VALUES[FIELD_NAME.OWNER];
+    if (!accountsFilter.isAvailable) return DEFAULT_VALUES[FIELD_NAME.OWNER];
 
     const owner = searchParams.get('owner');
 
@@ -101,14 +99,14 @@ function useTransactionFilters() {
       filter.blockNumber = { equalTo: debouncedSearch } as TransferFilter['blockNumber'];
     }
 
-    if (owner && accountAddress) {
-      filter.sender = { includesInsensitive: accountAddress } as TransferFilter['sender'];
+    if (owner && accountsFilter.isAvailable) {
+      filter.sender = { in: accountsFilter.addresses } as TransferFilter['sender'];
     }
 
     if (Object.keys(filter).length === 0) return;
 
     return filter;
-  }, [timestamp, status, asset, searchError, debouncedSearch, owner, accountAddress]);
+  }, [timestamp, status, asset, searchError, debouncedSearch, owner, accountsFilter]);
 
   return { form, filters };
 }

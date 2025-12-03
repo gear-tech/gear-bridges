@@ -1,0 +1,14 @@
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  font-size: 12px;
+  text-align: center;
+}

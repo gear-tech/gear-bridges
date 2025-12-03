@@ -146,7 +146,7 @@ impl BlockListener {
             log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
             let block = gear_api.api.blocks().at(block_hash).await?;
 
-            let gear_block = GearBlock::from_subxt_block(block).await?;
+            let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
 
             match tx.send(gear_block) {
                 Ok(_) => (),
@@ -157,32 +157,70 @@ impl BlockListener {
             }
         }
 
-        let mut finalized_blocks = gear_api.api.subscribe_finalized_blocks().await?;
-        loop {
-            match finalized_blocks.next().await {
-                Some(Err(err)) => {
-                    log::error!("Error receiving finalized block: {err}");
-                    break Err(err);
-                }
+        let mut last_finalized_block_number = None;
+        let mut subscription = gear_api.subscribe_grandpa_justifications().await?;
 
-                Some(Ok(block)) => {
-                    self.metrics.latest_block.set(block.number() as i64);
+        while let Some(justification) = subscription.next().await {
+            let justification = justification?;
 
-                    let block = GearBlock::from_subxt_block(block).await?;
-                    self.block_storage.add_block(&block).await;
+            let block_hash = justification.commit.target_hash;
+            let block_number = justification.commit.target_number;
 
-                    match tx.send(block) {
-                        Ok(_) => (),
-                        Err(broadcast::error::SendError(_)) => {
-                            log::error!("No active receivers for Gear block listener, stopping");
-                            return Ok(false);
+            // Check if there are missing blocks and fetch them
+            if let Some(last_finalized) = last_finalized_block_number {
+                if last_finalized + 1 != block_number {
+                    log::info!("Detected gap: last finalized block was #{last_finalized}, current block is #{block_number}");
+
+                    // Fetch missing blocks
+                    for missing_block in (last_finalized + 1)..block_number {
+                        log::trace!("Fetching missing block #{missing_block}");
+
+                        let missing_block_hash = match gear_api
+                            .block_number_to_hash(missing_block)
+                            .await
+                        {
+                            Ok(hash) => hash,
+                            Err(err) => {
+                                log::error!("Failed to get block hash for missing block #{missing_block}: {err}");
+                                continue;
+                            }
+                        };
+
+                        let missing_block_data =
+                            gear_api.api.blocks().at(missing_block_hash).await?;
+                        let gear_block =
+                            GearBlock::from_subxt_block(&gear_api, missing_block_data).await?;
+                        self.block_storage.add_block(&gear_api, &gear_block).await?;
+                        match tx.send(gear_block) {
+                            Ok(_) => {}
+                            Err(broadcast::error::SendError(_)) => {
+                                log::error!(
+                                    "No active receivers for Gear block listener, stopping"
+                                );
+                                return Ok(false);
+                            }
                         }
                     }
-                    self.metrics.latest_block.inc();
                 }
-
-                None => break Ok(true),
             }
+
+            // Process the current block
+            let block = gear_api.api.blocks().at(block_hash).await?;
+            let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
+            self.block_storage.add_block(&gear_api, &gear_block).await?;
+            match tx.send(gear_block) {
+                Ok(_) => {}
+                Err(broadcast::error::SendError(_)) => {
+                    log::error!("No active receivers for Gear block listener, stopping");
+                    return Ok(false);
+                }
+            }
+
+            // Update the last finalized block number
+            last_finalized_block_number = Some(block_number);
+            self.metrics.latest_block.set(block_number as i64);
         }
+
+        Ok(true)
     }
 }

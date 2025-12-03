@@ -29,7 +29,7 @@ function BalanceCardSkeleton() {
   return (
     <div className={styles.card}>
       <span className={styles.balance}>
-        <Skeleton borderRadius="50%">
+        <Skeleton width="24px" height="24px" borderRadius="50%">
           <TokenPlaceholderSVG />
         </Skeleton>
 

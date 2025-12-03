@@ -2,7 +2,8 @@ import { HexString } from '@gear-js/api';
 import { useQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
 
-import { INDEXER_ADDRESS } from '../consts';
+import { useNetworkType } from '@/context/network-type';
+
 import { graphql } from '../graphql';
 import { Pair, PairsQueryQuery } from '../graphql/graphql';
 
@@ -30,9 +31,11 @@ const derivePairs = ({ allPairs }: PairsQueryQuery) =>
   allPairs?.nodes as (Pair & { varaToken: HexString; ethToken: HexString })[];
 
 function usePairs() {
+  const { NETWORK_PRESET } = useNetworkType();
+
   return useQuery({
-    queryKey: ['pairs'],
-    queryFn: () => request(INDEXER_ADDRESS, PAIRS_QUERY),
+    queryKey: ['pairs', NETWORK_PRESET.INDEXER_ADDRESS],
+    queryFn: () => request(NETWORK_PRESET.INDEXER_ADDRESS, PAIRS_QUERY),
     select: derivePairs,
   });
 }

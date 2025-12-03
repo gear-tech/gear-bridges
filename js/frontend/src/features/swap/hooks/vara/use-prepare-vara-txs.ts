@@ -1,8 +1,8 @@
 import { Extrinsic } from '@polkadot/types/interfaces';
 
+import { useNetworkType } from '@/context/network-type';
 import { isUndefined } from '@/utils';
 
-import { CONTRACT_ADDRESS } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { FormattedValues } from '../../types';
 
@@ -38,6 +38,7 @@ function usePrepareVaraTxs({
   shouldPayPriorityFee,
   vftManagerFee,
 }: Params) {
+  const { NETWORK_PRESET } = useNetworkType();
   const { token } = useBridgeContext();
 
   const getAllowance = useGetVaraFTAllowance(token?.address);
@@ -68,7 +69,7 @@ function usePrepareVaraTxs({
 
     if (shouldApprove) {
       const { transaction, fee } = await approve.prepareTransactionAsync({
-        args: [CONTRACT_ADDRESS.VFT_MANAGER, amount],
+        args: [NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS, amount],
       });
 
       txs.push({

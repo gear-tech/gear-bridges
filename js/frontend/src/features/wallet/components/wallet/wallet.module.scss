@@ -1,66 +1,36 @@
+.container {
+  display: flex;
+  gap: 16px;
+
+  @include sm {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
+.skeleton {
+  width: 9rem;
+}
+
+.container,
+.wallet,
+.skeleton {
+  @include sm {
+    width: 100%;
+
+    * {
+      width: 100%;
+    }
+  }
+}
+
 .wallet {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 .balance {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  padding: 6px 16px;
-
-  font-size: 14px;
-
-  background-color: #13191e;
-  border: 1px solid #00ffc466;
-  border-radius: 4px;
-  transition: background-color 0.25s;
-
-  &:hover {
-    background-color: #00473766;
-  }
-}
-
-.account {
-  padding: 4px 16px;
-
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  font-weight: 600;
-  color: #000;
-
-  border-radius: 6px;
-  background-color: #fff;
-  transition: background-color 0.25s;
-
-  img,
-  svg {
-    width: 24px;
-    height: 24px;
-  }
-
-  svg {
-    flex-shrink: 0;
-  }
-
-  &:hover {
-    background-color: #d4d4d4;
-  }
-
   @include sm {
-    padding: 4px;
-  }
-
-  @include breakpoint(380px) {
-    display: none;
-  }
-}
-
-.address {
-  @include sm {
-    display: none;
+    justify-content: center;
   }
 }

@@ -3,9 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createClient } from 'graphql-ws';
 import { useEffect } from 'react';
 
+import { useNetworkType } from '@/context/network-type';
 import { logger } from '@/utils';
-
-import { INDEXER_ADDRESS } from '../consts';
 
 const TRANSFERS_COUNT_SUBSCRIPTION = `
   subscription TransfersCountSubscription {
@@ -13,13 +12,14 @@ const TRANSFERS_COUNT_SUBSCRIPTION = `
   }
 `;
 
-const wsClient = createClient({ url: INDEXER_ADDRESS });
-
 function useTransactionsCountSubscription() {
   const alert = useAlert();
   const queryClient = useQueryClient();
+  const { NETWORK_PRESET } = useNetworkType();
 
   useEffect(() => {
+    const wsClient = createClient({ url: NETWORK_PRESET.INDEXER_ADDRESS });
+
     const unsubscribe = wsClient.subscribe(
       { query: TRANSFERS_COUNT_SUBSCRIPTION },
       {
@@ -38,9 +38,10 @@ function useTransactionsCountSubscription() {
 
     return () => {
       unsubscribe();
+      void wsClient.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [NETWORK_PRESET.INDEXER_ADDRESS]);
 }
 
 export { useTransactionsCountSubscription };

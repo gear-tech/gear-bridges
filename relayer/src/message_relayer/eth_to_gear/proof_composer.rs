@@ -433,11 +433,11 @@ async fn build_inclusion_proof(
 pub struct ProofComposerActor {
     pub beacon_client: BeaconClient,
     pub eth_api: PollingEthApi,
-    pub waiting_for_checkpoints: Vec<(Uuid, TxHashWithSlot, Recipient<ComposedProof>)>,
+    pub waiting_for_checkpoints: Vec<(TxHashWithSlot, Recipient<ComposedProof>)>,
     pub last_checkpoint: Option<EthereumSlotNumber>,
     pub historical_proxy_address: H256,
     pub suri: String,
-    pub to_process: Vec<(Uuid, TxHashWithSlot, Recipient<ComposedProof>)>,
+    pub to_process: Vec<(TxHashWithSlot, Recipient<ComposedProof>)>,
     pub gear_actor: Addr<GearApiActor>,
     composer: Addr<Composer>,
     metrics: Metrics,
@@ -516,11 +516,11 @@ impl Actor for Composer {
 
 pub enum ComposedProof {
     Success {
+        tx_hash: TxHashWithSlot,
         payload: EthToVaraEvent,
-        tx_uuid: Uuid,
     },
     Failure {
-        tx_uuid: Uuid,
+        tx_hash: TxHashWithSlot,
         error: anyhow::Error,
     },
 }
@@ -532,7 +532,6 @@ pub enum ComposedProof {
 #[rtype(result = "()")]
 pub struct ComposeProof {
     pub tx: TxHashWithSlot,
-    pub tx_uuid: Uuid,
     pub recipient: Recipient<ComposedProof>,
 }
 
@@ -546,6 +545,9 @@ pub struct NewCheckpoint {
 impl Handler<NewCheckpoint> for ProofComposerActor {
     type Result = ();
 
+    /// Submit a new checkpoint to the actor.
+    ///
+    /// Processes all waiting transactions for which the checkpoint is sufficient.
     fn handle(&mut self, msg: NewCheckpoint, _ctx: &mut Self::Context) -> Self::Result {
         log::info!("Received new checkpoint: {}", msg.slot);
 
@@ -565,11 +567,7 @@ impl Handler<NewCheckpoint> for ProofComposerActor {
         // Send all ready transactions to composer. We do not wait for reply
         // but instead let composer handle them asynchronously and send replies to specified recipient.
         while let Some((tx_uuid, tx, recipient)) = self.to_process.pop() {
-            self.composer.do_send(ComposeProof {
-                tx,
-                tx_uuid,
-                recipient,
-            });
+            self.composer.do_send(ComposeProof { tx, recipient });
         }
     }
 }
@@ -577,6 +575,10 @@ impl Handler<NewCheckpoint> for ProofComposerActor {
 impl Handler<ComposeProof> for ProofComposerActor {
     type Result = ();
 
+    /// Handle request to compose proof for the given transaction.
+    ///
+    /// If checkpoint for the transaction slot is available, forwards the request to the [composer](Composer) actor
+    /// immediately. Otherwise, adds the request to the waiting queue.
     fn handle(&mut self, msg: ComposeProof, _ctx: &mut Self::Context) -> Self::Result {
         if self
             .last_checkpoint
@@ -587,10 +589,9 @@ impl Handler<ComposeProof> for ProofComposerActor {
         } else {
             log::debug!(
                 "Transaction {} is waiting for checkpoint, adding to queue",
-                msg.tx_uuid
+                msg.tx.tx_hash
             );
-            self.waiting_for_checkpoints
-                .push((msg.tx_uuid, msg.tx, msg.recipient));
+            self.waiting_for_checkpoints.push((msg.tx, msg.recipient));
         }
     }
 }
@@ -600,7 +601,7 @@ impl Handler<ComposeProof> for Composer {
 
     /// Compose proof for the given transaction and send it to the recipient.
     ///
-    /// Doe not block the actor, instead returns a future which is executed asynchronously.
+    /// Does not block the actor, instead returns a future which is executed asynchronously.
     fn handle(&mut self, msg: ComposeProof, _ctx: &mut Self::Context) -> Self::Result {
         let gear_actor = self.gear_actor.clone();
         let beacon_client = self.beacon_client.clone();
@@ -626,21 +627,21 @@ impl Handler<ComposeProof> for Composer {
                         .recipient
                         .send(ComposedProof::Success {
                             payload,
-                            tx_uuid: msg.tx_uuid,
+                            tx_hash: msg.tx,
                         })
                         .await;
                 }
                 Err(err) => {
                     log::error!(
                         "Failed to compose proof for transaction {}: {:?}",
-                        msg.tx_uuid,
+                        msg.tx.tx_hash,
                         err
                     );
 
                     let _ = msg
                         .recipient
                         .send(ComposedProof::Failure {
-                            tx_uuid: msg.tx_uuid,
+                            tx_hash: msg.tx,
                             error: err,
                         })
                         .await;

@@ -1,5 +1,5 @@
 use super::api_provider::GearApiActor;
-use actix::{Actor, Addr, Handler, Message, ResponseFuture};
+use actix::{Actor, Addr, AsyncContext, Handler, Message, Recipient, ResponseFuture};
 use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
@@ -23,7 +23,10 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
 
-use crate::message_relayer::eth_to_gear::api_provider::{ApiProviderConnection, ProxyRedirect};
+use crate::message_relayer::{
+    common::TxHashWithSlot,
+    eth_to_gear::api_provider::{ApiProviderConnection, ProxyRedirect},
+};
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,
@@ -424,21 +427,28 @@ impl MessageSenderActor {
 }
 
 #[derive(Message)]
-#[rtype(result = "anyhow::Result<(Uuid, MessageStatus)>")]
+#[rtype(result = "()")]
 pub struct SendEthToGearMessage {
-    pub tx_uuid: Uuid,
-    pub tx_hash: FixedBytes<32>,
+    pub tx_hash: TxHashWithSlot,
     pub payload: EthToVaraEvent,
+    pub recipient: Recipient<MessageSentResponse>,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct MessageSentResponse {
+    pub tx_hash: TxHashWithSlot,
+    pub status: MessageStatus,
 }
 
 impl Handler<SendEthToGearMessage> for MessageSenderActor {
-    type Result = ResponseFuture<anyhow::Result<(Uuid, MessageStatus)>>;
+    type Result = ();
 
-    fn handle(&mut self, msg: SendEthToGearMessage, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: SendEthToGearMessage, ctx: &mut Self::Context) -> Self::Result {
         let SendEthToGearMessage {
             payload,
-            tx_uuid,
             tx_hash,
+            recipient,
         } = msg;
 
         let gear_api = self.gear_actor.clone();
@@ -447,9 +457,7 @@ impl Handler<SendEthToGearMessage> for MessageSenderActor {
         let historical_proxy_address = self.historical_proxy_address;
         let suri = self.suri.clone();
 
-        // Send the message asynchronously in order to not block the actor
-        // and allow sending multiple messages concurrently.
-        Box::pin(async move {
+        ctx.spawn(Box::pin(async move {
             let (_, reply) = match gear_api
                 .send(ProxyRedirect {
                     suri,
@@ -465,30 +473,48 @@ impl Handler<SendEthToGearMessage> for MessageSenderActor {
                 // capture non-fatal error from historical proxy
                 Err(e) => {
                     let error = anyhow::anyhow!("Proxy error: {e:?}");
-                    return Ok((tx_uuid, MessageStatus::Failure(error.to_string())));
+                    return recipient.do_send(MessageSentResponse {
+                        tx_hash: tx_hash.clone(),
+                        status: MessageStatus::Failure(error.to_string()),
+                    });
                 }
             };
 
             let Ok(reply) = SubmitReceipt::decode_reply(&reply) else {
                 let error = anyhow::anyhow!("Failed to decode reply");
-                return Ok((tx_uuid, MessageStatus::Failure(error.to_string())));
+                return recipient.do_send(MessageSentResponse {
+                    tx_hash: tx_hash.clone(),
+                    status: MessageStatus::Failure(error.to_string()),
+                });
             };
             match reply {
-                Ok(()) => Ok((tx_uuid, MessageStatus::Success)),
+                Ok(()) => recipient.do_send(MessageSentResponse {
+                    tx_hash: tx_hash.clone(),
+                    status: MessageStatus::Success,
+                }),
                 Err(vft_manager_client::Error::AlreadyProcessed) => {
                     log::warn!("Message for {tx_hash:?} is already processed, skipping...");
-                    Ok((tx_uuid, MessageStatus::Success))
+                    recipient.do_send(MessageSentResponse {
+                        tx_hash: tx_hash.clone(),
+                        status: MessageStatus::Success,
+                    })
                 }
                 Err(vft_manager_client::Error::UnsupportedEthEvent) => {
                     let message = format!("Dropping message for {tx_hash:?} as it's considered invalid by vft-manager (probably unsupported ERC20 token)");
                     log::warn!("{message}");
-                    Ok((tx_uuid, MessageStatus::Failure(message)))
+                    recipient.do_send(MessageSentResponse {
+                        tx_hash: tx_hash.clone(),
+                        status: MessageStatus::Failure(message),
+                    })
                 }
                 Err(e) => {
                     let message = format!("Internal vft-manager error: {e:?}");
-                    Ok((tx_uuid, MessageStatus::Failure(message)))
+                    recipient.do_send(MessageSentResponse {
+                        tx_hash: tx_hash.clone(),
+                        status: MessageStatus::Failure(message),
+                    })
                 }
             }
-        })
+        }));
     }
 }

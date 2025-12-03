@@ -363,6 +363,9 @@ pub struct ProxyRedirect {
 impl actix::Handler<ProxyRedirect> for GearApiActor {
     type Result = ResponseFuture<anyhow::Result<(Vec<u8>, Vec<u8>)>>;
 
+    /// Redirect message via Historical Proxy.
+    ///
+    /// Returns the receipt RLP and the reply from the receiver.
     fn handle(&mut self, msg: ProxyRedirect, _ctx: &mut Self::Context) -> Self::Result {
         let ProxyRedirect {
             suri,

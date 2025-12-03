@@ -3,7 +3,7 @@ use crate::message_relayer::{
     common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
     eth_to_gear::tx_manager::TxStatus,
 };
-use actix::{dev::ToEnvelope, Actor, Handler, Message, ResponseFuture};
+use actix::{Actor, Handler, Message, ResponseFuture};
 use anyhow::Context;
 use async_trait::async_trait;
 use ethereum_client::TxHash;

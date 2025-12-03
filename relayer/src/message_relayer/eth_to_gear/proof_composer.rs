@@ -553,20 +553,18 @@ impl Handler<NewCheckpoint> for ProofComposerActor {
 
         self.last_checkpoint = Some(msg.slot);
         self.metrics.last_checkpoint.set(msg.slot.0 as i64);
-        self.waiting_for_checkpoints
-            .retain(|(tx_uuid, tx, recipient)| {
-                if tx.slot_number <= msg.slot {
-                    self.to_process
-                        .push((*tx_uuid, tx.clone(), recipient.clone()));
-                    false
-                } else {
-                    true
-                }
-            });
+        self.waiting_for_checkpoints.retain(|(tx, recipient)| {
+            if tx.slot_number <= msg.slot {
+                self.to_process.push((tx.clone(), recipient.clone()));
+                false
+            } else {
+                true
+            }
+        });
 
         // Send all ready transactions to composer. We do not wait for reply
         // but instead let composer handle them asynchronously and send replies to specified recipient.
-        while let Some((tx_uuid, tx, recipient)) = self.to_process.pop() {
+        while let Some((tx, recipient)) = self.to_process.pop() {
             self.composer.do_send(ComposeProof { tx, recipient });
         }
     }

@@ -1997,7 +1997,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "336bf780dd7526a9a4bc1521720b25c1994dc132cccd59553431923fa4d1a693"
 dependencies = [
  "hash-db 0.16.0",
- "log",
 ]
 
 [[package]]
@@ -8648,7 +8647,6 @@ dependencies = [
  "gprimitives",
  "parity-scale-codec",
  "scale-info",
- "serde",
 ]
 
 [[package]]

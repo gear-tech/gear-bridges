@@ -1,4 +1,12 @@
-use crate::message_relayer::{common::TxHashWithSlot, eth_to_gear::message_sender::MessageStatus};
+use crate::message_relayer::{
+    common::{EthereumSlotNumber, TxHashWithSlot},
+    eth_to_gear::{
+        message_sender::{MessageSenderActor, MessageStatus},
+        proof_composer::{ComposeProof, ComposedProof, NewCheckpoint, ProofComposerActor},
+        storage::{AddTransaction, CompleteTransaction, FailTransaction, SimpleStorageActor},
+    },
+};
+use actix::{dev::ToEnvelope, Actor, Addr, AsyncContext, Handler, StreamHandler, System};
 use eth_events_electra_client::EthToVaraEvent;
 use prometheus::IntCounter;
 use sails_rs::{Decode, Encode};
@@ -311,5 +319,96 @@ impl TransactionManager {
         }
 
         Ok(())
+    }
+}
+
+pub struct TransactionManagerActor {
+    pub storage: Addr<SimpleStorageActor>,
+    pub proof_composer: Addr<ProofComposerActor>,
+    pub message_sender: Addr<MessageSenderActor>,
+}
+
+impl Actor for TransactionManagerActor {
+    type Context = actix::Context<Self>;
+}
+
+impl StreamHandler<EthereumSlotNumber> for TransactionManagerActor {
+    fn handle(&mut self, item: EthereumSlotNumber, _ctx: &mut Self::Context) {
+        self.proof_composer.do_send(NewCheckpoint { slot: item });
+    }
+
+    fn finished(&mut self, _ctx: &mut Self::Context) {
+        log::info!("TransactionManagerActor: checkpoint stream closed, stopping system");
+        System::current().stop();
+    }
+}
+
+impl StreamHandler<TxHashWithSlot> for TransactionManagerActor {
+    fn handle(&mut self, item: TxHashWithSlot, ctx: &mut Self::Context) {
+        self.storage.do_send(AddTransaction::<false>(
+            item.clone(),
+            TxStatus::ComposeProof,
+        ));
+        self.proof_composer.do_send(ComposeProof {
+            tx: item,
+            recipient: ctx.address().recipient(),
+        })
+    }
+
+    fn finished(&mut self, _ctx: &mut Self::Context) {
+        log::info!("TransactionManagerActor: paid events stream closed, stopping system");
+        System::current().stop();
+    }
+}
+
+impl Handler<ComposedProof> for TransactionManagerActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ComposedProof, ctx: &mut Self::Context) -> Self::Result {
+        match msg {
+            ComposedProof::Failure { tx_hash, error } => {
+                self.storage
+                    .do_send(FailTransaction(tx_hash, error.to_string()));
+            }
+            ComposedProof::Success { tx_hash, payload } => {
+                self.storage.do_send(AddTransaction::<true>(
+                    tx_hash.clone(),
+                    TxStatus::SubmitMessage {
+                        payload: payload.encode(),
+                    },
+                ));
+                self.message_sender
+                    .do_send(message_sender::SendEthToGearMessage {
+                        tx_hash,
+                        payload: payload,
+                        recipient: ctx.address().recipient(),
+                    })
+            }
+        }
+    }
+}
+
+impl Handler<message_sender::MessageSentResponse> for TransactionManagerActor {
+    type Result = ();
+
+    fn handle(
+        &mut self,
+        msg: message_sender::MessageSentResponse,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        match msg.status {
+            MessageStatus::Success => {
+                log::info!("Transaction {} completed successfully", msg.tx_hash.tx_hash);
+                self.storage.do_send(CompleteTransaction(msg.tx_hash));
+            }
+            MessageStatus::Failure(error) => {
+                log::error!(
+                    "Transaction {} failed with error: {}",
+                    msg.tx_hash.tx_hash,
+                    error
+                );
+                self.storage.do_send(FailTransaction(msg.tx_hash, error));
+            }
+        }
     }
 }

@@ -1,14 +1,19 @@
 use super::tx_manager::{Transaction, TransactionManager};
-use crate::message_relayer::common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot};
+use crate::message_relayer::{
+    common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
+    eth_to_gear::tx_manager::TxStatus,
+};
+use actix::{dev::ToEnvelope, Actor, Handler, Message, ResponseFuture};
 use anyhow::Context;
 use async_trait::async_trait;
 use ethereum_client::TxHash;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     ffi::OsString,
     path::{Path, PathBuf},
     str::FromStr,
+    sync::Arc,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -395,5 +400,156 @@ impl Storage for JSONStorage {
 
     async fn save_blocks(&self) -> anyhow::Result<()> {
         self.block_storage().save(&self.path).await
+    }
+}
+
+/// A simple storage for transactions. Uses in-memory BTreeMaps.
+///
+/// ## Note
+///
+/// Only reliably supports access from single actor. With multiple actors
+/// trying to read/write the storage concurrently dead-locks may occur.
+///
+/// TODO: Implement persistent storage with sqlite or similar.
+pub struct SimpleStorageActor {
+    pub transactions: Arc<RwLock<BTreeMap<TxHashWithSlot, TxStatus>>>,
+    pub completed: Arc<RwLock<BTreeSet<TxHashWithSlot>>>,
+    pub failed: Arc<RwLock<BTreeMap<TxHashWithSlot, String>>>,
+}
+
+impl SimpleStorageActor {
+    pub fn new() -> Self {
+        Self {
+            transactions: Arc::new(RwLock::new(BTreeMap::new())),
+            completed: Arc::new(RwLock::new(BTreeSet::new())),
+            failed: Arc::new(RwLock::new(BTreeMap::new())),
+        }
+    }
+}
+
+pub struct Trans {
+    pub tx_hash: TxHashWithSlot,
+    pub status: TxStatus,
+}
+
+#[derive(Message)]
+#[rtype(result = "Option<TxStatus>")]
+pub struct GetTransaction(pub TxHashWithSlot);
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct AddTransaction<const OVERWRITE: bool>(pub TxHashWithSlot, pub TxStatus);
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CompleteTransaction(pub TxHashWithSlot);
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct FailTransaction(pub TxHashWithSlot, pub String);
+
+#[derive(Message)]
+#[rtype(result = "Vec<TxHashWithSlot>")]
+pub struct GetCompletedTransactions;
+
+#[derive(Message)]
+#[rtype(result = "Vec<(TxHashWithSlot, String)>")]
+pub struct GetFailedTransactions;
+
+impl Actor for SimpleStorageActor {
+    type Context = actix::Context<Self>;
+}
+
+impl Handler<GetTransaction> for SimpleStorageActor {
+    type Result = ResponseFuture<Option<TxStatus>>;
+
+    /// Returns the transaction status if it exists.
+    fn handle(&mut self, msg: GetTransaction, _ctx: &mut Self::Context) -> Self::Result {
+        let txs = self.transactions.clone();
+        Box::pin(async move {
+            let txs = txs.read().await;
+            txs.get(&msg.0).cloned()
+        })
+    }
+}
+
+impl<const OVERWRITE: bool> Handler<AddTransaction<OVERWRITE>> for SimpleStorageActor {
+    type Result = ResponseFuture<()>;
+
+    /// Add a transaction to the storage.
+    ///
+    /// If you want to access the transaction after the call be sure to await on response.
+    fn handle(&mut self, msg: AddTransaction<OVERWRITE>, _ctx: &mut Self::Context) -> Self::Result {
+        let txs = self.transactions.clone();
+        Box::pin(async move {
+            let mut txs = txs.write().await;
+            if OVERWRITE || !txs.contains_key(&msg.0) {
+                txs.insert(msg.0, msg.1);
+            }
+        })
+    }
+}
+
+impl Handler<CompleteTransaction> for SimpleStorageActor {
+    type Result = ResponseFuture<()>;
+
+    /// Mark a transaction as completed.
+    ///
+    /// If you want to access the transaction after the call be sure to await on response.
+    fn handle(&mut self, msg: CompleteTransaction, _ctx: &mut Self::Context) -> Self::Result {
+        let txs = self.transactions.clone();
+        let completed = self.completed.clone();
+        Box::pin(async move {
+            let mut txs = txs.write().await;
+            if txs.remove(&msg.0).is_some() {
+                let mut completed = completed.write().await;
+                completed.insert(msg.0);
+            }
+        })
+    }
+}
+
+impl Handler<FailTransaction> for SimpleStorageActor {
+    type Result = ResponseFuture<()>;
+
+    /// Mark a transaction as failed with the given reason.
+    ///
+    /// If you want to access the transaction after the call be sure to await on response.
+    fn handle(&mut self, msg: FailTransaction, _ctx: &mut Self::Context) -> Self::Result {
+        let txs = self.transactions.clone();
+        let failed = self.failed.clone();
+        Box::pin(async move {
+            let mut txs = txs.write().await;
+            if txs.remove(&msg.0).is_some() {
+                let mut failed = failed.write().await;
+                failed.insert(msg.0, msg.1);
+            }
+        })
+    }
+}
+
+impl Handler<GetCompletedTransactions> for SimpleStorageActor {
+    type Result = ResponseFuture<Vec<TxHashWithSlot>>;
+
+    /// Returns a list of completed transactions.
+    fn handle(&mut self, _msg: GetCompletedTransactions, _ctx: &mut Self::Context) -> Self::Result {
+        let completed = self.completed.clone();
+        Box::pin(async move {
+            let completed = completed.read().await;
+            completed.iter().cloned().collect()
+        })
+    }
+}
+
+impl Handler<GetFailedTransactions> for SimpleStorageActor {
+    type Result = ResponseFuture<Vec<(TxHashWithSlot, String)>>;
+
+    /// Returns a list of failed transactions with their failure reasons.
+    fn handle(&mut self, _msg: GetFailedTransactions, _ctx: &mut Self::Context) -> Self::Result {
+        let failed = self.failed.clone();
+        Box::pin(async move {
+            let failed = failed.read().await;
+            failed.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        })
     }
 }

@@ -4,20 +4,20 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-hex.workspace = true
-futures-util.workspace = true
 anyhow.workspace = true
 blake2.workspace = true
-log.workspace = true
+futures-util.workspace = true
 gsdk.workspace = true
-subxt.workspace = true
+hex = { workspace = true, features = ["std"] }
+log.workspace = true
+pallet-gear-eth-bridge-primitives = { workspace = true, features = ["std"] }
+parity-scale-codec = { workspace = true, features = ["std"] }
+primitive-types = { workspace = true, features = ["std"] }
 sc-consensus-grandpa.workspace = true
-sp-runtime.workspace = true
-sp-consensus-grandpa.workspace = true
-parity-scale-codec.workspace = true
-trie-db.workspace = true
-sp-trie.workspace = true
-sp-core.workspace = true
-pallet-gear-eth-bridge-primitives.workspace = true
-primitive-types.workspace = true
-serde.workspace = true
+serde = { workspace = true, features = ["std"] }
+sp-runtime = { workspace = true, features = ["std"] }
+sp-consensus-grandpa = { workspace = true, features = ["std"] }
+sp-core = { workspace = true, features = ["std"] }
+sp-trie = { workspace = true, features = ["std"] }
+subxt.workspace = true
+trie-db = { workspace = true, features = ["std"] }

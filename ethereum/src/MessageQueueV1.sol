@@ -21,7 +21,7 @@ import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
  *      MessageQueue smart contract is also responsible for verifying and processing
  *      received messages originated from Vara Network.
  */
-contract MessageQueue is
+contract MessageQueueV1 is
     Initializable,
     AccessControlUpgradeable,
     PausableUpgradeable,
@@ -103,10 +103,7 @@ contract MessageQueue is
     /**
      * @custom:oz-upgrades-validate-as-initializer
      */
-    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(2) {
-        _verifier = IVerifier(0xFACE08781c083588eF0569Ec1B497AAB67B2a18F);
-        _maxBlockNumber = 28_359_000;
-    }
+    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(2) {}
 
     /**
      * @dev Returns governance admin address.

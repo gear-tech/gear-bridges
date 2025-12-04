@@ -10,14 +10,12 @@ use blake2::{
 };
 use dto::{AuthoritySetState, BranchNodeData};
 use futures_util::{Stream, StreamExt};
-use gsdk::{
-    metadata::{
-        gear::Event as GearEvent,
-        gear_eth_bridge::Event as GearBridgeEvent,
-        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-        storage::{GearEthBridgeStorage, GrandpaStorage, TimestampStorage},
-    },
-    Event as RuntimeEvent, GearConfig,
+use gsdk::GearConfig;
+use metadata::{
+    gear::Event as GearEvent,
+    gear_eth_bridge::Event as GearBridgeEvent,
+    runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
+    Event as RuntimeEvent,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::{FinalityProof, Precommit};
@@ -35,9 +33,12 @@ use subxt::{
 };
 use trie_db::{node::NodeHandle, ChildReference};
 
-use crate::dto::StorageInclusionProof;
+use crate::{dto::StorageInclusionProof, metadata::runtime_types::frame_system::EventRecord};
 
 pub mod dto;
+pub mod metadata;
+
+pub use gsdk::{ext, gp};
 
 pub type GearBlock = BlockImpl<GearConfig, OnlineClient<GearConfig>>;
 
@@ -104,7 +105,8 @@ impl GearApi {
     /// Fetch authority set id for the given block.
     pub async fn authority_set_id(&self, block: H256) -> AnyResult<u64> {
         let block = (*self.api).blocks().at(block).await?;
-        let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
+        let set_id_address =
+            gsdk::Api::storage_root(gsdk::metadata::storage::GrandpaStorage::CurrentSetId);
         Self::fetch_from_storage(&block, &set_id_address).await
     }
 
@@ -117,7 +119,8 @@ impl GearApi {
         };
 
         let block = (*self.api).blocks().at(block).await?;
-        let set_id_address = gsdk::Api::storage_root(GrandpaStorage::CurrentSetId);
+        let set_id_address =
+            gsdk::Api::storage_root(gsdk::metadata::storage::GrandpaStorage::CurrentSetId);
         let set_id = Self::fetch_from_storage(&block, &set_id_address).await?;
 
         let authority_set = self.fetch_authority_set(set_id).await?;
@@ -278,7 +281,9 @@ impl GearApi {
     pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
         let block = self.latest_finalized_block().await?;
         let block = (*self.api).blocks().at(block).await?;
-        let queue_reset_since = gsdk::Api::storage_root(GearEthBridgeStorage::QueueOverflowedSince);
+        let queue_reset_since = gsdk::Api::storage_root(
+            gsdk::metadata::storage::GearEthBridgeStorage::QueueOverflowedSince,
+        );
         self.maybe_fetch_from_storage(&block, &queue_reset_since)
             .await
     }
@@ -500,7 +505,7 @@ impl GearApi {
     async fn fetch_authority_set_in_block(&self, block: H256) -> AnyResult<Vec<[u8; 32]>> {
         let block = (*self.api).blocks().at(block).await?;
 
-        let address = gsdk::Api::storage_root(GrandpaStorage::Authorities);
+        let address = gsdk::Api::storage_root(gsdk::metadata::storage::GrandpaStorage::Authorities);
         let authorities: Vec<(AuthorityId, u64)> =
             Self::fetch_from_storage(&block, &address).await?;
 
@@ -514,7 +519,8 @@ impl GearApi {
         &self,
         block: H256,
     ) -> AnyResult<dto::StorageInclusionProof> {
-        let address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
+        let address =
+            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
 
         self.fetch_block_inclusion_proof(block, &address.to_root_bytes())
             .await
@@ -524,7 +530,9 @@ impl GearApi {
         &self,
         block: H256,
     ) -> AnyResult<dto::StorageInclusionProof> {
-        let address = gsdk::Api::storage_root(GearEthBridgeStorage::AuthoritySetHash);
+        let address = gsdk::Api::storage_root(
+            gsdk::metadata::storage::GearEthBridgeStorage::AuthoritySetHash,
+        );
         self.fetch_block_inclusion_proof(block, &address.to_root_bytes())
             .await
     }
@@ -762,7 +770,8 @@ impl GearApi {
 
     pub async fn fetch_timestamp(&self, block: H256) -> AnyResult<u64> {
         let block = (*self.api).blocks().at(block).await?;
-        let timestamp_address = gsdk::Api::storage_root(TimestampStorage::Now);
+        let timestamp_address =
+            gsdk::Api::storage_root(gsdk::metadata::storage::TimestampStorage::Now);
         Self::fetch_from_storage(&block, &timestamp_address)
             .await
             .map(Duration::from_millis)
@@ -772,9 +781,11 @@ impl GearApi {
     /// Fetch queue merkle root for the given block.
     pub async fn fetch_queue_merkle_root(&self, block: H256) -> AnyResult<(u64, H256)> {
         let block = (*self.api).blocks().at(block).await?;
-        let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
+        let set_id_address =
+            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
         let merkle_root: H256 = Self::fetch_from_storage(&block, &set_id_address).await?;
-        let set_id_address = gsdk::Api::storage_root(GearEthBridgeStorage::QueueId);
+        let set_id_address =
+            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueId);
         let queue_id: u64 = self
             .maybe_fetch_from_storage(&block, &set_id_address)
             .await?
@@ -786,8 +797,19 @@ impl GearApi {
         Ok((queue_id, merkle_root))
     }
 
+    pub async fn get_events_at(
+        &self,
+        block_hash: Option<H256>,
+    ) -> anyhow::Result<Vec<RuntimeEvent>> {
+        let addr = gsdk::Api::storage_root(gsdk::metadata::storage::SystemStorage::Events);
+
+        let evs: Vec<EventRecord<RuntimeEvent, H256>> =
+            self.api.fetch_storage_at(&addr, block_hash).await?;
+        Ok(evs.into_iter().map(|er| er.event).collect())
+    }
+
     pub async fn message_queued_events(&self, block: H256) -> AnyResult<Vec<dto::Message>> {
-        let events = self.api.get_events_at(Some(block)).await?;
+        let events = self.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
             if let RuntimeEvent::GearEthBridge(GearBridgeEvent::MessageQueued { message, .. }) =
@@ -816,7 +838,7 @@ impl GearApi {
         to_user: H256,
         block: H256,
     ) -> AnyResult<Vec<dto::UserMessageSent>> {
-        let events = self.api.get_events_at(Some(block)).await?;
+        let events = self.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
             let RuntimeEvent::Gear(GearEvent::UserMessageSent {
@@ -882,7 +904,6 @@ impl GearApi {
 
 #[cfg(test)]
 mod tests {
-    use gsdk::metadata::storage::GearEthBridgeStorage;
 
     #[test]
     fn storage_correct() {
@@ -893,14 +914,15 @@ mod tests {
 
         let merkle_root_address = hex::decode(MERKLE_ROOT_STORAGE_ADDRESS).unwrap();
         let expected_merkle_root_address =
-            gsdk::Api::storage_root(GearEthBridgeStorage::QueueMerkleRoot);
+            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
         assert_eq!(
             merkle_root_address,
             expected_merkle_root_address.to_root_bytes()
         );
         let next_validator_set_address = hex::decode(NEXT_VALIDATOR_SET_ADDRESS).unwrap();
-        let expected_next_validator_set_address =
-            gsdk::Api::storage_root(GearEthBridgeStorage::AuthoritySetHash);
+        let expected_next_validator_set_address = gsdk::Api::storage_root(
+            gsdk::metadata::storage::GearEthBridgeStorage::AuthoritySetHash,
+        );
         assert_eq!(
             next_validator_set_address,
             expected_next_validator_set_address.to_root_bytes()

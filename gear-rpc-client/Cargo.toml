@@ -21,3 +21,5 @@ sp-core = { workspace = true, features = ["std"] }
 sp-trie = { workspace = true, features = ["std"] }
 subxt.workspace = true
 trie-db = { workspace = true, features = ["std"] }
+gear-core-errors.workspace = true
+gear-core.workspace = true

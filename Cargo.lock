@@ -5000,6 +5000,8 @@ dependencies = [
  "anyhow",
  "blake2",
  "futures-util",
+ "gear-core",
+ "gear-core-errors",
  "gsdk",
  "hex",
  "log",

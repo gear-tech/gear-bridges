@@ -1,6 +1,16 @@
+use actix::{Message, ResponseFuture};
 use anyhow::Context;
+use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
+use eth_events_electra_client::traits::EthereumEventClient;
 use gear_rpc_client::GearApi;
 use gsdk::Api;
+use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
+use primitive_types::H256;
+use sails_rs::{
+    calls::{Action, Call, Query},
+    gclient::calls::GClientRemoting,
+    ActorId,
+};
 use std::time::Duration;
 use tokio::sync::{
     mpsc,
@@ -215,5 +225,177 @@ impl ApiProvider {
                 }
             }
         });
+    }
+}
+
+/// An Actix actor that provides Gear API connectivity. Instead
+/// of actors using Gear API directly, they should send requests
+/// to this actor to perform Gear API operations on their behalf.
+///
+/// When there is Sails operation to be performed, client should
+/// send a message to this actor and await the response.
+///
+// TODO(Adel): proper error handling once we decide on the
+// usage of Actix.
+pub struct GearApiActor {
+    api: Api,
+}
+
+impl GearApiActor {
+    pub fn new(api: Api) -> Self {
+        Self { api }
+    }
+}
+
+impl actix::Actor for GearApiActor {
+    type Context = actix::Context<Self>;
+}
+
+#[derive(Message)]
+#[rtype(result = "anyhow::Result<u64>")]
+pub struct GetGasLimit;
+
+impl actix::Handler<GetGasLimit> for GearApiActor {
+    type Result = anyhow::Result<u64>;
+
+    fn handle(&mut self, _msg: GetGasLimit, _ctx: &mut Self::Context) -> Self::Result {
+        self.api
+            .gas_limit()
+            .context("failed to get gas limit from Gear node")
+    }
+}
+
+/// Construct a remoting instance connected to the Gear node with the given SURI.
+#[derive(Message)]
+#[rtype(result = "anyhow::Result<GClientRemoting>")]
+pub struct GetRemoting {
+    pub suri: String,
+}
+
+impl actix::Handler<GetRemoting> for GearApiActor {
+    type Result = anyhow::Result<GClientRemoting>;
+
+    fn handle(&mut self, msg: GetRemoting, _ctx: &mut Self::Context) -> Self::Result {
+        let api = self.api.clone();
+        let suri = msg.suri;
+        let gclient = gclient::GearApi::from(api)
+            .with(&suri)
+            .context("failed to create gclient with provided suri");
+
+        gclient.map(|api| GClientRemoting::new(api))
+    }
+}
+
+/// Fetch checkpoint at specified slot.
+///
+/// This makes use of Historical Proxy & eth-events services.
+#[derive(Message)]
+#[rtype(result = "anyhow::Result<(u64, H256)>")]
+pub struct GetCheckpointSlot {
+    pub slot: u64,
+    pub suri: String,
+    pub historical_proxy_id: ActorId,
+}
+
+impl actix::Handler<GetCheckpointSlot> for GearApiActor {
+    type Result = ResponseFuture<anyhow::Result<(u64, H256)>>;
+
+    fn handle(&mut self, msg: GetCheckpointSlot, _ctx: &mut Self::Context) -> Self::Result {
+        let GetCheckpointSlot {
+            suri,
+            historical_proxy_id,
+            slot,
+        } = msg;
+
+        let api = self.api.clone();
+
+        // we don't access actor ctx: can just return a future
+        Box::pin(async move {
+            let api = gclient::GearApi::from(api)
+                .with(&suri)
+                .context("failed to create gclient with provided suri")?;
+            let gas_limit = api.block_gas_limit()?;
+
+            let remoting = GClientRemoting::new(api);
+            let historical_proxy = HistoricalProxy::new(remoting.clone());
+            let eth_events = eth_events_electra_client::EthereumEventClient::new(remoting.clone());
+            let service_checkpoint = ServiceCheckpointFor::new(remoting);
+
+            let endpoint = historical_proxy
+                .endpoint_for(slot)
+                .recv(historical_proxy_id)
+                .await
+                .context("failed to query historical proxy")?
+                .map_err(|e| {
+                    anyhow::anyhow!("Proxy failed to get endpoint for slot #{slot}: {e:?}",)
+                })?;
+
+            let checkpoint_endpoint = eth_events
+                .checkpoint_light_client_address()
+                .recv(endpoint)
+                .await
+                .context("failed to get checkpoint light client address")?;
+
+            let (checkpoint_slot, checkpoint) = service_checkpoint
+                .get(slot)
+                .with_gas_limit(gas_limit)
+                .recv(checkpoint_endpoint)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
+                .map_err(|e| anyhow::anyhow!("Checkpoint error: {e:?}"))?;
+
+            Ok((checkpoint_slot, checkpoint))
+        })
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "anyhow::Result<(Vec<u8>, Vec<u8>)>")]
+pub struct ProxyRedirect {
+    pub suri: String,
+    pub historical_proxy_address: ActorId,
+    pub slot: u64,
+    pub proofs: Vec<u8>,
+    pub receiver_address: ActorId,
+    pub receiver_route: Vec<u8>,
+}
+
+impl actix::Handler<ProxyRedirect> for GearApiActor {
+    type Result = ResponseFuture<anyhow::Result<(Vec<u8>, Vec<u8>)>>;
+
+    /// Redirect message via Historical Proxy.
+    ///
+    /// Returns the receipt RLP and the reply from the receiver.
+    fn handle(&mut self, msg: ProxyRedirect, _ctx: &mut Self::Context) -> Self::Result {
+        let ProxyRedirect {
+            suri,
+            historical_proxy_address,
+            slot,
+            proofs,
+            receiver_address,
+            receiver_route,
+        } = msg;
+
+        let api = self.api.clone();
+
+        Box::pin(async move {
+            let api = gclient::GearApi::from(api)
+                .with(&suri)
+                .context("failed to create gclient with provided suri")?;
+            let gas_limit_block = api.block_gas_limit()?;
+            let gas_limit = gas_limit_block / 100 * 95;
+
+            let remoting = GClientRemoting::new(api);
+            let mut historical_proxy = HistoricalProxy::new(remoting.clone());
+
+            let (receipt_rlp, reply) = historical_proxy
+                .redirect(slot, proofs, receiver_address, receiver_route)
+                .with_gas_limit(gas_limit)
+                .send_recv(historical_proxy_address)
+                .await?
+                .map_err(|e| anyhow::anyhow!("Historical proxy error: {e:?}"))?;
+
+            Ok((receipt_rlp, reply))
+        })
     }
 }

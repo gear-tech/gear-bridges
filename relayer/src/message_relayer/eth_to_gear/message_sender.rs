@@ -1,3 +1,5 @@
+use super::api_provider::GearApiActor;
+use actix::{Actor, Addr, Handler, Message, Recipient};
 use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
@@ -11,7 +13,7 @@ use prometheus::{
 use sails_rs::{
     calls::{Action, ActionIo, Call},
     gclient::calls::GClientRemoting,
-    Encode,
+    ActorId, Encode,
 };
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -21,7 +23,10 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
 
-use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
+use crate::message_relayer::{
+    common::TxHashWithSlot,
+    eth_to_gear::api_provider::{ApiProviderConnection, ProxyRedirect},
+};
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,
@@ -377,6 +382,178 @@ async fn task(
                     }
                 }
             }
+        }
+    }
+}
+
+pub struct MessageSenderActor {
+    pub receiver_address: ActorId,
+    pub receiver_route: Vec<u8>,
+    pub historical_proxy_address: ActorId,
+    pub gear_actor: Addr<GearApiActor>,
+    pub suri: String,
+
+    metrics: Metrics,
+}
+
+impl MeteredService for MessageSenderActor {
+    fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
+        self.metrics.get_sources()
+    }
+}
+
+impl Actor for MessageSenderActor {
+    type Context = actix::Context<Self>;
+}
+
+impl MessageSenderActor {
+    pub fn new(
+        receiver_address: ActorId,
+        receiver_route: Vec<u8>,
+        historical_proxy_address: ActorId,
+        gear_actor: Addr<GearApiActor>,
+        suri: String,
+    ) -> Self {
+        Self {
+            receiver_address,
+            receiver_route,
+            historical_proxy_address,
+            gear_actor,
+            suri,
+
+            metrics: Metrics::new(),
+        }
+    }
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SendEthToGearMessage {
+    pub tx_hash: TxHashWithSlot,
+    pub payload: EthToVaraEvent,
+    pub recipient: Recipient<MessageSentResponse>,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct MessageSentResponse {
+    pub tx_hash: TxHashWithSlot,
+    pub status: MessageStatus,
+}
+
+impl Handler<SendEthToGearMessage> for MessageSenderActor {
+    type Result = ();
+
+    /// Send Eth message to Gear side.
+    ///
+    /// Instead of returning response future, we spawn a new task to handle the sending asynchronously
+    /// and send the result back to the recipient. This avoids blocking the actor's context (tasks spawned in the actor context **only** run in the same
+    /// thread as the actor).
+    fn handle(&mut self, msg: SendEthToGearMessage, _ctx: &mut Self::Context) -> Self::Result {
+        let SendEthToGearMessage {
+            payload,
+            tx_hash,
+            recipient,
+        } = msg;
+
+        let gear_api = self.gear_actor.clone();
+        let receiver_address = self.receiver_address;
+        let receiver_route = self.receiver_route.clone();
+        let historical_proxy_address = self.historical_proxy_address;
+        let suri = self.suri.clone();
+
+        actix::spawn(async move {
+            let result = do_send(
+                tx_hash.clone(),
+                gear_api,
+                historical_proxy_address,
+                receiver_address,
+                receiver_route,
+                suri,
+                payload,
+            )
+            .await;
+
+            match result {
+                Ok(response) => {
+                    recipient.do_send(response);
+                }
+                Err(err) => {
+                    let error = anyhow::anyhow!("Failed to send message: {err:?}");
+                    recipient.do_send(MessageSentResponse {
+                        tx_hash,
+                        status: MessageStatus::Failure(error.to_string()),
+                    });
+                }
+            }
+        });
+    }
+}
+
+async fn do_send(
+    tx_hash: TxHashWithSlot,
+    gear_actor: Addr<GearApiActor>,
+    historical_proxy_address: ActorId,
+    receiver_address: ActorId,
+    receiver_route: Vec<u8>,
+    suri: String,
+    payload: EthToVaraEvent,
+) -> anyhow::Result<MessageSentResponse> {
+    let (_, reply) = match gear_actor
+        .send(ProxyRedirect {
+            suri,
+            historical_proxy_address,
+            slot: payload.proof_block.block.slot,
+            proofs: payload.encode(),
+            receiver_address,
+            receiver_route,
+        })
+        .await?
+    {
+        Ok(res) => res,
+        // capture non-fatal error from historical proxy
+        Err(e) => {
+            let error = anyhow::anyhow!("Proxy error: {e:?}");
+            return Ok(MessageSentResponse {
+                tx_hash: tx_hash.clone(),
+                status: MessageStatus::Failure(error.to_string()),
+            });
+        }
+    };
+
+    let Ok(reply) = SubmitReceipt::decode_reply(&reply) else {
+        let error = anyhow::anyhow!("Failed to decode reply");
+        return Ok(MessageSentResponse {
+            tx_hash: tx_hash.clone(),
+            status: MessageStatus::Failure(error.to_string()),
+        });
+    };
+    match reply {
+        Ok(()) => Ok(MessageSentResponse {
+            tx_hash: tx_hash.clone(),
+            status: MessageStatus::Success,
+        }),
+        Err(vft_manager_client::Error::AlreadyProcessed) => {
+            log::warn!("Message for {tx_hash:?} is already processed, skipping...");
+            Ok(MessageSentResponse {
+                tx_hash: tx_hash.clone(),
+                status: MessageStatus::Success,
+            })
+        }
+        Err(vft_manager_client::Error::UnsupportedEthEvent) => {
+            let message = format!("Dropping message for {tx_hash:?} as it's considered invalid by vft-manager (probably unsupported ERC20 token)");
+            log::warn!("{message}");
+            Ok(MessageSentResponse {
+                tx_hash: tx_hash.clone(),
+                status: MessageStatus::Failure(message),
+            })
+        }
+        Err(e) => {
+            let message = format!("Internal vft-manager error: {e:?}");
+            Ok(MessageSentResponse {
+                tx_hash: tx_hash.clone(),
+                status: MessageStatus::Failure(message),
+            })
         }
     }
 }

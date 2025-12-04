@@ -6,8 +6,6 @@ pub mod errors;
 mod generated;
 mod impls;
 
-
-
 pub use self::{
     errors::ModuleError,
     generated::{

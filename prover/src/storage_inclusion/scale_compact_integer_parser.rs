@@ -8,11 +8,9 @@
 //!   range (0..=2^30 - 1).
 
 use crate::{
-    common::{
-        targets::{impl_target_set, ArrayTarget, ByteTarget},
-        BuilderExt,
-    },
+    common::targets::{impl_target_set, ArrayTarget, ByteTarget},
     prelude::*,
+    utils::CanonicalizeGenerator,
 };
 use plonky2::{iop::target::Target, plonk::circuit_builder::CircuitBuilder};
 use plonky2_field::types::Field;
@@ -97,7 +95,7 @@ pub mod single_byte {
 }
 
 /// Supports decoding of compact integers in single-, two- and four- byte modes.
-/// In these modes integer can take values in range \[0..=2^30 - 1\].
+/// In these modes integer can take values in the range \[0; 2^30 - 1\].
 pub mod full {
     use super::*;
 
@@ -118,96 +116,71 @@ pub mod full {
     }
 
     pub fn define(input: InputTarget, builder: &mut CircuitBuilder<F, D>) -> OutputTarget {
-        let first_byte_bits = input.padded_bytes.constant_read(0).as_bit_targets(builder);
+        let first_byte = input.padded_bytes.constant_read(0);
+        // split the byte (8 bits) into low part with 2 bits and high with 6
+        let (mode, value) = builder.split_low_high(first_byte.as_target(), 2, 8);
 
-        let mode = builder.mul_const(F::TWO, first_byte_bits.constant_read(1).target);
-        let mode = builder.add(mode, first_byte_bits.constant_read(0).target);
+        // 0b00
+        let mode_one_byte = builder.zero();
+        // 0b01
+        let mode_two_bytes = builder.one();
+        // 0b10. Isn't required in the calculations but just for the sake of readability
+        // let mode_four_bytes = builder.two();
+        // 0b11
+        let mode_multi_bytes = builder.constant(F::from_canonical_usize(3));
 
-        let refined_first_byte =
-            ByteTarget::from_target_unsafe(builder.le_sum(first_byte_bits.0[2..8].iter()));
+        // we don't support multiple bytes encoding at the moment so assert the case
+        let target_is_mode_multi_bytes = builder.is_equal(mode, mode_multi_bytes);
+        builder.assert_zero(target_is_mode_multi_bytes.target);
 
-        let big_int_mode = builder.constant(F::from_canonical_usize(4));
-        let big_int_mode = builder.is_equal(mode, big_int_mode);
-        builder.assert_zero(big_int_mode.target);
-
-        let single_byte_mode = builder.zero();
-        let is_single_byte_mode = builder.is_equal(mode, single_byte_mode);
-        let single_byte_out = try_parse_single_byte(refined_first_byte, builder);
-
-        let two_byte_mode = builder.one();
-        let is_two_byte_mode = builder.is_equal(mode, two_byte_mode);
-        let two_byte_out = try_parse_two_byte(
-            [refined_first_byte, input.padded_bytes.constant_read(1)],
-            builder,
+        // decode SCALE-encoded value in compact mode
+        let target_result_two_bytes = builder.mul_const_add(
+            F::from_canonical_u64(1 << 6),
+            input.padded_bytes.constant_read(1).as_target(),
+            value,
+        );
+        let target_result_three_bytes = builder.mul_const_add(
+            F::from_canonical_u64(1 << 14),
+            input.padded_bytes.constant_read(2).as_target(),
+            target_result_two_bytes,
+        );
+        let target_result_four_bytes = builder.mul_const_add(
+            F::from_canonical_u64(1 << 22),
+            input.padded_bytes.constant_read(3).as_target(),
+            target_result_three_bytes,
         );
 
-        let four_byte_out = try_parse_four_byte(
-            [
-                refined_first_byte,
-                input.padded_bytes.constant_read(1),
-                input.padded_bytes.constant_read(2),
-                input.padded_bytes.constant_read(3),
-            ],
-            builder,
+        let target_is_mode_one_byte = builder.is_equal(mode, mode_one_byte);
+        let target_is_mode_two_bytes = builder.is_equal(mode, mode_two_bytes);
+        let target_result =
+            builder.select(target_is_mode_one_byte, value, target_result_four_bytes);
+        let target_result = builder.select(
+            target_is_mode_two_bytes,
+            target_result_two_bytes,
+            target_result,
         );
 
-        let out = builder.select_target_set(is_single_byte_mode, &single_byte_out, &four_byte_out);
-        builder.select_target_set(is_two_byte_mode, &two_byte_out, &out)
-    }
-
-    fn try_parse_single_byte(
-        refined_byte: ByteTarget,
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> OutputTarget {
-        OutputTarget {
-            decoded: refined_byte.as_target(),
-            length: builder.one(),
-        }
-    }
-
-    fn try_parse_two_byte(
-        refined_bytes: [ByteTarget; 2],
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> OutputTarget {
-        let decoded = builder.mul_const(
-            F::from_canonical_usize(1 << 6),
-            refined_bytes[1].as_target(),
-        );
-        let decoded = builder.add(decoded, refined_bytes[0].as_target());
+        let one = builder.one();
+        let two = builder.two();
+        let four = builder.constant(F::from_canonical_usize(4));
+        let target_length_out = builder.select(target_is_mode_one_byte, one, four);
+        let target_length_out = builder.select(target_is_mode_two_bytes, two, target_length_out);
 
         OutputTarget {
-            decoded,
-            length: builder.two(),
+            decoded: {
+                let target_out = builder.add_virtual_target();
+                builder.add_simple_generator(CanonicalizeGenerator {
+                    target: target_result,
+                    target_out,
+                });
+
+                let target_difference = builder.sub(target_out, target_result);
+                builder.assert_zero(target_difference);
+
+                target_out
+            },
+            length: target_length_out,
         }
-    }
-
-    fn try_parse_four_byte(
-        refined_bytes: [ByteTarget; 4],
-        builder: &mut CircuitBuilder<F, D>,
-    ) -> OutputTarget {
-        let decoded = refined_bytes[0].as_target();
-
-        let val = builder.mul_const(
-            F::from_canonical_usize(1 << 6),
-            refined_bytes[1].as_target(),
-        );
-        let decoded = builder.add(decoded, val);
-
-        let val = builder.mul_const(
-            F::from_canonical_usize(1 << 14),
-            refined_bytes[2].as_target(),
-        );
-        let decoded = builder.add(decoded, val);
-
-        let val = builder.mul_const(
-            F::from_canonical_usize(1 << 22),
-            refined_bytes[3].as_target(),
-        );
-        let decoded = builder.add(decoded, val);
-
-        let length = builder.constant(F::from_canonical_usize(4));
-
-        OutputTarget { decoded, length }
     }
 
     #[cfg(test)]
@@ -222,23 +195,27 @@ pub mod full {
 
         #[test]
         fn test_scale_compact_integer_parser_full() {
+            // one byte mode
             positive_test_case(0);
             positive_test_case(1);
             positive_test_case(23);
             positive_test_case(63);
 
+            // two bytes mode
             positive_test_case(64);
-            positive_test_case(5731);
+            positive_test_case(5_731);
             positive_test_case((1 << 14) - 1);
 
+            // four bytes mode
             positive_test_case(1 << 14);
             positive_test_case((1 << 18) + 123);
+            // max integer value that is able to be encoded in non-multi bytes mode
             positive_test_case((1 << 30) - 1);
         }
 
         #[test]
         #[should_panic(
-            expected = "Partition containing Wire(Wire { row: 3, column: 63 }) was set twice with different values: 5 != 4"
+            expected = "assertion `left == right` failed: Partition containing VirtualTarget { index: 9 } was set twice with different values: 0 != 1\n  left: 1\n right: 0"
         )]
         fn test_scale_compact_integer_parser_fails_on_unsupported_prefix() {
             test_case(Compact::<u32>(u32::MAX).encode(), None);
@@ -276,7 +253,7 @@ pub mod full {
             let proof = circuit.prove(pw).expect("Failed to prove");
 
             if let Some(expected) = expected {
-                let decoded = proof.public_inputs[0].to_canonical_u64();
+                let decoded = proof.public_inputs[0].to_noncanonical_u64();
                 assert_eq!(decoded, expected as u64);
             }
 

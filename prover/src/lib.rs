@@ -11,6 +11,7 @@ mod final_proof;
 mod latest_validator_set;
 pub mod serialization;
 mod storage_inclusion;
+pub mod utils;
 
 pub(crate) mod prelude {
     use plonky2::{

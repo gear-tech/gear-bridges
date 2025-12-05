@@ -103,9 +103,74 @@ contract MessageQueue is
     /**
      * @custom:oz-upgrades-validate-as-initializer
      */
-    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(2) {
-        _verifier = IVerifier(0xFACE08781c083588eF0569Ec1B497AAB67B2a18F);
-        _maxBlockNumber = 28_359_000;
+    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(3) {
+        // Incident was resolved, funds were not affected, decentralization was not violated
+        // https://x.com/VaraNetwork/status/1994047125861056671
+
+        // MessageQueue contract was updated to https://etherscan.io/address/0x9D5D2BCf93feD81e48CCb645112F008aD6098eE7#code
+        // Verifier contract was updated to https://etherscan.io/address/0xFACE08781c083588eF0569Ec1B497AAB67B2a18F#code
+        //
+        // See source code of MessageQueue.sol, reinitialize method:
+        // - `_verifier = IVerifier(0xFACE08781c083588eF0569Ec1B497AAB67B2a18F)` - new verifier address
+        // - `_maxBlockNumber = 28_359_000` - new max block number
+        //
+        // https://vara.subsquare.io/fellowship/referenda/62 - signed block data to change verifier, approved by fellowship
+        // https://etherscan.io/tx/0xfbf36c984c9c0f65b16e58917111cba6858409364dde25a8a3df711c5e844993 - submit merkle root with MessageQueue upgrade
+        // https://etherscan.io/tx/0xfae7c0aec41c8d419ec1cd18fe99e60dd30e253efaf8d9e8d3b771146322f080#eventlog - process message with MessageQueue upgrade
+        //
+        // See event `Upgraded(0x9D5D2BCf93feD81e48CCb645112F008aD6098eE7)` in logs of transaction above
+        uint256 blockNumber = 28_125_135;
+        bytes32 merkleRoot = _blockNumbers[blockNumber];
+
+        delete _blockNumbers[blockNumber];
+        delete _merkleRootTimestamps[merkleRoot];
+
+        delete _processedMessages[type(uint256).max];
+
+        // https://vara.subscan.io/event/28135906-40
+        //
+        // block #28135906
+        // block hash 0xe0164e5fd486fd41c1d4285a93548d923c792057d645980a65120d55162b3332
+        // https://vara.subscan.io/block/28135906
+        //
+        // https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Farchive-rpc.vara.network#/chainstate
+        // https://i.imgur.com/VcFpkno.png
+        //
+        // gearEthBridge.queue: Vec<H256>
+        // [
+        //   0x35a87dc240b786879dbe9705045c3140abea49cc0b1a14dbca768bcb26f08f88 - https://vara.subscan.io/event/28135906-30 - 126_000 VARA transfer
+        // ]
+        blockNumber = 28_135_906;
+        merkleRoot = 0x35a87dc240b786879dbe9705045c3140abea49cc0b1a14dbca768bcb26f08f88;
+
+        _blockNumbers[blockNumber] = merkleRoot;
+        _merkleRootTimestamps[merkleRoot] = block.timestamp;
+
+        emit MerkleRoot(blockNumber, merkleRoot);
+
+        // https://vara.subscan.io/event/28142846-40
+        //
+        // block #28142846
+        // block hash 0xaf5e4ff07c3fc58526051d765abd91569c394cf28ef540cb010d17b3650608d4
+        // https://vara.subscan.io/block/28142846
+        //
+        // https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Farchive-rpc.vara.network#/chainstate
+        // https://i.imgur.com/Qlqk3bx.png
+        //
+        // gearEthBridge.queue: Vec<H256>
+        // [
+        //   0xb73ff7404e14b4e13d5e6038bac20b9c5e5d6d269879841b61a881da6d0a35f3 - https://vara.subscan.io/event/28141439-31 - 300_200 VARA transfer
+        //   0xc2bb624fb7b5f2e5fe29927ebd1b3837548aa1ecb3379242bd7c2f0666f39668 - https://vara.subscan.io/event/28142204-30 - 1 VARA transfer
+        //   0x3ba6a14f187cd7ac3956ed4f302b559938c9ecdd44066b95fbfabe3b43942689 - https://vara.subscan.io/event/28142735-30 - 1_000 VARA transfer
+        //   0x2d6efc7a1d195950d5e0606da04837b4c9954a163c7fff5188d312f78b776d7e - https://vara.subscan.io/event/28142846-30 - 5 VARA transfer
+        // ]
+        blockNumber = 28_142_846;
+        merkleRoot = 0x969589f86884f4399a51b940a58d728b04e12fc30f21c1fddce8ca0eb82f9734;
+
+        _blockNumbers[blockNumber] = merkleRoot;
+        _merkleRootTimestamps[merkleRoot] = block.timestamp;
+
+        emit MerkleRoot(blockNumber, merkleRoot);
     }
 
     /**

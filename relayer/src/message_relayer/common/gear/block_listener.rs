@@ -49,7 +49,7 @@ impl BlockListener {
     }
 
     pub async fn run<const RECEIVER_COUNT: usize>(
-        mut self,
+        self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
         // Capacity for the channel. At the moment merkle-root relayer might lag behind
         // during proof generation or era sync, so we need to have enough capacity
@@ -108,21 +108,13 @@ impl BlockListener {
 
                     Ok(true) => {
                         log::info!("Gear block listener: subscription expired, restarting");
-                        continue;
+                        return;
                     }
 
                     Err(err) => {
                         log::error!("Gear block listener failed: {err}");
 
-                        match self.api_provider.reconnect().await {
-                            Ok(()) => {
-                                log::info!("Gear block listener reconnected");
-                            }
-                            Err(err) => {
-                                log::error!("Gear block listener unable to reconnect: {err}");
-                                return;
-                            }
-                        };
+                        return;
                     }
                 }
             }

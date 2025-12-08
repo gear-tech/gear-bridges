@@ -5,15 +5,7 @@ on:
     branches: ['main']
     paths:
       - js/frontend/**
-  workflow_dispatch:
-    inputs:
-      network:
-        description: 'Select target network (for release branch only)'
-        required: true
-        type: choice
-        options:
-          - mainnet
-          - testnet
+  workflow_dispatch: {}
 
 env:
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -31,51 +23,45 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_name: ${{ steps.image.outputs.image_name }}
-      environment: ${{ steps.set-env.outputs.environment }}
+      deployment_name: ${{ steps.set-deploy.outputs.deployment_name }}
+      environment_name: ${{ steps.set-deploy.outputs.environment_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Get short SHA
         id: sha
-        run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-      - name: Determine environment
-        id: set-env
+      - name: Determine environment & deployment
+        id: set-deploy
         run: |
-          if [ "${GITHUB_REF#refs/heads/}" = "main" ]; then
-            echo "environment=stg" >> $GITHUB_OUTPUT
-          elif [ "${GITHUB_REF#refs/heads/}" = "release" ]; then
-            if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
-              echo "environment=mainnet-prod" >> $GITHUB_OUTPUT
-            else
-              echo "environment=testnet-prod" >> $GITHUB_OUTPUT
-            fi
+          branch=${GITHUB_REF#refs/heads/}
+          if [ "$branch" = "main" ]; then
+            environment_name="stg"
+            deployment_name="${KUBE_DEPLOYMENT_PREFIX}-stg"
+          else
+            environment_name="production"
+            deployment_name="${KUBE_DEPLOYMENT_PREFIX}-release"
           fi
-
+          echo "deployment_name=$deployment_name" >> $GITHUB_OUTPUT
+          echo "environment_name=$environment_name" >> $GITHUB_OUTPUT
       - name: Set IMAGE_NAME
         id: image
         run: |
-          branch_name=${GITHUB_REF#refs/heads/}
-          sha_short=${{ env.sha_short }}
-
-          if [ "$branch_name" = "main" ]; then
-            image_name="${{ env.REGISTRY }}:${branch_name}-${sha_short}"
-          elif [ "$branch_name" = "release" ]; then
-            if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
-              image_name="${{ env.REGISTRY }}:mainnet-${sha_short}"
-            else
-              image_name="${{ env.REGISTRY }}:testnet-${sha_short}"
-            fi
+          branch=${GITHUB_REF#refs/heads/}
+          sha=${{ env.sha_short }}
+          if [ "$branch" = "main" ]; then
+            image_name="${REGISTRY}:${branch}-${sha}"
+          else
+            image_name="${REGISTRY}:release-${sha}"
           fi
-
           echo "image_name=$image_name" >> $GITHUB_OUTPUT
-
+          
   build-and-push-image:
     needs: [prepair]
     runs-on: ubuntu-latest
-    environment: ${{ needs.prepair.outputs.environment }}
+    environment: ${{ needs.prepair.outputs.environment_name }}
     permissions:
       contents: read
       packages: write
@@ -113,38 +99,23 @@ jobs:
             VITE_ETH_BEACON_NODE_ADDRESSES=${{ secrets.VITE_ETH_BEACON_NODE_ADDRESSES }}
             VITE_ETH_MESSAGE_QUEUE_CONTRACT_ADDRESSES=${{ secrets.VITE_ETH_MESSAGE_QUEUE_CONTRACT_ADDRESSES }}
             VITE_GTM_ID=${{ secrets.VITE_GTM_ID }}
-
+            
   deploy-to-k8s:
     needs: [prepair, build-and-push-image]
     runs-on: ubuntu-latest
-    environment: ${{ needs.prepair.outputs.environment }}
+    environment: ${{ needs.prepair.outputs.environment_name }}
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Update deployment image
+      - name: Deploy to Kubernetes (update image)
         uses: kodermax/kubectl-aws-eks@main
         with:
-          args: |
-            set image deployment/${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ needs.prepair.outputs.environment }} \
-            ${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ needs.prepair.outputs.environment }}=${{ needs.prepair.outputs.image_name }} \
-            -n ${{ env.KUBE_NAMESPACE }}
+          args: -n ${{ env.KUBE_NAMESPACE }} set image deployment/${{ needs.prepair.outputs.deployment_name }} ${{ needs.prepair.outputs.deployment_name }}=${{ needs.prepair.outputs.image_name }}
 
       - name: Restart deployment
         uses: kodermax/kubectl-aws-eks@main
         with:
-          args: |
-            rollout restart deployment/${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ needs.prepair.outputs.environment }} \
-            -n ${{ env.KUBE_NAMESPACE }}
-
-      - name: Check deployment
+          args: -n ${{ env.KUBE_NAMESPACE }} rollout restart deployment/${{ needs.prepair.outputs.deployment_name }}
+          
+      - name: Check deployment status
         uses: kodermax/kubectl-aws-eks@main
         with:
-          args: |
-            rollout status deployment/${{ env.KUBE_DEPLOYMENT_PREFIX }}-${{ needs.prepair.outputs.environment }} \
-            --timeout=120s \
-            -n ${{ env.KUBE_NAMESPACE }}
+          args: -n ${{ env.KUBE_NAMESPACE }} rollout status deployment/${{ needs.prepair.outputs.deployment_name }} --timeout=120s

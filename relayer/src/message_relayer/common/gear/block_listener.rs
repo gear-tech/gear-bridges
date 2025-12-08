@@ -98,24 +98,18 @@ impl BlockListener {
                 }
             }
 
-            loop {
-                let res = self.run_inner(&tx2, &mut unprocessed).await;
-                match res {
-                    Ok(false) => {
-                        log::info!("Gear block listener stopped due to no active receivers");
-                        return;
-                    }
+            let res = self.run_inner(&tx2, &mut unprocessed).await;
+            match res {
+                Ok(false) => {
+                    log::info!("Gear block listener stopped due to no active receivers");
+                }
 
-                    Ok(true) => {
-                        log::info!("Gear block listener: subscription expired, restarting");
-                        return;
-                    }
+                Ok(true) => {
+                    log::info!("Gear block listener: subscription expired, restarting");
+                }
 
-                    Err(err) => {
-                        log::error!("Gear block listener failed: {err}");
-
-                        return;
-                    }
+                Err(err) => {
+                    log::error!("Gear block listener failed: {err}");
                 }
             }
         });

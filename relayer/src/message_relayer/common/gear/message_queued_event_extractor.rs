@@ -54,10 +54,8 @@ impl MessageQueuedEventExtractor {
             let res = self.run_inner(&mut blocks).await;
             if let Err(err) = res {
                 log::error!("Message queued extractor failed: {err}");
-                return;
             } else {
                 log::debug!("MessageQueuedEventExtractor exiting...");
-                return;
             }
         });
     }

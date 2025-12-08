@@ -6,7 +6,6 @@ use crate::{
     },
     proof_storage::ProofStorage,
 };
-use gclient::metadata::gear_eth_bridge::Event as GearEthBridgeEvent;
 use primitive_types::{H256, U256};
 use sails_rs::events::EventIo;
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
@@ -45,19 +44,21 @@ impl Block {
 
 pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<(u64, H256)> {
     block.events().iter().find_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::QueueMerkleRootChanged {
-            queue_id,
-            root,
-        }) => Some((*queue_id, *root)),
+        gear_rpc_client::metadata::Event::GearEthBridge(
+            gear_rpc_client::metadata::gear_eth_bridge::Event::QueueMerkleRootChanged {
+                queue_id,
+                root,
+            },
+        ) => Some((*queue_id, *root)),
         _ => None,
     })
 }
 
 pub(super) fn message_queued_events_of(block: &GearBlock) -> impl Iterator<Item = U256> + use<'_> {
     block.events().iter().filter_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::MessageQueued { message, .. }) => {
-            Some(U256(message.nonce.0))
-        }
+        gear_rpc_client::metadata::Event::GearEthBridge(
+            gear_rpc_client::metadata::gear_eth_bridge::Event::MessageQueued { message, .. },
+        ) => Some(U256(message.nonce.0)),
         _ => None,
     })
 }
@@ -84,10 +85,12 @@ pub(super) fn authority_set_changed(block: &GearBlock) -> bool {
         .events()
         .iter()
         .find_map(|event| match event {
-            gclient::Event::GearEthBridge(GearEthBridgeEvent::AuthoritySetHashChanged(_))
-            | gclient::Event::Grandpa(gclient::metadata::grandpa::Event::NewAuthorities {
-                ..
-            }) => Some(()),
+            gear_rpc_client::metadata::Event::GearEthBridge(
+                gear_rpc_client::metadata::gear_eth_bridge::Event::AuthoritySetHashChanged(_),
+            )
+            | gear_rpc_client::metadata::Event::Grandpa(
+                gear_rpc_client::metadata::grandpa::Event::NewAuthorities { .. },
+            ) => Some(()),
             _ => None,
         })
         .is_some()

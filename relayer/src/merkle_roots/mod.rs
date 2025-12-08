@@ -471,7 +471,7 @@ impl MerkleRootRelayer {
         }
 
         if let CriticalThreshold::Timeout(timeout) = self.options.critical_threshold {
-            if last_block > max_block_number + max_block_distance {
+            if last_block >= max_block_number + timeout {
                 if let Some(max_stored) = max_block_number_in_storage {
                     // If we have some finalized merkle roots in storage, we can start from
                     // the next block that aligns with our step size to catch up.

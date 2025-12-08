@@ -49,30 +49,15 @@ impl MessageQueuedEventExtractor {
         }
     }
 
-    pub fn spawn(mut self, mut blocks: Receiver<GearBlock>) {
+    pub fn spawn(self, mut blocks: Receiver<GearBlock>) {
         tokio::task::spawn(async move {
-            loop {
-                let res = self.run_inner(&mut blocks).await;
-                if let Err(err) = res {
-                    log::error!("Message queued extractor failed: {err}");
-
-                    if blocks.is_closed() {
-                        return;
-                    }
-
-                    match self.api_provider.reconnect().await {
-                        Ok(_) => {
-                            log::info!("Message queued extractor reconnected");
-                        }
-                        Err(err) => {
-                            log::error!("Message queued extractor unable to reconnect: {err}");
-                            return;
-                        }
-                    }
-                } else {
-                    log::debug!("MessageQueuedEventExtractor exiting...");
-                    return;
-                }
+            let res = self.run_inner(&mut blocks).await;
+            if let Err(err) = res {
+                log::error!("Message queued extractor failed: {err}");
+                return;
+            } else {
+                log::debug!("MessageQueuedEventExtractor exiting...");
+                return;
             }
         });
     }

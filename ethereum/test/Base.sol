@@ -31,6 +31,23 @@ import {MessageQueue} from "src/MessageQueue.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
 import {VerifierTestnet} from "src/VerifierTestnet.sol";
 
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {
+    PauseProxyMessage,
+    UnpauseProxyMessage,
+    UpgradeProxyMessage,
+    GovernancePacker
+} from "src/interfaces/IGovernance.sol";
+import {
+    IERC20Manager,
+    TransferMessage,
+    AddVftManagerMessage,
+    RegisterEthereumTokenMessage,
+    RegisterGearTokenMessage,
+    ERC20ManagerPacker
+} from "src/interfaces/IERC20Manager.sol";
+import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
+
 struct Overrides {
     address circleToken;
     address tetherToken;
@@ -65,6 +82,17 @@ library BaseConstants {
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+    using Hasher for VaraMessage;
+
+    using GovernancePacker for PauseProxyMessage;
+    using GovernancePacker for UnpauseProxyMessage;
+    using GovernancePacker for UpgradeProxyMessage;
+
+    using ERC20ManagerPacker for TransferMessage;
+    using ERC20ManagerPacker for AddVftManagerMessage;
+    using ERC20ManagerPacker for RegisterEthereumTokenMessage;
+    using ERC20ManagerPacker for RegisterGearTokenMessage;
+
     uint256 public messageNonce;
     uint256 public currentBlockNumber;
 
@@ -241,6 +269,201 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             });
 
             // TODO: all manipulations with the forked contracts should be done here
+
+            // make message with upgrade of MessageQueue implementation and reinitialization processed
+            // https://etherscan.io/tx/0xfae7c0aec41c8d419ec1cd18fe99e60dd30e253efaf8d9e8d3b771146322f080
+            address newImplementation = 0x9D5D2BCf93feD81e48CCb645112F008aD6098eE7;
+
+            VaraMessage memory message0 = VaraMessage({
+                nonce: type(uint256).max,
+                source: governanceAdmin.governance(),
+                destination: address(governanceAdmin),
+                payload: UpgradeProxyMessage({
+                        proxy: address(messageQueue),
+                        newImplementation: newImplementation,
+                        data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
+                    }).pack()
+            });
+
+            bytes32 message0Hash = message0.hash();
+
+            // https://etherscan.io/tx/0xfbf36c984c9c0f65b16e58917111cba6858409364dde25a8a3df711c5e844993
+            // test that merkle root at block 28_125_135 was in storage
+            assertEq(messageQueue.getMerkleRoot(28_125_135), message0Hash);
+            assertEq(messageQueue.getMerkleRootTimestamp(message0Hash), 1764952379);
+
+            // test that message0.nonce was in storage
+            assertEq(messageQueue.isProcessed(message0.nonce), true);
+
+            newImplementation = address(new MessageQueue()); // TODO: replace with actual new implementation
+
+            VaraMessage memory message1 = VaraMessage({
+                nonce: 146,
+                source: governanceAdmin.governance(),
+                destination: address(governanceAdmin),
+                payload: UpgradeProxyMessage({
+                        proxy: address(messageQueue),
+                        newImplementation: newImplementation,
+                        data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
+                    }).pack()
+            });
+            assertEq(messageQueue.isProcessed(message1.nonce), false);
+
+            bytes32 messageHash = message1.hash(); // TODO: print messageHash
+
+            uint256 blockNumber = currentBlockNumber++;
+            bytes32 merkleRoot = messageHash;
+            bytes memory proof1 = "";
+
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
+
+            uint256 totalLeaves = 1;
+            uint256 leafIndex = 0;
+            bytes32[] memory proof2 = new bytes32[](0);
+
+            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
+            assertEq(
+                address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+                address(newImplementation)
+            );
+
+            // test that merkle root at block 28_125_135 was removed from storage
+            assertEq(messageQueue.getMerkleRoot(28_125_135), bytes32(0));
+            assertEq(messageQueue.getMerkleRootTimestamp(message0Hash), 0);
+
+            // test that type(uint256).max nonce was removed from storage
+            assertEq(messageQueue.isProcessed(type(uint256).max), false);
+
+            // test processing of all paid messages on fork
+
+            // message #141
+
+            VaraMessage memory message2 = VaraMessage({
+                nonce: 141,
+                source: deploymentArguments.vftManager,
+                destination: address(erc20Manager),
+                payload: TransferMessage({
+                        sender: 0xaaa85e844473d825a1645513ed1cafe2669f31d98d187579f70d114f017df84a,
+                        receiver: 0x61d052FbDF5a0Cfff9D1C27ff4E2034Ba9f29396,
+                        token: address(wrappedVara),
+                        amount: 1_000 * (10 ** wrappedVara.decimals())
+                    }).pack()
+            });
+            assertEq(messageQueue.isProcessed(message2.nonce), false);
+
+            messageHash = message2.hash();
+            assertEq(messageHash, 0x35a87dc240b786879dbe9705045c3140abea49cc0b1a14dbca768bcb26f08f88); // https://vara.subscan.io/event/28135906-30
+
+            blockNumber = currentBlockNumber++;
+            merkleRoot = messageHash;
+
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
+
+            totalLeaves = 1;
+            leafIndex = 0;
+            proof2 = new bytes32[](0);
+
+            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
+
+            // https://etherscan.io/address/0x61d052FbDF5a0Cfff9D1C27ff4E2034Ba9f29396
+            assertEq(
+                wrappedVara.balanceOf(0x61d052FbDF5a0Cfff9D1C27ff4E2034Ba9f29396),
+                (126_000 + 1_000) * (10 ** wrappedVara.decimals())
+            );
+
+            // message #142
+
+            VaraMessage memory message3 = VaraMessage({
+                nonce: 142,
+                source: deploymentArguments.vftManager,
+                destination: address(erc20Manager),
+                payload: TransferMessage({
+                        sender: 0x50bf690723c14c7242b3eb0488f4ceb26e140f79fd4af16551048976ed119433,
+                        receiver: 0xaB012236A482fB9bFA83b955EC7b6115A0D8f714,
+                        token: address(wrappedVara),
+                        amount: 300_200 * (10 ** wrappedVara.decimals())
+                    }).pack()
+            });
+            assertEq(messageQueue.isProcessed(message3.nonce), false);
+
+            messageHash = message3.hash();
+            assertEq(messageHash, 0xb73ff7404e14b4e13d5e6038bac20b9c5e5d6d269879841b61a881da6d0a35f3); // https://vara.subscan.io/event/28141439-31
+
+            blockNumber = currentBlockNumber++;
+            merkleRoot = 0x969589f86884f4399a51b940a58d728b04e12fc30f21c1fddce8ca0eb82f9734;
+
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
+
+            totalLeaves = 4;
+            leafIndex = 0;
+            proof2 = new bytes32[](2);
+            proof2[0] = 0xc2bb624fb7b5f2e5fe29927ebd1b3837548aa1ecb3379242bd7c2f0666f39668;
+            proof2[1] = 0x609cf669aae21aef2be635fadde5e5aab418d0e656e4900d898b94f335e83007;
+
+            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message3, proof2);
+
+            // https://etherscan.io/address/0xaB012236A482fB9bFA83b955EC7b6115A0D8f714
+            assertEq(
+                wrappedVara.balanceOf(0xaB012236A482fB9bFA83b955EC7b6115A0D8f714),
+                (10 + 300_200) * (10 ** wrappedVara.decimals())
+            );
+
+            // message #144
+
+            VaraMessage memory message4 = VaraMessage({
+                nonce: 144,
+                source: deploymentArguments.vftManager,
+                destination: address(erc20Manager),
+                payload: TransferMessage({
+                        sender: 0x50bf690723c14c7242b3eb0488f4ceb26e140f79fd4af16551048976ed119433,
+                        receiver: 0xaB012236A482fB9bFA83b955EC7b6115A0D8f714,
+                        token: address(wrappedVara),
+                        amount: 1_000 * (10 ** wrappedVara.decimals())
+                    }).pack()
+            });
+            assertEq(messageQueue.isProcessed(message4.nonce), false);
+
+            messageHash = message4.hash();
+            assertEq(messageHash, 0x3ba6a14f187cd7ac3956ed4f302b559938c9ecdd44066b95fbfabe3b43942689); // https://vara.subscan.io/event/28142735-30
+
+            blockNumber = currentBlockNumber++;
+            merkleRoot = 0x969589f86884f4399a51b940a58d728b04e12fc30f21c1fddce8ca0eb82f9734;
+
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
+
+            totalLeaves = 4;
+            leafIndex = 2;
+            proof2 = new bytes32[](2);
+            proof2[0] = 0x2d6efc7a1d195950d5e0606da04837b4c9954a163c7fff5188d312f78b776d7e;
+            proof2[1] = 0x6d5d607e43e359f7f78175da3aba38fb7708859c7a48f9aaf1704ea7eb8cb3c9;
+
+            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message4, proof2);
+
+            // https://etherscan.io/address/0xaB012236A482fB9bFA83b955EC7b6115A0D8f714
+            assertEq(
+                wrappedVara.balanceOf(0xaB012236A482fB9bFA83b955EC7b6115A0D8f714),
+                (10 + 300_200 + 1_000) * (10 ** wrappedVara.decimals())
+            );
         }
 
         console.log("Deployment arguments:");

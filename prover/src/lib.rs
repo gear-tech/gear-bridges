@@ -14,6 +14,8 @@ pub mod serialization;
 mod storage_inclusion;
 pub mod utils;
 
+pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
+
 pub(crate) mod prelude {
     use plonky2::{
         field::goldilocks_field::GoldilocksField, plonk::config::PoseidonGoldilocksConfig,
@@ -24,6 +26,7 @@ pub(crate) mod prelude {
     pub const D: usize = 2;
 
     pub use super::consts;
+    pub use super::GearHeader;
 }
 
 pub mod consts {
@@ -278,12 +281,14 @@ pub mod proving {
     pub fn prove_message_sent(
         previous_proof: ProofWithCircuitData,
         block_finality_proof: BlockFinality,
+        headers: Vec<GearHeader>,
         genesis_config: GenesisConfig,
         message_inclusion_proof: StorageInclusion,
         message_contents: Vec<u8>,
     ) -> ExportedProofWithCircuitData {
         let message_sent = MessageSent {
             block_finality: block_finality_proof,
+            headers,
             inclusion_proof: message_inclusion_proof,
             message_storage_data: message_contents,
         };

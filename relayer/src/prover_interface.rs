@@ -2,13 +2,17 @@ use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
 use primitive_types::H256;
 use prometheus::{core::Collector, HistogramOpts, HistogramVec};
-use prover::proving::{
+use prover::{
+    proving::{
     self, BlockFinality, BranchNodeData, GenesisConfig, PreCommit, ProofWithCircuitData,
     StorageInclusion,
-};
+},  GearHeader,};
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, thread, time::Instant};
 use utils_prometheus::MeteredService;
+use anyhow::anyhow;
+use sp_consensus_grandpa::GrandpaJustification;
+use parity_scale_codec::{Decode, Encode};
 
 pub struct Metrics;
 
@@ -172,19 +176,37 @@ pub async fn prove_final(
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
     at_block: H256,
-
     count_thread: Option<usize>,
-    finality: Option<(H256, dto::BlockFinalityProof)>,
+    _finality: Option<(H256, dto::BlockFinalityProof)>,
 ) -> anyhow::Result<FinalProof> {
-    let (block, block_finality) = match finality {
-        Some(finality) => finality,
-        None => gear_api.fetch_finality_proof(at_block).await?,
+    let block_number = gear_api.block_hash_to_number(at_block).await?;
+    let (justification, headers) = gear_api.grandpa_prove_finality(block_number).await?;
+
+    let (block_hash, headers_new) = {
+        let mut headers_new = Vec::with_capacity(1 + headers.len());
+        let hash = if headers.is_empty() {
+            justification.commit.target_hash
+        } else {
+            headers[0].parent_hash
+        };
+
+        let header = gear_api.api.rpc().chain_get_header(Some(hash)).await?.ok_or(anyhow!("Unable to fetch the requested block header"))?;
+        // Subxt returns its own SubstrateHeader type which is the same as our GearHeader (sp_runtime::generic::Header) but
+        // just a different type.
+        //
+        // So we do this trick with the help of SCALE-codec.
+        let header_encoded = header.encode();
+        headers_new.push(GearHeader::decode(&mut &header_encoded[..]).expect("Header is encoded correctly"));
+        headers_new.extend_from_slice(&headers[..]);
+
+        (hash, headers_new)
     };
+
     prove_final_with_block_finality(
         gear_api,
         previous_proof,
         genesis_config,
-        (block, block_finality),
+        (block_hash, justification, headers_new),
         count_thread,
     )
     .await
@@ -194,11 +216,13 @@ pub async fn prove_final_with_block_finality(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
-    (block, block_finality): (H256, dto::BlockFinalityProof),
-
+    (block_hash, justification, headers): (H256, GrandpaJustification<GearHeader>, Vec<GearHeader>),
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
-    let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block).await?;
+    let (_block, block_finality): (H256, dto::BlockFinalityProof) = gear_api.produce_finality_proof(&justification).await?;
+
+    assert_eq!(block_hash, headers.first().expect("Should contain at least single block header").hash());
+    let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block_hash).await?;
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
@@ -210,6 +234,7 @@ pub async fn prove_final_with_block_finality(
         let proof = proving::prove_message_sent(
             previous_proof,
             parse_rpc_block_finality_proof(block_finality, count_thread),
+            headers,
             genesis_config,
             sent_message_inclusion_proof,
             message_contents,

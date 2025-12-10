@@ -62,6 +62,7 @@ impl MessageInStorageTarget {
 pub struct MessageSent {
     /// Proof that block where message is present in storage is finalized.
     pub block_finality: BlockFinality,
+    pub headers: Vec<GearHeader>,
     /// Proof that message is present in the storage.
     pub inclusion_proof: StorageInclusion,
     /// Original data stored in substrate storage.

@@ -29,8 +29,9 @@ static_assertions.workspace = true
 unroll.workspace = true
 
 parity-scale-codec.workspace = true
-sp-trie = { workspace = true, features = ["std"] }
 sp-core = { workspace = true, features = ["std"] }
+sp-runtime = { workspace = true, features = ["std"] }
+sp-trie = { workspace = true, features = ["std"] }
 trie-db = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
@@ -38,4 +39,3 @@ blake2.workspace = true
 hex.workspace = true
 hex-literal.workspace = true
 pretty_env_logger.workspace = true
-sp-runtime = { workspace = true, features = ["std"] }

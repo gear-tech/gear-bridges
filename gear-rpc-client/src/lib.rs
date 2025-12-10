@@ -276,26 +276,28 @@ impl GearApi {
         after_block: H256,
     ) -> AnyResult<GrandpaJustification<GearHeader>> {
         let after_block_number = self.block_hash_to_number(after_block).await?;
-        let finality: Option<String> = self
+        let (justification, _headers) = self.grandpa_prove_finality(after_block_number).await?;
+
+        Ok(justification)
+    }
+
+    pub async fn grandpa_prove_finality(
+        &self,
+        block_number: <GearHeader as sp_runtime::traits::Header>::Number,
+    ) -> AnyResult<(GrandpaJustification<GearHeader>, Vec<GearHeader>)> {
+        let proof_finality: Option<String> = self
             .api
             .rpc()
-            .request("grandpa_proveFinality", rpc_params![after_block_number])
+            .request("grandpa_proveFinality", rpc_params![block_number])
             .await?;
-        let finality = hex::decode(&finality.unwrap_or_default()["0x".len()..])?;
-        let finality = FinalityProof::<GearHeader>::decode(&mut &finality[..])?;
+        let proof_finality = hex::decode(proof_finality.as_deref().and_then(|s| s.strip_prefix("0x")).unwrap_or_default())?;
+        let proof_finality = FinalityProof::<GearHeader>::decode(&mut &proof_finality[..])?;
+        let fetched_block_number = self.block_hash_to_number(proof_finality.block).await?;
 
-        let fetched_block_number = self.block_hash_to_number(finality.block).await?;
-        if fetched_block_number < after_block_number {
-            return Err(anyhow!(
-                "Fetched finality for block #{fetched_block_number}, which is earlier than requested after_block #{after_block_number}",
-            ));
-        }
-
-        let mut justification =
-            GrandpaJustification::<GearHeader>::decode(&mut &finality.justification[..])?;
+        let mut justification = GrandpaJustification::<GearHeader>::decode(&mut &proof_finality.justification[..])?;
 
         justification.commit.precommits.retain(|pc| {
-            if pc.precommit.target_hash == finality.block
+            if pc.precommit.target_hash == proof_finality.block
                 && pc.precommit.target_number == fetched_block_number
             {
                 true
@@ -309,8 +311,9 @@ impl GearApi {
             }
         });
 
-        Ok(justification)
+        Ok((justification, proof_finality.unknown_headers))
     }
+
 
     /// Returns finality proof for block not earlier `after_block`
     /// and not later the end of session this block belongs to.

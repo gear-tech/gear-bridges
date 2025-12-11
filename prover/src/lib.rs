@@ -8,10 +8,13 @@ static GLOBAL: Jemalloc = Jemalloc;
 mod block_finality;
 pub(crate) mod common;
 mod final_proof;
+pub mod header_chain;
 mod latest_validator_set;
 pub mod serialization;
 mod storage_inclusion;
 pub mod utils;
+
+pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
 pub(crate) mod prelude {
     use plonky2::{
@@ -22,7 +25,7 @@ pub(crate) mod prelude {
     pub type C = PoseidonGoldilocksConfig;
     pub const D: usize = 2;
 
-    pub use super::consts;
+    pub use super::{consts, GearHeader};
 }
 
 pub mod consts {
@@ -277,12 +280,14 @@ pub mod proving {
     pub fn prove_message_sent(
         previous_proof: ProofWithCircuitData,
         block_finality_proof: BlockFinality,
+        headers: Vec<GearHeader>,
         genesis_config: GenesisConfig,
         message_inclusion_proof: StorageInclusion,
         message_contents: Vec<u8>,
     ) -> ExportedProofWithCircuitData {
         let message_sent = MessageSent {
             block_finality: block_finality_proof,
+            headers,
             inclusion_proof: message_inclusion_proof,
             message_storage_data: message_contents,
         };

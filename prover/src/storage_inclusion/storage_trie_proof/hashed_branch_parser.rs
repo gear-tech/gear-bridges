@@ -7,7 +7,7 @@ use plonky2::{
 
 use crate::{
     common::{
-        generic_blake2::GenericBlake2,
+        blake2::CircuitTargets as Blake2CircuitTargets,
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
@@ -43,9 +43,10 @@ impl HashedBranchParser {
     pub fn prove(self) -> ProofWithCircuitData<HashedBranchParserTarget> {
         const MAX_DATA_LENGTH_ESTIMATION: usize =
             MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
+
+        let circuit = Blake2CircuitTargets::new();
         let hasher_proof =
-            GenericBlake2::new::<MAX_DATA_LENGTH_ESTIMATION>(self.branch_parser.node_data.clone())
-                .prove();
+            circuit.prove::<MAX_DATA_LENGTH_ESTIMATION>(&self.branch_parser.node_data);
         let branch_parser_proof = self.branch_parser.prove();
 
         log::debug!("Composing hasher proof and branch parser proof...");

@@ -152,6 +152,12 @@ pub struct CircuitTargets {
     target_inner_cyclic_proof: ProofWithPublicInputsTarget<D>,
 }
 
+impl Default for CircuitTargets {
+    fn default() -> Self {
+        BuilderTargets::default().into()
+    }
+}
+
 impl From<BuilderTargets> for CircuitTargets {
     fn from(value: BuilderTargets) -> Self {
         log::trace!("From<BuilderTargets> for CircuitTargets enter");

@@ -237,7 +237,7 @@ jobs:
           --exclude plonky2_ecdsa
           --exclude plonky2_ed25519
           --exclude plonky2_sha512
-          --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
+          --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs $NODE_CONTAINER_NAME; docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
 
       - name: Run prover asserting tests
         run: cargo test --release --package prover assert_constants

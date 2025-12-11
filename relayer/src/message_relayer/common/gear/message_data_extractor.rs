@@ -6,7 +6,6 @@ use crate::message_relayer::{
 };
 use anyhow::Result as AnyResult;
 use ethereum_common::U256;
-use gsdk::subscription::BlockEvents;
 use std::{cmp::Ordering, ops::Deref};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -75,8 +74,7 @@ impl MessageDataExtractor {
         let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
 
         let header = block.header().clone();
-        let block_events = BlockEvents::new(block).await?;
-        let events = block_events.events()?;
+        let events = gear_api.get_events_at(Some(block_hash)).await?;
 
         let justification = gear_api.get_justification(block_hash).await?;
 

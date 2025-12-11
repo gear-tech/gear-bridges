@@ -1,6 +1,4 @@
-import { useAccount } from '@gear-js/react-hooks';
-
-import { useEthAccount } from '@/hooks';
+import { useAccountsConnection } from '@/hooks';
 import { isUndefined } from '@/utils';
 
 import { useIsEthRelayAvailable, useIsVaraRelayAvailable } from '../../hooks';
@@ -12,12 +10,11 @@ type VaraProps = {
 };
 
 function RelayVaraTxNote({ blockNumber }: VaraProps) {
-  const { account } = useAccount();
-  const ethAccount = useEthAccount();
+  const { isAnyAccount, isVaraAccount, isEthAccount } = useAccountsConnection();
 
   const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
 
-  if ((!account && !ethAccount.address) || isUndefined(isAvailable)) return;
+  if (!isAnyAccount || isUndefined(isAvailable)) return;
 
   if (!isAvailable)
     return (
@@ -30,8 +27,8 @@ function RelayVaraTxNote({ blockNumber }: VaraProps) {
   return (
     <div className={styles.text}>
       <p>Choose how to claim tokens: pay a fee to auto-claim, or finalize manually using your wallet.</p>
-      {!account && <p>Vara wallet connection will be requested for auto claim.</p>}
-      {!ethAccount.address && <p>Ethereum wallet connection will be requested for manual claim.</p>}
+      {!isVaraAccount && <p>Vara wallet connection will be requested for auto claim.</p>}
+      {!isEthAccount && <p>Ethereum wallet connection will be requested for manual claim.</p>}
     </div>
   );
 }
@@ -41,12 +38,11 @@ type EthProps = {
 };
 
 function RelayEthTxNote({ blockNumber }: EthProps) {
-  const { account } = useAccount();
-  const ethAccount = useEthAccount();
+  const { isAnyAccount, isVaraAccount } = useAccountsConnection();
 
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
 
-  if ((!ethAccount.address && !account) || isUndefined(isAvailable)) return;
+  if (!isAnyAccount || isUndefined(isAvailable)) return;
 
   if (!isAvailable)
     return (
@@ -59,7 +55,7 @@ function RelayEthTxNote({ blockNumber }: EthProps) {
   return (
     <div className={styles.text}>
       <p>Claim tokens: finalize manually using your wallet.</p>
-      {!account && <p>Vara wallet connection will be requested.</p>}
+      {!isVaraAccount && <p>Vara wallet connection will be requested.</p>}
     </div>
   );
 }

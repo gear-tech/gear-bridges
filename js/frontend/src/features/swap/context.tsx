@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import { useAccount } from '@gear-js/react-hooks';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Token, useTokens } from '@/context';
@@ -34,12 +35,13 @@ const useBridgeContext = () => useContext(BridgeContext);
 
 function BridgeProvider({ children }: PropsWithChildren) {
   // network
+  const { account } = useAccount();
   const ethAccount = useEthAccount();
 
   // token
   const { getActiveToken, nativeToken } = useTokens();
 
-  const defaultNetwork = ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
+  const defaultNetwork = !account && ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
   const defaultTokenAddress = nativeToken[defaultNetwork]?.address;
   const [tokenAddress, setTokenAddress] = useState(defaultTokenAddress);
 

@@ -39,14 +39,18 @@ pub async fn prove_genesis(
     count_thread: Option<usize>,
 ) -> anyhow::Result<ProofWithCircuitData> {
     log::info!(
-        "Proving genesis authority set change {} -> {}",
-        genesis_config.authority_set_id,
-        genesis_config.authority_set_id + 1
+        "Proving genesis authority set {}",
+        genesis_config.authority_set_id
     );
 
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(genesis_config.authority_set_id)
+        .fetch_finality_proof_for_session(genesis_config.authority_set_id + 1)
         .await?;
+
+    log::info!(
+        "Proving genesis; block = {block:?} ({})",
+        gear_api.block_hash_to_number(block).await?,
+    );
 
     let next_validator_set_inclusion_proof = gear_api
         .fetch_next_session_keys_inclusion_proof(block)
@@ -91,8 +95,13 @@ pub async fn prove_validator_set_change(
     );
 
     let (block, current_epoch_block_finality) = gear_api
-        .fetch_finality_proof_for_session(previous_authority_set_id)
+        .fetch_finality_proof_for_session(previous_authority_set_id + 1)
         .await?;
+
+    log::info!(
+        "Proving authority set change; block = {block:?} ({})",
+        gear_api.block_hash_to_number(block).await?,
+    );
 
     let next_validator_set_inclusion_proof = gear_api
         .fetch_next_session_keys_inclusion_proof(block)

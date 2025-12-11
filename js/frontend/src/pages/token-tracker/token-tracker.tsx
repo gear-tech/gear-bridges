@@ -1,10 +1,13 @@
 import { Container } from '@/components';
 import { TokensCard } from '@/features/token-tracker';
 
+import styles from './token-tracker.module.scss';
+
 function TokenTracker() {
   return (
-    <Container maxWidth="490px">
-      <TokensCard />
+    <Container className={styles.container}>
+      <TokensCard.Vara />
+      <TokensCard.Eth />
     </Container>
   );
 }

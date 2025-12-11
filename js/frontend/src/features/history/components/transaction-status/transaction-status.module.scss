@@ -30,7 +30,16 @@
   background-color: #ff37571a;
 }
 
-.awaitingPayment,
+.awaitingPayment {
+  color: #fdd87c;
+
+  background-color: #fdd87c3d;
+
+  svg path {
+    fill: #fdd87c;
+  }
+}
+
 .bridging {
   color: #f6f6f6cc;
 

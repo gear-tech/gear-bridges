@@ -290,11 +290,17 @@ impl GearApi {
             .rpc()
             .request("grandpa_proveFinality", rpc_params![block_number])
             .await?;
-        let proof_finality = hex::decode(proof_finality.as_deref().and_then(|s| s.strip_prefix("0x")).unwrap_or_default())?;
+        let proof_finality = hex::decode(
+            proof_finality
+                .as_deref()
+                .and_then(|s| s.strip_prefix("0x"))
+                .unwrap_or_default(),
+        )?;
         let proof_finality = FinalityProof::<GearHeader>::decode(&mut &proof_finality[..])?;
         let fetched_block_number = self.block_hash_to_number(proof_finality.block).await?;
 
-        let mut justification = GrandpaJustification::<GearHeader>::decode(&mut &proof_finality.justification[..])?;
+        let mut justification =
+            GrandpaJustification::<GearHeader>::decode(&mut &proof_finality.justification[..])?;
 
         justification.commit.precommits.retain(|pc| {
             if pc.precommit.target_hash == proof_finality.block
@@ -313,7 +319,6 @@ impl GearApi {
 
         Ok((justification, proof_finality.unknown_headers))
     }
-
 
     /// Returns finality proof for block not earlier `after_block`
     /// and not later the end of session this block belongs to.

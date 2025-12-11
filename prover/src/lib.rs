@@ -25,8 +25,7 @@ pub(crate) mod prelude {
     pub type C = PoseidonGoldilocksConfig;
     pub const D: usize = 2;
 
-    pub use super::consts;
-    pub use super::GearHeader;
+    pub use super::{consts, GearHeader};
 }
 
 pub mod consts {

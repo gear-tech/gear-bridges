@@ -1,5 +1,22 @@
 //! ### Circuit that's used to prove that message was queued for relaying.
 
+use crate::{
+    block_finality::BlockFinality,
+    common::{
+        array_to_bits,
+        blake2::{CircuitTargets as Blake2CircuitTargets, MAX_DATA_BYTES},
+        targets::{
+            impl_target_set, ArrayTarget, Blake2Target, Blake2TargetGoldilocks,
+            MessageTargetGoldilocks, TargetBitOperations, TargetSet,
+        },
+        BuilderExt, ProofWithCircuitData,
+    },
+    consts::MESSAGE_SIZE_IN_BITS,
+    header_chain::{CircuitTargets as HeaderChainCircuit, HeaderChainTarget},
+    prelude::*,
+    storage_inclusion::StorageInclusion,
+};
+use parity_scale_codec::Encode;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -7,28 +24,11 @@ use plonky2::{
     },
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
-use crate::{
-    block_finality::BlockFinality,
-    common::{
-        array_to_bits,
-        targets::{
-            impl_target_set, ArrayTarget, Blake2Target, Blake2TargetGoldilocks,
-            MessageTargetGoldilocks, TargetBitOperations, TargetSet,
-        },
-        BuilderExt, ProofWithCircuitData,
-        blake2::{CircuitTargets as Blake2CircuitTargets, MAX_DATA_BYTES},
-    },
-    consts::MESSAGE_SIZE_IN_BITS,
-    prelude::*,
-    storage_inclusion::StorageInclusion,
-    header_chain::{CircuitTargets as HeaderChainCircuit, HeaderChainTarget},
-};
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
     ThreadPoolBuilder,
 };
 use std::env;
-use parity_scale_codec::Encode;
 
 impl_target_set! {
     /// Public inputs for `MessageSent`.
@@ -111,19 +111,22 @@ impl MessageSent {
         let mut headers = self.headers;
         headers.sort_by_key(|header| header.number);
 
-        let proof_hashes = headers.into_par_iter().map(
-            |header| {
-                thread_pool.scope(|_| {
-                    circuit_blake2.prove::<MAX_DATA_BYTES>(header.encode().as_ref())
-                })
-            },
-        )
-        .collect::<Vec<_>>();
+        let proof_hashes = headers
+            .into_par_iter()
+            .map(|header| {
+                thread_pool
+                    .scope(|_| circuit_blake2.prove::<MAX_DATA_BYTES>(header.encode().as_ref()))
+            })
+            .collect::<Vec<_>>();
 
         let circuit_chain = HeaderChainCircuit::default();
-        let proof_chain = proof_hashes.into_iter().rev().fold(None, |proof_recursive, proof_header_hash| {
-            Some(circuit_chain.prove(&proof_header_hash, proof_recursive.as_ref()))
-        });
+        let proof_chain =
+            proof_hashes
+                .into_iter()
+                .rev()
+                .fold(None, |proof_recursive, proof_header_hash| {
+                    Some(circuit_chain.prove(&proof_header_hash, proof_recursive.as_ref()))
+                });
         let proof_chain = proof_chain.expect("Headers is not an empty list");
 
         let target_proof_chain = builder.add_virtual_proof_with_pis(circuit_chain.common());
@@ -132,7 +135,7 @@ impl MessageSent {
         builder.verify_proof::<C>(
             &target_proof_chain,
             &target_verifier,
-            &circuit_chain.common(),
+            circuit_chain.common(),
         );
 
         let mut iter_public_inputs = target_proof_chain.public_inputs.iter().copied();
@@ -146,7 +149,8 @@ impl MessageSent {
         inclusion_proof_target
             .block_hash
             .connect(&hash_header, &mut builder);
-        finality_proof_target.message
+        finality_proof_target
+            .message
             .block_hash
             .connect(&hash_header_start, &mut builder);
 

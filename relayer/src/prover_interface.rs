@@ -1,18 +1,20 @@
+use anyhow::anyhow;
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
+use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
 use prometheus::{core::Collector, HistogramOpts, HistogramVec};
 use prover::{
     proving::{
-    self, BlockFinality, BranchNodeData, GenesisConfig, PreCommit, ProofWithCircuitData,
-    StorageInclusion,
-},  GearHeader,};
+        self, BlockFinality, BranchNodeData, GenesisConfig, PreCommit, ProofWithCircuitData,
+        StorageInclusion,
+    },
+    GearHeader,
+};
 use serde::{Deserialize, Serialize};
+use sp_consensus_grandpa::GrandpaJustification;
 use std::{str::FromStr, thread, time::Instant};
 use utils_prometheus::MeteredService;
-use anyhow::anyhow;
-use sp_consensus_grandpa::GrandpaJustification;
-use parity_scale_codec::{Decode, Encode};
 
 pub struct Metrics;
 
@@ -190,13 +192,20 @@ pub async fn prove_final(
             headers[0].parent_hash
         };
 
-        let header = gear_api.api.rpc().chain_get_header(Some(hash)).await?.ok_or(anyhow!("Unable to fetch the requested block header"))?;
+        let header = gear_api
+            .api
+            .rpc()
+            .chain_get_header(Some(hash))
+            .await?
+            .ok_or(anyhow!("Unable to fetch the requested block header"))?;
         // Subxt returns its own SubstrateHeader type which is the same as our GearHeader (sp_runtime::generic::Header) but
         // just a different type.
         //
         // So we do this trick with the help of SCALE-codec.
         let header_encoded = header.encode();
-        headers_new.push(GearHeader::decode(&mut &header_encoded[..]).expect("Header is encoded correctly"));
+        headers_new.push(
+            GearHeader::decode(&mut &header_encoded[..]).expect("Header is encoded correctly"),
+        );
         headers_new.extend_from_slice(&headers[..]);
 
         (hash, headers_new)
@@ -219,10 +228,19 @@ pub async fn prove_final_with_block_finality(
     (block_hash, justification, headers): (H256, GrandpaJustification<GearHeader>, Vec<GearHeader>),
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
-    let (_block, block_finality): (H256, dto::BlockFinalityProof) = gear_api.produce_finality_proof(&justification).await?;
+    let (_block, block_finality): (H256, dto::BlockFinalityProof) =
+        gear_api.produce_finality_proof(&justification).await?;
 
-    assert_eq!(block_hash, headers.first().expect("Should contain at least single block header").hash());
-    let sent_message_inclusion_proof = gear_api.fetch_sent_message_inclusion_proof(block_hash).await?;
+    assert_eq!(
+        block_hash,
+        headers
+            .first()
+            .expect("Should contain at least single block header")
+            .hash()
+    );
+    let sent_message_inclusion_proof = gear_api
+        .fetch_sent_message_inclusion_proof(block_hash)
+        .await?;
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);

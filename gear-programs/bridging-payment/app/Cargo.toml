@@ -8,3 +8,4 @@ sails-rs.workspace = true
 parity-scale-codec.workspace = true
 scale-info.workspace = true
 gstd.workspace = true
+zerocopy.workspace = true

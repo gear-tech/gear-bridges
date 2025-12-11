@@ -3,7 +3,7 @@ import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
 
 import { Tooltip } from '@/components';
-import { useEthAccount, useModal } from '@/hooks';
+import { useModal } from '@/hooks';
 import { getErrorMessage, isUndefined } from '@/utils';
 
 import { usePayVaraFee, useVaraFee } from '../../hooks';
@@ -15,7 +15,6 @@ type Props = {
 
 function PayVaraFeeButton({ nonce, onInBlock }: Props) {
   const { account } = useAccount();
-  const ethAccount = useEthAccount();
 
   const alert = useAlert();
 
@@ -44,7 +43,7 @@ function PayVaraFeeButton({ nonce, onInBlock }: Props) {
     </>
   );
 
-  if (!account && !ethAccount.address) return;
+  if (!account) return;
 
   return (
     <>

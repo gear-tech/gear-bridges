@@ -1,4 +1,5 @@
 import { useChangeEffect, useLoading, useModal, useDebounce, useInvalidateOnBlock } from './common';
+import { useAccountsConnection } from './use-accounts-connection';
 import { useEthAccount } from './use-eth-account';
 import { useEthAccountBalance } from './use-eth-account-balance';
 import { useEthFTBalance } from './use-eth-ft-balance';
@@ -26,4 +27,5 @@ export {
   useVaraSymbol,
   useWrappedVaraProgram,
   useVFTProgram,
+  useAccountsConnection,
 };

@@ -1,4 +1,5 @@
 import ClockSVG from '@/assets/clock.svg?react';
+import WarningSVG from '@/assets/warning.svg?react';
 import { Skeleton } from '@/components';
 import { cx } from '@/utils';
 
@@ -10,7 +11,7 @@ import styles from './transaction-status.module.scss';
 
 const STATUS_SVG = {
   [StatusType.Completed]: CheckSVG,
-  [StatusType.AwaitingPayment]: ClockSVG,
+  [StatusType.AwaitingPayment]: WarningSVG,
   [StatusType.Failed]: ErrorSVG,
   [StatusType.Bridging]: ClockSVG,
 } as const;

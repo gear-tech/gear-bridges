@@ -13,13 +13,6 @@
 
   transition: background-color 0.25s;
 
-  @include breakpoint(555px) {
-    grid-column: 1 / -1;
-    grid-row: 2;
-
-    justify-content: center;
-  }
-
   &:disabled {
     pointer-events: none;
   }
@@ -148,13 +141,15 @@
   }
 
   .heading {
+    margin-bottom: 2px;
+
     display: flex;
     align-items: center;
     gap: 8px;
   }
 
   .subheading {
-    font-size: 10px;
+    font-size: 11px;
     color: #999999;
     letter-spacing: -0.03rem;
 

@@ -49,7 +49,7 @@ impl_target_set! {
     pub struct NextValidatorSetTarget {
         /// Current validator set hash.
         pub current_validator_set_hash: Blake2TargetGoldilocks,
-        /// Current authority set id.
+        /// Current authority set id. Who signed the block (grandpa-message).
         pub current_authority_set_id: Target,
         /// Next validator set hash.
         pub next_validator_set: Blake2TargetGoldilocks,
@@ -73,6 +73,8 @@ impl NextValidatorSet {
 
         let inclusion_proof = self.next_validator_set_inclusion_proof.prove();
         let block_finality_proof = self.current_epoch_block_finality.prove();
+
+        log::debug!("NextValidatorSet; block_finality_proof proven");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
@@ -116,6 +118,12 @@ impl NextValidatorSet {
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::prove_from_builder(builder, witness)
+        log::debug!("NextValidatorSet; before proof");
+
+        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
+
+        log::debug!("NextValidatorSet; after proof");
+
+        result
     }
 }

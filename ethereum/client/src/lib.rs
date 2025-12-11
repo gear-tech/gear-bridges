@@ -337,6 +337,13 @@ impl EthApi {
         self.contracts.max_block_number().await
     }
 
+    /// Returns the maximum block distance allowed between `max_block_number`
+    /// and the block number being submitted as part of a merkle-root submission
+    /// into MessageQueue contract.
+    pub async fn max_block_distance(&self) -> Result<u32, Error> {
+        self.contracts.max_block_distance().await
+    }
+
     /// Returns the delay (in seconds) requires before merkle-root submitted
     /// by an admin can be used.
     pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
@@ -508,6 +515,15 @@ impl Contracts {
     pub async fn max_block_number(&self) -> Result<u32, Error> {
         self.message_queue_instance
             .maxBlockNumber()
+            .call()
+            .await
+            .map(|num| num.to())
+            .map_err(Error::ErrorDuringContractExecution)
+    }
+
+    pub async fn max_block_distance(&self) -> Result<u32, Error> {
+        self.message_queue_instance
+            .MAX_BLOCK_DISTANCE()
             .call()
             .await
             .map(|num| num.to())

@@ -1,11 +1,11 @@
 import { HexString } from '@gear-js/api';
-import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAccount, useAlert } from '@gear-js/react-hooks';
+import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
 
 import { Tooltip } from '@/components';
-import { useEthAccount, useModal } from '@/hooks';
+import { useAccountsConnection, useModal } from '@/hooks';
 import { getErrorMessage, isUndefined, logger } from '@/utils';
 
 import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
@@ -17,9 +17,7 @@ type VaraProps = {
 };
 
 function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
-  const { account } = useAccount();
-
-  const ethAccount = useEthAccount();
+  const { isAnyAccount, isEthAccount } = useAccountsConnection();
   const { open: openEthModal } = useAppKit();
 
   const alert = useAlert();
@@ -28,7 +26,7 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
   const { mutate, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
 
   const handleClick = async () => {
-    if (!ethAccount.address) return openEthModal();
+    if (!isEthAccount) return openEthModal();
 
     const alertId = alert.loading('Relaying Vara transaction...');
     const onLog = (message: string) => alert.update(alertId, message);
@@ -58,12 +56,12 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
     return (
       <>
         <p>Use your Ethereum chain wallet to claim tokens by yourself.</p>
-        <p>A network fee is required. {!ethAccount.address && 'Wallet connection will be requested.'}</p>
+        <p>A network fee is required. {!isEthAccount && 'Wallet connection will be requested.'}</p>
       </>
     );
   };
 
-  if (!account && !ethAccount.address) return;
+  if (!isAnyAccount) return;
 
   return (
     <Tooltip value={renderTooltipText()}>
@@ -89,17 +87,16 @@ type EthProps = {
 };
 
 function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
-  const { account } = useAccount();
+  const { isAnyAccount, isVaraAccount } = useAccountsConnection();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
-  const ethAccount = useEthAccount();
   const alert = useAlert();
 
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
   const { mutate, isPending } = useRelayEthTx(txHash);
 
   const handleClick = () => {
-    if (!account) return openSubstrateModal();
+    if (!isVaraAccount) return openSubstrateModal();
 
     const alertId = alert.loading('Relaying Ethereum transaction...');
 
@@ -130,12 +127,12 @@ function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
     return (
       <>
         <p>Use your Vara chain wallet to claim tokens by yourself.</p>
-        <p>A network fee is required. {!account && 'Wallet connection will be requested.'}</p>
+        <p>A network fee is required. {!isVaraAccount && 'Wallet connection will be requested.'}</p>
       </>
     );
   };
 
-  if (!account && !ethAccount.address) return;
+  if (!isAnyAccount) return;
 
   return (
     <>

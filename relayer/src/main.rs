@@ -116,43 +116,37 @@ async fn run() -> AnyResult<()> {
                 ),
             };
 
-            log::info!("Block number with merkle root (for fn prove_final): {block_number}");
+            log::info!("Block number with merkle root (for fn prove_final): {block_number} ({block_hash:?})");
 
             let auth_set_id = gear_api.authority_set_id(block_hash).await?;
-            let auth_set_id_target = auth_set_id - 1;
-
             log::info!("Its authority set id is: {auth_set_id}");
 
-            // find block with auth_set_id_target
-            let mut genesis_config = None;
-            for n in [0, 1, 2] {
-                let block_number_to_check =
-                    (block_number as u64 / auth_set_id * (auth_set_id_target - n)) as u32;
-                let Ok(block_hash) = gear_api.block_number_to_hash(block_number_to_check).await
-                else {
-                    continue;
-                };
+            let auth_set_id_block_first = gear_api
+                .find_era_first_block(auth_set_id)
+                .await
+                .context("Unable to find the first block of an era")?;
+            let auth_set_id_block_number_first = gear_api
+                .block_hash_to_number(auth_set_id_block_first)
+                .await?;
 
-                let state = gear_api.authority_set_state(Some(block_hash)).await?;
-                log::debug!("block_number_to_check = {block_number_to_check}");
-                log::debug!("authority_set_id = {}", state.authority_set_id);
-                log::debug!(
-                    "authority_set_hash = {}",
-                    hex::encode(state.authority_set_hash)
-                );
+            let aut_set_id_previous_block_number = auth_set_id_block_number_first - 1;
+            let aut_set_id_previous_block = gear_api
+                .block_number_to_hash(aut_set_id_previous_block_number)
+                .await?;
 
-                if state.authority_set_id == auth_set_id_target {
-                    genesis_config = Some(prover::proving::GenesisConfig {
-                        authority_set_id: state.authority_set_id,
-                        authority_set_hash: state.authority_set_hash,
-                    });
+            let state = gear_api
+                .authority_set_state(Some(aut_set_id_previous_block))
+                .await?;
+            log::debug!("auth_set_id_block_first = {auth_set_id_block_first}");
+            log::debug!("authority_set_id = {}", state.authority_set_id);
+            log::debug!(
+                "authority_set_hash = {}",
+                hex::encode(state.authority_set_hash)
+            );
 
-                    break;
-                }
-            }
-
-            let Some(genesis_config) = genesis_config else {
-                return Err(anyhow!("Unable to find the required block header"));
+            let genesis_config = prover::proving::GenesisConfig {
+                authority_set_id: state.authority_set_id,
+                authority_set_hash: state.authority_set_hash,
             };
 
             let count_thread = match args.thread_count {

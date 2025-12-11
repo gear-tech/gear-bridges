@@ -1,16 +1,11 @@
 use ethereum_client::TxHash;
 use ethereum_common::Hash256;
-use gear_rpc_client::{dto::Message, GearApi, GearHeader};
-use gsdk::{
-    config::Header,
-    metadata::{
-        gear::Event as GearEvent,
-        gear_eth_bridge::Event as GearEthBridgeEvent,
-        runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-    },
-    subscription::BlockEvents,
-    GearConfig,
+use gear_rpc_client::{
+    dto::Message,
+    metadata::runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
+    GearApi, GearHeader,
 };
+use gsdk::{config::Header, GearConfig};
 use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
 use sp_consensus_grandpa::GrandpaJustification;
@@ -118,14 +113,14 @@ pub struct GSdkArgs {
 #[derive(Clone, Debug)]
 pub struct GearBlock {
     pub header: Header,
-    pub events: Vec<gsdk::Event>,
+    pub events: Vec<gear_rpc_client::metadata::Event>,
     pub grandpa_justification: GrandpaJustification<GearHeader>,
 }
 
 impl GearBlock {
     pub fn new(
         header: Header,
-        events: Vec<gsdk::Event>,
+        events: Vec<gear_rpc_client::metadata::Event>,
         grandpa_justification: GrandpaJustification<GearHeader>,
     ) -> Self {
         Self {
@@ -143,7 +138,7 @@ impl GearBlock {
         self.header.hash()
     }
 
-    pub fn events(&self) -> &[gsdk::Event] {
+    pub fn events(&self) -> &[gear_rpc_client::metadata::Event] {
         &self.events
     }
 
@@ -153,16 +148,18 @@ impl GearBlock {
         to_user: H256,
     ) -> impl Iterator<Item = &[u8]> + use<'_> {
         self.events.iter().filter_map(move |event| match event {
-            gclient::Event::Gear(GearEvent::UserMessageSent {
-                message:
-                    UserMessage {
-                        source,
-                        destination,
-                        payload,
-                        ..
-                    },
-                ..
-            }) if source == &ActorId(from_program.0) && destination == &ActorId(to_user.0) => {
+            gear_rpc_client::metadata::Event::Gear(
+                gear_rpc_client::metadata::gear::Event::UserMessageSent {
+                    message:
+                        UserMessage {
+                            source,
+                            destination,
+                            payload,
+                            ..
+                        },
+                    ..
+                },
+            ) if source == &ActorId(from_program.0) && destination == &ActorId(to_user.0) => {
                 Some(payload.0.as_ref())
             }
             _ => None,
@@ -175,8 +172,8 @@ impl GearBlock {
     ) -> anyhow::Result<Self> {
         let justification = api.get_justification(block.hash()).await?;
         let header = block.header().clone();
-        let events = BlockEvents::new(block).await?;
-        let events = events.events()?;
+        let events = api.get_events_at(Some(block.hash())).await?;
+
         Ok(Self::new(header, events, justification))
     }
 
@@ -191,8 +188,8 @@ impl GearBlock {
             .await?;
 
         let header = block.header().clone();
-        let events = BlockEvents::new(block).await?;
-        let events = events.events()?;
+        let events = api.get_events_at(Some(block.hash())).await?;
+
         Ok(Self::new(header, events, justification))
     }
 }
@@ -201,7 +198,9 @@ fn message_queued_events_of(
     block: &GearBlock,
 ) -> impl Iterator<Item = gear_rpc_client::dto::Message> + use<'_> {
     block.events().iter().filter_map(|event| match event {
-        gclient::Event::GearEthBridge(GearEthBridgeEvent::MessageQueued { message, .. }) => {
+        gear_rpc_client::metadata::Event::GearEthBridge(
+            gear_rpc_client::metadata::gear_eth_bridge::Event::MessageQueued { message, .. },
+        ) => {
             let mut nonce_be = [0; 32];
             primitive_types::U256(message.nonce.0).to_big_endian(&mut nonce_be);
 

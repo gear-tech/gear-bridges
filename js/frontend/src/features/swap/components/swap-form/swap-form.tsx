@@ -1,4 +1,4 @@
-import { useAccount, useApi } from '@gear-js/react-hooks';
+import { useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
@@ -6,7 +6,7 @@ import { FormProvider } from 'react-hook-form';
 import { Input } from '@/components';
 import { useNetworkType } from '@/context/network-type';
 import { TokenPrice } from '@/features/token-price';
-import { useEthAccount, useVaraSymbol } from '@/hooks';
+import { useAccountsConnection, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
@@ -43,9 +43,8 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
 
-  const { account } = useAccount();
-  const ethAccount = useEthAccount();
-  const isNetworkAccountConnected = (network.isVara && Boolean(account)) || (!network.isVara && ethAccount.isConnected);
+  const { isVaraAccount, isEthAccount } = useAccountsConnection();
+  const isNetworkAccountConnected = (network.isVara && isVaraAccount) || (!network.isVara && isEthAccount);
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined

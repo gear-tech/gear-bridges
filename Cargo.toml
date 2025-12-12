@@ -49,6 +49,7 @@ edition = "2021"
 
 [workspace.dependencies]
 actix-web = "4.11.0"
+actix = "0.13.5"
 mock-contract = { path = "./mock-contract" }
 relayer = { path = "./relayer" }
 gear-rpc-client = { path = "./gear-rpc-client" }

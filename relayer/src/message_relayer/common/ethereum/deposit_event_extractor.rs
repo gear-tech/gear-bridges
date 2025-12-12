@@ -112,6 +112,9 @@ impl DepositEventExtractor {
                                 return;
                             }
                         }
+                    } else {
+                        log::error!("Non recoverable error, exiting.");
+                        return;
                     }
                 } else {
                     log::info!("Block listener connection closed, exiting...");

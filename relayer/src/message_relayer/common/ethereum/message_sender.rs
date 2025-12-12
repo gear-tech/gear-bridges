@@ -143,6 +143,9 @@ async fn task(
                             break;
                         }
                     }
+                } else {
+                    log::error!("Non recoverable error, exiting.");
+                    break;
                 }
             }
         }

@@ -220,6 +220,12 @@ pub async fn prove_final(
         (hash, headers_new)
     };
 
+    log::info!(
+        "Proving message sent; requested block = {at_block:?} ({block_number}); signed block = {block_hash:?} ({:?}); chain len = {}",
+        headers_new.last().map(|header| header.number),
+        headers_new.len(),
+    );
+
     prove_final_with_block_finality(
         gear_api,
         previous_proof,

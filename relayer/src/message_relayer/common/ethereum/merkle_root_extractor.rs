@@ -122,7 +122,7 @@ async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
 
     let mut stream = subscription.into_result_stream();
     // check periodically that the connection to ApiProvider is alive
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
 
     loop {
         tokio::select! {

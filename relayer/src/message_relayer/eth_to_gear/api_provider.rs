@@ -46,10 +46,6 @@ impl ApiProviderConnection {
     /// When this function errors it indicates that the provider
     /// has failed and no further connections can be made.
     pub async fn reconnect(&mut self) -> anyhow::Result<()> {
-        if !self.is_alive() {
-            return Err(anyhow::anyhow!("API provider connection is dead"));
-        }
-
         let (tx, rx) = oneshot::channel();
         let request = ApiConnectionRequest {
             session: self.session,

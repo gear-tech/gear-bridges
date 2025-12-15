@@ -32,6 +32,13 @@ pub struct ApiProviderConnection {
 }
 
 impl ApiProviderConnection {
+    /// Check whether the connection is still alive.
+    ///
+    /// Internally checks that the underlying sender channel is still open.
+    pub fn is_alive(&self) -> bool {
+        !self.sender.is_closed()
+    }
+
     /// Explicit reconnect reqest to the [`ApiProvider`]. This will
     /// update current connection to include latest session number
     /// and API connection.

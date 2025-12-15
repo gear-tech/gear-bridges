@@ -32,6 +32,13 @@ pub struct ApiProviderConnection {
 }
 
 impl ApiProviderConnection {
+    /// Check whether the connection is still alive.
+    ///
+    /// Internally checks that the underlying sender channel is still open.
+    pub fn is_alive(&self) -> bool {
+        !self.sender.is_closed()
+    }
+
     /// Explicit reconnect reqest to the [`ApiProvider`]. This will
     /// update current connection to include latest session number
     /// and API connection.
@@ -39,6 +46,10 @@ impl ApiProviderConnection {
     /// When this function errors it indicates that the provider
     /// has failed and no further connections can be made.
     pub async fn reconnect(&mut self) -> anyhow::Result<()> {
+        if !self.is_alive() {
+            return Err(anyhow::anyhow!("API provider connection is dead"));
+        }
+
         let (tx, rx) = oneshot::channel();
         let request = ApiConnectionRequest {
             session: self.session,

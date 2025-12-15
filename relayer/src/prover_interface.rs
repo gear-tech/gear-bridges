@@ -247,12 +247,19 @@ pub async fn prove_final_with_block_finality(
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
     let Some(header_first) = headers.first() else {
-        return Err(anyhow!("Unknown header list should not be empty even for trivial chain"));
+        return Err(anyhow!(
+            "Unknown header list should not be empty even for trivial chain"
+        ));
     };
 
     let block_last_maybe_hash = headers.last().map(|header| header.hash());
-    if !block_last_maybe_hash.map(|hash| hash == justification.commit.target_hash).unwrap_or(false) {
-        return Err(anyhow!("The last header hash should be equal to the target hash"));
+    if !block_last_maybe_hash
+        .map(|hash| hash == justification.commit.target_hash)
+        .unwrap_or(false)
+    {
+        return Err(anyhow!(
+            "The last header hash should be equal to the target hash"
+        ));
     }
 
     let block_hash = header_first.hash();

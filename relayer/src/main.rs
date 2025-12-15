@@ -154,7 +154,9 @@ async fn run() -> AnyResult<()> {
                 Some(thread_count) => thread_count.into(),
             };
 
-            let (justification, headers) = crate::prover_interface::get_justification_and_headers(&gear_api, block_hash).await?;
+            let (justification, headers) =
+                crate::prover_interface::get_justification_and_headers(&gear_api, block_hash)
+                    .await?;
 
             let proof_previous =
                 crate::prover_interface::prove_genesis(&gear_api, genesis_config, count_thread)

@@ -128,7 +128,8 @@ async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
         tokio::select! {
             _ = interval.tick() => {
                 if !this.api_provider.is_alive() {
-                    return Err(anyhow::anyhow!("Connection to ApiProvider is lost"));
+                    log::error!("ApiProvider connection is dead, exiting Merkle root extractor task");
+                    return Ok(());
                 }
             }
 

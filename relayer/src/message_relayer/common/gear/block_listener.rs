@@ -213,8 +213,7 @@ impl BlockListener {
             for block_number in start..=backlog_end {
                 if already_known_numbers.contains(&block_number) {
                     continue;
-                }
-                already_known_numbers.insert(block_number);
+                }          
 
                 let block_hash = if block_number == backlog_end {
                     latest_finalized_hash
@@ -260,13 +259,9 @@ impl BlockListener {
 
         // Take and await the handle only if it's finished, so we never block the subscription loop.
         let handle = backlog_handle.take().expect("handle exists");
-        match handle.await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(err)) => Err(err),
-            Err(err) => Err(anyhow::anyhow!(
-                "Backlog task panicked or was cancelled: {err}"
-            )),
-        }
+        handle
+            .await
+            .map_err(|err| anyhow::anyhow!("Backlog task panicked or was cancelled: {err}"))?
     }
 
     async fn run_subscription_loop(

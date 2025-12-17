@@ -170,8 +170,7 @@ impl BlockListener {
         stored_blocks.sort_by_key(|(_, n)| *n);
         stored_blocks.dedup_by_key(|(_, n)| *n);
 
-        let already_known_numbers: HashSet<u32> =
-            stored_blocks.iter().map(|(_, n)| *n).collect();
+        let already_known_numbers: HashSet<u32> = stored_blocks.iter().map(|(_, n)| *n).collect();
 
         let api_provider = self.api_provider.clone();
         let block_storage = self.block_storage.clone();
@@ -213,7 +212,7 @@ impl BlockListener {
             for block_number in start..=backlog_end {
                 if already_known_numbers.contains(&block_number) {
                     continue;
-                }          
+                }
 
                 let block_hash = if block_number == backlog_end {
                     latest_finalized_hash

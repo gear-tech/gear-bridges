@@ -170,7 +170,7 @@ impl BlockListener {
         stored_blocks.sort_by_key(|(_, n)| *n);
         stored_blocks.dedup_by_key(|(_, n)| *n);
 
-        let mut already_known_numbers: HashSet<u32> =
+        let already_known_numbers: HashSet<u32> =
             stored_blocks.iter().map(|(_, n)| *n).collect();
 
         let api_provider = self.api_provider.clone();

@@ -74,10 +74,29 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     ...fees,
   });
 
+  const estimate = () => {
+    if (isUndefined(bridgingFee)) return;
+
+    let feesEstimate = 0n;
+
+    if (network.isVara) {
+      if (isUndefined(vftManagerFee) || isUndefined(priorityFee)) return;
+
+      feesEstimate += vftManagerFee;
+      if (shouldPayPriorityFee) feesEstimate += priorityFee;
+    }
+
+    if (shouldPayBridgingFee) feesEstimate += bridgingFee;
+
+    return isUndefined(txsEstimate.data) ? feesEstimate : txsEstimate.data.fees + feesEstimate;
+  };
+
+  const estimateTotal = estimate();
+
   const openTransactionModal = (values: FormattedValues) => {
     definedAssert(token, 'Token');
     definedAssert(destinationToken, 'Destination token');
-    definedAssert(txsEstimate.data, 'Transaction estimation');
+    definedAssert(estimateTotal, 'Transaction estimation');
 
     setTransactionModal({
       amount: values.amount,
@@ -85,7 +104,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
       isVaraNetwork: network.isVara,
       source: token.address,
       destination: destinationToken.address,
-      estimatedFees: txsEstimate.data.fees,
+      estimatedFees: estimateTotal,
       time,
       close: () => setTransactionModal(undefined),
     });
@@ -197,8 +216,8 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
             onPriorityChange={setPriority}
             onClaimTypeChange={setClaimType}
             isVaraNetwork={network.isVara}
-            fee={txsEstimate.data?.fees}
-            isFeeLoading={txsEstimate.isLoading}
+            fee={estimateTotal}
+            isFeeLoading={config.isLoading || txsEstimate.isLoading}
             disabled={isLoading}
             time={time}
           />

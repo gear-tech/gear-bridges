@@ -1,0 +1,3 @@
+function useVaraFeesEstimate() {}
+
+export { useVaraFeesEstimate };

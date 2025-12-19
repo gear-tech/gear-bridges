@@ -33,15 +33,15 @@ function FeeAndTimeFooter({ feeValue, time, isVaraNetwork, isLoading, className 
         </span>
 
         <span className={styles.value}>
-          {feeValue && decimals && symbol ? (
+          {feeValue && decimals && symbol && !isLoading ? (
             <>
               {formatUnits(feeValue, decimals)} {symbol}
               <TokenPrice id={tokenId} amount={formatUnits(feeValue, decimals)} fraction={4} />
             </>
           ) : (
             <>
-              <Skeleton width="3.5rem" disabled={!isLoading} />
-              <Skeleton width="3.5rem" disabled={!isLoading} />
+              <Skeleton width="3.5rem" />
+              <Skeleton width="3.5rem" />
             </>
           )}
         </span>

@@ -1,20 +1,13 @@
-import { useProgram, useProgramQuery } from '@gear-js/react-hooks';
+import { useProgramQuery } from '@gear-js/react-hooks';
 
-import { useNetworkType } from '@/context/network-type';
 import { isUndefined } from '@/utils';
 
-import { BridgingPaymentProgram } from '../../consts';
-
+import { useBridgingPaymentProgram } from './use-bridging-payment-program';
 import { useVFTManagerProgram } from './use-vft-manager-program';
 
 function useVaraFee() {
-  const { NETWORK_PRESET } = useNetworkType();
   const { data: vftManagerProgram } = useVFTManagerProgram();
-
-  const { data: bridgingPaymentProgram } = useProgram({
-    library: BridgingPaymentProgram,
-    id: NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS,
-  });
+  const { data: bridgingPaymentProgram } = useBridgingPaymentProgram();
 
   const vftManagerConfig = useProgramQuery({
     program: vftManagerProgram,

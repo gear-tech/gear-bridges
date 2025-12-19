@@ -74,29 +74,37 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     ...fees,
   });
 
-  const estimate = () => {
+  const getContractFees = () => {
     if (isUndefined(bridgingFee)) return;
 
-    let feesEstimate = 0n;
+    let result = 0n;
 
     if (network.isVara) {
       if (isUndefined(vftManagerFee) || isUndefined(priorityFee)) return;
 
-      feesEstimate += vftManagerFee;
-      if (shouldPayPriorityFee) feesEstimate += priorityFee;
+      result += vftManagerFee;
+      if (shouldPayPriorityFee) result += priorityFee;
     }
 
-    if (shouldPayBridgingFee) feesEstimate += bridgingFee;
+    if (shouldPayBridgingFee) result += bridgingFee;
 
-    return isUndefined(txsEstimate.data) ? feesEstimate : txsEstimate.data.fees + feesEstimate;
+    return result;
   };
 
-  const estimateTotal = estimate();
+  const contractFees = getContractFees();
+
+  const getTotalFees = () => {
+    if (isUndefined(txsEstimate.data) || isUndefined(contractFees)) return;
+
+    return txsEstimate.data.fees + contractFees;
+  };
+
+  const totalFees = getTotalFees();
 
   const openTransactionModal = (values: FormattedValues) => {
     definedAssert(token, 'Token');
     definedAssert(destinationToken, 'Destination token');
-    definedAssert(estimateTotal, 'Transaction estimation');
+    definedAssert(totalFees, 'Transaction estimation');
 
     setTransactionModal({
       amount: values.amount,
@@ -104,7 +112,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
       isVaraNetwork: network.isVara,
       source: token.address,
       destination: destinationToken.address,
-      estimatedFees: estimateTotal,
+      estimatedFees: totalFees,
       time,
       close: () => setTransactionModal(undefined),
     });
@@ -216,7 +224,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
             onPriorityChange={setPriority}
             onClaimTypeChange={setClaimType}
             isVaraNetwork={network.isVara}
-            fee={estimateTotal}
+            fee={totalFees || contractFees}
             isFeeLoading={config.isLoading || txsEstimate.isLoading}
             disabled={isLoading}
             time={time}

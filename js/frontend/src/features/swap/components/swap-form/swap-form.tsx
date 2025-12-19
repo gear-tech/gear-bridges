@@ -40,6 +40,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const { api } = useApi();
 
   const { bridgingFee, vftManagerFee, priorityFee, ...config } = useFee();
+  const fees = { bridgingFee, vftManagerFee, priorityFee };
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
 
@@ -67,12 +68,10 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const txsEstimate = useTxsEstimate({
     formValues: formattedValues,
-    bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
-    priorityFee: priorityFee?.value,
     shouldPayPriorityFee,
-    vftManagerFee: vftManagerFee?.value,
     ftBalance: ftBalance.data,
+    ...fees,
   });
 
   const openTransactionModal = (values: FormattedValues) => {
@@ -93,13 +92,11 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   };
 
   const sendTxs = useSendTxs({
-    bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
-    priorityFee: priorityFee?.value,
     shouldPayPriorityFee,
-    vftManagerFee: vftManagerFee?.value,
     ftBalance: ftBalance.data,
     onTransactionStart: openTransactionModal,
+    ...fees,
   });
 
   const isLoading =
@@ -120,7 +117,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   };
 
   const isEnoughBalance = () => {
-    if (!api || !token || isUndefined(bridgingFee.value) || !txsEstimate.data || !accountBalance.data) return false;
+    if (!api || !token || isUndefined(bridgingFee) || !txsEstimate.data || !accountBalance.data) return false;
 
     return accountBalance.data > txsEstimate.data.requiredBalance;
   };

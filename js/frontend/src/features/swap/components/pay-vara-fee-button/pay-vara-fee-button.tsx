@@ -25,9 +25,9 @@ function PayVaraFeeButton({ nonce, onInBlock }: Props) {
 
   const handlePayFeeButtonClick = () => {
     if (!account) return openSubstrateModal();
-    if (isUndefined(bridgingFee.value)) throw new Error('Fee is not found');
+    if (isUndefined(bridgingFee)) throw new Error('Fee is not found');
 
-    sendTransactionAsync({ args: [nonce], value: bridgingFee.value })
+    sendTransactionAsync({ args: [nonce], value: bridgingFee })
       .then(() => {
         alert.success('Fee paid successfully');
         onInBlock();
@@ -52,7 +52,7 @@ function PayVaraFeeButton({ nonce, onInBlock }: Props) {
           text="Claim Automatically"
           size="x-small"
           onClick={handlePayFeeButtonClick}
-          isLoading={isUndefined(bridgingFee.value) || isPending}
+          isLoading={isUndefined(bridgingFee) || isPending}
         />
       </Tooltip>
 

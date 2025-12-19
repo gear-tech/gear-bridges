@@ -1,3 +1,0 @@
-function useVaraFeesEstimate() {}
-
-export { useVaraFeesEstimate };

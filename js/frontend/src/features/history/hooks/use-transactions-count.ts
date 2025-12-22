@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { request } from 'graphql-request';
+import { useMemo } from 'react';
 
 import { useNetworkType } from '@/context/network-type';
 
@@ -20,10 +21,13 @@ type Params = {
   enabled?: boolean;
 };
 
-function useTransactionsCountQueryKey(filter: TransferFilter | undefined) {
+function useTransactionsCountQueryKey(filter?: TransferFilter) {
   const { NETWORK_PRESET } = useNetworkType();
 
-  return ['transactionsCount', NETWORK_PRESET.INDEXER_ADDRESS, filter];
+  return useMemo(
+    () => ['transactionsCount', NETWORK_PRESET.INDEXER_ADDRESS, filter],
+    [NETWORK_PRESET.INDEXER_ADDRESS, filter],
+  );
 }
 
 function useTransactionsCount({ filter, refetchInterval, enabled }: Params = {}) {

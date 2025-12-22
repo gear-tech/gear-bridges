@@ -408,7 +408,7 @@ impl GearApi {
         ))
     }
 
-    async fn fetch_authority_set(&self, authority_set_id: u64) -> AnyResult<Vec<[u8; 32]>> {
+    pub async fn fetch_authority_set(&self, authority_set_id: u64) -> AnyResult<Vec<[u8; 32]>> {
         let block = self
             .search_for_authority_set_block(authority_set_id)
             .await?;

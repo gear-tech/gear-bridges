@@ -11,7 +11,7 @@ const ED25519_SIGNATURE_SIZE: usize = 64;
 const KECCAK_HASH_SIZE: usize = 32;
 const BLAKE2_HASH_SIZE: usize = 32;
 
-#[derive(Encode, Decode, Clone)]
+#[derive(Debug, Encode, Decode, Clone)]
 pub struct PreCommit {
     pub public_key: [u8; ED25519_PUBLIC_KEY_SIZE],
     pub signature: [u8; ED25519_SIGNATURE_SIZE],

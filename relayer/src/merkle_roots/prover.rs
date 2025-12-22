@@ -1,9 +1,11 @@
 use crate::{
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
+    message_relayer::{
+        common::RawBlockInclusionProof, eth_to_gear::api_provider::ApiProviderConnection,
+    },
     prover_interface::{self, FinalProof},
 };
 use futures::executor::block_on;
-use gear_rpc_client::{dto, GearApi};
+use gear_rpc_client::GearApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use prover::proving::{GenesisConfig, ProofWithCircuitData};
@@ -22,7 +24,7 @@ pub struct Request {
     pub queue_id: u64,
     pub inner_proof: ProofWithCircuitData,
     pub batch: bool,
-    pub block_finality: (H256, dto::BlockFinalityProof),
+    pub block_inclusion_proof: RawBlockInclusionProof,
 }
 
 pub enum Response {
@@ -67,7 +69,7 @@ impl FinalityProverIo {
         inner_proof: ProofWithCircuitData,
         queue_id: u64,
         batch: bool,
-        block_finality: (H256, dto::BlockFinalityProof),
+        block_inclusion_proof: RawBlockInclusionProof,
     ) -> bool {
         self.requests
             .send(Request {
@@ -77,7 +79,7 @@ impl FinalityProverIo {
                 inner_proof,
                 queue_id,
                 batch,
-                block_finality,
+                block_inclusion_proof,
             })
             .is_ok()
     }
@@ -220,7 +222,7 @@ impl FinalityProver {
                                 request.block_hash,
                                 request.merkle_root,
                                 request.inner_proof,
-                                request.block_finality,
+                                request.block_inclusion_proof,
                             )
                             .await?;
 
@@ -298,7 +300,7 @@ impl FinalityProver {
                         request.block_hash,
                         request.merkle_root,
                         request.inner_proof,
-                        request.block_finality,
+                        request.block_inclusion_proof,
                     )
                     .await?;
                 self.metrics.currently_processing.set(0);
@@ -324,7 +326,7 @@ impl FinalityProver {
                     merkle_root,
                     inner_proof,
                     batch_roots,
-                    block_finality,
+                    block_inclusion_proof,
                 } = request.clone();
                 log::info!(
                     "Proving finality for latest block #{block_number} with authority set #{authority_set_id}, merkle-root {merkle_root} and queue #{queue_id} (will apply to {} blocks)",
@@ -345,7 +347,7 @@ impl FinalityProver {
                         block_hash,
                         merkle_root,
                         inner_proof,
-                        block_finality,
+                        block_inclusion_proof,
                     )
                     .await?;
 
@@ -376,7 +378,7 @@ impl FinalityProver {
         block_hash: H256,
         merkle_root: H256,
         inner_proof: ProofWithCircuitData,
-        block_finality: (H256, dto::BlockFinalityProof),
+        block_inclusion_proof: RawBlockInclusionProof,
     ) -> anyhow::Result<FinalProof> {
         log::info!("Generating merkle root proof for block #{block_number}");
 
@@ -389,7 +391,7 @@ impl FinalityProver {
             self.genesis_config,
             block_hash,
             self.count_thread,
-            Some(block_finality),
+            Some(block_inclusion_proof),
         )
         .await?;
         let elapsed = start.elapsed().as_secs_f64();
@@ -417,7 +419,7 @@ struct BatchProofRequest {
     block_hash: H256,
     merkle_root: H256,
     inner_proof: ProofWithCircuitData,
-    block_finality: (H256, dto::BlockFinalityProof),
+    block_inclusion_proof: RawBlockInclusionProof,
 
     batch_roots: Vec<(u32, H256)>,
 }
@@ -429,7 +431,7 @@ impl BatchProofRequest {
             block_hash: init.block_hash,
             merkle_root: init.merkle_root,
             inner_proof: init.inner_proof,
-            block_finality: init.block_finality,
+            block_inclusion_proof: init.block_inclusion_proof,
             batch_roots: Vec::new(),
         }
     }
@@ -445,7 +447,7 @@ impl BatchProofRequest {
             self.block_hash = request.block_hash;
             self.merkle_root = request.merkle_root;
             self.inner_proof = request.inner_proof;
-            self.block_finality = request.block_finality;
+            self.block_inclusion_proof = request.block_inclusion_proof;
         } else {
             self.batch_roots
                 .push((request.block_number, request.merkle_root));

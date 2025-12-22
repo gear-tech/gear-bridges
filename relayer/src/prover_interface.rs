@@ -16,6 +16,8 @@ use sp_consensus_grandpa::GrandpaJustification;
 use std::{str::FromStr, thread, time::Instant};
 use utils_prometheus::MeteredService;
 
+use crate::message_relayer::common::RawBlockInclusionProof;
+
 pub struct Metrics;
 
 impl MeteredService for Metrics {
@@ -188,7 +190,7 @@ pub async fn prove_final(
     genesis_config: GenesisConfig,
     at_block: H256,
     count_thread: Option<usize>,
-    _finality: Option<(H256, dto::BlockFinalityProof)>,
+    inclusion_proof: Option<RawBlockInclusionProof>,
 ) -> anyhow::Result<FinalProof> {
     let block_number = gear_api.block_hash_to_number(at_block).await?;
     let (justification, headers) = gear_api.grandpa_prove_finality(block_number).await?;
@@ -231,6 +233,7 @@ pub async fn prove_final(
         previous_proof,
         genesis_config,
         (block_hash, justification, headers_new),
+        inclusion_proof,
         count_thread,
     )
     .await
@@ -241,10 +244,15 @@ pub async fn prove_final_with_block_finality(
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
     (block_hash, justification, headers): (H256, GrandpaJustification<GearHeader>, Vec<GearHeader>),
+    inclusion_proof: Option<RawBlockInclusionProof>,
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
     let (_block, block_finality): (H256, dto::BlockFinalityProof) =
-        gear_api.produce_finality_proof(&justification).await?;
+        if let Some(proof) = inclusion_proof {
+            proof.into()
+        } else {
+            gear_api.produce_finality_proof(&justification).await?
+        };
 
     assert_eq!(
         block_hash,

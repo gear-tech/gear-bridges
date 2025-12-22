@@ -53,6 +53,17 @@ impl BlockStorage {
             .remove(&U256::from_big_endian(&message.message.nonce_be));
     }
 
+    pub async fn is_message_pending(&self, block: GearBlockNumber, nonce_be: [u8; 32]) -> bool {
+        let blocks = self.blocks.read().await;
+        let Some(stored_block) = blocks.get(&block) else {
+            return false;
+        };
+
+        stored_block
+            .messages
+            .contains(&U256::from_big_endian(&nonce_be))
+    }
+
     pub async fn add_block(
         &self,
         block: GearBlockNumber,
@@ -60,6 +71,20 @@ impl BlockStorage {
         txs: impl Iterator<Item = [u8; 32]>,
     ) {
         let mut blocks = self.blocks.write().await;
+
+        if let Some(existing) = blocks.get(&block) {
+            if existing.block_hash != block_hash {
+                log::warn!(
+                    "Block #{} is already in storage with a different hash (existing={}, new={})",
+                    block.0,
+                    existing.block_hash,
+                    block_hash
+                );
+            }
+            // Important: do NOT overwrite existing state.
+            // Overwriting would re-introduce already-dequeued messages and cause duplicates.
+            return;
+        }
 
         blocks.insert(
             block,
@@ -104,14 +129,13 @@ impl BlockStorage {
             })
             .collect::<Vec<_>>();
 
-        let last_block = blocks
-            .last_key_value()
-            .map(|(k, block)| (block.block_hash, k.0));
+        let first_block = unprocessed.first().copied();
+        let last_block = unprocessed.last().copied();
 
         UnprocessedBlocks {
             blocks: unprocessed,
             last_block,
-            first_block: None,
+            first_block,
         }
     }
 
@@ -428,7 +452,87 @@ impl Storage for JSONStorage {
     }
 
     async fn save_blocks(&self) -> anyhow::Result<()> {
-        // Implement saving blocks logic here
-        Ok(())
+        self.block_storage.save(&self.path).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber, MessageInBlock};
+
+    fn msg_in_block(block: u32, nonce: u64) -> MessageInBlock {
+        let mut nonce_be = [0u8; 32];
+        U256::from(nonce).to_big_endian(&mut nonce_be);
+
+        MessageInBlock {
+            message: gear_rpc_client::dto::Message {
+                nonce_be,
+                source: [1u8; 32],
+                destination: [2u8; 20],
+                payload: vec![0xAA, 0xBB],
+            },
+            block: GearBlockNumber(block),
+            block_hash: H256::from_low_u64_be(123),
+            authority_set_id: AuthoritySetId(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn unprocessed_blocks_cleared_after_all_messages_dequeued() {
+        let storage = BlockStorage::new();
+        let block = GearBlockNumber(10);
+        let block_hash = H256::from_low_u64_be(999);
+
+        let mut n1 = [0u8; 32];
+        U256::from(1u64).to_big_endian(&mut n1);
+        let mut n2 = [0u8; 32];
+        U256::from(2u64).to_big_endian(&mut n2);
+
+        storage
+            .add_block(block, block_hash, [n1, n2].into_iter())
+            .await;
+
+        let unprocessed = storage.unprocessed_blocks().await;
+        assert_eq!(unprocessed.blocks, vec![(block_hash, 10)]);
+        assert_eq!(unprocessed.first_block, Some((block_hash, 10)));
+        assert_eq!(unprocessed.last_block, Some((block_hash, 10)));
+
+        storage.complete_transaction(&msg_in_block(10, 1)).await;
+        let unprocessed = storage.unprocessed_blocks().await;
+        assert_eq!(unprocessed.blocks, vec![(block_hash, 10)]);
+        assert_eq!(unprocessed.first_block, Some((block_hash, 10)));
+        assert_eq!(unprocessed.last_block, Some((block_hash, 10)));
+
+        storage.complete_transaction(&msg_in_block(10, 2)).await;
+        let unprocessed = storage.unprocessed_blocks().await;
+        assert!(unprocessed.blocks.is_empty());
+        assert_eq!(unprocessed.first_block, None);
+        assert_eq!(unprocessed.last_block, None);
+    }
+
+    #[tokio::test]
+    async fn add_block_does_not_reintroduce_completed_messages() {
+        let storage = BlockStorage::new();
+        let block = GearBlockNumber(7);
+        let block_hash = H256::from_low_u64_be(777);
+
+        let mut n1 = [0u8; 32];
+        U256::from(1u64).to_big_endian(&mut n1);
+        let mut n2 = [0u8; 32];
+        U256::from(2u64).to_big_endian(&mut n2);
+
+        storage
+            .add_block(block, block_hash, [n1, n2].into_iter())
+            .await;
+        storage.complete_transaction(&msg_in_block(7, 1)).await;
+
+        // Replay of the same block should be ignored and not restore nonce=1.
+        storage
+            .add_block(block, block_hash, [n1, n2].into_iter())
+            .await;
+
+        assert!(!storage.is_message_pending(block, n1).await);
+        assert!(storage.is_message_pending(block, n2).await);
     }
 }

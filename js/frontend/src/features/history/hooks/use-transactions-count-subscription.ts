@@ -21,7 +21,10 @@ function useTransactionsCountSubscription() {
   const queryKey = useTransactionsCountQueryKey();
 
   useEffect(() => {
-    const wsClient = createClient({ url: NETWORK_PRESET.INDEXER_ADDRESS.replace('http', 'ws') });
+    const wsClient = createClient({
+      url: NETWORK_PRESET.INDEXER_ADDRESS.replace('http', 'ws'),
+      shouldRetry: () => true,
+    });
 
     const unsubscribe = wsClient.subscribe(
       { query: TRANSFERS_COUNT_SUBSCRIPTION },

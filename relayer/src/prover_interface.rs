@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use gear_rpc_client::{dto, GearApi};
+use gear_rpc_client::{dto, dto::RawBlockInclusionProof, GearApi};
 use num::BigUint;
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
@@ -15,9 +15,6 @@ use serde::{Deserialize, Serialize};
 use sp_consensus_grandpa::GrandpaJustification;
 use std::{str::FromStr, thread, time::Instant};
 use utils_prometheus::MeteredService;
-
-use crate::message_relayer::common::RawBlockInclusionProof;
-
 pub struct Metrics;
 
 impl MeteredService for Metrics {
@@ -251,7 +248,10 @@ pub async fn prove_final_with_block_finality(
         if let Some(proof) = inclusion_proof {
             proof.into()
         } else {
-            gear_api.produce_finality_proof(&justification).await?
+            gear_api
+                .produce_finality_proof(&justification)
+                .await?
+                .into()
         };
 
     assert_eq!(

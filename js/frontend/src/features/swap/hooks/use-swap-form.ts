@@ -60,6 +60,9 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
   const { amount } = formValues;
   const formattedValues = isValid ? schema?.safeParse(formValues).data : undefined;
 
+  // should we check whether its valid or not? does it affect performance?
+  const formattedAddress = addressSchema.safeParse(formValues[FIELD_NAME.ADDRESS]).data;
+
   const handleSubmit = (onSubmit: (values: FormattedValues) => Promise<unknown>) =>
     form.handleSubmit((values) => {
       const onSuccess = () => {
@@ -91,14 +94,14 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
     setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate: true });
   };
 
-  const setAddress = (address: string) => setValue(FIELD_NAME.ADDRESS, address);
+  const setAddress = (address: string) => setValue(FIELD_NAME.ADDRESS, address, { shouldValidate: Boolean(address) });
 
   useEffect(() => {
     form.clearErrors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, ethAccount.address]);
 
-  return { form, amount, formattedValues, handleSubmit, setMaxBalance, setAddress };
+  return { form, amount, formattedAddress, formattedValues, handleSubmit, setMaxBalance, setAddress };
 }
 
 export { useSwapForm };

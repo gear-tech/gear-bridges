@@ -49,7 +49,10 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const ethAccount = useEthAccount();
   const { isVaraAccount, isEthAccount } = useAccountsConnection();
   const isNetworkAccountConnected = (network.isVara && isVaraAccount) || (!network.isVara && isEthAccount);
-  const destinationAccountAddress = network.isVara ? account?.address : ethAccount.address;
+  const destinationAccountAddress = network.isVara ? ethAccount.address : account?.address;
+  const formattedDestinationAccountAddress = network.isVara
+    ? ethAccount.address?.toLowerCase()
+    : account?.decodedAddress.toLowerCase();
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
@@ -64,7 +67,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const varaSymbol = useVaraSymbol();
 
-  const { form, amount, formattedValues, handleSubmit, setMaxBalance, setAddress } = useSwapForm({
+  const { form, amount, formattedAddress, formattedValues, handleSubmit, setMaxBalance, setAddress } = useSwapForm({
     shouldPayBridgingFee,
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
@@ -213,7 +216,14 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
               <div className={styles.inputContainer}>
                 {destinationAccountAddress && (
-                  <WalletAddressButton onClick={() => setAddress(destinationAccountAddress)} />
+                  <WalletAddressButton
+                    isActive={formattedAddress === formattedDestinationAccountAddress}
+                    onClick={() =>
+                      setAddress(
+                        formattedAddress === formattedDestinationAccountAddress ? '' : destinationAccountAddress,
+                      )
+                    }
+                  />
                 )}
 
                 <Input

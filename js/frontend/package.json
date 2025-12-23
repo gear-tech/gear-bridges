@@ -40,7 +40,7 @@
     "zod": "4.2.1"
   },
   "devDependencies": {
-    "@gear-js/frontend-configs": "0.1.2",
+    "@gear-js/frontend-configs": "0.2.1",
     "@graphql-codegen/cli": "6.1.0",
     "@graphql-codegen/client-preset": "5.2.2",
     "@graphql-typed-document-node/core": "3.2.0",

@@ -174,6 +174,7 @@ async fn run() -> AnyResult<()> {
                 proof_previous,
                 genesis_config,
                 (justification, headers),
+                None,
                 count_thread,
             )
             .await?;

@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use gear_rpc_client::{dto, GearApi};
+use gear_rpc_client::{dto, dto::RawBlockInclusionProof, GearApi};
 use num::BigUint;
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use sp_consensus_grandpa::GrandpaJustification;
 use std::{str::FromStr, thread, time::Instant};
 use utils_prometheus::MeteredService;
-
 pub struct Metrics;
 
 impl MeteredService for Metrics {
@@ -225,7 +224,7 @@ pub async fn prove_final(
     genesis_config: GenesisConfig,
     at_block: H256,
     count_thread: Option<usize>,
-    _finality: Option<(H256, dto::BlockFinalityProof)>,
+    inclusion_proof: Option<RawBlockInclusionProof>,
 ) -> anyhow::Result<FinalProof> {
     let (justification, headers) = get_justification_and_headers(gear_api, at_block).await?;
 
@@ -234,6 +233,7 @@ pub async fn prove_final(
         previous_proof,
         genesis_config,
         (justification, headers),
+        inclusion_proof,
         count_thread,
     )
     .await
@@ -244,6 +244,7 @@ pub async fn prove_final_with_block_finality(
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
     (justification, headers): (GrandpaJustification<GearHeader>, Vec<GearHeader>),
+    inclusion_proof: Option<RawBlockInclusionProof>,
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
     let Some(header_first) = headers.first() else {
@@ -271,7 +272,26 @@ pub async fn prove_final_with_block_finality(
     );
 
     let (_block, block_finality): (H256, dto::BlockFinalityProof) =
-        gear_api.produce_finality_proof(&justification).await?;
+        if let Some(proof) = inclusion_proof {
+            assert!(
+                headers.last().expect("Headers should not be empty").hash() == proof.block_hash,
+                "Inclusion proof provided, but block hash does not match the last header's hash"
+            );
+            proof.into()
+        } else {
+            gear_api
+                .produce_finality_proof(&justification)
+                .await?
+                .into()
+        };
+
+    assert_eq!(
+        block_hash,
+        headers
+            .first()
+            .expect("Should contain at least single block header")
+            .hash()
+    );
     let sent_message_inclusion_proof = gear_api
         .fetch_sent_message_inclusion_proof(block_hash)
         .await?;

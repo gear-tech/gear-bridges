@@ -5010,6 +5010,7 @@ dependencies = [
  "primitive-types 0.12.2",
  "sc-consensus-grandpa",
  "serde",
+ "serde_json",
  "sp-consensus-grandpa",
  "sp-core",
  "sp-runtime",

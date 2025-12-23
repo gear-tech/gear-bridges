@@ -1,14 +1,12 @@
 use ethereum_client::TxHash;
 use ethereum_common::Hash256;
 use gear_rpc_client::{
-    dto::{Message, PreCommit, RawBlockInclusionProof},
-    ext::sp_core::crypto::Wraps,
+    dto::{Message, RawBlockInclusionProof},
     metadata::runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
     GearApi, GearHeader,
 };
 use gsdk::{config::Header, GearConfig};
 use primitive_types::{H256, U256};
-use prover::consts::ED25519_PUBLIC_KEY_SIZE;
 use serde::{Deserialize, Serialize};
 use sp_consensus_grandpa::GrandpaJustification;
 use subxt::{blocks::Block, config::Header as _, OnlineClient};
@@ -282,55 +280,5 @@ pub mod web_request {
         Failed {
             message: String,
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use prover::consts::ED25519_SIGNATURE_SIZE;
-
-    use super::*;
-
-    #[test]
-    fn raw_block_inclusion_proof_hex_serde_roundtrip() {
-        let p = RawBlockInclusionProof {
-            justification_round: 42,
-            required_authority_set_id: 7,
-            precommit: (H256::from_low_u64_be(0x11), 123),
-            validator_set: vec![
-                [0xAB; ED25519_PUBLIC_KEY_SIZE],
-                [0xCD; ED25519_PUBLIC_KEY_SIZE],
-            ],
-            block_hash: H256::from_low_u64_be(0x22),
-            block_number: 999,
-            pre_commits: vec![PreCommit {
-                public_key: [0xEF; ED25519_PUBLIC_KEY_SIZE],
-                signature: [0x01; ED25519_SIGNATURE_SIZE],
-            }],
-        };
-
-        let json = serde_json::to_string(&p).expect("serialize");
-        let v: serde_json::Value = serde_json::from_str(&json).expect("json value");
-
-        // Ensure these are encoded as hex strings (not arrays of ints).
-        assert!(v.get("block_hash").unwrap().as_str().is_some());
-        assert!(v.get("validator_set").unwrap().as_array().unwrap()[0]
-            .as_str()
-            .is_some());
-        assert!(v.get("precommit").unwrap().as_array().unwrap()[0]
-            .as_str()
-            .is_some());
-
-        let decoded: RawBlockInclusionProof = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(decoded.justification_round, p.justification_round);
-        assert_eq!(
-            decoded.required_authority_set_id,
-            p.required_authority_set_id
-        );
-        assert_eq!(decoded.precommit, p.precommit);
-        assert_eq!(decoded.validator_set, p.validator_set);
-        assert_eq!(decoded.block_hash, p.block_hash);
-        assert_eq!(decoded.block_number, p.block_number);
-        assert_eq!(decoded.pre_commits.len(), p.pre_commits.len());
     }
 }

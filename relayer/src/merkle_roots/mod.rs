@@ -6,7 +6,7 @@ use crate::{
         common::{
             gear::block_listener::BlockListener,
             web_request::{MerkleRootsRequest, MerkleRootsResponse},
-            GearBlock, RawBlockInclusionProof,
+            GearBlock,
         },
         eth_to_gear::api_provider::ApiProviderConnection,
     },
@@ -19,6 +19,7 @@ use ::prover::{
 };
 use anyhow::Context;
 use ethereum_client::EthApi;
+use gear_rpc_client::dto::RawBlockInclusionProof;
 use primitive_types::{H256, U256};
 use prometheus::IntGauge;
 use serde::{Deserialize, Serialize};

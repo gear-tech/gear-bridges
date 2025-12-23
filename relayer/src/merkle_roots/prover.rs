@@ -1,11 +1,9 @@
 use crate::{
-    message_relayer::{
-        common::RawBlockInclusionProof, eth_to_gear::api_provider::ApiProviderConnection,
-    },
+    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     prover_interface::{self, FinalProof},
 };
 use futures::executor::block_on;
-use gear_rpc_client::GearApi;
+use gear_rpc_client::{dto::RawBlockInclusionProof, GearApi};
 use primitive_types::H256;
 use prometheus::IntGauge;
 use prover::proving::{GenesisConfig, ProofWithCircuitData};

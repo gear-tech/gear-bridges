@@ -388,10 +388,7 @@ impl GearApi {
         Ok(RawBlockInclusionProof {
             justification_round: justification.round,
             required_authority_set_id,
-            precommit: (
-                justification.commit.target_hash,
-                justification.commit.target_number,
-            ),
+
             validator_set,
             block_hash: justification.commit.target_hash,
             block_number: justification.commit.target_number,

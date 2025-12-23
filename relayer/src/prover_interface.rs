@@ -246,6 +246,10 @@ pub async fn prove_final_with_block_finality(
 ) -> anyhow::Result<FinalProof> {
     let (_block, block_finality): (H256, dto::BlockFinalityProof) =
         if let Some(proof) = inclusion_proof {
+            assert!(
+                headers.last().expect("Headers should not be empty").hash() == proof.block_hash,
+                "Inclusion proof provided, but block hash does not match the last header's hash"
+            );
             proof.into()
         } else {
             gear_api

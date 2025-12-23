@@ -160,7 +160,6 @@ pub struct AuthoritySetState {
 pub struct RawBlockInclusionProof {
     pub justification_round: u64,
     pub required_authority_set_id: u64,
-    pub precommit: (H256, u32),
     pub validator_set: Vec<[u8; ED25519_PUBLIC_KEY_SIZE]>,
     pub block_hash: H256,
     pub block_number: u32,
@@ -178,9 +177,6 @@ impl Serialize for RawBlockInclusionProof {
         let mut state = serializer.serialize_struct("RawBlockInclusionProof", 7)?;
         state.serialize_field("justification_round", &self.justification_round)?;
         state.serialize_field("required_authority_set_id", &self.required_authority_set_id)?;
-
-        let precommit = (hex::encode(self.precommit.0.as_bytes()), self.precommit.1);
-        state.serialize_field("precommit", &precommit)?;
 
         let validator_set: Vec<String> = self.validator_set.iter().map(hex::encode).collect();
         state.serialize_field("validator_set", &validator_set)?;
@@ -202,7 +198,7 @@ impl<'de> Deserialize<'de> for RawBlockInclusionProof {
         struct Helper {
             justification_round: u64,
             required_authority_set_id: u64,
-            precommit: (String, u32),
+
             validator_set: Vec<String>,
             block_hash: String,
             block_number: u32,
@@ -210,13 +206,6 @@ impl<'de> Deserialize<'de> for RawBlockInclusionProof {
         }
 
         let helper = Helper::deserialize(deserializer)?;
-
-        let precommit_hash_bytes =
-            hex::decode(helper.precommit.0).map_err(serde::de::Error::custom)?;
-        if precommit_hash_bytes.len() != 32 {
-            return Err(serde::de::Error::custom("precommit hash must be 32 bytes"));
-        }
-        let precommit_hash = H256::from_slice(&precommit_hash_bytes);
 
         let mut validator_set = Vec::with_capacity(helper.validator_set.len());
         for s in helper.validator_set {
@@ -240,7 +229,7 @@ impl<'de> Deserialize<'de> for RawBlockInclusionProof {
         Ok(Self {
             justification_round: helper.justification_round,
             required_authority_set_id: helper.required_authority_set_id,
-            precommit: (precommit_hash, helper.precommit.1),
+
             validator_set,
             block_hash,
             block_number: helper.block_number,
@@ -255,8 +244,8 @@ impl From<RawBlockInclusionProof> for (H256, BlockFinalityProof) {
             this.justification_round,
             this.required_authority_set_id,
             &sp_consensus_grandpa::Message::<GearHeader>::Precommit(Precommit::<GearHeader>::new(
-                this.precommit.0,
-                this.precommit.1,
+                this.block_hash,
+                this.block_number,
             )),
         );
 
@@ -288,7 +277,7 @@ mod tests {
         let p = RawBlockInclusionProof {
             justification_round: 42,
             required_authority_set_id: 7,
-            precommit: (H256::from_low_u64_be(0x11), 123),
+
             validator_set: vec![
                 [0xAB; ED25519_PUBLIC_KEY_SIZE],
                 [0xCD; ED25519_PUBLIC_KEY_SIZE],
@@ -319,7 +308,7 @@ mod tests {
             decoded.required_authority_set_id,
             p.required_authority_set_id
         );
-        assert_eq!(decoded.precommit, p.precommit);
+
         assert_eq!(decoded.validator_set, p.validator_set);
         assert_eq!(decoded.block_hash, p.block_hash);
         assert_eq!(decoded.block_number, p.block_number);

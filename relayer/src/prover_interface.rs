@@ -181,18 +181,14 @@ impl FinalProof {
     }
 }
 
-pub async fn prove_final(
+pub async fn get_justification_and_headers(
     gear_api: &GearApi,
-    previous_proof: ProofWithCircuitData,
-    genesis_config: GenesisConfig,
-    at_block: H256,
-    count_thread: Option<usize>,
-    inclusion_proof: Option<RawBlockInclusionProof>,
-) -> anyhow::Result<FinalProof> {
-    let block_number = gear_api.block_hash_to_number(at_block).await?;
+    block_hash: H256,
+) -> anyhow::Result<(GrandpaJustification<GearHeader>, Vec<GearHeader>)> {
+    let block_number = gear_api.block_hash_to_number(block_hash).await?;
     let (justification, headers) = gear_api.grandpa_prove_finality(block_number).await?;
 
-    let (block_hash, headers_new) = {
+    let headers_new = {
         let mut headers_new = Vec::with_capacity(1 + headers.len());
         let hash = if headers.is_empty() {
             justification.commit.target_hash
@@ -216,20 +212,27 @@ pub async fn prove_final(
         );
         headers_new.extend_from_slice(&headers[..]);
 
-        (hash, headers_new)
+        headers_new
     };
 
-    log::info!(
-        "Proving message sent; requested block = {at_block:?} ({block_number}); signed block = {block_hash:?} ({:?}); chain len = {}",
-        headers_new.last().map(|header| header.number),
-        headers_new.len(),
-    );
+    Ok((justification, headers_new))
+}
+
+pub async fn prove_final(
+    gear_api: &GearApi,
+    previous_proof: ProofWithCircuitData,
+    genesis_config: GenesisConfig,
+    at_block: H256,
+    count_thread: Option<usize>,
+    inclusion_proof: Option<RawBlockInclusionProof>,
+) -> anyhow::Result<FinalProof> {
+    let (justification, headers) = get_justification_and_headers(gear_api, at_block).await?;
 
     prove_final_with_block_finality(
         gear_api,
         previous_proof,
         genesis_config,
-        (block_hash, justification, headers_new),
+        (justification, headers),
         inclusion_proof,
         count_thread,
     )
@@ -240,10 +243,34 @@ pub async fn prove_final_with_block_finality(
     gear_api: &GearApi,
     previous_proof: ProofWithCircuitData,
     genesis_config: GenesisConfig,
-    (block_hash, justification, headers): (H256, GrandpaJustification<GearHeader>, Vec<GearHeader>),
+    (justification, headers): (GrandpaJustification<GearHeader>, Vec<GearHeader>),
     inclusion_proof: Option<RawBlockInclusionProof>,
     count_thread: Option<usize>,
 ) -> anyhow::Result<FinalProof> {
+    let Some(header_first) = headers.first() else {
+        return Err(anyhow!(
+            "Unknown header list should not be empty even for trivial chain"
+        ));
+    };
+
+    let block_last_maybe_hash = headers.last().map(|header| header.hash());
+    if !block_last_maybe_hash
+        .map(|hash| hash == justification.commit.target_hash)
+        .unwrap_or(false)
+    {
+        return Err(anyhow!(
+            "The last header hash should be equal to the target hash"
+        ));
+    }
+
+    let block_hash = header_first.hash();
+    log::info!(
+        "Proving message sent; requested block = {block_hash:?} ({}); signed block = {block_last_maybe_hash:?} ({:?}); chain len = {}",
+        header_first.number,
+        headers.last().map(|header| header.number),
+        headers.len(),
+    );
+
     let (_block, block_finality): (H256, dto::BlockFinalityProof) =
         if let Some(proof) = inclusion_proof {
             assert!(

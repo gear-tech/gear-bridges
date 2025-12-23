@@ -4,7 +4,7 @@ import ClockSVG from '@/assets/clock.svg?react';
 import { Skeleton } from '@/components';
 import { TOKEN_ID, TokenPrice } from '@/features/token-price';
 import { useVaraSymbol } from '@/hooks';
-import { cx } from '@/utils';
+import { cx, isUndefined } from '@/utils';
 
 import GasSVG from '../../assets/gas.svg?react';
 
@@ -33,7 +33,7 @@ function FeeAndTimeFooter({ feeValue, time, isVaraNetwork, isLoading, className 
         </span>
 
         <span className={styles.value}>
-          {feeValue && decimals && symbol && !isLoading ? (
+          {!isUndefined(feeValue) && decimals && symbol && !isLoading ? (
             <>
               {formatUnits(feeValue, decimals)} {symbol}
               <TokenPrice id={tokenId} amount={formatUnits(feeValue, decimals)} fraction={4} />

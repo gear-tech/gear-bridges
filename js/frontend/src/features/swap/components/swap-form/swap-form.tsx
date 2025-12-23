@@ -1,4 +1,4 @@
-import { useApi } from '@gear-js/react-hooks';
+import { useAccount, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
@@ -6,7 +6,7 @@ import { FormProvider } from 'react-hook-form';
 import { Input } from '@/components';
 import { useNetworkType } from '@/context/network-type';
 import { TokenPrice } from '@/features/token-price';
-import { useAccountsConnection, useVaraSymbol } from '@/hooks';
+import { useAccountsConnection, useEthAccount, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
@@ -22,6 +22,7 @@ import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
 import { TransactionModal } from '../transaction-modal';
+import { WalletAddressButton } from '../wallet-address-button';
 
 import styles from './swap-form.module.scss';
 
@@ -44,8 +45,11 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
 
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
   const { isVaraAccount, isEthAccount } = useAccountsConnection();
   const isNetworkAccountConnected = (network.isVara && isVaraAccount) || (!network.isVara && isEthAccount);
+  const destinationAccountAddress = network.isVara ? account?.address : ethAccount.address;
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
@@ -60,7 +64,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const varaSymbol = useVaraSymbol();
 
-  const { form, amount, formattedValues, handleSubmit, setMaxBalance } = useSwapForm({
+  const { form, amount, formattedValues, handleSubmit, setMaxBalance, setAddress } = useSwapForm({
     shouldPayBridgingFee,
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
@@ -207,14 +211,20 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
               <div className={styles.priceFooter}>{renderTokenPrice()}</div>
 
-              <Input
-                icon={PlusSVG}
-                name={FIELD_NAME.ADDRESS}
-                label="Bridge to"
-                className={styles.input}
-                spellCheck={false}
-                block
-              />
+              <div className={styles.inputContainer}>
+                {destinationAccountAddress && (
+                  <WalletAddressButton onClick={() => setAddress(destinationAccountAddress)} />
+                )}
+
+                <Input
+                  icon={PlusSVG}
+                  name={FIELD_NAME.ADDRESS}
+                  label="Bridge to"
+                  className={styles.input}
+                  spellCheck={false}
+                  block
+                />
+              </div>
             </div>
           </div>
 

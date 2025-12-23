@@ -91,12 +91,14 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
     setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate: true });
   };
 
+  const setAddress = (address: string) => setValue(FIELD_NAME.ADDRESS, address);
+
   useEffect(() => {
     form.clearErrors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, ethAccount.address]);
 
-  return { form, amount, formattedValues, handleSubmit, setMaxBalance };
+  return { form, amount, formattedValues, handleSubmit, setMaxBalance, setAddress };
 }
 
 export { useSwapForm };

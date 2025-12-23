@@ -1,4 +1,4 @@
-import { Menu, Separator } from '@base-ui-components/react';
+import { Menu, Separator } from '@base-ui/react';
 
 import { NETWORK_PRESET, NETWORK_TYPE } from '@/context/network-type';
 import ActionArrowSVG from '@/features/swap/assets/arrow.svg?react';

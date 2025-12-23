@@ -52,8 +52,6 @@ struct StorageTrieInclusionProof {
     leaf_data: Vec<u8>,
 }
 
-const VOTE_LENGTH_IN_BITS: usize = 424;
-
 pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
 #[derive(Clone)]

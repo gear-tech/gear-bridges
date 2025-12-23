@@ -13,6 +13,7 @@ const ED25519_PUBLIC_KEY_SIZE: usize = 32;
 const ED25519_SIGNATURE_SIZE: usize = 64;
 const KECCAK_HASH_SIZE: usize = 32;
 const BLAKE2_HASH_SIZE: usize = 32;
+const VOTE_LENGTH_IN_BITS: usize = 424;
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct PreCommit {
@@ -258,6 +259,14 @@ impl From<RawBlockInclusionProof> for (H256, BlockFinalityProof) {
                 this.precommit.1,
             )),
         );
+
+        if signed_data.len() * 8 != VOTE_LENGTH_IN_BITS {
+            log::error!(
+                "Signed data has incorrect length: expected {}, got {}",
+                VOTE_LENGTH_IN_BITS,
+                signed_data.len() * 8
+            );
+        }
 
         (
             this.block_hash,

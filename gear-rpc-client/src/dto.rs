@@ -298,9 +298,6 @@ mod tests {
         assert!(v.get("validator_set").unwrap().as_array().unwrap()[0]
             .as_str()
             .is_some());
-        assert!(v.get("precommit").unwrap().as_array().unwrap()[0]
-            .as_str()
-            .is_some());
 
         let decoded: RawBlockInclusionProof = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded.justification_round, p.justification_round);

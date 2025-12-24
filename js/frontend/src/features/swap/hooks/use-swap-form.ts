@@ -57,7 +57,6 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
   const { isValid } = formState;
 
   const formValues = form.watch();
-  const { amount } = formValues;
   const formattedValues = isValid ? schema?.safeParse(formValues).data : undefined;
 
   const handleSubmit = (onSubmit: (values: FormattedValues) => Promise<unknown>) =>
@@ -91,12 +90,14 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
     setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate: true });
   };
 
+  const setAddress = (address: string) => setValue(FIELD_NAME.ADDRESS, address, { shouldValidate: true });
+
   useEffect(() => {
     form.clearErrors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, ethAccount.address]);
 
-  return { form, amount, formattedValues, handleSubmit, setMaxBalance };
+  return { form, formValues, formattedValues, handleSubmit, setMaxBalance, setAddress };
 }
 
 export { useSwapForm };

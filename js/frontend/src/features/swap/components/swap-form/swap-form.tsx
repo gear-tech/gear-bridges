@@ -22,6 +22,7 @@ import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
 import { TransactionModal } from '../transaction-modal';
+import { WalletAddressButton } from '../wallet-address-button';
 
 import styles from './swap-form.module.scss';
 
@@ -45,7 +46,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const ftBalance = useFTBalance(token?.address);
 
   const { isVaraAccount, isEthAccount } = useAccountsConnection();
-  const isNetworkAccountConnected = (network.isVara && isVaraAccount) || (!network.isVara && isEthAccount);
+  const isNetworkAccountConnected = network.isVara ? isVaraAccount : isEthAccount;
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
@@ -60,7 +61,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const varaSymbol = useVaraSymbol();
 
-  const { form, amount, formattedValues, handleSubmit, setMaxBalance } = useSwapForm({
+  const { form, formValues, formattedValues, handleSubmit, setMaxBalance, setAddress } = useSwapForm({
     shouldPayBridgingFee,
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
@@ -156,7 +157,10 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     return 'Transfer';
   };
 
-  const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
+  const renderTokenPrice = () => (
+    <TokenPrice symbol={token?.symbol} amount={formValues.amount} className={styles.price} />
+  );
+
   const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...sendTxs} />;
 
   return (
@@ -207,14 +211,18 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
               <div className={styles.priceFooter}>{renderTokenPrice()}</div>
 
-              <Input
-                icon={PlusSVG}
-                name={FIELD_NAME.ADDRESS}
-                label="Bridge to"
-                className={styles.input}
-                spellCheck={false}
-                block
-              />
+              <div className={styles.inputContainer}>
+                <WalletAddressButton value={formValues.accountAddress} onClick={setAddress} />
+
+                <Input
+                  icon={PlusSVG}
+                  name={FIELD_NAME.ADDRESS}
+                  label="Bridge to"
+                  className={styles.input}
+                  spellCheck={false}
+                  block
+                />
+              </div>
             </div>
           </div>
 

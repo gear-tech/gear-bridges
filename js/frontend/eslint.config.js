@@ -1,3 +1,3 @@
-import { eslintConfig } from "@gear-js/frontend-configs";
+import { eslintConfig } from '@gear-js/frontend-configs';
 
-export default eslintConfig;
+export default eslintConfig();

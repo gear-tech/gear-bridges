@@ -262,6 +262,14 @@ pub async fn prove_final(
         )
     };
 
+    log::info!(
+        "Proving message sent; requested block = {at_block:?} ({:?}); signed block = {:?} ({:?}); chain len = {}",
+        headers.first().map(|header| header.number),
+        proof.block_hash,
+        proof.block_number,
+        headers.len(),
+    );
+
     prove_final_with_block_finality(
         gear_api,
         previous_proof,

@@ -90,7 +90,7 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
     setValue(FIELD_NAME.VALUE, formattedValue, { shouldValidate: true });
   };
 
-  const setAddress = (address: string) => setValue(FIELD_NAME.ADDRESS, address, { shouldValidate: Boolean(address) });
+  const setAddress = (address: string) => setValue(FIELD_NAME.ADDRESS, address, { shouldValidate: true });
 
   useEffect(() => {
     form.clearErrors();

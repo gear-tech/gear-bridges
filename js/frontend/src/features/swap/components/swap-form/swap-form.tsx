@@ -1,4 +1,4 @@
-import { useAccount, useApi } from '@gear-js/react-hooks';
+import { useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { ComponentProps, useState } from 'react';
 import { FormProvider } from 'react-hook-form';
@@ -6,7 +6,7 @@ import { FormProvider } from 'react-hook-form';
 import { Input } from '@/components';
 import { useNetworkType } from '@/context/network-type';
 import { TokenPrice } from '@/features/token-price';
-import { useAccountsConnection, useEthAccount, useVaraSymbol } from '@/hooks';
+import { useAccountsConnection, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
@@ -45,14 +45,8 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
 
-  const { account } = useAccount();
-  const ethAccount = useEthAccount();
   const { isVaraAccount, isEthAccount } = useAccountsConnection();
-  const isNetworkAccountConnected = (network.isVara && isVaraAccount) || (!network.isVara && isEthAccount);
-  const destinationAccountAddress = network.isVara ? ethAccount.address : account?.address;
-  const formattedDestinationAccountAddress = network.isVara
-    ? ethAccount.address?.toLowerCase()
-    : account?.decodedAddress.toLowerCase();
+  const isNetworkAccountConnected = network.isVara ? isVaraAccount : isEthAccount;
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
@@ -67,7 +61,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const varaSymbol = useVaraSymbol();
 
-  const { form, amount, formattedAddress, formattedValues, handleSubmit, setMaxBalance, setAddress } = useSwapForm({
+  const { form, formValues, formattedValues, handleSubmit, setMaxBalance, setAddress } = useSwapForm({
     shouldPayBridgingFee,
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
@@ -163,7 +157,10 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     return 'Transfer';
   };
 
-  const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
+  const renderTokenPrice = () => (
+    <TokenPrice symbol={token?.symbol} amount={formValues.amount} className={styles.price} />
+  );
+
   const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...sendTxs} />;
 
   return (
@@ -215,16 +212,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
               <div className={styles.priceFooter}>{renderTokenPrice()}</div>
 
               <div className={styles.inputContainer}>
-                {destinationAccountAddress && (
-                  <WalletAddressButton
-                    isActive={formattedAddress === formattedDestinationAccountAddress}
-                    onClick={() =>
-                      setAddress(
-                        formattedAddress === formattedDestinationAccountAddress ? '' : destinationAccountAddress,
-                      )
-                    }
-                  />
-                )}
+                <WalletAddressButton value={formValues.accountAddress} onClick={setAddress} />
 
                 <Input
                   icon={PlusSVG}

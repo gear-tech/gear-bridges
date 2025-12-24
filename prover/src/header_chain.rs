@@ -93,7 +93,7 @@ impl BuilderTargets {
 
         let target_verifier_circuit = builder.add_verifier_data_public_inputs();
 
-        let common_data = common_data_for_recursion(builder.num_public_inputs(), 1 << 13);
+        let common_data = common_data_for_recursion(builder.num_public_inputs(), NUM_GATES_COMMON);
 
         let target_inner_cyclic_proof = builder.add_virtual_proof_with_pis(&common_data);
         // Unpack inner proof's public inputs.

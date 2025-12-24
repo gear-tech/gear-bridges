@@ -123,8 +123,7 @@ impl MessageSent {
         let proof_chain =
             proof_hashes
                 .into_iter()
-                .rev()
-                .fold(None, |proof_recursive, proof_header_hash| {
+                .rfold(None, |proof_recursive, proof_header_hash| {
                     Some(circuit_chain.prove(&proof_header_hash, proof_recursive.as_ref()))
                 });
         let proof_chain = proof_chain.expect("Headers is not an empty list");

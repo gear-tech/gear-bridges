@@ -25,7 +25,10 @@ pub(crate) mod prelude {
     pub type C = PoseidonGoldilocksConfig;
     pub const D: usize = 2;
 
-    pub use super::{consts, GearHeader};
+    pub use super::{
+        consts::{self, NUM_GATES_COMMON},
+        GearHeader,
+    };
 }
 
 pub mod consts {
@@ -55,6 +58,8 @@ pub mod consts {
 
     // 4MiB
     pub const SIZE_THREAD_STACK_MIN: usize = 4_194_304;
+
+    pub const NUM_GATES_COMMON: usize = 1 << 13;
 }
 
 pub mod proving {

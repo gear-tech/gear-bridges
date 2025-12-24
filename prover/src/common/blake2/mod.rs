@@ -10,7 +10,6 @@ use crate::{
     prelude::*,
     serialization::{GateSerializer, GeneratorSerializer, ReadAdapter},
 };
-use lazy_static::lazy_static;
 use plonky2::{
     gates::noop::NoopGate,
     iop::{
@@ -31,7 +30,12 @@ use plonky2_blake2b256::circuit::{
     blake2_circuit_from_message_targets_and_length_target, BLOCK_BITS, BLOCK_BYTES,
 };
 use plonky2_field::types::Field;
-use std::{env, fs, io, iter, marker::PhantomData, sync::Arc, time::Instant};
+use std::{
+    env, fs, io, iter,
+    marker::PhantomData,
+    sync::{Arc, LazyLock},
+    time::Instant,
+};
 use variative::{VariativeBlake2, VariativeBlake2Target};
 
 const MAX_BLOCK_COUNT: usize = 50;
@@ -40,37 +44,34 @@ const NUM_GATES: usize = 655_360;
 /// Max data length that this circuit will accept.
 pub const MAX_DATA_BYTES: usize = MAX_BLOCK_COUNT * BLOCK_BYTES;
 
-lazy_static! {
-    /// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
-    static ref VERIFIER_DATA_BY_BLOCK_COUNT: [VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT] = {
+/// Cached `VerifierOnlyCircuitData`s, each corresponding to a specific blake2 block count.
+static VERIFIER_DATA_BY_BLOCK_COUNT: LazyLock<[VerifierOnlyCircuitData<C, D>; MAX_BLOCK_COUNT]> =
+    LazyLock::new(|| {
         let path = env::var("VBLAKE2_CACHE_PATH").expect("VBLAKE2_CACHE_PATH is set");
 
         let mut verifier_data = Vec::with_capacity(MAX_BLOCK_COUNT);
 
         for i in 1..=MAX_BLOCK_COUNT {
-            let serialized = fs::read(format!("{path}/verifier_only_circuit_data-{i}")).expect("Correctly formed file with serialized data");
-            let data = VerifierOnlyCircuitData::<C, D>::from_bytes(serialized).expect("Correctly formed serialized data");
+            let serialized = fs::read(format!("{path}/verifier_only_circuit_data-{i}"))
+                .expect("Correctly formed file with serialized data");
+            let data = VerifierOnlyCircuitData::<C, D>::from_bytes(serialized)
+                .expect("Correctly formed serialized data");
             verifier_data.push(data);
         }
 
-        verifier_data
-            .try_into()
-            .expect("Correct max block count")
-    };
-}
+        verifier_data.try_into().expect("Correct max block count")
+    });
 
-lazy_static! {
-    static ref COMMON_CIRCUIT_DATA: CommonCircuitData<F, D> = {
-        let path = env::var("VBLAKE2_CACHE_PATH").expect("VBLAKE2_CACHE_PATH is set");
+static COMMON_CIRCUIT_DATA: LazyLock<CommonCircuitData<F, D>> = LazyLock::new(|| {
+    let path = env::var("VBLAKE2_CACHE_PATH").expect("VBLAKE2_CACHE_PATH is set");
 
-        let serialized = fs::read(format!("{path}/common_circuit_data"))
-            .expect("Correctly formed file with serialized data");
-        let serializer_gate = crate::serialization::GateSerializer;
+    let serialized = fs::read(format!("{path}/common_circuit_data"))
+        .expect("Correctly formed file with serialized data");
+    let serializer_gate = crate::serialization::GateSerializer;
 
-        CommonCircuitData::from_bytes(serialized, &serializer_gate)
-            .expect("Correctly formed serialized data")
-    };
-}
+    CommonCircuitData::from_bytes(serialized, &serializer_gate)
+        .expect("Correctly formed serialized data")
+});
 
 impl_parsable_target_set! {
     /// Public inputs for `GenericBlake2`.

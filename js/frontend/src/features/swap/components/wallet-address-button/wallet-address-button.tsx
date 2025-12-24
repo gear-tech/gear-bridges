@@ -1,4 +1,5 @@
 import { useAccount } from '@gear-js/react-hooks';
+import { useMemo } from 'react';
 
 import CheckSVG from '@/assets/check.svg?react';
 import { useEthAccount } from '@/hooks';
@@ -22,9 +23,16 @@ function WalletAddressButton({ value, onClick }: Props) {
   const schema = network.isVara ? ADDRESS_SCHEMA.ETH : ADDRESS_SCHEMA.VARA;
   const address = network.isVara ? ethAccount.address : account?.address;
 
-  if (!address) return;
+  const normalizedAddress = useMemo(() => (address ? schema.safeParse(address).data : undefined), [address, schema]);
 
-  const isActive = schema.safeParse(value).data === schema.safeParse(address).data;
+  const normalizedValue = useMemo(
+    () => (value && address ? schema.safeParse(value).data : undefined),
+    [value, address, schema],
+  );
+
+  if (!address || !normalizedAddress) return;
+
+  const isActive = normalizedAddress === normalizedValue;
   const SVG = isActive ? CheckSVG : WalletSVG;
 
   return (

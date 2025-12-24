@@ -18,10 +18,10 @@ use metadata::{
     Event as RuntimeEvent,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
-use sc_consensus_grandpa::{FinalityProof, Precommit};
+use sc_consensus_grandpa::FinalityProof;
 use sp_consensus_grandpa::{AuthorityId, GrandpaJustification};
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
-use sp_runtime::{traits::AppVerify, AccountId32};
+use sp_runtime::AccountId32;
 use subxt::{
     backend::BlockRef,
     blocks::Block as BlockImpl,
@@ -33,7 +33,10 @@ use subxt::{
 };
 use trie_db::{node::NodeHandle, ChildReference};
 
-use crate::{dto::StorageInclusionProof, metadata::runtime_types::frame_system::EventRecord};
+use crate::{
+    dto::{RawBlockInclusionProof, StorageInclusionProof},
+    metadata::runtime_types::frame_system::EventRecord,
+};
 
 pub mod dto;
 pub mod metadata;
@@ -48,8 +51,6 @@ struct StorageTrieInclusionProof {
 
     leaf_data: Vec<u8>,
 }
-
-const VOTE_LENGTH_IN_BITS: usize = 424;
 
 pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
@@ -294,26 +295,34 @@ impl GearApi {
         after_block: H256,
     ) -> AnyResult<GrandpaJustification<GearHeader>> {
         let after_block_number = self.block_hash_to_number(after_block).await?;
-        let finality: Option<String> = self
+        let (justification, _headers) = self.grandpa_prove_finality(after_block_number).await?;
+
+        Ok(justification)
+    }
+
+    pub async fn grandpa_prove_finality(
+        &self,
+        block_number: <GearHeader as sp_runtime::traits::Header>::Number,
+    ) -> AnyResult<(GrandpaJustification<GearHeader>, Vec<GearHeader>)> {
+        let proof_finality: Option<String> = self
             .api
             .rpc()
-            .request("grandpa_proveFinality", rpc_params![after_block_number])
+            .request("grandpa_proveFinality", rpc_params![block_number])
             .await?;
-        let finality = hex::decode(&finality.unwrap_or_default()["0x".len()..])?;
-        let finality = FinalityProof::<GearHeader>::decode(&mut &finality[..])?;
-
-        let fetched_block_number = self.block_hash_to_number(finality.block).await?;
-        if fetched_block_number < after_block_number {
-            return Err(anyhow!(
-                "Fetched finality for block #{fetched_block_number}, which is earlier than requested after_block #{after_block_number}",
-            ));
-        }
+        let proof_finality = hex::decode(
+            proof_finality
+                .as_deref()
+                .and_then(|s| s.strip_prefix("0x"))
+                .unwrap_or_default(),
+        )?;
+        let proof_finality = FinalityProof::<GearHeader>::decode(&mut &proof_finality[..])?;
+        let fetched_block_number = self.block_hash_to_number(proof_finality.block).await?;
 
         let mut justification =
-            GrandpaJustification::<GearHeader>::decode(&mut &finality.justification[..])?;
+            GrandpaJustification::<GearHeader>::decode(&mut &proof_finality.justification[..])?;
 
         justification.commit.precommits.retain(|pc| {
-            if pc.precommit.target_hash == finality.block
+            if pc.precommit.target_hash == proof_finality.block
                 && pc.precommit.target_number == fetched_block_number
             {
                 true
@@ -327,7 +336,7 @@ impl GearApi {
             }
         });
 
-        Ok(justification)
+        Ok((justification, proof_finality.unknown_headers))
     }
 
     /// Returns finality proof for block not earlier `after_block`
@@ -337,47 +346,34 @@ impl GearApi {
         after_block: H256,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let justification = self.get_justification(after_block).await?;
+        let proof = self.produce_finality_proof(&justification).await?;
 
-        self.produce_finality_proof(&justification).await
+        Ok((proof.block_hash, proof.into()))
     }
 
-    // Produces block finality proof for the given justification.
+    // Produces raw block inclusion proof for the given justification.
     pub async fn produce_finality_proof(
         &self,
         justification: &GrandpaJustification<GearHeader>,
-    ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
-        let block_number = justification.commit.target_number;
-        let block_hash = justification.commit.target_hash;
+    ) -> AnyResult<RawBlockInclusionProof> {
+        self.fetch_raw_block_inclusion_proof(
+            justification.commit.target_hash,
+            Some(justification.clone()),
+        )
+        .await
+    }
 
-        let required_authority_set_id = self.signed_by_authority_set_id(block_hash).await?;
-
-        let signed_data = sp_consensus_grandpa::localized_payload(
-            justification.round,
-            required_authority_set_id,
-            &sp_consensus_grandpa::Message::<GearHeader>::Precommit(Precommit::<GearHeader>::new(
-                block_hash,
-                block_number,
-            )),
-        );
-        if signed_data.len() * 8 != VOTE_LENGTH_IN_BITS {
-            return Err(anyhow!(
-                "Signed data length in bits mismatch: expected {}, got {}",
-                VOTE_LENGTH_IN_BITS,
-                signed_data.len() * 8
-            ));
-        }
-
-        for pc in &justification.commit.precommits {
-            if !pc.signature.verify(&signed_data[..], &pc.id) {
-                return Err(anyhow!(
-                    "Invalid signature in precommit from {:?} for block #{}, hash {:?}",
-                    pc.id,
-                    block_number,
-                    block_hash
-                ));
-            }
-        }
-
+    /// Builds a raw block inclusion proof for the given block hash.
+    pub async fn fetch_raw_block_inclusion_proof(
+        &self,
+        block: H256,
+        justification: Option<GrandpaJustification<GearHeader>>,
+    ) -> AnyResult<RawBlockInclusionProof> {
+        let justification = match justification {
+            Some(justification) => justification,
+            None => self.get_justification(block).await?,
+        };
+        let required_authority_set_id = self.signed_by_authority_set_id(block).await?;
         let validator_set = self.fetch_authority_set(required_authority_set_id).await?;
 
         let pre_commits: Vec<_> = justification
@@ -390,17 +386,18 @@ impl GearApi {
             })
             .collect();
 
-        Ok((
-            block_hash,
-            dto::BlockFinalityProof {
-                validator_set,
-                message: signed_data,
-                pre_commits,
-            },
-        ))
+        Ok(RawBlockInclusionProof {
+            justification_round: justification.round,
+            required_authority_set_id,
+
+            validator_set,
+            block_hash: justification.commit.target_hash,
+            block_number: justification.commit.target_number,
+            pre_commits,
+        })
     }
 
-    async fn fetch_authority_set(&self, authority_set_id: u64) -> AnyResult<Vec<[u8; 32]>> {
+    pub async fn fetch_authority_set(&self, authority_set_id: u64) -> AnyResult<Vec<[u8; 32]>> {
         let block = self
             .search_for_authority_set_block(authority_set_id)
             .await?;

@@ -4,7 +4,7 @@
 
 use crate::{
     common::{
-        generic_blake2::{GenericBlake2, MAX_DATA_BYTES},
+        blake2::{CircuitTargets as Blake2CircuitTargets, MAX_DATA_BYTES},
         targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
@@ -46,7 +46,8 @@ pub struct BlockHeaderParser {
 
 impl BlockHeaderParser {
     pub fn prove(self) -> ProofWithCircuitData<BlockHeaderParserTarget> {
-        let hasher_proof = GenericBlake2::new::<MAX_DATA_BYTES>(self.header_data).prove();
+        let circuit = Blake2CircuitTargets::new();
+        let hasher_proof = circuit.prove::<MAX_DATA_BYTES>(&self.header_data);
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);

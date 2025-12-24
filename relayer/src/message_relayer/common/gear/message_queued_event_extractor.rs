@@ -118,6 +118,16 @@ impl MessageQueuedEventExtractor {
             .await;
 
         for message in messages {
+            if !self
+                .storage
+                .block_storage()
+                .is_message_pending(GearBlockNumber(block.number()), message.nonce_be)
+                .await
+            {
+                // Message already dequeued (in-flight or completed) according to persisted storage.
+                continue;
+            }
+
             total += 1;
 
             self.sender.send(MessageInBlock {

@@ -1,16 +1,9 @@
-import { usePrepareProgramTransaction, useProgram } from '@gear-js/react-hooks';
+import { usePrepareProgramTransaction } from '@gear-js/react-hooks';
 
-import { useNetworkType } from '@/context/network-type';
-
-import { BridgingPaymentProgram } from '../../consts';
+import { useBridgingPaymentProgram } from './use-bridging-payment-program';
 
 function usePreparePayPriorityFee() {
-  const { NETWORK_PRESET } = useNetworkType();
-
-  const { data: program } = useProgram({
-    library: BridgingPaymentProgram,
-    id: NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS,
-  });
+  const { data: program } = useBridgingPaymentProgram();
 
   return {
     program,

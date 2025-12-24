@@ -43,8 +43,7 @@ function useVaraTxsEstimate({
   const estimateTxs = async () => {
     definedAssert(formValues, 'Form values');
     definedAssert(vftManagerFee, 'VFT Manager fee');
-    definedAssert(bridgingFee, 'Bridging fee value');
-    definedAssert(priorityFee, 'Priority fee value');
+
     definedAssert(api, 'API');
     definedAssert(prepareTxs, 'Prepared transactions');
 
@@ -53,11 +52,7 @@ function useVaraTxsEstimate({
 
     const totalEstimatedFee = txs.reduce((sum, { estimatedFee }) => sum + estimatedFee, 0n);
     const requiredBalance = totalGasLimit + totalEstimatedFee + totalValue + api.existentialDeposit.toBigInt();
-
-    let fees = totalGasLimit + totalEstimatedFee + vftManagerFee;
-
-    if (shouldPayBridgingFee) fees += bridgingFee;
-    if (shouldPayPriorityFee) fees += priorityFee;
+    const fees = totalGasLimit + totalEstimatedFee;
 
     return { requiredBalance, fees };
   };

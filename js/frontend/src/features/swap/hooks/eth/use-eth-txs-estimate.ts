@@ -28,7 +28,6 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, ftBa
 
   const estimateTxs = async () => {
     definedAssert(formValues, 'Form values');
-    definedAssert(bridgingFee, 'Bridging fee');
     definedAssert(token, 'Fungible Token');
     definedAssert(ethTxs.prepare, 'Prepared transactions');
 
@@ -38,9 +37,7 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, ftBa
     const { totalGasLimit, totalValue } = estimateBridging(txs, maxFeePerGas);
 
     const requiredBalance = totalValue + totalGasLimit;
-
-    let fees = totalGasLimit;
-    if (shouldPayBridgingFee) fees += bridgingFee;
+    const fees = totalGasLimit;
 
     return { requiredBalance, fees };
   };

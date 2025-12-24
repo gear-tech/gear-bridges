@@ -22,6 +22,7 @@ import { SubmitProgressBar } from '../submit-progress-bar';
 import { SwapNetworkButton } from '../swap-network-button';
 import { Token } from '../token';
 import { TransactionModal } from '../transaction-modal';
+import { WalletAddressButton } from '../wallet-address-button';
 
 import styles from './swap-form.module.scss';
 
@@ -40,11 +41,12 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const { api } = useApi();
 
   const { bridgingFee, vftManagerFee, priorityFee, ...config } = useFee();
+  const fees = { bridgingFee, vftManagerFee, priorityFee };
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
 
   const { isVaraAccount, isEthAccount } = useAccountsConnection();
-  const isNetworkAccountConnected = (network.isVara && isVaraAccount) || (!network.isVara && isEthAccount);
+  const isNetworkAccountConnected = network.isVara ? isVaraAccount : isEthAccount;
 
   const [transactionModal, setTransactionModal] = useState<
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
@@ -59,7 +61,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const varaSymbol = useVaraSymbol();
 
-  const { form, amount, formattedValues, handleSubmit, setMaxBalance } = useSwapForm({
+  const { form, formValues, formattedValues, handleSubmit, setMaxBalance, setAddress } = useSwapForm({
     shouldPayBridgingFee,
     accountBalance: accountBalance.data,
     ftBalance: ftBalance.data,
@@ -67,18 +69,43 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const txsEstimate = useTxsEstimate({
     formValues: formattedValues,
-    bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
-    priorityFee: priorityFee?.value,
     shouldPayPriorityFee,
-    vftManagerFee: vftManagerFee?.value,
     ftBalance: ftBalance.data,
+    ...fees,
   });
+
+  const getContractFees = () => {
+    if (isUndefined(bridgingFee)) return;
+
+    let result = 0n;
+
+    if (network.isVara) {
+      if (isUndefined(vftManagerFee) || isUndefined(priorityFee)) return;
+
+      result += vftManagerFee;
+      if (shouldPayPriorityFee) result += priorityFee;
+    }
+
+    if (shouldPayBridgingFee) result += bridgingFee;
+
+    return result;
+  };
+
+  const contractFees = getContractFees();
+
+  const getTotalFees = () => {
+    if (isUndefined(txsEstimate.data) || isUndefined(contractFees)) return;
+
+    return txsEstimate.data.fees + contractFees;
+  };
+
+  const totalFees = getTotalFees();
 
   const openTransactionModal = (values: FormattedValues) => {
     definedAssert(token, 'Token');
     definedAssert(destinationToken, 'Destination token');
-    definedAssert(txsEstimate.data, 'Transaction estimation');
+    definedAssert(totalFees, 'Transaction estimation');
 
     setTransactionModal({
       amount: values.amount,
@@ -86,20 +113,18 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
       isVaraNetwork: network.isVara,
       source: token.address,
       destination: destinationToken.address,
-      estimatedFees: txsEstimate.data.fees,
+      estimatedFees: totalFees,
       time,
       close: () => setTransactionModal(undefined),
     });
   };
 
   const sendTxs = useSendTxs({
-    bridgingFee: bridgingFee.value,
     shouldPayBridgingFee,
-    priorityFee: priorityFee?.value,
     shouldPayPriorityFee,
-    vftManagerFee: vftManagerFee?.value,
     ftBalance: ftBalance.data,
     onTransactionStart: openTransactionModal,
+    ...fees,
   });
 
   const isLoading =
@@ -120,7 +145,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   };
 
   const isEnoughBalance = () => {
-    if (!api || !token || isUndefined(bridgingFee.value) || !txsEstimate.data || !accountBalance.data) return false;
+    if (!api || !token || isUndefined(bridgingFee) || !txsEstimate.data || !accountBalance.data) return false;
 
     return accountBalance.data > txsEstimate.data.requiredBalance;
   };
@@ -132,7 +157,10 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     return 'Transfer';
   };
 
-  const renderTokenPrice = () => <TokenPrice symbol={token?.symbol} amount={amount} className={styles.price} />;
+  const renderTokenPrice = () => (
+    <TokenPrice symbol={token?.symbol} amount={formValues.amount} className={styles.price} />
+  );
+
   const renderProgressBar = () => <SubmitProgressBar isVaraNetwork={network.isVara} {...sendTxs} />;
 
   return (
@@ -183,14 +211,18 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
               <div className={styles.priceFooter}>{renderTokenPrice()}</div>
 
-              <Input
-                icon={PlusSVG}
-                name={FIELD_NAME.ADDRESS}
-                label="Bridge to"
-                className={styles.input}
-                spellCheck={false}
-                block
-              />
+              <div className={styles.inputContainer}>
+                <WalletAddressButton value={formValues.accountAddress} onClick={setAddress} />
+
+                <Input
+                  icon={PlusSVG}
+                  name={FIELD_NAME.ADDRESS}
+                  label="Bridge to"
+                  className={styles.input}
+                  spellCheck={false}
+                  block
+                />
+              </div>
             </div>
           </div>
 
@@ -200,8 +232,8 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
             onPriorityChange={setPriority}
             onClaimTypeChange={setClaimType}
             isVaraNetwork={network.isVara}
-            fee={txsEstimate.data?.fees}
-            isFeeLoading={txsEstimate.isLoading}
+            fee={totalFees || contractFees}
+            isFeeLoading={config.isLoading || txsEstimate.isLoading}
             disabled={isLoading}
             time={time}
           />

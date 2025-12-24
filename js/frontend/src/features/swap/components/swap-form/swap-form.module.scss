@@ -72,6 +72,10 @@
   border-bottom: 1px solid #00ffc433;
 }
 
+.inputContainer {
+  position: relative;
+}
+
 // TODO: remove fixes after @gear-js/vara-ui update
 .input {
   --input-line-height: 16px;

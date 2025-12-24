@@ -346,8 +346,9 @@ impl GearApi {
         after_block: H256,
     ) -> AnyResult<(H256, dto::BlockFinalityProof)> {
         let justification = self.get_justification(after_block).await?;
+        let proof = self.produce_finality_proof(&justification).await?;
 
-        Ok(self.produce_finality_proof(&justification).await?.into())
+        Ok((proof.block_hash, proof.into()))
     }
 
     // Produces raw block inclusion proof for the given justification.

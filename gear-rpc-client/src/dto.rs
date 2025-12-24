@@ -238,8 +238,8 @@ impl<'de> Deserialize<'de> for RawBlockInclusionProof {
     }
 }
 
-impl From<RawBlockInclusionProof> for (H256, BlockFinalityProof) {
-    fn from(this: RawBlockInclusionProof) -> (H256, BlockFinalityProof) {
+impl From<RawBlockInclusionProof> for BlockFinalityProof {
+    fn from(this: RawBlockInclusionProof) -> BlockFinalityProof {
         let signed_data = sp_consensus_grandpa::localized_payload(
             this.justification_round,
             this.required_authority_set_id,
@@ -257,14 +257,11 @@ impl From<RawBlockInclusionProof> for (H256, BlockFinalityProof) {
             );
         }
 
-        (
-            this.block_hash,
-            BlockFinalityProof {
-                validator_set: this.validator_set,
-                message: signed_data,
-                pre_commits: this.pre_commits,
-            },
-        )
+        BlockFinalityProof {
+            validator_set: this.validator_set,
+            message: signed_data,
+            pre_commits: this.pre_commits,
+        }
     }
 }
 

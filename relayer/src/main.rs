@@ -154,9 +154,7 @@ async fn run() -> AnyResult<()> {
                 Some(thread_count) => thread_count.into(),
             };
 
-            let (justification, headers) =
-                crate::prover_interface::get_justification_and_headers(&gear_api, block_hash)
-                    .await?;
+            let (justification, _headers) = gear_api.grandpa_prove_finality(block_number).await?;
 
             let proof_previous =
                 crate::prover_interface::prove_genesis(&gear_api, genesis_config, count_thread)
@@ -169,13 +167,13 @@ async fn run() -> AnyResult<()> {
             )
             .await?;
 
-            let proof = crate::prover_interface::prove_final_with_block_finality(
+            let proof = crate::prover_interface::prove_final(
                 &gear_api,
                 proof_previous,
                 genesis_config,
-                (justification, headers),
-                None,
+                block_hash,
                 count_thread,
+                Some(gear_api.produce_finality_proof(&justification).await?),
             )
             .await?;
 

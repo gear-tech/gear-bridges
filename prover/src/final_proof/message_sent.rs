@@ -80,8 +80,6 @@ impl MessageSent {
     pub fn prove(self) -> ProofWithCircuitData<MessageSentTarget> {
         log::debug!("Proving message presence in finalized block...");
 
-        let count_thread = self.block_finality.count_thread.unwrap_or(0);
-
         let inclusion_proof = self.inclusion_proof.prove();
         let finality_proof = self.block_finality.prove();
 
@@ -103,7 +101,8 @@ impl MessageSent {
                     .parse::<usize>()
                     .expect("RUST_MIN_STACK should have the correct value"),
             )
-            .num_threads(count_thread)
+            // TODO: 782
+            .num_threads(10)
             .build()
             .expect("MessageSent: failed to create ThreadPool");
 

@@ -154,6 +154,8 @@ async fn run() -> AnyResult<()> {
                 Some(thread_count) => thread_count.into(),
             };
 
+            let (justification, _headers) = gear_api.grandpa_prove_finality(block_number).await?;
+
             let proof_previous =
                 crate::prover_interface::prove_genesis(&gear_api, genesis_config, count_thread)
                     .await?;
@@ -171,7 +173,7 @@ async fn run() -> AnyResult<()> {
                 genesis_config,
                 block_hash,
                 count_thread,
-                None,
+                Some(gear_api.produce_finality_proof(&justification).await?),
             )
             .await?;
 

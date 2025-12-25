@@ -1,7 +1,7 @@
 use ethereum_client::TxHash;
 use ethereum_common::Hash256;
 use gear_rpc_client::{
-    dto::Message,
+    dto::{Message, RawBlockInclusionProof},
     metadata::runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
     GearApi, GearHeader,
 };
@@ -191,6 +191,12 @@ impl GearBlock {
         let events = api.get_events_at(Some(block.hash())).await?;
 
         Ok(Self::new(header, events, justification))
+    }
+
+    /// Produce a raw block inclusion proof from the block's grandpa justification.
+    pub async fn inclusion_proof(&self, api: &GearApi) -> anyhow::Result<RawBlockInclusionProof> {
+        api.fetch_raw_block_inclusion_proof(self.hash(), Some(self.grandpa_justification.clone()))
+            .await
     }
 }
 

@@ -121,65 +121,89 @@ async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
     let subscription = this.eth_api.subscribe_logs().await?;
 
     let mut stream = subscription.into_result_stream();
-    while let Some(Ok(log)) = stream.next().await {
-        log::debug!("Get log = {log:?}");
+    // check periodically that the connection to ApiProvider is alive
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
 
-        let (Some(tx_hash), Some(block_number)) = (log.transaction_hash, log.block_number) else {
-            log::error!("Unable to get tx_hash and block_number for log = {log:?}. Skipping");
-            continue;
-        };
-
-        if log.removed {
-            log::debug!("Blocks reorganization, log = {log:?}. Skipping");
-            continue;
-        }
-
-        let root = match MerkleRoot::decode_log_data(log.data()) {
-            Ok(root) => root,
-            Err(e) => {
-                log::error!("Failed to decode log = {log:?}: {e:?}. Skipping");
-                continue;
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if !this.api_provider.is_alive() {
+                    log::error!("ApiProvider connection is dead, exiting Merkle root extractor task");
+                    return Ok(());
+                }
             }
-        };
 
-        let pending =
-            PendingTransactionBuilder::new(this.eth_api.raw_provider().root().clone(), tx_hash);
-        pending
-            .with_required_confirmations(this.confirmations)
-            .watch()
-            .await?;
+            log = stream.next() => {
+                let log = match log {
+                    Some(Ok(log)) => log,
+                    Some(Err(e)) => {
+                        return Err(anyhow::anyhow!("Failed to get first log from stream: {e:?}"));
+                    }
+                    None => {
+                        log::info!("Log stream closed");
+                        return Ok(());
+                    }
+                };
 
-        let block_timestamp = this.eth_api.get_block_timestamp(block_number).await?;
+                log::debug!("Get log = {log:?}");
 
-        log::info!(
-            "Found merkle root {:?} at Ethereum block #{block_number} with timestamp {block_timestamp} ({} confirmation(s))",
-            (root.blockNumber, root.merkleRoot),
-            this.confirmations,
-        );
+                let (Some(tx_hash), Some(block_number)) = (log.transaction_hash, log.block_number) else {
+                    log::error!("Unable to get tx_hash and block_number for log = {log:?}. Skipping");
+                    continue;
+                };
 
-        let block_number_gear: u32 = root.blockNumber.to();
-        this.metrics
-            .latest_merkle_root_for_block
-            .set(block_number_gear as i64);
+                if log.removed {
+                    log::debug!("Blocks reorganization, log = {log:?}. Skipping");
+                    continue;
+                }
 
-        let block_hash = gear_api.block_number_to_hash(block_number_gear).await?;
+                let root = match MerkleRoot::decode_log_data(log.data()) {
+                    Ok(root) => root,
+                    Err(e) => {
+                        log::error!("Failed to decode log = {log:?}: {e:?}. Skipping");
+                        continue;
+                    }
+                };
 
-        let authority_set_id =
-            AuthoritySetId(gear_api.signed_by_authority_set_id(block_hash).await?);
+                let pending =
+                    PendingTransactionBuilder::new(this.eth_api.raw_provider().root().clone(), tx_hash);
+                pending
+                    .with_required_confirmations(this.confirmations)
+                    .watch()
+                    .await?;
 
-        log::info!(
-            "Merkle root {:?} is for era #{authority_set_id}",
-            (root.blockNumber, root.merkleRoot),
-        );
+                let block_timestamp = this.eth_api.get_block_timestamp(block_number).await?;
 
-        this.sender.send(RelayedMerkleRoot {
-            block: GearBlockNumber(block_number_gear),
-            block_hash,
-            authority_set_id,
-            merkle_root: root.merkleRoot.0.into(),
-            timestamp: block_timestamp,
-        })?;
+                log::info!(
+                    "Found merkle root {:?} at Ethereum block #{block_number} with timestamp {block_timestamp} ({} confirmation(s))",
+                    (root.blockNumber, root.merkleRoot),
+                    this.confirmations,
+                );
+
+                let block_number_gear: u32 = root.blockNumber.to();
+                this.metrics
+                    .latest_merkle_root_for_block
+                    .set(block_number_gear as i64);
+
+                let block_hash = gear_api.block_number_to_hash(block_number_gear).await?;
+
+                let authority_set_id =
+                    AuthoritySetId(gear_api.signed_by_authority_set_id(block_hash).await?);
+
+                log::info!(
+                    "Merkle root {:?} is for era #{authority_set_id}",
+                    (root.blockNumber, root.merkleRoot),
+                );
+
+                this.sender.send(RelayedMerkleRoot {
+                    block: GearBlockNumber(block_number_gear),
+                    block_hash,
+                    authority_set_id,
+                    merkle_root: root.merkleRoot.0.into(),
+                    timestamp: block_timestamp,
+                })?;
+
+            }
+        }
     }
-
-    Ok(())
 }

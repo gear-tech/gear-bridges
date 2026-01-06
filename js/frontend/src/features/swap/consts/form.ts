@@ -24,13 +24,13 @@ const VARA_ADDRESS_SCHEMA = z
   .string()
   .trim()
   .refine((value) => isSubstrateAddress(value), { message: ERROR_MESSAGE.INVALID_ADDRESS })
-  .transform((value) => decodeAddress(value).toLocaleLowerCase() as HexString);
+  .transform((value) => decodeAddress(value).toLowerCase() as HexString);
 
 const ETH_ADDRESS_SCHEMA = z
   .string()
   .trim()
   .refine((value) => isEthAddress(value), { message: ERROR_MESSAGE.INVALID_ADDRESS })
-  .transform((value) => value.toLocaleLowerCase() as HexString);
+  .transform((value) => value.toLowerCase() as HexString);
 
 const ADDRESS_SCHEMA = {
   VARA: VARA_ADDRESS_SCHEMA,

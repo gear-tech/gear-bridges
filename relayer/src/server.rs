@@ -3,7 +3,7 @@ use crate::message_relayer::common::web_request::{
 };
 use actix_web::{guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::net::TcpListener;
+use std::{collections::HashSet, net::TcpListener};
 use tokio::sync::mpsc::UnboundedSender;
 
 const HEADER_TOKEN: &str = "X-Token";
@@ -28,7 +28,15 @@ async fn relay_messages(
     let len = messages.len();
     let mut to_process = len;
 
+    // Avoid enqueuing duplicates within the same request.
+    let mut seen = HashSet::with_capacity(len);
+
     for message in messages {
+        if !seen.insert((message.block, message.nonce)) {
+            // Duplicate within this batch; treat as successfully handled.
+            to_process -= 1;
+            continue;
+        }
         match channel.send(message.clone()) {
             Ok(_) => to_process -= 1,
 

@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.33;
 
-import "forge-std/Script.sol";
-import "src/MessageHandler.sol";
+import {Script, console} from "forge-std/Script.sol";
+import {MessageHandler} from "src/MessageHandler.sol";
 
 contract Deploy is Script {
     function run() external {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
-
         vm.startBroadcast(privateKey);
 
         MessageHandler messageHandler = new MessageHandler();

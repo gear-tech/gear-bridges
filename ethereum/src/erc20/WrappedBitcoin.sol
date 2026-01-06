@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.33;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";

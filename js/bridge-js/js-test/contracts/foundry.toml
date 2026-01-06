@@ -2,8 +2,8 @@
 src = "src"
 out = "out"
 test = "test"
-evm_version = "prague"
-solc = "0.8.30"
+evm_version = "osaka"
+solc = "0.8.33"
 optimizer = true
 optimizer_runs = 200
 via_ir = true

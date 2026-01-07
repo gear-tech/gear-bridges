@@ -62,6 +62,7 @@ ethereum-client = { path = "./ethereum/client" }
 ethereum_beacon_client = { path = "ethereum_beacon_client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
 gear-common = { path = "gear-common" }
+cli-utils = { path = "cli-utils" }
 
 bridging-payment = { path = "gear-programs/bridging-payment" }
 bridging-payment-app = { path = "gear-programs/bridging-payment/app" }

@@ -8,6 +8,7 @@ vft = { workspace = true, features = ["wasm-binary"] }
 vft-client.workspace = true
 vft-vara = { workspace = true, features = ["wasm-binary"] }
 vft-vara-client.workspace = true
+cli-utils.workspace = true
 
 clap.workspace = true
 dotenv.workspace = true

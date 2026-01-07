@@ -95,8 +95,7 @@ impl Clone for ApiProviderConnection {
 /// A service which provides API connections to services which request it.
 pub struct ApiProvider {
     session: u64,
-    domain: String,
-    port: u16,
+    url: String,
     max_reconnect_attempts: u8,
     api: Api,
 
@@ -106,21 +105,18 @@ pub struct ApiProvider {
 
 impl ApiProvider {
     pub async fn new(
-        domain: String,
-        port: u16,
+        url: String,
         max_reconnect_attempts: u8,
     ) -> anyhow::Result<Self> {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let uri: &str = &format!("{domain}:{port}");
         let api = Api::builder()
-            .build(uri)
+            .build(url.as_str())
             .await
             .context("failed to connect to API")?;
 
         Ok(Self {
             session: 0,
-            domain,
-            port,
+            url,
             max_reconnect_attempts,
             api,
             receiver,
@@ -137,10 +133,8 @@ impl ApiProvider {
     }
 
     async fn reconnect(&mut self) -> bool {
-        let uri: &str = &format!("{}:{}", self.domain, self.port);
-
         for attempt in 0..self.max_reconnect_attempts {
-            match Api::builder().build(uri).await {
+            match Api::builder().build(self.url.as_str()).await {
                 Ok(api) => {
                     self.api = api;
                     return true;

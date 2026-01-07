@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use tokio::sync::RwLock;
 use utils_prometheus::{impl_metered_service, MeteredService};
+use url::Url;
 
 use super::{AuthoritySetId, ProofStorage, ProofStorageError};
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
@@ -102,13 +103,20 @@ struct UploadedProgramInfo {
 
 impl GearProofStorage {
     pub async fn new(
-        domain: &str,
-        port: u16,
+        url: &str,
         retries: u8,
         fee_payer: &str,
         config_folder_path: PathBuf,
     ) -> anyhow::Result<GearProofStorage> {
-        let wrapped_gear_api = WrappedGearApi::new(domain, port, retries).await?;
+        let wrapped_gear_api = WrappedGearApi::new(url, retries).await?;
+
+        let parsed = Url::parse(url)?;
+        let domain = parsed.host_str().ok_or_else(|| anyhow::anyhow!("No host in URL"))?;
+        let port = parsed.port().or_else(|| match parsed.scheme() {
+             "wss" | "https" => Some(443),
+             "ws" | "http" => Some(80),
+             _ => None
+        }).unwrap_or(9944);
 
         let address = WSAddress::try_new(domain, port)?;
 

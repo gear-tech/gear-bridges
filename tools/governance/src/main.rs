@@ -306,7 +306,7 @@ fn register_gear_token(
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let Cli { rpc_url, command } = Cli::parse();
+    let Cli { eth_connection, command } = Cli::parse();
 
     let DeploymentConfig {
         governance_admin,
@@ -314,7 +314,7 @@ async fn main() -> Result<(), Error> {
     } = toml::from_str(&fs::read_to_string("deployment.toml")?)?;
 
     let provider: DynProvider<Ethereum> =
-        ProviderBuilder::default().connect(&rpc_url).await?.erased();
+        ProviderBuilder::default().connect(&eth_connection.endpoint).await?.erased();
 
     let governance_info = GovernanceInfo {
         governance_admin: query_governance(governance_admin, &provider).await?,

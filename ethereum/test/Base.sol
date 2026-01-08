@@ -31,6 +31,10 @@ import {MessageQueue} from "src/MessageQueue.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
 import {VerifierTestnet} from "src/VerifierTestnet.sol";
 
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {UpgradeProxyMessage, GovernancePacker} from "src/interfaces/IGovernance.sol";
+import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
+
 struct Overrides {
     address circleToken;
     address tetherToken;
@@ -65,6 +69,10 @@ library BaseConstants {
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+    using Hasher for VaraMessage;
+
+    using GovernancePacker for UpgradeProxyMessage;
+
     uint256 public messageNonce;
     uint256 public currentBlockNumber;
 
@@ -241,6 +249,53 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             });
 
             // TODO: all manipulations with the forked contracts should be done here
+
+            // upgrade
+
+            address newImplementation = address(new MessageQueue());
+
+            VaraMessage memory message1 = VaraMessage({
+                nonce: messageNonce++,
+                source: governanceAdmin.governance(),
+                destination: address(governanceAdmin),
+                payload: UpgradeProxyMessage({
+                        proxy: address(messageQueue),
+                        newImplementation: newImplementation,
+                        data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
+                    }).pack()
+            });
+            assertEq(messageQueue.isProcessed(message1.nonce), false);
+
+            bytes32 messageHash = message1.hash();
+
+            uint256 blockNumber = currentBlockNumber++;
+            bytes32 merkleRoot = messageHash;
+            bytes memory proof1 = "";
+
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
+
+            uint256 totalLeaves = 1;
+            uint256 leafIndex = 0;
+            bytes32[] memory proof2 = new bytes32[](0);
+
+            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
+            assertEq(
+                address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+                address(newImplementation)
+            );
+
+            // test after upgrade
+
+            address[] memory emergencyStopObservers = messageQueue.emergencyStopObservers();
+            assertEq(emergencyStopObservers.length, 1);
+            assertEq(emergencyStopObservers[0], address(0xA6750cc25A606174cbB9e4B3c35aFc69d6F98d31));
+
+            assertEq(messageQueue.emergencyStopAdmin(), address(0x8e3D3370a4769FEcc5c9Bc58EaBeCF7cF1F49edc));
         }
 
         console.log("Deployment arguments:");
@@ -505,12 +560,12 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(messageQueueAddress, address(messageQueue));
         assertEq(messageQueue.governanceAdmin(), address(governanceAdmin));
         assertEq(messageQueue.governancePauser(), address(governancePauser));
-        assertEq(messageQueue.emergencyStopAdmin(), deploymentArguments.emergencyStopAdmin);
+        /*assertEq(messageQueue.emergencyStopAdmin(), deploymentArguments.emergencyStopAdmin);
         address[] memory emergencyStopObservers = messageQueue.emergencyStopObservers();
         assertEq(emergencyStopObservers.length, deploymentArguments.emergencyStopObservers.length);
         for (uint256 i = 0; i < emergencyStopObservers.length; i++) {
             assertEq(emergencyStopObservers[i], deploymentArguments.emergencyStopObservers[i]);
-        }
+        }*/
         assertEq(messageQueue.verifier(), address(verifier));
         assertEq(messageQueue.isChallengingRoot(), false);
         assertEq(messageQueue.isEmergencyStopped(), false);

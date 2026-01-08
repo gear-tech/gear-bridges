@@ -209,23 +209,26 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 wrappedBitcoin: erc20Tokens[4]
             });
 
-            bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
-            bytes32 value = ((vm.load(address(overrides.circleToken), slot) >> 160) << 160)
-                | bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
-            vm.store(address(overrides.circleToken), slot, value);
+            bool isMainnet = block.chainid == 1;
+            if (isMainnet) {
+                bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
+                bytes32 value = ((vm.load(address(overrides.circleToken), slot) >> 160) << 160)
+                    | bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+                vm.store(address(overrides.circleToken), slot, value);
 
-            vm.prank(deploymentArguments.deployerAddress);
-            ICircleToken(address(overrides.circleToken))
-                .configureMinter(deploymentArguments.deployerAddress, type(uint256).max);
+                vm.prank(deploymentArguments.deployerAddress);
+                ICircleToken(address(overrides.circleToken))
+                    .configureMinter(deploymentArguments.deployerAddress, type(uint256).max);
 
-            slot = bytes32(0x00); // address owner
-            value = bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
-            vm.store(overrides.tetherToken, slot, value);
+                slot = bytes32(0x00); // address owner
+                value = bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+                vm.store(overrides.tetherToken, slot, value);
 
-            slot = bytes32(uint256(0x05)); // address owner
-            value = ((vm.load(address(overrides.wrappedBitcoin), slot) << 248) >> 248)
-                | (bytes32(uint256(uint160(deploymentArguments.deployerAddress))) << 8);
-            vm.store(overrides.wrappedBitcoin, slot, value);
+                slot = bytes32(uint256(0x05)); // address owner
+                value = ((vm.load(address(overrides.wrappedBitcoin), slot) << 248) >> 248)
+                    | (bytes32(uint256(uint160(deploymentArguments.deployerAddress))) << 8);
+                vm.store(overrides.wrappedBitcoin, slot, value);
+            }
 
             deploymentArguments = DeploymentArguments({
                 privateKey: 0,

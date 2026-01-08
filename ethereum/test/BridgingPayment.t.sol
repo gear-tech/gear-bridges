@@ -61,8 +61,14 @@ contract BridgingPaymentTest is Test, Base {
         bytes32 to = 0;
 
         if (isFork()) {
-            ITetherToken(address(tetherToken)).issue(amount);
-            ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+            bool isMainnet = block.chainid == 1;
+            if (isMainnet) {
+                ITetherToken(address(tetherToken)).issue(amount);
+                ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+            } else {
+                IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
+                tetherToken.approve(address(erc20Manager), amount);
+            }
         } else {
             IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
             tetherToken.approve(address(erc20Manager), amount);

@@ -217,23 +217,26 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 wrappedBitcoin: erc20Tokens[4]
             });
 
-            bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
-            bytes32 value = ((vm.load(address(overrides.circleToken), slot) >> 160) << 160)
-                | bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
-            vm.store(address(overrides.circleToken), slot, value);
+            bool isMainnet = block.chainid == 1;
+            if (isMainnet) {
+                bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
+                bytes32 value = ((vm.load(address(overrides.circleToken), slot) >> 160) << 160)
+                    | bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+                vm.store(address(overrides.circleToken), slot, value);
 
-            vm.prank(deploymentArguments.deployerAddress);
-            ICircleToken(address(overrides.circleToken))
-                .configureMinter(deploymentArguments.deployerAddress, type(uint256).max);
+                vm.prank(deploymentArguments.deployerAddress);
+                ICircleToken(address(overrides.circleToken))
+                    .configureMinter(deploymentArguments.deployerAddress, type(uint256).max);
 
-            slot = bytes32(0x00); // address owner
-            value = bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
-            vm.store(overrides.tetherToken, slot, value);
+                slot = bytes32(0x00); // address owner
+                value = bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+                vm.store(overrides.tetherToken, slot, value);
 
-            slot = bytes32(uint256(0x05)); // address owner
-            value = ((vm.load(address(overrides.wrappedBitcoin), slot) << 248) >> 248)
-                | (bytes32(uint256(uint160(deploymentArguments.deployerAddress))) << 8);
-            vm.store(overrides.wrappedBitcoin, slot, value);
+                slot = bytes32(uint256(0x05)); // address owner
+                value = ((vm.load(address(overrides.wrappedBitcoin), slot) << 248) >> 248)
+                    | (bytes32(uint256(uint160(deploymentArguments.deployerAddress))) << 8);
+                vm.store(overrides.wrappedBitcoin, slot, value);
+            }
 
             deploymentArguments = DeploymentArguments({
                 privateKey: 0,
@@ -296,6 +299,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             assertEq(emergencyStopObservers[0], address(0xA6750cc25A606174cbB9e4B3c35aFc69d6F98d31));
 
             assertEq(messageQueue.emergencyStopAdmin(), address(0x8e3D3370a4769FEcc5c9Bc58EaBeCF7cF1F49edc));
+
+            // fix emergency stop observers tests
+
+            deploymentArguments.emergencyStopAdmin = messageQueue.emergencyStopAdmin();
+            deploymentArguments.emergencyStopObservers = messageQueue.emergencyStopObservers();
         }
 
         console.log("Deployment arguments:");

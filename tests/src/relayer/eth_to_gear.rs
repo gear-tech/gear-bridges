@@ -310,7 +310,7 @@ async fn test_relayer_mock() {
 
 #[tokio::test]
 async fn test_api_provider() {
-    let api_provider = ApiProvider::new("ws://127.0.0.1:9944", 1)
+    let api_provider = ApiProvider::new("ws://127.0.0.1:9944".to_owned(), 1)
         .await
         .expect("failed to create API provider");
 
@@ -343,7 +343,7 @@ async fn test_tx_manager() {
         .try_init();
     let contracts = super::upload::EthContracts::new().await;
 
-    let api_provider = ApiProvider::new("ws://127.0.0.1:9944", 2)
+    let api_provider = ApiProvider::new("ws://127.0.0.1:9944".to_owned(), 2)
         .await
         .unwrap();
 

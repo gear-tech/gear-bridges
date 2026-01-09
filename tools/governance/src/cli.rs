@@ -4,12 +4,13 @@ use gprimitives::ActorId;
 use std::{ops::Deref, str::FromStr};
 use thiserror::Error;
 
+use cli_utils::EthereumConnectionArgs;
+
 /// Governance tools (`deployment.toml` file is required)
 #[derive(Debug, Parser)]
 pub struct Cli {
-    /// Ethereum RPC URL
-    #[arg(short, long)]
-    pub rpc_url: String,
+    #[clap(flatten)]
+    pub eth_connection: EthereumConnectionArgs,
 
     /// Destination
     #[command(subcommand)]

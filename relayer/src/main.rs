@@ -91,8 +91,7 @@ async fn run() -> AnyResult<()> {
             }
 
             let gear_api = gear_rpc_client::GearApi::new(
-                &args.gear_args.domain,
-                args.gear_args.port,
+                &args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
             )
             .await?;
@@ -159,8 +158,7 @@ async fn run() -> AnyResult<()> {
                     .await?;
 
             let gear_api = gear_rpc_client::GearApi::new(
-                &args.gear_args.domain,
-                args.gear_args.port,
+                &args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
             )
             .await?;
@@ -188,14 +186,13 @@ async fn run() -> AnyResult<()> {
             }
 
             let api_provider = ApiProvider::new(
-                args.gear_args.domain.clone(),
-                args.gear_args.port,
+                args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
             )
             .await
             .expect("Failed to connect to Gear API");
 
-            let Some(path) = args.block_storage_args.block_storage_path.take() else {
+            let Some(path) = args.block_storage_args.path.take() else {
                 return Err(anyhow!("No block storage path provided"));
             };
 
@@ -251,8 +248,7 @@ async fn run() -> AnyResult<()> {
             use reqwest::header;
 
             let api_provider = ApiProvider::new(
-                args.gear_args.domain.clone(),
-                args.gear_args.port,
+                args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
             )
             .await
@@ -299,8 +295,7 @@ async fn run() -> AnyResult<()> {
 
         CliCommands::QueueCleaner(args) => {
             let api_provider = ApiProvider::new(
-                args.gear_args.domain.clone(),
-                args.gear_args.port,
+                args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
             )
             .await?;
@@ -314,13 +309,11 @@ async fn run() -> AnyResult<()> {
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
-                vara_domain: args.gear_args.domain,
-                vara_port: args.gear_args.port,
+                vara_endpoint: args.gear_args.get_endpoint()?,
             };
 
             let provider = ApiProvider::new(
-                gsdk_args.vara_domain.clone(),
-                gsdk_args.vara_port,
+                gsdk_args.vara_endpoint.clone(),
                 args.gear_args.max_reconnect_attempts,
             )
             .await
@@ -500,13 +493,11 @@ async fn run() -> AnyResult<()> {
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
-                vara_domain: gear_args.common.domain,
-                vara_port: gear_args.common.port,
+                vara_endpoint: gear_args.connection.get_endpoint()?,
             };
             let provider = ApiProvider::new(
-                gsdk_args.vara_domain.clone(),
-                gsdk_args.vara_port,
-                gear_args.common.max_reconnect_attempts,
+                gsdk_args.vara_endpoint.clone(),
+                gear_args.connection.max_reconnect_attempts,
             )
             .await
             .expect("Failed to create API provider");
@@ -602,8 +593,7 @@ async fn run() -> AnyResult<()> {
             let nonce = U256::from_big_endian(&nonce[..]);
             let eth_api = create_eth_signer_client(&args.ethereum_args).await;
             let api_provider = ApiProvider::new(
-                args.gear_args.domain.clone(),
-                args.gear_args.port,
+                args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
             )
             .await
@@ -648,15 +638,13 @@ async fn run() -> AnyResult<()> {
             use sails_rs::calls::ActionIo;
 
             let gear_client_args = message_relayer::common::GSdkArgs {
-                vara_domain: gear_args.common.domain,
-                vara_port: gear_args.common.port,
+                vara_endpoint: gear_args.connection.get_endpoint()?,
             };
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_args).await;
             let provider = ApiProvider::new(
-                gear_client_args.vara_domain.clone(),
-                gear_client_args.vara_port,
-                gear_args.common.max_reconnect_attempts,
+                gear_client_args.vara_endpoint.clone(),
+                gear_args.connection.max_reconnect_attempts,
             )
             .await
             .context("Failed to create API provider")?;
@@ -740,34 +728,30 @@ async fn run() -> AnyResult<()> {
 }
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
+    let (host, port) = args.connection.get_host_port().expect("Invalid gear args");
     gclient::GearApi::builder()
-        .retries(args.common.max_reconnect_attempts)
+        .retries(args.connection.max_reconnect_attempts)
         .suri(&args.suri)
-        .build(gclient::WSAddress::new(
-            &args.common.domain,
-            args.common.port,
-        ))
+        .build(gclient::WSAddress::new(&host, port))
         .await
         .expect("GearApi client should be created")
 }
 
 async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     let EthereumArgs {
-        eth_endpoint,
+        connection,
+        tx,
         mq_address,
-        eth_max_retries,
-        eth_retry_interval_ms,
-        ..
     } = &args.ethereum_args;
 
     EthApi::new_with_retries(
-        eth_endpoint,
+        &connection.endpoint,
         mq_address,
         Some(&args.eth_fee_payer),
-        *eth_max_retries,
-        eth_retry_interval_ms.map(Duration::from_millis),
-        args.ethereum_args.max_fee_per_gas,
-        args.ethereum_args.max_priority_fee_per_gas,
+        connection.max_retries,
+        connection.retry_interval_ms.map(Duration::from_millis),
+        tx.max_fee_per_gas,
+        tx.max_priority_fee_per_gas,
     )
     .await
     .expect("Error while creating ethereum client")
@@ -824,27 +808,21 @@ async fn create_eth_killswitch_client(
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {
-    let EthereumArgs {
-        eth_endpoint,
-        mq_address,
-        ..
-    } = args;
-
     EthApi::new(
-        eth_endpoint,
-        mq_address,
+        &args.connection.endpoint,
+        &args.mq_address,
         None,
-        args.max_fee_per_gas,
-        args.max_priority_fee_per_gas,
+        args.tx.max_fee_per_gas,
+        args.tx.max_priority_fee_per_gas,
     )
     .await
     .expect("Error while creating ethereum client")
 }
 
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
-    let timeout = args.beacon_timeout.map(Duration::from_secs);
+    let timeout = args.timeout.map(Duration::from_secs);
 
-    BeaconClient::new(args.beacon_endpoint.clone(), timeout)
+    BeaconClient::new(args.endpoint.clone(), timeout)
         .await
         .expect("Failed to create beacon client")
 }
@@ -857,8 +835,7 @@ async fn create_proof_storage(
     let proof_storage: Arc<dyn ProofStorage> =
         if let Some(fee_payer) = proof_storage_args.gear_fee_payer.as_ref() {
             let proof_storage = GearProofStorage::new(
-                &gear_args.domain,
-                gear_args.port,
+                &gear_args.get_endpoint().expect("Invalid endpoint"),
                 gear_args.max_reconnect_attempts,
                 fee_payer,
                 "./onchain_proof_storage_data".into(),
@@ -891,8 +868,7 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
         .await?;
 
     let gear_api = gear_rpc_client::GearApi::new(
-        &args.gear_args.domain,
-        args.gear_args.port,
+        &args.gear_args.get_endpoint()?,
         args.gear_args.max_reconnect_attempts,
     )
     .await?;

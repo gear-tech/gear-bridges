@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 clap.workspace = true
+cli-utils.workspace = true
 gear-rpc-client.workspace = true
 hex.workspace = true
 tokio.workspace = true

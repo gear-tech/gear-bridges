@@ -116,9 +116,11 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
         let merkle_root_changed = queue_merkle_root_changed(block);
         let authority_set_changed = authority_set_changed(block);
 
-        let finality = api
+        let proof = api
             .produce_finality_proof(&block.grandpa_justification)
             .await?;
+        let finality: (H256, gear_rpc_client::dto::BlockFinalityProof) =
+            (proof.block_hash, proof.into());
         let block_hash = block.hash();
         let block_number = block.number();
 

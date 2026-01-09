@@ -273,11 +273,7 @@ impl SignComposition {
         future_inner_cyclic_proof_pis.register_as_public_inputs(&mut builder);
 
         let verifier_data_target = builder.add_verifier_data_public_inputs();
-        let common_data = common_data_for_recursion(
-            CircuitConfig::standard_recursion_config(),
-            builder.num_public_inputs(),
-            1 << 13,
-        );
+        let common_data = common_data_for_recursion(builder.num_public_inputs(), NUM_GATES_COMMON);
 
         let condition = builder.add_virtual_bool_target_safe();
 

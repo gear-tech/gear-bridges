@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
-use gear_rpc_client::GearApi;
 use cli_utils::GearConnectionArgs;
+use gear_rpc_client::GearApi;
 
 const GEAR_RPC_RETRIES: u8 = 3;
 
@@ -37,7 +37,7 @@ async fn main() {
 
     let gear_api = GearApi::new(
         &args.gear_connection.get_endpoint().expect("Invalid URL"),
-        GEAR_RPC_RETRIES
+        GEAR_RPC_RETRIES,
     )
     .await
     .expect("Failed to create Gear API");

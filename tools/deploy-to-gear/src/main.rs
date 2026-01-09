@@ -103,7 +103,10 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let (gear_host, gear_port) = cli.gear_connection.get_host_port().expect("Invalid Gear URL");
+    let (gear_host, gear_port) = cli
+        .gear_connection
+        .get_host_port()
+        .expect("Invalid Gear URL");
     let address = WSAddress::new(gear_host, gear_port);
     let gear_api = GearApi::builder()
         .suri(cli.gear_suri)
@@ -281,20 +284,20 @@ impl Uploader {
 
         if let Some(minter) = self.minter {
             vft.set_minter(minter)
-            .with_gas_limit(self.gas_limit)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to grand minter role");
+                .with_gas_limit(self.gas_limit)
+                .send_recv(program_id)
+                .await
+                .expect("Failed to grand minter role");
 
             println!("Granted minter role");
         }
 
         if let Some(burner) = self.burner {
             vft.set_burner(burner)
-            .with_gas_limit(self.gas_limit)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to grand burner role");
+                .with_gas_limit(self.gas_limit)
+                .send_recv(program_id)
+                .await
+                .expect("Failed to grand burner role");
 
             println!("Granted burner role");
         }

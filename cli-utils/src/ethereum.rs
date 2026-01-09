@@ -21,7 +21,7 @@ pub struct EthereumTxArgs {
     /// 2_000_000_000 (2 Gwei).
     #[arg(long = "max-fee-per-gas", env = "ETH_MAX_FEE_PER_GAS")]
     pub max_fee_per_gas: Option<u128>,
-    
+
     /// Max priority fee per gas (in wei) for transactions sent to Ethereum. Default is
     /// 500_000_000 (0.5 Gwei).
     #[arg(
@@ -34,7 +34,11 @@ pub struct EthereumTxArgs {
 #[derive(Args, Clone, Debug)]
 pub struct BeaconConnectionArgs {
     /// Address of the ethereum beacon RPC endpoint
-    #[arg(long = "ethereum-beacon-rpc", alias="beacon-endpoint", env = "ETH_BEACON_RPC")]
+    #[arg(
+        long = "ethereum-beacon-rpc",
+        alias = "beacon-endpoint",
+        env = "ETH_BEACON_RPC"
+    )]
     pub endpoint: String,
 
     /// Timeout in seconds for requests to the ethereum beacon RPC

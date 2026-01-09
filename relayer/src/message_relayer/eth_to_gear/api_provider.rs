@@ -104,10 +104,7 @@ pub struct ApiProvider {
 }
 
 impl ApiProvider {
-    pub async fn new(
-        url: String,
-        max_reconnect_attempts: u8,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(url: String, max_reconnect_attempts: u8) -> anyhow::Result<Self> {
         let (sender, receiver) = mpsc::unbounded_channel();
         let api = Api::builder()
             .build(url.as_str())

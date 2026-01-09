@@ -1,9 +1,9 @@
 use clap::Args;
-use std::path::PathBuf;
 pub use cli_utils::{
-    BlockStorageArgs, GenesisConfigArgs, GearConnectionArgs, GearSignerArgs,
-    BeaconConnectionArgs, PrometheusArgs, EthereumConnectionArgs, EthereumTxArgs
+    BeaconConnectionArgs, BlockStorageArgs, EthereumConnectionArgs, EthereumTxArgs,
+    GearConnectionArgs, GearSignerArgs, GenesisConfigArgs, PrometheusArgs,
 };
+use std::path::PathBuf;
 
 #[derive(Args)]
 pub struct ProofStorageArgs {

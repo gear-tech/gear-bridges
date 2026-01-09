@@ -1,6 +1,6 @@
+use anyhow::{anyhow, Result};
 use clap::Args;
 use url::Url;
-use anyhow::{anyhow, Result};
 
 #[derive(Args, Clone, Debug)]
 pub struct GearConnectionArgs {
@@ -36,13 +36,13 @@ impl GearConnectionArgs {
         }
 
         log::warn!("Usage of --gear-domain and --gear-port is deprecated. Please use --gear-endpoint instead.");
-        
+
         let protocol = if self.port == 443 { "wss" } else { "ws" };
         // If domain already contains protocol, don't prepend
         if self.domain.contains("://") {
-             Ok(format!("{}:{}", self.domain, self.port))
+            Ok(format!("{}:{}", self.domain, self.port))
         } else {
-             Ok(format!("{}://{}:{}", protocol, self.domain, self.port))
+            Ok(format!("{}://{}:{}", protocol, self.domain, self.port))
         }
     }
 
@@ -50,13 +50,16 @@ impl GearConnectionArgs {
         if let Some(url) = &self.endpoint {
             let host = url.host_str().ok_or_else(|| anyhow!("No host in URL"))?;
             let scheme = url.scheme();
-            let address = format!("{}://{}", scheme, host);
+            let address = format!("{scheme}://{host}");
 
-            let port = url.port().or_else(|| match url.scheme() {
-                "wss" | "https" => Some(443),
-                "ws" | "http" => Some(80),
-                _ => None
-            }).unwrap_or(9944);
+            let port = url
+                .port()
+                .or_else(|| match url.scheme() {
+                    "wss" | "https" => Some(443),
+                    "ws" | "http" => Some(80),
+                    _ => None,
+                })
+                .unwrap_or(9944);
             Ok((address, port))
         } else {
             log::warn!("Usage of --gear-domain and --gear-port is deprecated. Please use --gear-endpoint instead.");

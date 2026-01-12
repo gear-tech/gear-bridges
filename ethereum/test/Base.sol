@@ -31,6 +31,10 @@ import {MessageQueue} from "src/MessageQueue.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
 import {VerifierTestnet} from "src/VerifierTestnet.sol";
 
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {UpgradeProxyMessage, GovernancePacker} from "src/interfaces/IGovernance.sol";
+import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
+
 struct Overrides {
     address circleToken;
     address tetherToken;
@@ -65,6 +69,10 @@ library BaseConstants {
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+    using Hasher for VaraMessage;
+
+    using GovernancePacker for UpgradeProxyMessage;
+
     uint256 public messageNonce;
     uint256 public currentBlockNumber;
 
@@ -244,6 +252,64 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             });
 
             // TODO: all manipulations with the forked contracts should be done here
+
+                        // upgrade
+
+            address newImplementation = address(new MessageQueue());
+
+            VaraMessage memory message1 = VaraMessage({
+                nonce: messageNonce++,
+                source: governanceAdmin.governance(),
+                destination: address(governanceAdmin),
+                payload: UpgradeProxyMessage({
+                        proxy: address(messageQueue),
+                        newImplementation: newImplementation,
+                        data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
+                    }).pack()
+            });
+            assertEq(messageQueue.isProcessed(message1.nonce), false);
+
+            bytes32 messageHash = message1.hash();
+
+            uint256 blockNumber = currentBlockNumber++;
+            bytes32 merkleRoot = messageHash;
+            bytes memory proof1 = "";
+
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
+
+            uint256 totalLeaves = 1;
+            uint256 leafIndex = 0;
+            bytes32[] memory proof2 = new bytes32[](0);
+
+            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
+            assertEq(
+                address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+                address(newImplementation)
+            );
+
+            // test after upgrade
+
+            address[] memory emergencyStopObservers = messageQueue.emergencyStopObservers();
+            assertEq(emergencyStopObservers.length, 3);
+            assertEq(emergencyStopObservers[0], address(0xE01a2B14FDd616C513f0D88Cb88281a19C22BFc5));
+            assertEq(emergencyStopObservers[1], address(0xa1240AE90B005686D2Fd4d81c5A0891C8Db18B32));
+            assertEq(emergencyStopObservers[2], address(0xCB14Fe9AF4D2Cd7e8e9CE4211F9eAbe71d7A3999));
+
+            assertEq(messageQueue.emergencyStopAdmin(), address(0x2C25f37F170aC053a8e04A4e319B5F579b869A7f));
+
+            // everything else should be kept the same
+            assertEq(messageQueue.verifier(), address(0xFACE08781c083588eF0569Ec1B497AAB67B2a18F));
+            assertEq(messageQueue.governanceAdmin(), address(0x3681A3e25F5652389B8f52504D517E96352830C3));
+
+            // fix emergency stop observers tests
+
+            deploymentArguments.emergencyStopAdmin = messageQueue.emergencyStopAdmin();
+            deploymentArguments.emergencyStopObservers = messageQueue.emergencyStopObservers();
         }
 
         console.log("Deployment arguments:");

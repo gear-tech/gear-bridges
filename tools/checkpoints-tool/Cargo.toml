@@ -18,4 +18,5 @@ parity-scale-codec = { workspace = true, features = ["std"] }
 sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true
 url.workspace = true
+cli-utils.workspace = true
 gear-core.workspace = true

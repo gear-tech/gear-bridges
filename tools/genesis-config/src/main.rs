@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use cli_utils::GearConnectionArgs;
 use gear_rpc_client::GearApi;
 
 const GEAR_RPC_RETRIES: u8 = 3;
@@ -21,16 +22,8 @@ enum CliCommands {
 
 #[derive(Args)]
 struct FetchArgs {
-    /// Address of the Gear RPC endpoint
-    #[arg(
-        long = "gear-endpoint",
-        default_value = "wss://testnet.vara.network",
-        env = "GEAR_RPC"
-    )]
-    gear_endpoint: String,
-    /// Port of the Gear RPC endpoint
-    #[arg(long = "gear-port", default_value = "443", env = "GEAR_PORT")]
-    gear_port: u16,
+    #[clap(flatten)]
+    gear_connection: GearConnectionArgs,
 
     /// Block number to fetch the genesis config for. If not specified, the latest block will be used
     #[arg(long = "block")]
@@ -42,9 +35,12 @@ async fn main() {
     let cli = Cli::parse();
     let CliCommands::Fetch(args) = cli.command;
 
-    let gear_api = GearApi::new(&args.gear_endpoint, args.gear_port, GEAR_RPC_RETRIES)
-        .await
-        .expect("Failed to create Gear API");
+    let gear_api = GearApi::new(
+        &args.gear_connection.get_endpoint().expect("Invalid URL"),
+        GEAR_RPC_RETRIES,
+    )
+    .await
+    .expect("Failed to create Gear API");
 
     let block = match args.block {
         Some(block) => Some(

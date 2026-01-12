@@ -8,13 +8,13 @@ use checkpoint_light_client_io::{
     Init, G2,
 };
 use clap::Parser;
+use cli_utils::{BeaconConnectionArgs, GearConnectionArgs};
 use ethereum_beacon_client::{utils, BeaconClient};
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use parity_scale_codec::Encode;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use std::time::Duration;
-use url::Url;
 
 const GEAR_API_RETRIES: u8 = 3;
 
@@ -25,9 +25,9 @@ struct Cli {
     /// Perform a dry run without actual deployment
     #[arg(long, default_value_t = false, env, num_args=0..=1)]
     dry_run: bool,
-    /// Address of the Gear RPC endpoint
-    #[arg(long, default_value = "ws://127.0.0.1:9944", env)]
-    gear_url: Url,
+
+    #[clap(flatten)]
+    gear_connection: GearConnectionArgs,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
@@ -36,17 +36,8 @@ struct Cli {
     #[arg(long, default_value = "//Alice", env = "GEAR_SURI")]
     gear_suri: String,
 
-    /// Specify the endpoint providing Beacon API
-    #[arg(
-        long,
-        default_value = "https://ethereum-beacon-api.publicnode.com",
-        env = "BEACON_ENDPOINT"
-    )]
-    beacon_endpoint: String,
-
-    /// Specify the timeout in seconds for requests to the Beacon API endpoint
-    #[arg(long, default_value = "120", env = "BEACON_TIMEOUT")]
-    beacon_timeout: u64,
+    #[clap(flatten)]
+    beacon: BeaconConnectionArgs,
 
     /// Specify the checkpoint slot for bootstrapping. If it is None then the header from
     /// the latest finality update is used to get the slot.
@@ -64,25 +55,13 @@ async fn main() -> AnyResult<()> {
 
     let cli = Cli::parse();
 
-    let gear_host = cli
-        .gear_url
-        .host_str()
-        .ok_or_else(|| anyhow!("Invalid Gear URL: {}", cli.gear_url))?
-        .to_string();
-    let gear_port = cli
-        .gear_url
-        .port_or_known_default()
-        .ok_or_else(|| anyhow!("Cannot determine port from Gear URL: {}", cli.gear_url))?;
+    let (gear_host, gear_port) = cli.gear_connection.get_host_port()?;
 
-    let scheme = cli.gear_url.scheme();
-
-    let endpoint = format!("{scheme}://{gear_host}");
-
-    println!("Using Gear endpoint: {endpoint}:{gear_port}");
+    println!("Using Gear endpoint: {gear_host}:{gear_port}");
 
     let beacon_client = BeaconClient::new(
-        cli.beacon_endpoint,
-        Some(Duration::from_secs(cli.beacon_timeout)),
+        cli.beacon.endpoint,
+        cli.beacon.timeout.map(Duration::from_secs),
     )
     .await?;
 
@@ -160,7 +139,7 @@ async fn main() -> AnyResult<()> {
     let api = GearApi::builder()
         .retries(GEAR_API_RETRIES)
         .suri(cli.gear_suri)
-        .build(WSAddress::new(endpoint, gear_port))
+        .build(WSAddress::new(gear_host, gear_port))
         .await?;
 
     let code_id = api

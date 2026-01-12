@@ -41,6 +41,7 @@ impl GearConnectionArgs {
                 _ => None,
             })
             .unwrap_or(9944);
+
         Ok((address, port))
     }
 }

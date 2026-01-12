@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::{Args, Parser, Subcommand};
-use cli_utils::GearConnectionArgs;
+use cli_utils::GearSignerArgs;
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::{
@@ -18,14 +18,7 @@ const SIZE_MIGRATE_BATCH: u32 = 100;
 #[command(propagate_version = true)]
 struct Cli {
     #[clap(flatten)]
-    gear_connection: GearConnectionArgs,
-
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char
-    #[arg(long, default_value = "//Alice", env = "GEAR_SURI")]
-    gear_suri: String,
+    gear: GearSignerArgs,
 
     #[command(subcommand)]
     command: CliCommands,
@@ -102,10 +95,10 @@ async fn main() -> AnyResult<()> {
         .init();
 
     let cli = Cli::parse();
-    let (host, port) = cli.gear_connection.get_host_port().expect("Invalid URL");
+    let (host, port) = cli.gear.connection.get_host_port().expect("Invalid URL");
     let address = WSAddress::new(host, port);
     let gear_api = GearApi::builder()
-        .suri(cli.gear_suri)
+        .suri(cli.gear.suri)
         .build(address)
         .await
         .context("Failed to initialize GearApi")?;

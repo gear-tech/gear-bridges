@@ -23,7 +23,7 @@ mod tests {
     fn test_gear_endpoint_parsing() {
         let cli = TestGearCli::parse_from(["test", "--gear-endpoint", "wss://example.com"]);
         assert_eq!(
-            cli.gear.endpoint.as_ref().unwrap().to_string(),
+            cli.gear.endpoint.to_string(),
             "wss://example.com/"
         );
         assert_eq!(cli.gear.get_endpoint().unwrap(), "wss://example.com/");
@@ -31,23 +31,6 @@ mod tests {
         let (host, port) = cli.gear.get_host_port().unwrap();
         assert_eq!(host, "wss://example.com");
         assert_eq!(port, 443);
-    }
-
-    #[test]
-    fn test_gear_domain_port_fallback() {
-        let cli = TestGearCli::parse_from([
-            "test",
-            "--gear-domain",
-            "ws://localhost",
-            "--gear-port",
-            "9944",
-        ]);
-        assert!(cli.gear.endpoint.is_none());
-        assert_eq!(cli.gear.get_endpoint().unwrap(), "ws://localhost:9944");
-
-        let (host, port) = cli.gear.get_host_port().unwrap();
-        assert_eq!(host, "ws://localhost");
-        assert_eq!(port, 9944);
     }
 
     #[derive(Parser, Debug)]

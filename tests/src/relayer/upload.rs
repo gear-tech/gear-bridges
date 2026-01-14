@@ -7,7 +7,6 @@ use crate::{connect_to_node, DEFAULT_BALANCE};
 use gclient::GearApi;
 use gstd::{ActorId, Encode};
 use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
-use primitive_types::H160;
 use sails_rs::{
     calls::{ActionIo, Activation, Call},
     gclient::calls::GClientRemoting,
@@ -109,9 +108,11 @@ impl EthContracts {
                 .expect("Failed to unpause vft-manager");
 
             vft_manager_client::VftManager::new(remoting.clone())
-                .update_erc_20_manager_address(H160(
-                    fixed_bytes!("0xa84a9eac078195b32f914f845d7555c45c0ad936").0,
-                ))
+                .update_erc_20_manager_address(
+                    fixed_bytes!("0xa84a9eac078195b32f914f845d7555c45c0ad936")
+                        .0
+                        .into(),
+                )
                 .send_recv(vft_manager)
                 .await
                 .expect("Failed to update ERC20 manager address");
@@ -168,7 +169,7 @@ impl EthContracts {
                 let mut service = vft_manager_client::VftManager::new(remoting.clone());
 
                 service
-                    .map_vara_to_eth_address(vft_id, *eth_token_id, TokenSupply::Ethereum)
+                    .map_vara_to_eth_address(vft_id, eth_token_id.0.into(), TokenSupply::Ethereum)
                     .send_recv(vft_manager)
                     .await
                     .expect("Failed to map VFT to ETH address");

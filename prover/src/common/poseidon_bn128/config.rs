@@ -165,9 +165,8 @@ impl<F: RichField> Hasher<F> for PoseidonBN128Hash {
     fn hash_pad(input: &[F]) -> Self::Hash {
         let mut padded_input = input.to_vec();
         padded_input.push(F::ONE);
-        while (padded_input.len() + 1)
-            % (super::permution::RATE * super::permution::GOLDILOCKS_ELEMENTS)
-            != 0
+        while !(padded_input.len() + 1)
+            .is_multiple_of(super::permution::RATE * super::permution::GOLDILOCKS_ELEMENTS)
         {
             padded_input.push(F::ZERO);
         }

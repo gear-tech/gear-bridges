@@ -1,6 +1,5 @@
 use gear_rpc_client::{dto, GearApi};
 use num::BigUint;
-use primitive_types::H256;
 use prometheus::{core::Collector, HistogramOpts, HistogramVec};
 use prover::proving::{
     self, BlockFinality, BranchNodeData, GenesisConfig, PreCommit, ProofWithCircuitData,
@@ -8,6 +7,7 @@ use prover::proving::{
 };
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, thread, time::Instant};
+use subxt::utils::H256;
 use utils_prometheus::MeteredService;
 
 pub struct Metrics;

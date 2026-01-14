@@ -5,6 +5,7 @@ use alloy::{
     providers::PendingTransactionBuilder,
     transports::{RpcError, TransportErrorKind},
 };
+use gsdk::ext::subxt_rpcs;
 use prover::proving::GenesisConfig;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -150,14 +151,18 @@ pub(crate) fn is_transport_error_recoverable(err: &anyhow::Error) -> bool {
     }
 
     // sails calls return gclient error which can contain subxt error with rpc transport error
-    if let Some(gclient::Error::Subxt(err)) = err.downcast_ref::<gclient::Error>() {
+    if let Some(gclient::Error::GearSDK(gsdk::Error::Subxt(err))) =
+        err.downcast_ref::<gclient::Error>()
+    {
         if err.is_disconnected_will_reconnect() {
             return true;
         }
         if let subxt::Error::Rpc(rpc) = &**err {
             match rpc {
                 subxt::error::RpcError::SubscriptionDropped => return true,
-                subxt::error::RpcError::DisconnectedWillReconnect(_) => return true,
+                subxt::error::RpcError::ClientError(
+                    subxt_rpcs::Error::DisconnectedWillReconnect(_),
+                ) => return true,
                 _ => (),
             }
         }

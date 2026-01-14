@@ -114,7 +114,7 @@ extern "C" fn handle() {
     let checkpoint = CHECKPOINTS
         .iter()
         .find(|(s, _)| *s == slot)
-        .map(|(_, (checkpoint, block_root))| (*checkpoint, *block_root))
+        .map(|(_, (checkpoint, block_root))| (*checkpoint, sails_rs::H256::from(block_root.0)))
         .expect("checkpoint not found");
 
     debug!("Found checkpoint: {checkpoint:?}");
@@ -122,7 +122,10 @@ extern "C" fn handle() {
     let mut bytes = Vec::with_capacity(GET_CHECKPOINT.len() + Encode::size_hint(&checkpoint));
     bytes.extend_from_slice(GET_CHECKPOINT);
     let result =
-        Result::<(u64, H256), checkpoint_light_client_client::CheckpointError>::Ok(checkpoint);
+        Result::<(u64, sails_rs::H256), checkpoint_light_client_client::CheckpointError>::Ok((
+            checkpoint.0,
+            checkpoint.1 .0.into(),
+        ));
     <service_checkpoint_for::io::Get as ActionIo>::Reply::encode_to(&result, &mut bytes);
 
     msg::reply_bytes(bytes, 0).expect("unable to reply with checkpoint");

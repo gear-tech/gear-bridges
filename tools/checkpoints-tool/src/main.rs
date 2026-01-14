@@ -10,13 +10,11 @@ use checkpoint_light_client_io::{
 use clap::Parser;
 use cli_utils::{BeaconConnectionArgs, GearConnectionArgs};
 use ethereum_beacon_client::{utils, BeaconClient};
-use gclient::{GearApi, WSAddress};
+use gclient::GearApi;
 use gear_core::ids::prelude::*;
 use parity_scale_codec::Encode;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use std::time::Duration;
-
-const GEAR_API_RETRIES: u8 = 3;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -55,9 +53,9 @@ async fn main() -> AnyResult<()> {
 
     let cli = Cli::parse();
 
-    let (gear_host, gear_port) = cli.gear_connection.get_host_port()?;
+    let endpoint = cli.gear_connection.get_endpoint()?;
 
-    println!("Using Gear endpoint: {gear_host}:{gear_port}");
+    println!("Using Gear endpoint: {endpoint}");
 
     let beacon_client = BeaconClient::new(
         cli.beacon.endpoint,
@@ -137,9 +135,9 @@ async fn main() -> AnyResult<()> {
     }
 
     let api = GearApi::builder()
-        .retries(GEAR_API_RETRIES)
         .suri(cli.gear_suri)
-        .build(WSAddress::new(gear_host, gear_port))
+        .uri(endpoint)
+        .build()
         .await?;
 
     let code_id = api

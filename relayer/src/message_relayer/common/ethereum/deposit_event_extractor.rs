@@ -1,6 +1,6 @@
 use ethereum_client::{DepositEventEntry, PollingEthApi};
+use primitive_types::H160;
 use prometheus::IntCounter;
-use sails_rs::H160;
 use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};

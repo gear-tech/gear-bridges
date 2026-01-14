@@ -145,18 +145,25 @@ async fn proxy() {
     let message_id = listener
         .proc(|e| match e {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.source == ethereum_event_client_program_id.into()
-                    && message.destination == admin.into()
-                    && message.details.is_none()
-                    && message.payload.0.starts_with(checkpoint_for_io::Get::ROUTE) =>
+                if message.source().into_bytes()
+                    == ethereum_event_client_program_id.into_bytes()
+                    && message.destination().into_bytes() == admin.into_bytes()
+                    && message.details().is_none()
+                    && message
+                        .payload_bytes()
+                        .starts_with(checkpoint_for_io::Get::ROUTE) =>
             {
-                let encoded = &message.payload.0[checkpoint_for_io::Get::ROUTE.len()..];
+                let encoded = &message.payload_bytes()[checkpoint_for_io::Get::ROUTE.len()..];
                 let slot: <checkpoint_for_io::Get as ActionIo>::Params =
                     Decode::decode(&mut &encoded[..]).ok()?;
 
                 if slot == 2_498_456 {
-                    println!("get checkpoint for: #{}, messageID={:?}", slot, message.id);
-                    Some(message.id)
+                    println!(
+                        "get checkpoint for: #{}, messageID={:?}",
+                        slot,
+                        message.id()
+                    );
+                    Some(message.id())
                 } else {
                     None
                 }
@@ -180,7 +187,7 @@ async fn proxy() {
 
     let mut listener = api.subscribe().await.unwrap();
     let (message_id, _, _) = match api
-        .send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
+        .send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
         .await
     {
         Ok(reply) => reply,
@@ -199,18 +206,18 @@ async fn proxy() {
     // wait for SubmitReceipt request and reply to it
     let predicate = |e| match e {
         Event::Gear(GearEvent::UserMessageSent { message, .. })
-            if message.destination == admin.into() && message.details.is_none() =>
+            if message.destination().into_bytes() == admin.into_bytes()
+                && message.details().is_none() =>
         {
             message
-                .payload
-                .0
+                .payload_bytes()
                 .starts_with(vft_manager::io::SubmitReceipt::ROUTE)
-                .then_some((Some(message.id), None))
+                .then_some((Some(message.id()), None))
         }
 
         Event::Gear(GearEvent::MessagesDispatched { statuses, .. }) => {
             statuses.into_iter().find_map(|(mid, status)| {
-                (mid.0 == message_id.into_bytes())
+                (mid.into_bytes() == message_id.into_bytes())
                     .then_some((None, Some(DispatchStatus::from(status))))
             })
         }
@@ -242,7 +249,7 @@ async fn proxy() {
         result
     };
 
-    api.send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
+    api.send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
         .await
         .unwrap();
 
@@ -266,18 +273,25 @@ async fn proxy() {
     let message_id = listener
         .proc(|e| match e {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.source == ethereum_event_client_program_id.into()
-                    && message.destination == admin.into()
-                    && message.details.is_none()
-                    && message.payload.0.starts_with(checkpoint_for_io::Get::ROUTE) =>
+                if message.source().into_bytes()
+                    == ethereum_event_client_program_id.into_bytes()
+                    && message.destination().into_bytes() == admin.into_bytes()
+                    && message.details().is_none()
+                    && message
+                        .payload_bytes()
+                        .starts_with(checkpoint_for_io::Get::ROUTE) =>
             {
-                let encoded = &message.payload.0[checkpoint_for_io::Get::ROUTE.len()..];
+                let encoded = &message.payload_bytes()[checkpoint_for_io::Get::ROUTE.len()..];
                 let slot: <checkpoint_for_io::Get as ActionIo>::Params =
                     Decode::decode(&mut &encoded[..]).ok()?;
 
                 if slot == 2_498_456 {
-                    println!("get checkpoint for: #{}, messageID={:?}", slot, message.id);
-                    Some(message.id)
+                    println!(
+                        "get checkpoint for: #{}, messageID={:?}",
+                        slot,
+                        message.id()
+                    );
+                    Some(message.id())
                 } else {
                     None
                 }
@@ -301,7 +315,7 @@ async fn proxy() {
 
     let mut listener = api.subscribe().await.unwrap();
     let (message_id, _, _) = match api
-        .send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
+        .send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
         .await
     {
         Ok(reply) => reply,
@@ -319,11 +333,12 @@ async fn proxy() {
     listener
         .proc(|e| match e {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.destination == admin.into() && message.details.is_none() =>
+                if message.destination().into_bytes() == admin.into_bytes()
+                    && message.details().is_none() =>
             {
                 let route = vft_manager::io::SubmitReceipt::ROUTE;
-                if message.payload.0.starts_with(route) {
-                    let slice = &message.payload.0[route.len()..];
+                if message.payload_bytes().starts_with(route) {
+                    let slice = &message.payload_bytes()[route.len()..];
                     let (slot, ..) = <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(
                         &mut &slice[..],
                     )

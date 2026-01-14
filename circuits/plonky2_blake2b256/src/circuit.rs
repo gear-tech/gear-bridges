@@ -85,7 +85,7 @@ pub fn blake2_circuit_from_targets<F: RichField + Extendable<D>, const D: usize>
     builder: &mut CircuitBuilder<F, D>,
     message: Vec<BoolTarget>,
 ) -> [BoolTarget; HASH_BITS] {
-    assert!(message.len() % 8 == 0);
+    assert!(message.len().is_multiple_of(8));
     let length = builder.constant(F::from_canonical_usize(message.len() / 8));
     blake2_circuit_from_message_targets_and_length_target(builder, message, length)
 }
@@ -99,10 +99,10 @@ pub fn blake2_circuit_from_message_targets_and_length_target<
     mut message: Vec<BoolTarget>,
     length: Target,
 ) -> [BoolTarget; HASH_BITS] {
-    assert!(message.len() % 8 == 0);
+    assert!(message.len().is_multiple_of(8));
 
     let msg_len_in_bits = message.len();
-    let dd = msg_len_in_bits / BLOCK_BITS + (msg_len_in_bits % BLOCK_BITS != 0) as usize;
+    let dd = msg_len_in_bits / BLOCK_BITS + !msg_len_in_bits.is_multiple_of(BLOCK_BITS) as usize;
     let dd = dd.max(1);
 
     let msg_len_rem = (dd * BLOCK_BITS) - msg_len_in_bits;

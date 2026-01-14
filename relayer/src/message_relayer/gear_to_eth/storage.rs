@@ -90,7 +90,7 @@ impl BlockStorage {
             block,
             Block {
                 block_hash,
-                messages: txs.map(|tx| U256::from_little_endian(&tx)).collect(),
+                messages: txs.map(|tx| U256::from_big_endian(&tx)).collect(),
             },
         );
     }

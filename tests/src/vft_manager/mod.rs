@@ -67,7 +67,7 @@ async fn calculate_reply_gas(
         result
     };
 
-    api.calculate_reply_gas(Some(origin.0.into()), message_id.into(), payload, 0, true)
+    api.calculate_reply_gas(Some(origin.0.into()), message_id, payload, 0, true)
         .await
 }
 
@@ -1483,7 +1483,7 @@ async fn vft_burn_from() -> Result<()> {
                     && message.destination().into_bytes() == [0; 32] =>
             {
                 if let Ok(Vft2Events::Transfer { from, to, value }) =
-                    Vft2Events::decode_event(&message.payload_bytes())
+                    Vft2Events::decode_event(message.payload_bytes())
                 {
                     if from.is_zero() && to == vft_id {
                         assert_eq!(value, amount_2);
@@ -1695,7 +1695,7 @@ async fn submit_receipt_works() -> Result<()> {
         {
             if let VftManagerEvents::BridgingAccepted {
                 to, amount, token, ..
-            } = VftManagerEvents::decode_event(&message.payload_bytes()).unwrap()
+            } = VftManagerEvents::decode_event(message.payload_bytes()).unwrap()
             {
                 assert_eq!(to, 42.into());
                 assert_eq!(token, vft_token_id);
@@ -1795,7 +1795,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
                 {
                     if let VftManagerEvents::BridgingAccepted {
                         ..
-                    } = VftManagerEvents::decode_event(&message.payload_bytes()).unwrap()
+                    } = VftManagerEvents::decode_event(message.payload_bytes()).unwrap()
                     {
                         Some(())
                     } else {
@@ -1909,7 +1909,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
             source,
             destination,
             ..
-        }) if destination == vft_manager_id.into() && source.0 == user_id.into_bytes() => {
+        }) if destination == vft_manager_id && source.0 == user_id.into_bytes() => {
             Some((MessageId::new(id.into_bytes()), 0_usize))
         }
         Event::Gear(GearEvent::UserMessageSent { message, .. })
@@ -2095,7 +2095,7 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
             match e {
                 Event::Gear(GearEvent::UserMessageSent { message, .. })
                     if message.destination().into_bytes() == [0_u8; 32]
-                        && message.source() == vft_manager_id.into() =>
+                        && message.source() == vft_manager_id =>
                 {
                     if let VftManagerEvents::BridgingAccepted {
                         ..

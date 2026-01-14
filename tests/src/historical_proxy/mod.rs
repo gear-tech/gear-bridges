@@ -187,7 +187,7 @@ async fn proxy() {
 
     let mut listener = api.subscribe().await.unwrap();
     let (message_id, _, _) = match api
-        .send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
+        .send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
         .await
     {
         Ok(reply) => reply,
@@ -249,7 +249,7 @@ async fn proxy() {
         result
     };
 
-    api.send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
+    api.send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
         .await
         .unwrap();
 
@@ -315,7 +315,7 @@ async fn proxy() {
 
     let mut listener = api.subscribe().await.unwrap();
     let (message_id, _, _) = match api
-        .send_reply_bytes(message_id.into(), payload, gas_limit / 100 * 95, 0)
+        .send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
         .await
     {
         Ok(reply) => reply,

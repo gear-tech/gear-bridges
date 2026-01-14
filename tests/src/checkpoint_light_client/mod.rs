@@ -406,8 +406,7 @@ async fn replay_back_and_updating() -> Result<()> {
                         let ServiceReplayBackEvents::NewCheckpoint {
                             slot,
                             tree_hash_root,
-                        } = ServiceReplayBackEvents::decode_event(message.payload_bytes())
-                            .unwrap();
+                        } = ServiceReplayBackEvents::decode_event(message.payload_bytes()).unwrap();
 
                         assert!(headers.iter().any(|header| {
                             header.slot == slot && header.tree_hash_root() == tree_hash_root

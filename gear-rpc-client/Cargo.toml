@@ -23,3 +23,4 @@ subxt.workspace = true
 trie-db = { workspace = true, features = ["std"] }
 gear-core-errors.workspace = true
 gear-core.workspace = true
+subxt-rpcs.workspace = true

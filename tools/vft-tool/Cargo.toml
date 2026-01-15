@@ -1,5 +1,5 @@
 [package]
-name = "deploy-to-gear"
+name = "vft-tool"
 version.workspace = true
 edition.workspace = true
 

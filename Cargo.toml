@@ -31,7 +31,7 @@ members = [
     "gear-programs/vft-vara/client",
     "utils-prometheus",
     "tools/checkpoints-tool",
-    "tools/deploy-to-gear",
+    "tools/vft-tool",
     "tools/genesis-config",
     "tools/governance",
     "tests",

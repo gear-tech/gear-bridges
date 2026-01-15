@@ -2,7 +2,7 @@
 
 #[macro_use]
 pub mod targets;
-pub mod generic_blake2;
+pub mod blake2;
 pub mod poseidon_bn128;
 
 use self::poseidon_bn128::config::PoseidonBN128GoldilocksConfig;
@@ -17,10 +17,7 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{
-            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
-            VerifierCircuitTarget,
-        },
+        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData},
         proof::{Proof, ProofWithPublicInputs},
     },
 };
@@ -300,36 +297,38 @@ impl BuilderExt for CircuitBuilder<F, D> {
     }
 }
 
-/// Compute `CommonCircuitData` to use in cyclic recursion.
+/// Generates `CommonCircuitData` usable for recursion.
+///
+/// Inspired by the function of the same name located in plonky2/src/recursion/cyclic_recursion.rs
+/// (commit b600142).
 pub fn common_data_for_recursion(
-    config: CircuitConfig,
     public_input_count: usize,
     num_gates: usize,
 ) -> CommonCircuitData<F, D> {
+    let config = CircuitConfig::standard_recursion_config();
+
     let builder = CircuitBuilder::<F, D>::new(config.clone());
     let data = builder.build::<C>();
+
     let mut builder = CircuitBuilder::<F, D>::new(config.clone());
     let proof = builder.add_virtual_proof_with_pis(&data.common);
-    let verifier_data = VerifierCircuitTarget {
-        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
-        circuit_digest: builder.add_virtual_hash(),
-    };
-
+    let verifier_data = builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
     builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
     let data = builder.build::<C>();
 
     let mut builder = CircuitBuilder::<F, D>::new(config);
     let proof = builder.add_virtual_proof_with_pis(&data.common);
-    let verifier_data = VerifierCircuitTarget {
-        constants_sigmas_cap: builder.add_virtual_cap(data.common.config.fri_config.cap_height),
-        circuit_digest: builder.add_virtual_hash(),
-    };
+    let verifier_data = builder.add_virtual_verifier_data(data.common.config.fri_config.cap_height);
     builder.verify_proof::<C>(&proof, &verifier_data, &data.common);
+
+    // Standardize degree
     while builder.num_gates() < num_gates {
         builder.add_gate(NoopGate, vec![]);
     }
+
     let mut data = builder.build::<C>().common;
     data.num_public_inputs = public_input_count;
+
     data
 }
 

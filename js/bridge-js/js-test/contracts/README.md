@@ -103,7 +103,7 @@ forge verify-contract \
     --watch \
     --constructor-args $(cast abi-encode "constructor()") \
     --etherscan-api-key $ETHERSCAN_API_KEY \
-    --compiler-version v0.8.30+commit.5b4cc3d1 \
+    --compiler-version v0.8.33+commit.64118f21 \
     CONTRACT_ADDRESS \
     src/MessageHandler.sol:MessageHandler
 ```

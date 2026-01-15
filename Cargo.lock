@@ -2552,6 +2552,7 @@ dependencies = [
  "checkpoint-light-client-client",
  "checkpoint-light-client-io",
  "clap",
+ "cli-utils",
  "dotenv",
  "ethereum_beacon_client",
  "gclient",
@@ -2659,6 +2660,18 @@ name = "clap_lex"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
+
+[[package]]
+name = "cli-utils"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hex",
+ "log",
+ "serde",
+ "url",
+]
 
 [[package]]
 name = "colorchoice"
@@ -3334,6 +3347,7 @@ name = "deploy-to-gear"
 version = "0.3.0"
 dependencies = [
  "clap",
+ "cli-utils",
  "dotenv",
  "gclient",
  "gear-common 0.3.0",
@@ -5237,6 +5251,7 @@ name = "genesis-config"
 version = "0.3.0"
 dependencies = [
  "clap",
+ "cli-utils",
  "gear-rpc-client",
  "hex",
  "tokio",
@@ -5329,6 +5344,7 @@ version = "0.3.0"
 dependencies = [
  "alloy",
  "clap",
+ "cli-utils",
  "gprimitives",
  "hex",
  "serde",
@@ -10162,6 +10178,7 @@ dependencies = [
  "checkpoint-light-client-io",
  "chrono",
  "clap",
+ "cli-utils",
  "derive_more 0.99.20",
  "dotenv",
  "eth-events-electra-client",
@@ -10200,6 +10217,7 @@ dependencies = [
  "subxt",
  "thiserror 2.0.12",
  "tokio",
+ "url",
  "utils-prometheus",
  "uuid",
  "vft-manager-client",
@@ -14427,6 +14445,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
+ "cli-utils",
  "dotenv",
  "gclient",
  "gear-common 0.3.0",

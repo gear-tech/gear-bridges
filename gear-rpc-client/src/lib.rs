@@ -66,10 +66,9 @@ impl From<gsdk::Api> for GearApi {
 }
 
 impl GearApi {
-    pub async fn new(domain: &str, port: u16, retries: u8) -> AnyResult<GearApi> {
-        let uri: &str = &format!("{domain}:{port}");
+    pub async fn new(url: &str, retries: u8) -> AnyResult<GearApi> {
         Ok(GearApi {
-            api: gsdk::Api::builder().retries(retries).build(uri).await?,
+            api: gsdk::Api::builder().retries(retries).build(url).await?,
         })
     }
 

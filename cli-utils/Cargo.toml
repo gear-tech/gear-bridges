@@ -1,0 +1,12 @@
+[package]
+name = "cli-utils"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+hex = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+url = { workspace = true }

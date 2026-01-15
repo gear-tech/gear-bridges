@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use cli_utils::GearConnectionArgs;
 use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
@@ -11,17 +12,8 @@ const SIZE_MIGRATE_BATCH: u32 = 25;
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
 struct Cli {
-    /// Address of the Gear RPC endpoint
-    #[arg(
-        long = "gear-endpoint",
-        default_value = "wss://testnet.vara.network",
-        env = "GEAR_RPC"
-    )]
-    gear_endpoint: String,
-
-    /// Port of the Gear RPC endpoint
-    #[arg(long = "gear-port", default_value = "443", env = "GEAR_PORT")]
-    gear_port: u16,
+    #[clap(flatten)]
+    gear_connection: GearConnectionArgs,
 
     /// Substrate URI that identifies a user by a mnemonic phrase or
     /// provides default users from the keyring (e.g., "//Alice", "//Bob",
@@ -111,7 +103,11 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let address = WSAddress::new(&cli.gear_endpoint, Some(cli.gear_port));
+    let (gear_host, gear_port) = cli
+        .gear_connection
+        .get_host_port()
+        .expect("Invalid Gear URL");
+    let address = WSAddress::new(gear_host, gear_port);
     let gear_api = GearApi::builder()
         .suri(cli.gear_suri)
         .build(address)

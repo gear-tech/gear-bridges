@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.33;
 
 import {Test} from "forge-std/Test.sol";
 import {Base} from "./Base.sol";
@@ -509,8 +509,14 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 balanceBeforeMint = tetherToken.balanceOf(address(erc20Manager));
         if (isFork()) {
-            ITetherToken(address(tetherToken)).issue(amount);
-            ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+            bool isMainnet = block.chainid == 1;
+            if (isMainnet) {
+                ITetherToken(address(tetherToken)).issue(amount);
+                ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+            } else {
+                IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
+                tetherToken.approve(address(erc20Manager), amount);
+            }
         } else {
             IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
             tetherToken.approve(address(erc20Manager), amount);
@@ -549,8 +555,14 @@ contract ERC20ManagerTest is Test, Base {
         address bridgingPayment_ = address(bridgingPayment);
 
         if (isFork()) {
-            ITetherToken(address(tetherToken)).issue(amount);
-            ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+            bool isMainnet = block.chainid == 1;
+            if (isMainnet) {
+                ITetherToken(address(tetherToken)).issue(amount);
+                ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
+            } else {
+                IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
+                tetherToken.approve(address(erc20Manager), amount);
+            }
         } else {
             IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
             tetherToken.approve(address(erc20Manager), amount);

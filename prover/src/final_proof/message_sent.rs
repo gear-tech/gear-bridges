@@ -102,7 +102,7 @@ impl MessageSent {
                     .expect("RUST_MIN_STACK should have the correct value"),
             )
             // TODO: 782
-            .num_threads(10)
+            .num_threads(5)
             .build()
             .expect("MessageSent: failed to create ThreadPool");
 

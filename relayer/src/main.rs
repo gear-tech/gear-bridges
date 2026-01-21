@@ -230,7 +230,7 @@ async fn run() -> AnyResult<()> {
             metrics
                 .register_service(&relayer)
                 .build()
-                .run(args.prometheus_args.endpoint)
+                .run(args.prometheus_args.prometheus_endpoint)
                 .await;
             api_provider.spawn();
 
@@ -289,7 +289,7 @@ async fn run() -> AnyResult<()> {
             metrics
                 .register_service(&kill_switch)
                 .build()
-                .run(args.prometheus_args.endpoint)
+                .run(args.prometheus_args.prometheus_endpoint)
                 .await;
             api_provider.spawn();
             kill_switch.run().await.expect("Kill switch relayer failed");
@@ -394,7 +394,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(args.prometheus_args.endpoint)
+                        .run(args.prometheus_args.prometheus_endpoint)
                         .await;
 
                     provider.spawn();
@@ -439,7 +439,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(args.prometheus_args.endpoint)
+                        .run(args.prometheus_args.prometheus_endpoint)
                         .await;
 
                     provider.spawn();
@@ -477,7 +477,7 @@ async fn run() -> AnyResult<()> {
             MetricsBuilder::new()
                 .register_service(&relayer)
                 .build()
-                .run(args.prometheus_args.endpoint)
+                .run(args.prometheus_args.prometheus_endpoint)
                 .await;
 
             relayer.run().await;
@@ -552,7 +552,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(prometheus_args.endpoint)
+                        .run(prometheus_args.prometheus_endpoint)
                         .await;
 
                     relayer.run().await;
@@ -582,7 +582,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(prometheus_args.endpoint)
+                        .run(prometheus_args.prometheus_endpoint)
                         .await;
 
                     relayer.run().await;
@@ -747,7 +747,7 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     } = &args.ethereum_args;
 
     EthApi::new_with_retries(
-        &connection.endpoint,
+        &connection.ethereum_endpoint,
         mq_address,
         Some(&args.eth_fee_payer),
         connection.max_retries,
@@ -811,7 +811,7 @@ async fn create_eth_killswitch_client(
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {
     EthApi::new(
-        &args.connection.endpoint,
+        &args.connection.ethereum_endpoint,
         &args.mq_address,
         None,
         args.tx.max_fee_per_gas,
@@ -824,7 +824,7 @@ async fn create_eth_client(args: &EthereumArgs) -> EthApi {
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
     let timeout = args.timeout.map(Duration::from_secs);
 
-    BeaconClient::new(args.endpoint.clone(), timeout)
+    BeaconClient::new(args.beacon_endpoint.clone(), timeout)
         .await
         .expect("Failed to create beacon client")
 }

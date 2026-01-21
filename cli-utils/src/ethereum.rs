@@ -4,7 +4,7 @@ use clap::Args;
 pub struct EthereumConnectionArgs {
     /// Address of the ethereum endpoint
     #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]
-    pub endpoint: String,
+    pub ethereum_endpoint: String,
 
     /// Number of retries for the ethereum endpoint
     #[arg(long = "eth-max-retries", env = "ETH_RPC_MAX_RETRIES")]
@@ -39,7 +39,7 @@ pub struct BeaconConnectionArgs {
         alias = "beacon-endpoint",
         env = "ETH_BEACON_RPC"
     )]
-    pub endpoint: String,
+    pub beacon_endpoint: String,
 
     /// Timeout in seconds for requests to the ethereum beacon RPC
     #[arg(

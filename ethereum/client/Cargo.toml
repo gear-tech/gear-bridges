@@ -16,4 +16,3 @@ serde_json.workspace = true
 sp-core = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio.workspace = true
-subxt.workspace = true

@@ -44,12 +44,6 @@ impl Block {
 
 pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<(u64, H256)> {
     block.events().iter().find_map(|event| match event {
-        /*gear_rpc_client::metadata::Event::GearEthBridge(
-            gear_rpc_client::metadata::gear_eth_bridge::Event::QueueMerkleRootChanged {
-                queue_id,
-                root,
-            },
-        ) => Some((*queue_id, *root)),*/
         gsdk::Event::GearEthBridge(
             gsdk::gear::gear_eth_bridge::Event::QueueMerkleRootChanged { queue_id, root },
         ) => Some((*queue_id, *root)),
@@ -59,9 +53,6 @@ pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<(u64, H256)
 
 pub(super) fn message_queued_events_of(block: &GearBlock) -> impl Iterator<Item = U256> + use<'_> {
     block.events().iter().filter_map(|event| match event {
-        /*gear_rpc_client::metadata::Event::GearEthBridge(
-            gear_rpc_client::metadata::gear_eth_bridge::Event::MessageQueued { message, .. },
-        ) => Some(U256(message.nonce.0)),*/
         gsdk::Event::GearEthBridge(gsdk::gear::gear_eth_bridge::Event::MessageQueued {
             message,
             ..

@@ -31,7 +31,6 @@ use trie_db::{node::NodeHandle, ChildReference};
 use crate::dto::StorageInclusionProof;
 
 pub mod dto;
-//pub mod metadata;
 
 pub use gsdk::{ext, gp};
 
@@ -509,7 +508,6 @@ impl GearApi {
         block: H256,
     ) -> AnyResult<dto::StorageInclusionProof> {
         let address = gsdk::gear::storage().gear_eth_bridge().queue_merkle_root();
-        //gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
 
         self.fetch_block_inclusion_proof(block, &address.to_root_bytes())
             .await
@@ -728,13 +726,6 @@ impl GearApi {
     }
 
     pub async fn fetch_timestamp(&self, block: H256) -> AnyResult<u64> {
-        /*let block = (*self.api).blocks().at(block).await?;
-        let timestamp_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::TimestampStorage::Now);
-        Self::fetch_from_storage(&block, &timestamp_address)
-            .await
-            .map(Duration::from_millis)
-            .map(|d| d.as_secs())*/
         let address = gsdk::gear::storage().timestamp().now();
         let timestamp: u64 = self.api.storage_fetch_at(&address, Some(block)).await?;
         Ok(timestamp)
@@ -742,21 +733,6 @@ impl GearApi {
 
     /// Fetch queue merkle root for the given block.
     pub async fn fetch_queue_merkle_root(&self, block: H256) -> AnyResult<(u64, H256)> {
-        /*let block = (*self.api).blocks().at(block).await?;
-        let set_id_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
-        let merkle_root: H256 = Self::fetch_from_storage(&block, &set_id_address).await?;
-        let set_id_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueId);
-        let queue_id: u64 = self
-            .maybe_fetch_from_storage(&block, &set_id_address)
-            .await?
-            .unwrap_or_else(|| {
-                log::warn!("QueueId not found in storage, using 0 as default");
-                0
-            });
-
-        Ok((queue_id, merkle_root))*/
         let address = gsdk::gear::storage().gear_eth_bridge().queue_merkle_root();
         let merkle_root: H256 = self.api.storage_fetch_at(&address, Some(block)).await?;
         let queue_id_address = gsdk::gear::storage().gear_eth_bridge().queue_id();
@@ -822,14 +798,6 @@ impl GearApi {
             let RuntimeEvent::Gear(GearEvent::UserMessageSent { message, .. }) = event else {
                 return None;
             };
-
-            /*if source != ActorId(from_program.0) {
-                return None;
-            }
-
-            if destination != ActorId(to_user.0) {
-                return None;
-            }*/
 
             if message.source() != ActorId::new(from_program.0) {
                 return None;

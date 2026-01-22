@@ -192,19 +192,6 @@ fn message_queued_events_of(
     block: &GearBlock,
 ) -> impl Iterator<Item = gear_rpc_client::dto::Message> + use<'_> {
     block.events().iter().filter_map(|event| match event {
-        /*gear_rpc_client::metadata::Event::GearEthBridge(
-            gear_rpc_client::metadata::gear_eth_bridge::Event::MessageQueued { message, .. },
-        ) => {
-            let mut nonce_be = [0; 32];
-            primitive_types::U256(message.nonce.0).to_big_endian(&mut nonce_be);
-
-            Some(gear_rpc_client::dto::Message {
-                nonce_be,
-                source: message.source.0,
-                destination: message.destination.0,
-                payload: message.payload.clone(),
-            })
-        }*/
         gsdk::Event::GearEthBridge(gsdk::gear::gear_eth_bridge::Event::MessageQueued {
             message,
             ..

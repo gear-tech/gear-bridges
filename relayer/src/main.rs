@@ -36,6 +36,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+
 use tokio::{sync::mpsc, task, time};
 use utils_prometheus::MetricsBuilder;
 use vft_manager_client::traits::VftManager;
@@ -96,10 +97,10 @@ async fn run() -> AnyResult<()> {
             )
             .await?;
 
-            let finalized_head = gear_api.api.rpc().chain_get_finalized_head().await?;
+            let finalized_head = gear_api.api.legacy().chain_get_finalized_head().await?;
             let header_finalized = gear_api
                 .api
-                .rpc()
+                .legacy()
                 .chain_get_header(Some(finalized_head))
                 .await?
                 .expect("Finalized header");
@@ -228,7 +229,7 @@ async fn run() -> AnyResult<()> {
             metrics
                 .register_service(&relayer)
                 .build()
-                .run(args.prometheus_args.endpoint)
+                .run(args.prometheus_args.prometheus_endpoint)
                 .await;
             api_provider.spawn();
 
@@ -287,7 +288,7 @@ async fn run() -> AnyResult<()> {
             metrics
                 .register_service(&kill_switch)
                 .build()
-                .run(args.prometheus_args.endpoint)
+                .run(args.prometheus_args.prometheus_endpoint)
                 .await;
             api_provider.spawn();
             kill_switch.run().await.expect("Kill switch relayer failed");
@@ -336,7 +337,8 @@ async fn run() -> AnyResult<()> {
                     match api.bridge_admin().await {
                         Ok(admin) => {
                             log::info!("Bridge admin: {admin}");
-                            excluded_from_fees.insert(admin);
+                            let admin: &[u8] = admin.as_ref();
+                            excluded_from_fees.insert(AccountId32::try_from(admin).unwrap());
                         }
                         Err(e) => {
                             log::error!("Failed to get bridge admin: {e}");
@@ -346,7 +348,8 @@ async fn run() -> AnyResult<()> {
                     match api.bridge_pauser().await {
                         Ok(pauser) => {
                             log::info!("Bridge pauser: {pauser}");
-                            excluded_from_fees.insert(pauser);
+                            let pauser: &[u8] = pauser.as_ref();
+                            excluded_from_fees.insert(AccountId32::try_from(pauser).unwrap());
                         }
                         Err(e) => {
                             log::error!("Failed to get bridge pauser: {e}");
@@ -392,7 +395,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(args.prometheus_args.endpoint)
+                        .run(args.prometheus_args.prometheus_endpoint)
                         .await;
 
                     provider.spawn();
@@ -437,7 +440,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(args.prometheus_args.endpoint)
+                        .run(args.prometheus_args.prometheus_endpoint)
                         .await;
 
                     provider.spawn();
@@ -475,7 +478,7 @@ async fn run() -> AnyResult<()> {
             MetricsBuilder::new()
                 .register_service(&relayer)
                 .build()
-                .run(args.prometheus_args.endpoint)
+                .run(args.prometheus_args.prometheus_endpoint)
                 .await;
 
             relayer.run().await;
@@ -510,7 +513,7 @@ async fn run() -> AnyResult<()> {
             let (historical_proxy_address, checkpoint_light_client_address) =
                 fetch_historical_proxy_and_checkpoints(
                     connection.clone(),
-                    vft_manager_address.into(),
+                    vft_manager_address.0.into(),
                     &gear_args.suri,
                 )
                 .await
@@ -537,8 +540,8 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         beacon_client,
                         erc20_manager_address,
-                        checkpoint_light_client_address.into(),
-                        historical_proxy_address.into(),
+                        checkpoint_light_client_address.into_bytes().into(),
+                        historical_proxy_address.into_bytes().into(),
                         vft_manager_address,
                         connection,
                         storage_path,
@@ -550,7 +553,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(prometheus_args.endpoint)
+                        .run(prometheus_args.prometheus_endpoint)
                         .await;
 
                     relayer.run().await;
@@ -567,8 +570,8 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         beacon_client,
                         bridging_payment_address,
-                        checkpoint_light_client_address.into(),
-                        historical_proxy_address.into(),
+                        checkpoint_light_client_address.into_bytes().into(),
+                        historical_proxy_address.into_bytes().into(),
                         vft_manager_address,
                         connection,
                         storage_path,
@@ -580,7 +583,7 @@ async fn run() -> AnyResult<()> {
                     MetricsBuilder::new()
                         .register_service(&relayer)
                         .build()
-                        .run(prometheus_args.endpoint)
+                        .run(prometheus_args.prometheus_endpoint)
                         .await;
 
                     relayer.run().await;
@@ -678,13 +681,13 @@ async fn run() -> AnyResult<()> {
                     })
                     .ok_or_else(|| anyhow!("checkpoint-light-client argument is required if receiver-route is specified"))?;
                 (
-                    historical_proxy_address.into(),
-                    checkpoint_light_client_address.into(),
+                    historical_proxy_address.0.into(),
+                    checkpoint_light_client_address.0.into(),
                 )
             } else {
                 fetch_historical_proxy_and_checkpoints(
                     provider_connection.clone(),
-                    receiver_address.into(),
+                    receiver_address.0.into(),
                     &gear_args.suri,
                 )
                 .await?
@@ -707,8 +710,8 @@ async fn run() -> AnyResult<()> {
                 gear_args.suri,
                 eth_api,
                 beacon_client,
-                checkpoint_light_client_address.into(),
-                historical_proxy_address.into(),
+                checkpoint_light_client_address.into_bytes().into(),
+                historical_proxy_address.into_bytes().into(),
                 receiver_address,
                 receiver_route,
                 tx_hash,
@@ -728,11 +731,11 @@ async fn run() -> AnyResult<()> {
 }
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
-    let (host, port) = args.connection.get_host_port().expect("Invalid gear args");
+    let endpoint = args.connection.get_endpoint().expect("Invalid gear args");
     gclient::GearApi::builder()
-        .retries(args.connection.max_reconnect_attempts)
         .suri(&args.suri)
-        .build(gclient::WSAddress::new(&host, port))
+        .uri(endpoint)
+        .build()
         .await
         .expect("GearApi client should be created")
 }
@@ -745,7 +748,7 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     } = &args.ethereum_args;
 
     EthApi::new_with_retries(
-        &connection.endpoint,
+        &connection.ethereum_endpoint,
         mq_address,
         Some(&args.eth_fee_payer),
         connection.max_retries,
@@ -809,7 +812,7 @@ async fn create_eth_killswitch_client(
 
 async fn create_eth_client(args: &EthereumArgs) -> EthApi {
     EthApi::new(
-        &args.connection.endpoint,
+        &args.connection.ethereum_endpoint,
         &args.mq_address,
         None,
         args.tx.max_fee_per_gas,
@@ -822,7 +825,7 @@ async fn create_eth_client(args: &EthereumArgs) -> EthApi {
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
     let timeout = args.timeout.map(Duration::from_secs);
 
-    BeaconClient::new(args.endpoint.clone(), timeout)
+    BeaconClient::new(args.beacon_endpoint.clone(), timeout)
         .await
         .expect("Failed to create beacon client")
 }

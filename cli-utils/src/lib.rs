@@ -22,7 +22,7 @@ mod tests {
     #[test]
     fn test_gear_endpoint_parsing() {
         let cli = TestGearCli::parse_from(["test", "--gear-endpoint", "wss://example.com"]);
-        assert_eq!(cli.gear.endpoint.to_string(), "wss://example.com/");
+        assert_eq!(cli.gear.gear_endpoint.to_string(), "wss://example.com/");
         assert_eq!(cli.gear.get_endpoint().unwrap(), "wss://example.com/");
 
         let (host, port) = cli.gear.get_host_port().unwrap();
@@ -39,6 +39,6 @@ mod tests {
     #[test]
     fn test_eth_parsing() {
         let cli = TestEthCli::parse_from(["test", "--ethereum-endpoint", "https://eth.com"]);
-        assert_eq!(cli.eth.endpoint, "https://eth.com");
+        assert_eq!(cli.eth.ethereum_endpoint, "https://eth.com");
     }
 }

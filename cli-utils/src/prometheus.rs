@@ -8,5 +8,5 @@ pub struct PrometheusArgs {
         default_value = "0.0.0.0:9090",
         env = "PROMETHEUS_ENDPOINT"
     )]
-    pub endpoint: String,
+    pub prometheus_endpoint: String,
 }

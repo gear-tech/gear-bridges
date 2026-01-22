@@ -317,7 +317,7 @@ async fn main() -> Result<(), Error> {
     } = toml::from_str(&fs::read_to_string("deployment.toml")?)?;
 
     let provider: DynProvider<Ethereum> = ProviderBuilder::default()
-        .connect(&eth_connection.endpoint)
+        .connect(&eth_connection.ethereum_endpoint)
         .await?
         .erased();
 

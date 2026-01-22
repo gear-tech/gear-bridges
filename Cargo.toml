@@ -197,9 +197,9 @@ gbuiltin-eth-bridge = { version = "1.10.0", default-features = false }
 gear-core-errors = "1.10.0"
 pallet-gear-eth-bridge-primitives = { version = "1.10.0", default-features = false }
 # TODO: remove idl-gen and client-gen
-sails-idl-gen = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap"  }
-sails-client-gen = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap"  }
-sails-rs = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap"  }
+sails-idl-gen = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap" }
+sails-client-gen = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap" }
+sails-rs = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap" }
 awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", branch = "ap-backport-gear", default-features = false }
 awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", branch = "ap-backport-gear", default-features = false, features = [
     "vft",
@@ -212,15 +212,15 @@ awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", b
 
 subxt-rpcs = "0.44.0"
 subxt = "0.44.0"
-sc-consensus-grandpa = { version = "0.30.0", default-features = false }
-sp-runtime = { version = "39.0.1", default-features = false }
-sp-consensus-grandpa = { version = "21.0.0", default-features = false }
+sc-consensus-grandpa = { version = "0.30.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-runtime = { version = "39.0.1", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-consensus-grandpa = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
 parity-scale-codec = { version = "3.7.5", default-features = false, features = [
     "derive",
 ] }
 trie-db = { version = "0.29.0", default-features = false }
-sp-trie = { version = "37.0.0", default-features = false }
-sp-core = { version = "34.0.0", default-features = false }
+sp-trie = { version = "37.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-core = { version = "34.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
 primitive-types = { version = "0.13.1", default-features = false }
 
 # Alloy deps

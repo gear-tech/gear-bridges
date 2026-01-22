@@ -58,7 +58,7 @@ async fn main() -> AnyResult<()> {
     println!("Using Gear endpoint: {endpoint}");
 
     let beacon_client = BeaconClient::new(
-        cli.beacon.endpoint,
+        cli.beacon.beacon_endpoint,
         cli.beacon.timeout.map(Duration::from_secs),
     )
     .await?;

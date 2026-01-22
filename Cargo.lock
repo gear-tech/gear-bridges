@@ -2284,7 +2284,6 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs",
  "scale-info",
- "zerocopy",
 ]
 
 [[package]]
@@ -4191,7 +4190,6 @@ dependencies = [
  "tree_hash",
  "tree_hash_derive",
  "trie-db 0.22.6",
- "zerocopy",
 ]
 
 [[package]]
@@ -8975,7 +8973,6 @@ dependencies = [
  "parity-scale-codec",
  "sails-rs",
  "scale-info",
- "zerocopy",
 ]
 
 [[package]]
@@ -14802,7 +14799,6 @@ dependencies = [
  "awesome-sails",
  "awesome-sails-services",
  "sails-rs",
- "zerocopy",
 ]
 
 [[package]]

@@ -30,7 +30,6 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 # its API changed a lot and the rlp implementation of NodeCodec
 # requires lots of non-trivial changes.
 trie-db = { version = "0.22.6", default-features = false }
-zerocopy.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

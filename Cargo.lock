@@ -3455,26 +3455,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "930c7171c8df9fb1782bdf9b918ed9ed2d33d1d22300abb754f9085bc48bf8e8"
 
 [[package]]
-name = "deploy-to-gear"
-version = "0.3.0"
-dependencies = [
- "clap",
- "cli-utils",
- "dotenv",
- "gclient",
- "gear-common 0.3.0",
- "gear-core",
- "gsdk",
- "hex",
- "sails-rs",
- "tokio",
- "vft",
- "vft-client",
- "vft-vara",
- "vft-vara-client",
-]
-
-[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14883,6 +14863,26 @@ dependencies = [
  "tokio",
  "vft-manager",
  "vft-manager-client",
+]
+
+[[package]]
+name = "vft-tool"
+version = "0.3.0"
+dependencies = [
+ "clap",
+ "cli-utils",
+ "dotenv",
+ "gclient",
+ "gear-common 0.3.0",
+ "gear-core",
+ "gsdk",
+ "hex",
+ "sails-rs",
+ "tokio",
+ "vft",
+ "vft-client",
+ "vft-vara",
+ "vft-vara-client",
 ]
 
 [[package]]

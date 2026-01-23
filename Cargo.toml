@@ -179,6 +179,8 @@ tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch 
 unroll = "0.1.5"
 uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
+# Temporary workaround - https://github.com/gear-tech/gear-bridges/actions/runs/19660617523/job/56306084288?pr=753
+zerocopy = "=0.8.27"
 zeroize = "1.8.1"
 async-trait = "0.1.88"
 url = "2.5.7"

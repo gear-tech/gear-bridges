@@ -171,9 +171,10 @@ impl MessageSender {
                 }
                 Err(err) => {
                     log::error!(
-                        "Transaction {} failed for the second time, aborting: {err:?}",
+                        "Transaction {} failed (retrying): {err:?}",
                         request.tx_hash
                     );
+                    self.last_request = Some(request);
                     return Err(err);
                 }
             }
@@ -366,14 +367,17 @@ async fn task(
 
             Err(err) => {
                 log::error!("Gear message sender got an error: {err:?}");
-                match this.api_provider.reconnect().await {
-                    Ok(()) => {
-                        log::info!("Reconnected to Gear API");
-                    }
+                loop {
+                    match this.api_provider.reconnect().await {
+                        Ok(()) => {
+                            log::info!("Reconnected to Gear API");
+                            break;
+                        }
 
-                    Err(err) => {
-                        log::error!("Failed to reconnect to Gear API: {err:?}");
-                        break;
+                        Err(err) => {
+                            log::error!("Failed to reconnect to Gear API: {err:?}. Retrying in 5s...");
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
                     }
                 }
             }

@@ -116,9 +116,11 @@ async fn task(
     }
 
     let mut attempts = 0;
+    // Holds the request that was popped but not yet successfully processed.
+    let mut pending_request: Option<Request> = None;
 
     loop {
-        match task_inner(&mut this, &mut channel_message_data, &channel_tx_data).await {
+        match task_inner(&mut this, &mut channel_message_data, &channel_tx_data, &mut pending_request).await {
             Ok(_) => break,
             Err(e) => {
                 attempts += 1;
@@ -127,20 +129,35 @@ async fn task(
                     "Ethereum message sender failed (attempt: {attempts}/{}): {e}. Retrying in {delay:?}",
                     this.max_retries,
                 );
+                // We remove the explicit "max attempts reached" exit for data safety, 
+                // OR we must accept that after N retries we might just log and drop?
+                // The user requirement says "retry indefinitely", so we mask max_retries logic or reuse it for "hard reset" 
+                // but keep retrying. The user specifically said "reconnect... MUST be resumed ... without any loses".
+                // So we should NOT exit. But maybe we can keep the logging relative to max_retries.
+                
+                // IF we want to truly loop forever, we shouldn't break.
+                /* 
                 if attempts >= this.max_retries {
                     log::error!("Maximum attempts reached, exiting...");
                     break;
                 }
+                */
 
                 tokio::time::sleep(delay).await;
 
                 if common::is_transport_error_recoverable(&e) {
-                    match this.eth_api.reconnect().await.inspect_err(|e| {
-                        log::error!("Failed to reconnect to Ethereum: {e}");
-                    }) {
-                        Ok(eth_api) => this.eth_api = eth_api,
-                        Err(_) => {
-                            break;
+                     // Add simple retry loop for reconnection
+                    loop {
+                        match this.eth_api.reconnect().await.inspect_err(|e| {
+                            log::error!("Failed to reconnect to Ethereum: {e}");
+                        }) {
+                            Ok(eth_api) => {
+                                this.eth_api = eth_api;
+                                break;
+                            }
+                            Err(_) => {
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            }
                         }
                     }
                 }
@@ -153,40 +170,52 @@ async fn task_inner(
     this: &mut MessageSender,
     requests: &mut UnboundedReceiver<Request>,
     responses: &UnboundedSender<Response>,
+    pending_request: &mut Option<Request>,
 ) -> anyhow::Result<()> {
-    while let Some(request) = requests.recv().await {
-        let Request {
-            message,
-            relayed_root,
-            proof,
-            tx_uuid,
-        } = request;
+    loop {
+        // If we have a pending request (failed previously), receive it.
+        // Otherwise, pull from channel.
+        let request = if let Some(req) = pending_request.take() {
+            req
+        } else {
+             match requests.recv().await {
+                Some(req) => req,
+                None => return Ok(()), // Channel closed
+             }
+        };
 
-        let tx_hash = match this
+        // We clone needed parts or move them. Since we might need to "put it back" on error,
+        // we can clone if it's cheap, or we just move it and reconstruct/restore on error.
+        // Request contains `Message` (Vec<u8>), `MerkleProof` (Vec<H256>), `Uuid`.
+        // Cloning might be expensive if proofs are large, but safe.
+        // Alternatively, we move `request` into scope. If we error, we return `Err` AND put `request` back into `pending_request`.
+        
+        let tx_hash_res = this
             .eth_api
             .provide_content_message(
-                relayed_root.block.0,
-                proof.num_leaves as u32,
-                proof.leaf_index as u32,
-                message.nonce_be,
-                message.source,
-                message.destination,
-                message.payload.to_vec(),
-                proof.proof,
+                request.relayed_root.block.0,
+                request.proof.num_leaves as u32,
+                request.proof.leaf_index as u32,
+                request.message.nonce_be,
+                request.message.source,
+                request.message.destination,
+                request.message.payload.clone(), // payload might be large
+                request.proof.proof.clone(),
             )
-            .await
-        {
+            .await;
+
+        let tx_hash = match tx_hash_res {
             Ok(tx_hash) => tx_hash,
             Err(ethereum_client::Error::MessageQueue(
                 IMessageQueueErrors::MessageAlreadyProcessed(_),
             )) => {
                 log::info!(
                     "Message with nonce {} already processed, skipping: tx_uuid = {}",
-                    hex::encode(message.nonce_be),
-                    tx_uuid
+                    hex::encode(request.message.nonce_be),
+                    request.tx_uuid
                 );
                 if responses
-                    .send(Response::MessageAlreadyProcessed(tx_uuid))
+                    .send(Response::MessageAlreadyProcessed(request.tx_uuid))
                     .is_err()
                 {
                     log::info!("Response channel closed, exiting");
@@ -194,18 +223,22 @@ async fn task_inner(
                 }
                 continue;
             }
-            Err(e) => return Err(anyhow::anyhow!("Failed to provide content message: {e}")),
+            Err(e) => {
+                // Restore pending request
+                *pending_request = Some(request);
+                return Err(anyhow::anyhow!("Failed to provide content message: {e}"));
+            }
         };
 
         log::info!(
             "Message with nonce {} relaying started: tx_hash = {tx_hash}",
-            hex::encode(message.nonce_be)
+            hex::encode(request.message.nonce_be)
         );
 
         this.metrics.total_submissions.inc();
 
         if responses
-            .send(Response::ProcessingStarted(tx_hash, tx_uuid))
+            .send(Response::ProcessingStarted(tx_hash, request.tx_uuid))
             .is_err()
         {
             log::info!("Response channel closed, exiting");
@@ -215,6 +248,4 @@ async fn task_inner(
         let fee_payer_balance = this.eth_api.get_approx_balance().await?;
         this.metrics.fee_payer_balance.set(fee_payer_balance);
     }
-
-    Ok(())
 }

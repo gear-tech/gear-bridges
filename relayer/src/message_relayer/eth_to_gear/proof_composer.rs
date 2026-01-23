@@ -236,6 +236,10 @@ async fn handle_requests(
                         "Failed to process transaction {tx_uuid} (hash: {:?}): {err:?}",
                         tx.tx_hash
                     );
+                    // Push back the failed transaction to the queue so it's not lost
+                    this.to_process.push((tx_uuid, tx));
+                    // Return the error to trigger the reconnect/retry logic in the main task
+                    return Err(err);
                 }
             }
         }

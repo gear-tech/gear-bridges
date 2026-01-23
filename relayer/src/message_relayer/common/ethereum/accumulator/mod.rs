@@ -140,13 +140,18 @@ impl Accumulator {
                         log::error!("{e:?}");
 
                         tokio::time::sleep(BASE_RETRY_DELAY).await;
-                        self.eth_api = match self.eth_api.reconnect().await {
-                            Ok(api) => api,
-                            Err(e) => {
-                                log::error!("Failed to reconnect to Ethereum API: {e:?}");
-                                return;
-                            }
-                        };
+                        loop {
+                            match self.eth_api.reconnect().await {
+                                Ok(api) => {
+                                    self.eth_api = api;
+                                    break;
+                                }
+                                Err(e) => {
+                                    log::error!("Failed to reconnect to Ethereum API: {e:?}. Retrying in 5s...");
+                                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                }
+                            };
+                        }
                     }
                 }
             }

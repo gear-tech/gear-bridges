@@ -1,5 +1,5 @@
 use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    common::BASE_RETRY_DELAY,
     message_relayer::{
         common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
@@ -77,11 +77,17 @@ impl MessagePaidEventExtractor {
         missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
         while let Some(block) = missing_blocks.pop() {
-            self.process_block_events(block, sender).await?;
+            if let Err(e) = self.process_block_events(block, sender).await {
+                missing_blocks.push(block);
+                return Err(e);
+            }
         }
 
         while let Some(block) = blocks.recv().await {
-            self.process_block_events(block, sender).await?;
+            if let Err(e) = self.process_block_events(block, sender).await {
+                missing_blocks.push(block);
+                return Err(e);
+            }
         }
 
         Ok(())
@@ -156,31 +162,27 @@ async fn task(
         };
 
         attempts += 1;
-        log::error!("Paid event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}");
+        let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
+        log::error!("Paid event extractor failed (attempt {attempts}): {err}. Retrying in {delay:?}");
+        
+        // Removed MAX_RETRIES check for infinite retry
+        
+        tokio::time::sleep(delay).await;
 
-        if attempts >= MAX_RETRIES {
-            log::error!("Max attempts reached, exiting...");
-            return;
+        // Try to reconnect if needed
+        loop {
+            match this.eth_api.reconnect().await {
+                Ok(eth_api) => {
+                    attempts = 0;
+                    this.eth_api = eth_api;
+                    log::info!("Paid event extractor reconnected");
+                    break;
+                }
+                Err(err) => {
+                    log::error!("Failed to reconnect to Ethereum API: {err}. Retrying in 5s...");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            };
         }
-
-        tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
-
-        if !common::is_transport_error_recoverable(&err) {
-            log::error!("Non recoverable error, exiting.");
-            return;
-        }
-
-        this.eth_api = match this.eth_api.reconnect().await {
-            Ok(eth_api) => {
-                attempts = 0;
-
-                eth_api
-            }
-
-            Err(err) => {
-                log::error!("Failed to reconnect to Ethereum API: {err}");
-                return;
-            }
-        };
     }
 }

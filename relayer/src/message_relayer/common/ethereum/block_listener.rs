@@ -1,4 +1,4 @@
-use crate::{common, message_relayer::common::EthereumBlockNumber};
+use crate::message_relayer::common::EthereumBlockNumber;
 use ethereum_client::PollingEthApi;
 use prometheus::IntGauge;
 use std::time::Duration;
@@ -47,19 +47,21 @@ impl BlockListener {
         receiver
     }
 
-    async fn run_inner(&self, sender: &UnboundedSender<EthereumBlockNumber>) -> anyhow::Result<()> {
-        let mut current_block = self.from_block;
-
-        self.metrics.latest_block.set(current_block as i64);
+    async fn run_inner(
+         &self,
+         sender: &UnboundedSender<EthereumBlockNumber>,
+         current_block: &mut u64,
+     ) -> anyhow::Result<()> {
+        self.metrics.latest_block.set(*current_block as i64);
 
         loop {
             let latest = self.eth_api.finalized_block().await?.header.number;
-            if latest >= current_block {
-                for block in current_block..=latest {
+            if latest >= *current_block {
+                for block in *current_block..=latest {
                     sender.send(EthereumBlockNumber(block))?;
                 }
 
-                current_block = latest + 1;
+                *current_block = latest + 1;
 
                 self.metrics.latest_block.set(latest as i64);
             } else {
@@ -70,25 +72,37 @@ impl BlockListener {
 }
 
 async fn task(mut this: BlockListener, sender: UnboundedSender<EthereumBlockNumber>) {
+    let mut current_block = this.from_block;
+
     loop {
-        let result = this.run_inner(&sender).await;
+        // We pass current_block as ref mut so it's updated as we go.
+        // If run_inner fails, we keep the updated current_block for the next attempt.
+        let result = this.run_inner(&sender, &mut current_block).await;
         let Err(e) = result else {
+            // run_inner loop typically doesn't exit with Ok unless logic changes (it's infinite loop)
+            // but if it does, we just continue or break.
             continue;
         };
 
         log::error!("Ethereum block listener failed: {e:?}");
-        if !common::is_transport_error_recoverable(&e) {
-            log::error!("Non recoverable error, exiting.");
-            return;
-        }
-
+        // We removed the "Non recoverable error" check because we want to retry indefinitely
+        // unless it's a shutdown signal (which isn't really handled here explicitly via cancellation).
+        // But the previous "is_transport_error_recoverable" might be too strict.
+        // If we want to support "indefinite retry" for network issues, we should retry.
+        
         tokio::time::sleep(Duration::from_secs(30)).await;
 
-        this.eth_api = match this.eth_api.reconnect().await {
-            Ok(api) => api,
-            Err(e) => {
-                log::error!("Failed to reconnect to Ethereum API: {e}");
-                return;
+        loop {
+             match this.eth_api.reconnect().await {
+                Ok(api) => {
+                    this.eth_api = api;
+                    log::info!("Ethereum block listener reconnected");
+                    break;
+                }
+                Err(e) => {
+                    log::error!("Failed to reconnect to Ethereum API: {e}. Retrying in 30s...");
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }
             }
         }
     }

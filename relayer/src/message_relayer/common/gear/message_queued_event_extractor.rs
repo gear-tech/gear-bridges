@@ -51,8 +51,11 @@ impl MessageQueuedEventExtractor {
 
     pub fn spawn(mut self, mut blocks: Receiver<GearBlock>) {
         tokio::task::spawn(async move {
+            let mut pending_block: Option<GearBlock> = None;
+
             loop {
-                let res = self.run_inner(&mut blocks).await;
+                // If we have a pending block, we'll try to process it first inside run_inner
+                let res = self.run_inner(&mut blocks, &mut pending_block).await;
                 if let Err(err) = res {
                     log::error!("Message queued extractor failed: {err}");
 
@@ -60,13 +63,17 @@ impl MessageQueuedEventExtractor {
                         return;
                     }
 
-                    match self.api_provider.reconnect().await {
-                        Ok(_) => {
-                            log::info!("Message queued extractor reconnected");
-                        }
-                        Err(err) => {
-                            log::error!("Message queued extractor unable to reconnect: {err}");
-                            return;
+                    // Loop until success
+                    loop {
+                         match self.api_provider.reconnect().await {
+                            Ok(_) => {
+                                log::info!("Message queued extractor reconnected");
+                                break;
+                            }
+                            Err(err) => {
+                                log::error!("Message queued extractor unable to reconnect: {err}. Retrying in 5s...");
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            }
                         }
                     }
                 } else {
@@ -77,23 +84,48 @@ impl MessageQueuedEventExtractor {
         });
     }
 
-    async fn run_inner(&self, blocks: &mut Receiver<GearBlock>) -> anyhow::Result<()> {
+    async fn run_inner(
+        &self, 
+        blocks: &mut Receiver<GearBlock>, 
+        pending_block: &mut Option<GearBlock>
+    ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
         loop {
-            match blocks.recv().await {
-                Ok(block) => {
-                    let block_hash = block.hash();
-                    let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-
-                    self.process_block_events(block, authority_set_id).await?;
+            // Use pending block if available, otherwise receive new one
+            let block = if let Some(block) = pending_block.take() {
+                block
+            } else {
+                match blocks.recv().await {
+                    Ok(block) => block,
+                    Err(RecvError::Closed) => {
+                        log::warn!("Message queued extractor channel closed, exiting");
+                        return Ok(());
+                    }
+                    Err(RecvError::Lagged(_)) => {
+                        log::warn!("Message queued extractor channel lagged behind, trying again");
+                        continue;
+                    }
                 }
-                Err(RecvError::Closed) => {
-                    log::warn!("Message queued extractor channel closed, exiting");
-                    return Ok(());
+            };
+            
+            // At this point we have a block. If we fail, we MUST put it back into pending_block.
+            let block_hash = block.hash();
+            match gear_api
+                .signed_by_authority_set_id(block_hash.0.into())
+                .await
+            {
+                Ok(authority_set_id) => {
+                     match self.process_block_events(block.clone(), authority_set_id).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                             *pending_block = Some(block);
+                             return Err(e);
+                        }
+                     }
                 }
-                Err(RecvError::Lagged(_)) => {
-                    log::warn!("Message queued extractor channel lagged behind, trying again");
-                    continue;
+                Err(e) => {
+                    *pending_block = Some(block);
+                    return Err(e.into());
                 }
             }
         }

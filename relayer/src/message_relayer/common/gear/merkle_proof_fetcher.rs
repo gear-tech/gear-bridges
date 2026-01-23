@@ -82,7 +82,7 @@ async fn task(
 
             Err(e) => {
                 log::error!("{e:?}");
-                
+
                 loop {
                     match this.api_provider.reconnect().await {
                         Ok(_) => {
@@ -110,10 +110,10 @@ async fn task_inner(
         let request = if let Some(req) = pending_request.take() {
             req
         } else {
-             match requests.recv().await {
+            match requests.recv().await {
                 Some(req) => req,
                 None => return Ok(()),
-             }
+            }
         };
 
         let message_hash = request.message_hash;
@@ -135,9 +135,9 @@ async fn task_inner(
             )
             .await;
 
-         match proof_res {
+        match proof_res {
             Ok(proof) => {
-                 responses.send(Response {
+                responses.send(Response {
                     proof,
                     merkle_root: request.merkle_root,
                     tx_uuid: request.tx_uuid,
@@ -145,7 +145,7 @@ async fn task_inner(
             }
             Err(e) => {
                 *pending_request = Some(request);
-                return Err(e.into());
+                return Err(e);
             }
         }
     }

@@ -65,7 +65,7 @@ impl MessageQueuedEventExtractor {
 
                     // Loop until success
                     loop {
-                         match self.api_provider.reconnect().await {
+                        match self.api_provider.reconnect().await {
                             Ok(_) => {
                                 log::info!("Message queued extractor reconnected");
                                 break;
@@ -85,9 +85,9 @@ impl MessageQueuedEventExtractor {
     }
 
     async fn run_inner(
-        &self, 
-        blocks: &mut Receiver<GearBlock>, 
-        pending_block: &mut Option<GearBlock>
+        &self,
+        blocks: &mut Receiver<GearBlock>,
+        pending_block: &mut Option<GearBlock>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.client();
         loop {
@@ -107,7 +107,7 @@ impl MessageQueuedEventExtractor {
                     }
                 }
             };
-            
+
             // At this point we have a block. If we fail, we MUST put it back into pending_block.
             let block_hash = block.hash();
             match gear_api
@@ -115,17 +115,20 @@ impl MessageQueuedEventExtractor {
                 .await
             {
                 Ok(authority_set_id) => {
-                     match self.process_block_events(block.clone(), authority_set_id).await {
-                        Ok(_) => {},
+                    match self
+                        .process_block_events(block.clone(), authority_set_id)
+                        .await
+                    {
+                        Ok(_) => {}
                         Err(e) => {
-                             *pending_block = Some(block);
-                             return Err(e);
+                            *pending_block = Some(block);
+                            return Err(e);
                         }
-                     }
+                    }
                 }
                 Err(e) => {
                     *pending_block = Some(block);
-                    return Err(e.into());
+                    return Err(e);
                 }
             }
         }

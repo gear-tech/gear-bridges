@@ -106,15 +106,6 @@ async fn task_inner(
     responses: &UnboundedSender<Response>,
     pending_request: &mut Option<Request>,
 ) -> anyhow::Result<()> {
-    // Re-create client if needed inside loop or just use `this.api_provider` which will have new client after reconnect.
-    // However, `this.api_provider.client()` returns a cloned `GearApi`. 
-    // `task_inner` should probably get the client fresh each time if it changes, 
-    // but `ApiProviderConnection` handles internal client update on reconnect? 
-    // Looking at block_listener, it calls `self.api_provider.client()` in loop. 
-    // So here we should probably not cache `gear_api` outside the loop if it becomes stale?
-    // Actually `ApiProviderConnection` likely wraps `Arc<RwLock>` or similar if it's dynamic, 
-    // or we just get a new one. Let's assume `this.api_provider.client()` is cheap or we just call it.
-    
     loop {
         let request = if let Some(req) = pending_request.take() {
             req

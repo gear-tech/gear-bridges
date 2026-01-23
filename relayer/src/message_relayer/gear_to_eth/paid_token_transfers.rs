@@ -1,25 +1,21 @@
-use crate::{
-    common::MAX_RETRIES,
-    message_relayer::{
-        common::{
-            ethereum::{
-                accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
-                message_sender::MessageSender, status_fetcher::StatusFetcher,
-            },
-            gear::{
-                block_listener::BlockListener as GearBlockListener,
-                merkle_proof_fetcher::MerkleProofFetcher,
-                message_data_extractor::MessageDataExtractor,
-                message_paid_event_extractor::MessagePaidEventExtractor,
-                message_queued_event_extractor::MessageQueuedEventExtractor,
-            },
-            paid_messages_filter::PaidMessagesFilter,
-            web_request::Message,
-            AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+use crate::message_relayer::{
+    common::{
+        ethereum::{
+            accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+            message_sender::MessageSender, status_fetcher::StatusFetcher,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
-        gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            merkle_proof_fetcher::MerkleProofFetcher, message_data_extractor::MessageDataExtractor,
+            message_paid_event_extractor::MessagePaidEventExtractor,
+            message_queued_event_extractor::MessageQueuedEventExtractor,
+        },
+        paid_messages_filter::PaidMessagesFilter,
+        web_request::Message,
+        AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
+    eth_to_gear::api_provider::ApiProviderConnection,
+    gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
 };
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
@@ -106,7 +102,7 @@ impl Relayer {
             roots_sender.clone(),
         );
 
-        let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
+        let message_sender = MessageSender::new(eth_api.clone());
 
         let proof_fetcher = MerkleProofFetcher::new(api_provider.clone());
         let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);

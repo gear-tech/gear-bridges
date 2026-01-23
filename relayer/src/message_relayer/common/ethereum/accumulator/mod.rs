@@ -1,7 +1,7 @@
 pub mod utils;
 
 use super::*;
-use crate::{common::BASE_RETRY_DELAY, message_relayer::common::AuthoritySetId};
+use crate::{common, message_relayer::common::AuthoritySetId};
 use ethereum_client::EthApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
@@ -133,17 +133,18 @@ impl Accumulator {
         let (requests_in, mut requests_out) = mpsc::unbounded_channel();
         let (mut messages_out, receiver) = mpsc::unbounded_channel();
         tokio::task::spawn(async move {
+            let mut attempts = 0;
             loop {
                 match run_inner(&mut self, &mut messages_out, &mut requests_out).await {
                     Ok(_) => break,
                     Err(e) => {
-                        log::error!("{e:?}");
-
-                        tokio::time::sleep(BASE_RETRY_DELAY).await;
+                        attempts += 1;
+                        common::retry_backoff(attempts, "Accumulator", &e).await;
                         loop {
                             match self.eth_api.reconnect().await {
                                 Ok(api) => {
                                     self.eth_api = api;
+                                    attempts = 0;
                                     break;
                                 }
                                 Err(e) => {

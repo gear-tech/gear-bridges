@@ -1,5 +1,5 @@
 use crate::{
-    common::BASE_RETRY_DELAY,
+    common,
     message_relayer::{
         common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
@@ -162,14 +162,8 @@ async fn task(
         };
 
         attempts += 1;
-        let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-        log::error!("Paid event extractor failed (attempt {attempts}): {err}. Retrying in {delay:?}");
-        
-        // Removed MAX_RETRIES check for infinite retry
-        
-        tokio::time::sleep(delay).await;
+        common::retry_backoff(attempts, "Paid event extractor", &err).await;
 
-        // Try to reconnect if needed
         loop {
             match this.eth_api.reconnect().await {
                 Ok(eth_api) => {

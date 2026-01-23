@@ -1,5 +1,5 @@
 use crate::{
-    common::{self, BASE_RETRY_DELAY},
+    common,
     message_relayer::{
         common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
         eth_to_gear::api_provider::ApiProviderConnection,
@@ -94,14 +94,7 @@ async fn task(mut this: MerkleRootExtractor) {
         let res = task_inner(&this, &mut pending_log).await;
         if let Err(err) = res {
             attempts += 1;
-            log::error!(
-                "Merkle root extractor failed (attempt {}): {}. Retrying in {:?}...",
-                attempts,
-                err,
-                BASE_RETRY_DELAY * 2u32.pow(attempts - 1),
-            );
-
-            tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
+            common::retry_backoff(attempts, "Merkle root extractor", &err).await;
 
             // Infinite retry for reconnection
             loop {

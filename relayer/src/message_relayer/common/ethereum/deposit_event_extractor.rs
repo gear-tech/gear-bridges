@@ -6,7 +6,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    common,
     message_relayer::{
         common::{
             ethereum::block_listener::ETHEREUM_BLOCK_TIME_APPROX, EthereumBlockNumber,
@@ -94,22 +94,20 @@ impl DepositEventExtractor {
                 let res = self.run_inner(&sender, &mut blocks, &mut unprocessed).await;
                 if let Err(err) = res {
                     attempts += 1;
-                    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
+                    common::retry_backoff(attempts, "Deposit event extractor", &err).await;
 
-                    log::error!(
-                        "Deposit event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}"
-                    );
-                    if attempts >= MAX_RETRIES {
-                        log::error!("Maximum attempts reached, exiting...");
-                        return;
-                    }
-                    tokio::time::sleep(delay).await;
-                    if common::is_transport_error_recoverable(&err) {
-                        self.eth_api = match self.eth_api.reconnect().await {
-                            Ok(api) => api,
+                    loop {
+                        match self.eth_api.reconnect().await {
+                            Ok(api) => {
+                                self.eth_api = api;
+                                log::info!("Ethereum API reconnected");
+                                break;
+                            }
                             Err(err) => {
-                                log::error!("Failed to reconnect to Ethereum: {err}");
-                                return;
+                                log::error!(
+                                    "Failed to reconnect to Ethereum: {err}. Retrying in 5s..."
+                                );
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                             }
                         }
                     }
@@ -130,10 +128,16 @@ impl DepositEventExtractor {
         missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
         while let Some(block) = missing_blocks.pop() {
-            self.process_block_events(block, sender).await?;
+            if let Err(e) = self.process_block_events(block, sender).await {
+                missing_blocks.push(block);
+                return Err(e);
+            }
         }
         while let Some(block) = blocks.recv().await {
-            self.process_block_events(block, sender).await?;
+            if let Err(e) = self.process_block_events(block, sender).await {
+                missing_blocks.push(block);
+                return Err(e);
+            }
         }
 
         Ok(())

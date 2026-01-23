@@ -1,7 +1,4 @@
-use crate::{
-    common::{self, BASE_RETRY_DELAY},
-    message_relayer::common::RelayedMerkleRoot,
-};
+use crate::{common, message_relayer::common::RelayedMerkleRoot};
 use ethereum_client::{abi::IMessageQueue::IMessageQueueErrors, EthApi, TxHash};
 use gear_rpc_client::dto::{MerkleProof, Message};
 use prometheus::{Gauge, IntCounter};
@@ -57,7 +54,6 @@ impl MessageSenderIo {
 }
 
 pub struct MessageSender {
-    max_retries: u32,
     eth_api: EthApi,
 
     metrics: Metrics,
@@ -84,9 +80,8 @@ impl_metered_service! {
 }
 
 impl MessageSender {
-    pub fn new(max_retries: u32, eth_api: EthApi) -> Self {
+    pub fn new(eth_api: EthApi) -> Self {
         Self {
-            max_retries,
             eth_api,
 
             metrics: Metrics::new(),
@@ -120,39 +115,28 @@ async fn task(
     let mut pending_request: Option<Request> = None;
 
     loop {
-        match task_inner(&mut this, &mut channel_message_data, &channel_tx_data, &mut pending_request).await {
+        match task_inner(
+            &mut this,
+            &mut channel_message_data,
+            &channel_tx_data,
+            &mut pending_request,
+        )
+        .await
+        {
             Ok(_) => break,
             Err(e) => {
                 attempts += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                    "Ethereum message sender failed (attempt: {attempts}/{}): {e}. Retrying in {delay:?}",
-                    this.max_retries,
-                );
-                // We remove the explicit "max attempts reached" exit for data safety, 
-                // OR we must accept that after N retries we might just log and drop?
-                // The user requirement says "retry indefinitely", so we mask max_retries logic or reuse it for "hard reset" 
-                // but keep retrying. The user specifically said "reconnect... MUST be resumed ... without any loses".
-                // So we should NOT exit. But maybe we can keep the logging relative to max_retries.
-                
-                // IF we want to truly loop forever, we shouldn't break.
-                /* 
-                if attempts >= this.max_retries {
-                    log::error!("Maximum attempts reached, exiting...");
-                    break;
-                }
-                */
-
-                tokio::time::sleep(delay).await;
+                common::retry_backoff(attempts, "Ethereum message sender", &e).await;
 
                 if common::is_transport_error_recoverable(&e) {
-                     // Add simple retry loop for reconnection
+                    // Add simple retry loop for reconnection
                     loop {
                         match this.eth_api.reconnect().await.inspect_err(|e| {
                             log::error!("Failed to reconnect to Ethereum: {e}");
                         }) {
                             Ok(eth_api) => {
                                 this.eth_api = eth_api;
+                                attempts = 0; // Reset attempts after successful reconnect
                                 break;
                             }
                             Err(_) => {
@@ -178,18 +162,12 @@ async fn task_inner(
         let request = if let Some(req) = pending_request.take() {
             req
         } else {
-             match requests.recv().await {
+            match requests.recv().await {
                 Some(req) => req,
                 None => return Ok(()), // Channel closed
-             }
+            }
         };
 
-        // We clone needed parts or move them. Since we might need to "put it back" on error,
-        // we can clone if it's cheap, or we just move it and reconstruct/restore on error.
-        // Request contains `Message` (Vec<u8>), `MerkleProof` (Vec<H256>), `Uuid`.
-        // Cloning might be expensive if proofs are large, but safe.
-        // Alternatively, we move `request` into scope. If we error, we return `Err` AND put `request` back into `pending_request`.
-        
         let tx_hash_res = this
             .eth_api
             .provide_content_message(

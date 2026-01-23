@@ -14,10 +14,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
-use crate::{
-    common::{submit_merkle_root_to_ethereum, BASE_RETRY_DELAY, MAX_RETRIES},
-    prover_interface::FinalProof,
-};
+use crate::{common::submit_merkle_root_to_ethereum, prover_interface::FinalProof};
 
 use super::storage::MerkleRootStorage;
 
@@ -435,21 +432,22 @@ async fn task(
             Ok(_) => break,
             Err(e) => {
                 attempts += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                    "Merkle root submitter failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
-                );
-                if attempts >= MAX_RETRIES {
-                    log::error!("Maximum attempts reached, exiting...");
-                    break;
-                }
-                tokio::time::sleep(delay).await;
+                crate::common::retry_backoff(attempts, "Merkle root submitter", &e).await;
 
-                match this.eth_api.reconnect().await {
-                    Ok(eth_api) => this.eth_api = eth_api,
-                    Err(e) => {
-                        log::error!("Failed to reconnect to Ethereum API: {e}");
-                        break;
+                // Simple reconnection loop
+                loop {
+                    match this.eth_api.reconnect().await {
+                        Ok(eth_api) => {
+                            this.eth_api = eth_api;
+                            log::info!("Reconnected to Ethereum API, attempts reset");
+
+                            attempts = 0;
+                            break;
+                        }
+                        Err(e) => {
+                            log::error!("Failed to reconnect to Ethereum API: {e}. Retrying reconnection in 5s...");
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
                     }
                 }
             }

@@ -191,5 +191,19 @@ pub fn create_range(from: Option<u64>, latest: u64) -> BlockRange {
     BlockRange { from, to: block_to }
 }
 
-pub const MAX_RETRIES: u32 = 10;
+// Max cap for retry delay
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(300);
+
+pub(crate) async fn retry_backoff(attempts: u32, component: &str, error: &impl std::fmt::Display) {
+    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts.min(10) - 1);
+    let delay = std::cmp::min(delay, MAX_RETRY_DELAY);
+
+    log::error!(
+        "{component} failed (attempt: {attempts}), reconnect in {} secs: {error}",
+        delay.as_secs()
+    );
+
+    tokio::time::sleep(delay).await;
+}
+
 pub const BASE_RETRY_DELAY: Duration = Duration::from_secs(10);

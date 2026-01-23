@@ -1,4 +1,3 @@
-use crate::common::{self, BASE_RETRY_DELAY, MAX_RETRIES};
 use alloy::providers::{PendingTransactionBuilder, PendingTransactionError, Provider};
 use ethereum_client::{EthApi, TxHash};
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -6,6 +5,7 @@ use prometheus::{
     core::{AtomicU64, GenericCounter, GenericGauge},
     IntCounter, IntGauge,
 };
+use std::{future::Future, pin::Pin};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
@@ -107,30 +107,28 @@ async fn task(
     responses: UnboundedSender<Response>,
 ) {
     let mut attempts = 0;
+    // Persist pending requests across reconnects
+    let mut pending_requests = std::collections::HashMap::new();
 
     loop {
-        match task_inner(&mut this, &mut channel, &responses).await {
-            Ok(_) => break,
+        match task_inner(&mut this, &mut channel, &responses, &mut pending_requests).await {
+            Ok(_) => break, // Clean exit
             Err(e) => {
                 attempts += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                "Ethereum message sender failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
-            );
-                if attempts >= MAX_RETRIES {
-                    log::error!("Maximum attempts reached, exiting...");
-                    break;
-                }
+                crate::common::retry_backoff(attempts, "Ethereum status fetcher", &e).await;
 
-                tokio::time::sleep(delay).await;
-
-                if common::is_transport_error_recoverable(&e) {
+                // Infinite retry loop for reconnection
+                loop {
                     match this.eth_api.reconnect().await.inspect_err(|e| {
                         log::error!("Failed to reconnect to Ethereum: {e}");
                     }) {
-                        Ok(eth_api) => this.eth_api = eth_api,
-                        Err(_) => {
+                        Ok(eth_api) => {
+                            this.eth_api = eth_api;
+                            log::info!("Ethereum status fetcher reconnected");
                             break;
+                        }
+                        Err(_) => {
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         }
                     }
                 }
@@ -143,8 +141,32 @@ async fn task_inner(
     this: &mut StatusFetcher,
     channel: &mut UnboundedReceiver<Request>,
     responses: &UnboundedSender<Response>,
+    pending_requests: &mut std::collections::HashMap<Uuid, TxHash>,
 ) -> anyhow::Result<()> {
-    let mut txs = FuturesUnordered::new();
+    type Output = (
+        Uuid,
+        Result<alloy::rpc::types::TransactionReceipt, alloy::providers::PendingTransactionError>,
+    );
+
+    let mut txs = FuturesUnordered::<Pin<Box<dyn Future<Output = Output> + Send>>>::new();
+
+    // Repopulate using current provider
+    for (uuid, tx_hash) in pending_requests.iter() {
+        let pending =
+            PendingTransactionBuilder::new(this.eth_api.raw_provider().root().clone(), *tx_hash);
+        let confirmations = this.confirmations;
+        let uuid = *uuid;
+        txs.push(Box::pin(async move {
+            (
+                uuid,
+                pending
+                    .with_required_confirmations(confirmations)
+                    .get_receipt()
+                    .await,
+            )
+        }));
+    }
+
     loop {
         tokio::select! {
             message = channel.recv() => {
@@ -156,6 +178,7 @@ async fn task_inner(
                 let Request { tx_uuid, tx_hash, .. } = request;
 
                 this.metrics.pending_tx_count.inc();
+                pending_requests.insert(tx_uuid, tx_hash);
 
                 let pending = PendingTransactionBuilder::new(
                     this.eth_api.raw_provider().root().clone(),
@@ -163,14 +186,14 @@ async fn task_inner(
                 );
 
                 let confirmations = this.confirmations;
-                txs.push(async move {
-                    Ok((tx_uuid, pending.with_required_confirmations(confirmations).get_receipt().await.map_err(|e| (tx_uuid, e))?))
-                });
+                txs.push(Box::pin(async move {
+                    (tx_uuid, pending.with_required_confirmations(confirmations).get_receipt().await)
+                }));
             }
 
-            Some(tx) = txs.next(), if !txs.is_empty() => {
-                match tx {
-                    Ok((uuid, receipt)) => {
+            Some((uuid, result)) = txs.next() => {
+                match result {
+                    Ok(receipt) => {
                         let tx_hash = receipt.transaction_hash;
                         let gas_used = receipt.gas_used;
 
@@ -185,13 +208,20 @@ async fn task_inner(
                             this.metrics.max_gas_used.set(gas_used);
                         }
 
-
                         this.metrics.pending_tx_count.dec();
+                        pending_requests.remove(&uuid);
                         responses.send(Response::Success(uuid, tx_hash))?;
                     }
-                    Err((uuid, e)) => {
+                    Err(PendingTransactionError::TransportError(e)) => {
+                        // Transport error - likely connection lost.
+                        // We should return error to trigger reconnect and rebuild of futures.
+                        return Err(anyhow::anyhow!("Transport error checking status for {uuid}: {e}"));
+                    }
+                    Err(e) => {
+                        // Other errors (e.g. reverted transaction, or something terminal for THIS tx)
                         this.metrics.total_failed_txs.inc();
                         log::error!("Failed to get transaction {uuid} status: {e}");
+                        pending_requests.remove(&uuid);
                         responses.send(Response::Failed(uuid, e))?;
                     }
                 }

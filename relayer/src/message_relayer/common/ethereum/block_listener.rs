@@ -48,10 +48,10 @@ impl BlockListener {
     }
 
     async fn run_inner(
-         &self,
-         sender: &UnboundedSender<EthereumBlockNumber>,
-         current_block: &mut u64,
-     ) -> anyhow::Result<()> {
+        &self,
+        sender: &UnboundedSender<EthereumBlockNumber>,
+        current_block: &mut u64,
+    ) -> anyhow::Result<()> {
         self.metrics.latest_block.set(*current_block as i64);
 
         loop {
@@ -79,21 +79,15 @@ async fn task(mut this: BlockListener, sender: UnboundedSender<EthereumBlockNumb
         // If run_inner fails, we keep the updated current_block for the next attempt.
         let result = this.run_inner(&sender, &mut current_block).await;
         let Err(e) = result else {
-            // run_inner loop typically doesn't exit with Ok unless logic changes (it's infinite loop)
-            // but if it does, we just continue or break.
             continue;
         };
 
         log::error!("Ethereum block listener failed: {e:?}");
-        // We removed the "Non recoverable error" check because we want to retry indefinitely
-        // unless it's a shutdown signal (which isn't really handled here explicitly via cancellation).
-        // But the previous "is_transport_error_recoverable" might be too strict.
-        // If we want to support "indefinite retry" for network issues, we should retry.
-        
+
         tokio::time::sleep(Duration::from_secs(30)).await;
 
         loop {
-             match this.eth_api.reconnect().await {
+            match this.eth_api.reconnect().await {
                 Ok(api) => {
                     this.eth_api = api;
                     log::info!("Ethereum block listener reconnected");

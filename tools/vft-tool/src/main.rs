@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use cli_utils::GearConnectionArgs;
-use gclient::GearApi;
+use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
 use vft_client::traits::*;
@@ -103,14 +103,14 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    let endpoint = cli
+    let (gear_host, gear_port) = cli
         .gear_connection
-        .get_endpoint()
+        .get_host_port()
         .expect("Invalid Gear URL");
+    let address = WSAddress::new(gear_host, gear_port);
     let gear_api = GearApi::builder()
         .suri(cli.gear_suri)
-        .uri(endpoint)
-        .build()
+        .build(address)
         .await
         .expect("Failed to initialize GearApi");
 
@@ -334,7 +334,7 @@ impl Uploader {
         let signer: gsdk::signer::Signer = self.api.clone().into();
         let network = if signer
             .api()
-            .legacy()
+            .rpc()
             .system_chain()
             .await
             .expect("Determine chain name")

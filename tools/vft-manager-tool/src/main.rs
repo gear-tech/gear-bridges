@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::{Args, Parser, Subcommand};
 use cli_utils::GearSignerArgs;
-use gclient::GearApi;
+use gclient::{GearApi, WSAddress};
 use gear_core::ids::prelude::*;
 use sails_rs::{
     calls::*,
@@ -95,11 +95,11 @@ async fn main() -> AnyResult<()> {
         .init();
 
     let cli = Cli::parse();
-    let endpoint = cli.gear.connection.get_endpoint().expect("Invalid URL");
+    let (host, port) = cli.gear.connection.get_host_port().expect("Invalid URL");
+    let address = WSAddress::new(host, port);
     let gear_api = GearApi::builder()
         .suri(cli.gear.suri)
-        .uri(endpoint)
-        .build()
+        .build(address)
         .await
         .context("Failed to initialize GearApi")?;
 
@@ -142,7 +142,7 @@ async fn main() -> AnyResult<()> {
 
             let block_hash = signer
                 .api()
-                .legacy()
+                .rpc()
                 .chain_get_block_hash(Some(args.block_number.into()))
                 .await?
                 .ok_or_else(|| anyhow!("Block #{} not present on RPC node", args.block_number))?;
@@ -155,7 +155,7 @@ async fn main() -> AnyResult<()> {
                 let transactions = service
                     .transactions(Order::Direct, cursor, size_batch)
                     .with_gas_limit(gas_limit)
-                    .at_block(block_hash.0.into())
+                    .at_block(block_hash)
                     .recv(vft_manager)
                     .await
                     .map_err(|e| anyhow!("{e:?}"))?;

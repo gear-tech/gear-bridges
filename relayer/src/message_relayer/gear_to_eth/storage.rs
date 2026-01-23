@@ -90,7 +90,7 @@ impl BlockStorage {
             block,
             Block {
                 block_hash,
-                messages: txs.map(|tx| U256::from_big_endian(&tx)).collect(),
+                messages: txs.map(U256::from).collect(),
             },
         );
     }
@@ -462,7 +462,8 @@ mod tests {
     use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber, MessageInBlock};
 
     fn msg_in_block(block: u32, nonce: u64) -> MessageInBlock {
-        let nonce_be = U256::from(nonce).to_big_endian();
+        let mut nonce_be = [0u8; 32];
+        U256::from(nonce).to_big_endian(&mut nonce_be);
 
         MessageInBlock {
             message: gear_rpc_client::dto::Message {
@@ -483,8 +484,10 @@ mod tests {
         let block = GearBlockNumber(10);
         let block_hash = H256::from_low_u64_be(999);
 
-        let n1 = U256::from(1u64).to_big_endian();
-        let n2 = U256::from(2u64).to_big_endian();
+        let mut n1 = [0u8; 32];
+        U256::from(1u64).to_big_endian(&mut n1);
+        let mut n2 = [0u8; 32];
+        U256::from(2u64).to_big_endian(&mut n2);
 
         storage
             .add_block(block, block_hash, [n1, n2].into_iter())
@@ -514,8 +517,10 @@ mod tests {
         let block = GearBlockNumber(7);
         let block_hash = H256::from_low_u64_be(777);
 
-        let n1 = U256::from(1u64).to_big_endian();
-        let n2 = U256::from(2u64).to_big_endian();
+        let mut n1 = [0u8; 32];
+        U256::from(1u64).to_big_endian(&mut n1);
+        let mut n2 = [0u8; 32];
+        U256::from(2u64).to_big_endian(&mut n2);
 
         storage
             .add_block(block, block_hash, [n1, n2].into_iter())

@@ -83,9 +83,7 @@ impl MessageQueuedEventExtractor {
             match blocks.recv().await {
                 Ok(block) => {
                     let block_hash = block.hash();
-                    let authority_set_id = gear_api
-                        .signed_by_authority_set_id(block_hash.0.into())
-                        .await?;
+                    let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
 
                     self.process_block_events(block, authority_set_id).await?;
                 }

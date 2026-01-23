@@ -107,8 +107,7 @@ impl ApiProvider {
     pub async fn new(url: String, max_reconnect_attempts: u8) -> anyhow::Result<Self> {
         let (sender, receiver) = mpsc::unbounded_channel();
         let api = Api::builder()
-            .uri(&url)
-            .build()
+            .build(url.as_str())
             .await
             .context("failed to connect to API")?;
 
@@ -132,7 +131,7 @@ impl ApiProvider {
 
     async fn reconnect(&mut self) -> bool {
         for attempt in 0..self.max_reconnect_attempts {
-            match Api::builder().uri(self.url.as_str()).build().await {
+            match Api::builder().build(self.url.as_str()).await {
                 Ok(api) => {
                     self.api = api;
                     return true;

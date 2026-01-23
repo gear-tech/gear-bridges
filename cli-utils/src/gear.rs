@@ -11,7 +11,7 @@ pub struct GearConnectionArgs {
         env = "GEAR_ENDPOINT",
         default_value = "ws://127.0.0.1:9944"
     )]
-    pub gear_endpoint: Url,
+    pub endpoint: Url,
 
     /// Reconnect attempts for the Gear RPC.
     #[arg(
@@ -24,11 +24,11 @@ pub struct GearConnectionArgs {
 
 impl GearConnectionArgs {
     pub fn get_endpoint(&self) -> Result<String> {
-        Ok(self.gear_endpoint.to_string())
+        Ok(self.endpoint.to_string())
     }
 
     pub fn get_host_port(&self) -> Result<(String, u16)> {
-        let url = &self.gear_endpoint;
+        let url = &self.endpoint;
         let host = url.host_str().ok_or_else(|| anyhow!("No host in URL"))?;
         let scheme = url.scheme();
         let address = format!("{scheme}://{host}");

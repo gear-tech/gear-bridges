@@ -63,7 +63,6 @@ impl<C: Curve> ProjectivePoint<C> {
 
         let all_sums: Vec<ProjectivePoint<C>> = all_summands
             .iter()
-            .cloned()
             .map(|vec| vec.iter().fold(ProjectivePoint::ZERO, |a, &b| a + b))
             .collect();
         for i in 0..all_sums.len() {

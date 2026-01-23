@@ -245,8 +245,8 @@ mod tests {
         let message_received = receiver.recv().await.unwrap();
         assert_eq!(block, message_received.block);
         assert_eq!(
-            U256::from_str(nonce_string).unwrap(),
-            message_received.nonce
+            U256::from_str(nonce_string).unwrap().0,
+            message_received.nonce.0
         );
 
         assert!(receiver.try_recv().is_err());

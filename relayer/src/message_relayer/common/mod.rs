@@ -1,15 +1,14 @@
 use ethereum_client::TxHash;
-use ethereum_common::Hash256;
-use gear_rpc_client::{
-    dto::Message,
-    metadata::runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-    GearApi, GearHeader,
-};
+use gear_rpc_client::{dto::Message, GearApi, GearHeader};
 use gsdk::{config::Header, GearConfig};
 use primitive_types::{H256, U256};
 use serde::{Deserialize, Serialize};
 use sp_consensus_grandpa::GrandpaJustification;
-use subxt::{blocks::Block, config::Header as _, OnlineClient};
+use subxt::{
+    blocks::Block,
+    config::{substrate::BlakeTwo256, Header as _},
+    OnlineClient,
+};
 
 pub mod ethereum;
 pub mod gear;
@@ -112,14 +111,14 @@ pub struct GSdkArgs {
 #[derive(Clone, Debug)]
 pub struct GearBlock {
     pub header: Header,
-    pub events: Vec<gear_rpc_client::metadata::Event>,
+    pub events: Vec<gsdk::Event>,
     pub grandpa_justification: GrandpaJustification<GearHeader>,
 }
 
 impl GearBlock {
     pub fn new(
         header: Header,
-        events: Vec<gear_rpc_client::metadata::Event>,
+        events: Vec<gsdk::Event>,
         grandpa_justification: GrandpaJustification<GearHeader>,
     ) -> Self {
         Self {
@@ -133,11 +132,12 @@ impl GearBlock {
         self.header.number()
     }
 
-    pub fn hash(&self) -> Hash256 {
-        self.header.hash()
+    pub fn hash(&self) -> H256 {
+        let blake2_hasher = BlakeTwo256;
+        self.header.hash_with(blake2_hasher).0.into()
     }
 
-    pub fn events(&self) -> &[gear_rpc_client::metadata::Event] {
+    pub fn events(&self) -> &[gsdk::Event] {
         &self.events
     }
 
@@ -147,20 +147,13 @@ impl GearBlock {
         to_user: H256,
     ) -> impl Iterator<Item = &[u8]> + use<'_> {
         self.events.iter().filter_map(move |event| match event {
-            gear_rpc_client::metadata::Event::Gear(
-                gear_rpc_client::metadata::gear::Event::UserMessageSent {
-                    message:
-                        UserMessage {
-                            source,
-                            destination,
-                            payload,
-                            ..
-                        },
-                    ..
-                },
-            ) if source == &ActorId(from_program.0) && destination == &ActorId(to_user.0) => {
-                Some(payload.0.as_ref())
+            gsdk::Event::Gear(gsdk::gear::gear::Event::UserMessageSent { message, .. })
+                if message.source().into_bytes() == from_program.0
+                    && message.destination().into_bytes() == to_user.0 =>
+            {
+                Some(message.payload_bytes())
             }
+
             _ => None,
         })
     }
@@ -183,7 +176,9 @@ impl GearBlock {
         let block = api
             .api
             .blocks()
-            .at(justification.commit.target_hash)
+            .at(primitive_types::H256::from(
+                justification.commit.target_hash.0,
+            ))
             .await?;
 
         let header = block.header().clone();
@@ -197,11 +192,11 @@ fn message_queued_events_of(
     block: &GearBlock,
 ) -> impl Iterator<Item = gear_rpc_client::dto::Message> + use<'_> {
     block.events().iter().filter_map(|event| match event {
-        gear_rpc_client::metadata::Event::GearEthBridge(
-            gear_rpc_client::metadata::gear_eth_bridge::Event::MessageQueued { message, .. },
-        ) => {
-            let mut nonce_be = [0; 32];
-            primitive_types::U256(message.nonce.0).to_big_endian(&mut nonce_be);
+        gsdk::Event::GearEthBridge(gsdk::gear::gear_eth_bridge::Event::MessageQueued {
+            message,
+            ..
+        }) => {
+            let nonce_be = primitive_types::U256(message.nonce.0).to_big_endian();
 
             Some(gear_rpc_client::dto::Message {
                 nonce_be,

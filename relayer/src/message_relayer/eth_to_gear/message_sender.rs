@@ -222,11 +222,11 @@ impl MessageSender {
             .redirect(
                 payload.proof_block.block.slot,
                 payload.encode(),
-                self.receiver_address.into(),
+                self.receiver_address.0.into(),
                 self.receiver_route.clone(),
             )
             .with_gas_limit(gas_limit)
-            .send_recv(self.historical_proxy_address.into())
+            .send_recv(self.historical_proxy_address.0.into())
             .await
             .map_err(|e| {
                 let error = anyhow::anyhow!("Failed to send message: {e:?}");

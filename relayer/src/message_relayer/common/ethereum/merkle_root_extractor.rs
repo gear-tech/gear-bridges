@@ -7,6 +7,7 @@ use crate::{
 };
 use alloy::{
     providers::{PendingTransactionBuilder, Provider},
+    rpc::types::Log,
     sol_types::SolEvent,
 };
 use ethereum_client::{abi::IMessageQueue::MerkleRoot, EthApi};
@@ -68,27 +69,7 @@ impl MerkleRootExtractor {
 
 async fn task(mut this: MerkleRootExtractor) {
     let mut attempts = 0;
-    // Persist log being processed across reconnects
-    // We use alloy::rpc::types::eth::Log or similar.
-    // The import says `use alloy::sol_types::SolEvent;`. `Log` comes from stream.
-    // It is `alloy::rpc::types::Log`.
-    // We need to know the type. The code says `stream.next()` returns `Log`.
-    // Let's assume generic `L` or use `alloy::rpc::types::Log`.
-    // `subscription.into_result_stream()` -> `impl Stream<Item = Result<Log, ...>>`.
-    // We can infer type or use `alloy::rpc::types::Log`.
-    // Since `this` is passed to `task_inner`, we can't easily change `task` signature without knowing type.
-    // But we can store it in `task`.
-    // Actually, let's keep it simple: define the logic inside `task_inner` to return the failed log?
-    // Or pass `&mut Option<Log>` to `task_inner`.
-    // We need to import `Log`. It's likely `alloy::rpc::types::Log`.
-    // Or just `alloy::primitives::Log`? No, that's typically `alloy_rpc_types::Log`.
-    // The original code doesn't import `Log` explicitly, it gets it from stream.
-    // Let's use `alloy::rpc::types::Log`. It might require adding import.
-    // Check `Cargo.toml` or imports. `ethereum_client` might export it.
-    // It's safer to not name the type if possible, or just add `use alloy::rpc::types::Log;`.
-    // Let's try to add the import.
-
-    let mut pending_log: Option<alloy::rpc::types::Log> = None;
+    let mut pending_log: Option<Log> = None;
 
     loop {
         let res = task_inner(&this, &mut pending_log).await;
@@ -198,7 +179,7 @@ async fn task_inner(
 async fn process_log(
     this: &MerkleRootExtractor,
     gear_api: &GearApi,
-    log: alloy::rpc::types::Log,
+    log: Log,
 ) -> anyhow::Result<()> {
     log::debug!("Get log = {log:?}");
 

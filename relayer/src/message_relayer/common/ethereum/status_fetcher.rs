@@ -1,11 +1,14 @@
-use alloy::providers::{PendingTransactionBuilder, PendingTransactionError, Provider};
+use alloy::{
+    providers::{PendingTransactionBuilder, PendingTransactionError, Provider},
+    rpc::types::TransactionReceipt,
+};
 use ethereum_client::{EthApi, TxHash};
 use futures::{stream::FuturesUnordered, StreamExt};
 use prometheus::{
     core::{AtomicU64, GenericCounter, GenericGauge},
     IntCounter, IntGauge,
 };
-use std::{future::Future, pin::Pin};
+use std::{collections::HashMap, future::Future, pin::Pin};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
@@ -108,7 +111,7 @@ async fn task(
 ) {
     let mut attempts = 0;
     // Persist pending requests across reconnects
-    let mut pending_requests = std::collections::HashMap::new();
+    let mut pending_requests = HashMap::new();
 
     loop {
         match task_inner(&mut this, &mut channel, &responses, &mut pending_requests).await {
@@ -141,12 +144,9 @@ async fn task_inner(
     this: &mut StatusFetcher,
     channel: &mut UnboundedReceiver<Request>,
     responses: &UnboundedSender<Response>,
-    pending_requests: &mut std::collections::HashMap<Uuid, TxHash>,
+    pending_requests: &mut HashMap<Uuid, TxHash>,
 ) -> anyhow::Result<()> {
-    type Output = (
-        Uuid,
-        Result<alloy::rpc::types::TransactionReceipt, alloy::providers::PendingTransactionError>,
-    );
+    type Output = (Uuid, Result<TransactionReceipt, PendingTransactionError>);
 
     let mut txs = FuturesUnordered::<Pin<Box<dyn Future<Output = Output> + Send>>>::new();
 

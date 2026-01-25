@@ -160,7 +160,7 @@ impl ProofComposer {
             &gear_api,
             &self.eth_api,
             tx.tx_hash,
-            self.historical_proxy_address.0.into(),
+            self.historical_proxy_address.into(),
         )
         .await
         {

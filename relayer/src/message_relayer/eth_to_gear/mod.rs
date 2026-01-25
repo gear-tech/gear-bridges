@@ -22,7 +22,7 @@ pub async fn get_latest_checkpoint(
     let remoting = GClientRemoting::new(gear_api);
     checkpoint_light_client_client::ServiceState::new(remoting)
         .get(Order::Reverse, 0, 1)
-        .recv(checkpoint_light_client_address.0.into())
+        .recv(checkpoint_light_client_address.into())
         .await
         .ok()
         .map(|state| {

@@ -109,7 +109,7 @@ async fn calculate_upload_gas(api: &GearApi, code_id: CodeId, init: &Init) -> Re
     };
 
     Ok(api
-        .calculate_create_gas(Some(origin.0.into()), code_id, payload, 0, true)
+        .calculate_create_gas(Some(origin), code_id, payload, 0, true)
         .await?
         .min_limit)
 }
@@ -123,7 +123,7 @@ async fn calculate_gas<T: ActionIo>(
     let payload = T::encode_call(params);
 
     Ok(api
-        .calculate_handle_gas(Some(origin.0.into()), program_id, payload, 0, true)
+        .calculate_handle_gas(Some(origin), program_id, payload, 0, true)
         .await?
         .min_limit)
 }
@@ -400,13 +400,13 @@ async fn replay_back_and_updating() -> Result<()> {
         .proc_many(
             |event| match event {
                 gclient::Event::Gear(gclient::GearEvent::UserMessageSent { message, .. }) => {
-                    if message.source().into_bytes() == program_id.into_bytes()
-                        && message.destination().into_bytes() == [0; 32]
+                    if message.source.0 == program_id.into_bytes()
+                        && message.destination.0 == [0; 32]
                     {
                         let ServiceReplayBackEvents::NewCheckpoint {
                             slot,
                             tree_hash_root,
-                        } = ServiceReplayBackEvents::decode_event(message.payload_bytes()).unwrap();
+                        } = ServiceReplayBackEvents::decode_event(&message.payload.0).unwrap();
 
                         assert!(headers.iter().any(|header| {
                             header.slot == slot && header.tree_hash_root() == tree_hash_root

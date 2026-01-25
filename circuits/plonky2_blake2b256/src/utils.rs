@@ -198,7 +198,7 @@ mod tests {
     }
 
     fn test_rright_word_inner(val: u64, shift: usize) {
-        let a_rotate = val.rotate_right(shift as _);
+        let a_rotate = (val >> shift) | (val << (64 - shift));
         let a_rotate_bits = word_to_bits_le(a_rotate);
 
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::wide_ecc_config());

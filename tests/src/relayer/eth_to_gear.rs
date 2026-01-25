@@ -361,9 +361,9 @@ async fn test_tx_manager() {
     MockProofComposer::run(proof_req_rx, proof_res_tx).await;
 
     let message_sender = MessageSender::new(
-        contracts.vft_manager.into_bytes().into(),
+        contracts.vft_manager.into(),
         <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
-        contracts.historical_proxy.into_bytes().into(),
+        contracts.historical_proxy.into(),
         conn.clone(),
         contracts.suri.clone(),
     );

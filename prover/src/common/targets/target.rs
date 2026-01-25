@@ -61,7 +61,7 @@ fn bits_to_target<const B: usize>(
     little_endian: bool,
 ) -> Target {
     assert!(B <= 64);
-    assert!(B.is_multiple_of(8));
+    assert!(B % 8 == 0);
 
     let bits = bits.0.chunks(8);
     let mut bits: Vec<_> = if little_endian {

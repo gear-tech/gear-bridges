@@ -44,14 +44,14 @@ fn checkpoints_for_block(block: &GearBlock, program_address: H256) -> Vec<(u64, 
                     |ServiceReplayBackEvents::NewCheckpoint {
                          slot,
                          tree_hash_root,
-                     }| (slot, H256::from(tree_hash_root.0)),
+                     }| (slot, tree_hash_root),
                 )
                 .or_else(|| {
                     ServiceSyncUpdateEvents::decode_event(payload).ok().map(
                         |ServiceSyncUpdateEvents::NewCheckpoint {
                              slot,
                              tree_hash_root,
-                         }| (slot, H256::from(tree_hash_root.0)),
+                         }| (slot, tree_hash_root),
                     )
                 })
         })

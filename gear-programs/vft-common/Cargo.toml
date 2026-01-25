@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 awesome-sails.workspace = true
-awesome-sails-services = { workspace = true, features = [
-    "vft-native-exchange",
-] }
+awesome-sails-services = { workspace = true, features = ["vft-native-exchange"] }
 sails-rs.workspace = true
+zerocopy.workspace = true

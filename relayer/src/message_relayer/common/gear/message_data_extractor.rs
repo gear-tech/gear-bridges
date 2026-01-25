@@ -96,7 +96,7 @@ impl MessageDataExtractor {
         let messages = common::message_queued_events_of(&block);
         let block_hash = block.hash();
         for message_queued in messages {
-            if U256::from_big_endian(&message_queued.nonce_be).0 != message.nonce.0 {
+            if U256::from_big_endian(&message_queued.nonce_be) != message.nonce {
                 log::info!("Message nonce mismatch, skipping {message_queued:?}");
                 continue;
             }
@@ -106,7 +106,7 @@ impl MessageDataExtractor {
             self.sender.send(MessageInBlock {
                 message: message_queued,
                 block: GearBlockNumber(block.number()),
-                block_hash: block_hash.0.into(),
+                block_hash,
                 authority_set_id,
             })?;
 

@@ -221,6 +221,10 @@ pub struct GearEthTokensArgs {
     pub governance_admin: String,
     #[arg(long = "governance-pauser", env = "GEAR_GOVERNANCE_PAUSER")]
     pub governance_pauser: String,
+
+    /// Storage path for Ethereum blocks.
+    #[arg(long = "ethereum-blocks", env = "ETHEREUM_BLOCKS")]
+    pub ethereum_blocks: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -267,6 +271,10 @@ pub struct EthGearTokensArgs {
     /// status in that directory.
     #[arg(long = "storage-path", env = "ETH_GEAR_TX_STORAGE_PATH")]
     pub storage_path: String,
+
+    /// Storage path for Ethereum blocks.
+    #[arg(long = "ethereum-blocks", env = "ETHEREUM_BLOCKS")]
+    pub ethereum_blocks: Option<String>,
 }
 
 #[derive(Subcommand)]

@@ -105,15 +105,8 @@ async fn task(mut this: MerkleRootExtractor) {
                         }
                     };
                 } else {
-                    // Non-transport error. Should we exit?
-                    // The user wants "indefinite retry", so effectively we treat everything as potentially recoverable via restart or just loop?
-                    // If it's a logic error (decode failed), it will loop forever on the same pending_log!
-                    // We should handle decode error INSIDE task_inner/process logic and drop the log if it's junk.
-                    // But if it's network error, we retry.
-                    // `process_log` should separate fatal errors (drop log) vs retryable (keep log).
-                    // For now, let's assume `task_inner` handles that distinction or we refine `process_log`.
-                    // If `task_inner` passed back the log in `pending_log`, it means it wants to retry.
-                    break;
+                    // Non transport error: Exit the task clearly.
+                    return;
                 }
             }
         }

@@ -80,6 +80,7 @@ impl GearApi {
             .at(BlockRef::from_hash(block_hash))
             .await
             .map(|block| block.number())
+            .map_err(|err| anyhow!("Failed to get block number: {err}"))
     }
 
     pub async fn block_number_to_hash(&self, block: u32) -> AnyResult<H256> {

@@ -1077,13 +1077,17 @@ impl MerkleRootRelayer {
         // finality proof might be available already which happens in the case of
         // merkle roots being inserted there before authority set is synced. Otherwise
         // immediately fetch finality proof.
+
         let block_inclusion_proof = match self
             .roots
             .get(&(block.number(), merkle_root))
             .map(|root| root.block_inclusion_proof.clone())
         {
             Some(proof) => proof,
-            None => block.inclusion_proof(&api).await?,
+            None => match self.storage.blocks.read().await.get(&block.number()) {
+                Some(block) => block.inclusion_proof.clone(),
+                None => block.inclusion_proof(&api).await?,
+            },
         };
 
         let nonces = storage::message_queued_events_of(&block).collect::<Vec<_>>();

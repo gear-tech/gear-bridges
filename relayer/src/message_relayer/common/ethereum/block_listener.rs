@@ -53,7 +53,7 @@ impl BlockListener {
     pub fn spawn(self) -> UnboundedReceiver<EthereumBlockNumber> {
         let (sender, receiver) = unbounded_channel();
 
-        tokio::spawn(self.task(sender));
+        tokio::spawn(task(self, sender));
 
         receiver
     }

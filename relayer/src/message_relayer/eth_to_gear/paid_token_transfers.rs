@@ -13,7 +13,7 @@ use utils_prometheus::MeteredService;
 
 use crate::message_relayer::common::{
     ethereum::{
-        block_listener::BlockListener as EthereumBlockListener,
+        self, block_listener::BlockListener as EthereumBlockListener,
         message_paid_event_extractor::MessagePaidEventExtractor,
     },
     gear::{
@@ -66,6 +66,7 @@ impl Relayer {
         mut api_provider: ApiProviderConnection,
         storage_path: String,
         genesis_time: u64,
+        eth_unprocessed_block_storage_path: Option<String>,
     ) -> anyhow::Result<Self> {
         let gear_block_listener = GearBlockListener::new(
             api_provider.clone(),
@@ -73,7 +74,15 @@ impl Relayer {
         );
 
         let from_eth_block = eth_api.finalized_block().await?.header.number;
-        let ethereum_block_listener = EthereumBlockListener::new(eth_api.clone(), from_eth_block);
+        let block_storage: Arc<dyn UnprocessedBlockStorage> =
+            if let Some(path) = eth_unprocessed_block_storage_path {
+                Arc::new(ethereum::block_storage::JSONBlockStorage::new(path.into()).await?)
+            } else {
+                Arc::new(ethereum::block_storage::NoStorage)
+            };
+
+        let ethereum_block_listener =
+            EthereumBlockListener::new(eth_api.clone(), from_eth_block, block_storage);
 
         let storage = Arc::new(JSONStorage::new(storage_path));
 

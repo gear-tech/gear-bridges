@@ -491,6 +491,7 @@ async fn run() -> AnyResult<()> {
             beacon_rpc,
             prometheus_args,
             storage_path,
+            ethereum_blocks,
         }) => {
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
@@ -546,6 +547,7 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_blocks.clone(),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -576,6 +578,7 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_blocks.clone(),
                     )
                     .await
                     .expect("Failed to create relayer");

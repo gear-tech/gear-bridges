@@ -1,6 +1,7 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
+use crate::dto::{RawBlockInclusionProof, StorageInclusionProof};
 use anyhow::{anyhow, Context, Result as AnyResult};
 use blake2::{
     digest::{Update, VariableOutput},
@@ -27,9 +28,6 @@ use subxt::{
 };
 use subxt_rpcs::rpc_params;
 use trie_db::{node::NodeHandle, ChildReference};
-use crate::{
-    dto::{RawBlockInclusionProof, StorageInclusionProof},
-};
 
 pub mod dto;
 
@@ -305,7 +303,9 @@ impl GearApi {
                 .unwrap_or_default(),
         )?;
         let proof_finality = FinalityProof::<GearHeader>::decode(&mut &proof_finality[..])?;
-        let fetched_block_number = self.block_hash_to_number(proof_finality.block.0.into()).await?;
+        let fetched_block_number = self
+            .block_hash_to_number(proof_finality.block.0.into())
+            .await?;
 
         let mut justification =
             GrandpaJustification::<GearHeader>::decode(&mut &proof_finality.justification[..])?;

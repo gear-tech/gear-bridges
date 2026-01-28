@@ -202,13 +202,14 @@ macro_rules! impl_parsable_target_set {
     }
 }
 
-pub(crate) use crate::{impl_array_target_wrapper, impl_parsable_array_target_wrapper};
+pub(crate) use crate::impl_array_target_wrapper;
 
 /// Implement newtype wrapper over `ArrayTarget`.
 #[macro_export]
 macro_rules! impl_array_target_wrapper {
     ($name:ident, $target_ty:ty, $len:ident) => {
         #[derive(::std::clone::Clone, ::std::fmt::Debug)]
+        #[allow(dead_code)]
         pub struct $name($crate::common::targets::ArrayTarget<$target_ty, $len>);
 
         impl ::std::ops::Deref for $name {

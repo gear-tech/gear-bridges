@@ -244,7 +244,7 @@ impl From<RawBlockInclusionProof> for BlockFinalityProof {
             this.justification_round,
             this.required_authority_set_id,
             &sp_consensus_grandpa::Message::<GearHeader>::Precommit(Precommit::<GearHeader>::new(
-                this.block_hash,
+                this.block_hash.0.into(),
                 this.block_number,
             )),
         );

@@ -2,7 +2,6 @@ use anyhow::anyhow;
 use gear_rpc_client::{dto, dto::RawBlockInclusionProof, GearApi};
 use num::BigUint;
 use parity_scale_codec::{Decode, Encode};
-use primitive_types::H256;
 use prometheus::{core::Collector, HistogramOpts, HistogramVec};
 use prover::{
     proving::{
@@ -14,6 +13,7 @@ use prover::{
 use serde::{Deserialize, Serialize};
 use sp_consensus_grandpa::GrandpaJustification;
 use std::{str::FromStr, thread, time::Instant};
+use subxt::utils::H256;
 use utils_prometheus::MeteredService;
 pub struct Metrics;
 
@@ -184,7 +184,7 @@ impl FinalProof {
 pub async fn get_header(gear_api: &GearApi, hash: H256) -> anyhow::Result<GearHeader> {
     let header = gear_api
         .api
-        .rpc()
+        .legacy()
         .chain_get_header(Some(hash))
         .await?
         .ok_or(anyhow!("Unable to fetch the requested block header"))?;
@@ -213,7 +213,7 @@ pub async fn get_justification_and_headers(
             headers[0].parent_hash
         };
 
-        headers_new.push(get_header(gear_api, hash).await?);
+        headers_new.push(get_header(gear_api, hash.0.into()).await?);
         headers_new.extend_from_slice(&headers[..]);
 
         headers_new
@@ -247,7 +247,7 @@ pub async fn prove_final(
                 break;
             }
 
-            hash = parent_hash;
+            hash = parent_hash.0.into();
         }
 
         let headers = headers.into_iter().rev().collect();
@@ -295,7 +295,7 @@ pub async fn prove_final_with_block_finality(
 
     let block_last_maybe_hash = headers.last().map(|header| header.hash());
     if !block_last_maybe_hash
-        .map(|hash| hash == block_finality_proof.block_hash)
+        .map(|hash| hash.0 == block_finality_proof.block_hash.0)
         .unwrap_or(false)
     {
         return Err(anyhow!(
@@ -304,7 +304,7 @@ pub async fn prove_final_with_block_finality(
     }
 
     let sent_message_inclusion_proof = gear_api
-        .fetch_sent_message_inclusion_proof(header_first.hash())
+        .fetch_sent_message_inclusion_proof(header_first.hash().0.into())
         .await?;
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();

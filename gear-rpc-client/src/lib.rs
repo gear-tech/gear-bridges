@@ -1,8 +1,6 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use std::time::Duration;
-
 use anyhow::{anyhow, Context, Result as AnyResult};
 use blake2::{
     digest::{Update, VariableOutput},
@@ -10,36 +8,30 @@ use blake2::{
 };
 use dto::{AuthoritySetState, BranchNodeData};
 use futures_util::{Stream, StreamExt};
-use gsdk::GearConfig;
-use metadata::{
-    gear::Event as GearEvent,
-    gear_eth_bridge::Event as GearBridgeEvent,
-    runtime_types::{gear_core::message::user::UserMessage, gprimitives::ActorId},
-    Event as RuntimeEvent,
+use gear_core::ids::ActorId;
+use gsdk::{
+    gear::runtime_types::{
+        pallet_gear::pallet::Event as GearEvent,
+        pallet_gear_eth_bridge::pallet::Event as GearEthBridgeEvent, vara_runtime::RuntimeEvent,
+    },
+    GearConfig,
 };
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::FinalityProof;
-use sp_consensus_grandpa::{AuthorityId, GrandpaJustification};
+use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
 use sp_runtime::AccountId32;
 use subxt::{
-    backend::BlockRef,
-    blocks::Block as BlockImpl,
-    dynamic::DecodedValueThunk,
-    rpc_params,
-    storage::Address,
-    utils::{Yes, H256},
+    backend::BlockRef, blocks::Block as BlockImpl, dynamic::DecodedValueThunk, utils::H256,
     OnlineClient,
 };
+use subxt_rpcs::rpc_params;
 use trie_db::{node::NodeHandle, ChildReference};
-
 use crate::{
     dto::{RawBlockInclusionProof, StorageInclusionProof},
-    metadata::runtime_types::frame_system::EventRecord,
 };
 
 pub mod dto;
-pub mod metadata;
 
 pub use gsdk::{ext, gp};
 
@@ -66,9 +58,9 @@ impl From<gsdk::Api> for GearApi {
 }
 
 impl GearApi {
-    pub async fn new(url: &str, retries: u8) -> AnyResult<GearApi> {
+    pub async fn new(url: &str, _retries: u8) -> AnyResult<GearApi> {
         Ok(GearApi {
-            api: gsdk::Api::builder().retries(retries).build(url).await?,
+            api: gsdk::Api::builder().uri(url).build().await?,
         })
     }
 
@@ -81,33 +73,34 @@ impl GearApi {
             .await?)
     }
 
-    pub async fn block_hash_to_number(&self, block: H256) -> AnyResult<u32> {
+    pub async fn block_hash_to_number(&self, block_hash: H256) -> AnyResult<u32> {
         self.api
-            .rpc()
-            .chain_get_block(Some(block))
-            .await?
-            .map(|block| block.block.header.number)
-            .ok_or_else(|| anyhow!("Block {block} not present on RPC node"))
+            .blocks()
+            .at(BlockRef::from_hash(block_hash))
+            .await
+            .map(|block| block.number())
+            .map_err(|err| anyhow!("Failed to get block number: {err}"))
     }
 
     pub async fn block_number_to_hash(&self, block: u32) -> AnyResult<H256> {
         self.api
-            .rpc()
+            .legacy()
             .chain_get_block_hash(Some(block.into()))
             .await?
             .ok_or_else(|| anyhow!("Block #{block} not present on RPC node"))
     }
 
     pub async fn latest_finalized_block(&self) -> AnyResult<H256> {
-        Ok(self.api.rpc().chain_get_finalized_head().await?)
+        Ok(self.api.legacy().chain_get_finalized_head().await?)
     }
 
     /// Fetch authority set id for the given block.
     pub async fn authority_set_id(&self, block: H256) -> AnyResult<u64> {
-        let block = (*self.api).blocks().at(block).await?;
-        let set_id_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GrandpaStorage::CurrentSetId);
-        Self::fetch_from_storage(&block, &set_id_address).await
+        let addr = gsdk::gear::storage().grandpa().current_set_id();
+        self.api
+            .storage_fetch_at(&addr, Some(block))
+            .await
+            .map_err(|err| anyhow!("Failed to fetch authority set id: {err}"))
     }
 
     /// Get authority set state for specified block. If block is not specified
@@ -118,10 +111,7 @@ impl GearApi {
             None => self.latest_finalized_block().await?,
         };
 
-        let block = (*self.api).blocks().at(block).await?;
-        let set_id_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GrandpaStorage::CurrentSetId);
-        let set_id = Self::fetch_from_storage(&block, &set_id_address).await?;
+        let set_id = self.authority_set_id(block).await?;
 
         let authority_set = self.fetch_authority_set(set_id).await?;
         let authority_set_data: Vec<_> = authority_set.into_iter().flatten().collect();
@@ -230,7 +220,6 @@ impl GearApi {
         let stream = self
             .api
             .rpc()
-            .client()
             .subscribe(
                 "grandpa_subscribeJustifications",
                 rpc_params![],
@@ -279,13 +268,14 @@ impl GearApi {
     }
 
     pub async fn fetch_queue_overflowed_since(&self) -> AnyResult<Option<u32>> {
-        let block = self.latest_finalized_block().await?;
-        let block = (*self.api).blocks().at(block).await?;
-        let queue_reset_since = gsdk::Api::storage_root(
-            gsdk::metadata::storage::GearEthBridgeStorage::QueueOverflowedSince,
-        );
-        self.maybe_fetch_from_storage(&block, &queue_reset_since)
-            .await
+        let addr = gsdk::gear::storage()
+            .gear_eth_bridge()
+            .queue_overflowed_since();
+        match self.api.storage_fetch(&addr).await {
+            Ok(block) => Ok(Some(block)),
+            Err(gsdk::Error::StorageEntryNotFound) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Returns GRANDPA justification for block not earlier `after_block`
@@ -315,7 +305,7 @@ impl GearApi {
                 .unwrap_or_default(),
         )?;
         let proof_finality = FinalityProof::<GearHeader>::decode(&mut &proof_finality[..])?;
-        let fetched_block_number = self.block_hash_to_number(proof_finality.block).await?;
+        let fetched_block_number = self.block_hash_to_number(proof_finality.block.0.into()).await?;
 
         let mut justification =
             GrandpaJustification::<GearHeader>::decode(&mut &proof_finality.justification[..])?;
@@ -356,7 +346,7 @@ impl GearApi {
         justification: &GrandpaJustification<GearHeader>,
     ) -> AnyResult<RawBlockInclusionProof> {
         self.fetch_raw_block_inclusion_proof(
-            justification.commit.target_hash,
+            justification.commit.target_hash.0.into(),
             Some(justification.clone()),
         )
         .await
@@ -390,7 +380,7 @@ impl GearApi {
             required_authority_set_id,
 
             validator_set,
-            block_hash: justification.commit.target_hash,
+            block_hash: justification.commit.target_hash.0.into(),
             block_number: justification.commit.target_number,
             pre_commits,
         })
@@ -499,24 +489,21 @@ impl GearApi {
     }
 
     async fn fetch_authority_set_in_block(&self, block: H256) -> AnyResult<Vec<[u8; 32]>> {
-        let block = (*self.api).blocks().at(block).await?;
-
-        let address = gsdk::Api::storage_root(gsdk::metadata::storage::GrandpaStorage::Authorities);
-        let authorities: Vec<(AuthorityId, u64)> =
-            Self::fetch_from_storage(&block, &address).await?;
+        let address = gsdk::gear::storage().grandpa().authorities();
+        let authorities = self.api.storage_fetch_at(&address, Some(block)).await?;
 
         Ok(authorities
+            .0
             .into_iter()
-            .map(|(grandpa, _)| <[u8; 32]>::try_from(grandpa.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?)
+            .map(|(grandpa, _)| grandpa.0)
+            .collect::<Vec<_>>())
     }
 
     pub async fn fetch_sent_message_inclusion_proof(
         &self,
         block: H256,
-    ) -> AnyResult<dto::StorageInclusionProof> {
-        let address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
+    ) -> AnyResult<StorageInclusionProof> {
+        let address = gsdk::gear::storage().gear_eth_bridge().queue_merkle_root();
 
         self.fetch_block_inclusion_proof(block, &address.to_root_bytes())
             .await
@@ -525,10 +512,8 @@ impl GearApi {
     pub async fn fetch_next_session_keys_inclusion_proof(
         &self,
         block: H256,
-    ) -> AnyResult<dto::StorageInclusionProof> {
-        let address = gsdk::Api::storage_root(
-            gsdk::metadata::storage::GearEthBridgeStorage::AuthoritySetHash,
-        );
+    ) -> AnyResult<StorageInclusionProof> {
+        let address = gsdk::gear::storage().gear_eth_bridge().authority_set_hash();
         self.fetch_block_inclusion_proof(block, &address.to_root_bytes())
             .await
     }
@@ -537,7 +522,7 @@ impl GearApi {
         &self,
         block: H256,
         address: &[u8],
-    ) -> AnyResult<dto::StorageInclusionProof> {
+    ) -> AnyResult<StorageInclusionProof> {
         let storage_inclusion_proof = self.fetch_storage_inclusion_proof(block, address).await?;
 
         let block = (*self.api).blocks().at(block).await?;
@@ -592,7 +577,7 @@ impl GearApi {
 
         let storage_proof = self
             .api
-            .rpc()
+            .legacy()
             .state_get_read_proof(storage_keys.clone(), Some(block.hash()))
             .await?
             .proof
@@ -614,7 +599,7 @@ impl GearApi {
             _,
             _,
             _,
-        >(&storage_proof, state_root, storage_keys.iter())
+        >(&storage_proof, state_root.0.into(), storage_keys.iter())
         .unwrap_or_else(|err| panic!("Failed to generate trie proof for {address:?}: {err}"));
 
         let leaf = proof.pop().expect("At least one node in trie proof");
@@ -671,7 +656,14 @@ impl GearApi {
                 let encoded_node = TrieCodec::branch_node_nibbled(
                     nibbles.right_iter(),
                     nibbles.len(),
-                    children.into_iter(),
+                    children.into_iter().map(|x| {
+                        x.map(|x| match x {
+                            ChildReference::Hash(hash) => ChildReference::Hash(hash.0.into()),
+                            ChildReference::Inline(hash, data) => {
+                                ChildReference::Inline(hash.0.into(), data)
+                            }
+                        })
+                    }),
                     value,
                 );
 
@@ -699,41 +691,6 @@ impl GearApi {
             leaf_node_data: encoded_leaf,
             leaf_data: storage_data,
         })
-    }
-
-    async fn maybe_fetch_from_storage<T, A>(
-        &self,
-        block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
-        address: &A,
-    ) -> AnyResult<Option<T>>
-    where
-        A: Address<IsFetchable = Yes, Target = DecodedValueThunk>,
-        T: Decode,
-    {
-        let data = match block.storage().fetch(address).await? {
-            Some(data) => data.into_encoded(),
-            None => return Ok(None),
-        };
-
-        Ok(Some(T::decode(&mut &data[..])?))
-    }
-
-    async fn fetch_from_storage<T, A>(
-        block: &BlockImpl<GearConfig, OnlineClient<GearConfig>>,
-        address: &A,
-    ) -> AnyResult<T>
-    where
-        A: Address<IsFetchable = Yes, Target = DecodedValueThunk>,
-        T: Decode,
-    {
-        let data = block
-            .storage()
-            .fetch(address)
-            .await?
-            .ok_or_else(|| anyhow!("Block #{} is not present on RPC node", block.number()))?
-            .into_encoded();
-
-        Ok(T::decode(&mut &data[..])?)
     }
 
     pub async fn fetch_message_inclusion_merkle_proof(
@@ -765,30 +722,28 @@ impl GearApi {
     }
 
     pub async fn fetch_timestamp(&self, block: H256) -> AnyResult<u64> {
-        let block = (*self.api).blocks().at(block).await?;
-        let timestamp_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::TimestampStorage::Now);
-        Self::fetch_from_storage(&block, &timestamp_address)
-            .await
-            .map(Duration::from_millis)
-            .map(|d| d.as_secs())
+        let address = gsdk::gear::storage().timestamp().now();
+        let timestamp: u64 = self.api.storage_fetch_at(&address, Some(block)).await?;
+        Ok(timestamp)
     }
 
     /// Fetch queue merkle root for the given block.
     pub async fn fetch_queue_merkle_root(&self, block: H256) -> AnyResult<(u64, H256)> {
-        let block = (*self.api).blocks().at(block).await?;
-        let set_id_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
-        let merkle_root: H256 = Self::fetch_from_storage(&block, &set_id_address).await?;
-        let set_id_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueId);
-        let queue_id: u64 = self
-            .maybe_fetch_from_storage(&block, &set_id_address)
-            .await?
-            .unwrap_or_else(|| {
-                log::warn!("QueueId not found in storage, using 0 as default");
+        let address = gsdk::gear::storage().gear_eth_bridge().queue_merkle_root();
+        let merkle_root: H256 = self.api.storage_fetch_at(&address, Some(block)).await?;
+        let queue_id_address = gsdk::gear::storage().gear_eth_bridge().queue_id();
+        let queue_id: u64 = match self
+            .api
+            .storage_fetch_at(&queue_id_address, Some(block))
+            .await
+        {
+            Ok(queue_id) => queue_id,
+            Err(gsdk::Error::StorageEntryNotFound) => {
+                log::warn!("QueueId entry not found in storage, using 0 as default");
                 0
-            });
+            }
+            Err(err) => return Err(err.into()),
+        };
 
         Ok((queue_id, merkle_root))
     }
@@ -797,22 +752,21 @@ impl GearApi {
         &self,
         block_hash: Option<H256>,
     ) -> anyhow::Result<Vec<RuntimeEvent>> {
-        let addr = gsdk::Api::storage_root(gsdk::metadata::storage::SystemStorage::Events);
+        let addr = gsdk::gear::storage().system().events();
 
-        let evs: Vec<EventRecord<RuntimeEvent, H256>> =
-            self.api.fetch_storage_at(&addr, block_hash).await?;
-        Ok(evs.into_iter().map(|er| er.event).collect())
+        let events = self.api.storage_fetch_at(&addr, block_hash).await?;
+        Ok(events.into_iter().map(|record| record.event).collect())
     }
 
     pub async fn message_queued_events(&self, block: H256) -> AnyResult<Vec<dto::Message>> {
         let events = self.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
-            if let RuntimeEvent::GearEthBridge(GearBridgeEvent::MessageQueued { message, .. }) =
-                event
+            if let RuntimeEvent::GearEthBridge(GearEthBridgeEvent::MessageQueued {
+                message, ..
+            }) = event
             {
-                let mut nonce_be = [0; 32];
-                primitive_types::U256(message.nonce.0).to_big_endian(&mut nonce_be);
+                let nonce_be = primitive_types::U256(message.nonce.0).to_big_endian();
 
                 Some(dto::Message {
                     nonce_be,
@@ -837,29 +791,21 @@ impl GearApi {
         let events = self.get_events_at(Some(block)).await?;
 
         let events = events.into_iter().filter_map(|event| {
-            let RuntimeEvent::Gear(GearEvent::UserMessageSent {
-                message:
-                    UserMessage {
-                        source,
-                        destination,
-                        payload,
-                        ..
-                    },
-                ..
-            }) = event
-            else {
+            let RuntimeEvent::Gear(GearEvent::UserMessageSent { message, .. }) = event else {
                 return None;
             };
 
-            if source != ActorId(from_program.0) {
+            if message.source() != ActorId::new(from_program.0) {
                 return None;
             }
 
-            if destination != ActorId(to_user.0) {
+            if message.destination() != ActorId::new(to_user.0) {
                 return None;
             }
 
-            Some(dto::UserMessageSent { payload: payload.0 })
+            Some(dto::UserMessageSent {
+                payload: message.payload_bytes().to_vec(),
+            })
         });
 
         Ok(events.collect())
@@ -909,16 +855,18 @@ mod tests {
             "fd6e027f7a1bd8baa6406cea4d80d9327120fd2add6d1249bf1b6bfc3bdf510f";
 
         let merkle_root_address = hex::decode(MERKLE_ROOT_STORAGE_ADDRESS).unwrap();
+
         let expected_merkle_root_address =
-            gsdk::Api::storage_root(gsdk::metadata::storage::GearEthBridgeStorage::QueueMerkleRoot);
+            gsdk::gear::storage().gear_eth_bridge().queue_merkle_root();
         assert_eq!(
             merkle_root_address,
             expected_merkle_root_address.to_root_bytes()
         );
         let next_validator_set_address = hex::decode(NEXT_VALIDATOR_SET_ADDRESS).unwrap();
-        let expected_next_validator_set_address = gsdk::Api::storage_root(
-            gsdk::metadata::storage::GearEthBridgeStorage::AuthoritySetHash,
-        );
+
+        let expected_next_validator_set_address =
+            gsdk::gear::storage().gear_eth_bridge().authority_set_hash();
+
         assert_eq!(
             next_validator_set_address,
             expected_next_validator_set_address.to_root_bytes()

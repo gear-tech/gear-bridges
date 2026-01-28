@@ -1,11 +1,8 @@
 use std::ops::ControlFlow;
 
-use crate::{
-    common,
-    message_relayer::{
-        common::{EthereumSlotNumber, TxHashWithSlot},
-        eth_to_gear::api_provider::ApiProviderConnection,
-    },
+use crate::message_relayer::{
+    common::{EthereumSlotNumber, TxHashWithSlot},
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
 use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -160,7 +157,7 @@ impl ProofComposer {
             &gear_api,
             &self.eth_api,
             tx.tx_hash,
-            self.historical_proxy_address.into(),
+            self.historical_proxy_address.0.into(),
         )
         .await
         {
@@ -190,25 +187,21 @@ async fn task(
             handle_requests(&mut this, &mut checkpoints, &mut requests, &responses).await
         {
             log::error!("Proof composer failed with error: {err:?}");
-            if common::is_transport_error_recoverable(&err) {
-                match this.api_provider.reconnect().await {
-                    Ok(_) => log::info!("Successfully reconnected to Gear API"),
-                    Err(err) => {
-                        log::error!("Failed to reconnect to Gear API: {err:?}");
-                        return;
-                    }
-                }
 
-                match this.eth_api.reconnect().await {
-                    Ok(_) => log::info!("Successfully reconnected to Ethereum API"),
-                    Err(err) => {
-                        log::error!("Failed to reconnect to Ethereum API: {err:?}");
-                        return;
-                    }
+            match this.api_provider.reconnect().await {
+                Ok(_) => log::info!("Successfully reconnected to Gear API"),
+                Err(err) => {
+                    log::error!("Failed to reconnect to Gear API: {err:?}");
+                    return;
                 }
-            } else {
-                log::error!("Non recoverable error, exiting: {err:?}");
-                return;
+            }
+
+            match this.eth_api.reconnect().await {
+                Ok(_) => log::info!("Successfully reconnected to Ethereum API"),
+                Err(err) => {
+                    log::error!("Failed to reconnect to Ethereum API: {err:?}");
+                    return;
+                }
             }
         } else {
             return;
@@ -236,6 +229,8 @@ async fn handle_requests(
                         "Failed to process transaction {tx_uuid} (hash: {:?}): {err:?}",
                         tx.tx_hash
                     );
+                    this.to_process.push((tx_uuid, tx));
+                    return Err(err); // force reconnect
                 }
             }
         }

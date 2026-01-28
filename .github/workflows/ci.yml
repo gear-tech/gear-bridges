@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-      - improve-message-sent-circuit
   pull_request:
     branches:
       - main
-      - improve-message-sent-circuit
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

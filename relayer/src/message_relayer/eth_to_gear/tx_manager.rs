@@ -1,18 +1,20 @@
+use super::{
+    message_sender::{self, MessageSenderIo},
+    proof_composer::{self, ProofComposerIo},
+    storage::Storage,
+};
 use crate::message_relayer::{common::TxHashWithSlot, eth_to_gear::message_sender::MessageStatus};
 use eth_events_electra_client::EthToVaraEvent;
 use prometheus::IntCounter;
 use sails_rs::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::{mpsc::UnboundedReceiver, RwLock};
+use tokio::{
+    sync::{mpsc::UnboundedReceiver, RwLock},
+    time::{self, Duration, Interval},
+};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
-
-use super::{
-    message_sender::{self, MessageSenderIo},
-    proof_composer::{self, ProofComposerIo},
-    storage::Storage,
-};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Transaction {
@@ -117,24 +119,22 @@ impl TransactionManager {
         mut proof_composer: ProofComposerIo,
         mut message_sender: MessageSenderIo,
     ) -> anyhow::Result<()> {
-        if !self
-            .resume(&mut message_sender, &mut proof_composer)
-            .await?
-        {
-            // no need to update storage, `resume` does not transition
-            // tx status
-            return Ok(());
-        }
+        // once per 15 mins
+        let mut poll_interval = time::interval(Duration::from_secs(15 * 60));
+        poll_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
         loop {
             let result = self
                 .process(
+                    &mut poll_interval,
                     &mut message_paid_events,
                     &mut proof_composer,
                     &mut message_sender,
                 )
                 .await;
+
             self.update_storage().await;
+
             match result {
                 Ok(false) => {
                     log::error!("One of channels are closed, terminating transaction manager");
@@ -153,31 +153,46 @@ impl TransactionManager {
 
     pub async fn process(
         &self,
+        poll_interval: &mut Interval,
         message_paid_events: &mut UnboundedReceiver<TxHashWithSlot>,
         proof_composer: &mut ProofComposerIo,
         message_sender: &mut MessageSenderIo,
     ) -> anyhow::Result<bool> {
         tokio::select! {
-           value = message_paid_events.recv() =>
-               match value {
-                   Some(tx) =>  self.compose_proof(tx, proof_composer).await,
-                   None => Ok(false)
-               },
-           value = proof_composer.recv() =>
-               match value {
-                   Some(proof_composer::Response { tx_uuid, payload }) =>
-                       self.submit_message(tx_uuid, payload, message_sender).await,
-                   None => Ok(false)
-               },
+            _ = poll_interval.tick() => {
+                match self
+                    .resume(message_sender, proof_composer)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => return Ok(false),
+                    Err(e) => log::error!(r#"Failed to resume Ethereum tasks: "{e:?}""#),
+                }
 
-           value = message_sender.recv() =>
-               match value {
-                   Some(response) => {
-                       self.finalize_transaction(response).await?;
-                       Ok(true)
-                    },
-                   None => Ok(false),
-               }
+                Ok(true)
+            }
+
+            value = message_paid_events.recv() =>
+                match value {
+                    Some(tx) => self.compose_proof(tx, proof_composer).await,
+                    None => Ok(false)
+                },
+
+            value = proof_composer.recv() =>
+                match value {
+                    Some(proof_composer::Response { tx_uuid, payload }) =>
+                        self.submit_message(tx_uuid, payload, message_sender).await,
+                    None => Ok(false)
+                },
+
+            value = message_sender.recv() =>
+                match value {
+                    Some(response) => {
+                        self.finalize_transaction(response).await?;
+                        Ok(true)
+                     },
+                    None => Ok(false),
+                }
         }
     }
 
@@ -205,7 +220,7 @@ impl TransactionManager {
                     }
                 }
 
-                TxStatus::Completed => unreachable!(),
+                TxStatus::Completed => return Err(anyhow::anyhow!("Wrong Completed status")),
             }
         }
 

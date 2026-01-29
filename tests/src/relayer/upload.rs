@@ -23,6 +23,7 @@ pub(crate) struct EthContracts {
     pub api: GearApi,
     pub admin: ActorId,
     pub suri: String,
+    pub suri2: String,
 
     pub mock_contract: ActorId,
     pub historical_proxy: ActorId,
@@ -225,6 +226,7 @@ impl EthContracts {
             api,
             admin,
             suri,
+            suri2: connection.accounts[1].2.clone(),
 
             mock_contract,
             historical_proxy,

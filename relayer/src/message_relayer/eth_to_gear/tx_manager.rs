@@ -1,3 +1,8 @@
+use super::{
+    message_sender::{self, MessageSenderIo},
+    proof_composer::{self, ProofComposerIo},
+    storage::Storage,
+};
 use crate::message_relayer::{common::TxHashWithSlot, eth_to_gear::message_sender::MessageStatus};
 use eth_events_electra_client::EthToVaraEvent;
 use prometheus::IntCounter;
@@ -6,16 +11,10 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::{
     sync::{mpsc::UnboundedReceiver, RwLock},
-    time::{self, Duration},
+    time::{self, Duration, Interval},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
-
-use super::{
-    message_sender::{self, MessageSenderIo},
-    proof_composer::{self, ProofComposerIo},
-    storage::Storage,
-};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Transaction {
@@ -120,9 +119,14 @@ impl TransactionManager {
         mut proof_composer: ProofComposerIo,
         mut message_sender: MessageSenderIo,
     ) -> anyhow::Result<()> {
+        // once per 15 mins
+        let mut poll_interval = time::interval(Duration::from_secs(15 * 60));
+        poll_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+
         loop {
             let result = self
                 .process(
+                    &mut poll_interval,
                     &mut message_paid_events,
                     &mut proof_composer,
                     &mut message_sender,
@@ -149,14 +153,11 @@ impl TransactionManager {
 
     pub async fn process(
         &self,
+        poll_interval: &mut Interval,
         message_paid_events: &mut UnboundedReceiver<TxHashWithSlot>,
         proof_composer: &mut ProofComposerIo,
         message_sender: &mut MessageSenderIo,
     ) -> anyhow::Result<bool> {
-        // once per 15 mins
-        let mut poll_interval = time::interval(Duration::from_secs(15 * 60));
-        poll_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-
         tokio::select! {
             _ = poll_interval.tick() => {
                 match self

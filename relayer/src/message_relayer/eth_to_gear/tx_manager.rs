@@ -153,7 +153,8 @@ impl TransactionManager {
         proof_composer: &mut ProofComposerIo,
         message_sender: &mut MessageSenderIo,
     ) -> anyhow::Result<bool> {
-        let mut poll_interval = time::interval(Duration::from_secs(60));
+        // once per 15 mins
+        let mut poll_interval = time::interval(Duration::from_secs(15 * 60));
         poll_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
         tokio::select! {

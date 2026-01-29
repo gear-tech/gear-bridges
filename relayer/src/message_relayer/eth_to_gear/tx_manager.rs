@@ -182,7 +182,7 @@ impl TransactionManager {
                         self.submit_message(tx_uuid, payload, message_sender).await,
                     None => Ok(false)
                 },
- 
+
             value = message_sender.recv() =>
                 match value {
                     Some(response) => {

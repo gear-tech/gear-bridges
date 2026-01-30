@@ -1,5 +1,5 @@
 use crate::{
-    common::MAX_RETRIES,
+    common::{BlockRange, MAX_RETRIES},
     message_relayer::{
         common::{
             ethereum::{
@@ -203,44 +203,62 @@ async fn fetch_merkle_roots_inner(
     sender: UnboundedSender<RelayedMerkleRoot>,
 ) -> AnyResult<()> {
     const COUNT: u64 = 2_000;
+    const COUNT_STEP: u64 = 50;
 
     let block_finalized = eth_api.finalized_block_number().await?;
+    let block_latest = eth_api.latest_block_number().await?;
     let gear_api = api_provider.client();
 
-    for i in 0..50 {
+    for i in 0..COUNT_STEP {
         let block_range = crate::common::create_range(
             (block_finalized - (i + 1) * COUNT).into(),
             block_finalized - i * COUNT,
         );
-        let merkle_roots = eth_api
-            .fetch_merkle_roots_in_range(block_range.from, block_range.to)
-            .await?;
 
-        let len = merkle_roots.len();
-        log::trace!("Found {len} entry(ies) with merkle roots (i = {i})");
-        for (root, _block_number_eth) in merkle_roots
-            .into_iter()
-            .filter_map(|(root, block)| block.map(|block| (root, block)))
-        {
-            let timestamp = eth_api.get_block_timestamp(_block_number_eth).await?;
-            let block_hash = gear_api
-                .block_number_to_hash(root.block_number as u32)
-                .await?;
-            let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-
-            sender.send(RelayedMerkleRoot {
-                block: GearBlockNumber(root.block_number as u32),
-                block_hash,
-                authority_set_id: AuthoritySetId(authority_set_id),
-                merkle_root: root.merkle_root,
-                timestamp,
-            })?;
-        }
-
-        log::trace!("Successfuly sent {len} merkle root entry(ies) (i = {i})");
+        fetch_merkle_roots_in_range(&eth_api, &gear_api, &sender, i, block_range).await?;
 
         time::sleep(time::Duration::from_secs(5)).await;
     }
 
-    Ok(())
+    // to that moment block_latest should have the required number of confirmations
+    let block_range = crate::common::create_range((block_finalized + 1).into(), block_latest);
+
+    Ok(fetch_merkle_roots_in_range(&eth_api, &gear_api, &sender, COUNT_STEP, block_range).await?)
+}
+
+async fn fetch_merkle_roots_in_range(
+    eth_api: &EthApi,
+    gear_api: &gear_rpc_client::GearApi,
+    sender: &UnboundedSender<RelayedMerkleRoot>,
+    i: u64,
+    block_range: BlockRange,
+) -> AnyResult<()> {
+    let merkle_roots = eth_api
+        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
+        .await?;
+
+    let len = merkle_roots.len();
+    log::trace!("Found {len} entry(ies) with merkle roots (i = {i})");
+    for (root, _block_number_eth) in merkle_roots
+        .into_iter()
+        .filter_map(|(root, block)| block.map(|block| (root, block)))
+    {
+        let timestamp = eth_api.get_block_timestamp(_block_number_eth).await?;
+        let block_hash = gear_api
+            .block_number_to_hash(root.block_number as u32)
+            .await?;
+        let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+
+        sender.send(RelayedMerkleRoot {
+            block: GearBlockNumber(root.block_number as u32),
+            block_hash,
+            authority_set_id: AuthoritySetId(authority_set_id),
+            merkle_root: root.merkle_root,
+            timestamp,
+        })?;
+    }
+
+    Ok({
+        log::trace!("Successfuly sent {len} merkle root entry(ies) (i = {i})");
+    })
 }

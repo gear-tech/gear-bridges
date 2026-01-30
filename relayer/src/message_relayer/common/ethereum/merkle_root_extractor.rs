@@ -1,9 +1,6 @@
-use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::{
-        common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
-        eth_to_gear::api_provider::ApiProviderConnection,
-    },
+use crate::message_relayer::{
+    common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
 use alloy::{
     providers::{PendingTransactionBuilder, Provider},
@@ -66,53 +63,41 @@ impl MerkleRootExtractor {
 }
 
 async fn task(mut this: MerkleRootExtractor) {
-    let mut attempts = 0;
-
     loop {
-        let res = task_inner(&this).await;
-        if let Err(err) = res {
-            attempts += 1;
-            log::error!(
-                "Merkle root extractor failed (attempt {}/{}): {}. Retrying in {:?}...",
-                attempts,
-                MAX_RETRIES,
-                err,
-                BASE_RETRY_DELAY * 2u32.pow(attempts - 1),
-            );
-            if attempts >= MAX_RETRIES {
-                log::error!("Merkle root extractor failed {attempts} times: {err}");
-                break;
-            }
+        let Err(err) = task_inner(&this).await else {
+            log::info!("Exiting");
+            break;
+        };
 
-            tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
+        if this.sender.is_closed() {
+            log::error!(r#"Sender channel closed: "{err:?}". Exiting."#);
+            break;
+        }
+
+        if err.downcast_ref::<gclient::Error>().is_some() {
+            log::error!(r#"Merkle root extractor failed: "{err:?}""#);
 
             match this.api_provider.reconnect().await {
-                Ok(()) => {
+                Ok(_) => {
                     log::info!("API provider reconnected");
+
+                    continue;
                 }
 
                 Err(err) => {
-                    log::error!("Merkle root extractor unable to reconnect: {err}");
+                    log::error!(r#"Merkle root extractor unable to reconnect: "{err}""#);
                     return;
                 }
             }
+        }
 
-            if common::is_transport_error_recoverable(&err) {
-                this.eth_api = match this.eth_api.reconnect().await {
-                    Ok(eth_api) => eth_api,
-                    Err(err) => {
-                        log::error!("Failed to reconnect to Ethereum: {err}");
-                        break;
-                    }
-                };
-            } else {
-                log::error!("Merkle root extractor failed: {err}");
+        this.eth_api = match this.eth_api.reconnect().await {
+            Ok(eth_api) => eth_api,
+            Err(err) => {
+                log::error!(r#"Failed to reconnect to Ethereum: "{err}""#);
                 break;
             }
-        } else {
-            log::info!("Exiting");
-            break;
-        }
+        };
     }
 }
 
@@ -202,7 +187,6 @@ async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
                     merkle_root: root.merkleRoot.0.into(),
                     timestamp: block_timestamp,
                 })?;
-
             }
         }
     }

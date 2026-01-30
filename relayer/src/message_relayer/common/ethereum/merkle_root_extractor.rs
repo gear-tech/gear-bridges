@@ -74,9 +74,8 @@ async fn task(mut this: MerkleRootExtractor) {
             break;
         }
 
+        log::error!(r#"Merkle root extractor failed: "{err:?}""#);
         if err.downcast_ref::<gclient::Error>().is_some() {
-            log::error!(r#"Merkle root extractor failed: "{err:?}""#);
-
             match this.api_provider.reconnect().await {
                 Ok(_) => {
                     log::info!("API provider reconnected");

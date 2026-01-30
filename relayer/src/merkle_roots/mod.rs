@@ -19,7 +19,7 @@ use ::prover::{
 };
 use anyhow::Context;
 use ethereum_client::EthApi;
-use gear_rpc_client::dto;
+use gear_rpc_client::dto::RawBlockInclusionProof;
 use primitive_types::{H256, U256};
 use prometheus::IntGauge;
 use serde::{Deserialize, Serialize};
@@ -307,8 +307,7 @@ impl MerkleRootRelayer {
                         message_nonces: Vec::new(),
                         proof: merkle_root.proof.clone(),
                         http_requests: Vec::new(),
-                        block_finality_proof: merkle_root.block_finality_proof.clone(),
-                        block_finality_hash: merkle_root.block_finality_hash,
+                        block_inclusion_proof: merkle_root.block_inclusion_proof.clone(),
                     },
                 );
             };
@@ -339,10 +338,7 @@ impl MerkleRootRelayer {
                                 authority_set_proof,
                                 merkle_root.queue_id,
                                 true,
-                                (
-                                    merkle_root.block_finality_hash,
-                                    merkle_root.block_finality_proof.clone(),
-                                ),
+                                merkle_root.block_inclusion_proof.clone(),
                             ) {
                                 log::error!("Prover connection closed, exiting...");
                                 return Ok(());
@@ -409,10 +405,7 @@ impl MerkleRootRelayer {
                         inner_proof,
                         merkle_root.queue_id,
                         true,
-                        (
-                            merkle_root.block_finality_hash,
-                            merkle_root.block_finality_proof.clone(),
-                        ),
+                        merkle_root.block_inclusion_proof.clone(),
                     ) {
                         log::error!("Prover connection closed, exiting...");
                         return Ok(());
@@ -719,7 +712,7 @@ impl MerkleRootRelayer {
                             pending.queue_id,
                             /* request is part of the batch: */
                             true,
-                            (merkle_root.block_finality_hash, merkle_root.block_finality_proof.clone()),
+                            merkle_root.block_inclusion_proof.clone(),
                         ) {
                             log::warn!("Prover connection closed, exiting");
                             return Ok(false);
@@ -1064,11 +1057,10 @@ impl MerkleRootRelayer {
         priority: Priority,
         force_generation: ForceGeneration,
     ) -> anyhow::Result<Option<(u64, H256)>> {
+        let api = self.api_provider.client();
+
         let (queue_id, merkle_root) = if force_generation == ForceGeneration::Yes {
-            self.api_provider
-                .client()
-                .fetch_queue_merkle_root(block.hash())
-                .await?
+            api.fetch_queue_merkle_root(block.hash()).await?
         } else {
             match storage::queue_merkle_root_changed(&block) {
                 Some(merkle_root) => merkle_root,
@@ -1085,24 +1077,17 @@ impl MerkleRootRelayer {
         // finality proof might be available already which happens in the case of
         // merkle roots being inserted there before authority set is synced. Otherwise
         // immediately fetch finality proof.
-        let (block_finality_hash, block_finality_proof) = match self
+
+        let block_inclusion_proof = match self
             .roots
             .get(&(block.number(), merkle_root))
-            .map(|root| (root.block_finality_hash, root.block_finality_proof.clone()))
+            .map(|root| root.block_inclusion_proof.clone())
         {
-            Some((hash, proof)) => (hash, proof),
-            None => self
-                .api_provider
-                .client()
-                .produce_finality_proof(&block.grandpa_justification)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to fetch finality proof for block #{} with merkle-root {}",
-                        block.number(),
-                        merkle_root
-                    )
-                })?,
+            Some(proof) => proof,
+            None => match self.storage.blocks.read().await.get(&block.number()) {
+                Some(block) => block.inclusion_proof.clone(),
+                None => block.inclusion_proof(&api).await?,
+            },
         };
 
         let nonces = storage::message_queued_events_of(&block).collect::<Vec<_>>();
@@ -1160,8 +1145,7 @@ impl MerkleRootRelayer {
                         message_nonces: nonces,
                         http_requests: Vec::new(),
                         proof: None,
-                        block_finality_proof: block_finality_proof.clone(),
-                        block_finality_hash,
+                        block_inclusion_proof: block_inclusion_proof.clone(),
                     });
                 if matches!(batch, Batch::Yes) {
                     let now = Instant::now();
@@ -1193,7 +1177,7 @@ impl MerkleRootRelayer {
                     queue_id,
                     /* non batching request: should be processed separately */
                     false,
-                    (block_finality_hash, block_finality_proof.clone()),
+                    block_inclusion_proof,
                 ) {
                     log::error!("Prover connection closed, exiting...");
                     return Err(anyhow::anyhow!("Prover connection closed"));
@@ -1220,8 +1204,7 @@ impl MerkleRootRelayer {
                         message_nonces: nonces,
                         http_requests: Vec::new(),
                         proof: None,
-                        block_finality_proof,
-                        block_finality_hash,
+                        block_inclusion_proof,
                     });
 
                 let force_sync = self
@@ -1259,8 +1242,7 @@ impl MerkleRootRelayer {
                         message_nonces: nonces,
                         http_requests: Vec::new(),
                         proof: None,
-                        block_finality_proof,
-                        block_finality_hash,
+                        block_inclusion_proof,
                     },
                 );
 
@@ -1286,8 +1268,7 @@ pub struct MerkleRoot {
     #[serde(default)]
     pub proof: Option<FinalProof>,
     pub status: MerkleRootStatus,
-    pub block_finality_proof: dto::BlockFinalityProof,
-    pub block_finality_hash: H256,
+    pub block_inclusion_proof: RawBlockInclusionProof,
 }
 
 impl Clone for MerkleRoot {
@@ -1300,8 +1281,7 @@ impl Clone for MerkleRoot {
             http_requests: Vec::new(),
             proof: self.proof.clone(),
             status: self.status.clone(),
-            block_finality_proof: self.block_finality_proof.clone(),
-            block_finality_hash: self.block_finality_hash,
+            block_inclusion_proof: self.block_inclusion_proof.clone(),
         }
     }
 }

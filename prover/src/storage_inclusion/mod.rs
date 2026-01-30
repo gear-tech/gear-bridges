@@ -10,17 +10,16 @@
 //! All the above means that any data that's stored in `Leaf` or `HashedValueLeaf` will be parsed,
 //! except ones that have length < 32 bytes.
 
-use plonky2::{
-    iop::witness::PartialWitness,
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
-};
-
 use crate::{
     common::{
         targets::{impl_parsable_target_set, Blake2Target, TargetSet},
         BuilderExt, ProofWithCircuitData,
     },
     prelude::*,
+};
+use plonky2::{
+    iop::{target::Target, witness::PartialWitness},
+    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 
 mod block_header_parser;
@@ -39,6 +38,8 @@ impl_parsable_target_set! {
         /// Blake2 hash of data included into storage. We don't use original data here as it'll
         /// potentially have generic length.
         pub storage_item_hash: Blake2Target,
+        /// Block number where storage gets read.
+        pub block_number: Target,
     }
 }
 
@@ -96,6 +97,7 @@ impl StorageInclusion {
         StorageInclusionTarget {
             block_hash: block_header_target.block_hash,
             storage_item_hash: storage_trie_target.data_hash,
+            block_number: block_header_target.block_number,
         }
         .register_as_public_inputs(&mut builder);
 

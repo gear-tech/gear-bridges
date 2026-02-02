@@ -102,8 +102,9 @@ $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $HO
 4. generate an update message with the help of `governance-tool` (see `tools/governance/README.md`):
 
    ```bash
-   NEW_IMPLEMENTATION="0x0000000000000000000000000000000000000000" # must exist on https://etherscan.io
-   cargo run --package governance-tool --release -- --rpc-url $MAINNET_RPC_URL GovernanceAdmin UpgradeProxy MessageQueue $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
+   # must exist on https://etherscan.io
+   NEW_IMPLEMENTATION="0x0000000000000000000000000000000000000000"
+   cargo run --package governance-tool --release -- --ethereum-endpoint $MAINNET_RPC_URL GovernanceAdmin UpgradeProxy MessageQueue $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
    ```
 
 5. send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`

@@ -327,8 +327,8 @@ contract ERC20ManagerTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                    proxy: address(erc20Manager), newImplementation: address(newImplementationMock), data: ""
-                }).pack()
+                proxy: address(erc20Manager), newImplementation: address(newImplementationMock), data: ""
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -450,8 +450,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
-                }).pack()
+                sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -718,8 +718,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
-                }).pack()
+                sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -1001,8 +1001,8 @@ contract ERC20ManagerTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: RegisterGearTokenMessage({
-                    tokenName: tokenName, tokenSymbol: tokenSymbol, tokenDecimals: tokenDecimals
-                }).pack()
+                tokenName: tokenName, tokenSymbol: tokenSymbol, tokenDecimals: tokenDecimals
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -1039,8 +1039,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
-                }).pack()
+                sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 

@@ -274,8 +274,8 @@ contract WrappedVaraTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                    proxy: address(wrappedVara), newImplementation: address(newImplementationMock), data: ""
-                }).pack()
+                proxy: address(wrappedVara), newImplementation: address(newImplementationMock), data: ""
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 

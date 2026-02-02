@@ -6,7 +6,6 @@ use crate::message_relayer::{
     eth_to_gear::api_provider::ApiProviderConnection,
 };
 use futures::StreamExt;
-use primitive_types::H256;
 use prometheus::IntGauge;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -49,7 +48,7 @@ impl BlockListener {
     }
 
     pub async fn run<const RECEIVER_COUNT: usize>(
-        mut self,
+        self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
         // Capacity for the channel. At the moment merkle-root relayer might lag behind
         // during proof generation or era sync, so we need to have enough capacity
@@ -65,41 +64,62 @@ impl BlockListener {
                 blocks: _,
             } = self.block_storage.unprocessed_blocks().await;
 
-            let mut unprocessed = Vec::new();
+            let api_back = api.clone();
+            let tx_back = tx2.clone();
+            let storage_back = self.block_storage.clone();
 
-            if let Some(from_block) = last_block.or(first_block) {
-                let latest_finalized_block = match api.latest_finalized_block().await {
-                    Ok(block) => block,
-                    Err(err) => {
-                        log::error!("Failed to get latest finalized block: {err}");
-                        return;
-                    }
-                };
-                let Ok(latest_finalized_block_number) =
-                    api.block_hash_to_number(latest_finalized_block).await
-                else {
-                    log::error!("Failed to convert latest finalized block hash to number");
-                    return;
-                };
-
-                for block in from_block.1..=latest_finalized_block_number {
-                    let hash = if block == latest_finalized_block_number {
-                        latest_finalized_block
-                    } else {
-                        match api.block_number_to_hash(block).await {
-                            Ok(hash) => hash,
-                            Err(err) => {
-                                log::error!("Failed to get block hash for number {block}: {err}");
-                                continue;
-                            }
+            tokio::spawn(async move {
+                if let Some(from_block) = last_block.or(first_block) {
+                    log::info!("Gear block listener: unprocessed blocks found, fetching them.");
+                    let latest_finalized_block = match api_back.latest_finalized_block().await {
+                        Ok(block) => block,
+                        Err(err) => {
+                            log::error!("Failed to get latest finalized block: {err}");
+                            return Err(anyhow::anyhow!("Failed to get latest finalized block"));
                         }
                     };
-                    unprocessed.push((hash, block));
+                    let Ok(latest_finalized_block_number) =
+                        api_back.block_hash_to_number(latest_finalized_block).await
+                    else {
+                        log::error!("Failed to convert latest finalized block hash to number");
+                        return Err(anyhow::anyhow!(
+                            "Failed to convert latest finalized block hash to number"
+                        ));
+                    };
+
+                    for block in from_block.1..=latest_finalized_block_number {
+                        let hash = if block == latest_finalized_block_number {
+                            latest_finalized_block
+                        } else {
+                            match api_back.block_number_to_hash(block).await {
+                                Ok(hash) => hash,
+                                Err(err) => {
+                                    log::error!(
+                                        "Failed to get block hash for number {block}: {err}"
+                                    );
+                                    continue;
+                                }
+                            }
+                        };
+                        let missing_block_data = api_back.api.blocks().at(hash).await?;
+                        let gear_block =
+                            GearBlock::from_subxt_block(&api_back, missing_block_data).await?;
+                        storage_back.add_block(&api_back, &gear_block).await?;
+                        match tx_back.send(gear_block) {
+                            Ok(_) => {}
+                            Err(err) => {
+                                log::error!("Failed to send Gear block: {err}");
+                                return Err(anyhow::anyhow!("Failed to send Gear block"));
+                            }
+                        }
+                    }
                 }
-            }
+
+                Ok(())
+            });
 
             loop {
-                let res = self.run_inner(&tx2, &mut unprocessed).await;
+                let res = self.run_inner(&tx2).await;
                 match res {
                     Ok(false) => {
                         log::info!("Gear block listener stopped due to no active receivers");
@@ -114,15 +134,7 @@ impl BlockListener {
                     Err(err) => {
                         log::error!("Gear block listener failed: {err}");
 
-                        match self.api_provider.reconnect().await {
-                            Ok(()) => {
-                                log::info!("Gear block listener reconnected");
-                            }
-                            Err(err) => {
-                                log::error!("Gear block listener unable to reconnect: {err}");
-                                return;
-                            }
-                        };
+                        return;
                     }
                 }
             }
@@ -135,27 +147,8 @@ impl BlockListener {
             .expect("expected Vec of correct length")
     }
 
-    async fn run_inner(
-        &self,
-        tx: &broadcast::Sender<GearBlock>,
-        unprocessed: &mut Vec<(H256, u32)>,
-    ) -> anyhow::Result<bool> {
+    async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<bool> {
         let gear_api = self.api_provider.client();
-
-        for (block_hash, block_number) in unprocessed.drain(..) {
-            log::trace!("Fetching unprocessed block #{block_number} (hash: {block_hash})");
-            let block = gear_api.api.blocks().at(block_hash).await?;
-
-            let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
-
-            match tx.send(gear_block) {
-                Ok(_) => (),
-                Err(broadcast::error::SendError(_)) => {
-                    log::error!("No active receivers for Gear block listener, stopping");
-                    return Ok(false);
-                }
-            }
-        }
 
         let mut last_finalized_block_number = None;
         let mut subscription = gear_api.subscribe_grandpa_justifications().await?;

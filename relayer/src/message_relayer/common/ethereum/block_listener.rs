@@ -1,7 +1,12 @@
-use crate::{common, message_relayer::common::EthereumBlockNumber};
+use crate::{
+    common,
+    message_relayer::common::{
+        ethereum::block_storage::UnprocessedBlockStorage, EthereumBlockNumber,
+    },
+};
 use ethereum_client::PollingEthApi;
 use prometheus::IntGauge;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -10,6 +15,7 @@ pub const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
 pub struct BlockListener {
     eth_api: PollingEthApi,
     from_block: u64,
+    storage: Arc<dyn UnprocessedBlockStorage>,
 
     metrics: Metrics,
 }
@@ -30,10 +36,15 @@ impl_metered_service! {
 }
 
 impl BlockListener {
-    pub fn new(eth_api: PollingEthApi, from_block: u64) -> Self {
+    pub fn new(
+        eth_api: PollingEthApi,
+        from_block: u64,
+        storage: Arc<dyn UnprocessedBlockStorage>,
+    ) -> Self {
         Self {
             eth_api,
             from_block,
+            storage,
 
             metrics: Metrics::new(),
         }
@@ -42,7 +53,7 @@ impl BlockListener {
     pub fn spawn(self) -> UnboundedReceiver<EthereumBlockNumber> {
         let (sender, receiver) = unbounded_channel();
 
-        tokio::spawn(self::task(self, sender));
+        tokio::spawn(task(self, sender));
 
         receiver
     }
@@ -52,10 +63,32 @@ impl BlockListener {
 
         self.metrics.latest_block.set(current_block as i64);
 
+        // Fetch unprocessed blocks in background
+        let storage = self.storage.clone();
+        let sender_clone = sender.clone();
+        tokio::spawn(async move {
+            match storage.unprocessed_blocks().await {
+                Ok(blocks) => {
+                    for block in blocks {
+                        if let Err(e) = sender_clone.send(EthereumBlockNumber(block)) {
+                            log::error!("Failed to send unprocessed block {block}: {e}");
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch unprocessed blocks: {e}");
+                }
+            }
+        });
+
         loop {
             let latest = self.eth_api.finalized_block().await?.header.number;
             if latest >= current_block {
                 for block in current_block..=latest {
+                    if let Err(e) = self.storage.add_block(block).await {
+                        log::error!("Failed to add block {block} to storage: {e}");
+                    }
                     sender.send(EthereumBlockNumber(block))?;
                 }
 

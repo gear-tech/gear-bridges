@@ -6,6 +6,7 @@ use crate::{
     },
     proof_storage::ProofStorage,
 };
+use gear_rpc_client::dto::RawBlockInclusionProof;
 use primitive_types::{H256, U256};
 use sails_rs::events::EventIo;
 use serde::{ser::SerializeStruct, Deserialize, Serialize};
@@ -31,9 +32,7 @@ pub struct Block {
     pub block_hash: H256,
     pub merkle_root_changed: Option<(u64, H256)>,
     pub authority_set_changed: bool,
-    pub finality_block: u32,
-    pub finality_proof: gear_rpc_client::dto::BlockFinalityProof,
-    pub finality_hash: H256,
+    pub inclusion_proof: RawBlockInclusionProof,
 }
 
 impl Block {
@@ -112,9 +111,10 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
         let merkle_root_changed = queue_merkle_root_changed(block);
         let authority_set_changed = authority_set_changed(block);
 
-        let finality = api
+        let proof = api
             .produce_finality_proof(&block.grandpa_justification)
             .await?;
+
         let block_hash = block.hash();
         let block_number = block.number();
 
@@ -129,9 +129,7 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
                     block_hash,
                     merkle_root_changed,
                     authority_set_changed,
-                    finality_block: block.grandpa_justification.commit.target_number,
-                    finality_proof: finality.1,
-                    finality_hash: finality.0,
+                    inclusion_proof: proof,
                 });
             }
         }

@@ -154,6 +154,8 @@ async fn run() -> AnyResult<()> {
                 Some(thread_count) => thread_count.into(),
             };
 
+            let (justification, _headers) = gear_api.grandpa_prove_finality(block_number).await?;
+
             let proof_previous =
                 crate::prover_interface::prove_genesis(&gear_api, genesis_config, count_thread)
                     .await?;
@@ -170,7 +172,7 @@ async fn run() -> AnyResult<()> {
                 genesis_config,
                 block_hash,
                 count_thread,
-                None,
+                Some(gear_api.produce_finality_proof(&justification).await?),
             )
             .await?;
 
@@ -491,6 +493,7 @@ async fn run() -> AnyResult<()> {
             beacon_rpc,
             prometheus_args,
             storage_path,
+            ethereum_blocks,
         }) => {
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
@@ -546,6 +549,7 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_blocks.clone(),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -576,6 +580,7 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_blocks.clone(),
                     )
                     .await
                     .expect("Failed to create relayer");

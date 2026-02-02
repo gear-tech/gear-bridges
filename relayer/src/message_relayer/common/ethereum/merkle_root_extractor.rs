@@ -1,9 +1,6 @@
-use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    message_relayer::{
-        common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
-        eth_to_gear::api_provider::ApiProviderConnection,
-    },
+use crate::message_relayer::{
+    common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
+    eth_to_gear::api_provider::ApiProviderConnection,
 };
 use alloy::{
     providers::{PendingTransactionBuilder, Provider},
@@ -11,6 +8,8 @@ use alloy::{
 };
 use ethereum_client::{abi::IMessageQueue::MerkleRoot, EthApi};
 use futures::StreamExt;
+use gear_rpc_client::GearApi;
+use primitive_types::H256;
 use prometheus::IntGauge;
 use tokio::sync::mpsc::UnboundedSender;
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -63,61 +62,73 @@ impl MerkleRootExtractor {
     pub fn spawn(self) {
         tokio::task::spawn(task(self));
     }
-}
 
-async fn task(mut this: MerkleRootExtractor) {
-    let mut attempts = 0;
+    async fn fetch_hash_auth_id(
+        &mut self,
+        block_number_gear: u32,
+    ) -> Option<(H256, AuthoritySetId)> {
+        let gear_api = self.api_provider.client();
+        loop {
+            match self::fetch_hash_auth_id(&gear_api, block_number_gear).await {
+                Ok(result) => return Some(result),
 
-    loop {
-        let res = task_inner(&this).await;
-        if let Err(err) = res {
-            attempts += 1;
-            log::error!(
-                "Merkle root extractor failed (attempt {}/{}): {}. Retrying in {:?}...",
-                attempts,
-                MAX_RETRIES,
-                err,
-                BASE_RETRY_DELAY * 2u32.pow(attempts - 1),
-            );
-            if attempts >= MAX_RETRIES {
-                log::error!("Merkle root extractor failed {attempts} times: {err}");
-                break;
-            }
-
-            tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
-
-            match this.api_provider.reconnect().await {
-                Ok(()) => {
-                    log::info!("API provider reconnected");
-                }
-
-                Err(err) => {
-                    log::error!("Merkle root extractor unable to reconnect: {err}");
-                    return;
-                }
-            }
-
-            if common::is_transport_error_recoverable(&err) {
-                this.eth_api = match this.eth_api.reconnect().await {
-                    Ok(eth_api) => eth_api,
-                    Err(err) => {
-                        log::error!("Failed to reconnect to Ethereum: {err}");
-                        break;
+                Err(e) => {
+                    log::error!(r#"Merkle root extractor failed to fetch block_hash: "{e:?}""#);
+                    log::trace!(
+                        r#"e.downcast_ref::<gsdk::Error>(): "{:?}""#,
+                        e.downcast_ref::<gsdk::Error>()
+                    );
+                    log::trace!(
+                        r#"e.downcast_ref::<subxt::Error>(): "{:?}""#,
+                        e.downcast_ref::<subxt::Error>()
+                    );
+                    for cause in e.chain() {
+                        log::trace!(r#"cause: "{cause:?}""#);
                     }
-                };
-            } else {
-                log::error!("Merkle root extractor failed: {err}");
-                break;
+                }
             }
-        } else {
-            log::info!("Exiting");
-            break;
+
+            if let Err(e) = self.api_provider.reconnect().await {
+                log::error!(r#"Merkle root extractor unable to reconnect: "{e}""#);
+                return None;
+            }
+
+            log::debug!("API provider reconnected");
         }
     }
 }
 
-async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
-    let gear_api = this.api_provider.client();
+async fn fetch_hash_auth_id(
+    gear_api: &GearApi,
+    block_number_gear: u32,
+) -> anyhow::Result<(H256, AuthoritySetId)> {
+    let block_hash = gear_api.block_number_to_hash(block_number_gear).await?;
+
+    let authority_set_id = AuthoritySetId(gear_api.signed_by_authority_set_id(block_hash).await?);
+
+    Ok((block_hash, authority_set_id))
+}
+
+async fn task(mut this: MerkleRootExtractor) {
+    loop {
+        let Err(err) = task_inner(&mut this).await else {
+            log::info!("Exiting");
+            break;
+        };
+
+        log::error!(r#"Merkle root extractor failed: "{err:?}""#);
+
+        this.eth_api = match this.eth_api.reconnect().await {
+            Ok(eth_api) => eth_api,
+            Err(err) => {
+                log::error!(r#"Failed to reconnect to Ethereum: "{err}""#);
+                break;
+            }
+        };
+    }
+}
+
+async fn task_inner(this: &mut MerkleRootExtractor) -> anyhow::Result<()> {
     let subscription = this.eth_api.subscribe_logs().await?;
 
     let mut stream = subscription.into_result_stream();
@@ -185,24 +196,25 @@ async fn task_inner(this: &MerkleRootExtractor) -> anyhow::Result<()> {
                     .latest_merkle_root_for_block
                     .set(block_number_gear as i64);
 
-                let block_hash = gear_api.block_number_to_hash(block_number_gear).await?;
-
-                let authority_set_id =
-                    AuthoritySetId(gear_api.signed_by_authority_set_id(block_hash).await?);
+                let Some((block_hash, authority_set_id)) = this.fetch_hash_auth_id(block_number_gear).await else {
+                    return Ok(());
+                };
 
                 log::info!(
                     "Merkle root {:?} is for era #{authority_set_id}",
                     (root.blockNumber, root.merkleRoot),
                 );
 
-                this.sender.send(RelayedMerkleRoot {
+                if let Err(e) = this.sender.send(RelayedMerkleRoot {
                     block: GearBlockNumber(block_number_gear),
                     block_hash,
                     authority_set_id,
                     merkle_root: root.merkleRoot.0.into(),
                     timestamp: block_timestamp,
-                })?;
-
+                }) {
+                    log::error!(r#"Sender channel closed: "{e:?}"."#);
+                    return Ok(());
+                }
             }
         }
     }

@@ -67,8 +67,9 @@ impl MerkleRootExtractor {
         &mut self,
         block_number_gear: u32,
     ) -> Option<(H256, AuthoritySetId)> {
-        let gear_api = self.api_provider.client();
         loop {
+            let gear_api = self.api_provider.client();
+
             match self::fetch_hash_auth_id(&gear_api, block_number_gear).await {
                 Ok(result) => return Some(result),
 

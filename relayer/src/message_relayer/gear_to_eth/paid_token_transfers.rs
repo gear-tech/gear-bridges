@@ -223,7 +223,7 @@ async fn fetch_merkle_roots_inner(
     // to that moment block_latest should have the required number of confirmations
     let block_range = crate::common::create_range((block_finalized + 1).into(), block_latest);
 
-    Ok(fetch_merkle_roots_in_range(&eth_api, &gear_api, &sender, COUNT_STEP, block_range).await?)
+    fetch_merkle_roots_in_range(&eth_api, &gear_api, &sender, COUNT_STEP, block_range).await
 }
 
 async fn fetch_merkle_roots_in_range(
@@ -258,7 +258,7 @@ async fn fetch_merkle_roots_in_range(
         })?;
     }
 
-    Ok({
-        log::trace!("Successfuly sent {len} merkle root entry(ies) (i = {i})");
-    })
+    log::trace!("Successfuly sent {len} merkle root entry(ies) (i = {i})");
+
+    Ok(())
 }

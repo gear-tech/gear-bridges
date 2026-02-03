@@ -101,10 +101,19 @@ impl BlockListener {
                                 }
                             }
                         };
-                        let missing_block_data = api_back.api.blocks().at(hash).await?;
-                        let gear_block =
-                            GearBlock::from_subxt_block(&api_back, missing_block_data).await?;
-                        storage_back.add_block(&api_back, &gear_block).await?;
+                        let missing_block_data = api_back
+                            .api
+                            .blocks()
+                            .at(hash)
+                            .await
+                            .expect("Failed to fetch block data for hash from Gear node");
+                        let gear_block = GearBlock::from_subxt_block(&api_back, missing_block_data)
+                            .await
+                            .expect("Failed to convert Subxt block into GearBlock");
+                        storage_back
+                            .add_block(&api_back, &gear_block)
+                            .await
+                            .expect("Failed to add missing Gear block to storage");
                         match tx_back.send(gear_block) {
                             Ok(_) => {}
                             Err(err) => {
@@ -151,10 +160,14 @@ impl BlockListener {
         let gear_api = self.api_provider.client();
 
         let mut last_finalized_block_number = None;
-        let mut subscription = gear_api.subscribe_grandpa_justifications().await?;
+        let mut subscription = gear_api
+            .subscribe_grandpa_justifications()
+            .await
+            .expect("Failed to subscribe to Grandpa justifications");
 
         while let Some(justification) = subscription.next().await {
-            let justification = justification?;
+            let justification =
+                justification.expect("Failed to read justification from subscription");
 
             let block_hash = justification.commit.target_hash;
             let block_number = justification.commit.target_number;
@@ -179,11 +192,19 @@ impl BlockListener {
                             }
                         };
 
-                        let missing_block_data =
-                            gear_api.api.blocks().at(missing_block_hash).await?;
-                        let gear_block =
-                            GearBlock::from_subxt_block(&gear_api, missing_block_data).await?;
-                        self.block_storage.add_block(&gear_api, &gear_block).await?;
+                        let missing_block_data = gear_api
+                            .api
+                            .blocks()
+                            .at(missing_block_hash)
+                            .await
+                            .expect("Failed to fetch missing block data from Gear node");
+                        let gear_block = GearBlock::from_subxt_block(&gear_api, missing_block_data)
+                            .await
+                            .expect("Failed to convert missing Subxt block into GearBlock");
+                        self.block_storage
+                            .add_block(&gear_api, &gear_block)
+                            .await
+                            .expect("Failed to add missing Gear block to storage");
                         match tx.send(gear_block) {
                             Ok(_) => {}
                             Err(broadcast::error::SendError(_)) => {
@@ -199,9 +220,19 @@ impl BlockListener {
 
             // Process the current block
             let block_hash: primitive_types::H256 = block_hash.0.into();
-            let block = gear_api.api.blocks().at(block_hash).await?;
-            let gear_block = GearBlock::from_subxt_block(&gear_api, block).await?;
-            self.block_storage.add_block(&gear_api, &gear_block).await?;
+            let block = gear_api
+                .api
+                .blocks()
+                .at(block_hash)
+                .await
+                .expect("Failed to fetch finalized block data from Gear node");
+            let gear_block = GearBlock::from_subxt_block(&gear_api, block)
+                .await
+                .expect("Failed to convert current Subxt block into GearBlock");
+            self.block_storage
+                .add_block(&gear_api, &gear_block)
+                .await
+                .expect("Failed to add current Gear block to storage");
             match tx.send(gear_block) {
                 Ok(_) => {}
                 Err(broadcast::error::SendError(_)) => {

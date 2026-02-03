@@ -223,12 +223,13 @@ impl GearApi {
                 rpc_params![],
                 "grandpa_unsubscribeJustifications",
             )
-            .await?;
+            .await
+            .expect("Subscription to grandpa justifications failed");
 
         let stream = stream.map(|res: Result<String, _>| -> AnyResult<_, _> {
             let hex_string = res?;
             let bytes = hex::decode(&hex_string[2..]).context("failed to decoded hex")?;
-            let mut justification = GrandpaJustification::<GearHeader>::decode(&mut &bytes[..])?;
+            let mut justification = GrandpaJustification::<GearHeader>::decode(&mut &bytes[..]).expect("Failed to decode justification");
 
             justification.commit.precommits.retain(|pc| {
                 if pc.precommit.target_hash == justification.commit.target_hash

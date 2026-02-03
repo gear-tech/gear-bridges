@@ -3,11 +3,13 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 
 import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
+import { useNetworkType } from '@/context/network-type';
 import { TransactionsCounter } from '@/features/history';
 import { NetworkSwitch } from '@/features/network-switch';
 import { LockedBalanceTooltip } from '@/features/token-tracker';
 import { Wallet } from '@/features/wallet';
 import { useAccountsConnection } from '@/hooks';
+import { isString } from '@/utils';
 
 import { Container } from '../container';
 
@@ -16,11 +18,13 @@ import styles from './header.module.scss';
 
 function Header() {
   const { isAnyAccount } = useAccountsConnection();
+  const { networkType } = useNetworkType();
 
   const { pathname } = useLocation();
   const [linksStyle, setLinksStyle] = useState<CSSProperties>();
 
   const linksRef = useRef<HTMLUListElement>(null);
+
   const linkRefs = useRef<{ [key: string]: HTMLAnchorElement | null }>({
     [ROUTE.HOME]: null,
     [ROUTE.TRANSACTIONS]: null,
@@ -40,7 +44,7 @@ function Header() {
       '--active-link-width': `${linkRect.width}px`,
       '--active-link-offset': `${offset}px`,
     } as CSSProperties);
-  }, [pathname, isAnyAccount]);
+  }, [pathname, isAnyAccount, networkType]);
 
   const renderLinks = () =>
     Object.entries(LINKS).map(([to, text]) => {
@@ -55,7 +59,7 @@ function Header() {
       return (
         <li key={to}>
           <NavLink to={to} className={styles.link} ref={setRef}>
-            {text}
+            {isString(text) ? text : text[networkType]}
           </NavLink>
 
           {isTokensLink && <LockedBalanceTooltip />}

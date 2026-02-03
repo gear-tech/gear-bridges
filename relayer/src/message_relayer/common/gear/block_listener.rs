@@ -117,8 +117,9 @@ impl BlockListener {
                 Ok(())
             });
 
+            let mut last_finalized_block_number = None;
             loop {
-                let res = self.run_inner(&tx2).await;
+                let res = self.run_inner(&tx2, &mut last_finalized_block_number).await;
                 let e = match res {
                     Ok(false) => {
                         log::info!("Gear block listener stopped due to no active receivers");
@@ -151,12 +152,14 @@ impl BlockListener {
             .expect("expected Vec of correct length")
     }
 
-    async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<bool> {
+    async fn run_inner(
+        &self,
+        tx: &broadcast::Sender<GearBlock>,
+        last_finalized_block_number: &mut Option<u32>,
+    ) -> anyhow::Result<bool> {
         let gear_api = self.api_provider.client();
 
-        let mut last_finalized_block_number = None;
         let mut subscription = gear_api.subscribe_grandpa_justifications().await?;
-
         while let Some(justification) = subscription.next().await {
             let justification = justification?;
 
@@ -164,7 +167,7 @@ impl BlockListener {
             let block_number = justification.commit.target_number;
 
             // Check if there are missing blocks and fetch them
-            if let Some(last_finalized) = last_finalized_block_number {
+            if let Some(last_finalized) = last_finalized_block_number.clone() {
                 if last_finalized + 1 != block_number {
                     log::info!("Detected gap: last finalized block was #{last_finalized}, current block is #{block_number}");
 
@@ -215,7 +218,7 @@ impl BlockListener {
             }
 
             // Update the last finalized block number
-            last_finalized_block_number = Some(block_number);
+            *last_finalized_block_number = Some(block_number);
             self.metrics.latest_block.set(block_number as i64);
         }
 

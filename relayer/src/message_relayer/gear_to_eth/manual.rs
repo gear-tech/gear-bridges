@@ -13,7 +13,10 @@ use crate::message_relayer::{
         AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
     eth_to_gear::api_provider::ApiProviderConnection,
-    gear_to_eth::{storage::NoStorage, tx_manager::TransactionManager},
+    gear_to_eth::{
+        storage::NoStorage,
+        tx_manager::{TransactionManager, TxStatus},
+    },
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -156,20 +159,33 @@ pub async fn relay(
             )
             .await
         {
-            Ok(res) => {
-                if !res {
-                    log::warn!("Trasaction manager exiting");
-                    return;
-                }
-
+            Ok(true) => {
                 if !tx_manager.completed.read().await.is_empty() {
                     log::info!("Transaction nonce={message_nonce}, block={gear_block} successfully relayed");
+
+                    return;
                 } else if !tx_manager.failed.read().await.is_empty() {
                     log::error!(
                         "Failed to relay transaction nonce={message_nonce}, block={gear_block}: {}",
                         tx_manager.failed.read().await.first_key_value().unwrap().1
                     );
+
+                    return;
                 }
+
+                let binding = tx_manager.transactions.read().await;
+                let Some((_key, tx)) = binding.first_key_value() else {
+                    continue;
+                };
+
+                if let TxStatus::Completed = tx.status {
+                    return;
+                }
+            }
+
+            Ok(false) => {
+                log::warn!("Trasaction manager exiting");
+                return;
             }
 
             Err(err) => {

@@ -117,26 +117,6 @@ impl TransactionManager {
         }
     }
 
-    async fn is_message_already_known(&self, message: &MessageInBlock) -> bool {
-        let hash = message_hash(&message.message);
-
-        {
-            let transactions = self.transactions.read().await;
-            if transactions.values().any(|tx| tx.message_hash == hash) {
-                return true;
-            }
-        }
-
-        {
-            let completed = self.completed.read().await;
-            if completed.values().any(|tx| tx.message_hash == hash) {
-                return true;
-            }
-        }
-
-        false
-    }
-
     pub async fn update_storage(&self) {
         if let Err(err) = self.storage.save(self).await {
             log::error!("Failed to save transaction manager state: {err}");
@@ -310,36 +290,52 @@ impl TransactionManager {
                     return Ok(false);
                 };
 
-                if self.is_message_already_known(&message).await {
-                    log::info!(
-                        "Skipping duplicate message (already in tx storage): nonce={}, block=#{}",
-                        hex::encode(message.message.nonce_be),
-                        message.block.0
-                    );
-                } else {
-                    self.storage.block_storage().complete_transaction(&message).await;
-                    let source = ActorId::from(message.message.source);
-                    let tx = Transaction::new(message, TxStatus::WaitForMerkleRoot);
+                let hash = message_hash(&message.message);
+                {
+                    let completed = self.completed.read().await;
+                    if completed.values().any(|tx| tx.message_hash == hash) {
+                        log::info!(
+                            "Skipping completed message: nonce={}, block=#{}",
+                            hex::encode(message.message.nonce_be),
+                            message.block.0
+                        );
 
-                    let block_hash = tx.message.block_hash;
-                    let authority_set_id = tx.message.authority_set_id;
-                    let block = tx.message.block;
-                    let uuid = tx.uuid;
-
-                    log::info!(
-                        "New transaction {}, nonce={} from source {} at block #{}({})",
-                        uuid,
-                        hex::encode(tx.message.message.nonce_be),
-                        source,
-                        block.0,
-                        block_hash,
-                    );
-
-                    self.add_transaction(tx).await;
-                    if !accumulator.send_message(uuid, authority_set_id, block, block_hash, source) {
-                        log::warn!("Failed to send message to accumulator, exiting");
-                        return Ok(false);
+                        return Ok(true);
                     }
+                }
+
+                let tx_maybe = {
+                    let transactions = self.transactions.read().await;
+
+                    transactions.values().find(|tx| tx.message_hash == hash).cloned()
+                };
+
+                let (tx, is_new) = match tx_maybe {
+                    Some(tx) => (tx, false),
+                    None => {
+                        self.storage.block_storage().complete_transaction(&message).await;
+                        let tx = Transaction::new(message, TxStatus::WaitForMerkleRoot);
+                        self.add_transaction(tx.clone()).await;
+
+                        (tx, true)
+                    }
+                };
+
+                let source = ActorId::from(tx.message.message.source);
+                let block_hash = tx.message.block_hash;
+                let authority_set_id = tx.message.authority_set_id;
+                let block = tx.message.block;
+                let uuid = tx.uuid;
+
+                log::info!(
+                    "Transaction (is new: {is_new}) {uuid}, nonce={} from source {source} at block #{} ({block_hash})",
+                    hex::encode(tx.message.message.nonce_be),
+                    block.0,
+                );
+
+                if !accumulator.send_message(uuid, authority_set_id, block, block_hash, source) {
+                    log::warn!("Failed to send message to accumulator, exiting");
+                    return Ok(false);
                 }
             }
 
@@ -487,6 +483,7 @@ impl TransactionManager {
                 }
             }
         }
+
         Ok(true)
     }
 }

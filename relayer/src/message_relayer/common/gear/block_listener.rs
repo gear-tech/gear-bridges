@@ -48,7 +48,7 @@ impl BlockListener {
     }
 
     pub async fn run<const RECEIVER_COUNT: usize>(
-        self,
+        mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
         // Capacity for the channel. At the moment merkle-root relayer might lag behind
         // during proof generation or era sync, so we need to have enough capacity
@@ -57,14 +57,13 @@ impl BlockListener {
         let (tx, _) = broadcast::channel(CAPACITY);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
-            let api = self.api_provider.client();
             let UnprocessedBlocks {
                 last_block,
                 first_block,
                 blocks: _,
             } = self.block_storage.unprocessed_blocks().await;
 
-            let api_back = api.clone();
+            let api_back = self.api_provider.client();
             let tx_back = tx2.clone();
             let storage_back = self.block_storage.clone();
 
@@ -120,7 +119,7 @@ impl BlockListener {
 
             loop {
                 let res = self.run_inner(&tx2).await;
-                match res {
+                let e = match res {
                     Ok(false) => {
                         log::info!("Gear block listener stopped due to no active receivers");
                         return;
@@ -131,12 +130,17 @@ impl BlockListener {
                         continue;
                     }
 
-                    Err(err) => {
-                        log::error!("Gear block listener failed: {err}");
+                    Err(e) => e,
+                };
 
-                        return;
-                    }
+                log::error!(r#"Gear block listener failed: "{e:?}""#);
+
+                if let Err(e) = self.api_provider.reconnect().await {
+                    log::error!(r#"API provider unable to reconnect: "{e}""#);
+                    return;
                 }
+
+                log::debug!("API provider reconnected");
             }
         });
 

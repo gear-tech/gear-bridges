@@ -43,56 +43,6 @@ impl MessageDataExtractor {
         task::spawn(self::task(self));
     }
 
-    async fn run_inner(&mut self) -> anyhow::Result<()> {
-        loop {
-            let Some(message) = self.receiver.recv().await else {
-                return Ok(());
-            };
-
-            log::trace!(r#"Processing message: "{message:?}""#);
-
-            let block_data = match self.find_block_data(message.block) {
-                Some(block_data) => block_data,
-                None => self.retreive_block_data(message.block).await?,
-            };
-
-            log::trace!(r#"Found data for the message block: "{block_data:?}""#);
-
-            let (block, authority_set_id) = block_data;
-            let messages = common::message_queued_events_of(&block);
-            let block_hash = block.hash();
-            let Some(sender) = self.sender.upgrade() else {
-                log::info!("Unable to upgrade sender channel.");
-
-                return Ok(());
-            };
-
-            for message_queued in messages {
-                if U256::from_big_endian(&message_queued.nonce_be).0 != message.nonce.0 {
-                    log::info!("Message nonce mismatch, skipping {message_queued:?}");
-                    continue;
-                }
-
-                log::trace!("Processing message in block: {message_queued:?}");
-
-                if sender
-                    .send(MessageInBlock {
-                        message: message_queued,
-                        block: GearBlockNumber(block.number()),
-                        block_hash: block_hash.0.into(),
-                        authority_set_id,
-                    })
-                    .is_err()
-                {
-                    log::info!("Sender channel closed.");
-                    return Ok(());
-                }
-
-                break;
-            }
-        }
-    }
-
     fn find_block_data(&self, block_number: u32) -> Option<BlockData> {
         self.blocks.find_by_block_number(block_number).cloned()
     }
@@ -120,24 +70,84 @@ impl MessageDataExtractor {
 }
 
 async fn task(mut this: MessageDataExtractor) {
+    let mut message_last = None;
     loop {
-        let result = this.run_inner().await;
+        let result = run_inner(&mut this, &mut message_last).await;
         let Err(e) = result else {
             log::trace!("Message data extractor exiting...");
             return;
         };
 
         log::error!("Message data extractor failed: {e}");
+        if let Err(e) = this.api_provider.reconnect().await {
+            log::error!(r#"Unable to reconnect: "{e}""#);
+            return;
+        }
 
-        match this.api_provider.reconnect().await {
-            Ok(_) => {
-                log::info!("Message queued extractor reconnected");
+        log::debug!("API provider reconnected");
+    }
+}
+
+async fn run_inner(
+    this: &mut MessageDataExtractor,
+    message_last: &mut Option<Message>,
+) -> anyhow::Result<()> {
+    loop {
+        let message = match message_last.clone() {
+            Some(message) => message,
+            None => {
+                let Some(message) = this.receiver.recv().await else {
+                    return Ok(());
+                };
+
+                *message_last = Some(message.clone());
+
+                message
+            }
+        };
+
+        log::trace!(r#"Processing message: "{message:?}""#);
+
+        let block_data = match this.find_block_data(message.block) {
+            Some(block_data) => block_data,
+            None => this.retreive_block_data(message.block).await?,
+        };
+
+        *message_last = None;
+
+        log::trace!(r#"Found data for the message block: "{block_data:?}""#);
+
+        let (block, authority_set_id) = block_data;
+        let messages = common::message_queued_events_of(&block);
+        let block_hash = block.hash();
+        let Some(sender) = this.sender.upgrade() else {
+            log::info!("Unable to upgrade sender channel.");
+
+            return Ok(());
+        };
+
+        for message_queued in messages {
+            if U256::from_big_endian(&message_queued.nonce_be).0 != message.nonce.0 {
+                log::info!("Message nonce mismatch, skipping {message_queued:?}");
+                continue;
             }
 
-            Err(e) => {
-                log::error!("Message queued extractor unable to reconnect: {e:?}");
-                return;
+            log::trace!("Processing message in block: {message_queued:?}");
+
+            if sender
+                .send(MessageInBlock {
+                    message: message_queued,
+                    block: GearBlockNumber(block.number()),
+                    block_hash: block_hash.0.into(),
+                    authority_set_id,
+                })
+                .is_err()
+            {
+                log::info!("Sender channel closed.");
+                return Ok(());
             }
+
+            break;
         }
     }
 }

@@ -8,15 +8,19 @@ use anyhow::Result as AnyResult;
 use ethereum_common::U256;
 use std::{cmp::Ordering, ops::Deref};
 use tokio::{
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{UnboundedReceiver, WeakUnboundedSender},
     task,
 };
 
 pub type BlockData = (GearBlock, AuthoritySetId);
 
+/// The purpose of the entity is to receive requests to relay message(s) from an external source,
+/// than get required data for relaying the message(s) and send the data further.
+///
+/// An example of an external requester is HTTP server.
 pub struct MessageDataExtractor {
     api_provider: ApiProviderConnection,
-    sender: UnboundedSender<MessageInBlock>,
+    sender: WeakUnboundedSender<MessageInBlock>,
     receiver: UnboundedReceiver<Message>,
     blocks: BlockDataList,
 }
@@ -24,7 +28,7 @@ pub struct MessageDataExtractor {
 impl MessageDataExtractor {
     pub fn new(
         api_provider: ApiProviderConnection,
-        sender: UnboundedSender<MessageInBlock>,
+        sender: WeakUnboundedSender<MessageInBlock>,
         receiver: UnboundedReceiver<Message>,
     ) -> Self {
         Self {
@@ -33,10 +37,6 @@ impl MessageDataExtractor {
             receiver,
             blocks: BlockDataList::new(1_000),
         }
-    }
-
-    pub fn sender(&self) -> &UnboundedSender<MessageInBlock> {
-        &self.sender
     }
 
     pub fn spawn(self) {
@@ -58,7 +58,38 @@ impl MessageDataExtractor {
 
             log::trace!(r#"Found data for the message block: "{block_data:?}""#);
 
-            self.process_message_block(message, block_data).await?;
+            let (block, authority_set_id) = block_data;
+            let messages = common::message_queued_events_of(&block);
+            let block_hash = block.hash();
+            let Some(sender) = self.sender.upgrade() else {
+                log::info!("Unable to upgrade sender channel.");
+
+                return Ok(());
+            };
+
+            for message_queued in messages {
+                if U256::from_big_endian(&message_queued.nonce_be).0 != message.nonce.0 {
+                    log::info!("Message nonce mismatch, skipping {message_queued:?}");
+                    continue;
+                }
+
+                log::trace!("Processing message in block: {message_queued:?}");
+
+                if sender
+                    .send(MessageInBlock {
+                        message: message_queued,
+                        block: GearBlockNumber(block.number()),
+                        block_hash: block_hash.0.into(),
+                        authority_set_id,
+                    })
+                    .is_err()
+                {
+                    log::info!("Sender channel closed.");
+                    return Ok(());
+                }
+
+                break;
+            }
         }
     }
 
@@ -85,35 +116,6 @@ impl MessageDataExtractor {
         self.blocks.push(block_data.clone());
 
         Ok(block_data)
-    }
-
-    async fn process_message_block(
-        &self,
-        message: Message,
-        block_data: BlockData,
-    ) -> anyhow::Result<()> {
-        let (block, authority_set_id) = block_data;
-        let messages = common::message_queued_events_of(&block);
-        let block_hash = block.hash();
-        for message_queued in messages {
-            if U256::from_big_endian(&message_queued.nonce_be).0 != message.nonce.0 {
-                log::info!("Message nonce mismatch, skipping {message_queued:?}");
-                continue;
-            }
-
-            log::trace!("Processing message in block: {message_queued:?}");
-
-            self.sender.send(MessageInBlock {
-                message: message_queued,
-                block: GearBlockNumber(block.number()),
-                block_hash: block_hash.0.into(),
-                authority_set_id,
-            })?;
-
-            break;
-        }
-
-        Ok(())
     }
 }
 

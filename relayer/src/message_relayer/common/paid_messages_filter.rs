@@ -13,6 +13,7 @@ pub struct PaidMessagesFilter {
     pending_messages: HashMap<[u8; 32], MessageInBlock>,
     pending_nonces: Vec<[u8; 32]>,
     excluded_from_fees: HashSet<AccountId32>,
+    sender: UnboundedSender<MessageInBlock>,
 
     metrics: Metrics,
 }
@@ -33,11 +34,15 @@ impl_metered_service! {
 }
 
 impl PaidMessagesFilter {
-    pub fn new(excluded_from_fees: HashSet<AccountId32>) -> Self {
+    pub fn new(
+        excluded_from_fees: HashSet<AccountId32>,
+        sender: UnboundedSender<MessageInBlock>,
+    ) -> Self {
         Self {
             pending_messages: HashMap::default(),
             pending_nonces: vec![],
             excluded_from_fees,
+            sender,
             metrics: Metrics::new(),
         }
     }
@@ -46,10 +51,9 @@ impl PaidMessagesFilter {
         mut self,
         mut messages: UnboundedReceiver<MessageInBlock>,
         mut paid_messages: UnboundedReceiver<PaidMessage>,
-        sender: UnboundedSender<MessageInBlock>,
     ) {
         tokio::spawn(async move {
-            match run_inner(&mut self, &sender, &mut messages, &mut paid_messages).await {
+            match run_inner(&mut self, &mut messages, &mut paid_messages).await {
                 Ok(_) => {}
                 Err(e) => log::error!("Paid messages filter failed: {e}"),
             }
@@ -59,7 +63,6 @@ impl PaidMessagesFilter {
 
 async fn run_inner(
     self_: &mut PaidMessagesFilter,
-    sender: &UnboundedSender<MessageInBlock>,
     messages: &mut UnboundedReceiver<MessageInBlock>,
     paid_messages: &mut UnboundedReceiver<PaidMessage>,
 ) -> anyhow::Result<()> {
@@ -91,7 +94,7 @@ async fn run_inner(
                         AccountId32::from(message.message.source),
                         hex::encode(message.message.nonce_be)
                     );
-                    sender.send(message)?;
+                    self_.sender.send(message)?;
 
                     continue;
                 }
@@ -100,7 +103,7 @@ async fn run_inner(
                     .pending_messages
                     .insert(message.message.nonce_be, message)
                 {
-                    panic!(
+                    log::error!(
                         "Received 2 messages with the same nonce: {}",
                         hex::encode(msg.message.nonce_be)
                     );
@@ -112,7 +115,7 @@ async fn run_inner(
 
         for i in (0..self_.pending_nonces.len()).rev() {
             if let Some(message) = self_.pending_messages.remove(&self_.pending_nonces[i]) {
-                sender.send(message)?;
+                self_.sender.send(message)?;
                 self_.pending_nonces.remove(i);
             }
         }
@@ -140,7 +143,8 @@ mod tests {
 
         set.insert(account0.into());
 
-        let filter = PaidMessagesFilter::new(set);
+        let (filter_msg_sender, mut msg_receiver) = mpsc::unbounded_channel();
+        let filter = PaidMessagesFilter::new(set, filter_msg_sender);
 
         let message0 = MessageInBlock {
             message: Message {
@@ -168,8 +172,7 @@ mod tests {
 
         let (msg_sender, filter_msg_receiver) = mpsc::unbounded_channel();
         let (paid_sender, paid_receiver) = mpsc::unbounded_channel();
-        let (filter_msg_sender, mut msg_receiver) = mpsc::unbounded_channel();
-        filter.spawn(filter_msg_receiver, paid_receiver, filter_msg_sender);
+        filter.spawn(filter_msg_receiver, paid_receiver);
 
         msg_sender.send(message0).unwrap();
         let res = msg_receiver.recv().await.unwrap();

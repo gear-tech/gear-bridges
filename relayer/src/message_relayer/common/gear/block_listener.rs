@@ -48,7 +48,7 @@ impl BlockListener {
     }
 
     pub async fn run<const RECEIVER_COUNT: usize>(
-        self,
+        mut self,
     ) -> [broadcast::Receiver<GearBlock>; RECEIVER_COUNT] {
         // Capacity for the channel. At the moment merkle-root relayer might lag behind
         // during proof generation or era sync, so we need to have enough capacity
@@ -57,14 +57,13 @@ impl BlockListener {
         let (tx, _) = broadcast::channel(CAPACITY);
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
-            let api = self.api_provider.client();
             let UnprocessedBlocks {
                 last_block,
                 first_block,
                 blocks: _,
             } = self.block_storage.unprocessed_blocks().await;
 
-            let api_back = api.clone();
+            let api_back = self.api_provider.client();
             let tx_back = tx2.clone();
             let storage_back = self.block_storage.clone();
 
@@ -118,9 +117,10 @@ impl BlockListener {
                 Ok(())
             });
 
+            let mut last_finalized_block_number = None;
             loop {
-                let res = self.run_inner(&tx2).await;
-                match res {
+                let res = self.run_inner(&tx2, &mut last_finalized_block_number).await;
+                let e = match res {
                     Ok(false) => {
                         log::info!("Gear block listener stopped due to no active receivers");
                         return;
@@ -131,12 +131,17 @@ impl BlockListener {
                         continue;
                     }
 
-                    Err(err) => {
-                        log::error!("Gear block listener failed: {err}");
+                    Err(e) => e,
+                };
 
-                        return;
-                    }
+                log::error!(r#"Gear block listener failed: "{e:?}""#);
+
+                if let Err(e) = self.api_provider.reconnect().await {
+                    log::error!(r#"API provider unable to reconnect: "{e}""#);
+                    return;
                 }
+
+                log::debug!("API provider reconnected");
             }
         });
 
@@ -147,12 +152,14 @@ impl BlockListener {
             .expect("expected Vec of correct length")
     }
 
-    async fn run_inner(&self, tx: &broadcast::Sender<GearBlock>) -> anyhow::Result<bool> {
+    async fn run_inner(
+        &self,
+        tx: &broadcast::Sender<GearBlock>,
+        last_finalized_block_number: &mut Option<u32>,
+    ) -> anyhow::Result<bool> {
         let gear_api = self.api_provider.client();
 
-        let mut last_finalized_block_number = None;
         let mut subscription = gear_api.subscribe_grandpa_justifications().await?;
-
         while let Some(justification) = subscription.next().await {
             let justification = justification?;
 
@@ -160,7 +167,7 @@ impl BlockListener {
             let block_number = justification.commit.target_number;
 
             // Check if there are missing blocks and fetch them
-            if let Some(last_finalized) = last_finalized_block_number {
+            if let Some(last_finalized) = *last_finalized_block_number {
                 if last_finalized + 1 != block_number {
                     log::info!("Detected gap: last finalized block was #{last_finalized}, current block is #{block_number}");
 
@@ -211,7 +218,7 @@ impl BlockListener {
             }
 
             // Update the last finalized block number
-            last_finalized_block_number = Some(block_number);
+            *last_finalized_block_number = Some(block_number);
             self.metrics.latest_block.set(block_number as i64);
         }
 

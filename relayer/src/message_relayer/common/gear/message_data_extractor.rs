@@ -8,15 +8,19 @@ use anyhow::Result as AnyResult;
 use ethereum_common::U256;
 use std::{cmp::Ordering, ops::Deref};
 use tokio::{
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{UnboundedReceiver, WeakUnboundedSender},
     task,
 };
 
 pub type BlockData = (GearBlock, AuthoritySetId);
 
+/// The purpose of the entity is to receive requests to relay message(s) from an external source,
+/// than get required data for relaying the message(s) and send the data further.
+///
+/// An example of an external requester is HTTP server.
 pub struct MessageDataExtractor {
     api_provider: ApiProviderConnection,
-    sender: UnboundedSender<MessageInBlock>,
+    sender: WeakUnboundedSender<MessageInBlock>,
     receiver: UnboundedReceiver<Message>,
     blocks: BlockDataList,
 }
@@ -24,7 +28,7 @@ pub struct MessageDataExtractor {
 impl MessageDataExtractor {
     pub fn new(
         api_provider: ApiProviderConnection,
-        sender: UnboundedSender<MessageInBlock>,
+        sender: WeakUnboundedSender<MessageInBlock>,
         receiver: UnboundedReceiver<Message>,
     ) -> Self {
         Self {
@@ -35,31 +39,8 @@ impl MessageDataExtractor {
         }
     }
 
-    pub fn sender(&self) -> &UnboundedSender<MessageInBlock> {
-        &self.sender
-    }
-
     pub fn spawn(self) {
         task::spawn(self::task(self));
-    }
-
-    async fn run_inner(&mut self) -> anyhow::Result<()> {
-        loop {
-            let Some(message) = self.receiver.recv().await else {
-                return Ok(());
-            };
-
-            log::trace!(r#"Processing message: "{message:?}""#);
-
-            let block_data = match self.find_block_data(message.block) {
-                Some(block_data) => block_data,
-                None => self.retreive_block_data(message.block).await?,
-            };
-
-            log::trace!(r#"Found data for the message block: "{block_data:?}""#);
-
-            self.process_message_block(message, block_data).await?;
-        }
     }
 
     fn find_block_data(&self, block_number: u32) -> Option<BlockData> {
@@ -86,15 +67,65 @@ impl MessageDataExtractor {
 
         Ok(block_data)
     }
+}
 
-    async fn process_message_block(
-        &self,
-        message: Message,
-        block_data: BlockData,
-    ) -> anyhow::Result<()> {
+async fn task(mut this: MessageDataExtractor) {
+    let mut message_last = None;
+    loop {
+        let result = run_inner(&mut this, &mut message_last).await;
+        let Err(e) = result else {
+            log::trace!("Message data extractor exiting...");
+            return;
+        };
+
+        log::error!("Message data extractor failed: {e}");
+        if let Err(e) = this.api_provider.reconnect().await {
+            log::error!(r#"Unable to reconnect: "{e}""#);
+            return;
+        }
+
+        log::debug!("API provider reconnected");
+    }
+}
+
+async fn run_inner(
+    this: &mut MessageDataExtractor,
+    message_last: &mut Option<Message>,
+) -> anyhow::Result<()> {
+    loop {
+        let message = match message_last.clone() {
+            Some(message) => message,
+            None => {
+                let Some(message) = this.receiver.recv().await else {
+                    return Ok(());
+                };
+
+                *message_last = Some(message.clone());
+
+                message
+            }
+        };
+
+        log::trace!(r#"Processing message: "{message:?}""#);
+
+        let block_data = match this.find_block_data(message.block) {
+            Some(block_data) => block_data,
+            None => this.retreive_block_data(message.block).await?,
+        };
+
+        *message_last = None;
+
+        log::trace!(r#"Found data for the message block: "{block_data:?}""#);
+
         let (block, authority_set_id) = block_data;
         let messages = common::message_queued_events_of(&block);
         let block_hash = block.hash();
+        let Some(sender) = this.sender.upgrade() else {
+            log::info!("Unable to upgrade sender channel.");
+
+            return Ok(());
+        };
+
         for message_queued in messages {
             if U256::from_big_endian(&message_queued.nonce_be).0 != message.nonce.0 {
                 log::info!("Message nonce mismatch, skipping {message_queued:?}");
@@ -103,39 +134,20 @@ impl MessageDataExtractor {
 
             log::trace!("Processing message in block: {message_queued:?}");
 
-            self.sender.send(MessageInBlock {
-                message: message_queued,
-                block: GearBlockNumber(block.number()),
-                block_hash: block_hash.0.into(),
-                authority_set_id,
-            })?;
+            if sender
+                .send(MessageInBlock {
+                    message: message_queued,
+                    block: GearBlockNumber(block.number()),
+                    block_hash: block_hash.0.into(),
+                    authority_set_id,
+                })
+                .is_err()
+            {
+                log::info!("Sender channel closed.");
+                return Ok(());
+            }
 
             break;
-        }
-
-        Ok(())
-    }
-}
-
-async fn task(mut this: MessageDataExtractor) {
-    loop {
-        let result = this.run_inner().await;
-        let Err(e) = result else {
-            log::trace!("Message data extractor exiting...");
-            return;
-        };
-
-        log::error!("Message data extractor failed: {e}");
-
-        match this.api_provider.reconnect().await {
-            Ok(_) => {
-                log::info!("Message queued extractor reconnected");
-            }
-
-            Err(e) => {
-                log::error!("Message queued extractor unable to reconnect: {e:?}");
-                return;
-            }
         }
     }
 }

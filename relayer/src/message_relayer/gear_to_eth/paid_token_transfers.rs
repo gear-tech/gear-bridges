@@ -96,8 +96,6 @@ impl Relayer {
 
         let message_paid_listener = MessagePaidEventExtractor::new(bridging_payment_address);
 
-        let paid_messages_filter = PaidMessagesFilter::new(excluded_from_fees);
-
         let (roots_sender, roots_receiver) = mpsc::unbounded_channel();
         let merkle_root_extractor = MerkleRootExtractor::new(
             eth_api.clone(),
@@ -112,6 +110,10 @@ impl Relayer {
         let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);
 
         let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
+        let message_data_extractor =
+            MessageDataExtractor::new(api_provider.clone(), messages_sender.downgrade(), receiver);
+        let paid_messages_filter = PaidMessagesFilter::new(excluded_from_fees, messages_sender);
+
         let accumulator = Accumulator::new(
             roots_receiver,
             tx_manager.merkle_roots.clone(),
@@ -119,9 +121,6 @@ impl Relayer {
             governance_pauser,
             eth_api.clone(),
         );
-
-        let message_data_extractor =
-            MessageDataExtractor::new(api_provider.clone(), messages_sender, receiver);
 
         task::spawn(self::fetch_merkle_roots(
             eth_api,
@@ -157,11 +156,8 @@ impl Relayer {
         let message_paid_receiver = self.message_paid_listener.run(gear_blocks_1).await;
         self.listener_message_queued.spawn(gear_blocks_0);
 
-        self.paid_messages_filter.spawn(
-            self.message_queued_receiver,
-            message_paid_receiver,
-            self.message_data_extractor.sender().clone(),
-        );
+        self.paid_messages_filter
+            .spawn(self.message_queued_receiver, message_paid_receiver);
         self.merkle_root_extractor.spawn();
         let accumulator_io = self.accumulator.spawn();
 

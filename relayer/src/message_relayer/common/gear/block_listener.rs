@@ -167,7 +167,7 @@ impl BlockListener {
             let block_number = justification.commit.target_number;
 
             // Check if there are missing blocks and fetch them
-            if let Some(last_finalized) = last_finalized_block_number.clone() {
+            if let Some(last_finalized) = *last_finalized_block_number {
                 if last_finalized + 1 != block_number {
                     log::info!("Detected gap: last finalized block was #{last_finalized}, current block is #{block_number}");
 

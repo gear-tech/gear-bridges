@@ -11,9 +11,13 @@ use dto::{AuthoritySetState, BranchNodeData};
 use futures_util::{Stream, StreamExt};
 use gear_core::ids::ActorId;
 use gsdk::{
-    gear::runtime_types::{
-        pallet_gear::pallet::Event as GearEvent,
-        pallet_gear_eth_bridge::pallet::Event as GearEthBridgeEvent, vara_runtime::RuntimeEvent,
+    gear::{
+        runtime_types::{
+            pallet_gear::pallet::Event as GearEvent,
+            pallet_gear_eth_bridge::pallet::Event as GearEthBridgeEvent,
+            vara_runtime::RuntimeEvent,
+        },
+        system::storage::types::events::Events,
     },
     GearConfig,
 };
@@ -23,7 +27,11 @@ use sp_consensus_grandpa::GrandpaJustification;
 use sp_core::{crypto::Wraps, Blake2Hasher, Hasher};
 use sp_runtime::AccountId32;
 use subxt::{
-    backend::BlockRef, blocks::Block as BlockImpl, dynamic::DecodedValueThunk, utils::H256,
+    backend::BlockRef,
+    blocks::Block as BlockImpl,
+    dynamic::DecodedValueThunk,
+    storage::{Address, DynamicAddress},
+    utils::H256,
     OnlineClient,
 };
 use subxt_rpcs::rpc_params;
@@ -754,7 +762,16 @@ impl GearApi {
     ) -> anyhow::Result<Vec<RuntimeEvent>> {
         let addr = gsdk::gear::storage().system().events();
 
-        let events = self.api.storage_fetch_at(&addr, block_hash).await?;
+        let events = self
+            .api
+            .storage_fetch_at(
+                &DynamicAddress::new(addr.pallet_name(), addr.entry_name(), ()),
+                block_hash,
+            )
+            .await?
+            .as_type::<Events>()
+            .map_err(|e| anyhow!("Failed to decode events: {e}"))?;
+
         Ok(events.into_iter().map(|record| record.event).collect())
     }
 

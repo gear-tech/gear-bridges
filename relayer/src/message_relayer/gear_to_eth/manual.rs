@@ -76,7 +76,7 @@ pub async fn relay(
         let block_to = block_from + COUNT_BATCH;
         let block_to = cmp::min(block_to, block_range.to);
 
-        fetch_merkle_roots_in_range(
+        if fetch_merkle_roots_in_range(
             &eth_api,
             &gear_api,
             block_from,
@@ -84,7 +84,10 @@ pub async fn relay(
             &merkle_roots_sender,
             &message_in_block,
         )
-        .await;
+        .await
+        {
+            break;
+        }
 
         block_from = block_to + 1;
     }
@@ -169,7 +172,7 @@ async fn fetch_merkle_roots_in_range(
     block_to: u64,
     merkle_roots_sender: &UnboundedSender<RelayedMerkleRoot>,
     message_in_block: &MessageInBlock,
-) {
+) -> bool {
     log::info!("Fetch merkle roots in the Ethereum blocks range [{block_from}; {block_to}]",);
 
     let merkle_roots = eth_api
@@ -217,7 +220,9 @@ async fn fetch_merkle_roots_in_range(
         if authority_set_id == message_in_block.authority_set_id
             && merkle_root.block_number >= message_in_block.block.0.into()
         {
-            break;
+            return true;
         }
     }
+
+    false
 }

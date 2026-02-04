@@ -37,6 +37,7 @@ const asOptionalField = <T extends z.ZodTypeAny>(schema: T) => schema.or(z.liter
 
 const isUndefined = (value: unknown): value is undefined => value === undefined;
 const isNull = (value: unknown): value is null => value === null;
+const isString = (value: unknown): value is string => typeof value === 'string';
 const isNumeric = (value: string) => /^\d+$/.test(value);
 
 // asserts can't use arrow functions
@@ -67,6 +68,7 @@ export {
   asOptionalField,
   isUndefined,
   isNull,
+  isString,
   isNumeric,
   getErrorMessage,
   definedAssert,

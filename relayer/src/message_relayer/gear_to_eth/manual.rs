@@ -1,9 +1,3 @@
-use ethereum_client::EthApi;
-use primitive_types::U256;
-use sails_rs::ActorId;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-
 use crate::message_relayer::{
     common::{
         ethereum::{
@@ -18,6 +12,14 @@ use crate::message_relayer::{
         tx_manager::{TransactionManager, TxStatus},
     },
 };
+use ethereum_client::EthApi;
+use gear_rpc_client::GearApi;
+use primitive_types::U256;
+use sails_rs::ActorId;
+use std::{cmp, sync::Arc};
+use tokio::sync::mpsc::{self, UnboundedSender};
+
+const COUNT_BATCH: u64 = 500;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
@@ -67,60 +69,24 @@ pub async fn relay(
         .await
         .expect("Failed to get the latest block number on Ethereum");
     let block_range = crate::common::create_range(from_eth_block, block_latest);
-    let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
-        .await
-        .expect("Unable to fetch merkle roots");
-
-    if merkle_roots.is_empty() {
-        log::info!("Found no merkle roots");
-
-        return;
-    }
-
+    let mut block_from = block_range.from;
     let (merkle_roots_sender, merkle_roots_receiver) = mpsc::unbounded_channel();
-    for (merkle_root, block_number_eth) in merkle_roots
-        .into_iter()
-        .filter_map(|(merkle_root, block)| block.map(|block| (merkle_root, block)))
-    {
-        let block_hash = gear_api
-            .block_number_to_hash(merkle_root.block_number as u32)
-            .await
-            .expect("Unable to get hash for the block number");
 
-        let authority_set_id = AuthoritySetId(
-            gear_api
-                .signed_by_authority_set_id(block_hash)
-                .await
-                .expect("Unable to get AuthoritySetId"),
-        );
+    while block_from < block_range.to {
+        let block_to = block_from + COUNT_BATCH;
+        let block_to = cmp::min(block_to, block_range.to);
 
-        let timestamp = eth_api
-            .get_block_timestamp(block_number_eth)
-            .await
-            .expect("failed to get Ethereum block timestamp");
+        fetch_merkle_roots_in_range(
+            &eth_api,
+            &gear_api,
+            block_from,
+            block_to,
+            &merkle_roots_sender,
+            &message_in_block,
+        )
+        .await;
 
-        log::info!(
-            "Found merkle root for gear block #{} and era #{}",
-            merkle_root.block_number,
-            authority_set_id
-        );
-
-        merkle_roots_sender
-            .send(RelayedMerkleRoot {
-                block: GearBlockNumber(merkle_root.block_number as u32),
-                block_hash,
-                authority_set_id,
-                merkle_root: merkle_root.merkle_root,
-                timestamp,
-            })
-            .expect("Unable to send RelayedMerkleRoot");
-
-        if authority_set_id == message_in_block.authority_set_id
-            && merkle_root.block_number >= gear_block.into()
-        {
-            break;
-        }
+        block_from = block_to + 1;
     }
 
     let storage = Arc::new(NoStorage::new());
@@ -192,6 +158,66 @@ pub async fn relay(
                 log::error!("Error occurred while processing transaction manager: {err}");
                 return;
             }
+        }
+    }
+}
+
+async fn fetch_merkle_roots_in_range(
+    eth_api: &EthApi,
+    gear_api: &GearApi,
+    block_from: u64,
+    block_to: u64,
+    merkle_roots_sender: &UnboundedSender<RelayedMerkleRoot>,
+    message_in_block: &MessageInBlock,
+) {
+    log::info!("Fetch merkle roots in the Ethereum blocks range [{block_from}; {block_to}]",);
+
+    let merkle_roots = eth_api
+        .fetch_merkle_roots_in_range(block_from, block_to)
+        .await
+        .expect("Unable to fetch merkle roots");
+
+    for (merkle_root, block_number_eth) in merkle_roots
+        .into_iter()
+        .filter_map(|(merkle_root, block)| block.map(|block| (merkle_root, block)))
+    {
+        let block_hash = gear_api
+            .block_number_to_hash(merkle_root.block_number as u32)
+            .await
+            .expect("Unable to get hash for the block number");
+
+        let authority_set_id = AuthoritySetId(
+            gear_api
+                .signed_by_authority_set_id(block_hash)
+                .await
+                .expect("Unable to get AuthoritySetId"),
+        );
+
+        let timestamp = eth_api
+            .get_block_timestamp(block_number_eth)
+            .await
+            .expect("failed to get Ethereum block timestamp");
+
+        log::info!(
+            "Found merkle root for gear block #{} and era #{}",
+            merkle_root.block_number,
+            authority_set_id
+        );
+
+        merkle_roots_sender
+            .send(RelayedMerkleRoot {
+                block: GearBlockNumber(merkle_root.block_number as u32),
+                block_hash,
+                authority_set_id,
+                merkle_root: merkle_root.merkle_root,
+                timestamp,
+            })
+            .expect("Unable to send RelayedMerkleRoot");
+
+        if authority_set_id == message_in_block.authority_set_id
+            && merkle_root.block_number >= message_in_block.block.0.into()
+        {
+            break;
         }
     }
 }

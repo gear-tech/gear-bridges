@@ -34,10 +34,7 @@ use std::{
 use vft_manager_client::traits::VftManager;
 
 use std::sync::{Arc, LazyLock};
-use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    time::{self, Duration, MissedTickBehavior},
-};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 #[derive(Deserialize, Debug)]
 pub struct Receipts {
@@ -261,16 +258,9 @@ async fn test_relayer_mock() {
     let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
     MockProofComposer::run(proof_req_rx, proof_res_tx).await;
     MockMessageSender::run(message_req_rx, message_res_tx).await;
-    let mut poll_interval = time::interval(Duration::from_secs(5 * 60));
-    poll_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         let res = tx_manager
-            .process(
-                &mut poll_interval,
-                &mut events_rx,
-                &mut proof_composer,
-                &mut message_sender,
-            )
+            .process(&mut events_rx, &mut proof_composer, &mut message_sender)
             .await;
         assert!(matches!(res, Ok(true)));
 
@@ -393,11 +383,8 @@ async fn test_tx_manager() {
         events_tx.send(tx_event).unwrap();
     }
 
-    let mut poll_interval = time::interval(Duration::from_secs(5 * 60));
-    poll_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     while let Ok(true) = tx_manager
         .process(
-            &mut poll_interval,
             &mut events_rx,
             &mut proof_composer_io,
             &mut message_sender_io,
@@ -424,11 +411,8 @@ async fn test_tx_manager() {
         })
         .unwrap();
 
-    let mut poll_interval = time::interval(Duration::from_secs(5 * 60));
-    poll_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
     while let Ok(true) = tx_manager
         .process(
-            &mut poll_interval,
             &mut events_rx,
             &mut proof_composer_io,
             &mut message_sender_io,

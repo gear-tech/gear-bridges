@@ -16,7 +16,7 @@ use sails_rs::{
     Encode,
 };
 use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -55,8 +55,8 @@ impl MessageSenderIo {
             .is_ok()
     }
 
-    pub async fn recv(&mut self) -> Option<Response> {
-        self.responses_channel.recv().await
+    pub fn try_recv(&mut self) -> Result<Response, TryRecvError> {
+        self.responses_channel.try_recv()
     }
 }
 

@@ -27,8 +27,6 @@ mod sync_update;
 const SIZE_CHANNEL: usize = 100_000;
 const COUNT_FAILURE: usize = 3;
 const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
-// The constant is intentionally duplicated since vara-runtime is too heavy dependency.
-const UNITS: u128 = 1_000_000_000_000;
 
 struct SyncUpdate {
     sync_update: SyncCommitteeUpdate,
@@ -219,11 +217,12 @@ impl Relayer {
 async fn update_total_balance(client: &GearApi, update_metrics: &metrics::Updates) {
     match client.total_balance(client.account_id()).await {
         Ok(total_balance) => {
-            let total_balance = total_balance / UNITS;
+            let total_balance = total_balance / gear_common::UNITS;
             let total_balance: i64 = total_balance.try_into().unwrap_or(i64::MAX);
 
             update_metrics.account_total_balance.set(total_balance);
         }
+
         Err(e) => log::error!("Unable to get total balance: {e:?}"),
     }
 }

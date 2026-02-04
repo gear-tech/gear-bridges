@@ -20,8 +20,8 @@ use tokio::{
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
-
 use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
+use gear_common::UNITS;
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,
@@ -338,7 +338,7 @@ impl MessageSender {
             .await
             .map_err(|e| anyhow::anyhow!("Unable to get total balance: {e:?}"))?;
 
-        let balance = balance / 1_000_000_000_000;
+        let balance = balance / UNITS;
         let balance: i64 = balance.try_into().unwrap_or(i64::MAX);
 
         self.metrics.fee_payer_balance.set(balance);

@@ -10219,6 +10219,7 @@ dependencies = [
  "ethereum_beacon_client",
  "futures",
  "gclient",
+ "gear-common 1.0.1",
  "gear-core",
  "gear-rpc-client",
  "gear_proof_storage",

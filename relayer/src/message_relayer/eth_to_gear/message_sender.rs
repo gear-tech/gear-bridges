@@ -1,7 +1,9 @@
+use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
 use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
 use gclient::GearApi;
+use gear_common::UNITS;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::{
@@ -20,8 +22,6 @@ use tokio::{
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 use vft_manager_client::vft_manager::io::SubmitReceipt;
-use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
-use gear_common::UNITS;
 
 pub struct MessageSenderIo {
     requests_channel: UnboundedSender<Request>,
@@ -161,6 +161,7 @@ impl MessageSender {
         responses: &mut UnboundedSender<Response>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.gclient_client(&self.suri)?;
+        self.update_balance_metric(&gear_api).await?;
 
         if let Some(request) = self.last_request.take() {
             match self.process(responses, &gear_api, &request).await {
@@ -329,6 +330,7 @@ impl MessageSender {
                 }
             }
         }
+
         Ok(true)
     }
 
@@ -358,24 +360,20 @@ async fn task(
             break;
         }
 
-        match this.run_inner(&mut requests, &mut responses).await {
-            Ok(()) => {
-                log::warn!("Transaction manager connection terminated, exiting...");
-                break;
+        let Err(err) = this.run_inner(&mut requests, &mut responses).await else {
+            log::warn!("Transaction manager connection terminated, exiting...");
+            break;
+        };
+
+        log::error!("Gear message sender got an error: {err:?}");
+        match this.api_provider.reconnect().await {
+            Ok(_) => {
+                log::info!("Reconnected to Gear API");
             }
 
             Err(err) => {
-                log::error!("Gear message sender got an error: {err:?}");
-                match this.api_provider.reconnect().await {
-                    Ok(()) => {
-                        log::info!("Reconnected to Gear API");
-                    }
-
-                    Err(err) => {
-                        log::error!("Failed to reconnect to Gear API: {err:?}");
-                        break;
-                    }
-                }
+                log::error!("Failed to reconnect to Gear API: {err:?}");
+                break;
             }
         }
     }

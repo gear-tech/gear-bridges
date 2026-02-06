@@ -1,4 +1,5 @@
 use super::{
+    base_types::List,
     beacon::{BlockHeader, Bytes32, SignedBeaconBlockHeader, SyncAggregate, SyncCommittee},
     memory_db,
     patricia_trie::{TrieDB, TrieDBMut},
@@ -358,4 +359,19 @@ where
         LightClientHeader::Unwrapped(header) => header,
         LightClientHeader::Wrapped(header) => header.beacon,
     })
+}
+
+pub fn deserialize_list_u64<'de, D, const N: usize>(
+    deserializer: D,
+) -> Result<List<u64, N>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let list: Vec<&str> = Deserialize::deserialize(deserializer)?;
+    let list = list
+        .into_iter()
+        .map(|value| u64::from_str(value).map_err(de::Error::custom))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    List::<_, N>::try_from(list).map_err(de::Error::custom)
 }

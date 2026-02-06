@@ -74,6 +74,7 @@ pub struct AttesterSlashing {
     Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
 )]
 pub struct IndexedAttestation {
+    #[serde(deserialize_with = "utils::deserialize_list_u64")]
     pub attesting_indices: base_types::List<u64, 2_048>,
     pub data: AttestationData,
     pub signature: SignatureBytes,
@@ -250,6 +251,7 @@ pub mod electra {
         Debug, Clone, Decode, Encode, Deserialize, PartialEq, tree_hash_derive::TreeHash, TypeInfo,
     )]
     pub struct IndexedAttestation {
+        #[serde(deserialize_with = "utils::deserialize_list_u64")]
         pub attesting_indices: base_types::List<
             u64,
             { (MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT) as usize },

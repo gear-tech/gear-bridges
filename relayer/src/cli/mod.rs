@@ -150,6 +150,21 @@ pub struct GearEthCoreArgs {
         default_value = "4h"
     )]
     pub critical_threshold: CriticalThreshold,
+
+    #[arg(
+        long,
+        help = "Startup sync strategy: critical-threshold (default), skip, or blocks",
+        value_parser = parse_startup_sync_strategy,
+        default_value = "critical-threshold"
+    )]
+    pub startup_sync_strategy: StartupSyncStrategy,
+
+    #[arg(
+        long,
+        value_delimiter = ',',
+        help = "Block numbers to sync at startup (used when startup-sync-strategy=blocks)"
+    )]
+    pub startup_sync_blocks: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,12 +173,33 @@ pub enum CriticalThreshold {
     AuthoritySetChange,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupSyncStrategy {
+    CriticalThreshold,
+    SkipCatchUp,
+    Blocks,
+}
+
 pub fn parse_critical_threshold(s: &str) -> anyhow::Result<CriticalThreshold> {
     if s.trim().eq_ignore_ascii_case("authority_set_change") {
         return Ok(CriticalThreshold::AuthoritySetChange);
     }
 
     Ok(CriticalThreshold::Timeout(humantime::parse_duration(s)?))
+}
+
+pub fn parse_startup_sync_strategy(s: &str) -> anyhow::Result<StartupSyncStrategy> {
+    let value = s.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "critical-threshold" | "critical_threshold" | "critical" => {
+            Ok(StartupSyncStrategy::CriticalThreshold)
+        }
+        "skip" | "skip-catchup" | "skip_catchup" => Ok(StartupSyncStrategy::SkipCatchUp),
+        "blocks" | "block" => Ok(StartupSyncStrategy::Blocks),
+        _ => Err(anyhow::anyhow!(
+            "Invalid startup sync strategy: {s}. Expected one of: critical-threshold, skip, blocks"
+        )),
+    }
 }
 
 #[derive(Args)]

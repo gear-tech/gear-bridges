@@ -95,7 +95,7 @@ pub async fn relay(
     let storage = Arc::new(NoStorage::new());
     let tx_manager = TransactionManager::new(storage.clone());
 
-    let message_sender = MessageSender::new(1, eth_api.clone());
+    let message_sender = MessageSender::new(eth_api.clone());
 
     let (queued_messages_sender, mut queued_messages_receiver) = mpsc::unbounded_channel();
     let accumulator = Accumulator::new(

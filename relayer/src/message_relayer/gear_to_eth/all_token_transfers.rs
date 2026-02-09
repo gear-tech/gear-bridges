@@ -1,21 +1,18 @@
-use crate::{
-    common::MAX_RETRIES,
-    message_relayer::{
-        common::{
-            ethereum::{
-                accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
-                message_sender::MessageSender, status_fetcher::StatusFetcher,
-            },
-            gear::{
-                block_listener::BlockListener as GearBlockListener,
-                merkle_proof_fetcher::MerkleProofFetcher,
-                message_queued_event_extractor::MessageQueuedEventExtractor,
-            },
-            MessageInBlock,
+use crate::message_relayer::{
+    common::{
+        ethereum::{
+            accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+            message_sender::MessageSender, status_fetcher::StatusFetcher,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
-        gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            merkle_proof_fetcher::MerkleProofFetcher,
+            message_queued_event_extractor::MessageQueuedEventExtractor,
+        },
+        MessageInBlock,
     },
+    eth_to_gear::api_provider::ApiProviderConnection,
+    gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
 };
 use ethereum_client::EthApi;
 use sails_rs::ActorId;
@@ -96,7 +93,7 @@ impl Relayer {
             eth_api.clone(),
         );
 
-        let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
+        let message_sender = MessageSender::new(eth_api.clone());
 
         let proof_fetcher = MerkleProofFetcher::new(api_provider);
         let status_fetcher = StatusFetcher::new(eth_api, confirmations_status);

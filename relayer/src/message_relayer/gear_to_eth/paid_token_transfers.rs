@@ -1,5 +1,5 @@
 use crate::{
-    common::{BlockRange, MAX_RETRIES},
+    common::BlockRange,
     message_relayer::{
         common::{
             ethereum::{
@@ -104,7 +104,7 @@ impl Relayer {
             roots_sender.clone(),
         );
 
-        let message_sender = MessageSender::new(MAX_RETRIES, eth_api.clone());
+        let message_sender = MessageSender::new(eth_api.clone());
 
         let proof_fetcher = MerkleProofFetcher::new(api_provider.clone());
         let status_fetcher = StatusFetcher::new(eth_api.clone(), confirmations_status);

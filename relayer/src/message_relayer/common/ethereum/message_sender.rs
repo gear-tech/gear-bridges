@@ -121,7 +121,11 @@ async fn task(
 
         tokio::time::sleep(delay).await;
         match this.eth_api.reconnect().await {
-            Ok(eth_api) => this.eth_api = eth_api,
+            Ok(eth_api) => {
+                this.eth_api = eth_api;
+                log::debug!("EthApi successfully reconnected");
+            }
+
             Err(e) => {
                 log::error!(r#"Failed to reconnect to Ethereum: "{e:?}""#);
                 break;

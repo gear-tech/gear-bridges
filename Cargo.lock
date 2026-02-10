@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "bridging-payment"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "bridging-payment-app",
  "sails-idl-gen",
@@ -2280,7 +2280,7 @@ dependencies = [
 
 [[package]]
 name = "bridging-payment-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "gstd",
  "parity-scale-codec",
@@ -2290,7 +2290,7 @@ dependencies = [
 
 [[package]]
 name = "bridging-payment-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "bridging-payment-app",
  "mockall 0.12.1",
@@ -2611,7 +2611,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoint-light-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "checkpoint-light-client-app",
  "sails-idl-gen",
@@ -2620,7 +2620,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoint-light-client-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",
@@ -2639,7 +2639,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoint-light-client-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "checkpoint-light-client-app",
  "checkpoint-light-client-io",
@@ -2652,7 +2652,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoint-light-client-io"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "ark-bls12-381",
  "ark-scale",
@@ -2663,7 +2663,7 @@ dependencies = [
 
 [[package]]
 name = "checkpoints-tool"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
@@ -2793,7 +2793,7 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
 name = "cli-utils"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -4050,7 +4050,7 @@ checksum = "1b241177c7107d9829286c2ffdc5eee98d992d6356f3515e7f412f988b1a72fd"
 
 [[package]]
 name = "eth-events-common"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "alloy-rlp",
  "checkpoint-light-client-client",
@@ -4060,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "eth-events-deneb"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eth-events-deneb-app",
  "sails-idl-gen",
@@ -4069,7 +4069,7 @@ dependencies = [
 
 [[package]]
 name = "eth-events-deneb-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eth-events-common",
  "ethereum-common",
@@ -4080,7 +4080,7 @@ dependencies = [
 
 [[package]]
 name = "eth-events-deneb-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eth-events-deneb-app",
  "ethereum-common",
@@ -4092,7 +4092,7 @@ dependencies = [
 
 [[package]]
 name = "eth-events-electra"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eth-events-electra-app",
  "sails-idl-gen",
@@ -4101,7 +4101,7 @@ dependencies = [
 
 [[package]]
 name = "eth-events-electra-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eth-events-common",
  "ethereum-common",
@@ -4112,7 +4112,7 @@ dependencies = [
 
 [[package]]
 name = "eth-events-electra-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eth-events-electra-app",
  "ethereum-common",
@@ -4139,7 +4139,7 @@ dependencies = [
 
 [[package]]
 name = "ethereum-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "ahash 0.7.8",
  "alloy",
@@ -4202,7 +4202,7 @@ dependencies = [
 
 [[package]]
 name = "ethereum_beacon_client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "ark-serialize 0.4.2",
@@ -4931,7 +4931,7 @@ dependencies = [
 
 [[package]]
 name = "gear-common"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "gclient",
@@ -5115,7 +5115,7 @@ dependencies = [
 
 [[package]]
 name = "gear-rpc-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "blake2",
@@ -5309,7 +5309,7 @@ dependencies = [
 
 [[package]]
 name = "gear_proof_storage"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "gear-wasm-builder",
  "gstd",
@@ -5353,7 +5353,7 @@ dependencies = [
 
 [[package]]
 name = "genesis-config"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "clap",
  "cli-utils",
@@ -5445,7 +5445,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "governance-tool"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "alloy",
  "clap",
@@ -5851,7 +5851,7 @@ checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
 name = "historical-proxy"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "historical-proxy",
  "historical-proxy-app",
@@ -5863,7 +5863,7 @@ dependencies = [
 
 [[package]]
 name = "historical-proxy-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eth-events-common",
  "eth-events-deneb",
@@ -5884,7 +5884,7 @@ dependencies = [
 
 [[package]]
 name = "historical-proxy-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "historical-proxy-app",
  "mockall 0.12.1",
@@ -6652,7 +6652,7 @@ dependencies = [
 
 [[package]]
 name = "js-test"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "alloy",
  "dotenv",
@@ -7912,7 +7912,7 @@ dependencies = [
 
 [[package]]
 name = "mock-contract"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "checkpoint-light-client-client",
  "gear-wasm-builder",
@@ -8970,7 +8970,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "ping"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "parity-scale-codec",
  "sails-rs",
@@ -9030,7 +9030,7 @@ dependencies = [
 
 [[package]]
 name = "plonky2_blake2b256"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "blake2",
@@ -9058,7 +9058,7 @@ dependencies = [
 
 [[package]]
 name = "plonky2_ed25519"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -9108,7 +9108,7 @@ dependencies = [
 
 [[package]]
 name = "plonky2_sha512"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "itertools 0.10.5",
@@ -9648,7 +9648,7 @@ dependencies = [
 
 [[package]]
 name = "prover"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "blake2",
@@ -10192,7 +10192,7 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
 name = "relayer"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "actix-web",
  "alloy",
@@ -13782,7 +13782,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "tests"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "alloy",
  "alloy-consensus",
@@ -13809,7 +13809,7 @@ dependencies = [
  "ethereum_beacon_client",
  "futures",
  "gclient",
- "gear-common 1.0.3",
+ "gear-common 1.0.4",
  "gear-core",
  "gstd",
  "gtest",
@@ -14720,7 +14720,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utils-prometheus"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "axum",
  "prometheus",
@@ -14759,7 +14759,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vft"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "sails-idl-gen",
  "sails-rs",
@@ -14768,7 +14768,7 @@ dependencies = [
 
 [[package]]
 name = "vft-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "awesome-sails-services",
  "sails-rs",
@@ -14777,7 +14777,7 @@ dependencies = [
 
 [[package]]
 name = "vft-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "mockall 0.12.1",
  "sails-client-gen",
@@ -14788,7 +14788,7 @@ dependencies = [
 
 [[package]]
 name = "vft-common"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "awesome-sails",
  "awesome-sails-services",
@@ -14797,7 +14797,7 @@ dependencies = [
 
 [[package]]
 name = "vft-manager"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "sails-idl-gen",
  "sails-rs",
@@ -14806,7 +14806,7 @@ dependencies = [
 
 [[package]]
 name = "vft-manager-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
@@ -14825,7 +14825,7 @@ dependencies = [
 
 [[package]]
 name = "vft-manager-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "mockall 0.12.1",
  "sails-client-gen",
@@ -14836,14 +14836,14 @@ dependencies = [
 
 [[package]]
 name = "vft-manager-tool"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "clap",
  "cli-utils",
  "dotenv",
  "gclient",
- "gear-common 1.0.3",
+ "gear-common 1.0.4",
  "gear-core",
  "gsdk",
  "hex",
@@ -14857,13 +14857,13 @@ dependencies = [
 
 [[package]]
 name = "vft-tool"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "clap",
  "cli-utils",
  "dotenv",
  "gclient",
- "gear-common 1.0.3",
+ "gear-common 1.0.4",
  "gear-core",
  "gsdk",
  "hex",
@@ -14877,7 +14877,7 @@ dependencies = [
 
 [[package]]
 name = "vft-vara"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "sails-idl-gen",
  "sails-rs",
@@ -14886,7 +14886,7 @@ dependencies = [
 
 [[package]]
 name = "vft-vara-app"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "awesome-sails-services",
  "sails-rs",
@@ -14895,7 +14895,7 @@ dependencies = [
 
 [[package]]
 name = "vft-vara-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "mockall 0.12.1",
  "sails-client-gen",

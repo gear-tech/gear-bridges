@@ -1,7 +1,4 @@
-use crate::{
-    common::{self, BASE_RETRY_DELAY},
-    message_relayer::common::RelayedMerkleRoot,
-};
+use crate::{common::BASE_RETRY_DELAY, message_relayer::common::RelayedMerkleRoot};
 use ethereum_client::{abi::IMessageQueue::IMessageQueueErrors, EthApi, TxHash};
 use gear_rpc_client::dto::{MerkleProof, Message};
 use prometheus::{Gauge, IntCounter};
@@ -57,7 +54,6 @@ impl MessageSenderIo {
 }
 
 pub struct MessageSender {
-    max_retries: u32,
     eth_api: EthApi,
 
     metrics: Metrics,
@@ -84,9 +80,8 @@ impl_metered_service! {
 }
 
 impl MessageSender {
-    pub fn new(max_retries: u32, eth_api: EthApi) -> Self {
+    pub fn new(eth_api: EthApi) -> Self {
         Self {
-            max_retries,
             eth_api,
 
             metrics: Metrics::new(),
@@ -115,35 +110,25 @@ async fn task(
         this.metrics.fee_payer_balance.set(fee_payer_balance);
     }
 
-    let mut attempts = 0;
-
     loop {
-        match task_inner(&mut this, &mut channel_message_data, &channel_tx_data).await {
-            Ok(_) => break,
+        let Err(e) = task_inner(&mut this, &mut channel_message_data, &channel_tx_data).await
+        else {
+            break;
+        };
+
+        let delay = BASE_RETRY_DELAY * 6;
+        log::error!(r#"Ethereum message sender failed: "{e:?}". Retrying in {delay:?}"#,);
+
+        tokio::time::sleep(delay).await;
+        match this.eth_api.reconnect().await {
+            Ok(eth_api) => {
+                this.eth_api = eth_api;
+                log::debug!("EthApi successfully reconnected");
+            }
+
             Err(e) => {
-                attempts += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                    "Ethereum message sender failed (attempt: {attempts}/{}): {e}. Retrying in {delay:?}",
-                    this.max_retries,
-                );
-                if attempts >= this.max_retries {
-                    log::error!("Maximum attempts reached, exiting...");
-                    break;
-                }
-
-                tokio::time::sleep(delay).await;
-
-                if common::is_transport_error_recoverable(&e) {
-                    match this.eth_api.reconnect().await.inspect_err(|e| {
-                        log::error!("Failed to reconnect to Ethereum: {e}");
-                    }) {
-                        Ok(eth_api) => this.eth_api = eth_api,
-                        Err(_) => {
-                            break;
-                        }
-                    }
-                }
+                log::error!(r#"Failed to reconnect to Ethereum: "{e:?}""#);
+                break;
             }
         }
     }

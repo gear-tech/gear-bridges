@@ -4,6 +4,9 @@ use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft_client::traits::*;
 use vft_manager_client::{traits::*, Order};
 
+// The constant is intentionally duplicated since vara-runtime is too heavy dependency.
+pub const UNITS: u128 = 1_000_000_000_000;
+
 /// Asynchronously migrates balances from an old VFT contract to a new one.
 ///
 /// This function performs a batched migration of token balances between two VFT contracts.

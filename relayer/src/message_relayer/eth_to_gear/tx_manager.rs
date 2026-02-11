@@ -8,13 +8,22 @@ use eth_events_electra_client::EthToVaraEvent;
 use prometheus::IntCounter;
 use sails_rs::{Decode, Encode};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+    time::Instant,
+};
 use tokio::{
-    sync::{mpsc::UnboundedReceiver, RwLock},
-    time::{self, Duration, Interval},
+    sync::{
+        mpsc::{error::TryRecvError, UnboundedReceiver},
+        RwLock,
+    },
+    time::{self, Duration},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
+
+const CAPACITY: usize = 1_000;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Transaction {
@@ -62,6 +71,7 @@ pub struct TransactionManager {
     /// Queue of transactions to be processed. Completed and failed
     /// transactions are moved to `completed` and `failed` maps.
     pub transactions: RwLock<BTreeMap<Uuid, Transaction>>,
+    pub transactions_timestamp: RwLock<HashMap<Uuid, Instant>>,
 
     pub completed: RwLock<BTreeMap<Uuid, Transaction>>,
     pub failed: RwLock<BTreeMap<Uuid, String>>,
@@ -80,6 +90,7 @@ impl TransactionManager {
     pub fn new(storage: Arc<dyn Storage>) -> Self {
         Self {
             transactions: RwLock::new(BTreeMap::new()),
+            transactions_timestamp: RwLock::new(HashMap::with_capacity(CAPACITY)),
             completed: RwLock::new(BTreeMap::new()),
             failed: RwLock::new(BTreeMap::new()),
             storage,
@@ -119,14 +130,9 @@ impl TransactionManager {
         mut proof_composer: ProofComposerIo,
         mut message_sender: MessageSenderIo,
     ) -> anyhow::Result<()> {
-        // once per 15 mins
-        let mut poll_interval = time::interval(Duration::from_secs(15 * 60));
-        poll_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
-
         loop {
             let result = self
                 .process(
-                    &mut poll_interval,
                     &mut message_paid_events,
                     &mut proof_composer,
                     &mut message_sender,
@@ -153,47 +159,41 @@ impl TransactionManager {
 
     pub async fn process(
         &self,
-        poll_interval: &mut Interval,
         message_paid_events: &mut UnboundedReceiver<TxHashWithSlot>,
         proof_composer: &mut ProofComposerIo,
         message_sender: &mut MessageSenderIo,
     ) -> anyhow::Result<bool> {
-        tokio::select! {
-            _ = poll_interval.tick() => {
-                match self
-                    .resume(message_sender, proof_composer)
-                    .await
-                {
-                    Ok(true) => {}
-                    Ok(false) => return Ok(false),
-                    Err(e) => log::error!(r#"Failed to resume Ethereum tasks: "{e:?}""#),
-                }
+        while let Some(response) = match message_sender.try_recv() {
+            Ok(response) => Some(response),
+            Err(TryRecvError::Empty) => None,
 
-                Ok(true)
-            }
-
-            value = message_paid_events.recv() =>
-                match value {
-                    Some(tx) => self.compose_proof(tx, proof_composer).await,
-                    None => Ok(false)
-                },
-
-            value = proof_composer.recv() =>
-                match value {
-                    Some(proof_composer::Response { tx_uuid, payload }) =>
-                        self.submit_message(tx_uuid, payload, message_sender).await,
-                    None => Ok(false)
-                },
-
-            value = message_sender.recv() =>
-                match value {
-                    Some(response) => {
-                        self.finalize_transaction(response).await?;
-                        Ok(true)
-                     },
-                    None => Ok(false),
-                }
+            Err(TryRecvError::Disconnected) => return Ok(false),
+        } {
+            self.finalize_transaction(response).await;
         }
+
+        // Ethereum block appears every 12 seconds so we allow the channel to wait for a message
+        // payment event for that period.
+        let mut poll_interval = time::interval(Duration::from_secs(12));
+        // skip the first tick
+        poll_interval.tick().await;
+
+        tokio::select! {
+            _ = poll_interval.tick() => {}
+
+            value = message_paid_events.recv() => match value {
+                    Some(tx) => self.compose_proof(tx).await,
+                    None => return Ok(false),
+                },
+
+            value = proof_composer.recv() => match value {
+                    Some(proof_composer::Response { tx_uuid, payload }) =>
+                        self.submit_message(tx_uuid, payload).await,
+                    None => return Ok(false),
+                },
+        }
+
+        self.resume(message_sender, proof_composer).await
     }
 
     async fn resume(
@@ -201,37 +201,52 @@ impl TransactionManager {
         message_sender: &mut MessageSenderIo,
         proof_composer: &mut ProofComposerIo,
     ) -> anyhow::Result<bool> {
-        let transactions = self.transactions.write().await;
+        let transactions = self.transactions.read().await.clone();
+
         for (_, tx) in transactions.iter() {
+            let tx_uuid = tx.uuid;
+            {
+                let timestamps = self.transactions_timestamp.read().await;
+                if matches!(timestamps.get(&tx_uuid), Some(timestamp) if timestamp.elapsed() < Duration::from_secs(15 * 60))
+                {
+                    continue;
+                }
+            }
+
             match tx.status {
                 TxStatus::ComposeProof => {
-                    if !proof_composer.compose_proof_for(tx.uuid, tx.tx.clone()) {
+                    if !proof_composer.compose_proof_for(tx_uuid, tx.tx.clone()) {
                         log::info!("Proof composer connection closed, exiting...");
                         return Ok(false);
+                    } else {
+                        log::info!("Transaction {tx_uuid} is enqueued for proof composition");
                     }
                 }
 
                 TxStatus::SubmitMessage { ref payload } => {
                     let payload = EthToVaraEvent::decode(&mut payload.as_slice())?;
 
-                    if !message_sender.send_message(tx.uuid, tx.tx.tx_hash, payload) {
+                    if !message_sender.send_message(tx_uuid, tx.tx.tx_hash, payload) {
                         log::info!("Message sender connection closed, exiting...");
                         return Ok(false);
+                    } else {
+                        log::info!("Transaction {tx_uuid} is submitted");
                     }
                 }
 
-                TxStatus::Completed => return Err(anyhow::anyhow!("Wrong Completed status")),
+                TxStatus::Completed => continue,
             }
+
+            self.transactions_timestamp
+                .write()
+                .await
+                .insert(tx_uuid, Instant::now());
         }
 
         Ok(true)
     }
 
-    async fn compose_proof(
-        &self,
-        tx: TxHashWithSlot,
-        proof_composer: &mut ProofComposerIo,
-    ) -> anyhow::Result<bool> {
+    async fn compose_proof(&self, tx: TxHashWithSlot) {
         let tx = Transaction::new(tx, TxStatus::ComposeProof);
 
         let tx_uuid = tx.uuid;
@@ -248,83 +263,60 @@ impl TransactionManager {
             .block_storage()
             .complete_transaction(&tx_hash)
             .await;
-
-        if !proof_composer.compose_proof_for(tx_uuid, tx_hash) {
-            log::error!("Proof composer connection closed, exiting...");
-            Ok(false)
-        } else {
-            log::info!("Transaction {tx_uuid} is enqueued for proof composition");
-            Ok(true)
-        }
     }
 
-    async fn submit_message(
-        &self,
-        tx_uuid: Uuid,
-        payload: EthToVaraEvent,
-        message_sender: &mut MessageSenderIo,
-    ) -> anyhow::Result<bool> {
-        log::info!("Received proof for transaction {tx_uuid}");
-
+    async fn submit_message(&self, tx_uuid: Uuid, payload: EthToVaraEvent) {
         let mut transactions = self.transactions.write().await;
+        let Some(tx) = transactions.get_mut(&tx_uuid) else {
+            log::warn!("Received proof for unknown transaction: {tx_uuid}");
+            return;
+        };
 
-        match transactions.get_mut(&tx_uuid) {
-            Some(tx) => {
-                if let TxStatus::ComposeProof = tx.status {
-                    tx.status = TxStatus::SubmitMessage {
-                        payload: payload.encode(),
-                    };
-                    let tx_hash = tx.tx.tx_hash;
-                    let tx_uuid = tx.uuid;
+        log::info!("Received proof for transaction {tx_uuid}");
+        self.transactions_timestamp.write().await.remove(&tx_uuid);
 
-                    drop(transactions);
+        if let TxStatus::ComposeProof = tx.status {
+            tx.status = TxStatus::SubmitMessage {
+                payload: payload.encode(),
+            };
 
-                    if !message_sender.send_message(tx_uuid, tx_hash, payload) {
-                        log::info!("Message sender connection terminated, exiting...");
-                        return Ok(false);
-                    }
-                } else {
-                    log::warn!(
-                        "Received proof for a transaction that is not in ComposeProof state"
-                    );
-                }
-            }
-
-            None => {
-                log::warn!("Received proof for unknown transaction: {tx_uuid}");
-            }
+            drop(transactions);
+        } else {
+            log::warn!(
+                "Received proof for a transaction that is in {:?} state",
+                tx.status
+            );
         }
-
-        Ok(true)
     }
 
-    async fn finalize_transaction(&self, response: message_sender::Response) -> anyhow::Result<()> {
+    async fn finalize_transaction(&self, response: message_sender::Response) {
         let message_sender::Response { tx_uuid, status } = response;
 
-        log::info!("Received response for transaction {tx_uuid}: {status:?}");
         let mut transactions = self.transactions.write().await;
-
-        if let Some(mut tx) = transactions.remove(&tx_uuid) {
-            match status {
-                MessageStatus::Success => {
-                    tx.status = TxStatus::Completed;
-                    // transaction may have been failed and restarted. Remove
-                    // it from failed set if it succeeded.
-                    self.failed.write().await.remove(&tx.uuid);
-                    self.completed.write().await.insert(tx.uuid, tx);
-                    self.metrics.completed_transactions.inc();
-                }
-
-                MessageStatus::Failure(message) => {
-                    self.fail_transaction(tx_uuid, message).await;
-                    // add transaction back to tx queue. It can be restarted later.
-                    transactions.insert(tx_uuid, tx);
-                }
-            }
-        } else {
+        let Some(mut tx) = transactions.remove(&tx_uuid) else {
             log::warn!("Received response for unknown transaction {tx_uuid}");
-        }
+            return;
+        };
 
-        Ok(())
+        self.transactions_timestamp.write().await.remove(&tx_uuid);
+
+        log::info!("Received response for transaction {tx_uuid}: {status:?}");
+
+        match status {
+            MessageStatus::Success => {
+                tx.status = TxStatus::Completed;
+                // transaction may have been failed and restarted. Remove
+                // it from failed set if it succeeded.
+                self.failed.write().await.remove(&tx.uuid);
+                self.completed.write().await.insert(tx.uuid, tx);
+                self.metrics.completed_transactions.inc();
+            }
+
+            MessageStatus::Failure(message) => {
+                self.fail_transaction(tx_uuid, message).await;
+                // add transaction back to tx queue. It can be restarted later.
+                transactions.insert(tx_uuid, tx);
+            }
+        }
     }
 }

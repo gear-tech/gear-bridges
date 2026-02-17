@@ -10239,6 +10239,7 @@ dependencies = [
  "prometheus",
  "prover",
  "rand 0.8.5",
+ "rayon",
  "reqwest 0.11.27",
  "ruzstd 0.5.0",
  "sails-rs",

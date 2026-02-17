@@ -1,6 +1,5 @@
 //! Circuit that's used to prove that majority of validators have signed GRANDPA message.
 
-use itertools::Itertools;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -14,11 +13,8 @@ use plonky2::{
     recursion::dummy_circuit::cyclic_base_proof,
 };
 use plonky2_field::types::Field;
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
-    ThreadPoolBuilder,
-};
-use std::{env, iter, sync::mpsc::channel};
+use rayon::ThreadPoolBuilder;
+use std::iter;
 
 mod indexed_validator_sign;
 mod single_validator_sign;
@@ -72,44 +68,51 @@ impl ValidatorSignsChain {
 
         let validator_set_hash_proof = self.validator_set_hash.prove();
 
-        let mut pre_commits = self.pre_commits.clone();
-        pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
+        let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+        let pools = vec![
+            ThreadPoolBuilder::new().num_threads(30).build().unwrap(),
+            ThreadPoolBuilder::new().num_threads(30).build().unwrap(),
+        ];
 
-        let (sender, receiver) = channel();
+        let worker_func = |pre_commit: &ProcessedPreCommit, pool: &rayon::ThreadPool| {
+            let (index, proof) = pool.install(|| {
+                let proof = IndexedValidatorSign {
+                    public_key: pre_commit.public_key,
+                    index: pre_commit.validator_idx,
+                    signature: pre_commit.signature,
+                    message: self.message,
+                }
+                .prove(&validator_set_hash_proof);
 
-        let thread_pool = ThreadPoolBuilder::new()
-            .stack_size(
-                env::var("RUST_MIN_STACK")
-                    .expect("RUST_MIN_STACK should be set")
-                    .parse::<usize>()
-                    .expect("RUST_MIN_STACK should have the correct value"),
-            )
-            .num_threads(self.count_thread.unwrap_or(0))
-            .build()
-            .expect("Failed to create ThreadPool");
+                (pre_commit.validator_idx, proof)
+            });
 
-        pre_commits.into_par_iter().enumerate().for_each_with(
-            sender,
-            |sender, (id, pre_commit)| {
-                thread_pool.scope(|_| {
-                    let proof = IndexedValidatorSign {
-                        public_key: pre_commit.public_key,
-                        index: pre_commit.validator_idx,
-                        signature: pre_commit.signature,
-                        message: self.message,
-                    }
-                    .prove(&validator_set_hash_proof);
+            (index, proof)
+        };
 
-                    sender
-                        .send((id, proof))
-                        .expect("Failed to send proof over channel");
-                });
-            },
-        );
+        let mut proofs = Vec::with_capacity(self.pre_commits.len());
+        let (chunks, remainder) = self.pre_commits.as_chunks::<2>();
+        assert!(remainder.len() < 2);
+        for chunk in chunks {
+            assert_eq!(chunk.len(), 2);
 
-        let mut inner_proofs = receiver
-            .iter()
-            .sorted_by(|a, b| a.0.cmp(&b.0))
+            let (result_1, result_2) = pool.join(
+                || worker_func(&chunk[0], &pools[0]),
+                || worker_func(&chunk[1], &pools[1]),
+            );
+
+            proofs.push(result_1);
+            proofs.push(result_2);
+        }
+
+        if !remainder.is_empty() {
+            proofs.push(worker_func(&remainder[0], &pools[1]));
+        }
+
+        proofs.sort_by(|(index_a, _proof_a), (index_b, _proof_b)| index_a.cmp(&index_b));
+
+        let mut inner_proofs = proofs
+            .into_iter()
             .map(|(_, proof)| proof)
             .collect::<Vec<_>>();
 

@@ -43,6 +43,10 @@ use vft_manager_client::traits::VftManager;
 use zeroize::Zeroizing;
 
 fn main() -> AnyResult<()> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(30)
+        .build_global()?;
+
     // we need at least 2 native threads to run some of the blocking tasks like proof composition
     // so lets set minimum to 4 threads or to available parallelism.
     tokio::runtime::Builder::new_multi_thread()

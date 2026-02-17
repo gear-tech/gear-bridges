@@ -45,6 +45,7 @@ pretty_env_logger.workspace = true
 primitive-types = { workspace = true, features = ["std"] }
 prometheus.workspace = true
 rand.workspace = true
+rayon.workspace = true
 reqwest.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 serde.workspace = true

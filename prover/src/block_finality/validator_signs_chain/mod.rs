@@ -15,6 +15,7 @@ use plonky2::{
 use plonky2_field::types::Field;
 use rayon::ThreadPoolBuilder;
 use std::iter;
+use std::time::Instant;
 
 mod indexed_validator_sign;
 mod single_validator_sign;
@@ -66,7 +67,13 @@ impl ValidatorSignsChain {
 
         let validator_set_hash = self.validator_set_hash.compute_hash();
 
+        let now = Instant::now();
+
         let validator_set_hash_proof = self.validator_set_hash.prove();
+
+        log::info!("validator_set_hash.prove() time: {}ms", now.elapsed().as_millis());
+
+        let now = Instant::now();
 
         let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
         let pools = vec![
@@ -116,6 +123,10 @@ impl ValidatorSignsChain {
             .map(|(_, proof)| proof)
             .collect::<Vec<_>>();
 
+        log::info!("inner_proofs time: {}ms", now.elapsed().as_millis());
+
+        let now = Instant::now();
+
         let initial_data = SignCompositionInitialData {
             validator_set_hash,
             message: self.message,
@@ -126,6 +137,8 @@ impl ValidatorSignsChain {
         for inner in inner_proofs {
             composed_proof = SignComposition::build(&inner).prove_recursive(composed_proof.proof());
         }
+
+        log::info!("SignComposition time: {}ms", now.elapsed().as_millis());
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();

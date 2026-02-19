@@ -61,8 +61,33 @@ pub struct ValidatorSignsChain {
     pub count_thread: Option<usize>,
 }
 
+type ProofRequest = (usize, ProofWithCircuitData<IndexedValidatorSignTarget>);
+
+enum Request {
+    Pair((ProofRequest, ProofRequest)),
+    SingleItem(ProofRequest),
+}
+
+impl From<Request> for (ProofWithCircuitData<IndexedValidatorSignTarget>, Option<ProofWithCircuitData<IndexedValidatorSignTarget>>) {
+    fn from(request: Request) -> Self {
+        match request {
+            Request::SingleItem((_index, proof)) => (proof, None),
+            Request::Pair(data) => {
+                let (index_1, proof_1) = data.0;
+                let (index_2, proof_2) = data.1;
+
+                if index_1 < index_2 {
+                    (proof_1, Some(proof_2))
+                } else {
+                    (proof_2, Some(proof_1))
+                }
+            }
+        }
+    }
+}
+
 impl ValidatorSignsChain {
-    pub fn prove(self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
+    pub fn prove(mut self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::debug!("Proving validator signs chain...");
 
         let validator_set_hash = self.validator_set_hash.compute_hash();
@@ -74,6 +99,38 @@ impl ValidatorSignsChain {
         log::info!("validator_set_hash.prove() time: {}ms", now.elapsed().as_millis());
 
         let now = Instant::now();
+
+        self.pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
+
+        let (sender, receiver) = std::sync::mpsc::channel::<Request>();
+        let thread = std::thread::spawn(move || {
+            let Ok(request) = receiver.recv() else {
+                return None;
+            };
+
+            let (proof_initial, proof_maybe) = request.into();
+
+            let initial_data = SignCompositionInitialData {
+                validator_set_hash,
+                message: self.message,
+            };
+            let mut composed_proof =
+                SignComposition::build(&proof_initial).prove_initial(initial_data);
+            if let Some(proof) = proof_maybe {
+                composed_proof = SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+            }
+
+            while let Ok(request) = receiver.recv() {
+                let (proof, proof_maybe) = request.into();
+
+                composed_proof = SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                if let Some(proof) = proof_maybe {
+                    composed_proof = SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                }
+            }
+
+            Some(composed_proof)
+        });
 
         let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
         let pools = vec![
@@ -97,9 +154,20 @@ impl ValidatorSignsChain {
             (index, proof)
         };
 
-        let mut proofs = Vec::with_capacity(self.pre_commits.len());
         let (chunks, remainder) = self.pre_commits.as_chunks::<2>();
+        assert!(!chunks.is_empty());
         assert!(remainder.len() < 2);
+
+        let mut chunks = chunks.iter();
+        let chunk = chunks.next().expect("chunks is not empty");
+        assert_eq!(chunk.len(), 2);
+
+        let (result_1, result_2) = pool.join(
+            || worker_func(&chunk[0], &pools[0]),
+            || worker_func(&chunk[1], &pools[1]),
+        );
+        sender.send(Request::Pair((result_1, result_2))).unwrap();
+
         for chunk in chunks {
             assert_eq!(chunk.len(), 2);
 
@@ -108,37 +176,17 @@ impl ValidatorSignsChain {
                 || worker_func(&chunk[1], &pools[1]),
             );
 
-            proofs.push(result_1);
-            proofs.push(result_2);
+            sender.send(Request::Pair((result_1, result_2))).unwrap();
         }
 
         if !remainder.is_empty() {
-            proofs.push(worker_func(&remainder[0], &pools[1]));
+            sender.send(Request::SingleItem(worker_func(&remainder[0], &pools[1]))).unwrap();
         }
 
-        proofs.sort_by(|(index_a, _proof_a), (index_b, _proof_b)| index_a.cmp(&index_b));
-
-        let mut inner_proofs = proofs
-            .into_iter()
-            .map(|(_, proof)| proof)
-            .collect::<Vec<_>>();
+        drop(sender);
+        let composed_proof = thread.join().expect("should be joinable").expect("there is a proof");
 
         log::info!("inner_proofs time: {}ms", now.elapsed().as_millis());
-
-        let now = Instant::now();
-
-        let initial_data = SignCompositionInitialData {
-            validator_set_hash,
-            message: self.message,
-        };
-        let mut composed_proof =
-            SignComposition::build(&inner_proofs.remove(0)).prove_initial(initial_data);
-
-        for inner in inner_proofs {
-            composed_proof = SignComposition::build(&inner).prove_recursive(composed_proof.proof());
-        }
-
-        log::info!("SignComposition time: {}ms", now.elapsed().as_millis());
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();

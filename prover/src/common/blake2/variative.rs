@@ -38,7 +38,7 @@ impl VariativeBlake2 {
         };
 
         log::trace!(
-            "Loading circuit data directly time: {}ms",
+            "Loading circuit data (index = {index}) directly time: {}ms",
             now.elapsed().as_millis()
         );
 

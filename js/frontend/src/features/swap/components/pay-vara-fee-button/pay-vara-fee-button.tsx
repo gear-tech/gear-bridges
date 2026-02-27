@@ -1,6 +1,7 @@
 import { useAccount, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
+import { captureException } from '@sentry/react';
 
 import { Tooltip } from '@/components';
 import { useModal } from '@/hooks';
@@ -32,7 +33,10 @@ function PayVaraFeeButton({ nonce, onInBlock }: Props) {
         alert.success('Fee paid successfully');
         onInBlock();
       })
-      .catch((error: Error) => alert.error(getErrorMessage(error)));
+      .catch((error: Error) => {
+        alert.error(getErrorMessage(error));
+        captureException(error, { tags: { feature: 'pay-tx-fee' } });
+      });
   };
 
   const renderTooltipText = () => (

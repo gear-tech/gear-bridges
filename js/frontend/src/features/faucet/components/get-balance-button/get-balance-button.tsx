@@ -2,6 +2,7 @@ import { HexString } from '@gear-js/api';
 import { useAccount, useAlert, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { Turnstile, TurnstileInstance } from '@marsidev/react-turnstile';
+import { captureException } from '@sentry/react';
 import { useMutation } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 
@@ -62,13 +63,19 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
           'Your request for test tokens has been received and is being processed. The tokens will appear in your balance shortly.',
         );
       })
-      .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
+      .catch((error) => {
+        alert.error(error instanceof Error ? error.message : String(error));
+        captureException(error, { tags: { feature: 'faucet', flow: 'request' } });
+      });
   };
 
   const handleVerificationError = (code: string) => {
     settleVerification();
+    alert.error(`Error verifying that you are a human. Please try again.`);
 
-    alert.error(`Error verifying that you are a human, code: ${code}. Please try again.`);
+    const error = new Error(`Cloudflare Turnstile (human verification) error. Code: ${code}`);
+
+    captureException(error, { tags: { feature: 'faucet', flow: 'verification' } });
   };
 
   return (

@@ -98,6 +98,7 @@ jobs:
             VITE_VARA_ARCHIVE_NODE_ADDRESSES=${{ secrets.VITE_VARA_ARCHIVE_NODE_ADDRESSES }}
             VITE_ETH_BEACON_NODE_ADDRESSES=${{ secrets.VITE_ETH_BEACON_NODE_ADDRESSES }}
             VITE_ETH_MESSAGE_QUEUE_CONTRACT_ADDRESSES=${{ secrets.VITE_ETH_MESSAGE_QUEUE_CONTRACT_ADDRESSES }}
+            VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
             VITE_GTM_ID=${{ secrets.VITE_GTM_ID }}
             
   deploy-to-k8s:

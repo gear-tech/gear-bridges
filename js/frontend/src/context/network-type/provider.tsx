@@ -1,5 +1,6 @@
 import { useApi, useAlert } from '@gear-js/react-hooks';
 import { useAppKitNetwork } from '@reown/appkit/react';
+import { captureException } from '@sentry/react';
 import { PropsWithChildren, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useChainId, useConfig, useSwitchChain } from 'wagmi';
@@ -82,6 +83,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     switchNetwork({ endpoint: NEXT_PRESET.NODE_ADDRESS }).catch((error: Error) => {
       alert.error(`Failed to switch network. ${error.message}`);
       logger.error('Network switch', error);
+      captureException(error, { tags: { feature: 'network-switch' } });
     });
   };
 

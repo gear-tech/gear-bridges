@@ -208,7 +208,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/runtime@npm:^7.0.0, @babel/runtime@npm:^7.17.9, @babel/runtime@npm:^7.21.0, @babel/runtime@npm:^7.26.0, @babel/runtime@npm:^7.26.10, @babel/runtime@npm:^7.5.5, @babel/runtime@npm:^7.8.7":
+"@babel/runtime@npm:^7.0.0, @babel/runtime@npm:^7.21.0, @babel/runtime@npm:^7.26.0, @babel/runtime@npm:^7.26.10, @babel/runtime@npm:^7.5.5, @babel/runtime@npm:^7.8.7":
   version: 7.28.3
   resolution: "@babel/runtime@npm:7.28.3"
   checksum: 10c0/b360f82c2c5114f2a062d4d143d7b4ec690094764853937110585a9497977aed66c102166d0e404766c274e02a50ffb8f6d77fef7251ecf3f607f0e03e6397bc
@@ -2017,26 +2017,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hcaptcha/loader@npm:^2.3.0":
-  version: 2.3.0
-  resolution: "@hcaptcha/loader@npm:2.3.0"
-  checksum: 10c0/2273c0de35968bad169ba1102085930da52e6a5d3b74bfdc5c00a8959066f9671ddf2f1d25dddbc7544f290268439559cb49b42009d88c5a7e8481dcb9c67981
-  languageName: node
-  linkType: hard
-
-"@hcaptcha/react-hcaptcha@npm:1.17.1":
-  version: 1.17.1
-  resolution: "@hcaptcha/react-hcaptcha@npm:1.17.1"
-  dependencies:
-    "@babel/runtime": "npm:^7.17.9"
-    "@hcaptcha/loader": "npm:^2.3.0"
-  peerDependencies:
-    react: ">= 16.3.0"
-    react-dom: ">= 16.3.0"
-  checksum: 10c0/f807130fa9068ef096caa6cb97ab8d922c3f78bae6a22fc9a79b01caf47189555b36bd72585119783b9a271d369854ce572cea0df9c29c75ac349f9ba1abf05a
-  languageName: node
-  linkType: hard
-
 "@hookform/resolvers@npm:5.2.2":
   version: 5.2.2
   resolution: "@hookform/resolvers@npm:5.2.2"
@@ -2546,6 +2526,16 @@ __metadata:
     "@lodestar/params": "npm:^1.33.0"
     ethereum-cryptography: "npm:^2.0.0"
   checksum: 10c0/668e7880fec4070593fa89f9c981ea87b2ab0cf87af1293f2357dcd85b3bb5f96118b08affe45f6564569e4ee63254878096a6b990bf95138ec4aa0080d292d7
+  languageName: node
+  linkType: hard
+
+"@marsidev/react-turnstile@npm:1.4.2":
+  version: 1.4.2
+  resolution: "@marsidev/react-turnstile@npm:1.4.2"
+  peerDependencies:
+    react: ^17.0.2 || ^18.0.0 || ^19.0
+    react-dom: ^17.0.2 || ^18.0.0 || ^19.0
+  checksum: 10c0/3cb72435076f65eb1bf965ad2aaa15900df032bf32609246591a8810f633d508f98561b9a2376c9b3c15f36de639b885df6bf90d3001f3ffb086f29e3396945a
   languageName: node
   linkType: hard
 
@@ -13006,8 +12996,8 @@ __metadata:
     "@graphql-codegen/cli": "npm:6.1.0"
     "@graphql-codegen/client-preset": "npm:5.2.2"
     "@graphql-typed-document-node/core": "npm:3.2.0"
-    "@hcaptcha/react-hcaptcha": "npm:1.17.1"
     "@hookform/resolvers": "npm:5.2.2"
+    "@marsidev/react-turnstile": "npm:1.4.2"
     "@polkadot/api": "npm:16.4.6"
     "@polkadot/react-identicon": "npm:3.16.4"
     "@polkadot/types": "npm:16.4.6"

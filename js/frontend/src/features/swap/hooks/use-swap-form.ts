@@ -1,5 +1,6 @@
 import { useAlert, useAccount, useApi } from '@gear-js/react-hooks';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { captureException } from '@sentry/react';
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { formatUnits } from 'viem';
@@ -72,8 +73,11 @@ function useSwapForm({ accountBalance, ftBalance, shouldPayBridgingFee }: Params
       };
 
       const onError = (error: WriteContractErrorType | string) => {
-        logger.error('Transfer Error', typeof error === 'string' ? new Error(error) : error);
+        const err = typeof error === 'string' ? new Error(error) : error;
+
+        logger.error('Transfer Error', err);
         alert.error(getErrorMessage(error));
+        captureException(err, { tags: { feature: 'swap' } });
       };
 
       onSubmit(values).then(onSuccess).catch(onError);

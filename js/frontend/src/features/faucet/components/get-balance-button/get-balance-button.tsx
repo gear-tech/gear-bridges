@@ -1,17 +1,18 @@
 import { HexString } from '@gear-js/api';
 import { useAccount, useAlert, useApi } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
-import HCaptcha from '@hcaptcha/react-hcaptcha';
+import { Turnstile, TurnstileInstance } from '@marsidev/react-turnstile';
 import { useMutation } from '@tanstack/react-query';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 import { LinkButton } from '@/components';
 import { useNetworkType } from '@/context/network-type';
-import { useEthAccount } from '@/hooks';
+import { useEthAccount, useModal } from '@/hooks';
+import { cx } from '@/utils';
 
 import { GetBalanceParameters, getEthTokenBalance, getVaraAccountBalance } from '../../api';
 import GiftSVG from '../../assets/gift.svg?react';
-import { HCAPTCHA_SITEKEY } from '../../consts';
+import { TURNSTILE_SITEKEY } from '../../consts';
 
 import styles from './get-balance-button.module.scss';
 
@@ -29,38 +30,63 @@ const BUTTON_PROPS = {
 
 function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) {
   const alert = useAlert();
-  const hCaptchaRef = useRef<HCaptcha>(null);
+  const turnstileRef = useRef<TurnstileInstance>(null);
+
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isVerificationVisible, openVerification, closeVerification] = useModal();
 
   const { mutateAsync, isPending } = useMutation({
-    mutationFn: async () => {
-      if (!hCaptchaRef.current) throw new Error('HCaptcha ref is null');
-
-      const token = (await hCaptchaRef.current.execute({ async: true })).response;
-      const payload = parameters as T;
-
-      return getBalance({ token, ...payload });
-    },
+    mutationFn: (token: string) => getBalance({ token, ...(parameters as T) }),
   });
 
-  const handleClick = () =>
-    mutateAsync()
+  const handleClick = () => {
+    setIsVerifying(true);
+
+    turnstileRef.current?.reset();
+    turnstileRef.current?.execute();
+  };
+
+  const settleVerification = () => {
+    closeVerification();
+    setIsVerifying(false);
+  };
+
+  const handleVerificationSuccess = (token: string) => {
+    settleVerification();
+
+    mutateAsync(token)
       .then(() => {
         onSuccess?.();
+
         alert.success(
           'Your request for test tokens has been received and is being processed. The tokens will appear in your balance shortly.',
         );
       })
-      .catch((error: string | Error) => {
-        if (error === 'challenge-closed') return;
+      .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
+  };
 
-        alert.error(error instanceof Error ? error.message : error);
-      });
+  const handleVerificationError = (code: string) => {
+    settleVerification();
+
+    alert.error(`Error verifying that you are a human, code: ${code}. Please try again.`);
+  };
 
   return (
-    <div>
-      <Button onClick={handleClick} isLoading={isPending} {...BUTTON_PROPS} />
-      <HCaptcha ref={hCaptchaRef} theme="dark" size="invisible" sitekey={HCAPTCHA_SITEKEY} />
-    </div>
+    <>
+      <Button onClick={handleClick} isLoading={isPending || isVerifying} {...BUTTON_PROPS} />
+
+      <div className={cx(styles.overlay, isVerificationVisible && styles.active)}>
+        <Turnstile
+          options={{ execution: 'execute', appearance: 'interaction-only' }}
+          siteKey={TURNSTILE_SITEKEY}
+          ref={turnstileRef}
+          onBeforeInteractive={openVerification}
+          onAfterInteractive={settleVerification}
+          onError={handleVerificationError}
+          onSuccess={handleVerificationSuccess}
+        />
+      </div>
+    </>
   );
 }
 

@@ -1,3 +1,3 @@
-const HCAPTCHA_SITEKEY = import.meta.env.VITE_HCAPTCHA_SITEKEY as string;
+const TURNSTILE_SITEKEY = import.meta.env.VITE_TURNSTILE_SITEKEY as string;
 
-export { HCAPTCHA_SITEKEY };
+export { TURNSTILE_SITEKEY };

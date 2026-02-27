@@ -36,17 +36,23 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
   const [isVerificationVisible, openVerification, closeVerification] = useModal();
 
   const { mutateAsync, isPending } = useMutation({
-    mutationFn: async (token: string) => getBalance({ token, ...(parameters as T) }),
+    mutationFn: (token: string) => getBalance({ token, ...(parameters as T) }),
   });
 
   const handleClick = () => {
     setIsVerifying(true);
+
+    turnstileRef.current?.reset();
     turnstileRef.current?.execute();
   };
 
-  const handleVerificationSuccess = (token: string) => {
+  const settleVerification = () => {
     closeVerification();
     setIsVerifying(false);
+  };
+
+  const handleVerificationSuccess = (token: string) => {
+    settleVerification();
 
     mutateAsync(token)
       .then(() => {
@@ -56,15 +62,13 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
           'Your request for test tokens has been received and is being processed. The tokens will appear in your balance shortly.',
         );
       })
-      .catch((error) => alert.error(error instanceof Error ? error.message : String(error)))
-      .finally(() => turnstileRef.current?.reset());
+      .catch((error) => alert.error(error instanceof Error ? error.message : String(error)));
   };
 
   const handleVerificationError = (code: string) => {
-    closeVerification();
-    setIsVerifying(false);
+    settleVerification();
 
-    alert.error(`Human verification error occurred. ${code}`);
+    alert.error(`Error verifying that you are a human, code: ${code}. Please try again.`);
   };
 
   return (
@@ -77,6 +81,7 @@ function ButtonComponent<T>({ getBalance, onSuccess, ...parameters }: Props<T>) 
           siteKey={TURNSTILE_SITEKEY}
           ref={turnstileRef}
           onBeforeInteractive={openVerification}
+          onAfterInteractive={settleVerification}
           onError={handleVerificationError}
           onSuccess={handleVerificationSuccess}
         />

@@ -19,7 +19,6 @@ env:
 
 jobs:
   prepair:
-    if: github.ref == 'refs/heads/main' || (github.ref == 'refs/heads/release' && github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     outputs:
       image_name: ${{ steps.image.outputs.image_name }}

@@ -308,7 +308,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                     "WrappedVara.sol",
                     abi.encodeCall(
                         WrappedVara.initialize,
-                        (IGovernance(governanceAdminAddress), IGovernance(governancePauserAddress), erc20ManagerAddress)
+                        (
+                            IGovernance(governanceAdminAddress),
+                            IGovernance(governancePauserAddress),
+                            address(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266)
+                        )
                     )
                 )
             );

@@ -118,6 +118,19 @@
     background-color: #00ffc30f;
     border-color: #00ffc30d;
   }
+
+  &.disabled {
+    opacity: 0.4;
+
+    &:hover {
+      background-color: #ffffff03;
+      border-color: #ffffff0a;
+    }
+  }
+}
+
+.disabledWrapper {
+  display: block;
 }
 
 .wallet {

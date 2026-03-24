@@ -5,7 +5,7 @@ import { useState } from 'react';
 import EthSVG from '@/assets/eth.svg?react';
 import SearchSVG from '@/assets/search.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
-import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
+import { FormattedBalance, Skeleton, TokenSVG, Tooltip } from '@/components';
 import { useTokens } from '@/context';
 import { useEthFTBalances, useVaraFTBalances, useModal, useVaraAccountBalance, useEthAccountBalance } from '@/hooks';
 import { cx, isUndefined } from '@/utils';
@@ -69,7 +69,7 @@ function SelectTokenModal({ close }: ModalProps) {
   const renderTokens = () => {
     if (!filteredTokens) return;
 
-    return filteredTokens.map(({ address, symbol, displaySymbol, isNative }, index) => {
+    return filteredTokens.map(({ address, symbol, displaySymbol, isNative, isDisabled }, index) => {
       const isActive = address === token?.address;
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
@@ -78,24 +78,34 @@ function SelectTokenModal({ close }: ModalProps) {
         close();
       };
 
+      const button = (
+        <button
+          type="button"
+          className={cx(styles.tokenButton, isActive && styles.active, isDisabled && styles.disabled)}
+          onClick={handleClick}
+          disabled={isActive || isDisabled}>
+          <span className={styles.wallet}>
+            <TokenSVG symbol={symbol} network={networkName} />
+
+            <span className={styles.token}>
+              <span className={styles.symbol}>{displaySymbol}</span>
+              <span className={styles.network}>{networkText}</span>
+            </span>
+          </span>
+
+          {renderTokenBalance(address, isNative)}
+        </button>
+      );
+
       return (
         <li key={index}>
-          <button
-            type="button"
-            className={cx(styles.tokenButton, isActive && styles.active)}
-            onClick={handleClick}
-            disabled={isActive}>
-            <span className={styles.wallet}>
-              <TokenSVG symbol={symbol} network={networkName} />
-
-              <span className={styles.token}>
-                <span className={styles.symbol}>{displaySymbol}</span>
-                <span className={styles.network}>{networkText}</span>
-              </span>
-            </span>
-
-            {renderTokenBalance(address, isNative)}
-          </button>
+          {isDisabled ? (
+            <Tooltip value="Under maintenance">
+              <span className={styles.disabledWrapper}>{button}</span>
+            </Tooltip>
+          ) : (
+            button
+          )}
         </li>
       );
     });

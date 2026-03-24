@@ -53,6 +53,7 @@ type Token = {
   isNative: boolean;
   network: 'vara' | 'eth';
   isActive: boolean;
+  isDisabled: boolean;
 };
 
 const TOKEN_PLACEHOLDER: Token = {
@@ -65,6 +66,7 @@ const TOKEN_PLACEHOLDER: Token = {
   isNative: false,
   network: 'vara',
   isActive: false,
+  isDisabled: false,
 };
 
 const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
@@ -82,6 +84,9 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
     const varaDisplaySymbol = isVaraNative ? varaSymbol : pair.varaTokenSymbol;
     const ethDisplaySymbol = isEthNative ? 'ETH' : pair.ethTokenSymbol;
 
+    // Temporarily disabled: native VARA token and its ETH-side wrapped counterpart (wtvara/wvara)
+    const isVaraPairDisabled = isVaraNative;
+
     const varaToken: Token = {
       address: varaAddress,
       destinationAddress: ethAddress,
@@ -92,6 +97,7 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       isNative: isVaraNative,
       network: 'vara',
       isActive: pair.isActive,
+      isDisabled: isVaraPairDisabled,
     };
 
     const ethToken: Token = {
@@ -104,6 +110,7 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       isNative: isEthNative,
       network: 'eth',
       isActive: pair.isActive,
+      isDisabled: isVaraPairDisabled,
     };
 
     if (pair.isActive) {

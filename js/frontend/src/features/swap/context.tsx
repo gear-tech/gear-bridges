@@ -1,9 +1,9 @@
 import { HexString } from '@gear-js/api';
-// import { useAccount } from '@gear-js/react-hooks';
+import { useAccount } from '@gear-js/react-hooks';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Token, useTokens } from '@/context';
-// import { useEthAccount } from '@/hooks';
+import { useEthAccount } from '@/hooks';
 
 import { NETWORK } from './consts';
 
@@ -34,16 +34,15 @@ const { Provider } = BridgeContext;
 const useBridgeContext = () => useContext(BridgeContext);
 
 function BridgeProvider({ children }: PropsWithChildren) {
-  // network
-  // const { account } = useAccount();
-  // const ethAccount = useEthAccount();
+  const { account } = useAccount();
+  const ethAccount = useEthAccount();
 
-  // token
-  const { getActiveToken, nativeToken } = useTokens();
+  const { getActiveToken, nativeToken, tokens } = useTokens();
 
-  // const defaultNetwork = !account && ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
-  const defaultNetwork = NETWORK.ETH;
-  const defaultTokenAddress = nativeToken[defaultNetwork]?.address;
+  const defaultNetwork = account && !ethAccount.address ? NETWORK.VARA : NETWORK.ETH;
+  const defaultTokenAddress = nativeToken[defaultNetwork]?.isDisabled
+    ? tokens[defaultNetwork]?.find(({ isDisabled }) => !isDisabled)?.address
+    : nativeToken[defaultNetwork]?.address;
   const [tokenAddress, setTokenAddress] = useState(defaultTokenAddress);
 
   useEffect(() => {

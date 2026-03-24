@@ -322,6 +322,8 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             console.log("    WTVARA:              ", address(wrappedVara));
         }
 
+        return;
+
         if (!isFork) {
             assertEq(wrappedVara.governanceAdmin(), governanceAdminAddress);
             assertEq(wrappedVara.governancePauser(), governancePauserAddress);

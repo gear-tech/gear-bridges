@@ -50,6 +50,7 @@ $ anvil
 ```shell
 $ source .env
 
+$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```

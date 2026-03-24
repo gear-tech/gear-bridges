@@ -39,7 +39,7 @@ function BridgeProvider({ children }: PropsWithChildren) {
 
   const { getActiveToken, nativeToken, tokens } = useTokens();
 
-  const defaultNetwork = account && !ethAccount.address ? NETWORK.VARA : NETWORK.ETH;
+  const defaultNetwork = !account && ethAccount.address ? NETWORK.ETH : NETWORK.VARA;
   const defaultTokenAddress = nativeToken[defaultNetwork]?.isDisabled
     ? tokens[defaultNetwork]?.find(({ isDisabled }) => !isDisabled)?.address
     : nativeToken[defaultNetwork]?.address;

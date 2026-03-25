@@ -291,6 +291,16 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     );
   }
 
+  public removePairById(pairId: string, blockNumber: bigint) {
+    this._removedPairs.set(pairId, blockNumber);
+    this._log.info(
+      {
+        pairId,
+      },
+      'Pair removed by ID',
+    );
+  }
+
   public async upgradePair(varaToken: string, block: BlockHeader) {
     const vftAddr = varaToken.toLowerCase();
 

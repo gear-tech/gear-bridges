@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 
 import { config } from './config.js';
 import { getDecoder } from './decoders.js';
+import { ProgramName } from './util.js';
 
 // Helper function for querying VFT metadata
 async function queryVFTMetadata<T>(rpc: RpcClient, programId: string, blockhash: string, fn: string): Promise<T> {
@@ -27,6 +28,32 @@ async function queryVFTMetadata<T>(rpc: RpcClient, programId: string, blockhash:
     return result;
   } else {
     throw new Error(`Failed to get token ${fn}. ${response.code}`);
+  }
+}
+
+export async function queryVftManagerPairs(
+  rpc: RpcClient,
+  programId: string,
+  blockhash: string,
+): Promise<[vft: string, erc20: string, supply: string][]> {
+  const method = 'gear_calculateReplyForHandle';
+  const origin = ZERO_ADDRESS;
+  const gasLimit = 1e10;
+  const value = 0;
+
+  const service = 'VftManager';
+  const fn = 'VaraToEthAddresses';
+
+  const decoder = getDecoder(ProgramName.VftManager);
+
+  const payload = decoder.encodeQueryInput(service, fn, []);
+
+  const response = await rpc.call(method, [origin, programId, payload, gasLimit, value, blockhash]);
+
+  if (response.code.Success) {
+    return decoder.decodeQueryOutput<[vft: string, erc20: string, supply: string][]>(service, fn, response.payload);
+  } else {
+    throw new Error(`Failed to get token pairs. ${response.code}`);
   }
 }
 

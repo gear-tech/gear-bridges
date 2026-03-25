@@ -14870,6 +14870,8 @@ dependencies = [
  "gear-core",
  "gsdk",
  "hex",
+ "log",
+ "pretty_env_logger",
  "sails-rs",
  "tokio",
  "vft",

@@ -1,4 +1,4 @@
-use crate::message_relayer::eth_to_gear::api_provider::ApiProviderConnection;
+use gear_common::api_provider::ApiProviderConnection;
 use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;

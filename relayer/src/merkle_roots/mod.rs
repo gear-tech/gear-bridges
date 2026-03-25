@@ -8,11 +8,11 @@ use crate::{
             web_request::{MerkleRootsRequest, MerkleRootsResponse},
             GearBlock,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
     },
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
 };
+use gear_common::api_provider::ApiProviderConnection;
 use ::prover::{
     consts::BLAKE2_DIGEST_SIZE,
     proving::{GenesisConfig, ProofWithCircuitData},

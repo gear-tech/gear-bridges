@@ -1,6 +1,7 @@
-use crate::message_relayer::{common::GearBlock, eth_to_gear::api_provider::ApiProviderConnection};
+use crate::message_relayer::common::GearBlock;
 use futures::StreamExt;
 use gsdk::Event;
+use gear_common::api_provider::ApiProviderConnection;
 
 pub async fn queue_cleaner(
     mut api_provider: ApiProviderConnection,

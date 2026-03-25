@@ -17,7 +17,6 @@ use crate::{
             web_request::Message,
             AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
         gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
     },
 };
@@ -32,6 +31,7 @@ use tokio::{
     task, time,
 };
 use utils_prometheus::MeteredService;
+use gear_common::api_provider::ApiProviderConnection;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,

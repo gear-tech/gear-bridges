@@ -1,7 +1,7 @@
 use crate::{
-    message_relayer::eth_to_gear::api_provider::ApiProviderConnection,
     prover_interface::{self, FinalProof},
 };
+use gear_common::api_provider::ApiProviderConnection;
 use futures::executor::block_on;
 use gear_rpc_client::{dto::RawBlockInclusionProof, GearApi};
 use primitive_types::H256;

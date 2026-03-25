@@ -1,7 +1,7 @@
 use crate::message_relayer::{
     common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
-    eth_to_gear::api_provider::ApiProviderConnection,
 };
+use gear_common::api_provider::ApiProviderConnection;
 use alloy::{
     providers::{PendingTransactionBuilder, Provider},
     sol_types::SolEvent,

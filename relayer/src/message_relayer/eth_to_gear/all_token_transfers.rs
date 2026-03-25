@@ -23,8 +23,7 @@ use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
 use utils_prometheus::MeteredService;
-
-use super::api_provider::ApiProviderConnection;
+use gear_common::api_provider::ApiProviderConnection;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,

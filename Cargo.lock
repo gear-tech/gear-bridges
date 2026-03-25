@@ -4935,8 +4935,11 @@ version = "1.1.0"
 dependencies = [
  "anyhow",
  "gclient",
+ "gear-rpc-client",
+ "gsdk",
  "log",
  "sails-rs",
+ "tokio",
  "vft-client",
  "vft-manager-client",
 ]

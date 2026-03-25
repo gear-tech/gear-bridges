@@ -1,3 +1,5 @@
+pub mod api_provider;
+
 use anyhow::anyhow;
 use gclient::Result;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};

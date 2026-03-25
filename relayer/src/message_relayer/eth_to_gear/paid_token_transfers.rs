@@ -10,7 +10,6 @@ use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
 use tx_manager::TransactionManager;
 use utils_prometheus::MeteredService;
-
 use crate::message_relayer::common::{
     ethereum::{
         self, block_listener::BlockListener as EthereumBlockListener,
@@ -23,8 +22,7 @@ use crate::message_relayer::common::{
     },
     EthereumSlotNumber,
 };
-
-use super::api_provider::ApiProviderConnection;
+use gear_common::api_provider::ApiProviderConnection;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,

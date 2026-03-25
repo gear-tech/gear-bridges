@@ -11,10 +11,10 @@ use ethereum_common::{
         ReceiptEnvelope,
     },
 };
+use gear_common::api_provider::ApiProvider;
 use relayer::message_relayer::{
     common::{EthereumSlotNumber, TxHashWithSlot},
     eth_to_gear::{
-        api_provider::ApiProvider,
         message_sender::{self, MessageSender, MessageSenderIo},
         proof_composer::{self, ProofComposerIo},
         storage::NoStorage,
@@ -30,11 +30,10 @@ use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
+    sync::{Arc, LazyLock},
 };
-use vft_manager_client::traits::VftManager;
-
-use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use vft_manager_client::traits::VftManager;
 
 #[derive(Deserialize, Debug)]
 pub struct Receipts {

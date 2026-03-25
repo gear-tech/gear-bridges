@@ -36,14 +36,14 @@ const handler = async (ctx: ProcessorContext) => {
       { activePairsCount: activePairs.length, currentActivePairsCount: currentActivePairs.length },
       'Active pairs count',
     );
-    const actualActivePairs: string[] = [];
+    const actualActivePairs: Set<string> = new Set();
     const currentInactivePairs = pairs.filter((p) => !p.isActive).map((p) => p.id);
 
     for (const pair of activePairs) {
-      const id = createPairHash(pair[0], pair[1]);
+      const id = createPairHash(pair[0].toLowerCase(), pair[1].toLowerCase());
       if (currentActivePairs.includes(id)) {
         ctx.log.info({ id }, 'Pair is already in the database as active');
-        actualActivePairs.push(id);
+        actualActivePairs.add(id);
         continue;
       }
       if (currentInactivePairs.includes(id)) {
@@ -65,13 +65,13 @@ const handler = async (ctx: ProcessorContext) => {
       );
     }
 
-    if (actualActivePairs.length !== currentActivePairs.length) {
+    if (actualActivePairs.size !== currentActivePairs.length) {
       ctx.log.info(
-        { actualActivePairsCount: actualActivePairs.length, currentActivePairsCount: currentActivePairs.length },
+        { actualActivePairsCount: actualActivePairs.size, currentActivePairsCount: currentActivePairs.length },
         'Some pairs are no longer active according to VFT Manager, marking them as inactive',
       );
 
-      const actualInactivePairs = currentActivePairs.filter((id) => !actualActivePairs.includes(id));
+      const actualInactivePairs = currentActivePairs.filter((id) => !actualActivePairs.has(id));
 
       actualInactivePairs.forEach((id) => state.removePairById(id, BigInt(ctx.blocks[0].header.height)));
     }

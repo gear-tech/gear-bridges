@@ -35,7 +35,7 @@ export async function queryVftManagerPairs(
   rpc: RpcClient,
   programId: string,
   blockhash: string,
-): Promise<[vft: string, erc20: string, supply: string][]> {
+): Promise<[vft: string, erc20: string, supply: 'Ethereum' | 'Gear'][]> {
   const method = 'gear_calculateReplyForHandle';
   const origin = ZERO_ADDRESS;
   const gasLimit = 1e10;
@@ -51,7 +51,11 @@ export async function queryVftManagerPairs(
   const response = await rpc.call(method, [origin, programId, payload, gasLimit, value, blockhash]);
 
   if (response.code.Success) {
-    return decoder.decodeQueryOutput<[vft: string, erc20: string, supply: string][]>(service, fn, response.payload);
+    return decoder.decodeQueryOutput<[vft: string, erc20: string, supply: 'Ethereum' | 'Gear'][]>(
+      service,
+      fn,
+      response.payload,
+    );
   } else {
     throw new Error(`Failed to get token pairs. ${response.code}`);
   }

@@ -23,6 +23,7 @@ use crate::{
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
+use gear_common::api_provider::ApiProviderConnection;
 use primitive_types::H256;
 use sails_rs::ActorId;
 use std::{collections::HashSet, iter, path::Path, sync::Arc};
@@ -31,7 +32,6 @@ use tokio::{
     task, time,
 };
 use utils_prometheus::MeteredService;
-use gear_common::api_provider::ApiProviderConnection;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,

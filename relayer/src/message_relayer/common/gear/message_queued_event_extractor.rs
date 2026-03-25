@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use crate::message_relayer::{
     common::{self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock},
     gear_to_eth::storage::Storage,
 };
 use gear_common::api_provider::ApiProviderConnection;
 use prometheus::IntCounter;
+use std::sync::Arc;
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
     mpsc::UnboundedSender,

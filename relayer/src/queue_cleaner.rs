@@ -1,7 +1,7 @@
 use crate::message_relayer::common::GearBlock;
 use futures::StreamExt;
-use gsdk::Event;
 use gear_common::api_provider::ApiProviderConnection;
+use gsdk::Event;
 
 pub async fn queue_cleaner(
     mut api_provider: ApiProviderConnection,

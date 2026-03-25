@@ -1,8 +1,6 @@
-use crate::{
-    prover_interface::{self, FinalProof},
-};
-use gear_common::api_provider::ApiProviderConnection;
+use crate::prover_interface::{self, FinalProof};
 use futures::executor::block_on;
+use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::{dto::RawBlockInclusionProof, GearApi};
 use primitive_types::H256;
 use prometheus::IntGauge;

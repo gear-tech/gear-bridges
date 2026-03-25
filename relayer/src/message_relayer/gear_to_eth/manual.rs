@@ -12,12 +12,12 @@ use crate::message_relayer::{
     },
 };
 use ethereum_client::EthApi;
+use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::GearApi;
 use primitive_types::U256;
 use sails_rs::ActorId;
 use std::{cmp, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedSender};
-use gear_common::api_provider::ApiProviderConnection;
 
 const COUNT_BATCH: u64 = 500;
 

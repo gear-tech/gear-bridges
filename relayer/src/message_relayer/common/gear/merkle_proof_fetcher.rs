@@ -1,10 +1,8 @@
-use crate::message_relayer::{
-    common::RelayedMerkleRoot
-};
+use crate::message_relayer::common::RelayedMerkleRoot;
+use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::dto::MerkleProof;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
-use gear_common::api_provider::ApiProviderConnection;
 
 pub struct Request {
     pub tx_uuid: Uuid,

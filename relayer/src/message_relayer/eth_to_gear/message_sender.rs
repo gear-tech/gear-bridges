@@ -1,9 +1,8 @@
-use gear_common::api_provider::ApiProviderConnection;
 use alloy_primitives::FixedBytes;
 use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
 use gclient::GearApi;
-use gear_common::UNITS;
+use gear_common::{api_provider::ApiProviderConnection, UNITS};
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::{

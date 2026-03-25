@@ -12,9 +12,7 @@ use crate::{
         is_rpc_transport_error_recoverable, send_challege_root_to_ethereum,
         submit_merkle_root_to_ethereum,
     },
-    message_relayer::{
-        common::web_request::{MerkleRootBlocks, MerkleRootsResponse},
-    },
+    message_relayer::common::web_request::{MerkleRootBlocks, MerkleRootsResponse},
     prover_interface::FinalProof,
 };
 use gear_common::api_provider::ApiProviderConnection;

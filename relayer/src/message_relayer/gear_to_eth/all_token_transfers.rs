@@ -14,11 +14,11 @@ use crate::message_relayer::{
     gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
 };
 use ethereum_client::EthApi;
+use gear_common::api_provider::ApiProviderConnection;
 use sails_rs::ActorId;
 use std::{iter, path::Path, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use utils_prometheus::MeteredService;
-use gear_common::api_provider::ApiProviderConnection;
 
 pub struct Relayer {
     gear_block_listener: GearBlockListener,

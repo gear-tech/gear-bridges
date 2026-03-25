@@ -5,21 +5,25 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{EthApi, PollingEthApi};
 use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
+use gear_common::api_provider::{ApiProvider, ApiProviderConnection};
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::U256;
 use prover::consts::SIZE_THREAD_STACK_MIN;
 use relayer::{
-    merkle_roots::MerkleRootRelayerOptions,
-    message_relayer::{self, gear_to_eth, eth_to_gear},
-    common, hex_utils, server, ethereum_checkpoints,
     cli::{
-    BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs, EthGearTokensCommands,
-    EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FeePayers, FetchMerkleRootsArgs,
-    GearArgs, GearEthTokensCommands, GearSignerArgs, ProofStorageArgs, DEFAULT_COUNT_CONFIRMATIONS,
-    DEFAULT_COUNT_THREADS,
-}, merkle_roots, prover_interface, kill_switch::KillSwitchRelayer, proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage},
+        BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs,
+        EthGearTokensCommands, EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FeePayers,
+        FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands, GearSignerArgs, ProofStorageArgs,
+        DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
+    },
+    common, ethereum_checkpoints, hex_utils,
+    kill_switch::KillSwitchRelayer,
+    merkle_roots,
+    merkle_roots::MerkleRootRelayerOptions,
+    message_relayer::{self, eth_to_gear, gear_to_eth},
+    proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage},
+    prover_interface, server,
 };
-use gear_common::api_provider::{ApiProviderConnection, ApiProvider};
 use sails_rs::{calls::Query, gclient::calls::GClientRemoting, ActorId};
 use std::{
     collections::HashSet,

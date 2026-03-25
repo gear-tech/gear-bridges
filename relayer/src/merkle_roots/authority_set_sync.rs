@@ -3,8 +3,8 @@ use crate::{
     message_relayer::common::GearBlock,
     proof_storage::ProofStorage,
 };
-use gear_common::api_provider::ApiProviderConnection;
 use futures::executor::block_on;
+use gear_common::api_provider::ApiProviderConnection;
 use prometheus::IntGauge;
 use prover::proving::GenesisConfig;
 use std::sync::Arc;

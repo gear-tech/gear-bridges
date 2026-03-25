@@ -3,7 +3,7 @@ use cli_utils::GearConnectionArgs;
 use gclient::GearApi;
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
-use vft_client::traits::*;
+use vft_client::{traits::*, vft_admin::io};
 use vft_vara_client::{traits::*, Mainnet};
 
 const SIZE_MIGRATE_BATCH: u32 = 25;
@@ -49,6 +49,22 @@ enum CliCommands {
         program_id: String,
     },
     MigrateBalances(MigrateBalances),
+    HexEncodedMessage(HexEncodedMessageArgs),
+}
+
+#[derive(Args)]
+struct HexEncodedMessageArgs {
+    #[command(subcommand)]
+    message: HexEncodedMessage,
+}
+
+#[derive(Subcommand)]
+enum HexEncodedMessage {
+    Pause,
+    Resume,
+    Exit { vft_new: ActorId },
+    SetBurner { burner: ActorId },
+    SetMinter { minter: ActorId },
 }
 
 #[derive(Args)]
@@ -97,11 +113,33 @@ fn str_to_actorid(s: String) -> ActorId {
     ActorId::new(data.try_into().expect("Got input of wrong length"))
 }
 
+fn print_encoded_message(message: HexEncodedMessage) {
+    use HexEncodedMessage::*;
+
+    let (label, encoded_call) = match message {
+        Pause => ("Pause", io::Pause::encode_call()),
+        Resume => ("Resume", io::Resume::encode_call()),
+
+        Exit { vft_new } => ("Exit", io::Exit::encode_call(vft_new)),
+
+        SetBurner { burner } => ("SetBurner", io::SetBurner::encode_call(burner)),
+
+        SetMinter { minter } => ("SetMinter", io::SetMinter::encode_call(minter)),
+    };
+
+    println!(r#"{label}: "{}""#, hex::encode(encoded_call));
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
 
     let cli = Cli::parse();
+    if let CliCommands::HexEncodedMessage(args) = cli.command {
+        print_encoded_message(args.message);
+
+        return;
+    }
 
     let endpoint = cli
         .gear_connection
@@ -198,6 +236,8 @@ async fn main() {
         }
 
         CliCommands::MigrateBalances(args) => migrate_balances(gear_api, args).await,
+
+        CliCommands::HexEncodedMessage(..) => {}
     }
 }
 
@@ -261,11 +301,11 @@ impl Uploader {
 
     async fn upload_common(self, program_id: ActorId) {
         assert_eq!(
-            vft_client::vft_admin::io::SetMinter::ROUTE,
+            io::SetMinter::ROUTE,
             vft_vara_client::vft_admin::io::SetMinter::ROUTE,
         );
         assert_eq!(
-            vft_client::vft_admin::io::SetBurner::ROUTE,
+            io::SetBurner::ROUTE,
             vft_vara_client::vft_admin::io::SetBurner::ROUTE,
         );
         assert_eq!(

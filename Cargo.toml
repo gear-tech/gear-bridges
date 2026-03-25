@@ -32,7 +32,6 @@ members = [
     "utils-prometheus",
     "tools/checkpoints-tool",
     "tools/vft-tool",
-    "tools/genesis-config",
     "tools/governance",
     "tests",
     "gear-common",

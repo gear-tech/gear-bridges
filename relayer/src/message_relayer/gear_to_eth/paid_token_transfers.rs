@@ -17,13 +17,13 @@ use crate::{
             web_request::Message,
             AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
         },
-        eth_to_gear::api_provider::ApiProviderConnection,
         gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
     },
 };
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
+use gear_common::api_provider::ApiProviderConnection;
 use primitive_types::H256;
 use sails_rs::ActorId;
 use std::{collections::HashSet, iter, path::Path, sync::Arc};

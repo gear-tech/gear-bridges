@@ -2,13 +2,10 @@ use crate::{
     cli::{self, GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS},
     hex_utils,
     merkle_roots::{authority_set_sync::AuthoritySetSyncIo, prover::FinalityProverIo},
-    message_relayer::{
-        common::{
-            gear::block_listener::BlockListener,
-            web_request::{MerkleRootsRequest, MerkleRootsResponse},
-            GearBlock,
-        },
-        eth_to_gear::api_provider::ApiProviderConnection,
+    message_relayer::common::{
+        gear::block_listener::BlockListener,
+        web_request::{MerkleRootsRequest, MerkleRootsResponse},
+        GearBlock,
     },
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
@@ -19,6 +16,7 @@ use ::prover::{
 };
 use anyhow::Context;
 use ethereum_client::EthApi;
+use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::dto::RawBlockInclusionProof;
 use primitive_types::{H256, U256};
 use prometheus::IntGauge;

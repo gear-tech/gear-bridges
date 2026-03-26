@@ -1,13 +1,11 @@
-use crate::message_relayer::{
-    common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
-    eth_to_gear::api_provider::ApiProviderConnection,
-};
+use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot};
 use alloy::{
     providers::{PendingTransactionBuilder, Provider},
     sol_types::SolEvent,
 };
 use ethereum_client::{abi::IMessageQueue::MerkleRoot, EthApi};
 use futures::StreamExt;
+use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::GearApi;
 use primitive_types::H256;
 use prometheus::IntGauge;

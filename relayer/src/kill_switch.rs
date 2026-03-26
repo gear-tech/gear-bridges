@@ -12,12 +12,10 @@ use crate::{
         is_rpc_transport_error_recoverable, send_challege_root_to_ethereum,
         submit_merkle_root_to_ethereum,
     },
-    message_relayer::{
-        common::web_request::{MerkleRootBlocks, MerkleRootsResponse},
-        eth_to_gear::api_provider::ApiProviderConnection,
-    },
+    message_relayer::common::web_request::{MerkleRootBlocks, MerkleRootsResponse},
     prover_interface::FinalProof,
 };
+use gear_common::api_provider::ApiProviderConnection;
 
 const SCAN_EVENTS_PERIOD_SEC: Duration = Duration::from_secs(12);
 const ERROR_REPEAT_DELAY: Duration = Duration::from_secs(3);

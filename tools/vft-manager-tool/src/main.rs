@@ -9,7 +9,7 @@ use sails_rs::{
     prelude::*,
 };
 use vft_manager::WASM_BINARY;
-use vft_manager_client::{traits::*, InitConfig, Order};
+use vft_manager_client::{traits::*, vft_manager::io, InitConfig, Order};
 
 const SIZE_MIGRATE_BATCH: u32 = 100;
 
@@ -30,6 +30,30 @@ enum CliCommands {
     DeployUpgraded(DeployUpgraded),
     MigrateTransactions(MigrateTransactions),
     ReadTransactions(ReadTransactions),
+    HexEncodedMessage(HexEncodedMessageArgs),
+}
+
+#[derive(Args)]
+struct HexEncodedMessageArgs {
+    #[command(subcommand)]
+    message: HexEncodedMessage,
+}
+
+#[derive(Subcommand)]
+enum HexEncodedMessage {
+    /// Message UpdateVfts. Mapping is constructed the following way [(vfts[0], vfts[1]), (vfts[2], vfts[3]), ...]
+    /// so the len should be even. If there are odd items count then the last one will be ignored.
+    UpdateVfts {
+        vfts: Vec<ActorId>,
+    },
+    MapVaraToEthAddress {
+        address_gear: ActorId,
+        address_eth: H160,
+        is_gear: bool,
+    },
+    RemoveVaraToEthAddress {
+        vara_token_id: ActorId,
+    },
 }
 
 #[derive(Args)]
@@ -83,6 +107,49 @@ fn str_to_actorid(s: String) -> AnyResult<ActorId> {
     })?))
 }
 
+fn print_encoded_message(message: HexEncodedMessage) {
+    use HexEncodedMessage::*;
+
+    let (label, encoded_call) = match message {
+        UpdateVfts { vfts } => {
+            let (chunks, remainder) = vfts.as_chunks::<2>();
+            if !remainder.is_empty() {
+                log::warn!("slice doesn't have even length. The last item is ignored.")
+            }
+
+            (
+                "UpdateVfts",
+                io::UpdateVfts::encode_call(
+                    chunks.iter().map(|chunk| (chunk[0], chunk[1])).collect(),
+                ),
+            )
+        }
+
+        MapVaraToEthAddress {
+            address_gear,
+            address_eth,
+            is_gear,
+        } => (
+            "MapVaraToEthAddress",
+            io::MapVaraToEthAddress::encode_call(
+                address_gear,
+                address_eth,
+                if is_gear {
+                    vft_manager_client::TokenSupply::Gear
+                } else {
+                    vft_manager_client::TokenSupply::Ethereum
+                },
+            ),
+        ),
+        RemoveVaraToEthAddress { vara_token_id } => (
+            "RemoveVaraToEthAddress",
+            io::RemoveVaraToEthAddress::encode_call(vara_token_id),
+        ),
+    };
+
+    println!(r#"{label}: "{}""#, hex::encode(encoded_call));
+}
+
 #[tokio::main]
 async fn main() -> AnyResult<()> {
     let _ = dotenv::dotenv();
@@ -95,6 +162,11 @@ async fn main() -> AnyResult<()> {
         .init();
 
     let cli = Cli::parse();
+    if let CliCommands::HexEncodedMessage(args) = cli.command {
+        print_encoded_message(args.message);
+        return Ok(());
+    }
+
     let endpoint = cli.gear.connection.get_endpoint().expect("Invalid URL");
     let gear_api = GearApi::builder()
         .suri(cli.gear.suri)
@@ -170,6 +242,8 @@ async fn main() -> AnyResult<()> {
                 }
             }
         }
+
+        CliCommands::HexEncodedMessage(..) => {}
     }
 
     Ok(())

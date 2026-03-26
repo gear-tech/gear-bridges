@@ -17,5 +17,7 @@ gear-core.workspace = true
 gclient.workspace = true
 gsdk.workspace = true
 hex.workspace = true
+log.workspace = true
+pretty_env_logger.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true

@@ -2,6 +2,7 @@ import { HexString } from '@gear-js/api';
 import { createPairHash } from 'gear-bridge-common';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
+import { useNetworkType } from '@/context/network-type';
 import { usePairs } from '@/features/history';
 import { NetworkEnum, Pair } from '@/features/history/graphql/graphql';
 import { NETWORK } from '@/features/swap/consts';
@@ -69,7 +70,7 @@ const TOKEN_PLACEHOLDER: Token = {
   isDisabled: false,
 };
 
-const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
+const deriveTokens = (pairs: Pair[], varaSymbol: string, isMainnet: boolean) => {
   const addressToActiveToken: Record<HexString, Token> = {};
   const pairHashToHistoryToken: Record<string, Token> = {};
 
@@ -84,8 +85,8 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
     const varaDisplaySymbol = isVaraNative ? varaSymbol : pair.varaTokenSymbol;
     const ethDisplaySymbol = isEthNative ? 'ETH' : pair.ethTokenSymbol;
 
-    // Temporarily disabled: native VARA token and its ETH-side wrapped counterpart (wtvara/wvara)
-    const isVaraPairDisabled = isVaraNative;
+    // Temporarily disabled on mainnet: native VARA token and its ETH-side wrapped counterpart (wvara)
+    const isVaraPairDisabled = isMainnet && isVaraNative;
 
     const varaToken: Token = {
       address: varaAddress,
@@ -129,13 +130,14 @@ function TokensProvider({ children }: PropsWithChildren) {
   const { data: pairs } = usePairs();
 
   const varaSymbol = useVaraSymbol();
+  const { isMainnet } = useNetworkType();
 
   const { pairHashToHistoryToken, addressToActiveToken } = useMemo(
     () =>
       pairs && varaSymbol
-        ? deriveTokens(pairs, varaSymbol)
+        ? deriveTokens(pairs, varaSymbol, isMainnet)
         : { pairHashToHistoryToken: undefined, addressToActiveToken: undefined },
-    [pairs, varaSymbol],
+    [pairs, varaSymbol, isMainnet],
   );
 
   const activeTokens = useMemo(

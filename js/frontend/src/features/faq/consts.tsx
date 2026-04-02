@@ -33,6 +33,10 @@ const QUESTIONS = [
             <span className={styles.bold}>wETH</span>
           </li>
           <li>
+            <span className={styles.bold}>BTC</span> <ArrowsDoubleSVG className={styles.inlineIcon} />{' '}
+            <span className={styles.bold}>wBTC</span>
+          </li>
+          <li>
             <span className={styles.bold}>USDT</span> <ArrowsDoubleSVG className={styles.inlineIcon} />{' '}
             <span className={styles.bold}>wUSDT</span>
           </li>
@@ -191,7 +195,7 @@ const QUESTIONS = [
         <ul>
           <li>
             <a
-              href="https://wiki.gear.foundation/docs/bridge/developer-guide-vara-eth"
+              href="https://wiki.vara.network/docs/vara-network/bridge/developer-guide-vara-eth"
               target="_blank"
               rel="noreferrer"
               className="faqLink">
@@ -200,7 +204,7 @@ const QUESTIONS = [
           </li>
           <li>
             <a
-              href="https://wiki.gear.foundation/docs/bridge/developer-guide-eth-vara"
+              href="https://wiki.vara.network/docs/vara-network/bridge/developer-guide-eth-vara"
               target="_blank"
               rel="noreferrer"
               className="faqLink">
@@ -225,7 +229,7 @@ const QUESTIONS = [
     answer: (
       <p>
         You can learn more about the architecture, security model, and integration options here:{' '}
-        <a href="https://wiki.vara.network/docs/bridge" target="_blank" rel="noreferrer">
+        <a href="https://wiki.vara.network/docs/vara-network/bridge" target="_blank" rel="noreferrer">
           Read the Bridge Wiki
         </a>
         .

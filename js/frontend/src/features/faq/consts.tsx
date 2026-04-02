@@ -195,7 +195,7 @@ const QUESTIONS = [
         <ul>
           <li>
             <a
-              href="https://wiki.vara.network/docs/vara-network/bridge/developer-guide-vara-eth"
+              href="https://wiki.gear.foundation/docs/vara-network/bridge/developer-guide-vara-eth"
               target="_blank"
               rel="noreferrer"
               className="faqLink">
@@ -204,7 +204,7 @@ const QUESTIONS = [
           </li>
           <li>
             <a
-              href="https://wiki.vara.network/docs/vara-network/bridge/developer-guide-eth-vara"
+              href="https://wiki.gear.foundation/docs/vara-network/bridge/developer-guide-eth-vara"
               target="_blank"
               rel="noreferrer"
               className="faqLink">
@@ -229,7 +229,7 @@ const QUESTIONS = [
     answer: (
       <p>
         You can learn more about the architecture, security model, and integration options here:{' '}
-        <a href="https://wiki.vara.network/docs/vara-network/bridge" target="_blank" rel="noreferrer">
+        <a href="https://wiki.gear.foundation/docs/vara-network/bridge" target="_blank" rel="noreferrer">
           Read the Bridge Wiki
         </a>
         .

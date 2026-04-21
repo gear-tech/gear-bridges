@@ -89,6 +89,11 @@ interface IMessageQueue is IPausable {
     error BlockNumberTooFar(uint256 blockNumber, uint256 maxBlockNumber);
 
     /**
+     * @dev Block number overflow uint32.
+     */
+    error BlockNumberOverflow(uint256 blockNumber);
+
+    /**
      * @dev Emitted when challenging root status is enabled.
      */
     event ChallengeRootEnabled(uint256 untilTimestamp);

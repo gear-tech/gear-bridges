@@ -304,6 +304,10 @@ contract MessageQueue is
             }
         }
 
+        if (blockNumber > type(uint32).max) {
+            revert BlockNumberOverflow(blockNumber);
+        }
+
         uint256[] memory publicInputs = new uint256[](2);
         publicInputs[0] = uint256(merkleRoot) >> 64;
         publicInputs[1] = ((uint256(merkleRoot) & uint256(type(uint64).max)) << 128)

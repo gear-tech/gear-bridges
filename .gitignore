@@ -21,6 +21,7 @@ deployment.toml
 .DS_Store
 
 .direnv/
+.worktrees/
 
 # js
 node_modules/

@@ -1,0 +1,34 @@
+# Ignore files
+.gitignore
+.dockerignore
+
+# Unused files
+README.md
+Dockerfile
+
+# Compiler files
+cache/
+out/
+
+# Commonly ignored directories
+.logs/
+.ignore/
+
+# Ignores broadcast logs
+broadcast/
+
+# Docs
+docs/
+
+# Dotenv file
+.env.*
+
+# Coverage files
+lcov.info
+coverage/
+
+# Soldeer
+dependencies/
+
+# Client
+client/

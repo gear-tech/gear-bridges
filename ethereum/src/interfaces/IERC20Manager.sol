@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {IMessageHandler} from "./IMessageHandler.sol";
-import {IPausable} from "./IPausable.sol";
+import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
+import {IPausable} from "src/interfaces/IPausable.sol";
 import {LibString} from "src/libraries/LibString.sol";
 
 /**

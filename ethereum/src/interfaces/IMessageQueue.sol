@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {IPausable} from "./IPausable.sol";
+import {IPausable} from "src/interfaces/IPausable.sol";
 
 /**
  * @dev Type representing message being bridged from Gear-based chain (Vara Network) to Ethereum.

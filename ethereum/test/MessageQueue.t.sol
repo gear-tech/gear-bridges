@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
-import {Base} from "./Base.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC1967} from "@openzeppelin/contracts/interfaces/IERC1967.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Test} from "forge-std/Test.sol";
+import {VerifierTestnet} from "src/VerifierTestnet.sol";
 import {
+    GovernancePacker,
     PauseProxyMessage,
     UnpauseProxyMessage,
-    UpgradeProxyMessage,
-    GovernancePacker
+    UpgradeProxyMessage
 } from "src/interfaces/IGovernance.sol";
 import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
-import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
+import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifierMock} from "src/interfaces/IVerifierMock.sol";
-import {VerifierTestnet} from "src/VerifierTestnet.sol";
+import {Base} from "test/Base.sol";
 
 contract MessageQueueTest is Test, Base {
     using Hasher for VaraMessage;
@@ -325,8 +325,8 @@ contract MessageQueueTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                    proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
-                }).pack()
+                proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -495,8 +495,8 @@ contract MessageQueueTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                    proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
-                }).pack()
+                proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 

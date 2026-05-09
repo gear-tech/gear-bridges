@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import {ERC20GearSupply} from "./erc20/managed/ERC20GearSupply.sol";
-import {CustomEnumerableMap} from "./libraries/CustomEnumerableMap.sol";
-import {LibString} from "./libraries/LibString.sol";
-import {BridgingPayment} from "./BridgingPayment.sol";
-import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
-import {IERC20Burnable} from "./interfaces/IERC20Burnable.sol";
-import {IERC20Manager} from "./interfaces/IERC20Manager.sol";
-import {IERC20Mintable} from "./interfaces/IERC20Mintable.sol";
-import {IGovernance} from "./interfaces/IGovernance.sol";
-import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
-import {IPausable} from "./interfaces/IPausable.sol";
+import {BridgingPayment} from "src/BridgingPayment.sol";
+import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
+import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
+import {IERC20Burnable} from "src/interfaces/IERC20Burnable.sol";
+import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
+import {IGovernance} from "src/interfaces/IGovernance.sol";
+import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
+import {IPausable} from "src/interfaces/IPausable.sol";
+import {CustomEnumerableMap} from "src/libraries/CustomEnumerableMap.sol";
+import {LibString} from "src/libraries/LibString.sol";
 
 contract ERC20Manager is
     Initializable,

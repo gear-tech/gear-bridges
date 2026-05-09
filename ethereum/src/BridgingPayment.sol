@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {IBridgingPayment} from "./interfaces/IBridgingPayment.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
 
 /**
  * @dev BridgingPayment smart contract is responsible for collecting bridging fees

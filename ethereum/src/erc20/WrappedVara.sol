@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -119,7 +119,7 @@ contract WrappedVara is
     /**
      * @dev Returns the number of decimals used to get its user representation.
      *      Also see documentation about decimals:
-     *      - https://wiki.vara.network/docs/staking/validator-faqs#what-is-the-precision-of-the-vara-token
+     *      - https://wiki.vara.network/docs/vara-network/staking/validator-faqs#what-is-the-precision-of-the-vara-token
      */
     function decimals() public view virtual override returns (uint8) {
         return 12;

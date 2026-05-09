@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {console, Script} from "forge-std/Script.sol";
-import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {Script, console} from "forge-std/Script.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
 
 contract VerifierMainnetScript is Script {
     IVerifier public verifier;

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import {IGovernance} from "./interfaces/IGovernance.sol";
-import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
-import {VaraMessage, IMessageQueue, Hasher} from "./interfaces/IMessageQueue.sol";
-import {IPausable} from "./interfaces/IPausable.sol";
-import {IVerifier} from "./interfaces/IVerifier.sol";
-import {BinaryMerkleTree} from "./libraries/BinaryMerkleTree.sol";
+import {IGovernance} from "src/interfaces/IGovernance.sol";
+import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
+import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {IPausable} from "src/interfaces/IPausable.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {BinaryMerkleTree} from "src/libraries/BinaryMerkleTree.sol";
 
 /**
  * @dev MessageQueue smart contract is responsible for storing Merkle roots for blocks
@@ -152,6 +152,7 @@ contract MessageQueue is
      * @return isChallengingRoot challenging root status.
      */
     function isChallengingRoot() public view returns (bool) {
+        // forge-lint: disable-next-line(block-timestamp)
         return block.timestamp < _challengingRootTimestamp + CHALLENGE_ROOT_DELAY;
     }
 
@@ -444,6 +445,7 @@ contract MessageQueue is
         }
 
         uint256 timestamp = _merkleRootTimestamps[merkleRoot];
+        // forge-lint: disable-next-line(block-timestamp)
         if (block.timestamp < timestamp + messageDelay) {
             revert MerkleRootDelayNotPassed();
         }

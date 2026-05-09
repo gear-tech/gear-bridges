@@ -15,6 +15,12 @@ https://book.getfoundry.sh/
 
 ## Usage
 
+### Install dependencies
+
+```shell
+$ forge soldeer install
+```
+
 ### Build
 
 ```shell
@@ -48,8 +54,16 @@ $ anvil
 ### Deploy
 
 ```shell
+# deployment
+$ cp .env.example .env
+# fork testing on mainnet
+$ cp .env.example.mainnet .env
+# fork testing on hoodi
+$ cp .env.example.hoodi .env
+
 $ source .env
 
+$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
@@ -63,30 +77,36 @@ $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL
 ```shell
 $ source .env
 
+$ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
+$ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
+$ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
 ### Example of changing `Verifier*.sol`
 
-1. deploy new `Verifier*` (see the previous chapter for details)
+1. Deploy new `Verifier*` (see the previous chapter for details).
 
-2. add the method to the `MessageQueue`:
+2. Add the method to the `MessageQueue`:
 
    ```solidity
    /**
@@ -97,9 +117,9 @@ $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $HO
    }
    ```
 
-3. deploy the new `MessageQueue` and write the address to `NEW_IMPLEMENTATION`
+3. Deploy the new `MessageQueue` and write the address to `NEW_IMPLEMENTATION`.
 
-4. generate an update message with the help of `governance-tool` (see `tools/governance/README.md`):
+4. Generate an update message with the help of `governance-tool` (see `tools/governance/README.md`):
 
    ```bash
    # must exist on https://etherscan.io
@@ -107,7 +127,7 @@ $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $HO
    cargo run --package governance-tool --release -- --ethereum-endpoint $MAINNET_RPC_URL GovernanceAdmin UpgradeProxy MessageQueue $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
    ```
 
-5. send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`
+5. Send the extrinsic `gearEthBridge::sendEthMessage` in behalf of `governance admin`.
 
 ### Coverage
 
@@ -119,6 +139,8 @@ $ docker run --rm -it --volume "$(pwd)":/files gear-bridges/ethereum-contracts
 
 $ sed -i '/if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {/{N;N;d;}' src/MessageQueue.sol
 $ sed -i '/emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);/d' src/MessageQueue.sol
+$ sed -i '/if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {/{N;N;d;}' src/MessageQueueV1.sol
+$ sed -i '/emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);/d' src/MessageQueueV1.sol
 $ sed -i '/function test_ProcessMessageWithInvalidMerkleProof()/,/^[[:space:]]*}[[:space:]]*$/d' test/MessageQueue.t.sol
 $ forge test
 $ forge coverage --report lcov

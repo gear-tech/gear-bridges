@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
 import {Test} from "forge-std/Test.sol";
-import {Base} from "./Base.sol";
 import {
-    GovernanceConstants,
-    IGovernance,
     ChangeGovernanceMessage,
-    PauseProxyMessage,
-    GovernancePacker
+    GovernanceConstants,
+    GovernancePacker,
+    IGovernance,
+    PauseProxyMessage
 } from "src/interfaces/IGovernance.sol";
-import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
+import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {Base} from "test/Base.sol";
 
 contract GovernancePauserTest is Test, Base {
     using Hasher for VaraMessage;

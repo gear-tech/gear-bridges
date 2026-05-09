@@ -1,28 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {CommonBase} from "forge-std/Base.sol";
-import {console} from "forge-std/console.sol";
 import {StdAssertions} from "forge-std/StdAssertions.sol";
 import {StdChains} from "forge-std/StdChains.sol";
 import {StdCheats} from "forge-std/StdCheats.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {console} from "forge-std/console.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
-import {ICircleToken} from "src/erc20/interfaces/ICircleToken.sol";
-import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
-import {CircleToken} from "src/erc20/CircleToken.sol";
-import {TetherToken} from "src/erc20/TetherToken.sol";
-import {WrappedBitcoin} from "src/erc20/WrappedBitcoin.sol";
-import {WrappedEther} from "src/erc20/WrappedEther.sol";
-import {WrappedVara} from "src/erc20/WrappedVara.sol";
-import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
-import {IGovernance} from "src/interfaces/IGovernance.sol";
-import {IVerifier} from "src/interfaces/IVerifier.sol";
-import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
-import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
-import {VerifierMock} from "src/mocks/VerifierMock.sol";
 import {BridgingPayment} from "src/BridgingPayment.sol";
 import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
@@ -30,6 +17,19 @@ import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
 import {VerifierTestnet} from "src/VerifierTestnet.sol";
+import {CircleToken} from "src/erc20/CircleToken.sol";
+import {TetherToken} from "src/erc20/TetherToken.sol";
+import {WrappedBitcoin} from "src/erc20/WrappedBitcoin.sol";
+import {WrappedEther} from "src/erc20/WrappedEther.sol";
+import {WrappedVara} from "src/erc20/WrappedVara.sol";
+import {ICircleToken} from "src/erc20/interfaces/ICircleToken.sol";
+import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
+import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {IGovernance} from "src/interfaces/IGovernance.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
+import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
+import {VerifierMock} from "src/mocks/VerifierMock.sol";
 
 struct Overrides {
     address circleToken;

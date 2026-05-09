@@ -8,13 +8,7 @@ data/
 _obj
 .binpath
 
-cache/
-out/
 tmp/
-
-ethereum/broadcast
-ethereum/coverage
-ethereum/lcov.info
 
 .env
 deployment.toml

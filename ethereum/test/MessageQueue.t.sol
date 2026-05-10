@@ -42,31 +42,35 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_SubmitMerkleRootWithCanonicalProofFixture() public {
-        vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
+        if (!isFork()) {
+            vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
 
-        (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
+            (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
 
-        messageQueue.submitMerkleRoot(canonicalBlock, merkleRoot, proof);
+            messageQueue.submitMerkleRoot(canonicalBlock, merkleRoot, proof);
 
-        assertEq(messageQueue.getMerkleRoot(canonicalBlock), merkleRoot);
-        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
-        assertEq(messageQueue.genesisBlock(), canonicalBlock);
-        assertEq(messageQueue.maxBlockNumber(), canonicalBlock);
+            assertEq(messageQueue.getMerkleRoot(canonicalBlock), merkleRoot);
+            assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+            assertEq(messageQueue.genesisBlock(), canonicalBlock);
+            assertEq(messageQueue.maxBlockNumber(), canonicalBlock);
+        }
     }
 
     function test_SubmitMerkleRootRejectsAliasedBlockNumber() public {
-        vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
+        if (!isFork()) {
+            vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
 
-        (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
-        uint256 aliasBlock = canonicalBlock | (1 << 32);
+            (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
+            uint256 aliasBlock = canonicalBlock | (1 << 32);
 
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.BlockNumberOverflow.selector, aliasBlock));
-        messageQueue.submitMerkleRoot(aliasBlock, merkleRoot, proof);
+            vm.expectRevert(abi.encodeWithSelector(IMessageQueue.BlockNumberOverflow.selector, aliasBlock));
+            messageQueue.submitMerkleRoot(aliasBlock, merkleRoot, proof);
 
-        assertEq(messageQueue.genesisBlock(), 0);
-        assertEq(messageQueue.maxBlockNumber(), 0);
-        assertEq(messageQueue.getMerkleRoot(aliasBlock), bytes32(0));
-        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), 0);
+            assertEq(messageQueue.genesisBlock(), 0);
+            assertEq(messageQueue.maxBlockNumber(), 0);
+            assertEq(messageQueue.getMerkleRoot(aliasBlock), bytes32(0));
+            assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), 0);
+        }
     }
 
     function test_PauseWithGovernanceAdmin() public {

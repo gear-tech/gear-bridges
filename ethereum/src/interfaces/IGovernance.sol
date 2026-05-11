@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {IMessageHandler} from "./IMessageHandler.sol";
+import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 
 /**
  * @dev Governance constants.

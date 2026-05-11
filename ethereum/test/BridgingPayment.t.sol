@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
-import {Base} from "./Base.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {Test} from "forge-std/Test.sol";
+import {ERC20Manager} from "src/ERC20Manager.sol";
 import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
 import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
-import {ERC20Manager} from "src/ERC20Manager.sol";
+import {Base} from "test/Base.sol";
 
 contract BridgingPaymentOwner {
     ERC20Manager public erc20Manager;

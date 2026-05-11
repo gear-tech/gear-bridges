@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
+import {Test} from "forge-std/Test.sol";
 import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
 import {CustomEnumerableMap} from "src/libraries/CustomEnumerableMap.sol";
 

@@ -1,26 +1,50 @@
 [profile.default]
 src = "src"
 out = "out"
-libs = ["lib"]
+libs = ["dependencies"]
+remappings = [
+    "forge-std/=dependencies/forge-std-1.16.1/src/",
+    "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.6.1/",
+    "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.6.1/",
+]
 evm_version = "osaka"
-solc = "0.8.33"
+solc = "0.8.35"
 optimizer = true
 extra_output_files = ["irOptimized"]
 via_ir = true
 bytecode_hash = "none"
 cbor_metadata = false
 revert_strings = "strip"
-# Required for OpenZeppelin Foundry Upgrades https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades
+# Required for OpenZeppelin Foundry Upgrades:
+# - https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades
 ffi = true
 ast = true
 build_info = true
 extra_output = ["storageLayout"]
-# Some warnings should be omitted (https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades/issues/115)
+# Some warnings should be omitted:
+# - https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades/issues/115
+# - https://github.com/OpenZeppelin/openzeppelin-contracts/issues/5577
 ignored_warnings_from = [
-    "lib/openzeppelin-foundry-upgrades/src/internal/Core.sol",
-    "lib/openzeppelin-foundry-upgrades/src/internal/DefenderDeploy.sol",
-    "lib/openzeppelin-foundry-upgrades/src/internal/StringFinder.sol",
+    "dependencies/openzeppelin-foundry-upgrades-0.4.0/src/internal/Core.sol",
+    "dependencies/openzeppelin-foundry-upgrades-0.4.0/src/internal/DefenderDeploy.sol",
+    "dependencies/openzeppelin-foundry-upgrades-0.4.0/src/internal/StringFinder.sol",
+
+    "dependencies/@openzeppelin-contracts-5.6.1/utils/cryptography/ECDSA.sol",
+    "dependencies/@openzeppelin-contracts-5.6.1/utils/structs/EnumerableMap.sol",
+    "dependencies/@openzeppelin-contracts-5.6.1/utils/structs/EnumerableSet.sol",
+
+    "src/libraries/CustomEnumerableMap.sol",
+    "test/libraries/CustomEnumerableMap.t.sol",
 ]
+
+[dependencies]
+forge-std = "1.16.1"
+"@openzeppelin-contracts" = "5.6.1"
+"@openzeppelin-contracts-upgradeable" = "5.6.1"
+openzeppelin-foundry-upgrades = "0.4.0"
+
+[fmt]
+sort_imports = true
 
 [rpc_endpoints]
 mainnet = "${MAINNET_RPC_URL}"

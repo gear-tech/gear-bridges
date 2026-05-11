@@ -1,36 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
-import {Base} from "./Base.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC1967} from "@openzeppelin/contracts/interfaces/IERC1967.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Test} from "forge-std/Test.sol";
 import {UnsafeUpgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
-import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
+import {ERC20Manager} from "src/ERC20Manager.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
+import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
 import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
 import {
-    IERC20Manager,
-    TransferMessage,
     AddVftManagerMessage,
+    ERC20ManagerPacker,
+    IERC20Manager,
     RegisterEthereumTokenMessage,
     RegisterGearTokenMessage,
-    ERC20ManagerPacker
+    TransferMessage
 } from "src/interfaces/IERC20Manager.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
 import {
+    GovernancePacker,
     PauseProxyMessage,
     UnpauseProxyMessage,
-    UpgradeProxyMessage,
-    GovernancePacker
+    UpgradeProxyMessage
 } from "src/interfaces/IGovernance.sol";
-import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
-import {ERC20Manager} from "src/ERC20Manager.sol";
+import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {Base} from "test/Base.sol";
 
 contract ERC20ManagerTest is Test, Base {
     using Hasher for VaraMessage;
@@ -327,8 +327,8 @@ contract ERC20ManagerTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                    proxy: address(erc20Manager), newImplementation: address(newImplementationMock), data: ""
-                }).pack()
+                proxy: address(erc20Manager), newImplementation: address(newImplementationMock), data: ""
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -450,8 +450,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
-                }).pack()
+                sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -718,8 +718,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
-                }).pack()
+                sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -1001,8 +1001,8 @@ contract ERC20ManagerTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(erc20Manager),
             payload: RegisterGearTokenMessage({
-                    tokenName: tokenName, tokenSymbol: tokenSymbol, tokenDecimals: tokenDecimals
-                }).pack()
+                tokenName: tokenName, tokenSymbol: tokenSymbol, tokenDecimals: tokenDecimals
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -1039,8 +1039,8 @@ contract ERC20ManagerTest is Test, Base {
             source: deploymentArguments.vftManager,
             destination: address(erc20Manager),
             payload: TransferMessage({
-                    sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
-                }).pack()
+                sender: to, receiver: deploymentArguments.deployerAddress, token: token, amount: amount
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 

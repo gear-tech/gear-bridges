@@ -13,7 +13,8 @@ RUN apt update && \
     foundryup && \
     forge --version && \
     forge compiler resolve && \
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && \
+    forge soldeer install && \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash && \
     \. "$NVM_DIR/nvm.sh"  && \
     nvm install --lts && \
     npm install -g npm@latest && \

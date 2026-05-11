@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {GovernanceConstants, IGovernance} from "./interfaces/IGovernance.sol";
-import {IMessageHandler} from "./interfaces/IMessageHandler.sol";
-import {IPausable} from "./interfaces/IPausable.sol";
-import {IUUPSUpgradeable} from "./interfaces/IUUPSUpgradeable.sol";
+import {GovernanceConstants, IGovernance} from "src/interfaces/IGovernance.sol";
+import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
+import {IPausable} from "src/interfaces/IPausable.sol";
+import {IUUPSUpgradeable} from "src/interfaces/IUUPSUpgradeable.sol";
 
 /**
  * @dev GovernanceAdmin smart contract is responsible for processing messages

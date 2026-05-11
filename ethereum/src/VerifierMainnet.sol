@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {IPlonkVerifier} from "./interfaces/IPlonkVerifier.sol";
-import {IVerifier} from "./interfaces/IVerifier.sol";
-import {PlonkVerifierMainnet} from "./libraries/PlonkVerifierMainnet.sol";
+import {IPlonkVerifier} from "src/interfaces/IPlonkVerifier.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {PlonkVerifierMainnet} from "src/libraries/PlonkVerifierMainnet.sol";
 
 /**
  * @dev VerifierMainnet smart contract is responsible for verifying zk-SNARK Plonk proofs.

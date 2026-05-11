@@ -1,0 +1,24 @@
+# Compiler files
+cache/
+out/
+
+# Commonly ignored directories
+.logs/
+.ignore/
+
+# Ignores broadcast logs
+broadcast/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+!.env.example
+
+# Coverage files
+lcov.info
+coverage/
+
+# Soldeer
+dependencies/

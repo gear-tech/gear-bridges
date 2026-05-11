@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {console, Script} from "forge-std/Script.sol";
+import {Script, console} from "forge-std/Script.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
 
 contract MessageQueueScript is Script {

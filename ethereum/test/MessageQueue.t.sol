@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.33;
+pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
-import {Base} from "./Base.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC1967} from "@openzeppelin/contracts/interfaces/IERC1967.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Test} from "forge-std/Test.sol";
+import {VerifierTestnet} from "src/VerifierTestnet.sol";
 import {
+    GovernancePacker,
     PauseProxyMessage,
     UnpauseProxyMessage,
-    UpgradeProxyMessage,
-    GovernancePacker
+    UpgradeProxyMessage
 } from "src/interfaces/IGovernance.sol";
 import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
-import {VaraMessage, IMessageQueue, Hasher} from "src/interfaces/IMessageQueue.sol";
+import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifierMock} from "src/interfaces/IVerifierMock.sol";
-import {VerifierTestnet} from "src/VerifierTestnet.sol";
+import {Base} from "test/Base.sol";
 
 contract MessageQueueTest is Test, Base {
     using Hasher for VaraMessage;
@@ -42,31 +42,35 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_SubmitMerkleRootWithCanonicalProofFixture() public {
-        vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
+        if (!isFork()) {
+            vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
 
-        (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
+            (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
 
-        messageQueue.submitMerkleRoot(canonicalBlock, merkleRoot, proof);
+            messageQueue.submitMerkleRoot(canonicalBlock, merkleRoot, proof);
 
-        assertEq(messageQueue.getMerkleRoot(canonicalBlock), merkleRoot);
-        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
-        assertEq(messageQueue.genesisBlock(), canonicalBlock);
-        assertEq(messageQueue.maxBlockNumber(), canonicalBlock);
+            assertEq(messageQueue.getMerkleRoot(canonicalBlock), merkleRoot);
+            assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
+            assertEq(messageQueue.genesisBlock(), canonicalBlock);
+            assertEq(messageQueue.maxBlockNumber(), canonicalBlock);
+        }
     }
 
     function test_SubmitMerkleRootRejectsAliasedBlockNumber() public {
-        vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
+        if (!isFork()) {
+            vm.etch(address(verifier), type(VerifierTestnet).runtimeCode);
 
-        (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
-        uint256 aliasBlock = canonicalBlock | (1 << 32);
+            (bytes memory proof, uint256 canonicalBlock, bytes32 merkleRoot) = testnetVerifierFixture();
+            uint256 aliasBlock = canonicalBlock | (1 << 32);
 
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.BlockNumberOverflow.selector, aliasBlock));
-        messageQueue.submitMerkleRoot(aliasBlock, merkleRoot, proof);
+            vm.expectRevert(abi.encodeWithSelector(IMessageQueue.BlockNumberOverflow.selector, aliasBlock));
+            messageQueue.submitMerkleRoot(aliasBlock, merkleRoot, proof);
 
-        assertEq(messageQueue.genesisBlock(), 0);
-        assertEq(messageQueue.maxBlockNumber(), 0);
-        assertEq(messageQueue.getMerkleRoot(aliasBlock), bytes32(0));
-        assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), 0);
+            assertEq(messageQueue.genesisBlock(), 0);
+            assertEq(messageQueue.maxBlockNumber(), 0);
+            assertEq(messageQueue.getMerkleRoot(aliasBlock), bytes32(0));
+            assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), 0);
+        }
     }
 
     function test_PauseWithGovernanceAdmin() public {
@@ -325,8 +329,8 @@ contract MessageQueueTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                    proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
-                }).pack()
+                proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -495,8 +499,8 @@ contract MessageQueueTest is Test, Base {
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
-                    proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
-                }).pack()
+                proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
+            }).pack()
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 

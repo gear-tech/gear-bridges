@@ -15,4 +15,5 @@ export const config = {
   ethRpcUrl: getEnv('ETH_HTTP_RPC_URL'),
   rateLimit: Number(getEnv('GEAR_RATE_LIMIT', '100')),
   apiPath,
+  apiKey: getEnv('GEAR_SQUID_API_KEY'),
 };

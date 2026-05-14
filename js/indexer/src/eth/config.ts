@@ -13,4 +13,5 @@ export const config = {
   bridgingPayment: getEnv('ETH_BRIDGING_PAYMENT').toLowerCase(),
   fromBlock: Number(getEnv('ETH_FROM_BLOCK', '2636000')),
   apiPath,
+  apiKey: getEnv('ETH_SQUID_API_KEY'),
 };

@@ -13,7 +13,7 @@ import { hostname } from 'node:os';
 import { config } from './config.js';
 
 const processor = new SubstrateBatchProcessor()
-  .setGateway(config.archiveUrl)
+  .setGateway({ url: config.archiveUrl, apiKey: config.apiKey })
   .setRpcEndpoint({
     url: config.rpcUrl,
     rateLimit: config.rateLimit,

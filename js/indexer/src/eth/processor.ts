@@ -14,7 +14,7 @@ import * as bridgingPaymentAbi from './abi/bridging-payment.js';
 import { config } from './config.js';
 
 export const processor = new EvmBatchProcessor()
-  .setGateway(config.archiveUrl)
+  .setGateway({ url: config.archiveUrl, apiKey: config.apiKey })
   .setRpcEndpoint({
     url: config.rpcUrl,
     rateLimit: config.rateLimit,

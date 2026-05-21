@@ -14,8 +14,7 @@ use plonky2::{
 };
 use plonky2_field::types::Field;
 use rayon::ThreadPoolBuilder;
-use std::iter;
-use std::time::Instant;
+use std::{iter, time::Instant};
 
 mod indexed_validator_sign;
 mod single_validator_sign;
@@ -64,14 +63,22 @@ pub struct ValidatorSignsChain {
 type ProofRequest = (usize, ProofWithCircuitData<IndexedValidatorSignTarget>);
 
 enum Request {
-    Pair((ProofRequest, ProofRequest)),
-    SingleItem(ProofRequest),
+    Pair(Box<(ProofRequest, ProofRequest)>),
+    SingleItem(Box<ProofRequest>),
 }
 
-impl From<Request> for (ProofWithCircuitData<IndexedValidatorSignTarget>, Option<ProofWithCircuitData<IndexedValidatorSignTarget>>) {
+impl From<Request>
+    for (
+        ProofWithCircuitData<IndexedValidatorSignTarget>,
+        Option<ProofWithCircuitData<IndexedValidatorSignTarget>>,
+    )
+{
     fn from(request: Request) -> Self {
         match request {
-            Request::SingleItem((_index, proof)) => (proof, None),
+            Request::SingleItem(data) => {
+                let (_index, proof) = *data;
+                (proof, None)
+            }
             Request::Pair(data) => {
                 let (index_1, proof_1) = data.0;
                 let (index_2, proof_2) = data.1;
@@ -96,11 +103,15 @@ impl ValidatorSignsChain {
 
         let validator_set_hash_proof = self.validator_set_hash.prove();
 
-        log::info!("validator_set_hash.prove() time: {}ms", now.elapsed().as_millis());
+        log::info!(
+            "validator_set_hash.prove() time: {}ms",
+            now.elapsed().as_millis()
+        );
 
         let now = Instant::now();
 
-        self.pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
+        self.pre_commits
+            .sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
 
         let (sender, receiver) = std::sync::mpsc::channel::<Request>();
         let thread = std::thread::spawn(move || {
@@ -117,15 +128,18 @@ impl ValidatorSignsChain {
             let mut composed_proof =
                 SignComposition::build(&proof_initial).prove_initial(initial_data);
             if let Some(proof) = proof_maybe {
-                composed_proof = SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                composed_proof =
+                    SignComposition::build(&proof).prove_recursive(composed_proof.proof());
             }
 
             while let Ok(request) = receiver.recv() {
                 let (proof, proof_maybe) = request.into();
 
-                composed_proof = SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                composed_proof =
+                    SignComposition::build(&proof).prove_recursive(composed_proof.proof());
                 if let Some(proof) = proof_maybe {
-                    composed_proof = SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                    composed_proof =
+                        SignComposition::build(&proof).prove_recursive(composed_proof.proof());
                 }
             }
 
@@ -133,9 +147,16 @@ impl ValidatorSignsChain {
         });
 
         let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
-        let pools = vec![
-            ThreadPoolBuilder::new().num_threads(30).build().unwrap(),
-            ThreadPoolBuilder::new().num_threads(30).build().unwrap(),
+        let worker_thread_count = self.count_thread.unwrap_or(30);
+        let pools = [
+            ThreadPoolBuilder::new()
+                .num_threads(worker_thread_count)
+                .build()
+                .unwrap(),
+            ThreadPoolBuilder::new()
+                .num_threads(worker_thread_count)
+                .build()
+                .unwrap(),
         ];
 
         let worker_func = |pre_commit: &ProcessedPreCommit, pool: &rayon::ThreadPool| {
@@ -166,7 +187,9 @@ impl ValidatorSignsChain {
             || worker_func(&chunk[0], &pools[0]),
             || worker_func(&chunk[1], &pools[1]),
         );
-        sender.send(Request::Pair((result_1, result_2))).unwrap();
+        sender
+            .send(Request::Pair(Box::new((result_1, result_2))))
+            .unwrap();
 
         for chunk in chunks {
             assert_eq!(chunk.len(), 2);
@@ -176,15 +199,25 @@ impl ValidatorSignsChain {
                 || worker_func(&chunk[1], &pools[1]),
             );
 
-            sender.send(Request::Pair((result_1, result_2))).unwrap();
+            sender
+                .send(Request::Pair(Box::new((result_1, result_2))))
+                .unwrap();
         }
 
         if !remainder.is_empty() {
-            sender.send(Request::SingleItem(worker_func(&remainder[0], &pools[1]))).unwrap();
+            sender
+                .send(Request::SingleItem(Box::new(worker_func(
+                    &remainder[0],
+                    &pools[1],
+                ))))
+                .unwrap();
         }
 
         drop(sender);
-        let composed_proof = thread.join().expect("should be joinable").expect("there is a proof");
+        let composed_proof = thread
+            .join()
+            .expect("should be joinable")
+            .expect("there is a proof");
 
         log::info!("inner_proofs time: {}ms", now.elapsed().as_millis());
 

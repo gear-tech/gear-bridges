@@ -93,11 +93,16 @@ impl VariativeBlake2 {
         let targets = buffer_read
             .read_target_vec()
             .expect("VariativeBlake2: buffer_read.read_target_vec()");
-        
+
         Self::prove_inner(index, &prover_data, &targets, data)
     }
 
-    fn prove_inner(index: usize, prover_data: &ProverCircuitData<F, C, D>, targets: &[Target], data: &[u8]) -> ProofWithCircuitData<VariativeBlake2Target> {
+    fn prove_inner(
+        index: usize,
+        prover_data: &ProverCircuitData<F, C, D>,
+        targets: &[Target],
+        data: &[u8],
+    ) -> ProofWithCircuitData<VariativeBlake2Target> {
         let witness = Self::set_witness(targets, data);
 
         let now = Instant::now();

@@ -93,6 +93,24 @@ impl From<Request>
     }
 }
 
+fn send_proof_requests_for_pre_commits<'a>(
+    pre_commits: &'a [ProcessedPreCommit],
+    mut send_pair: impl FnMut(&'a ProcessedPreCommit, &'a ProcessedPreCommit),
+    mut send_single: impl FnMut(&'a ProcessedPreCommit),
+) {
+    let (chunks, remainder) = pre_commits.as_chunks::<2>();
+    debug_assert!(remainder.len() < 2);
+
+    for chunk in chunks {
+        let [left, right] = chunk;
+        send_pair(left, right);
+    }
+
+    if let Some(single) = remainder.first() {
+        send_single(single);
+    }
+}
+
 impl ValidatorSignsChain {
     pub fn prove(mut self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::debug!("Proving validator signs chain...");
@@ -175,43 +193,26 @@ impl ValidatorSignsChain {
             (index, proof)
         };
 
-        let (chunks, remainder) = self.pre_commits.as_chunks::<2>();
-        assert!(!chunks.is_empty());
-        assert!(remainder.len() < 2);
+        send_proof_requests_for_pre_commits(
+            &self.pre_commits,
+            |left, right| {
+                let (result_1, result_2) = pool.join(
+                    || worker_func(left, &pools[0]),
+                    || worker_func(right, &pools[1]),
+                );
 
-        let mut chunks = chunks.iter();
-        let chunk = chunks.next().expect("chunks is not empty");
-        assert_eq!(chunk.len(), 2);
-
-        let (result_1, result_2) = pool.join(
-            || worker_func(&chunk[0], &pools[0]),
-            || worker_func(&chunk[1], &pools[1]),
+                sender
+                    .send(Request::Pair(Box::new((result_1, result_2))))
+                    .unwrap();
+            },
+            |single| {
+                sender
+                    .send(Request::SingleItem(Box::new(worker_func(
+                        single, &pools[1],
+                    ))))
+                    .unwrap();
+            },
         );
-        sender
-            .send(Request::Pair(Box::new((result_1, result_2))))
-            .unwrap();
-
-        for chunk in chunks {
-            assert_eq!(chunk.len(), 2);
-
-            let (result_1, result_2) = pool.join(
-                || worker_func(&chunk[0], &pools[0]),
-                || worker_func(&chunk[1], &pools[1]),
-            );
-
-            sender
-                .send(Request::Pair(Box::new((result_1, result_2))))
-                .unwrap();
-        }
-
-        if !remainder.is_empty() {
-            sender
-                .send(Request::SingleItem(Box::new(worker_func(
-                    &remainder[0],
-                    &pools[1],
-                ))))
-                .unwrap();
-        }
 
         drop(sender);
         let composed_proof = thread
@@ -450,5 +451,50 @@ impl SignComposition {
             inner_cyclic_proof_with_pis,
             witness: pw,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pre_commit(validator_idx: usize) -> ProcessedPreCommit {
+        ProcessedPreCommit {
+            validator_idx,
+            public_key: [0; consts::ED25519_PUBLIC_KEY_SIZE],
+            signature: [0; consts::ED25519_SIGNATURE_SIZE],
+        }
+    }
+
+    #[test]
+    fn proof_request_batches_handle_single_pre_commit() {
+        let pre_commits = vec![pre_commit(0)];
+        let mut pairs = Vec::new();
+        let mut singles = Vec::new();
+
+        send_proof_requests_for_pre_commits(
+            &pre_commits,
+            |left, right| pairs.push((left.validator_idx, right.validator_idx)),
+            |single| singles.push(single.validator_idx),
+        );
+
+        assert!(pairs.is_empty());
+        assert_eq!(singles, vec![0]);
+    }
+
+    #[test]
+    fn proof_request_batches_handle_pairs_and_remainder() {
+        let pre_commits = vec![pre_commit(0), pre_commit(1), pre_commit(2)];
+        let mut pairs = Vec::new();
+        let mut singles = Vec::new();
+
+        send_proof_requests_for_pre_commits(
+            &pre_commits,
+            |left, right| pairs.push((left.validator_idx, right.validator_idx)),
+            |single| singles.push(single.validator_idx),
+        );
+
+        assert_eq!(pairs, vec![(0, 1)]);
+        assert_eq!(singles, vec![2]);
     }
 }

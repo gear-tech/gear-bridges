@@ -208,7 +208,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/runtime@npm:^7.0.0, @babel/runtime@npm:^7.17.9, @babel/runtime@npm:^7.21.0, @babel/runtime@npm:^7.26.0, @babel/runtime@npm:^7.26.10, @babel/runtime@npm:^7.5.5, @babel/runtime@npm:^7.8.7":
+"@babel/runtime@npm:^7.0.0, @babel/runtime@npm:^7.21.0, @babel/runtime@npm:^7.26.0, @babel/runtime@npm:^7.26.10, @babel/runtime@npm:^7.5.5, @babel/runtime@npm:^7.8.7":
   version: 7.28.3
   resolution: "@babel/runtime@npm:7.28.3"
   checksum: 10c0/b360f82c2c5114f2a062d4d143d7b4ec690094764853937110585a9497977aed66c102166d0e404766c274e02a50ffb8f6d77fef7251ecf3f607f0e03e6397bc
@@ -2017,26 +2017,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@hcaptcha/loader@npm:^2.3.0":
-  version: 2.3.0
-  resolution: "@hcaptcha/loader@npm:2.3.0"
-  checksum: 10c0/2273c0de35968bad169ba1102085930da52e6a5d3b74bfdc5c00a8959066f9671ddf2f1d25dddbc7544f290268439559cb49b42009d88c5a7e8481dcb9c67981
-  languageName: node
-  linkType: hard
-
-"@hcaptcha/react-hcaptcha@npm:1.17.1":
-  version: 1.17.1
-  resolution: "@hcaptcha/react-hcaptcha@npm:1.17.1"
-  dependencies:
-    "@babel/runtime": "npm:^7.17.9"
-    "@hcaptcha/loader": "npm:^2.3.0"
-  peerDependencies:
-    react: ">= 16.3.0"
-    react-dom: ">= 16.3.0"
-  checksum: 10c0/f807130fa9068ef096caa6cb97ab8d922c3f78bae6a22fc9a79b01caf47189555b36bd72585119783b9a271d369854ce572cea0df9c29c75ac349f9ba1abf05a
-  languageName: node
-  linkType: hard
-
 "@hookform/resolvers@npm:5.2.2":
   version: 5.2.2
   resolution: "@hookform/resolvers@npm:5.2.2"
@@ -2546,6 +2526,16 @@ __metadata:
     "@lodestar/params": "npm:^1.33.0"
     ethereum-cryptography: "npm:^2.0.0"
   checksum: 10c0/668e7880fec4070593fa89f9c981ea87b2ab0cf87af1293f2357dcd85b3bb5f96118b08affe45f6564569e4ee63254878096a6b990bf95138ec4aa0080d292d7
+  languageName: node
+  linkType: hard
+
+"@marsidev/react-turnstile@npm:1.4.2":
+  version: 1.4.2
+  resolution: "@marsidev/react-turnstile@npm:1.4.2"
+  peerDependencies:
+    react: ^17.0.2 || ^18.0.0 || ^19.0
+    react-dom: ^17.0.2 || ^18.0.0 || ^19.0
+  checksum: 10c0/3cb72435076f65eb1bf965ad2aaa15900df032bf32609246591a8810f633d508f98561b9a2376c9b3c15f36de639b885df6bf90d3001f3ffb086f29e3396945a
   languageName: node
   linkType: hard
 
@@ -5239,6 +5229,76 @@ __metadata:
     "@noble/hashes": "npm:~1.8.0"
     "@scure/base": "npm:~1.2.5"
   checksum: 10c0/73a54b5566a50a3f8348a5cfd74d2092efeefc485efbed83d7a7374ffd9a75defddf446e8e5ea0385e4adb49a94b8ae83c5bad3e16333af400e932f7da3aaff8
+  languageName: node
+  linkType: hard
+
+"@sentry-internal/browser-utils@npm:10.40.0":
+  version: 10.40.0
+  resolution: "@sentry-internal/browser-utils@npm:10.40.0"
+  dependencies:
+    "@sentry/core": "npm:10.40.0"
+  checksum: 10c0/9801776fad1c7e9690823588d978631dad4e66fd5e8eab934e9e508306e7d6d149982d6270e00687d62c96255dabb930871f841f7674ab273ead19c1b38bb700
+  languageName: node
+  linkType: hard
+
+"@sentry-internal/feedback@npm:10.40.0":
+  version: 10.40.0
+  resolution: "@sentry-internal/feedback@npm:10.40.0"
+  dependencies:
+    "@sentry/core": "npm:10.40.0"
+  checksum: 10c0/8694d99adef186c6e93c9b48638391cefbf3a6414ef9ad5bd250740fbc69685b0fb6362734446ee5473b3f82177b4ae72c228ee9dc6f5b07bd423c8eaf8419db
+  languageName: node
+  linkType: hard
+
+"@sentry-internal/replay-canvas@npm:10.40.0":
+  version: 10.40.0
+  resolution: "@sentry-internal/replay-canvas@npm:10.40.0"
+  dependencies:
+    "@sentry-internal/replay": "npm:10.40.0"
+    "@sentry/core": "npm:10.40.0"
+  checksum: 10c0/c1f359945eb1dfdbe37053b67a25cd2f241cd6370b24679bc32512e14af4dc3bd92c9663dbca5e66e206f7633dcb1bf521d989ef8f25e7faa998a3ee84ba1c46
+  languageName: node
+  linkType: hard
+
+"@sentry-internal/replay@npm:10.40.0":
+  version: 10.40.0
+  resolution: "@sentry-internal/replay@npm:10.40.0"
+  dependencies:
+    "@sentry-internal/browser-utils": "npm:10.40.0"
+    "@sentry/core": "npm:10.40.0"
+  checksum: 10c0/ce7bf12b12360caabccfe60cc0bc6c96cef151a2897fb2d2fa645d845ff812457df72cd8d16bd167ae5ccdf9a8932905be435f2b473d7b0efa6c106837412fbf
+  languageName: node
+  linkType: hard
+
+"@sentry/browser@npm:10.40.0":
+  version: 10.40.0
+  resolution: "@sentry/browser@npm:10.40.0"
+  dependencies:
+    "@sentry-internal/browser-utils": "npm:10.40.0"
+    "@sentry-internal/feedback": "npm:10.40.0"
+    "@sentry-internal/replay": "npm:10.40.0"
+    "@sentry-internal/replay-canvas": "npm:10.40.0"
+    "@sentry/core": "npm:10.40.0"
+  checksum: 10c0/4a383bf7d47640d0b5d14e39da3ebd35c88c93b048df13849eea22316f6ee44caf6221005fe87776eb9957219f50702e07f11213d405af1095acdab7fb62bbdb
+  languageName: node
+  linkType: hard
+
+"@sentry/core@npm:10.40.0":
+  version: 10.40.0
+  resolution: "@sentry/core@npm:10.40.0"
+  checksum: 10c0/76dc283cda98ae854be63a1836ea77abaf2a3db88b592ae086982e89d2a9d163b5e92819cbf3005bffc459a56ca90b0f71cc908cce7c55e147606b111a4dbb8a
+  languageName: node
+  linkType: hard
+
+"@sentry/react@npm:10.40.0":
+  version: 10.40.0
+  resolution: "@sentry/react@npm:10.40.0"
+  dependencies:
+    "@sentry/browser": "npm:10.40.0"
+    "@sentry/core": "npm:10.40.0"
+  peerDependencies:
+    react: ^16.14.0 || 17.x || 18.x || 19.x
+  checksum: 10c0/f7efc5b58d43ed96c37e0dcbfee9cc0d6cb75370d0e88d434a2cf4fdea51b8adffc9b6db8258339d7f5ba16920231ad44488933d9e15e8b8fb420aeacf83922e
   languageName: node
   linkType: hard
 
@@ -13006,13 +13066,14 @@ __metadata:
     "@graphql-codegen/cli": "npm:6.1.0"
     "@graphql-codegen/client-preset": "npm:5.2.2"
     "@graphql-typed-document-node/core": "npm:3.2.0"
-    "@hcaptcha/react-hcaptcha": "npm:1.17.1"
     "@hookform/resolvers": "npm:5.2.2"
+    "@marsidev/react-turnstile": "npm:1.4.2"
     "@polkadot/api": "npm:16.4.6"
     "@polkadot/react-identicon": "npm:3.16.4"
     "@polkadot/types": "npm:16.4.6"
     "@reown/appkit": "npm:1.8.15"
     "@reown/appkit-adapter-wagmi": "npm:1.8.15"
+    "@sentry/react": "npm:10.40.0"
     "@tanstack/react-query": "npm:5.90.12"
     "@types/react": "npm:19.2.7"
     "@types/react-dom": "npm:19.2.3"

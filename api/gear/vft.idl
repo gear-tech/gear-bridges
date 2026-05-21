@@ -31,6 +31,7 @@ service VftAdmin {
   Burn : (from: actor_id, value: u256) -> null;
   Exit : (inheritor: actor_id) -> null;
   Mint : (to: actor_id, value: u256) -> null;
+  MintList : (list: vec struct { actor_id, u256 }) -> null;
   Pause : () -> null;
   Resume : () -> null;
   SetAdmin : (admin: actor_id) -> null;

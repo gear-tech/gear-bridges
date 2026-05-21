@@ -1,6 +1,7 @@
 use super::{connect_to_node, DEFAULT_BALANCE};
 use anyhow::anyhow;
-use gclient::Result;
+use gclient::{Result, WSAddress};
+use gear_common::api_provider::ApiProvider;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
@@ -116,7 +117,15 @@ async fn upgrade() -> Result<()> {
         .expect("Failed to allocate next allowances shard")
     {}
 
-    gear_common::migrate_balances(remoting.clone(), gas_limit, 100, vft_id_1, vft_id_new).await?;
+    // migrate balances
+    let api_provider = ApiProvider::new(WSAddress::dev().url(), 2).await.unwrap();
+
+    let connection = api_provider.connection();
+
+    api_provider.spawn();
+
+    gear_common::migrate_balances(connection, suri_admin.clone(), 100, vft_id_1, vft_id_new)
+        .await?;
 
     // new VFT should have no allowances
     let service_vft = vft_client::VftExtension::new(remoting.clone().with_suri(suri_user_2));

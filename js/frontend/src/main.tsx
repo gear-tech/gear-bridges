@@ -1,4 +1,5 @@
 import '@gear-js/vara-ui/dist/style.css';
+import * as Sentry from '@sentry/react';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import TagManager from 'react-gtm-module';
@@ -7,10 +8,18 @@ import { Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { useAccountsConnection } from '@/hooks';
 
 import { App } from './app';
-import { ROUTE, GTM_ID } from './consts';
+import { ROUTE, GTM_ID, SENTRY_DSN } from './consts';
 import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction } from './pages';
 
 import './index.scss';
+
+if (SENTRY_DSN)
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    integrations: [Sentry.replayIntegration()],
+    replaysSessionSampleRate: 0,
+    replaysOnErrorSampleRate: 1.0,
+  });
 
 if (GTM_ID) TagManager.initialize({ gtmId: GTM_ID });
 

@@ -1,4 +1,7 @@
+pub mod api_provider;
+
 use anyhow::anyhow;
+use api_provider::ApiProviderConnection;
 use gclient::Result;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft_client::traits::*;
@@ -16,7 +19,7 @@ pub const UNITS: u128 = 1_000_000_000_000;
 /// 3. Minting equivalent amounts in the new contract
 ///
 /// # Parameters
-/// - `remoting`: remoting interface for contract interactions
+/// - `connection`: remoting interface for contract interactions
 /// - `gas_limit`: Gas limit for each contract call
 /// - `size_batch`: Number of balances to process per batch
 /// - `vft`: ActorId of the source VFT contract (old)
@@ -27,13 +30,15 @@ pub const UNITS: u128 = 1_000_000_000_000;
 /// - `Ok(())` if migration completes successfully
 /// - `Err(anyhow::Error)` on failure
 pub async fn migrate_balances(
-    remoting: GClientRemoting,
-    gas_limit: u64,
+    mut connection: ApiProviderConnection,
+    gear_suri: String,
     size_batch: u32,
     vft: ActorId,
     vft_new: ActorId,
 ) -> Result<()> {
-    let service_vft = vft_client::Vft::new(remoting.clone());
+    let gclient = connection.gclient();
+    let gas_limit = gclient.block_gas_limit()?;
+    let service_vft = vft_client::Vft::new(GClientRemoting::new(gclient));
     let supply = service_vft
         .total_supply()
         .with_gas_limit(gas_limit)
@@ -46,33 +51,73 @@ pub async fn migrate_balances(
         ))?;
     }
 
-    let service_extension = vft_client::VftExtension::new(remoting.clone());
-    let mut service_admin = vft_client::VftAdmin::new(remoting);
     let mut cursor = 0;
     loop {
-        let balances = service_extension
-            .balances(cursor, size_batch)
-            .with_gas_limit(gas_limit)
-            .recv(vft)
-            .await
-            .map_err(|e| anyhow!("{e:?}"))?;
+        let balances = get_balances(&mut connection, cursor, size_batch, gas_limit, vft).await?;
+        let len = balances.len();
+        log::debug!("migrate_balances: read {len} item(s) from {cursor}");
 
         cursor += size_batch;
 
-        let len = balances.len();
-        for (account, balance) in balances {
-            service_admin
-                .mint(account, balance)
-                .with_gas_limit(gas_limit)
-                .send_recv(vft_new)
-                .await
-                .map_err(|e| anyhow!("{e:?}"))?;
-        }
+        mint(&mut connection, &gear_suri, balances, gas_limit, vft_new).await?;
+        log::debug!("migrate_balances: successfully send {len} item(s)");
 
         if (len as u32) < size_batch {
             break Ok(());
         }
     }
+}
+
+async fn get_balances(
+    connection: &mut ApiProviderConnection,
+    cursor: u32,
+    size_batch: u32,
+    gas_limit: u64,
+    vft: ActorId,
+) -> Result<Vec<(ActorId, U256)>> {
+    loop {
+        let service_extension =
+            vft_client::VftExtension::new(GClientRemoting::new(connection.gclient()));
+        match service_extension
+            .balances(cursor, size_batch)
+            .with_gas_limit(gas_limit)
+            .recv(vft)
+            .await
+        {
+            Ok(balances) => break Ok(balances),
+            Err(e) => log::error!(
+                r#"Failed to get balances (cursor = {cursor}, size_batch = {size_batch}): "{e:?}"#
+            ),
+        }
+
+        connection.reconnect().await?;
+    }
+}
+
+async fn mint(
+    connection: &mut ApiProviderConnection,
+    gear_suri: &str,
+    balances: Vec<(ActorId, U256)>,
+    gas_limit: u64,
+    vft_new: ActorId,
+) -> Result<()> {
+    loop {
+        let mut service_admin =
+            vft_client::VftAdmin::new(GClientRemoting::new(connection.gclient_client(gear_suri)?));
+        match service_admin
+            .mint_list(balances.clone())
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_new)
+            .await
+        {
+            Ok(_) => break,
+            Err(e) => log::error!(r#"Failed to mint "{balances:?}": "{e:?}""#),
+        }
+
+        connection.reconnect().await?;
+    }
+
+    Ok(())
 }
 
 pub async fn migrate_transactions(

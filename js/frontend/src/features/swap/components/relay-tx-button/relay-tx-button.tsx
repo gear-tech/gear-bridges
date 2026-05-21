@@ -3,6 +3,7 @@ import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAlert } from '@gear-
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
 import { useAppKit } from '@reown/appkit/react';
+import { captureException } from '@sentry/react';
 
 import { Tooltip } from '@/components';
 import { useAccountsConnection, useModal } from '@/hooks';
@@ -39,6 +40,7 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
     const onError = (error: Error) => {
       logger.error('Vara -> Eth relay', error);
       alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
+      captureException(error, { tags: { feature: 'manual-tx-relay' } });
     };
 
     mutate({ onLog, onReceipt, onError });

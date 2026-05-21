@@ -1,9 +1,6 @@
 use std::ops::ControlFlow;
 
-use crate::message_relayer::{
-    common::{EthereumSlotNumber, TxHashWithSlot},
-    eth_to_gear::api_provider::ApiProviderConnection,
-};
+use crate::message_relayer::common::{EthereumSlotNumber, TxHashWithSlot};
 use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
@@ -16,6 +13,7 @@ use ethereum_beacon_client::BeaconClient;
 use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::{beacon, tree_hash::TreeHash, utils as eth_utils, utils::MerkleProof};
 use futures::executor::block_on;
+use gear_common::api_provider::ApiProviderConnection;
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::H256;
 use prometheus::IntGauge;

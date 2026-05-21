@@ -6,13 +6,13 @@ use crate::message_relayer::{
         gear::merkle_proof_fetcher::MerkleProofFetcher,
         AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
     },
-    eth_to_gear::api_provider::ApiProviderConnection,
     gear_to_eth::{
         storage::NoStorage,
         tx_manager::{TransactionManager, TxStatus},
     },
 };
 use ethereum_client::EthApi;
+use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::GearApi;
 use primitive_types::U256;
 use sails_rs::ActorId;

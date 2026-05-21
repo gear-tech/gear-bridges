@@ -1,12 +1,13 @@
 use clap::{Args, Parser, Subcommand};
 use cli_utils::GearConnectionArgs;
 use gclient::GearApi;
+use gear_common::api_provider::{ApiProvider, ApiProviderConnection};
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
-use vft_client::traits::*;
+use vft_client::{traits::*, vft_admin::io};
 use vft_vara_client::{traits::*, Mainnet};
 
-const SIZE_MIGRATE_BATCH: u32 = 25;
+const SIZE_MIGRATE_BATCH: u32 = 200;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -49,6 +50,22 @@ enum CliCommands {
         program_id: String,
     },
     MigrateBalances(MigrateBalances),
+    HexEncodedMessage(HexEncodedMessageArgs),
+}
+
+#[derive(Args)]
+struct HexEncodedMessageArgs {
+    #[command(subcommand)]
+    message: HexEncodedMessage,
+}
+
+#[derive(Subcommand)]
+enum HexEncodedMessage {
+    Pause,
+    Resume,
+    Exit { vft_new: ActorId },
+    SetBurner { burner: ActorId },
+    SetMinter { minter: ActorId },
 }
 
 #[derive(Args)]
@@ -97,21 +114,54 @@ fn str_to_actorid(s: String) -> ActorId {
     ActorId::new(data.try_into().expect("Got input of wrong length"))
 }
 
+fn print_encoded_message(message: HexEncodedMessage) {
+    use HexEncodedMessage::*;
+
+    let (label, encoded_call) = match message {
+        Pause => ("Pause", io::Pause::encode_call()),
+        Resume => ("Resume", io::Resume::encode_call()),
+
+        Exit { vft_new } => ("Exit", io::Exit::encode_call(vft_new)),
+
+        SetBurner { burner } => ("SetBurner", io::SetBurner::encode_call(burner)),
+
+        SetMinter { minter } => ("SetMinter", io::SetMinter::encode_call(minter)),
+    };
+
+    println!(r#"{label}: "{}""#, hex::encode(encoded_call));
+}
+
 #[tokio::main]
 async fn main() {
     let _ = dotenv::dotenv();
 
+    pretty_env_logger::formatted_timed_builder()
+        .filter_level(log::LevelFilter::Info)
+        .format_target(false)
+        .format_timestamp_secs()
+        .parse_default_env()
+        .init();
+
     let cli = Cli::parse();
+    if let CliCommands::HexEncodedMessage(args) = cli.command {
+        print_encoded_message(args.message);
+
+        return;
+    }
 
     let endpoint = cli
         .gear_connection
         .get_endpoint()
         .expect("Invalid Gear URL");
-    let gear_api = GearApi::builder()
-        .suri(cli.gear_suri)
-        .uri(endpoint)
-        .build()
+    let api_provider = ApiProvider::new(endpoint, u8::MAX)
         .await
+        .expect("Failed to initialize GearApi");
+    let mut connection = api_provider.connection();
+
+    api_provider.spawn();
+
+    let gear_api = connection
+        .gclient_client(&cli.gear_suri)
         .expect("Failed to initialize GearApi");
 
     let salt = match cli.salt {
@@ -197,7 +247,11 @@ async fn main() {
             uploader.allocate_shards(program_id).await;
         }
 
-        CliCommands::MigrateBalances(args) => migrate_balances(gear_api, args).await,
+        CliCommands::MigrateBalances(args) => {
+            migrate_balances(connection, cli.gear_suri, args).await
+        }
+
+        CliCommands::HexEncodedMessage(..) => {}
     }
 }
 
@@ -261,11 +315,11 @@ impl Uploader {
 
     async fn upload_common(self, program_id: ActorId) {
         assert_eq!(
-            vft_client::vft_admin::io::SetMinter::ROUTE,
+            io::SetMinter::ROUTE,
             vft_vara_client::vft_admin::io::SetMinter::ROUTE,
         );
         assert_eq!(
-            vft_client::vft_admin::io::SetBurner::ROUTE,
+            io::SetBurner::ROUTE,
             vft_vara_client::vft_admin::io::SetBurner::ROUTE,
         );
         assert_eq!(
@@ -370,15 +424,16 @@ impl Uploader {
     }
 }
 
-async fn migrate_balances(gear_api: GearApi, args: MigrateBalances) {
-    let gas_limit = gear_api
-        .block_gas_limit()
-        .expect("Unable to get block gas limit");
+async fn migrate_balances(
+    connection: ApiProviderConnection,
+    gear_suri: String,
+    args: MigrateBalances,
+) {
     let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
 
     if let Err(e) = gear_common::migrate_balances(
-        GClientRemoting::new(gear_api),
-        gas_limit,
+        connection,
+        gear_suri,
         size_batch,
         str_to_actorid(args.vft),
         str_to_actorid(args.vft_new),

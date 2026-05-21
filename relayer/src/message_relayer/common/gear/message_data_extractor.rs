@@ -1,11 +1,9 @@
-use crate::message_relayer::{
-    common::{
-        self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
-    },
-    eth_to_gear::api_provider::ApiProviderConnection,
+use crate::message_relayer::common::{
+    self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
 };
 use anyhow::Result as AnyResult;
 use ethereum_common::U256;
+use gear_common::api_provider::ApiProviderConnection;
 use std::{cmp::Ordering, ops::Deref};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, WeakUnboundedSender},

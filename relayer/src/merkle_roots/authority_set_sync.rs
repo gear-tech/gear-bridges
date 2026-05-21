@@ -1,9 +1,10 @@
 use crate::{
     common::{sync_authority_set_id, SyncStepCount},
-    message_relayer::{common::GearBlock, eth_to_gear::api_provider::ApiProviderConnection},
+    message_relayer::common::GearBlock,
     proof_storage::ProofStorage,
 };
 use futures::executor::block_on;
+use gear_common::api_provider::ApiProviderConnection;
 use prometheus::IntGauge;
 use prover::proving::GenesisConfig;
 use std::sync::Arc;

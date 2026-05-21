@@ -13,11 +13,71 @@ import {
   handleEthBridgeMessage,
   handleProgramChangedEvent,
 } from './handlers/index.js';
+import { config } from './config.js';
+import { queryVftManagerPairs } from './rpc-queries.js';
+import { Network, Pair } from '../model/index.js';
+import { createPairHash } from 'gear-bridge-common';
 
 const state = new BatchState();
 
+let isFirstRun = true;
+
 const handler = async (ctx: ProcessorContext) => {
   await state.new(ctx);
+
+  if (ctx.isHead && isFirstRun) {
+    ctx.log.info('First run of the processor, syncing active pairs from VFT Manager');
+    const activePairs = await queryVftManagerPairs(ctx._chain.rpc, config.vftManager, ctx.blocks[0].header.hash);
+
+    const pairs = await ctx.store.find(Pair);
+
+    const currentActivePairs = pairs.filter((p) => p.isActive).map((p) => p.id);
+    ctx.log.info(
+      { activePairsCount: activePairs.length, currentActivePairsCount: currentActivePairs.length },
+      'Active pairs count',
+    );
+    const actualActivePairs: Set<string> = new Set();
+    const currentInactivePairs = pairs.filter((p) => !p.isActive).map((p) => p.id);
+
+    for (const pair of activePairs) {
+      const id = createPairHash(pair[0].toLowerCase(), pair[1].toLowerCase());
+      if (currentActivePairs.includes(id)) {
+        ctx.log.info({ id }, 'Pair is already in the database as active');
+        actualActivePairs.add(id);
+        continue;
+      }
+      if (currentInactivePairs.includes(id)) {
+        ctx.log.error({ id }, 'Pair is in the database as inactive, but active in VFT Manager');
+        throw new Error(`Pair ${id} is already in the database as inactive`);
+      }
+
+      if (pair[2] !== 'Ethereum' && pair[2] !== 'Gear') {
+        ctx.log.error({ id, supplyType: pair[2] }, 'Unknown supply type for pair');
+        throw new Error(`Unknown supply type ${pair[2]} for pair ${id}`);
+      }
+
+      ctx.log.info({ id, vara: pair[0], eth: pair[1] }, 'Adding pair to the database as active');
+      await state.addPair(
+        pair[0],
+        pair[1],
+        pair[2] === 'Ethereum' ? Network.Ethereum : Network.Vara,
+        ctx.blocks[0].header,
+      );
+    }
+
+    if (actualActivePairs.size !== currentActivePairs.length) {
+      ctx.log.info(
+        { actualActivePairsCount: actualActivePairs.size, currentActivePairsCount: currentActivePairs.length },
+        'Some pairs are no longer active according to VFT Manager, marking them as inactive',
+      );
+
+      const actualInactivePairs = currentActivePairs.filter((id) => !actualActivePairs.has(id));
+
+      actualInactivePairs.forEach((id) => state.removePairById(id, BigInt(ctx.blocks[0].header.height)));
+    }
+
+    isFirstRun = false;
+  }
 
   for (const block of ctx.blocks) {
     for (const event of block.events) {

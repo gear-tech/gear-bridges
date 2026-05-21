@@ -1,6 +1,7 @@
 import { HexString } from '@gear-js/api';
 import { useAccount, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
+import { captureException } from '@sentry/react';
 import { ReactNode } from 'react';
 
 import EthSVG from '@/assets/eth.svg?react';
@@ -57,7 +58,10 @@ function TokensCardComponent({
 
         return refetchBalances();
       })
-      .catch((error: Error) => alert.error(getErrorMessage(error)));
+      .catch((error: Error) => {
+        alert.error(getErrorMessage(error));
+        captureException(error, { tags: { feature: 'burn-tokens' } });
+      });
   };
 
   const renderBalances = () => {

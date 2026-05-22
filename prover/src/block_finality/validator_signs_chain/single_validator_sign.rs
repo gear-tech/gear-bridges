@@ -20,6 +20,7 @@ use crate::{
     consts::GRANDPA_VOTE_LENGTH,
     prelude::*,
 };
+use std::time::Instant;
 
 use lazy_static::lazy_static;
 use plonky2::{iop::target::BoolTarget, plonk::circuit_data::CircuitData};
@@ -48,7 +49,12 @@ pub struct SingleValidatorSign {
 impl SingleValidatorSign {
     pub fn prove(self) -> ProofWithCircuitData<PublicInputsTarget> {
         log::debug!("        Proving single validator sign...");
+
+        let now = Instant::now();
+
         let res = CACHE.prove(self);
+
+        log::info!("SingleValidatorSign time: {}ms", now.elapsed().as_millis());
         log::debug!("        Proven single validator sign...");
         res
     }

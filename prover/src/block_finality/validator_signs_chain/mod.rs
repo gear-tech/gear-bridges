@@ -1,6 +1,5 @@
 //! Circuit that's used to prove that majority of validators have signed GRANDPA message.
 
-use itertools::Itertools;
 use plonky2::{
     iop::{
         target::{BoolTarget, Target},
@@ -14,11 +13,8 @@ use plonky2::{
     recursion::dummy_circuit::cyclic_base_proof,
 };
 use plonky2_field::types::Field;
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator},
-    ThreadPoolBuilder,
-};
-use std::{env, iter, sync::mpsc::channel};
+use rayon::ThreadPoolBuilder;
+use std::{iter, time::Instant};
 
 mod indexed_validator_sign;
 mod single_validator_sign;
@@ -64,65 +60,167 @@ pub struct ValidatorSignsChain {
     pub count_thread: Option<usize>,
 }
 
+type ProofRequest = (usize, ProofWithCircuitData<IndexedValidatorSignTarget>);
+
+enum Request {
+    Pair(Box<(ProofRequest, ProofRequest)>),
+    SingleItem(Box<ProofRequest>),
+}
+
+impl From<Request>
+    for (
+        ProofWithCircuitData<IndexedValidatorSignTarget>,
+        Option<ProofWithCircuitData<IndexedValidatorSignTarget>>,
+    )
+{
+    fn from(request: Request) -> Self {
+        match request {
+            Request::SingleItem(data) => {
+                let (_index, proof) = *data;
+                (proof, None)
+            }
+            Request::Pair(data) => {
+                let (index_1, proof_1) = data.0;
+                let (index_2, proof_2) = data.1;
+
+                if index_1 < index_2 {
+                    (proof_1, Some(proof_2))
+                } else {
+                    (proof_2, Some(proof_1))
+                }
+            }
+        }
+    }
+}
+
+fn send_proof_requests_for_pre_commits<'a>(
+    pre_commits: &'a [ProcessedPreCommit],
+    mut send_pair: impl FnMut(&'a ProcessedPreCommit, &'a ProcessedPreCommit),
+    mut send_single: impl FnMut(&'a ProcessedPreCommit),
+) {
+    let (chunks, remainder) = pre_commits.as_chunks::<2>();
+    debug_assert!(remainder.len() < 2);
+
+    for chunk in chunks {
+        let [left, right] = chunk;
+        send_pair(left, right);
+    }
+
+    if let Some(single) = remainder.first() {
+        send_single(single);
+    }
+}
+
 impl ValidatorSignsChain {
-    pub fn prove(self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
+    pub fn prove(mut self) -> ProofWithCircuitData<ValidatorSignsChainTarget> {
         log::debug!("Proving validator signs chain...");
 
         let validator_set_hash = self.validator_set_hash.compute_hash();
 
+        let now = Instant::now();
+
         let validator_set_hash_proof = self.validator_set_hash.prove();
 
-        let mut pre_commits = self.pre_commits.clone();
-        pre_commits.sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
+        log::info!(
+            "validator_set_hash.prove() time: {}ms",
+            now.elapsed().as_millis()
+        );
 
-        let (sender, receiver) = channel();
+        let now = Instant::now();
 
-        let thread_pool = ThreadPoolBuilder::new()
-            .stack_size(
-                env::var("RUST_MIN_STACK")
-                    .expect("RUST_MIN_STACK should be set")
-                    .parse::<usize>()
-                    .expect("RUST_MIN_STACK should have the correct value"),
-            )
-            .num_threads(self.count_thread.unwrap_or(0))
-            .build()
-            .expect("Failed to create ThreadPool");
+        self.pre_commits
+            .sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
 
-        pre_commits.into_par_iter().enumerate().for_each_with(
-            sender,
-            |sender, (id, pre_commit)| {
-                thread_pool.scope(|_| {
-                    let proof = IndexedValidatorSign {
-                        public_key: pre_commit.public_key,
-                        index: pre_commit.validator_idx,
-                        signature: pre_commit.signature,
-                        message: self.message,
-                    }
-                    .prove(&validator_set_hash_proof);
+        let (sender, receiver) = std::sync::mpsc::channel::<Request>();
+        let thread = std::thread::spawn(move || {
+            let Ok(request) = receiver.recv() else {
+                return None;
+            };
 
-                    sender
-                        .send((id, proof))
-                        .expect("Failed to send proof over channel");
-                });
+            let (proof_initial, proof_maybe) = request.into();
+
+            let initial_data = SignCompositionInitialData {
+                validator_set_hash,
+                message: self.message,
+            };
+            let mut composed_proof =
+                SignComposition::build(&proof_initial).prove_initial(initial_data);
+            if let Some(proof) = proof_maybe {
+                composed_proof =
+                    SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+            }
+
+            while let Ok(request) = receiver.recv() {
+                let (proof, proof_maybe) = request.into();
+
+                composed_proof =
+                    SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                if let Some(proof) = proof_maybe {
+                    composed_proof =
+                        SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                }
+            }
+
+            Some(composed_proof)
+        });
+
+        let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
+        let worker_thread_count = self.count_thread.unwrap_or(30);
+        let pools = [
+            ThreadPoolBuilder::new()
+                .num_threads(worker_thread_count)
+                .build()
+                .unwrap(),
+            ThreadPoolBuilder::new()
+                .num_threads(worker_thread_count)
+                .build()
+                .unwrap(),
+        ];
+
+        let worker_func = |pre_commit: &ProcessedPreCommit, pool: &rayon::ThreadPool| {
+            let (index, proof) = pool.install(|| {
+                let proof = IndexedValidatorSign {
+                    public_key: pre_commit.public_key,
+                    index: pre_commit.validator_idx,
+                    signature: pre_commit.signature,
+                    message: self.message,
+                }
+                .prove(&validator_set_hash_proof);
+
+                (pre_commit.validator_idx, proof)
+            });
+
+            (index, proof)
+        };
+
+        send_proof_requests_for_pre_commits(
+            &self.pre_commits,
+            |left, right| {
+                let (result_1, result_2) = pool.join(
+                    || worker_func(left, &pools[0]),
+                    || worker_func(right, &pools[1]),
+                );
+
+                sender
+                    .send(Request::Pair(Box::new((result_1, result_2))))
+                    .unwrap();
+            },
+            |single| {
+                sender
+                    .send(Request::SingleItem(Box::new(worker_func(
+                        single, &pools[1],
+                    ))))
+                    .unwrap();
             },
         );
 
-        let mut inner_proofs = receiver
-            .iter()
-            .sorted_by(|a, b| a.0.cmp(&b.0))
-            .map(|(_, proof)| proof)
-            .collect::<Vec<_>>();
+        drop(sender);
+        let composed_proof = thread
+            .join()
+            .expect("should be joinable")
+            .expect("there is a proof");
 
-        let initial_data = SignCompositionInitialData {
-            validator_set_hash,
-            message: self.message,
-        };
-        let mut composed_proof =
-            SignComposition::build(&inner_proofs.remove(0)).prove_initial(initial_data);
-
-        for inner in inner_proofs {
-            composed_proof = SignComposition::build(&inner).prove_recursive(composed_proof.proof());
-        }
+        log::info!("inner_proofs time: {}ms", now.elapsed().as_millis());
 
         let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
         let mut witness = PartialWitness::new();
@@ -353,5 +451,50 @@ impl SignComposition {
             inner_cyclic_proof_with_pis,
             witness: pw,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pre_commit(validator_idx: usize) -> ProcessedPreCommit {
+        ProcessedPreCommit {
+            validator_idx,
+            public_key: [0; consts::ED25519_PUBLIC_KEY_SIZE],
+            signature: [0; consts::ED25519_SIGNATURE_SIZE],
+        }
+    }
+
+    #[test]
+    fn proof_request_batches_handle_single_pre_commit() {
+        let pre_commits = vec![pre_commit(0)];
+        let mut pairs = Vec::new();
+        let mut singles = Vec::new();
+
+        send_proof_requests_for_pre_commits(
+            &pre_commits,
+            |left, right| pairs.push((left.validator_idx, right.validator_idx)),
+            |single| singles.push(single.validator_idx),
+        );
+
+        assert!(pairs.is_empty());
+        assert_eq!(singles, vec![0]);
+    }
+
+    #[test]
+    fn proof_request_batches_handle_pairs_and_remainder() {
+        let pre_commits = vec![pre_commit(0), pre_commit(1), pre_commit(2)];
+        let mut pairs = Vec::new();
+        let mut singles = Vec::new();
+
+        send_proof_requests_for_pre_commits(
+            &pre_commits,
+            |left, right| pairs.push((left.validator_idx, right.validator_idx)),
+            |single| singles.push(single.validator_idx),
+        );
+
+        assert_eq!(pairs, vec![(0, 1)]);
+        assert_eq!(singles, vec![2]);
     }
 }

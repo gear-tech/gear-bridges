@@ -1,21 +1,9 @@
 use super::*;
+use plonky2::plonk::circuit_data::ProverCircuitData;
 
-impl_target_set! {
-    pub struct VariativeBlake2Target {
-        pub data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
-        pub length: Target,
-        pub hash: Blake2Target
-    }
-}
-
-/// Inner circuit that will have different `VerifierOnlyCircuitData` for each block count.
-/// This circuit asserts that data padding is zeroed (it applies to targets, not the `data` field).
-pub struct VariativeBlake2;
-
-impl VariativeBlake2 {
-    // The function uses cached circuit data from files.
-    pub fn prove(data: &[u8]) -> ProofWithCircuitData<VariativeBlake2Target> {
-        let index = data.len().div_ceil(BLOCK_BYTES).max(1);
+static CACHED_PROVER_TARGETS2: LazyLock<(ProverCircuitData<F, C, D>, Vec<Target>)> =
+    LazyLock::new(|| {
+        let index = 2;
 
         let path = env::var("VBLAKE2_CACHE_PATH")
             .expect(r#"VariativeBlake2: "VBLAKE2_CACHE_PATH" is set"#);
@@ -38,7 +26,7 @@ impl VariativeBlake2 {
         };
 
         log::trace!(
-            "Loading circuit data directly time: {}ms",
+            "Loading CACHED_PROVER_TARGETS2 time: {}ms",
             now.elapsed().as_millis()
         );
 
@@ -49,7 +37,73 @@ impl VariativeBlake2 {
             .read_target_vec()
             .expect("VariativeBlake2: buffer_read.read_target_vec()");
 
-        let witness = Self::set_witness(&targets, data);
+        (prover_data, targets)
+    });
+
+impl_target_set! {
+    pub struct VariativeBlake2Target {
+        pub data: ArrayTarget<ByteTarget, MAX_DATA_BYTES>,
+        pub length: Target,
+        pub hash: Blake2Target
+    }
+}
+
+/// Inner circuit that will have different `VerifierOnlyCircuitData` for each block count.
+/// This circuit asserts that data padding is zeroed (it applies to targets, not the `data` field).
+pub struct VariativeBlake2;
+
+impl VariativeBlake2 {
+    // The function uses cached circuit data from files.
+    pub fn prove(data: &[u8]) -> ProofWithCircuitData<VariativeBlake2Target> {
+        let index = data.len().div_ceil(BLOCK_BYTES).max(1);
+
+        if index == 2 {
+            let (ref prover_data, ref targets) = *CACHED_PROVER_TARGETS2;
+            return Self::prove_inner(index, prover_data, targets, data);
+        }
+
+        let path = env::var("VBLAKE2_CACHE_PATH")
+            .expect(r#"VariativeBlake2: "VBLAKE2_CACHE_PATH" is set"#);
+        let serializer_gate = GateSerializer;
+        let serializer_generator = GeneratorSerializer::<C, D>::default();
+
+        let now = Instant::now();
+        let prover_data = {
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .open(format!("{path}/prover_circuit_data-{index}"))
+                .expect("VariativeBlake2: open a file with correctly formed data for read");
+            let reader = io::BufReader::with_capacity(*BUFFER_SIZE, file);
+
+            let mut read_adapter = ReadAdapter::new(reader, None);
+
+            read_adapter
+                .read_prover_circuit_data::<F, C, D>(&serializer_gate, &serializer_generator)
+                .expect("Correctly formed serialized data")
+        };
+
+        log::trace!(
+            "Loading circuit data (index = {index}) directly time: {}ms",
+            now.elapsed().as_millis()
+        );
+
+        let serialized = fs::read(format!("{path}/prover_circuit_data-targets-{index}"))
+            .expect("VariativeBlake2: Good file with serialized data");
+        let mut buffer_read = Buffer::new(&serialized[..]);
+        let targets = buffer_read
+            .read_target_vec()
+            .expect("VariativeBlake2: buffer_read.read_target_vec()");
+
+        Self::prove_inner(index, &prover_data, &targets, data)
+    }
+
+    fn prove_inner(
+        index: usize,
+        prover_data: &ProverCircuitData<F, C, D>,
+        targets: &[Target],
+        data: &[u8],
+    ) -> ProofWithCircuitData<VariativeBlake2Target> {
+        let witness = Self::set_witness(targets, data);
 
         let now = Instant::now();
 

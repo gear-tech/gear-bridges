@@ -1,7 +1,12 @@
-use crate::common::{self, BASE_RETRY_DELAY, MAX_RETRIES};
-use alloy::providers::{PendingTransactionBuilder, PendingTransactionError, Provider};
+use crate::{
+    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    rpc,
+};
+use alloy::providers::{
+    PendingTransactionBuilder, PendingTransactionError, Provider, RootProvider,
+};
 use ethereum_client::{EthApi, TxHash};
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use prometheus::{
     core::{AtomicU64, GenericCounter, GenericGauge},
     IntCounter, IntGauge,
@@ -26,6 +31,10 @@ pub enum Response {
     Success(Uuid, TxHash),
     Failed(Uuid, PendingTransactionError),
 }
+
+type TxWatchResult =
+    Result<(Uuid, alloy::rpc::types::TransactionReceipt), (Uuid, TxHash, PendingTransactionError)>;
+type TxWatch = BoxFuture<'static, TxWatchResult>;
 
 pub struct StatusFetcherIo {
     requests: UnboundedSender<Request>,
@@ -144,7 +153,7 @@ async fn task_inner(
     channel: &mut UnboundedReceiver<Request>,
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
-    let mut txs = FuturesUnordered::new();
+    let mut txs: FuturesUnordered<TxWatch> = FuturesUnordered::new();
     loop {
         tokio::select! {
             message = channel.recv() => {
@@ -157,15 +166,12 @@ async fn task_inner(
 
                 this.metrics.pending_tx_count.inc();
 
-                let pending = PendingTransactionBuilder::new(
+                txs.push(watch_tx(
                     this.eth_api.raw_provider().root().clone(),
+                    tx_uuid,
                     tx_hash,
-                );
-
-                let confirmations = this.confirmations;
-                txs.push(async move {
-                    Ok((tx_uuid, pending.with_required_confirmations(confirmations).get_receipt().await.map_err(|e| (tx_uuid, e))?))
-                });
+                    this.confirmations,
+                ));
             }
 
             Some(tx) = txs.next(), if !txs.is_empty() => {
@@ -189,7 +195,17 @@ async fn task_inner(
                         this.metrics.pending_tx_count.dec();
                         responses.send(Response::Success(uuid, tx_hash))?;
                     }
-                    Err((uuid, e)) => {
+                    Err((uuid, tx_hash, e)) if rpc::is_recoverable_error_text(&e) => {
+                        log::warn!("Recoverable error while polling transaction {tx_hash}: {e}. Reconnecting and continuing to watch");
+                        this.eth_api = this.eth_api.reconnect().await?;
+                        txs.push(watch_tx(
+                            this.eth_api.raw_provider().root().clone(),
+                            uuid,
+                            tx_hash,
+                            this.confirmations,
+                        ));
+                    }
+                    Err((uuid, _tx_hash, e)) => {
                         this.metrics.total_failed_txs.inc();
                         log::error!("Failed to get transaction {uuid} status: {e}");
                         responses.send(Response::Failed(uuid, e))?;
@@ -198,4 +214,18 @@ async fn task_inner(
             }
         }
     }
+}
+
+fn watch_tx(provider: RootProvider, tx_uuid: Uuid, tx_hash: TxHash, confirmations: u64) -> TxWatch {
+    Box::pin(async move {
+        let pending = PendingTransactionBuilder::new(provider, tx_hash);
+        Ok((
+            tx_uuid,
+            pending
+                .with_required_confirmations(confirmations)
+                .get_receipt()
+                .await
+                .map_err(|e| (tx_uuid, tx_hash, e))?,
+        ))
+    })
 }

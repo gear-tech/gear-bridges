@@ -1,5 +1,8 @@
-use crate::message_relayer::common::{
-    self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
+use crate::{
+    message_relayer::common::{
+        self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
+    },
+    rpc,
 };
 use anyhow::Result as AnyResult;
 use ethereum_common::U256;
@@ -46,16 +49,26 @@ impl MessageDataExtractor {
     }
 
     async fn retreive_block_data(&mut self, block_number: u32) -> AnyResult<BlockData> {
-        let gear_api = self.api_provider.client();
-
-        let block_hash = gear_api.block_number_to_hash(block_number).await?;
-        let block = gear_api.get_block_at(block_hash).await?;
-        let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-
-        let header = block.header().clone();
-        let events = gear_api.get_events_at(Some(block_hash)).await?;
-
-        let justification = gear_api.get_justification(block_hash).await?;
+        let (header, events, justification, _block_hash, authority_set_id) = rpc::retry_gear(
+            &mut self.api_provider,
+            "message data block fetch",
+            move |gear_api| async move {
+                let block_hash = gear_api.block_number_to_hash(block_number).await?;
+                let block = gear_api.get_block_at(block_hash).await?;
+                let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
+                let header = block.header().clone();
+                let events = gear_api.get_events_at(Some(block_hash)).await?;
+                let justification = gear_api.get_justification(block_hash).await?;
+                Ok::<_, anyhow::Error>((
+                    header,
+                    events,
+                    justification,
+                    block_hash,
+                    authority_set_id,
+                ))
+            },
+        )
+        .await?;
 
         let block_data = (
             GearBlock::new(header, events, justification),

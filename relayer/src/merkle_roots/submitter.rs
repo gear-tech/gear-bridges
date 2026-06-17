@@ -17,6 +17,7 @@ use utils_prometheus::{impl_metered_service, MeteredService};
 use crate::{
     common::{submit_merkle_root_to_ethereum, BASE_RETRY_DELAY, MAX_RETRIES},
     prover_interface::FinalProof,
+    rpc,
 };
 
 use super::storage::MerkleRootStorage;
@@ -238,11 +239,11 @@ impl MerkleRootSubmitter {
                         continue;
                     }
 
-                    self.storage.submitted_merkle_root(request.merkle_root_block, H256::from(request.proof.merkle_root)).await;
-
+                    loop {
                     match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
                         Ok(pending_tx) => {
                             log::info!("Submitted merkle root to Ethereum, tx hash: {}", pending_tx.tx_hash());
+                            self.storage.submitted_merkle_root(request.merkle_root_block, H256::from(request.proof.merkle_root)).await;
                             self.metrics.total_submissions.inc();
                             pending_transactions.push(SubmittedMerkleRoot::new(
                                 pending_tx,
@@ -252,6 +253,7 @@ impl MerkleRootSubmitter {
                                 request.proof,
                                 self.confirmations,
                             ));
+                            break;
                         }
                         // How do we get here?
                         // - Relayer crashed and already submitted the merkle root but not yet confirmed it
@@ -269,10 +271,11 @@ impl MerkleRootSubmitter {
                                     merkle_root_block: request.merkle_root_block,
                                     merkle_root: request.merkle_root,
                                     status: ResponseStatus::Submitted,
-                                    proof: request.proof,
+                                    proof: request.proof.clone(),
                                 }).is_err() {
                                     return Ok(());
                                 };
+                                break;
                             } else {
                                 log::error!("Failed to submit merkle root {}: Error during contract execution: {err:?}", H256::from(request.proof.merkle_root));
                                 self.metrics.failed_submissions.inc();
@@ -282,13 +285,24 @@ impl MerkleRootSubmitter {
                                     merkle_root_block: request.merkle_root_block,
                                     merkle_root: request.merkle_root,
                                     status: ResponseStatus::Failed("Error during contract execution".to_string()),
-                                    proof: request.proof,
+                                    proof: request.proof.clone(),
                                 }).is_err() {
                                     return Ok(());
                                 };
+                                break;
                             }
                         }
 
+
+                        Err(err) if is_recoverable_eth_error(&err) => {
+                            log::warn!(
+                                "Recoverable error while submitting merkle root {}: {err}. Reconnecting and retrying",
+                                H256::from(request.proof.merkle_root)
+                            );
+                            tokio::time::sleep(BASE_RETRY_DELAY).await;
+                            self.eth_api = self.eth_api.reconnect().await?;
+                            continue;
+                        }
 
                         Err(err) => {
 
@@ -300,11 +314,13 @@ impl MerkleRootSubmitter {
                                 merkle_root_block: request.merkle_root_block,
                                 merkle_root: request.merkle_root,
                                 status: ResponseStatus::Failed(err.to_string()),
-                                proof: request.proof,
+                                proof: request.proof.clone(),
                             }).is_err() {
                                 return Ok(());
                             };
+                            break;
                         }
+                    }
                     }
                 },
 
@@ -420,6 +436,15 @@ impl MerkleRootSubmitter {
         tokio::task::spawn(task(self, rx, response_tx));
 
         SubmitterIo::new(tx, response_rx)
+    }
+}
+
+fn is_recoverable_eth_error(err: &ethereum_client::Error) -> bool {
+    match err {
+        ethereum_client::Error::ErrorInHTTPTransport(err) => {
+            crate::common::is_rpc_transport_error_recoverable(err)
+        }
+        _ => rpc::is_recoverable_error_text(err),
     }
 }
 

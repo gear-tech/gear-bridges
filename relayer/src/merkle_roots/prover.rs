@@ -1,7 +1,10 @@
-use crate::prover_interface::{self, FinalProof};
+use crate::{
+    prover_interface::{self, FinalProof},
+    rpc,
+};
 use futures::executor::block_on;
 use gear_common::api_provider::ApiProviderConnection;
-use gear_rpc_client::{dto::RawBlockInclusionProof, GearApi};
+use gear_rpc_client::dto::RawBlockInclusionProof;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use prover::proving::{GenesisConfig, ProofWithCircuitData};
@@ -171,8 +174,6 @@ impl FinalityProver {
         requests: &mut UnboundedReceiver<Request>,
         responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<()> {
-        let gear_api = self.api_provider.client();
-
         // Batch size which is equal approximately to 2 full queues.
         const BATCH_SIZE: usize = 4096;
 
@@ -213,7 +214,6 @@ impl FinalityProver {
 
                         let proof = self
                             .generate_proof(
-                                &gear_api,
                                 request.block_number,
                                 request.block_hash,
                                 request.merkle_root,
@@ -252,7 +252,13 @@ impl FinalityProver {
                     continue;
                 }
 
-                let authority_set_id = gear_api.authority_set_id(request.block_hash).await?;
+                let block_hash = request.block_hash;
+                let authority_set_id = rpc::retry_gear(
+                    &mut self.api_provider,
+                    "prover authority set id",
+                    move |gear_api| async move { gear_api.authority_set_id(block_hash).await },
+                )
+                .await?;
                 match request_groups.entry((authority_set_id, request.queue_id)) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().add_request(request);
@@ -291,7 +297,6 @@ impl FinalityProver {
                     .set(self.metrics.pending_requests.get() - 1);
                 let proof = self
                     .generate_proof(
-                        &gear_api,
                         request.block_number,
                         request.block_hash,
                         request.merkle_root,
@@ -338,7 +343,6 @@ impl FinalityProver {
 
                 let proof = self
                     .generate_proof(
-                        &gear_api,
                         block_number,
                         block_hash,
                         merkle_root,
@@ -369,7 +373,6 @@ impl FinalityProver {
 
     async fn generate_proof(
         &mut self,
-        gear_api: &GearApi,
         block_number: u32,
         block_hash: H256,
         merkle_root: H256,
@@ -381,13 +384,26 @@ impl FinalityProver {
         log::info!("Proving merkle root({merkle_root}) presence in block #{block_number}");
 
         let start = Instant::now();
-        let proof = prover_interface::prove_final(
-            gear_api,
-            inner_proof,
-            self.genesis_config,
-            block_hash,
-            self.count_thread,
-            Some(block_inclusion_proof),
+        let genesis_config = self.genesis_config;
+        let count_thread = self.count_thread;
+        let proof = rpc::retry_gear(
+            &mut self.api_provider,
+            "prover finality proof",
+            move |gear_api| {
+                let inner_proof = inner_proof.clone();
+                let block_inclusion_proof = block_inclusion_proof.clone();
+                async move {
+                    prover_interface::prove_final(
+                        &gear_api,
+                        inner_proof,
+                        genesis_config,
+                        block_hash,
+                        count_thread,
+                        Some(block_inclusion_proof),
+                    )
+                    .await
+                }
+            },
         )
         .await?;
         let elapsed = start.elapsed().as_secs_f64();

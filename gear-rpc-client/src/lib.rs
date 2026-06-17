@@ -85,7 +85,7 @@ impl GearApi {
             .at(BlockRef::from_hash(block_hash))
             .await
             .map(|block| block.number())
-            .map_err(|err| anyhow!("Failed to get block number: {err}"))
+            .context("Failed to get block number")
     }
 
     pub async fn block_number_to_hash(&self, block: u32) -> AnyResult<H256> {
@@ -106,7 +106,7 @@ impl GearApi {
         self.api
             .storage_fetch_at(&addr, Some(block))
             .await
-            .map_err(|err| anyhow!("Failed to fetch authority set id: {err}"))
+            .context("Failed to fetch authority set id")
     }
 
     /// Get authority set state for specified block. If block is not specified

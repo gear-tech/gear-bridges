@@ -117,13 +117,18 @@ async fn task(mut this: MerkleRootExtractor) {
 
         log::error!(r#"Merkle root extractor failed: "{err:?}""#);
 
-        this.eth_api = match this.eth_api.reconnect().await {
-            Ok(eth_api) => eth_api,
-            Err(err) => {
-                log::error!(r#"Failed to reconnect to Ethereum: "{err}""#);
-                break;
+        loop {
+            match this.eth_api.reconnect().await {
+                Ok(eth_api) => {
+                    this.eth_api = eth_api;
+                    break;
+                }
+                Err(err) => {
+                    log::error!(r#"Failed to reconnect to Ethereum: "{err}". Retrying..."#);
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
             }
-        };
+        }
     }
 }
 
@@ -138,8 +143,7 @@ async fn task_inner(this: &mut MerkleRootExtractor) -> anyhow::Result<()> {
         tokio::select! {
             _ = interval.tick() => {
                 if !this.api_provider.is_alive() {
-                    log::error!("ApiProvider connection is dead, exiting Merkle root extractor task");
-                    return Ok(());
+                    return Err(anyhow::anyhow!("ApiProvider connection is dead"));
                 }
             }
 
@@ -150,8 +154,7 @@ async fn task_inner(this: &mut MerkleRootExtractor) -> anyhow::Result<()> {
                         return Err(anyhow::anyhow!("Failed to get first log from stream: {e:?}"));
                     }
                     None => {
-                        log::info!("Log stream closed");
-                        return Ok(());
+                        return Err(anyhow::anyhow!("Log stream closed"));
                     }
                 };
 

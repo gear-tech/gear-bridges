@@ -2,6 +2,7 @@ use crate::{
     common::{sync_authority_set_id, SyncStepCount},
     message_relayer::common::GearBlock,
     proof_storage::ProofStorage,
+    rpc,
 };
 use futures::executor::block_on;
 use gear_common::api_provider::ApiProviderConnection;
@@ -152,15 +153,24 @@ impl AuthoritySetSync {
                             };
                         }
                         Some(Request::Initialize) => {
-                            let client = self.api_provider.client();
                             log::info!("Initializing authority set sync");
                             let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
                             if latest_proven_authority_set_id.is_none() {
                                 log::info!("No authority set found in proof storage, syncing from genesis");
                                 let genesis_authority_set_id = self.genesis_config.authority_set_id;
-                                let genesis_block_hash = client.find_era_first_block(genesis_authority_set_id + 1).await?;
-                                let genesis_block = client.get_block_at(genesis_block_hash).await?;
-                                let block = GearBlock::from_subxt_block(&client, genesis_block).await?;
+                                let block = rpc::retry_gear(
+                                    &mut self.api_provider,
+                                    "authority set sync initialize",
+                                    move |client| async move {
+                                        let genesis_block_hash = client
+                                            .find_era_first_block(genesis_authority_set_id + 1)
+                                            .await?;
+                                        let genesis_block =
+                                            client.get_block_at(genesis_block_hash).await?;
+                                        GearBlock::from_subxt_block(&client, genesis_block).await
+                                    },
+                                )
+                                .await?;
                                 let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
                                     return Ok(());
                                 };
@@ -265,32 +275,51 @@ impl AuthoritySetSync {
         block: &GearBlock,
         responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<(SyncStepCount, u64)> {
-        let gear_api = self.api_provider.client();
-
         let finalized_head = block.hash();
-        let latest_authority_set_id = gear_api.authority_set_id(finalized_head).await?;
+        let proof_storage = self.proof_storage.clone();
+        let genesis_config = self.genesis_config;
+        let responses = responses.clone();
+        let count_thread = self.count_thread;
+
+        let (sync_steps, latest_authority_set_id, latest_proven_authority_set_id) =
+            rpc::retry_gear(
+                &mut self.api_provider,
+                "authority set sync",
+                move |gear_api| {
+                    let proof_storage = proof_storage.clone();
+                    let responses = responses.clone();
+                    async move {
+                        let latest_authority_set_id =
+                            gear_api.authority_set_id(finalized_head).await?;
+                        let latest_proven_authority_set_id =
+                            proof_storage.get_latest_authority_set_id().await;
+                        let sync_steps = sync_authority_set_id(
+                            &gear_api,
+                            &proof_storage,
+                            genesis_config,
+                            latest_authority_set_id,
+                            latest_proven_authority_set_id,
+                            &responses,
+                            count_thread,
+                        )
+                        .await?;
+                        Ok::<_, anyhow::Error>((
+                            sync_steps,
+                            latest_authority_set_id,
+                            latest_proven_authority_set_id,
+                        ))
+                    }
+                },
+            )
+            .await?;
 
         self.metrics
             .latest_observed_gear_era
             .set(latest_authority_set_id as i64);
-        let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
-
-        if let Some(&latest_proven) = latest_proven_authority_set_id.as_ref() {
+        if let Some(latest_proven) = latest_proven_authority_set_id {
             self.metrics.latest_proven_era.set(latest_proven as i64);
         }
 
-        Ok((
-            sync_authority_set_id(
-                &gear_api,
-                &self.proof_storage,
-                self.genesis_config,
-                latest_authority_set_id,
-                latest_proven_authority_set_id,
-                responses,
-                self.count_thread,
-            )
-            .await?,
-            latest_authority_set_id,
-        ))
+        Ok((sync_steps, latest_authority_set_id))
     }
 }

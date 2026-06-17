@@ -9,6 +9,7 @@ use crate::{
     },
     proof_storage::ProofStorageError,
     prover_interface::FinalProof,
+    rpc,
 };
 use ::prover::{
     consts::BLAKE2_DIGEST_SIZE,
@@ -1136,13 +1137,6 @@ impl MerkleRootRelayer {
 
         let nonces = storage::message_queued_events_of(&block).collect::<Vec<_>>();
 
-        // mark root processed so that we don't process the entire block again.
-        self.storage.merkle_root_processed(block.number()).await;
-
-        if let Err(err) = self.storage.save(&self.roots).await {
-            log::error!("Failed to save block storage state: {err:?}");
-        }
-
         if self
             .storage
             .is_merkle_root_submitted(block.number(), merkle_root)
@@ -1154,14 +1148,23 @@ impl MerkleRootRelayer {
                 merkle_root,
                 block.number()
             );
+            self.storage.merkle_root_processed(block.number()).await;
+            if let Err(err) = self.storage.save(&self.roots).await {
+                log::error!("Failed to save block storage state: {err:?}");
+            }
             return Ok(None);
         }
 
-        let signed_by_authority_set_id = self
-            .api_provider
-            .client()
-            .signed_by_authority_set_id(block.hash())
-            .await?;
+        let block_hash_for_authority = block.hash();
+        let signed_by_authority_set_id = rpc::retry_gear(
+            &mut self.api_provider,
+            "merkle root signed authority set id",
+            move |api| async move {
+                api.signed_by_authority_set_id(block_hash_for_authority)
+                    .await
+            },
+        )
+        .await?;
 
         let block_number = block.number();
 
@@ -1293,8 +1296,18 @@ impl MerkleRootRelayer {
                 log::error!(
                     "Failed to get proof for authority set id {signed_by_authority_set_id}: {err}"
                 );
+                self.storage.merkle_root_processed(block_number).await;
+                if let Err(save_err) = self.storage.save(&self.roots).await {
+                    log::error!("Failed to save block storage state: {save_err:?}");
+                }
                 return Err(err.into());
             }
+        }
+
+        // Mark root processed only after durable root state exists or the work is queued.
+        self.storage.merkle_root_processed(block_number).await;
+        if let Err(err) = self.storage.save(&self.roots).await {
+            log::error!("Failed to save block storage state: {err:?}");
         }
 
         Ok(Some((queue_id, merkle_root)))

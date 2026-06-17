@@ -1,5 +1,5 @@
 use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    common::{self, BASE_RETRY_DELAY},
     message_relayer::{
         common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
         eth_to_gear::storage::{Storage, UnprocessedBlocks},
@@ -147,7 +147,7 @@ async fn task(
         }
     }
 
-    let mut attempts = 0;
+    let mut attempts: u32 = 0;
     loop {
         let result = this.run_inner(&sender, &mut blocks, &mut unprocessed).await;
         let Err(err) = result else {
@@ -155,32 +155,30 @@ async fn task(
             return;
         };
 
-        attempts += 1;
-        log::error!("Paid event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}");
-
-        if attempts >= MAX_RETRIES {
-            log::error!("Max attempts reached, exiting...");
-            return;
-        }
-
-        tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts - 1)).await;
-
         if !common::is_transport_error_recoverable(&err) {
-            log::error!("Non recoverable error, exiting.");
+            log::error!("Non recoverable paid event extractor error, exiting: {err}");
             return;
         }
 
-        this.eth_api = match this.eth_api.reconnect().await {
-            Ok(eth_api) => {
-                attempts = 0;
+        attempts += 1;
+        log::error!(
+            "Paid event extractor failed with recoverable error (attempt {attempts}): {err}"
+        );
 
-                eth_api
-            }
+        tokio::time::sleep(BASE_RETRY_DELAY * 2u32.pow(attempts.saturating_sub(1).min(6))).await;
 
-            Err(err) => {
-                log::error!("Failed to reconnect to Ethereum API: {err}");
-                return;
+        loop {
+            match this.eth_api.reconnect().await {
+                Ok(eth_api) => {
+                    attempts = 0;
+                    this.eth_api = eth_api;
+                    break;
+                }
+                Err(err) => {
+                    log::error!("Failed to reconnect to Ethereum API: {err}. Retrying...");
+                    tokio::time::sleep(BASE_RETRY_DELAY).await;
+                }
             }
-        };
+        }
     }
 }

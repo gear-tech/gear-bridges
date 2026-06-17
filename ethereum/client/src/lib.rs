@@ -82,24 +82,53 @@ pub enum TxStatus {
 pub struct PollingEthApi {
     provider: RootProvider,
     url: Url,
+    ws_max_retry: Option<u32>,
+    ws_retry_interval: Option<Duration>,
 }
 
 impl PollingEthApi {
     pub async fn new(url: &str) -> AnyResult<Self> {
+        Self::new_with_retries(url, None, None).await
+    }
+
+    pub async fn new_with_retries(
+        url: &str,
+        ws_max_retry: Option<u32>,
+        ws_retry_interval: Option<Duration>,
+    ) -> AnyResult<Self> {
         let url = Url::parse(url).context("Provided url is not valid")?;
-        let ws = WsConnect::new(url.clone());
+        let mut ws = WsConnect::new(url.clone());
+        if let Some(ws_max_retry) = ws_max_retry {
+            ws = ws.with_max_retries(ws_max_retry);
+        }
+        if let Some(ws_retry_interval) = ws_retry_interval {
+            ws = ws.with_retry_interval(ws_retry_interval);
+        }
         let provider = RootProvider::builder().connect_ws(ws).await?;
 
-        Ok(Self { provider, url })
+        Ok(Self {
+            provider,
+            url,
+            ws_max_retry,
+            ws_retry_interval,
+        })
     }
 
     pub async fn reconnect(&self) -> AnyResult<Self> {
-        let ws = WsConnect::new(self.url.clone());
+        let mut ws = WsConnect::new(self.url.clone());
+        if let Some(ws_max_retry) = self.ws_max_retry {
+            ws = ws.with_max_retries(ws_max_retry);
+        }
+        if let Some(ws_retry_interval) = self.ws_retry_interval {
+            ws = ws.with_retry_interval(ws_retry_interval);
+        }
         let provider = RootProvider::builder().connect_ws(ws).await?;
 
         Ok(Self {
             provider,
             url: self.url.clone(),
+            ws_max_retry: self.ws_max_retry,
+            ws_retry_interval: self.ws_retry_interval,
         })
     }
 
@@ -224,6 +253,8 @@ pub struct EthApi {
     public_key: Address,
     wallet: EthereumWallet,
     url: Url,
+    ws_max_retry: Option<u32>,
+    ws_retry_interval: Option<Duration>,
 }
 
 impl EthApi {
@@ -301,11 +332,19 @@ impl EthApi {
             public_key,
             url,
             wallet,
+            ws_max_retry,
+            ws_retry_interval,
         })
     }
 
     pub async fn reconnect(&self) -> Result<EthApi, Error> {
-        let ws = WsConnect::new(self.url.clone());
+        let mut ws = WsConnect::new(self.url.clone());
+        if let Some(ws_max_retry) = self.ws_max_retry {
+            ws = ws.with_max_retries(ws_max_retry);
+        }
+        if let Some(ws_retry_interval) = self.ws_retry_interval {
+            ws = ws.with_retry_interval(ws_retry_interval);
+        }
         let provider: ProviderType = ProviderBuilder::new()
             .wallet(self.wallet.clone())
             .connect_ws(ws)
@@ -323,6 +362,8 @@ impl EthApi {
             public_key: self.public_key,
             url: self.url.clone(),
             wallet: self.wallet.clone(),
+            ws_max_retry: self.ws_max_retry,
+            ws_retry_interval: self.ws_retry_interval,
         })
     }
 

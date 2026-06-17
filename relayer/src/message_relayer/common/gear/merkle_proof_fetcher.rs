@@ -1,4 +1,4 @@
-use crate::message_relayer::common::RelayedMerkleRoot;
+use crate::{message_relayer::common::RelayedMerkleRoot, rpc};
 use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::dto::MerkleProof;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -101,7 +101,6 @@ async fn task_inner(
     requests: &mut UnboundedReceiver<Request>,
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
-    let gear_api = this.api_provider.client();
     while let Some(request) = requests.recv().await {
         let message_hash = request.message_hash;
         log::info!(
@@ -114,12 +113,20 @@ async fn task_inner(
             request.merkle_root.block_hash,
         );
 
-        let proof = gear_api
-            .fetch_message_inclusion_merkle_proof(
-                request.merkle_root.block_hash,
-                message_hash.into(),
-            )
-            .await?;
+        let merkle_root_block_hash = request.merkle_root.block_hash;
+        let proof = rpc::retry_gear(
+            &mut this.api_provider,
+            "message inclusion merkle proof",
+            move |gear_api| async move {
+                gear_api
+                    .fetch_message_inclusion_merkle_proof(
+                        merkle_root_block_hash,
+                        message_hash.into(),
+                    )
+                    .await
+            },
+        )
+        .await?;
 
         responses.send(Response {
             proof,

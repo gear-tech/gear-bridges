@@ -6,7 +6,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
+    common::{self, BASE_RETRY_DELAY},
     message_relayer::{
         common::{
             ethereum::block_listener::ETHEREUM_BLOCK_TIME_APPROX, EthereumBlockNumber,
@@ -70,7 +70,7 @@ impl DepositEventExtractor {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(async move {
-            let mut attempts = 0;
+            let mut attempts: u32 = 0;
             let UnprocessedBlocks {
                 last_block,
                 mut unprocessed,
@@ -94,22 +94,27 @@ impl DepositEventExtractor {
                 let res = self.run_inner(&sender, &mut blocks, &mut unprocessed).await;
                 if let Err(err) = res {
                     attempts += 1;
-                    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-
-                    log::error!(
-                        "Deposit event extractor failed (attempt {attempts}/{MAX_RETRIES}): {err}. Retrying in {delay:?}"
-                    );
-                    if attempts >= MAX_RETRIES {
-                        log::error!("Maximum attempts reached, exiting...");
+                    if !common::is_transport_error_recoverable(&err) {
+                        log::error!(
+                            "Non recoverable deposit event extractor error, exiting: {err}"
+                        );
                         return;
                     }
+                    let delay = BASE_RETRY_DELAY * 2u32.pow(attempts.saturating_sub(1).min(6));
+
+                    log::error!(
+                        "Deposit event extractor failed with recoverable error (attempt {attempts}): {err}. Retrying in {delay:?}"
+                    );
                     tokio::time::sleep(delay).await;
-                    if common::is_transport_error_recoverable(&err) {
-                        self.eth_api = match self.eth_api.reconnect().await {
-                            Ok(api) => api,
+                    loop {
+                        match self.eth_api.reconnect().await {
+                            Ok(api) => {
+                                self.eth_api = api;
+                                break;
+                            }
                             Err(err) => {
-                                log::error!("Failed to reconnect to Ethereum: {err}");
-                                return;
+                                log::error!("Failed to reconnect to Ethereum: {err}. Retrying...");
+                                tokio::time::sleep(BASE_RETRY_DELAY).await;
                             }
                         }
                     }

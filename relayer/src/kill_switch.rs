@@ -177,12 +177,6 @@ impl KillSwitchRelayer {
                 Err(err) => {
                     loop_delay = ERROR_REPEAT_DELAY;
 
-                    let eth_api = if let State::SubmitMerkleRoot { .. } = self.state {
-                        self.eth_admin_api.as_ref().expect("bad state")
-                    } else {
-                        &self.eth_observer_api
-                    };
-
                     match err {
                         Error::ScanForEvents(ScanForEventsError::EthApi(
                             ethereum_client::Error::ErrorInHTTPTransport(err),
@@ -198,8 +192,17 @@ impl KillSwitchRelayer {
                                 log::error!(
                                     "Recoverable Ethereum transport error: {err}, reconnecting..."
                                 );
-                                if let Err(e) = eth_api.reconnect().await {
-                                    log::error!("Ethereum API reconnect failed: {e}");
+                                if let State::SubmitMerkleRoot { .. } = self.state {
+                                    let eth_api = self.eth_admin_api.as_mut().expect("bad state");
+                                    match eth_api.reconnect().await {
+                                        Ok(reconnected) => *eth_api = reconnected,
+                                        Err(e) => log::error!("Ethereum API reconnect failed: {e}"),
+                                    }
+                                } else {
+                                    match self.eth_observer_api.reconnect().await {
+                                        Ok(reconnected) => self.eth_observer_api = reconnected,
+                                        Err(e) => log::error!("Ethereum API reconnect failed: {e}"),
+                                    }
                                 }
                             }
                         }

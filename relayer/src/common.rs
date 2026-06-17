@@ -13,6 +13,7 @@ use crate::{
     merkle_roots::authority_set_sync,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
+    rpc::{self, RetryDecision},
 };
 
 use ethereum_client::{EthApi, TxHash};
@@ -125,20 +126,14 @@ pub(crate) async fn send_challege_root_to_ethereum(
 }
 
 pub(crate) fn is_rpc_transport_error_recoverable(err: &RpcError<TransportErrorKind>) -> bool {
-    match err {
-        RpcError::Transport(transport) => match transport {
-            TransportErrorKind::MissingBatchResponse(_) => true,
-            TransportErrorKind::BackendGone => true,
-            TransportErrorKind::PubsubUnavailable => false,
-            TransportErrorKind::HttpError(_) => false,
-            TransportErrorKind::Custom(_) => false,
-            _ => false,
-        },
-        _ => false,
-    }
+    rpc::classify_alloy_rpc(err) == RetryDecision::Retry
 }
 
 pub(crate) fn is_transport_error_recoverable(err: &anyhow::Error) -> bool {
+    if rpc::classify_anyhow(err) == RetryDecision::Retry {
+        return true;
+    }
+
     if let Some(ethereum_client::Error::ErrorInHTTPTransport(err)) =
         err.downcast_ref::<ethereum_client::Error>()
     {

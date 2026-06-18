@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 mod common;
 
@@ -70,12 +70,16 @@ pub struct UpdateVerifierSolArgs {
 
 #[derive(Args)]
 pub struct GearEthCoreArgs {
+    /// Path to gear-eth-core TOML config. When present, per-relayer settings are read from this file.
+    #[arg(long = "config", env = "RELAYER_CONFIG")]
+    pub config: Option<PathBuf>,
+
     #[clap(flatten)]
     pub gear_args: GearArgs,
     #[clap(flatten)]
-    pub ethereum_args: EthereumSignerArgs,
+    pub ethereum_args: GearEthCoreEthereumSignerArgs,
     #[clap(flatten)]
-    pub genesis_config_args: GenesisConfigArgs,
+    pub genesis_config_args: GearEthCoreGenesisConfigArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
     #[clap(flatten)]
@@ -130,7 +134,7 @@ pub struct GearEthCoreArgs {
 
     /// Authorization token for web-server
     #[arg(long, env)]
-    pub web_server_token: String,
+    pub web_server_token: Option<String>,
 
     /// Socket address for web-server
     #[arg(long, env, default_value = "127.0.0.1:8443")]
@@ -165,6 +169,50 @@ pub struct GearEthCoreArgs {
         help = "Block numbers to sync at startup (used when startup-sync-strategy=blocks)"
     )]
     pub startup_sync_blocks: Vec<u32>,
+}
+
+#[derive(Args)]
+pub struct GearEthCoreEthereumSignerArgs {
+    /// Address of the ethereum endpoint
+    #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]
+    pub ethereum_endpoint: Option<String>,
+
+    /// Number of retries for the ethereum endpoint
+    #[arg(long = "eth-max-retries", env = "ETH_RPC_MAX_RETRIES")]
+    pub max_retries: Option<u32>,
+
+    /// Interval in milliseconds between retries for the ethereum endpoint
+    #[arg(long = "eth-retry-interval-ms", env = "ETH_RPC_RETRY_INTERVAL_MS")]
+    pub retry_interval_ms: Option<u64>,
+
+    /// Max fee per gas (in wei) for transactions sent to Ethereum.
+    #[arg(long = "max-fee-per-gas", env = "ETH_MAX_FEE_PER_GAS")]
+    pub max_fee_per_gas: Option<u128>,
+
+    /// Max priority fee per gas (in wei) for transactions sent to Ethereum.
+    #[arg(
+        long = "max-priority-fee-per-gas",
+        env = "ETH_MAX_PRIORITY_FEE_PER_GAS"
+    )]
+    pub max_priority_fee_per_gas: Option<u128>,
+
+    /// Ethereum address of message queue contract
+    #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
+    pub mq_address: Option<String>,
+
+    /// Private key for fee payer
+    #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
+    pub eth_fee_payer: Option<String>,
+}
+
+#[derive(Args)]
+pub struct GearEthCoreGenesisConfigArgs {
+    /// Authority set hash used in genesis config
+    #[arg(long, env = "GENESIS_CONFIG_AUTHORITY_SET_HASH")]
+    pub authority_set_hash: Option<String>,
+    /// Authority set id used in genesis config
+    #[arg(long, env = "GENESIS_CONFIG_AUTHORITY_SET_ID")]
+    pub authority_set_id: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -480,4 +528,54 @@ fn parse_thread_count(s: &str) -> anyhow::Result<ThreadCount> {
     }
 
     Ok(s.parse::<usize>().map(ThreadCount::Manual)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::EffectiveConfig;
+
+    #[test]
+    fn gear_eth_core_config_mode_parses_without_legacy_required_flags() {
+        let cli = Cli::try_parse_from([
+            "relayer",
+            "gear-eth-core",
+            "--config",
+            "relayer/config.toml.example",
+        ])
+        .unwrap();
+
+        match cli.command {
+            CliCommands::GearEthCore(args) => {
+                assert_eq!(
+                    args.config.unwrap(),
+                    PathBuf::from("relayer/config.toml.example")
+                );
+            }
+            _ => panic!("expected gear-eth-core command"),
+        }
+    }
+
+    #[test]
+    fn gear_eth_core_no_config_mode_keeps_runtime_required_fields() {
+        let cli = Cli::try_parse_from([
+            "relayer",
+            "gear-eth-core",
+            "--config",
+            "relayer/config.toml.example",
+        ])
+        .unwrap();
+
+        let CliCommands::GearEthCore(mut args) = cli.command else {
+            panic!("expected gear-eth-core command");
+        };
+        args.config = None;
+        args.ethereum_args.ethereum_endpoint = None;
+
+        let err = match EffectiveConfig::from_cli(&args) {
+            Ok(_) => panic!("legacy mode unexpectedly accepted missing Ethereum endpoint"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("--ethereum-endpoint/ETH_RPC"));
+    }
 }

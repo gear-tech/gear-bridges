@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod common;
+pub mod config;
 pub mod ethereum_checkpoints;
 pub mod hex_utils;
 pub mod kill_switch;

@@ -10243,6 +10243,7 @@ dependencies = [
  "subxt",
  "thiserror 2.0.12",
  "tokio",
+ "toml 0.9.7",
  "url",
  "utils-prometheus",
  "uuid",
@@ -11935,6 +11936,19 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "signed-block-id-tool"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cli-utils",
+ "dotenv",
+ "gear-rpc-client",
+ "primitive-types 0.13.1",
+ "tokio",
 ]
 
 [[package]]

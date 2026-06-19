@@ -1,3 +1,4 @@
+use actix_web::dev::ServerHandle;
 use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use eth_events_electra_client::traits::EthereumEventClient;
@@ -13,13 +14,17 @@ use relayer::{
     cli::{
         BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs,
         EthGearTokensCommands, EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FeePayers,
-        FetchMerkleRootsArgs, GearArgs, GearEthTokensCommands, GearSignerArgs, ProofStorageArgs,
+        FetchMerkleRootsArgs, GearEthCoreArgs, GearEthTokensCommands, GearSignerArgs,
         DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
     },
-    common, ethereum_checkpoints, hex_utils,
+    common,
+    config::{
+        EffectiveConfig, EffectiveEthereumConfig, EffectiveGearConfig, EffectiveProofStorageConfig,
+        EffectiveRelayerConfig,
+    },
+    ethereum_checkpoints, hex_utils,
     kill_switch::KillSwitchRelayer,
-    merkle_roots,
-    merkle_roots::MerkleRootRelayerOptions,
+    merkle_roots::{self, prover::SharedFinalityProver},
     message_relayer::{self, eth_to_gear, gear_to_eth},
     proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage},
     prover_interface, server,
@@ -29,6 +34,7 @@ use std::{
     collections::HashSet,
     env,
     fs::{self, File},
+    future::Future,
     io::Read as _,
     net::TcpListener,
     path::Path,
@@ -38,7 +44,7 @@ use std::{
 };
 
 use tokio::{sync::mpsc, task, time};
-use utils_prometheus::MetricsBuilder;
+use utils_prometheus::{MeteredService, MetricsBuilder};
 use vft_manager_client::traits::VftManager;
 use zeroize::Zeroizing;
 
@@ -185,70 +191,8 @@ async fn run() -> AnyResult<()> {
             log::info!("merkle_root = '{}'", hex::encode(proof.merkle_root));
         }
 
-        CliCommands::GearEthCore(mut args) => {
-            let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
-            let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
-            if rust_min_stack < SIZE_THREAD_STACK_MIN {
-                return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
-            }
-
-            let api_provider = ApiProvider::new(
-                args.gear_args.get_endpoint()?,
-                args.gear_args.max_reconnect_attempts,
-            )
-            .await
-            .expect("Failed to connect to Gear API");
-
-            let Some(path) = args.block_storage_args.path.take() else {
-                return Err(anyhow!("No block storage path provided"));
-            };
-
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
-
-            let metrics = MetricsBuilder::new();
-
-            let (proof_storage, metrics) =
-                create_proof_storage(&args.proof_storage_args, &args.gear_args, metrics).await;
-            let storage =
-                relayer::merkle_roots::storage::MerkleRootStorage::new(proof_storage, path);
-
-            let options = MerkleRootRelayerOptions::from_cli(&args)?;
-
-            let tcp_listener = TcpListener::bind(&args.web_server_address)?;
-
-            let (sender, receiver) = mpsc::unbounded_channel();
-            let web_server =
-                server::create(tcp_listener, args.web_server_token, None, Some(sender))
-                    .context("Failed to create web server")?;
-            let handle_server = web_server.handle();
-            tokio::spawn(web_server);
-
-            let relayer = merkle_roots::Relayer::new(
-                api_provider.connection(),
-                eth_api,
-                receiver,
-                storage,
-                options,
-            )
-            .await;
-
-            metrics
-                .register_service(&relayer)
-                .build()
-                .run(args.prometheus_args.prometheus_endpoint)
-                .await;
-            api_provider.spawn();
-
-            let res = relayer.run().await;
-
-            if tokio::time::timeout(Duration::from_secs(5 * 60), handle_server.stop(true))
-                .await
-                .is_err()
-            {
-                log::error!("Failed to stop web server within timeout");
-                std::process::exit(1);
-            }
-            return res;
+        CliCommands::GearEthCore(args) => {
+            return run_gear_eth_core(args).await;
         }
 
         CliCommands::KillSwitch(args) => {
@@ -420,9 +364,14 @@ async fn run() -> AnyResult<()> {
                     // spawn web-server
                     let tcp_listener = TcpListener::bind(web_server_address)?;
                     let (sender, receiver) = mpsc::unbounded_channel();
-                    let web_server =
-                        server::create(tcp_listener, web_server_token, Some(sender), None)
-                            .context("Failed to create web server")?;
+                    let web_server = server::create(
+                        tcp_listener,
+                        web_server_token,
+                        "gear-eth-token-paid-transfers".to_string(),
+                        Some(sender),
+                        None,
+                    )
+                    .context("Failed to create web server")?;
                     let handle_server = web_server.handle();
                     task::spawn(web_server);
 
@@ -739,6 +688,277 @@ async fn run() -> AnyResult<()> {
     Ok(())
 }
 
+async fn run_gear_eth_core(args: GearEthCoreArgs) -> AnyResult<()> {
+    let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
+    let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
+    if rust_min_stack < SIZE_THREAD_STACK_MIN {
+        return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
+    }
+
+    let EffectiveConfig {
+        prometheus_endpoint,
+        relayers,
+    } = match args.config.as_ref() {
+        Some(path) => EffectiveConfig::from_path(path)?,
+        None => EffectiveConfig::from_cli(&args)?,
+    };
+
+    if relayers.len() == 1 {
+        let relayer = relayers
+            .into_iter()
+            .next()
+            .expect("relayers length is checked immediately above");
+        let running =
+            start_gear_eth_core_relayer(relayer, Some(prometheus_endpoint), None, false).await?;
+        return wait_single_relayer(running).await;
+    }
+
+    run_gear_eth_core_relayers(relayers, prometheus_endpoint).await
+}
+
+struct RunningGearEthCoreRelayer {
+    id: String,
+    task: task::JoinHandle<AnyResult<()>>,
+    server_handle: ServerHandle,
+    metrics: Option<MetricsBuilder>,
+}
+
+async fn run_gear_eth_core_relayers(
+    relayers: Vec<EffectiveRelayerConfig>,
+    prometheus_endpoint: String,
+) -> AnyResult<()> {
+    log::info!(
+        "Starting {} merkle-root relayers in one process. Prometheus endpoint {prometheus_endpoint} uses relayer labels for per-relayer collectors",
+        relayers.len()
+    );
+
+    let shared_prover = SharedFinalityProver::new();
+    let mut metrics = MetricsBuilder::new();
+    metrics.register_service_mut(&shared_prover);
+
+    let mut running = start_required_gear_eth_core_relayers(relayers, |relayer| {
+        start_gear_eth_core_relayer(relayer, None, Some(&shared_prover), true)
+    })
+    .await?;
+
+    for relayer in &mut running {
+        if let Some(relayer_metrics) = relayer.metrics.take() {
+            metrics.append(relayer_metrics);
+        }
+    }
+    metrics.build().run(prometheus_endpoint).await;
+
+    supervise_running_gear_eth_core_relayers(running).await
+}
+
+async fn start_required_gear_eth_core_relayers<I, F, Fut>(
+    relayers: impl IntoIterator<Item = I>,
+    mut start: F,
+) -> AnyResult<Vec<RunningGearEthCoreRelayer>>
+where
+    F: FnMut(I) -> Fut,
+    Fut: Future<Output = AnyResult<RunningGearEthCoreRelayer>>,
+{
+    let mut running = Vec::new();
+    for relayer in relayers {
+        match start(relayer).await {
+            Ok(relayer) => running.push(relayer),
+            Err(err) => {
+                stop_running_gear_eth_core_relayers(running).await;
+                return Err(err);
+            }
+        }
+    }
+    Ok(running)
+}
+
+async fn stop_running_gear_eth_core_relayers(running: Vec<RunningGearEthCoreRelayer>) {
+    let mut tasks = Vec::with_capacity(running.len());
+    for relayer in running {
+        stop_web_server(relayer.server_handle).await;
+        relayer.task.abort();
+        tasks.push(relayer.task);
+    }
+
+    for task in tasks {
+        let _ = task.await;
+    }
+}
+
+async fn supervise_running_gear_eth_core_relayers(
+    running: Vec<RunningGearEthCoreRelayer>,
+) -> AnyResult<()> {
+    if running.is_empty() {
+        return Err(anyhow!("no merkle-root relayers started"));
+    }
+
+    let mut tasks = Vec::with_capacity(running.len());
+    let mut ids = Vec::with_capacity(running.len());
+    let mut server_handles = Vec::with_capacity(running.len());
+
+    for relayer in running {
+        ids.push(relayer.id);
+        server_handles.push(relayer.server_handle);
+        tasks.push(relayer.task);
+    }
+
+    let (result, index, remaining_tasks) = futures::future::select_all(tasks).await;
+    for server_handle in server_handles {
+        stop_web_server(server_handle).await;
+    }
+    for task in remaining_tasks {
+        task.abort();
+    }
+
+    let id = ids
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| "<unknown>".to_string());
+
+    match result {
+        Ok(Ok(())) => Err(anyhow!("merkle-root relayer {id} exited unexpectedly")),
+        Ok(Err(err)) => Err(err).with_context(|| format!("merkle-root relayer {id} failed")),
+        Err(err) => Err(anyhow!("merkle-root relayer {id} task failed: {err}")),
+    }
+}
+
+async fn wait_single_relayer(running: RunningGearEthCoreRelayer) -> AnyResult<()> {
+    let RunningGearEthCoreRelayer {
+        id,
+        task,
+        server_handle,
+        ..
+    } = running;
+    match task.await {
+        Ok(result) => result,
+        Err(err) => {
+            stop_web_server(server_handle).await;
+            Err(anyhow!("merkle-root relayer {id} task failed: {err}"))
+        }
+    }
+}
+
+async fn start_gear_eth_core_relayer(
+    config: EffectiveRelayerConfig,
+    prometheus_endpoint: Option<String>,
+    shared_prover: Option<&SharedFinalityProver>,
+    label_metrics: bool,
+) -> AnyResult<RunningGearEthCoreRelayer> {
+    let id = config.id.clone();
+    let api_provider = ApiProvider::new(
+        config.gear.endpoint.clone(),
+        config.gear.max_reconnect_attempts,
+    )
+    .await
+    .context("Failed to connect to Gear API")?;
+
+    let eth_api = create_eth_signer_client_from_config(&config.ethereum).await?;
+
+    let mut metrics = MetricsBuilder::new();
+
+    let metric_relayer_id = label_metrics.then_some(id.as_str());
+    let proof_storage = create_proof_storage_from_config(
+        &config.proof_storage,
+        &config.gear,
+        &mut metrics,
+        metric_relayer_id,
+    )
+    .await?;
+    let storage = relayer::merkle_roots::storage::MerkleRootStorage::new(
+        proof_storage,
+        config.storage.block_storage.clone(),
+    );
+
+    let tcp_listener = TcpListener::bind(&config.http.address)?;
+
+    let (sender, receiver) = mpsc::unbounded_channel();
+    let web_server = server::create(
+        tcp_listener,
+        config.http.token.clone(),
+        format!("merkle-root relayer {}", config.id),
+        None,
+        Some(sender),
+    )
+    .context("Failed to create web server")?;
+    let handle_server = web_server.handle();
+    let task_handle_server = handle_server.clone();
+    tokio::spawn(web_server);
+
+    let relayer = if let Some(shared_prover) = shared_prover {
+        let prover = shared_prover.register(
+            id.clone(),
+            config.priority,
+            api_provider.connection(),
+            config.options.genesis_config,
+            config.options.count_thread,
+        );
+        merkle_roots::Relayer::new_with_prover_io(
+            api_provider.connection(),
+            eth_api,
+            receiver,
+            storage,
+            config.options,
+            prover,
+        )
+        .await
+    } else {
+        merkle_roots::Relayer::new(
+            api_provider.connection(),
+            eth_api,
+            receiver,
+            storage,
+            config.options,
+        )
+        .await
+    };
+
+    register_gear_eth_core_metrics(&mut metrics, metric_relayer_id, &relayer);
+
+    let metrics = if let Some(prometheus_endpoint) = prometheus_endpoint {
+        metrics.build().run(prometheus_endpoint).await;
+        None
+    } else {
+        Some(metrics)
+    };
+    api_provider.spawn();
+
+    let task_id = id.clone();
+    let task = tokio::spawn(async move {
+        let result = relayer.run().await;
+        stop_web_server(task_handle_server).await;
+        result
+    });
+
+    Ok(RunningGearEthCoreRelayer {
+        id: task_id,
+        task,
+        server_handle: handle_server,
+        metrics,
+    })
+}
+
+fn register_gear_eth_core_metrics(
+    metrics: &mut MetricsBuilder,
+    relayer_id: Option<&str>,
+    service: &impl MeteredService,
+) {
+    if let Some(relayer_id) = relayer_id {
+        metrics.register_labeled_service_mut(service, [("relayer", relayer_id)]);
+    } else {
+        metrics.register_service_mut(service);
+    }
+}
+
+async fn stop_web_server(handle: ServerHandle) {
+    if tokio::time::timeout(Duration::from_secs(5 * 60), handle.stop(true))
+        .await
+        .is_err()
+    {
+        log::error!("Failed to stop web server within timeout");
+        std::process::exit(1);
+    }
+}
+
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
     let endpoint = args.connection.get_endpoint().expect("Invalid gear args");
     gclient::GearApi::builder()
@@ -767,6 +987,20 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     )
     .await
     .expect("Error while creating ethereum client")
+}
+
+async fn create_eth_signer_client_from_config(args: &EffectiveEthereumConfig) -> AnyResult<EthApi> {
+    EthApi::new_with_retries(
+        &args.endpoint,
+        &args.message_queue_address,
+        Some(&args.fee_payer),
+        args.max_retries,
+        args.retry_interval_ms.map(Duration::from_millis),
+        args.max_fee_per_gas,
+        args.max_priority_fee_per_gas,
+    )
+    .await
+    .context("Error while creating ethereum client")
 }
 
 async fn create_eth_killswitch_client(
@@ -839,31 +1073,37 @@ async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
         .expect("Failed to create beacon client")
 }
 
-async fn create_proof_storage(
-    proof_storage_args: &ProofStorageArgs,
-    gear_args: &GearArgs,
-    mut metrics: MetricsBuilder,
-) -> (Arc<dyn ProofStorage>, MetricsBuilder) {
-    let proof_storage: Arc<dyn ProofStorage> =
-        if let Some(fee_payer) = proof_storage_args.gear_fee_payer.as_ref() {
+async fn create_proof_storage_from_config(
+    proof_storage_config: &EffectiveProofStorageConfig,
+    gear_config: &EffectiveGearConfig,
+    metrics: &mut MetricsBuilder,
+    relayer_id: Option<&str>,
+) -> AnyResult<Arc<dyn ProofStorage>> {
+    let proof_storage: Arc<dyn ProofStorage> = match proof_storage_config {
+        EffectiveProofStorageConfig::Gear {
+            fee_payer,
+            config_dir,
+        } => {
             let proof_storage = GearProofStorage::new(
-                &gear_args.get_endpoint().expect("Invalid endpoint"),
-                gear_args.max_reconnect_attempts,
+                &gear_config.endpoint,
+                gear_config.max_reconnect_attempts,
                 fee_payer,
-                "./onchain_proof_storage_data".into(),
+                config_dir.clone(),
             )
             .await
-            .expect("Failed to initialize proof storage");
+            .context("Failed to initialize proof storage")?;
 
-            metrics = metrics.register_service(&proof_storage);
+            register_gear_eth_core_metrics(metrics, relayer_id, &proof_storage);
 
             Arc::new(proof_storage)
-        } else {
+        }
+        EffectiveProofStorageConfig::FileSystem { path } => {
             log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
-            Arc::new(FileSystemProofStorage::new("./proof_storage".into()).await)
-        };
+            Arc::new(FileSystemProofStorage::new(path.clone()).await)
+        }
+    };
 
-    (proof_storage, metrics)
+    Ok(proof_storage)
 }
 
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
@@ -934,4 +1174,187 @@ async fn fetch_historical_proxy_and_checkpoints(
     log::info!("Checkpoint light client address is {checkpoints_address:#?} for slot #{slot}");
 
     Ok((historical_proxy_address, checkpoints_address))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{web, App, HttpResponse, HttpServer};
+    use std::{
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+    };
+
+    #[tokio::test]
+    async fn supervisor_reports_unexpected_relayer_exit_with_id() {
+        let (running, _addr) = dummy_running_relayer("mainnet", Ok(()));
+
+        let err = supervise_running_gear_eth_core_relayers(vec![running])
+            .await
+            .expect_err("supervisor must reject unexpected relayer exit");
+
+        assert!(err.to_string().contains("mainnet"));
+        assert!(err.to_string().contains("exited unexpectedly"));
+    }
+
+    #[tokio::test]
+    async fn supervisor_reports_relayer_error_with_id() {
+        let (running, _addr) = dummy_running_relayer("testnet", Err(anyhow!("boom")));
+
+        let err = supervise_running_gear_eth_core_relayers(vec![running])
+            .await
+            .expect_err("supervisor must report relayer task error");
+
+        assert!(err.to_string().contains("testnet"));
+        assert!(err.to_string().contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn supervisor_stops_http_server_on_relayer_exit() {
+        let (running, addr) = dummy_running_relayer("mainnet", Ok(()));
+        wait_until_server_accepts(addr).await;
+
+        let _ = supervise_running_gear_eth_core_relayers(vec![running])
+            .await
+            .expect_err("unexpected relayer exit should still stop the HTTP server");
+
+        wait_until_server_stops(addr).await;
+    }
+
+    #[tokio::test]
+    async fn startup_failure_stops_already_started_relayers() {
+        let started_addr = Arc::new(Mutex::new(None));
+        let started_addr_for_start = started_addr.clone();
+
+        let err = match start_required_gear_eth_core_relayers(["first", "second"], |id| {
+            let id = id.to_string();
+            let started_addr = started_addr_for_start.clone();
+            async move {
+                if id == "first" {
+                    let (running, addr) = dummy_pending_relayer(&id);
+                    *started_addr.lock().unwrap() = Some(addr);
+                    wait_until_server_accepts(addr).await;
+                    Ok(running)
+                } else {
+                    Err(anyhow!("failed to start {id}"))
+                }
+            }
+        })
+        .await
+        {
+            Ok(_) => panic!("startup failure must be returned"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("second"));
+        let addr = started_addr
+            .lock()
+            .unwrap()
+            .expect("first relayer must have started");
+        wait_until_server_stops(addr).await;
+    }
+
+    #[tokio::test]
+    async fn startup_starts_all_requested_relayers() {
+        let mut addresses = Vec::new();
+        let running = start_required_gear_eth_core_relayers(["first", "second", "third"], |id| {
+            let (running, addr) = dummy_pending_relayer(id);
+            addresses.push(addr);
+            async move { Ok(running) }
+        })
+        .await
+        .expect("all relayers should start");
+
+        assert_eq!(running.len(), 3);
+        for addr in &addresses {
+            wait_until_server_accepts(*addr).await;
+        }
+
+        stop_running_gear_eth_core_relayers(running).await;
+
+        for addr in addresses {
+            wait_until_server_stops(addr).await;
+        }
+    }
+
+    fn dummy_running_relayer(
+        id: &str,
+        result: AnyResult<()>,
+    ) -> (RunningGearEthCoreRelayer, SocketAddr) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = HttpServer::new(|| {
+            App::new().route("/", web::get().to(|| async { HttpResponse::Ok().finish() }))
+        })
+        .listen(listener)
+        .unwrap()
+        .disable_signals()
+        .run();
+        let server_handle = server.handle();
+        tokio::spawn(server);
+
+        (
+            RunningGearEthCoreRelayer {
+                id: id.to_string(),
+                task: tokio::spawn(async move { result }),
+                server_handle,
+                metrics: None,
+            },
+            addr,
+        )
+    }
+
+    fn dummy_pending_relayer(id: &str) -> (RunningGearEthCoreRelayer, SocketAddr) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = HttpServer::new(|| {
+            App::new().route("/", web::get().to(|| async { HttpResponse::Ok().finish() }))
+        })
+        .listen(listener)
+        .unwrap()
+        .disable_signals()
+        .run();
+        let server_handle = server.handle();
+        tokio::spawn(server);
+
+        (
+            RunningGearEthCoreRelayer {
+                id: id.to_string(),
+                task: tokio::spawn(async { futures::future::pending::<AnyResult<()>>().await }),
+                server_handle,
+                metrics: None,
+            },
+            addr,
+        )
+    }
+
+    async fn wait_until_server_accepts(addr: SocketAddr) {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let url = format!("http://{addr}/");
+        for _ in 0..50 {
+            if client.get(&url).send().await.is_ok() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("dummy HTTP server did not start");
+    }
+
+    async fn wait_until_server_stops(addr: SocketAddr) {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let url = format!("http://{addr}/");
+        for _ in 0..50 {
+            if client.get(&url).send().await.is_err() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("dummy HTTP server did not stop");
+    }
 }

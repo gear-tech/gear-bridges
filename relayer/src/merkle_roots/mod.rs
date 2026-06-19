@@ -1,6 +1,5 @@
 use crate::{
-    cli::{self, GearEthCoreArgs, DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS},
-    hex_utils,
+    cli::GearEthCoreArgs,
     merkle_roots::{authority_set_sync::AuthoritySetSyncIo, prover::FinalityProverIo},
     message_relayer::common::{
         gear::block_listener::BlockListener,
@@ -11,10 +10,7 @@ use crate::{
     prover_interface::FinalProof,
     rpc,
 };
-use ::prover::{
-    consts::BLAKE2_DIGEST_SIZE,
-    proving::{GenesisConfig, ProofWithCircuitData},
-};
+use ::prover::proving::{GenesisConfig, ProofWithCircuitData};
 use anyhow::Context;
 use ethereum_client::EthApi;
 use gear_common::api_provider::ApiProviderConnection;
@@ -46,7 +42,7 @@ pub mod submitter;
 pub struct Relayer {
     merkle_roots: MerkleRootRelayer,
     authority_set_sync: authority_set_sync::AuthoritySetSync,
-    prover: prover::FinalityProver,
+    prover: ProverSource,
     submitter: submitter::MerkleRootSubmitter,
     block_listener: BlockListener,
 
@@ -54,14 +50,22 @@ pub struct Relayer {
     http: UnboundedReceiver<MerkleRootsRequest>,
 }
 
+enum ProverSource {
+    Owned(prover::FinalityProver),
+    External(FinalityProverIo),
+}
+
 impl MeteredService for Relayer {
     fn get_sources(&self) -> impl IntoIterator<Item = Box<dyn prometheus::core::Collector>> {
-        self.authority_set_sync
-            .get_sources()
-            .into_iter()
-            .chain(self.merkle_roots.get_sources())
-            .chain(self.submitter.get_sources())
-            .chain(self.prover.get_sources())
+        let mut sources: Vec<Box<dyn prometheus::core::Collector>> = Vec::new();
+        sources.extend(self.authority_set_sync.get_sources());
+        sources.extend(self.block_listener.get_sources());
+        sources.extend(self.merkle_roots.get_sources());
+        sources.extend(self.submitter.get_sources());
+        if let ProverSource::Owned(prover) = &self.prover {
+            sources.extend(prover.get_sources());
+        }
+        sources
     }
 }
 
@@ -84,11 +88,11 @@ impl Relayer {
         )
         .await;
 
-        let prover = prover::FinalityProver::new(
+        let prover = ProverSource::Owned(prover::FinalityProver::new(
             api_provider.clone(),
             options.genesis_config,
             options.count_thread,
-        );
+        ));
 
         let submitter = submitter::MerkleRootSubmitter::new(
             eth_api.clone(),
@@ -101,6 +105,44 @@ impl Relayer {
             merkle_roots,
             authority_set_sync,
             prover,
+            submitter,
+            block_listener,
+
+            eth_api,
+            http,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_with_prover_io(
+        api_provider: ApiProviderConnection,
+        eth_api: EthApi,
+        http: UnboundedReceiver<MerkleRootsRequest>,
+        storage: Arc<MerkleRootStorage>,
+        options: MerkleRootRelayerOptions,
+        prover: FinalityProverIo,
+    ) -> Self {
+        let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
+
+        let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
+            api_provider.clone(),
+            storage.proofs.clone(),
+            options.genesis_config,
+            options.count_thread,
+        )
+        .await;
+
+        let submitter = submitter::MerkleRootSubmitter::new(
+            eth_api.clone(),
+            storage.clone(),
+            options.confirmations,
+        );
+        let merkle_roots = MerkleRootRelayer::new(api_provider, storage, options).await;
+
+        Self {
+            merkle_roots,
+            authority_set_sync,
+            prover: ProverSource::External(prover),
             submitter,
             block_listener,
 
@@ -124,7 +166,10 @@ impl Relayer {
         let [blocks0, blocks1] = block_listener.run().await;
 
         let authority_set_sync = authority_set_sync.run(blocks1);
-        let prover = prover.run();
+        let prover = match prover {
+            ProverSource::Owned(prover) => prover.run(),
+            ProverSource::External(prover) => prover,
+        };
         let submitter = submitter.run();
 
         merkle_roots
@@ -1370,69 +1415,12 @@ pub struct MerkleRootRelayerOptions {
 
 impl MerkleRootRelayerOptions {
     pub fn from_cli(config: &GearEthCoreArgs) -> anyhow::Result<Self> {
-        if config.startup_sync_strategy != cli::StartupSyncStrategy::Blocks
-            && !config.startup_sync_blocks.is_empty()
-        {
-            return Err(anyhow::anyhow!(
-                "startup-sync-blocks can only be used when startup-sync-strategy=blocks"
-            ));
-        }
-
-        let startup_sync_strategy = match config.startup_sync_strategy {
-            cli::StartupSyncStrategy::CriticalThreshold => StartupSyncStrategy::CriticalThreshold,
-            cli::StartupSyncStrategy::SkipCatchUp => StartupSyncStrategy::SkipCatchUp,
-            cli::StartupSyncStrategy::Blocks => {
-                if config.startup_sync_blocks.is_empty() {
-                    return Err(anyhow::anyhow!(
-                        "startup-sync-blocks must be provided when startup-sync-strategy=blocks"
-                    ));
-                }
-                StartupSyncStrategy::Blocks(config.startup_sync_blocks.clone())
-            }
-        };
-
-        Ok(Self {
-            critical_threshold: match config.critical_threshold {
-                cli::CriticalThreshold::Timeout(duration) => {
-                    CriticalThreshold::Timeout((duration.as_secs() / 3) as u32)
-                },
-                cli::CriticalThreshold::AuthoritySetChange => {
-                    CriticalThreshold::AuthoritySetChange
-                },
-            },
-            startup_sync_strategy,
-            spike_config: SpikeConfig {
-                timeout: config.spike_timeout,
-                priority_timeout: config.priority_spike_timeout,
-                window: config.spike_window,
-                threshold: config.spike_threshold,
-            },
-            check_interval: config.check_interval,
-            save_interval: config.save_interval,
-            genesis_config: GenesisConfig {
-                authority_set_hash: hex::decode(&config.genesis_config_args.authority_set_hash)
-                    .context(
-                        "Incorrect format for authority set hash: hex encoded hash is expected",
-                    )?
-                    .try_into()
-                    .map_err(|got: Vec<u8>| {
-                        anyhow::anyhow!("Incorrect format for authority set hash: wrong length. Expected {}, got {}", BLAKE2_DIGEST_SIZE, got.len())
-                    })?,
-                authority_set_id: config.genesis_config_args.authority_set_id,
-            },
-            last_sealed: config.start_authority_set_id,
-            confirmations: config.confirmations_merkle_root.unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
-            count_thread: match config.thread_count {
-                None => Some(DEFAULT_COUNT_THREADS),
-                Some(thread_count) => thread_count.into(),
-            },
-            bridging_payment_address: config
-                .bridging_payment_address
-                .as_ref()
-                .map(|x| hex_utils::decode_h256(x))
-                .transpose()
-                .context("Failed to parse bridging payment address")?,
-        })
+        crate::config::EffectiveConfig::from_cli(config)?
+            .relayers
+            .into_iter()
+            .next()
+            .map(|relayer| relayer.options)
+            .ok_or_else(|| anyhow::anyhow!("No relayer config found"))
     }
 }
 

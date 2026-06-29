@@ -10,6 +10,7 @@ use prometheus::{IntCounter, IntGauge, IntGaugeVec, Opts};
 use prover::proving::{GenesisConfig, ProofWithCircuitData};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -55,6 +56,7 @@ struct ProverContext {
     api_provider: ApiProviderConnection,
     genesis_config: GenesisConfig,
     count_thread: Option<usize>,
+    gnark_data_path: PathBuf,
 }
 
 enum RequestSender {
@@ -238,12 +240,14 @@ impl FinalityProver {
         api_provider: ApiProviderConnection,
         genesis_config: GenesisConfig,
         count_thread: Option<usize>,
+        gnark_data_path: PathBuf,
     ) -> Self {
         Self {
             context: ProverContext {
                 api_provider,
                 genesis_config,
                 count_thread,
+                gnark_data_path,
             },
 
             metrics: Metrics::new(),
@@ -508,12 +512,14 @@ async fn generate_proof(
     let start = Instant::now();
     let genesis_config = context.genesis_config;
     let count_thread = context.count_thread;
+    let gnark_data_path = context.gnark_data_path.clone();
     let proof = rpc::retry_gear(
         &mut context.api_provider,
         "prover finality proof",
         move |gear_api| {
             let inner_proof = inner_proof.clone();
             let block_inclusion_proof = block_inclusion_proof.clone();
+            let gnark_data_path = gnark_data_path.clone();
             async move {
                 prover_interface::prove_final(
                     &gear_api,
@@ -521,6 +527,7 @@ async fn generate_proof(
                     genesis_config,
                     block_hash,
                     count_thread,
+                    gnark_data_path,
                     Some(block_inclusion_proof),
                 )
                 .await
@@ -593,6 +600,7 @@ impl SharedFinalityProver {
         api_provider: ApiProviderConnection,
         genesis_config: GenesisConfig,
         count_thread: Option<usize>,
+        gnark_data_path: PathBuf,
     ) -> FinalityProverIo {
         let (response_tx, response_rx) = tokio::sync::mpsc::unbounded_channel();
         FinalityProverIo::new_shared(
@@ -602,6 +610,7 @@ impl SharedFinalityProver {
                 api_provider,
                 genesis_config,
                 count_thread,
+                gnark_data_path,
             },
             self.requests.clone(),
             response_rx,

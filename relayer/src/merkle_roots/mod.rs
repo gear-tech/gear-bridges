@@ -20,6 +20,7 @@ use prometheus::IntGauge;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -92,6 +93,7 @@ impl Relayer {
             api_provider.clone(),
             options.genesis_config,
             options.count_thread,
+            options.gnark_data_path.clone(),
         ));
 
         let submitter = submitter::MerkleRootSubmitter::new(
@@ -1411,6 +1413,7 @@ pub struct MerkleRootRelayerOptions {
     pub critical_threshold: CriticalThreshold,
     /// Startup sync strategy for initial catch-up.
     pub startup_sync_strategy: StartupSyncStrategy,
+    pub gnark_data_path: PathBuf,
 }
 
 impl MerkleRootRelayerOptions {

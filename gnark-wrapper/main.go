@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"path/filepath"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark-crypto/kzg"
@@ -94,15 +95,25 @@ type ProofWithPublicInputs struct {
 	PublicInputs []string `json:"public_inputs"`
 }
 
+const defaultDataDir = "data"
+
+func dataFile(dataDir string, name string) string {
+	if dataDir == "" {
+		dataDir = defaultDataDir
+	}
+	return filepath.Join(dataDir, name)
+}
+
 //export prove
-func prove(circuitData *C.char) *C.char {
-	pk, err := loadProvingKey()
+func prove(circuitData *C.char, dataPath *C.char) *C.char {
+	dataDir := C.GoString(dataPath)
+	pk, err := loadProvingKey(dataDir)
 	if err != nil {
-		compile(circuitData)
-		pk, _ = loadProvingKey()
+		compile(circuitData, dataDir)
+		pk, _ = loadProvingKey(dataDir)
 	}
 
-	r1cs := loadR1CS()
+	r1cs := loadR1CS(dataDir)
 
 	assignment, err := deserializeCircuit(C.GoString(circuitData))
 	if err != nil {
@@ -116,7 +127,7 @@ func prove(circuitData *C.char) *C.char {
 		panic(errorString)
 	}
 
-	vk := loadVerifyingKey()
+	vk := loadVerifyingKey(dataDir)
 	publicWitness, err := witness.Public()
 	if err != nil {
 		panic(err)
@@ -132,7 +143,7 @@ func prove(circuitData *C.char) *C.char {
 	return C.CString(rawProof)
 }
 
-func compile(circuitData *C.char) {
+func compile(circuitData *C.char, dataDir string) {
 	circuit, err := deserializeCircuit(C.GoString(circuitData))
 	if err != nil {
 		panic(err)
@@ -144,7 +155,7 @@ func compile(circuitData *C.char) {
 		os.Exit(1)
 	}
 
-	srs := loadSRS()
+	srs := loadSRS(dataDir)
 
 	pk, vk, err := plonk.Setup(r1cs, srs)
 	if err != nil {
@@ -152,19 +163,19 @@ func compile(circuitData *C.char) {
 		os.Exit(1)
 	}
 
-	fR1CS, _ := os.Create("data/r1cs")
+	fR1CS, _ := os.Create(dataFile(dataDir, "r1cs"))
 	r1cs.WriteTo(fR1CS)
 	fR1CS.Close()
 
-	fPK, _ := os.Create("data/proving.key")
+	fPK, _ := os.Create(dataFile(dataDir, "proving.key"))
 	pk.WriteRawTo(fPK)
 	fPK.Close()
 
-	fVK, _ := os.Create("data/verifying.key")
+	fVK, _ := os.Create(dataFile(dataDir, "verifying.key"))
 	vk.WriteRawTo(fVK)
 	fVK.Close()
 
-	fSolidity, _ := os.Create("data/verifier.sol")
+	fSolidity, _ := os.Create(dataFile(dataDir, "verifier.sol"))
 	_ = vk.ExportSolidity(fSolidity)
 }
 
@@ -279,8 +290,8 @@ func compressPublicInputs(pis []gl.Variable) []frontend.Variable {
 	return compressedPis
 }
 
-func loadVerifyingKey() plonk.VerifyingKey {
-	vkFile, err := os.Open("data/verifying.key")
+func loadVerifyingKey(dataDir string) plonk.VerifyingKey {
+	vkFile, err := os.Open(dataFile(dataDir, "verifying.key"))
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -294,8 +305,8 @@ func loadVerifyingKey() plonk.VerifyingKey {
 	return vk
 }
 
-func loadProvingKey() (plonk.ProvingKey, error) {
-	pkFile, err := os.Open("data/proving.key")
+func loadProvingKey(dataDir string) (plonk.ProvingKey, error) {
+	pkFile, err := os.Open(dataFile(dataDir, "proving.key"))
 	if err != nil {
 		return nil, err
 	}
@@ -310,9 +321,9 @@ func loadProvingKey() (plonk.ProvingKey, error) {
 	return pk, nil
 }
 
-func loadR1CS() constraint.ConstraintSystem {
+func loadR1CS(dataDir string) constraint.ConstraintSystem {
 	r1cs := plonk.NewCS(ecc.BN254)
-	r1csFile, err := os.Open("data/r1cs")
+	r1csFile, err := os.Open(dataFile(dataDir, "r1cs"))
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -326,9 +337,9 @@ func loadR1CS() constraint.ConstraintSystem {
 	return r1cs
 }
 
-func loadSRS() kzg.SRS {
+func loadSRS(dataDir string) kzg.SRS {
 	fmt.Println("Running circuit setup")
-	fileName := "data/srs_setup"
+	fileName := dataFile(dataDir, "srs_setup")
 	if _, err := os.Stat(fileName); os.IsNotExist(err) {
 		trusted_setup.DownloadAndSaveAztecIgnitionSrs(174, fileName)
 	}

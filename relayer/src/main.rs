@@ -37,7 +37,7 @@ use std::{
     future::Future,
     io::Read as _,
     net::TcpListener,
-    path::Path,
+    path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -182,6 +182,7 @@ async fn run() -> AnyResult<()> {
                 genesis_config,
                 block_hash,
                 count_thread,
+                PathBuf::from("data"),
                 Some(gear_api.produce_finality_proof(&justification).await?),
             )
             .await?;
@@ -891,6 +892,7 @@ async fn start_gear_eth_core_relayer(
             api_provider.connection(),
             config.options.genesis_config,
             config.options.count_thread,
+            config.options.gnark_data_path.clone(),
         );
         merkle_roots::Relayer::new_with_prover_io(
             api_provider.connection(),

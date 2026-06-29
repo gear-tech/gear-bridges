@@ -19,6 +19,7 @@ const DEFAULT_PROMETHEUS_ENDPOINT: &str = "0.0.0.0:9090";
 const DEFAULT_RELAYER_ID: &str = "default";
 const DEFAULT_FILE_SYSTEM_PROOF_STORAGE: &str = "./proof_storage";
 const DEFAULT_GEAR_PROOF_STORAGE_CONFIG: &str = "./onchain_proof_storage_data";
+const DEFAULT_GNARK_DATA_PATH: &str = "data";
 
 #[derive(Clone)]
 pub struct EffectiveConfig {
@@ -137,6 +138,7 @@ impl EffectiveConfig {
             spike_threshold: args.spike_threshold,
             save_interval: args.save_interval,
             check_interval: args.check_interval,
+            gnark_data_path: PathBuf::from(DEFAULT_GNARK_DATA_PATH),
             authority_set_hash,
             authority_set_id,
         })?;
@@ -208,6 +210,8 @@ struct RawRelayerConfig {
     storage: RawStorageConfig,
     proof_storage: RawProofStorageConfig,
     #[serde(default)]
+    gnark: RawGnarkConfig,
+    #[serde(default)]
     options: RawOptionsConfig,
 }
 
@@ -256,6 +260,20 @@ enum RawProofStorageConfig {
         gear_fee_payer: String,
         config_dir: PathBuf,
     },
+}
+
+#[derive(Deserialize)]
+struct RawGnarkConfig {
+    #[serde(default = "default_gnark_data_path")]
+    data_path: PathBuf,
+}
+
+impl Default for RawGnarkConfig {
+    fn default() -> Self {
+        Self {
+            data_path: PathBuf::from(DEFAULT_GNARK_DATA_PATH),
+        }
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -317,6 +335,7 @@ impl RawConfig {
                 .with_context(|| format!("relayer {id}: http.address is invalid"))?;
             validate_non_empty(&relayer.http.token, &id, "http.token")?;
             validate_block_storage_path(&relayer.storage.block_storage, &id)?;
+            validate_non_empty_path(&relayer.gnark.data_path, &id, "gnark.data_path")?;
 
             let thread_count = match relayer.options.thread_count {
                 Some(raw) => Some(parse_thread_count(raw, &id)?).flatten(),
@@ -408,6 +427,7 @@ impl RawConfig {
                 spike_threshold: relayer.options.spike_threshold.unwrap_or(8),
                 save_interval,
                 check_interval,
+                gnark_data_path: relayer.gnark.data_path.clone(),
                 authority_set_hash: &relayer.genesis.authority_set_hash,
                 authority_set_id: relayer.genesis.authority_set_id,
             })?;
@@ -465,6 +485,7 @@ struct OptionSource<'a> {
     spike_threshold: usize,
     save_interval: Duration,
     check_interval: Duration,
+    gnark_data_path: PathBuf,
     authority_set_hash: &'a str,
     authority_set_id: u64,
 }
@@ -541,6 +562,7 @@ fn build_options(source: OptionSource<'_>) -> anyhow::Result<MerkleRootRelayerOp
         bridging_payment_address,
         critical_threshold,
         startup_sync_strategy,
+        gnark_data_path: source.gnark_data_path,
     })
 }
 
@@ -710,6 +732,10 @@ fn default_max_reconnect_attempts() -> u8 {
     3
 }
 
+fn default_gnark_data_path() -> PathBuf {
+    PathBuf::from(DEFAULT_GNARK_DATA_PATH)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +776,9 @@ block_storage = "/tmp/mainnet-blocks.json"
 [relayers.mainnet.proof_storage]
 kind = "filesystem"
 filesystem_path = "/tmp/mainnet-proofs"
+
+[relayers.mainnet.gnark]
+data_path = "/tmp/mainnet-gnark"
 
 [relayers.mainnet.options]
 confirmations_merkle_root = 8
@@ -803,6 +832,9 @@ block_storage = "{block_storage}"
 [relayers.testnet.proof_storage]
 kind = "filesystem"
 filesystem_path = "{proof_storage}"
+
+[relayers.testnet.gnark]
+data_path = "/tmp/testnet-gnark"
 "#,
             "44".repeat(32),
             "55".repeat(32),
@@ -820,7 +852,36 @@ filesystem_path = "{proof_storage}"
         assert_eq!(relayer.gear.endpoint, "wss://gear.example");
         assert_eq!(relayer.gear.max_reconnect_attempts, 4);
         assert_eq!(relayer.ethereum.max_retries, Some(5));
+        assert_eq!(
+            relayer.options.gnark_data_path,
+            PathBuf::from("/tmp/mainnet-gnark")
+        );
         assert_eq!(relayer.options.count_thread, None);
+    }
+
+    #[test]
+    fn defaults_gnark_data_path_to_data() {
+        let config = valid_config().replace(
+            "\n[relayers.mainnet.gnark]\ndata_path = \"/tmp/mainnet-gnark\"\n",
+            "\n",
+        );
+
+        let config = EffectiveConfig::from_toml_str(&config).unwrap();
+
+        assert_eq!(
+            config.relayers[0].options.gnark_data_path,
+            PathBuf::from("data")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_gnark_data_path() {
+        let config =
+            valid_config().replace("data_path = \"/tmp/mainnet-gnark\"", "data_path = \"\"");
+
+        let err = config_error(&config);
+
+        assert!(err.contains("gnark.data_path"));
     }
 
     #[test]

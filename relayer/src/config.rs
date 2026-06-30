@@ -542,6 +542,7 @@ fn build_options(source: OptionSource<'_>) -> anyhow::Result<MerkleRootRelayerOp
         .transpose()?;
 
     Ok(MerkleRootRelayerOptions {
+        relayer_id: source.relayer_id.to_string(),
         spike_config: SpikeConfig {
             timeout: source.spike_timeout,
             priority_timeout: source.priority_spike_timeout,
@@ -848,6 +849,7 @@ data_path = "/tmp/testnet-gnark"
         assert_eq!(config.relayers.len(), 1);
         let relayer = &config.relayers[0];
         assert_eq!(relayer.id, "mainnet");
+        assert_eq!(relayer.options.relayer_id, "mainnet");
         assert_eq!(relayer.priority, 100);
         assert_eq!(relayer.gear.endpoint, "wss://gear.example");
         assert_eq!(relayer.gear.max_reconnect_attempts, 4);
@@ -895,8 +897,10 @@ data_path = "/tmp/testnet-gnark"
         let config = EffectiveConfig::from_toml_str(&config).unwrap();
         assert_eq!(config.relayers.len(), 2);
         assert_eq!(config.relayers[0].id, "mainnet");
+        assert_eq!(config.relayers[0].options.relayer_id, "mainnet");
         assert_eq!(config.relayers[0].priority, 100);
         assert_eq!(config.relayers[1].id, "testnet");
+        assert_eq!(config.relayers[1].options.relayer_id, "testnet");
         assert_eq!(config.relayers[1].priority, 50);
     }
 

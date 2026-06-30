@@ -73,6 +73,7 @@ pub struct AuthoritySetSync {
     genesis_config: GenesisConfig,
 
     count_thread: Option<usize>,
+    relayer_id: String,
 
     metrics: Metrics,
 }
@@ -92,12 +93,14 @@ impl AuthoritySetSync {
         genesis_config: GenesisConfig,
 
         count_thread: Option<usize>,
+        relayer_id: String,
     ) -> Self {
         Self {
             api_provider,
             proof_storage,
             genesis_config,
             count_thread,
+            relayer_id,
 
             metrics: Metrics::new(),
         }
@@ -111,22 +114,29 @@ impl AuthoritySetSync {
 
         tokio::task::spawn_blocking(move || {
             block_on(async move {
+                let relayer_id = self.relayer_id.clone();
                 loop {
                     if let Err(err) = self.process(&mut blocks, &tx, &mut req_rx).await {
-                        log::error!("Authority set sync task failed: {err}");
+                        log::error!(
+                            "Authority set sync for relayer {relayer_id} task failed: {err}"
+                        );
 
                         match self.api_provider.reconnect().await {
                             Ok(_) => {
-                                log::info!("Reconnected to Gear API, resuming authority set sync");
+                                log::info!(
+                                    "Authority set sync for relayer {relayer_id}: reconnected to Gear API, resuming"
+                                );
                                 continue;
                             }
                             Err(err) => {
-                                log::error!("Failed to reconnect to Gear API: {err}");
+                                log::error!(
+                                    "Authority set sync for relayer {relayer_id}: failed to reconnect to Gear API: {err}"
+                                );
                                 return;
                             }
                         }
                     } else {
-                        log::info!("Authority set sync task terminated");
+                        log::info!("Authority set sync for relayer {relayer_id} task terminated");
                         break;
                     }
                 }
@@ -147,16 +157,22 @@ impl AuthoritySetSync {
                 req = force_sync.recv() => {
                     match req {
                         Some(Request::ForceSync(block)) => {
-                            log::info!("Force syncing authority set for block #{}", block.number());
+                            log::info!("Authority set sync for relayer {}: force syncing authority set for block #{}", self.relayer_id, block.number());
                             let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
                                 return Ok(());
                             };
                         }
                         Some(Request::Initialize) => {
-                            log::info!("Initializing authority set sync");
+                            log::info!(
+                                "Authority set sync for relayer {}: initializing",
+                                self.relayer_id
+                            );
                             let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
                             if latest_proven_authority_set_id.is_none() {
-                                log::info!("No authority set found in proof storage, syncing from genesis");
+                                log::info!(
+                                    "Authority set sync for relayer {}: no authority set found in proof storage, syncing from genesis",
+                                    self.relayer_id
+                                );
                                 let genesis_authority_set_id = self.genesis_config.authority_set_id;
                                 let block = rpc::retry_gear(
                                     &mut self.api_provider,
@@ -175,11 +191,17 @@ impl AuthoritySetSync {
                                     return Ok(());
                                 };
                             } else {
-                                log::info!("Authority set already initialized in proof storage");
+                                log::info!(
+                                    "Authority set sync for relayer {}: authority set already initialized in proof storage",
+                                    self.relayer_id
+                                );
                             }
                         }
                         None => {
-                            log::warn!("Force sync channel closed, exiting");
+                            log::warn!(
+                                "Authority set sync for relayer {}: force sync channel closed, exiting",
+                                self.relayer_id
+                            );
                             return Ok(());
                         }
                     }
@@ -199,13 +221,17 @@ impl AuthoritySetSync {
 
                         Err(RecvError::Lagged(n)) => {
                             log::error!(
-                                "Gear block listener lagged behind {n} blocks, skipping some blocks"
+                                "Authority set sync for relayer {}: Gear block listener lagged behind {n} blocks, skipping some blocks",
+                                self.relayer_id
                             );
                             continue;
                         }
 
                         Err(RecvError::Closed) => {
-                            log::warn!("Gear block listener connection closed, exiting");
+                            log::warn!(
+                                "Authority set sync for relayer {}: Gear block listener connection closed, exiting",
+                                self.relayer_id
+                            );
                             return Ok(());
                         }
                     }
@@ -224,25 +250,33 @@ impl AuthoritySetSync {
             self.sync_authority_set(initial_block, responses).await?;
         if sync_steps == 0 {
             log::info!(
-                "Authority set #{authority_set_id} is already in sync at block #{}",
+                "Authority set sync for relayer {}: authority set #{authority_set_id} is already in sync at block #{}",
+                self.relayer_id,
                 initial_block.number()
             );
             return Ok(Some(authority_set_id));
         }
 
-        log::info!("Syncing authority set #{authority_set_id}");
+        log::info!(
+            "Authority set sync for relayer {}: syncing authority set #{authority_set_id}",
+            self.relayer_id
+        );
         loop {
             let (sync_steps, _) = match blocks.recv().await {
                 Ok(block) => self.sync_authority_set(&block, responses).await?,
 
                 Err(RecvError::Closed) => {
-                    log::warn!("Gear block listener connection closed");
+                    log::warn!(
+                        "Authority set sync for relayer {}: Gear block listener connection closed",
+                        self.relayer_id
+                    );
                     return Ok(None);
                 }
 
                 Err(RecvError::Lagged(n)) => {
                     log::error!(
-                        "Gear block listener lagged behind {n} blocks, skipping some blocks"
+                        "Authority set sync for relayer {}: Gear block listener lagged behind {n} blocks, skipping some blocks",
+                        self.relayer_id
                     );
                     continue;
                 }
@@ -251,11 +285,17 @@ impl AuthoritySetSync {
             if sync_steps == 0 {
                 break;
             } else {
-                log::info!("Synced {sync_steps} authority sets");
+                log::info!(
+                    "Authority set sync for relayer {}: synced {sync_steps} authority sets",
+                    self.relayer_id
+                );
             }
         }
 
-        log::info!("Authority set #{authority_set_id} is in sync");
+        log::info!(
+            "Authority set sync for relayer {}: authority set #{authority_set_id} is in sync",
+            self.relayer_id
+        );
 
         if responses
             .send(Response::AuthoritySetSynced(

@@ -79,13 +79,18 @@ impl Relayer {
         storage: Arc<MerkleRootStorage>,
         options: MerkleRootRelayerOptions,
     ) -> Self {
-        let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
+        let block_listener = BlockListener::new_for_relayer(
+            api_provider.clone(),
+            storage.clone(),
+            options.relayer_id.clone(),
+        );
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
             storage.proofs.clone(),
             options.genesis_config,
             options.count_thread,
+            options.relayer_id.clone(),
         )
         .await;
 
@@ -100,6 +105,7 @@ impl Relayer {
             eth_api.clone(),
             storage.clone(),
             options.confirmations,
+            options.relayer_id.clone(),
         );
         let merkle_roots = MerkleRootRelayer::new(api_provider, storage, options).await;
 
@@ -124,13 +130,18 @@ impl Relayer {
         options: MerkleRootRelayerOptions,
         prover: FinalityProverIo,
     ) -> Self {
-        let block_listener = BlockListener::new(api_provider.clone(), storage.clone());
+        let block_listener = BlockListener::new_for_relayer(
+            api_provider.clone(),
+            storage.clone(),
+            options.relayer_id.clone(),
+        );
 
         let authority_set_sync = authority_set_sync::AuthoritySetSync::new(
             api_provider.clone(),
             storage.proofs.clone(),
             options.genesis_config,
             options.count_thread,
+            options.relayer_id.clone(),
         )
         .await;
 
@@ -138,6 +149,7 @@ impl Relayer {
             eth_api.clone(),
             storage.clone(),
             options.confirmations,
+            options.relayer_id.clone(),
         );
         let merkle_roots = MerkleRootRelayer::new(api_provider, storage, options).await;
 
@@ -301,11 +313,14 @@ impl MerkleRootRelayer {
 
         eth_api: EthApi,
     ) -> anyhow::Result<()> {
-        log::info!("Starting relayer");
+        let relayer_id = self.options.relayer_id.clone();
+        log::info!("Starting merkle root relayer {relayer_id}");
         let mut roots = match self.storage.load().await {
             Ok(roots) => roots,
             Err(err) => {
-                log::error!("Failed to load merkle roots from storage: {err}");
+                log::error!(
+                    "Merkle root relayer {relayer_id}: failed to load merkle roots from storage: {err}"
+                );
                 Default::default()
             }
         };
@@ -334,7 +349,9 @@ impl MerkleRootRelayer {
             .await
             .is_none()
         {
-            log::info!("Proof storage is empty, syncing authority sets from genesis");
+            log::info!(
+                "Merkle root relayer {relayer_id}: proof storage is empty, syncing authority sets from genesis"
+            );
             authority_set_sync.initialize();
         }
 
@@ -363,7 +380,7 @@ impl MerkleRootRelayer {
                 // most likely will need to wait for era sealing rather than authority set sync
                 MerkleRootStatus::WaitForAuthoritySetSync(id, _) => {
                     log::info!(
-                        "Merkle root {hash} for block #{block_number} is waiting for authority set sync with id {id}"
+                        "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} is waiting for authority set sync with id {id}"
                     );
 
                     let block = gear_api.get_block_at(block_hash).await?;
@@ -387,12 +404,14 @@ impl MerkleRootRelayer {
                                 true,
                                 merkle_root.block_inclusion_proof.clone(),
                             ) {
-                                log::error!("Prover connection closed, exiting...");
+                                log::error!(
+                                    "Merkle root relayer {relayer_id}: prover connection closed, exiting..."
+                                );
                                 return Ok(());
                             }
                         }
                         Err(_) => {
-                            log::warn!("Authority set proof for #{id} not found, waiting for authority set sync");
+                            log::warn!("Merkle root relayer {relayer_id}: authority set proof for #{id} not found, waiting for authority set sync");
 
                             reinstate(MerkleRootStatus::WaitForAuthoritySetSync(
                                 *id,
@@ -430,7 +449,7 @@ impl MerkleRootRelayer {
                     reinstate(MerkleRootStatus::GenerateProof);
 
                     log::info!(
-                        "Merkle root {hash} for block #{block_number} is waiting for proof generation"
+                        "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} is waiting for proof generation"
                     );
 
                     // if merkle root was saved in `generate proof` phase, it means
@@ -454,14 +473,16 @@ impl MerkleRootRelayer {
                         true,
                         merkle_root.block_inclusion_proof.clone(),
                     ) {
-                        log::error!("Prover connection closed, exiting...");
+                        log::error!(
+                            "Merkle root relayer {relayer_id}: prover connection closed, exiting..."
+                        );
                         return Ok(());
                     }
                 }
 
                 MerkleRootStatus::SubmitProof => {
                     log::info!(
-                        "Merkle root {hash} for block #{block_number} is waiting for proof submission"
+                        "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} is waiting for proof submission"
                     );
                     let proof = merkle_root
                         .proof
@@ -471,7 +492,9 @@ impl MerkleRootRelayer {
                     reinstate(MerkleRootStatus::SubmitProof);
 
                     if !submitter.submit_merkle_root(block_number, hash, proof) {
-                        log::error!("Proof submitter connection closed, exiting");
+                        log::error!(
+                            "Merkle root relayer {relayer_id}: proof submitter connection closed, exiting"
+                        );
                         return Ok(());
                     }
                 }
@@ -479,13 +502,17 @@ impl MerkleRootRelayer {
                 MerkleRootStatus::Failed(err) => {
                     reinstate(MerkleRootStatus::Failed(err.clone()));
 
-                    log::error!("Merkle root {hash} for block #{block_number} failed: {err}");
+                    log::error!(
+                        "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} failed: {err}"
+                    );
                 }
 
                 MerkleRootStatus::Finalized => {
                     reinstate(MerkleRootStatus::Finalized);
 
-                    log::info!("Merkle root {hash} for block #{block_number} is finalized");
+                    log::info!(
+                        "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} is finalized"
+                    );
                 }
             }
         }
@@ -503,11 +530,13 @@ impl MerkleRootRelayer {
             .block_hash_to_number(last_block_hash)
             .await?;
 
-        log::info!("Latest finalized block is #{last_block}, max block number in Ethereum MessageQueue contract is #{max_block_number} (MAX_BLOCK_DISTANCE={max_block_distance})");
+        log::info!("Merkle root relayer {relayer_id}: latest finalized block is #{last_block}, max block number in Ethereum MessageQueue contract is #{max_block_number} (MAX_BLOCK_DISTANCE={max_block_distance})");
         if let Some(max_stored) = max_block_number_in_storage {
-            log::info!("Max finalized merkle root in storage is at block #{max_stored}");
+            log::info!(
+                "Merkle root relayer {relayer_id}: max finalized merkle root in storage is at block #{max_stored}"
+            );
         } else {
-            log::info!("No finalized merkle roots in storage");
+            log::info!("Merkle root relayer {relayer_id}: no finalized merkle roots in storage");
         }
         // set last submitted block to the max_block_number in storage OR to max_block_number from MQ contract
         // in order to trigger catch-up logic in `run_inner` properly.
@@ -515,18 +544,23 @@ impl MerkleRootRelayer {
 
         match &self.options.startup_sync_strategy {
             StartupSyncStrategy::SkipCatchUp => {
-                log::info!("Startup sync strategy: skip catch-up");
+                log::info!(
+                    "Merkle root relayer {relayer_id}: startup sync strategy: skip catch-up"
+                );
             }
 
             StartupSyncStrategy::Blocks(blocks) => {
                 let mut blocks = blocks.clone();
                 blocks.sort_unstable();
                 blocks.dedup();
-                log::info!("Startup sync strategy: blocks ({} block(s))", blocks.len());
+                log::info!(
+                    "Merkle root relayer {relayer_id}: startup sync strategy: blocks ({} block(s))",
+                    blocks.len()
+                );
                 for block_number in blocks {
                     if block_number > last_block {
                         log::warn!(
-                            "Skipping startup block #{block_number} because it is higher than latest finalized block #{last_block}"
+                            "Merkle root relayer {relayer_id}: skipping startup block #{block_number} because it is higher than latest finalized block #{last_block}"
                         );
                         continue;
                     }
@@ -560,21 +594,25 @@ impl MerkleRootRelayer {
 
                             // Ensure we don't start after the last block
                             let start_block = if aligned_start > last_block {
-                                log::info!("Aligned start block #{aligned_start} is after last block #{last_block}, processing last block only");
+                                log::info!("Merkle root relayer {relayer_id}: aligned start block #{aligned_start} is after last block #{last_block}, processing last block only");
                                 last_block
                             } else {
                                 log::info!(
-                                "Resuming merkle root processing from block #{aligned_start} to catch up"
+                                "Merkle root relayer {relayer_id}: resuming merkle root processing from block #{aligned_start} to catch up"
                             );
                                 aligned_start
                             };
 
                             let mut block_number = start_block;
-                            log::info!("Processing every {step}th block to catch up");
+                            log::info!(
+                                "Merkle root relayer {relayer_id}: processing every {step}th block to catch up"
+                            );
 
                             // If we're starting at last_block, process it and finish
                             if start_block == last_block {
-                                log::info!("Processing last block #{last_block}");
+                                log::info!(
+                                    "Merkle root relayer {relayer_id}: processing last block #{last_block}"
+                                );
                                 let block = gear_api.get_block_at(last_block_hash).await?;
                                 let block = GearBlock::from_subxt_block(&gear_api, block).await?;
                                 self.try_proof_merkle_root(
@@ -588,7 +626,9 @@ impl MerkleRootRelayer {
                                 .await?;
                             } else {
                                 loop {
-                                    log::info!("Processing block #{block_number}");
+                                    log::info!(
+                                        "Merkle root relayer {relayer_id}: processing block #{block_number}"
+                                    );
                                     let block_hash =
                                         gear_api.block_number_to_hash(block_number).await?;
                                     let block = gear_api.get_block_at(block_hash).await?;
@@ -607,7 +647,7 @@ impl MerkleRootRelayer {
 
                                     block_number += step;
                                     if block_number >= last_block {
-                                        log::info!("Reached the latest finalized block, generating merkle-root for it: #{last_block}");
+                                        log::info!("Merkle root relayer {relayer_id}: reached the latest finalized block, generating merkle-root for it: #{last_block}");
                                         let block = gear_api.get_block_at(last_block_hash).await?;
                                         let block =
                                             GearBlock::from_subxt_block(&gear_api, block).await?;
@@ -628,7 +668,7 @@ impl MerkleRootRelayer {
                             let mut target_block = max_block_number.saturating_sub(300);
                             let step = timeout;
                             log::info!(
-                                "No finalized merkle roots in storage, starting from #{target_block}"
+                                "Merkle root relayer {relayer_id}: no finalized merkle roots in storage, starting from #{target_block}"
                             );
                             loop {
                                 // If there are no finalized merkle roots in storage, we need to start from
@@ -649,7 +689,7 @@ impl MerkleRootRelayer {
                                 .await?;
                                 target_block += step;
                                 if target_block >= last_block {
-                                    log::info!("Reached the latest finalized block, generating merkle-root for it: #{last_block}");
+                                    log::info!("Merkle root relayer {relayer_id}: reached the latest finalized block, generating merkle-root for it: #{last_block}");
                                     let block = gear_api.get_block_at(last_block_hash).await?;
                                     let block =
                                         GearBlock::from_subxt_block(&gear_api, block).await?;
@@ -673,7 +713,7 @@ impl MerkleRootRelayer {
                     let authority_set_eth = client.authority_set_id(max_block_hash).await?;
                     let latest_authority_set_id = client.authority_set_id(last_block_hash).await?;
                     if authority_set_eth < latest_authority_set_id {
-                        log::info!("Syncing authority sets from id #{authority_set_eth} to #{latest_authority_set_id}");
+                        log::info!("Merkle root relayer {relayer_id}: syncing authority sets from id #{authority_set_eth} to #{latest_authority_set_id}");
                         for id in authority_set_eth..=latest_authority_set_id {
                             let block_hash = client.search_for_authority_set_block(id).await?;
                             let block = client.get_block_at(block_hash).await?;
@@ -703,10 +743,12 @@ impl MerkleRootRelayer {
             )
             .await
         {
-            log::error!("Merkle root relayer encountered an error: {err}");
+            log::error!("Merkle root relayer {relayer_id} encountered an error: {err}");
             Err(err)
         } else {
-            log::warn!("Gear block listener connection closed, exiting");
+            log::warn!(
+                "Merkle root relayer {relayer_id}: Gear block listener connection closed, exiting"
+            );
             Ok(())
         }
     }
@@ -726,14 +768,20 @@ impl MerkleRootRelayer {
                 .await;
 
             if let Err(err) = self.storage.save(&self.roots).await {
-                log::error!("Failed to save block state: {err:?}");
+                log::error!(
+                    "Merkle root relayer {}: failed to save block state: {err:?}",
+                    self.options.relayer_id
+                );
             }
 
             match result {
                 Ok(true) => continue,
                 Ok(false) => return Ok(()),
                 Err(err) => {
-                    log::error!("Error processing blocks: {err}");
+                    log::error!(
+                        "Merkle root relayer {}: error processing blocks: {err}",
+                        self.options.relayer_id
+                    );
                     return Err(err);
                 }
             }
@@ -754,7 +802,10 @@ impl MerkleRootRelayer {
             _ = self.save_interval.tick() => {
                 log::trace!("60 seconds passed, saving current state");
                 if let Err(err) = self.storage.save(&self.roots).await {
-                    log::error!("Failed to save block state: {err:?}");
+                    log::error!(
+                        "Merkle root relayer {}: failed to save block state: {err:?}",
+                        self.options.relayer_id
+                    );
                 }
             }
 
@@ -792,7 +843,7 @@ impl MerkleRootRelayer {
                     if batch_size == 0 {
                         return Ok(true);
                     }
-                    log::info!("Triggering proof generation. Batch size: {batch_size}, Reason: Spike={is_spike}, Timeout={is_timeout}");
+                    log::info!("Merkle root relayer {}: triggering proof generation. Batch size: {batch_size}, Reason: Spike={is_spike}, Timeout={is_timeout}", self.options.relayer_id);
                     // do not group blocks by authority set id, prover will do this for us.
                     for pending in self.merkle_root_batch.drain(..) {
                         let merkle_root = &self.roots[&(pending.block_number, pending.merkle_root)];
@@ -806,7 +857,10 @@ impl MerkleRootRelayer {
                             true,
                             merkle_root.block_inclusion_proof.clone(),
                         ) {
-                            log::warn!("Prover connection closed, exiting");
+                            log::warn!(
+                                "Merkle root relayer {}: prover connection closed, exiting",
+                                self.options.relayer_id
+                            );
                             return Ok(false);
                         }
                     }
@@ -832,7 +886,7 @@ impl MerkleRootRelayer {
                                             block_hash: root.block_hash,
                                             merkle_root,
                                         }) else {
-                                            log::error!("HTTP response send failed");
+                                            log::error!("Merkle root relayer {}: HTTP response send failed", self.options.relayer_id);
                                             return Ok(false);
                                         };
                                         return Ok(true);
@@ -853,13 +907,13 @@ impl MerkleRootRelayer {
 
                                     Ok(None) => {
                                         let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
-                                            log::error!("HTTP response send failed");
+                                            log::error!("Merkle root relayer {}: HTTP response send failed", self.options.relayer_id);
                                             return Ok(false);
                                         };
                                     }
                                     Err(err) => {
                                         let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
-                                            log::error!("HTTP response send failed");
+                                            log::error!("Merkle root relayer {}: HTTP response send failed", self.options.relayer_id);
                                             return Ok(false);
                                         };
                                         return Err(err);
@@ -871,7 +925,10 @@ impl MerkleRootRelayer {
 
 
                     None => {
-                        log::error!("Failed to receive HTTP request");
+                        log::error!(
+                            "Merkle root relayer {}: failed to receive HTTP request",
+                            self.options.relayer_id
+                        );
                         return Ok(false);
                     }
                 }
@@ -888,7 +945,7 @@ impl MerkleRootRelayer {
                             if let CriticalThreshold::Timeout(threshold) = self.options.critical_threshold
                             {
                                 if last_submitted_block + threshold <= number {
-                                    log::warn!("Last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation");
+                                    log::warn!("Merkle root relayer {}: last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation", self.options.relayer_id);
                                     force = ForceGeneration::Yes;
                                     batch = Batch::No;
                                 }
@@ -900,7 +957,7 @@ impl MerkleRootRelayer {
                             for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
                                 let pblock = self.api_provider.client().get_block_at(pblock).await?;
                                 let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
-                                log::info!("Priority bridging requested at block #{}, generating proof for merkle-root at block #{}", block.number(), pblock.number());
+                                log::info!("Merkle root relayer {}: priority bridging requested at block #{}, generating proof for merkle-root at block #{}", self.options.relayer_id, block.number(), pblock.number());
 
                                 self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes).await?;
                             }
@@ -910,12 +967,18 @@ impl MerkleRootRelayer {
                     }
 
                     Err(RecvError::Lagged(n)) => {
-                        log::warn!("Merkle root relayer lagged behind {n} blocks");
+                        log::warn!(
+                            "Merkle root relayer {} lagged behind {n} blocks",
+                            self.options.relayer_id
+                        );
                         return Ok(true);
                     }
 
                     Err(RecvError::Closed) => {
-                        log::warn!("Block listener connection closed, exiting");
+                        log::warn!(
+                            "Merkle root relayer {}: block listener connection closed, exiting",
+                            self.options.relayer_id
+                        );
                         return Ok(false);
                     }
                 }
@@ -923,7 +986,10 @@ impl MerkleRootRelayer {
 
             response = prover.recv() => {
                 let Some(response) = response else {
-                    log::warn!("Finality prover connection closed, exiting");
+                    log::warn!(
+                        "Merkle root relayer {}: finality prover connection closed, exiting",
+                        self.options.relayer_id
+                    );
                     return Ok(false);
                 };
 
@@ -934,7 +1000,9 @@ impl MerkleRootRelayer {
                         proof,
                     } => {
                         log::info!(
-                            "Finality proof for block #{block_number} with merkle root {merkle_root} received");
+                            "Merkle root relayer {}: finality proof for block #{block_number} with merkle root {merkle_root} received",
+                            self.options.relayer_id
+                        );
 
                         self.roots.entry((block_number, merkle_root))
                             .and_modify(|merkle_root_entry| {
@@ -948,7 +1016,7 @@ impl MerkleRootRelayer {
                                         block_hash: merkle_root_entry.block_hash,
                                         merkle_root
                                     }) else {
-                                        log::error!("RPC response send failed");
+                                        log::error!("Merkle root relayer {}: RPC response send failed", self.options.relayer_id);
                                         continue;
                                     };
                                 }
@@ -956,7 +1024,10 @@ impl MerkleRootRelayer {
 
 
                         if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
-                            log::warn!("Proof submitter connection closed, exiting");
+                            log::warn!(
+                                "Merkle root relayer {}: proof submitter connection closed, exiting",
+                                self.options.relayer_id
+                            );
                             return Ok(false);
                         }
                     }
@@ -967,10 +1038,10 @@ impl MerkleRootRelayer {
                         proof,
                         batch_roots
                     } => {
-                        log::info!("Finality proof for block #{block_number} with merkle root {merkle_root} received (will apply to {} blocks)", batch_roots.len());
+                        log::info!("Merkle root relayer {}: finality proof for block #{block_number} with merkle root {merkle_root} received (will apply to {} blocks)", self.options.relayer_id, batch_roots.len());
 
                         for (block_number, merkle_root) in batch_roots {
-                            log::debug!("Merkle-root {merkle_root} finalized as part of batch for block #{block_number}");
+                            log::debug!("Merkle root relayer {}: merkle-root {merkle_root} finalized as part of batch for block #{block_number}", self.options.relayer_id);
                             self.roots.entry((block_number, merkle_root))
                                 .and_modify(|merkle_root_entry| {
                                     merkle_root_entry.status = MerkleRootStatus::Finalized;
@@ -983,10 +1054,10 @@ impl MerkleRootRelayer {
                                             block_hash: merkle_root_entry.block_hash,
                                             merkle_root,
                                         }) else {
-                                            log::error!("RPC response send failed");
+                                            log::error!("Merkle root relayer {}: RPC response send failed", self.options.relayer_id);
                                             continue;
                                         };
-                                        log::info!("Send HTTP response for merkle root {merkle_root} at block #{block_number}");
+                                        log::info!("Merkle root relayer {}: send HTTP response for merkle root {merkle_root} at block #{block_number}", self.options.relayer_id);
                                     }
                             });
 
@@ -1004,14 +1075,17 @@ impl MerkleRootRelayer {
                                         block_hash: merkle_root_entry.block_hash,
                                         merkle_root,
                                     }) else {
-                                        log::error!("RPC response send failed");
+                                        log::error!("Merkle root relayer {}: RPC response send failed", self.options.relayer_id);
                                         continue;
                                     };
                                 }
                             });
 
                         if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
-                            log::warn!("Proof submitter connection closed, exiting");
+                            log::warn!(
+                                "Merkle root relayer {}: proof submitter connection closed, exiting",
+                                self.options.relayer_id
+                            );
                             return Ok(false);
                         }
                     }
@@ -1022,7 +1096,10 @@ impl MerkleRootRelayer {
 
             response = authority_set_sync.recv() => {
                 let Some(response) = response else {
-                    log::warn!("Authority set sync connection closed, exiting");
+                    log::warn!(
+                        "Merkle root relayer {}: authority set sync connection closed, exiting",
+                        self.options.relayer_id
+                    );
                     return Ok(false);
                 };
 
@@ -1031,11 +1108,11 @@ impl MerkleRootRelayer {
                         self.storage.authority_set_processed(block).await;
 
                         let Some(mut to_submit) = self.waiting_for_authority_set_sync.remove(&id) else {
-                            log::warn!("No blocks to sync for authority set #{id}");
+                            log::warn!("Merkle root relayer {}: no blocks to sync for authority set #{id}", self.options.relayer_id);
                             return Ok(true)
                         };
 
-                        log::info!("Authority set #{id} is synced, submitting {} blocks", to_submit.len());
+                        log::info!("Merkle root relayer {}: authority set #{id} is synced, submitting {} blocks", self.options.relayer_id, to_submit.len());
                         while let Some(block) = to_submit.pop() {
                             self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::Yes, Priority::No, ForceGeneration::Yes).await?;
                         }
@@ -1044,7 +1121,7 @@ impl MerkleRootRelayer {
                             let block_hash = client.search_for_authority_set_block(id).await?;
                             let block = client.get_block_at(block_hash).await?;
                             let block = GearBlock::from_subxt_block(&client, block).await?;
-                            log::info!("Critical threshold is set to AuthoritySetChange, forcing proof at block #{}", block.number());
+                            log::info!("Merkle root relayer {}: critical threshold is set to AuthoritySetChange, forcing proof at block #{}", self.options.relayer_id, block.number());
                             self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::No, ForceGeneration::Yes).await?;
 
                         }
@@ -1054,7 +1131,10 @@ impl MerkleRootRelayer {
 
             response = submitter.recv() => {
                 let Some(response) = response else {
-                    log::warn!("Proof submitter connection closed, exiting");
+                    log::warn!(
+                        "Merkle root relayer {}: proof submitter connection closed, exiting",
+                        self.options.relayer_id
+                    );
                     return Ok(false);
                 };
 
@@ -1067,7 +1147,8 @@ impl MerkleRootRelayer {
     async fn finalize_merkle_root(&mut self, response: submitter::Response) -> anyhow::Result<()> {
         if let Some(era) = response.era {
             log::info!(
-                "Era #{} merkle root {} for block #{} is finalized with status: {:?}",
+                "Merkle root relayer {}: era #{} merkle root {} for block #{} is finalized with status: {:?}",
+                self.options.relayer_id,
                 era,
                 response.merkle_root,
                 response.merkle_root_block,
@@ -1086,7 +1167,8 @@ impl MerkleRootRelayer {
                     };
                     merkle_root.status = MerkleRootStatus::Finalized;
                     log::info!(
-                        "Merkle root {} for block #{} is finalized",
+                        "Merkle root relayer {}: merkle root {} for block #{} is finalized",
+                        self.options.relayer_id,
                         response.merkle_root,
                         response.merkle_root_block
                     );
@@ -1102,7 +1184,10 @@ impl MerkleRootRelayer {
                             block_hash: merkle_root.block_hash,
                             merkle_root: response.merkle_root,
                         }) else {
-                            log::error!("HTTP response send failed");
+                            log::error!(
+                                "Merkle root relayer {}: HTTP response send failed",
+                                self.options.relayer_id
+                            );
                             return Err(anyhow::anyhow!("HTTP response send failed"));
                         };
                     }
@@ -1111,7 +1196,8 @@ impl MerkleRootRelayer {
                 submitter::ResponseStatus::Failed(err) => {
                     merkle_root.status = MerkleRootStatus::Failed(err.to_string());
                     log::error!(
-                        "Failed to finalize merkle root {} for block #{}: {}",
+                        "Merkle root relayer {}: failed to finalize merkle root {} for block #{}: {}",
+                        self.options.relayer_id,
                         response.merkle_root,
                         response.merkle_root_block,
                         err
@@ -1120,7 +1206,10 @@ impl MerkleRootRelayer {
                         let Ok(_) = req.send(MerkleRootsResponse::Failed {
                             message: err.clone(),
                         }) else {
-                            log::error!("HTTP response send failed");
+                            log::error!(
+                                "Merkle root relayer {}: HTTP response send failed",
+                                self.options.relayer_id
+                            );
                             return Err(anyhow::anyhow!("HTTP response send failed"));
                         };
                     }
@@ -1128,7 +1217,8 @@ impl MerkleRootRelayer {
             }
         } else {
             log::warn!(
-                "Merkle root {} for block #{} not found in storage",
+                "Merkle root relayer {}: merkle root {} for block #{} not found in storage",
+                self.options.relayer_id,
                 response.merkle_root,
                 response.merkle_root_block
             );
@@ -1191,13 +1281,17 @@ impl MerkleRootRelayer {
             && force_generation == ForceGeneration::No
         {
             log::debug!(
-                "Skipping merkle root {} for block #{} as there were no new messages",
+                "Merkle root relayer {}: skipping merkle root {} for block #{} as there were no new messages",
+                self.options.relayer_id,
                 merkle_root,
                 block.number()
             );
             self.storage.merkle_root_processed(block.number()).await;
             if let Err(err) = self.storage.save(&self.roots).await {
-                log::error!("Failed to save block storage state: {err:?}");
+                log::error!(
+                    "Merkle root relayer {}: failed to save block storage state: {err:?}",
+                    self.options.relayer_id
+                );
             }
             return Ok(None);
         }
@@ -1248,7 +1342,7 @@ impl MerkleRootRelayer {
                         self.first_pending_timestamp = Some(now);
                     }
 
-                    log::info!("Merkle-root #{merkle_root} at block #{block_number} with queue #{queue_id} is enqueued for batch processing");
+                    log::info!("Merkle root relayer {}: merkle-root #{merkle_root} at block #{block_number} with queue #{queue_id} is enqueued for batch processing", self.options.relayer_id);
 
                     self.queued_root_timestamps.push_back(now);
                     self.merkle_root_batch.push(PendingMerkleRoot {
@@ -1262,7 +1356,7 @@ impl MerkleRootRelayer {
                     });
                     return Ok(Some((queue_id, merkle_root)));
                 }
-                log::info!("Proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{block_number} with queue #{queue_id}");
+                log::info!("Merkle root relayer {}: proof for authority set #{signed_by_authority_set_id} is found, generating proof for merkle-root {merkle_root} at block #{block_number} with queue #{queue_id}", self.options.relayer_id);
                 if !prover.prove(
                     block_number,
                     block_hash,
@@ -1273,14 +1367,18 @@ impl MerkleRootRelayer {
                     false,
                     block_inclusion_proof,
                 ) {
-                    log::error!("Prover connection closed, exiting...");
+                    log::error!(
+                        "Merkle root relayer {}: prover connection closed, exiting...",
+                        self.options.relayer_id
+                    );
                     return Err(anyhow::anyhow!("Prover connection closed"));
                 }
             }
 
             Err(ProofStorageError::NotInitialized) | Err(ProofStorageError::NotFound(_)) => {
                 log::info!(
-                    "Delaying proof generation for merkle root {} at block #{} until authority set #{} is synced",
+                    "Merkle root relayer {}: delaying proof generation for merkle root {} at block #{} until authority set #{} is synced",
+                    self.options.relayer_id,
                     merkle_root,
                     block.number(),
                     signed_by_authority_set_id,
@@ -1341,11 +1439,15 @@ impl MerkleRootRelayer {
                 );
 
                 log::error!(
-                    "Failed to get proof for authority set id {signed_by_authority_set_id}: {err}"
+                    "Merkle root relayer {}: failed to get proof for authority set id {signed_by_authority_set_id}: {err}",
+                    self.options.relayer_id
                 );
                 self.storage.merkle_root_processed(block_number).await;
                 if let Err(save_err) = self.storage.save(&self.roots).await {
-                    log::error!("Failed to save block storage state: {save_err:?}");
+                    log::error!(
+                        "Merkle root relayer {}: failed to save block storage state: {save_err:?}",
+                        self.options.relayer_id
+                    );
                 }
                 return Err(err.into());
             }
@@ -1354,7 +1456,10 @@ impl MerkleRootRelayer {
         // Mark root processed only after durable root state exists or the work is queued.
         self.storage.merkle_root_processed(block_number).await;
         if let Err(err) = self.storage.save(&self.roots).await {
-            log::error!("Failed to save block storage state: {err:?}");
+            log::error!(
+                "Merkle root relayer {}: failed to save block storage state: {err:?}",
+                self.options.relayer_id
+            );
         }
 
         Ok(Some((queue_id, merkle_root)))
@@ -1401,6 +1506,7 @@ pub enum MerkleRootStatus {
 
 #[derive(Clone)]
 pub struct MerkleRootRelayerOptions {
+    pub relayer_id: String,
     pub spike_config: SpikeConfig,
     pub check_interval: Duration,
     pub save_interval: Duration,

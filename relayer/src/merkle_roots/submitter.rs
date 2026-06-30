@@ -185,6 +185,7 @@ pub struct MerkleRootSubmitter {
     eth_api: EthApi,
     storage: Arc<MerkleRootStorage>,
     confirmations: u64,
+    relayer_id: String,
     metrics: Metrics,
 }
 
@@ -195,11 +196,17 @@ impl MeteredService for MerkleRootSubmitter {
 }
 
 impl MerkleRootSubmitter {
-    pub fn new(eth_api: EthApi, storage: Arc<MerkleRootStorage>, confirmations: u64) -> Self {
+    pub fn new(
+        eth_api: EthApi,
+        storage: Arc<MerkleRootStorage>,
+        confirmations: u64,
+        relayer_id: String,
+    ) -> Self {
         Self {
             eth_api,
             storage,
             confirmations,
+            relayer_id,
             metrics: Metrics::new(),
         }
     }
@@ -211,6 +218,7 @@ impl MerkleRootSubmitter {
     ) -> anyhow::Result<()> {
         let mut pending_transactions = FuturesUnordered::new();
         loop {
+            let relayer_id = self.relayer_id.as_str();
             let balance = self.eth_api.get_approx_balance().await?;
             self.metrics.fee_payer_balance.set(balance);
             self.metrics
@@ -220,13 +228,15 @@ impl MerkleRootSubmitter {
             tokio::select! {
                 request = proofs.recv() => {
                     let Some(request) = request else {
-                        log::info!("No more proofs to process, exiting");
+                        log::info!(
+                            "Merkle root relayer {relayer_id}: no more proofs to process, exiting"
+                        );
                         return Ok(());
                     };
 
                     if self.storage.is_merkle_root_submitted(request.merkle_root_block, H256::from(request.proof.merkle_root)).await {
                         log::info!(
-                            "Merkle root {} for block #{} is already submitted", H256::from(request.proof.merkle_root), request.merkle_root_block);
+                            "Merkle root relayer {relayer_id}: merkle root {} for block #{} is already submitted", H256::from(request.proof.merkle_root), request.merkle_root_block);
                         if responses.send(Response {
                             era: request.era,
                             merkle_root_block: request.merkle_root_block,
@@ -242,7 +252,10 @@ impl MerkleRootSubmitter {
                     loop {
                     match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
                         Ok(pending_tx) => {
-                            log::info!("Submitted merkle root to Ethereum, tx hash: {}", pending_tx.tx_hash());
+                            log::info!(
+                                "Merkle root relayer {relayer_id}: submitted merkle root to Ethereum, tx hash: {}",
+                                pending_tx.tx_hash()
+                            );
                             self.storage.submitted_merkle_root(request.merkle_root_block, H256::from(request.proof.merkle_root)).await;
                             self.metrics.total_submissions.inc();
                             pending_transactions.push(SubmittedMerkleRoot::new(
@@ -265,7 +278,7 @@ impl MerkleRootSubmitter {
                                 .is_some();
 
                             if root_exists {
-                                log::warn!("Merkle root {} for block #{} is already submitted, contract execution failed: {err:?}", H256::from(request.proof.merkle_root), request.merkle_root_block);
+                                log::warn!("Merkle root relayer {relayer_id}: merkle root {} for block #{} is already submitted, contract execution failed: {err:?}", H256::from(request.proof.merkle_root), request.merkle_root_block);
                                 if responses.send(Response {
                                     era: request.era,
                                     merkle_root_block: request.merkle_root_block,
@@ -277,7 +290,7 @@ impl MerkleRootSubmitter {
                                 };
                                 break;
                             } else {
-                                log::error!("Failed to submit merkle root {}: Error during contract execution: {err:?}", H256::from(request.proof.merkle_root));
+                                log::error!("Merkle root relayer {relayer_id}: failed to submit merkle root {}: Error during contract execution: {err:?}", H256::from(request.proof.merkle_root));
                                 self.metrics.failed_submissions.inc();
                                 self.storage.submission_failed(request.proof.block_number, H256::from(request.proof.merkle_root)).await;
                                 if responses.send(Response {
@@ -296,7 +309,7 @@ impl MerkleRootSubmitter {
 
                         Err(err) if is_recoverable_eth_error(&err) => {
                             log::warn!(
-                                "Recoverable error while submitting merkle root {}: {err}. Reconnecting and retrying",
+                                "Merkle root relayer {relayer_id}: recoverable error while submitting merkle root {}: {err}. Reconnecting and retrying",
                                 H256::from(request.proof.merkle_root)
                             );
                             tokio::time::sleep(BASE_RETRY_DELAY).await;
@@ -306,7 +319,7 @@ impl MerkleRootSubmitter {
 
                         Err(err) => {
 
-                            log::error!("Failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
+                            log::error!("Merkle root relayer {relayer_id}: failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
                             self.metrics.failed_submissions.inc();
                             self.storage.submission_failed(request.proof.block_number, H256::from(request.proof.merkle_root)).await;
                             if responses.send(Response {
@@ -355,7 +368,7 @@ impl MerkleRootSubmitter {
                                     }).is_err() {
                                         return Ok(());
                                     };
-                                    log::info!("Merkle root {} for block #{} is already submitted", submitted.merkle_root, submitted.merkle_root_block);
+                                    log::info!("Merkle root relayer {relayer_id}: merkle root {} for block #{} is already submitted", submitted.merkle_root, submitted.merkle_root_block);
                                     continue;
                                 }
 
@@ -381,7 +394,7 @@ impl MerkleRootSubmitter {
                             };
                             self.metrics.last_submitted_block.set(submitted.merkle_root_block as i64);
                             log::info!(
-                                "Merkle root {} for block #{} submission confirmed after {} confirmations",
+                                "Merkle root relayer {relayer_id}: merkle root {} for block #{} submission confirmed after {} confirmations",
                                 submitted.merkle_root,
                                 submitted.merkle_root_block,
                                 self.confirmations
@@ -405,11 +418,11 @@ impl MerkleRootSubmitter {
                                 }).is_err() {
                                     return Ok(());
                                 };
-                                log::info!("Merkle root {} for block #{} is already submitted", err.merkle_root, err.merkle_root_block);
+                                log::info!("Merkle root relayer {relayer_id}: merkle root {} for block #{} is already submitted", err.merkle_root, err.merkle_root_block);
                                 continue;
                             }
 
-                            log::error!("Failed to submit merkle root {}: {}", err.merkle_root, err.error);
+                            log::error!("Merkle root relayer {relayer_id}: failed to submit merkle root {}: {}", err.merkle_root, err.error);
                             self.metrics.pending_submissions.dec();
                             self.metrics.failed_submissions.inc();
                             self.storage.submission_failed(err.merkle_root_block, H256::from(err.proof.merkle_root)).await;
@@ -462,10 +475,14 @@ async fn task(
                 attempts += 1;
                 let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                 log::error!(
-                    "Merkle root submitter failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
+                    "Merkle root relayer {} submitter failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
+                    this.relayer_id,
                 );
                 if attempts >= MAX_RETRIES {
-                    log::error!("Maximum attempts reached, exiting...");
+                    log::error!(
+                        "Merkle root relayer {} submitter maximum attempts reached, exiting...",
+                        this.relayer_id
+                    );
                     break;
                 }
                 tokio::time::sleep(delay).await;
@@ -473,7 +490,10 @@ async fn task(
                 match this.eth_api.reconnect().await {
                     Ok(eth_api) => this.eth_api = eth_api,
                     Err(e) => {
-                        log::error!("Failed to reconnect to Ethereum API: {e}");
+                        log::error!(
+                            "Merkle root relayer {} submitter failed to reconnect to Ethereum API: {e}",
+                            this.relayer_id
+                        );
                         break;
                     }
                 }

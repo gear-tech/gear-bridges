@@ -91,6 +91,8 @@ impl Relayer {
             options.genesis_config,
             options.count_thread,
             options.relayer_id.clone(),
+            options.priority,
+            options.shared_authority_set_sync.clone(),
         )
         .await;
 
@@ -142,6 +144,8 @@ impl Relayer {
             options.genesis_config,
             options.count_thread,
             options.relayer_id.clone(),
+            options.priority,
+            options.shared_authority_set_sync.clone(),
         )
         .await;
 
@@ -1520,6 +1524,11 @@ pub struct MerkleRootRelayerOptions {
     /// Startup sync strategy for initial catch-up.
     pub startup_sync_strategy: StartupSyncStrategy,
     pub gnark_data_path: PathBuf,
+    /// Relayer priority used by shared workers when multiple relayers run in one process.
+    pub priority: i64,
+    /// When multiple relayers share a process, authority-set proving is serialized through
+    /// this shared worker so only one heavy proving job runs at a time.
+    pub shared_authority_set_sync: Option<Arc<authority_set_sync::SharedAuthoritySetSync>>,
 }
 
 impl MerkleRootRelayerOptions {

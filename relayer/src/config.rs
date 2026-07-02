@@ -122,6 +122,7 @@ impl EffectiveConfig {
 
         let options = build_options(OptionSource {
             relayer_id: DEFAULT_RELAYER_ID,
+            priority: 0,
             confirmations_merkle_root: args.confirmations_merkle_root,
             start_authority_set_id: args.start_authority_set_id,
             bridging_payment_address: args.bridging_payment_address.as_deref(),
@@ -414,6 +415,7 @@ impl RawConfig {
 
             let options = build_options(OptionSource {
                 relayer_id: &id,
+                priority,
                 confirmations_merkle_root: relayer.options.confirmations_merkle_root,
                 start_authority_set_id: relayer.options.start_authority_set_id,
                 bridging_payment_address: relayer.options.bridging_payment_address.as_deref(),
@@ -472,6 +474,7 @@ impl RawConfig {
 
 struct OptionSource<'a> {
     relayer_id: &'a str,
+    priority: i64,
     confirmations_merkle_root: Option<u64>,
     start_authority_set_id: Option<u64>,
     bridging_payment_address: Option<&'a str>,
@@ -543,6 +546,7 @@ fn build_options(source: OptionSource<'_>) -> anyhow::Result<MerkleRootRelayerOp
 
     Ok(MerkleRootRelayerOptions {
         relayer_id: source.relayer_id.to_string(),
+        priority: source.priority,
         spike_config: SpikeConfig {
             timeout: source.spike_timeout,
             priority_timeout: source.priority_spike_timeout,
@@ -564,6 +568,7 @@ fn build_options(source: OptionSource<'_>) -> anyhow::Result<MerkleRootRelayerOp
         critical_threshold,
         startup_sync_strategy,
         gnark_data_path: source.gnark_data_path,
+        shared_authority_set_sync: None,
     })
 }
 

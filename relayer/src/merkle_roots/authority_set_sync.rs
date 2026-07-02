@@ -8,11 +8,16 @@ use futures::executor::block_on;
 use gear_common::api_provider::ApiProviderConnection;
 use prometheus::IntGauge;
 use prover::proving::GenesisConfig;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
-    mpsc::{UnboundedReceiver, UnboundedSender},
+    mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender},
+    oneshot,
 };
+
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct AuthoritySetSyncIo {
@@ -62,6 +67,157 @@ impl_metered_service!(
     }
 );
 
+#[derive(Clone)]
+struct SyncContext {
+    api_provider: ApiProviderConnection,
+    proof_storage: Arc<dyn ProofStorage>,
+    genesis_config: GenesisConfig,
+    count_thread: Option<usize>,
+    metrics: Metrics,
+}
+
+struct SharedSyncRequest {
+    relayer_id: String,
+    priority: i64,
+    sequence: u64,
+    context: SyncContext,
+    block: GearBlock,
+    responses: UnboundedSender<Response>,
+    reply: oneshot::Sender<anyhow::Result<(SyncStepCount, u64)>>,
+}
+
+/// Shared worker that serializes authority-set proving across relayers in one process.
+pub struct SharedAuthoritySetSync {
+    requests: UnboundedSender<SharedSyncRequest>,
+}
+
+impl SharedAuthoritySetSync {
+    pub fn new() -> Arc<Self> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::task::spawn_blocking(move || {
+            block_on(async move {
+                if let Err(err) = process_shared_sync_requests(&mut rx).await {
+                    log::error!("Shared authority set sync worker failed: {err}");
+                } else {
+                    log::info!("Shared authority set sync worker exiting");
+                }
+            })
+        });
+
+        Arc::new(Self { requests: tx })
+    }
+
+    fn create_handle(
+        &self,
+        relayer_id: String,
+        priority: i64,
+        context: SyncContext,
+        responses: UnboundedSender<Response>,
+    ) -> SharedAuthoritySetSyncHandle {
+        SharedAuthoritySetSyncHandle {
+            requests: self.requests.clone(),
+            relayer_id,
+            priority,
+            sequence: Arc::new(AtomicU64::new(0)),
+            context,
+            responses,
+        }
+    }
+}
+
+struct SharedAuthoritySetSyncHandle {
+    requests: UnboundedSender<SharedSyncRequest>,
+    relayer_id: String,
+    priority: i64,
+    sequence: Arc<AtomicU64>,
+    context: SyncContext,
+    responses: UnboundedSender<Response>,
+}
+
+impl SharedAuthoritySetSyncHandle {
+    async fn sync_authority_set(
+        &self,
+        block: &GearBlock,
+    ) -> anyhow::Result<(SyncStepCount, u64)> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        self.requests
+            .send(SharedSyncRequest {
+                relayer_id: self.relayer_id.clone(),
+                priority: self.priority,
+                sequence,
+                context: self.context.clone(),
+                block: block.clone(),
+                responses: self.responses.clone(),
+                reply: reply_tx,
+            })
+            .map_err(|_| anyhow::anyhow!("shared authority set sync worker is not running"))?;
+
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("shared authority set sync worker dropped the request"))?
+    }
+}
+
+async fn process_shared_sync_requests(
+    requests: &mut UnboundedReceiver<SharedSyncRequest>,
+) -> anyhow::Result<()> {
+    const BATCH_SIZE: usize = 4096;
+    let mut pending = Vec::with_capacity(BATCH_SIZE);
+
+    loop {
+        if pending.is_empty() {
+            let Some(request) = requests.recv().await else {
+                log::info!("Shared authority set sync request channel closed, exiting");
+                return Ok(());
+            };
+            pending.push(request);
+        }
+
+        while pending.len() < BATCH_SIZE {
+            match requests.try_recv() {
+                Ok(request) => pending.push(request),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+
+        let Some(index) = select_next_sync_request(&pending) else {
+            continue;
+        };
+        let request = pending.remove(index);
+        let relayer_id = request.relayer_id.clone();
+        log::info!("Shared authority set sync selected relayer {relayer_id} for the next sync job");
+
+        let mut context = request.context.clone();
+        let result = execute_sync_authority_set(
+            &mut context.api_provider,
+            &context.proof_storage,
+            context.genesis_config,
+            context.count_thread,
+            &request.block,
+            &request.responses,
+            &context.metrics,
+        )
+        .await;
+
+        let _ = request.reply.send(result);
+    }
+}
+
+fn select_next_sync_request(pending: &[SharedSyncRequest]) -> Option<usize> {
+    pending
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| {
+            left.priority
+                .cmp(&right.priority)
+                .then_with(|| right.sequence.cmp(&left.sequence))
+        })
+        .map(|(index, _)| index)
+}
+
 /// Authority set sync task which is responsible for synchronizing
 /// authority set in proof-storage and generating new proofs.
 ///
@@ -74,6 +230,8 @@ pub struct AuthoritySetSync {
 
     count_thread: Option<usize>,
     relayer_id: String,
+    priority: i64,
+    shared: Option<Arc<SharedAuthoritySetSync>>,
 
     metrics: Metrics,
 }
@@ -87,13 +245,12 @@ impl MeteredService for AuthoritySetSync {
 impl AuthoritySetSync {
     pub async fn new(
         api_provider: ApiProviderConnection,
-
         proof_storage: Arc<dyn ProofStorage>,
-
         genesis_config: GenesisConfig,
-
         count_thread: Option<usize>,
         relayer_id: String,
+        priority: i64,
+        shared: Option<Arc<SharedAuthoritySetSync>>,
     ) -> Self {
         Self {
             api_provider,
@@ -101,27 +258,54 @@ impl AuthoritySetSync {
             genesis_config,
             count_thread,
             relayer_id,
-
+            priority,
+            shared,
             metrics: Metrics::new(),
         }
     }
 
-    pub fn run(mut self, mut blocks: Receiver<GearBlock>) -> AuthoritySetSyncIo {
+    pub fn run(self, mut blocks: Receiver<GearBlock>) -> AuthoritySetSyncIo {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let (req_tx, mut req_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let io = AuthoritySetSyncIo::new(rx, req_tx);
 
-        tokio::task::spawn_blocking(move || {
-            block_on(async move {
-                let relayer_id = self.relayer_id.clone();
+        if let Some(shared) = self.shared.clone() {
+            let shared_handle = shared.create_handle(
+                self.relayer_id.clone(),
+                self.priority,
+                SyncContext {
+                    api_provider: self.api_provider.clone(),
+                    proof_storage: self.proof_storage.clone(),
+                    genesis_config: self.genesis_config,
+                    count_thread: self.count_thread,
+                    metrics: self.metrics.clone(),
+                },
+                tx.clone(),
+            );
+
+            let relayer_id = self.relayer_id.clone();
+            tokio::spawn(async move {
+                let mut runner = AuthoritySetSyncRunner {
+                    relayer_id: relayer_id.clone(),
+                    api_provider: self.api_provider,
+                    proof_storage: self.proof_storage,
+                    genesis_config: self.genesis_config,
+                    count_thread: self.count_thread,
+                    metrics: self.metrics,
+                    shared_handle: Some(shared_handle),
+                };
+
                 loop {
-                    if let Err(err) = self.process(&mut blocks, &tx, &mut req_rx).await {
+                    if let Err(err) = runner
+                        .process(&mut blocks, &tx, &mut req_rx)
+                        .await
+                    {
                         log::error!(
                             "Authority set sync for relayer {relayer_id} task failed: {err}"
                         );
 
-                        match self.api_provider.reconnect().await {
+                        match runner.api_provider.reconnect().await {
                             Ok(_) => {
                                 log::info!(
                                     "Authority set sync for relayer {relayer_id}: reconnected to Gear API, resuming"
@@ -140,12 +324,70 @@ impl AuthoritySetSync {
                         break;
                     }
                 }
-            })
-        });
+            });
+        } else {
+            tokio::task::spawn_blocking(move || {
+                block_on(async move {
+                    let relayer_id = self.relayer_id.clone();
+                    let mut runner = AuthoritySetSyncRunner {
+                        relayer_id: relayer_id.clone(),
+                        api_provider: self.api_provider,
+                        proof_storage: self.proof_storage,
+                        genesis_config: self.genesis_config,
+                        count_thread: self.count_thread,
+                        metrics: self.metrics,
+                        shared_handle: None,
+                    };
+
+                    loop {
+                        if let Err(err) = runner
+                            .process(&mut blocks, &tx, &mut req_rx)
+                            .await
+                        {
+                            log::error!(
+                                "Authority set sync for relayer {relayer_id} task failed: {err}"
+                            );
+
+                            match runner.api_provider.reconnect().await {
+                                Ok(_) => {
+                                    log::info!(
+                                        "Authority set sync for relayer {relayer_id}: reconnected to Gear API, resuming"
+                                    );
+                                    continue;
+                                }
+                                Err(err) => {
+                                    log::error!(
+                                        "Authority set sync for relayer {relayer_id}: failed to reconnect to Gear API: {err}"
+                                    );
+                                    return;
+                                }
+                            }
+                        } else {
+                            log::info!(
+                                "Authority set sync for relayer {relayer_id} task terminated"
+                            );
+                            break;
+                        }
+                    }
+                })
+            });
+        }
 
         io
     }
+}
 
+struct AuthoritySetSyncRunner {
+    relayer_id: String,
+    api_provider: ApiProviderConnection,
+    proof_storage: Arc<dyn ProofStorage>,
+    genesis_config: GenesisConfig,
+    count_thread: Option<usize>,
+    metrics: Metrics,
+    shared_handle: Option<SharedAuthoritySetSyncHandle>,
+}
+
+impl AuthoritySetSyncRunner {
     async fn process(
         &mut self,
         blocks: &mut Receiver<GearBlock>,
@@ -167,6 +409,7 @@ impl AuthoritySetSync {
                                 "Authority set sync for relayer {}: initializing",
                                 self.relayer_id
                             );
+
                             let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
                             if latest_proven_authority_set_id.is_none() {
                                 log::info!(
@@ -315,51 +558,69 @@ impl AuthoritySetSync {
         block: &GearBlock,
         responses: &UnboundedSender<Response>,
     ) -> anyhow::Result<(SyncStepCount, u64)> {
-        let finalized_head = block.hash();
-        let proof_storage = self.proof_storage.clone();
-        let genesis_config = self.genesis_config;
-        let responses = responses.clone();
-        let count_thread = self.count_thread;
-
-        let (sync_steps, latest_authority_set_id, latest_proven_authority_set_id) =
-            rpc::retry_gear(
-                &mut self.api_provider,
-                "authority set sync",
-                move |gear_api| {
-                    let proof_storage = proof_storage.clone();
-                    let responses = responses.clone();
-                    async move {
-                        let latest_authority_set_id =
-                            gear_api.authority_set_id(finalized_head).await?;
-                        let latest_proven_authority_set_id =
-                            proof_storage.get_latest_authority_set_id().await;
-                        let sync_steps = sync_authority_set_id(
-                            &gear_api,
-                            &proof_storage,
-                            genesis_config,
-                            latest_authority_set_id,
-                            latest_proven_authority_set_id,
-                            &responses,
-                            count_thread,
-                        )
-                        .await?;
-                        Ok::<_, anyhow::Error>((
-                            sync_steps,
-                            latest_authority_set_id,
-                            latest_proven_authority_set_id,
-                        ))
-                    }
-                },
-            )
-            .await?;
-
-        self.metrics
-            .latest_observed_gear_era
-            .set(latest_authority_set_id as i64);
-        if let Some(latest_proven) = latest_proven_authority_set_id {
-            self.metrics.latest_proven_era.set(latest_proven as i64);
+        if let Some(handle) = &self.shared_handle {
+            return handle.sync_authority_set(block).await;
         }
 
-        Ok((sync_steps, latest_authority_set_id))
+        execute_sync_authority_set(
+            &mut self.api_provider,
+            &self.proof_storage,
+            self.genesis_config,
+            self.count_thread,
+            block,
+            responses,
+            &self.metrics,
+        )
+        .await
     }
+}
+
+async fn execute_sync_authority_set(
+    api_provider: &mut ApiProviderConnection,
+    proof_storage: &Arc<dyn ProofStorage>,
+    genesis_config: GenesisConfig,
+    count_thread: Option<usize>,
+    block: &GearBlock,
+    responses: &UnboundedSender<Response>,
+    metrics: &Metrics,
+) -> anyhow::Result<(SyncStepCount, u64)> {
+    let finalized_head = block.hash();
+    let proof_storage = proof_storage.clone();
+    let responses = responses.clone();
+
+    let (sync_steps, latest_authority_set_id, latest_proven_authority_set_id) =
+        rpc::retry_gear(api_provider, "authority set sync", move |gear_api| {
+            let proof_storage = proof_storage.clone();
+            let responses = responses.clone();
+            async move {
+                let latest_authority_set_id = gear_api.authority_set_id(finalized_head).await?;
+                let latest_proven_authority_set_id =
+                    proof_storage.get_latest_authority_set_id().await;
+                let sync_steps = sync_authority_set_id(
+                    &gear_api,
+                    &proof_storage,
+                    genesis_config,
+                    latest_authority_set_id,
+                    latest_proven_authority_set_id,
+                    &responses,
+                    count_thread,
+                )
+                .await?;
+                Ok::<_, anyhow::Error>((
+                    sync_steps,
+                    latest_authority_set_id,
+                    latest_proven_authority_set_id,
+                ))
+            }
+        })
+        .await?;
+
+    metrics
+        .latest_observed_gear_era
+        .set(latest_authority_set_id as i64);
+    if let Some(latest_proven) = latest_proven_authority_set_id {
+        metrics.latest_proven_era.set(latest_proven as i64);
+    }
+
+    Ok((sync_steps, latest_authority_set_id))
 }

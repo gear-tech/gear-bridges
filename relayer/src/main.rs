@@ -24,7 +24,7 @@ use relayer::{
     },
     ethereum_checkpoints, hex_utils,
     kill_switch::KillSwitchRelayer,
-    merkle_roots::{self, prover::SharedFinalityProver},
+    merkle_roots::{self, authority_set_sync::SharedAuthoritySetSync, prover::SharedFinalityProver},
     message_relayer::{self, eth_to_gear, gear_to_eth},
     proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage},
     prover_interface, server,
@@ -725,7 +725,7 @@ struct RunningGearEthCoreRelayer {
 }
 
 async fn run_gear_eth_core_relayers(
-    relayers: Vec<EffectiveRelayerConfig>,
+    mut relayers: Vec<EffectiveRelayerConfig>,
     prometheus_endpoint: String,
 ) -> AnyResult<()> {
     log::info!(
@@ -733,11 +733,20 @@ async fn run_gear_eth_core_relayers(
         relayers.len()
     );
 
+    // Start higher-priority relayers first; authority-set proving is serialized by
+    // SharedAuthoritySetSync so only one heavy proving job runs at a time.
+    relayers.sort_by(|a, b| b.priority.cmp(&a.priority));
+    let shared_authority_set_sync = SharedAuthoritySetSync::new();
+
     let shared_prover = SharedFinalityProver::new();
     let mut metrics = MetricsBuilder::new();
     metrics.register_service_mut(&shared_prover);
 
-    let mut running = start_required_gear_eth_core_relayers(relayers, |relayer| {
+    let mut running = start_required_gear_eth_core_relayers(relayers, |mut relayer| {
+        relayer
+            .options
+            .shared_authority_set_sync
+            .replace(shared_authority_set_sync.clone());
         start_gear_eth_core_relayer(relayer, None, Some(&shared_prover), true)
     })
     .await?;

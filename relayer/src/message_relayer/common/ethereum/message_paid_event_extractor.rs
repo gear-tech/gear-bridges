@@ -70,6 +70,14 @@ impl MessagePaidEventExtractor {
         receiver
     }
 
+    pub fn spawn_into(
+        self,
+        blocks: UnboundedReceiver<EthereumBlockNumber>,
+        sender: UnboundedSender<TxHashWithSlot>,
+    ) {
+        tokio::task::spawn(self::task(self, blocks, sender));
+    }
+
     async fn run_inner(
         &self,
         sender: &UnboundedSender<TxHashWithSlot>,

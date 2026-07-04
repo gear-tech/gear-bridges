@@ -346,17 +346,13 @@ impl MerkleRootRelayer {
         let max_block_number = eth_api.max_block_number().await?;
         let max_block_distance = eth_api.max_block_distance().await?;
 
-        if self
-            .storage
-            .proofs
-            .get_latest_authority_set_id()
-            .await
-            .is_none()
-        {
-            log::info!(
-                "Merkle root relayer {relayer_id}: proof storage is empty, syncing authority sets from genesis"
+        log::info!(
+            "Merkle root relayer {relayer_id}: ensuring authority sets are synced on startup"
+        );
+        if !authority_set_sync.initialize() {
+            log::error!(
+                "Merkle root relayer {relayer_id}: failed to enqueue authority set sync startup job"
             );
-            authority_set_sync.initialize();
         }
 
         let gear_api = self.api_provider.client();
@@ -1403,22 +1399,24 @@ impl MerkleRootRelayer {
                         block_inclusion_proof,
                     });
 
-                let force_sync = self
-                    .storage
-                    .proofs
-                    .get_latest_authority_set_id()
-                    .await
-                    .filter(|latest| signed_by_authority_set_id > *latest)
-                    .is_some();
+                // Enqueue an authority set sync for this id whenever the proof is missing.
+                // `or_insert_with` de-duplicates per id, so this never spams the runner.
+                // We send unconditionally (not only when `signed_by > latest_proven`) so
+                // that block-proof requests are self-sufficient even when proof storage is
+                // empty (`get_latest_authority_set_id() == None`); in that case the
+                // `Request::Initialize`/genesis path is what actually produces the proof,
+                // but the `ForceSync` ensures the runner wakes up and emits
+                // `Response::AuthoritySetSynced` so waiting blocks / parked HTTP requests
+                // are released once the set is available.
+                let force_sync = match self.storage.proofs.get_latest_authority_set_id().await {
+                    Some(latest) => signed_by_authority_set_id > latest,
+                    None => true,
+                };
 
                 self.waiting_for_authority_set_sync
                     .entry(signed_by_authority_set_id)
                     .or_insert_with(|| {
                         if force_sync {
-                            self.last_submitted_block = match self.last_submitted_block {
-                                Some(n) if block.number() > n => Some(block.number()),
-                                _ => Some(block.number()),
-                            };
                             authority_set_sync.send(block.clone());
                         }
                         Vec::new()

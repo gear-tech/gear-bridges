@@ -248,6 +248,16 @@ pub mod web_request {
         pub messages: Vec<Message>,
     }
 
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub struct EthTransaction {
+        pub tx_hash: String,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+    pub struct EthTransactions {
+        pub transactions: Vec<EthTransaction>,
+    }
+
     #[derive(Clone, Debug, Default, Deserialize, Serialize)]
     pub struct MerkleRootBlocks {
         pub blocks: Vec<u32>,

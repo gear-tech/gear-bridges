@@ -4,13 +4,16 @@ use crate::{
     proof_storage::ProofStorage,
     rpc,
 };
-use futures::executor::block_on;
+use futures::{executor::block_on, FutureExt};
 use gear_common::api_provider::ApiProviderConnection;
 use prometheus::IntGauge;
 use prover::proving::GenesisConfig;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    panic::AssertUnwindSafe,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 use tokio::sync::{
     broadcast::{error::RecvError, Receiver},
@@ -97,10 +100,33 @@ impl SharedAuthoritySetSync {
 
         tokio::task::spawn_blocking(move || {
             block_on(async move {
-                if let Err(err) = process_shared_sync_requests(&mut rx).await {
-                    log::error!("Shared authority set sync worker failed: {err}");
-                } else {
-                    log::info!("Shared authority set sync worker exiting");
+                // Supervise the shared worker: if `process_shared_sync_requests` returns
+                // an error or panics, log and restart it with the same receiver instead
+                // of letting the task die. A dead worker otherwise takes down authority
+                // set sync for every relayer until the whole process is restarted.
+                loop {
+                    let outcome = AssertUnwindSafe(process_shared_sync_requests(&mut rx))
+                        .catch_unwind()
+                        .await;
+                    match outcome {
+                        Ok(Ok(())) => {
+                            log::info!("Shared authority set sync worker exiting");
+                            break;
+                        }
+                        Ok(Err(err)) => {
+                            log::error!(
+                                "Shared authority set sync worker failed: {err}; restarting worker"
+                            );
+                            continue;
+                        }
+                        Err(panic_payload) => {
+                            log::error!(
+                                "Shared authority set sync worker panicked: {}; restarting worker",
+                                panic_message(&panic_payload)
+                            );
+                            continue;
+                        }
+                    }
                 }
             })
         });
@@ -136,10 +162,7 @@ struct SharedAuthoritySetSyncHandle {
 }
 
 impl SharedAuthoritySetSyncHandle {
-    async fn sync_authority_set(
-        &self,
-        block: &GearBlock,
-    ) -> anyhow::Result<(SyncStepCount, u64)> {
+    async fn sync_authority_set(&self, block: &GearBlock) -> anyhow::Result<(SyncStepCount, u64)> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         self.requests
@@ -191,7 +214,11 @@ async fn process_shared_sync_requests(
         log::info!("Shared authority set sync selected relayer {relayer_id} for the next sync job");
 
         let mut context = request.context.clone();
-        let result = execute_sync_authority_set(
+        // Isolate each sync job from panics: a panic in `execute_sync_authority_set`
+        // (e.g. from a stale/out-of-order block or a prover/storage panic) is converted
+        // to an error reply so the requesting runner can recover, and the worker keeps
+        // serving other relayers instead of being killed.
+        let result = match AssertUnwindSafe(execute_sync_authority_set(
             &mut context.api_provider,
             &context.proof_storage,
             context.genesis_config,
@@ -199,8 +226,19 @@ async fn process_shared_sync_requests(
             &request.block,
             &request.responses,
             &context.metrics,
-        )
-        .await;
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(result) => result,
+            Err(panic_payload) => {
+                let msg = panic_message(&panic_payload);
+                log::error!(
+                    "Shared authority set sync job for relayer {relayer_id} panicked: {msg}"
+                );
+                Err(anyhow::anyhow!("authority set sync job panicked: {msg}"))
+            }
+        };
 
         let _ = request.reply.send(result);
     }
@@ -216,6 +254,17 @@ fn select_next_sync_request(pending: &[SharedSyncRequest]) -> Option<usize> {
                 .then_with(|| right.sequence.cmp(&left.sequence))
         })
         .map(|(index, _)| index)
+}
+
+/// Best-effort extraction of a message from a `catch_unwind` panic payload.
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        return (*s).to_string();
+    }
+    "unknown panic payload".to_string()
 }
 
 /// Authority set sync task which is responsible for synchronizing
@@ -297,10 +346,7 @@ impl AuthoritySetSync {
                 };
 
                 loop {
-                    if let Err(err) = runner
-                        .process(&mut blocks, &tx, &mut req_rx)
-                        .await
-                    {
+                    if let Err(err) = runner.process(&mut blocks, &tx, &mut req_rx).await {
                         log::error!(
                             "Authority set sync for relayer {relayer_id} task failed: {err}"
                         );
@@ -340,10 +386,7 @@ impl AuthoritySetSync {
                     };
 
                     loop {
-                        if let Err(err) = runner
-                            .process(&mut blocks, &tx, &mut req_rx)
-                            .await
-                        {
+                        if let Err(err) = runner.process(&mut blocks, &tx, &mut req_rx).await {
                             log::error!(
                                 "Authority set sync for relayer {relayer_id} task failed: {err}"
                             );
@@ -405,19 +448,15 @@ impl AuthoritySetSyncRunner {
                             };
                         }
                         Some(Request::Initialize) => {
-                            log::info!(
-                                "Authority set sync for relayer {}: initializing",
-                                self.relayer_id
-                            );
-
-                            let latest_proven_authority_set_id = self.proof_storage.get_latest_authority_set_id().await;
-                            if latest_proven_authority_set_id.is_none() {
+                            let latest_proven_authority_set_id =
+                                self.proof_storage.get_latest_authority_set_id().await;
+                            let block = if latest_proven_authority_set_id.is_none() {
                                 log::info!(
                                     "Authority set sync for relayer {}: no authority set found in proof storage, syncing from genesis",
                                     self.relayer_id
                                 );
                                 let genesis_authority_set_id = self.genesis_config.authority_set_id;
-                                let block = rpc::retry_gear(
+                                rpc::retry_gear(
                                     &mut self.api_provider,
                                     "authority set sync initialize",
                                     move |client| async move {
@@ -429,16 +468,30 @@ impl AuthoritySetSyncRunner {
                                         GearBlock::from_subxt_block(&client, genesis_block).await
                                     },
                                 )
-                                .await?;
-                                let Some(_) = self.sync_authority_set_completely(&block, blocks, responses).await? else {
-                                    return Ok(());
-                                };
+                                .await?
                             } else {
                                 log::info!(
-                                    "Authority set sync for relayer {}: authority set already initialized in proof storage",
+                                    "Authority set sync for relayer {}: checking authority set catch-up on startup (latest proven {latest_proven_authority_set_id:?})",
                                     self.relayer_id
                                 );
-                            }
+                                rpc::retry_gear(
+                                    &mut self.api_provider,
+                                    "authority set sync startup catch-up",
+                                    move |client| async move {
+                                        let block_hash = client.latest_finalized_block().await?;
+                                        let block = client.get_block_at(block_hash).await?;
+                                        GearBlock::from_subxt_block(&client, block).await
+                                    },
+                                )
+                                .await?
+                            };
+
+                            let Some(_) = self
+                                .sync_authority_set_completely(&block, blocks, responses)
+                                .await?
+                            else {
+                                return Ok(());
+                            };
                         }
                         None => {
                             log::warn!(
@@ -497,48 +550,52 @@ impl AuthoritySetSyncRunner {
                 self.relayer_id,
                 initial_block.number()
             );
-            return Ok(Some(authority_set_id));
-        }
+            // Fall through to emit `Response::AuthoritySetSynced` so the merkle root
+            // relayer drains `waiting_for_authority_set_sync[id]` and any parked HTTP
+            // requests even when the set was already caught up (e.g. a `ForceSync` /
+            // `Initialize` that races with an already-completed sync). The receiver
+            // tolerates "no blocks to sync for authority set #{id}".
+        } else {
+            log::info!(
+                "Authority set sync for relayer {}: syncing authority set #{authority_set_id}",
+                self.relayer_id
+            );
+            loop {
+                let (sync_steps, _) = match blocks.recv().await {
+                    Ok(block) => self.sync_authority_set(&block, responses).await?,
 
-        log::info!(
-            "Authority set sync for relayer {}: syncing authority set #{authority_set_id}",
-            self.relayer_id
-        );
-        loop {
-            let (sync_steps, _) = match blocks.recv().await {
-                Ok(block) => self.sync_authority_set(&block, responses).await?,
+                    Err(RecvError::Closed) => {
+                        log::warn!(
+                            "Authority set sync for relayer {}: Gear block listener connection closed",
+                            self.relayer_id
+                        );
+                        return Ok(None);
+                    }
 
-                Err(RecvError::Closed) => {
-                    log::warn!(
-                        "Authority set sync for relayer {}: Gear block listener connection closed",
+                    Err(RecvError::Lagged(n)) => {
+                        log::error!(
+                            "Authority set sync for relayer {}: Gear block listener lagged behind {n} blocks, skipping some blocks",
+                            self.relayer_id
+                        );
+                        continue;
+                    }
+                };
+
+                if sync_steps == 0 {
+                    break;
+                } else {
+                    log::info!(
+                        "Authority set sync for relayer {}: synced {sync_steps} authority sets",
                         self.relayer_id
                     );
-                    return Ok(None);
                 }
-
-                Err(RecvError::Lagged(n)) => {
-                    log::error!(
-                        "Authority set sync for relayer {}: Gear block listener lagged behind {n} blocks, skipping some blocks",
-                        self.relayer_id
-                    );
-                    continue;
-                }
-            };
-
-            if sync_steps == 0 {
-                break;
-            } else {
-                log::info!(
-                    "Authority set sync for relayer {}: synced {sync_steps} authority sets",
-                    self.relayer_id
-                );
             }
-        }
 
-        log::info!(
-            "Authority set sync for relayer {}: authority set #{authority_set_id} is in sync",
-            self.relayer_id
-        );
+            log::info!(
+                "Authority set sync for relayer {}: authority set #{authority_set_id} is in sync",
+                self.relayer_id
+            );
+        }
 
         if responses
             .send(Response::AuthoritySetSynced(

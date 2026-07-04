@@ -44,20 +44,20 @@ pub(crate) async fn sync_authority_set_id(
         let proof = prover_interface::prove_genesis(gear_api, genesis_config, count_thread).await?;
         proof_storage
             .init(proof, genesis_config.authority_set_id)
-            .await
-            .unwrap();
+            .await?;
 
         return Ok(1);
     };
 
     if latest_proven < genesis_config.authority_set_id + 1 {
-        panic!(
+        return Err(anyhow::anyhow!(
             "Invalid state of proof storage detected: \
             latest proven authority set id = {} \
             but genesis = {}. \
             Clean proof storage state and restart the relayer.",
-            latest_proven, genesis_config.authority_set_id,
-        );
+            latest_proven,
+            genesis_config.authority_set_id,
+        ));
     }
 
     if latest_proven < latest_authority_set_id {
@@ -91,12 +91,17 @@ pub(crate) async fn sync_authority_set_id(
         return Ok(0);
     }
 
-    panic!(
-        "Invalid state of proof storage detected: \
-        latest proven authority set id = {latest_proven} \
-        but latest authority set id on VARA = {latest_authority_set_id}. \
-        Clean proof storage state and restart the relayer."
-    )
+    // `latest_proven > latest_authority_set_id`: the queried block is older than the
+    // latest proven era. This is reachable with non-corrupt state when a stale /
+    // out-of-order block (e.g. a gap-replay block from before an era boundary) is fed
+    // in after the newer authority set was already proven. There is nothing to sync,
+    // so treat it as a no-op rather than a fatal invariant violation.
+    log::warn!(
+        "Skipping authority set sync: proof storage is ahead of the queried block \
+        (latest proven = {latest_proven}, block authority set id = {latest_authority_set_id}). \
+        Likely a stale/out-of-order block; no work to do."
+    );
+    Ok(0)
 }
 
 pub(crate) async fn submit_merkle_root_to_ethereum(

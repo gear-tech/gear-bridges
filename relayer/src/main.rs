@@ -24,7 +24,9 @@ use relayer::{
     },
     ethereum_checkpoints, hex_utils,
     kill_switch::KillSwitchRelayer,
-    merkle_roots::{self, authority_set_sync::SharedAuthoritySetSync, prover::SharedFinalityProver},
+    merkle_roots::{
+        self, authority_set_sync::SharedAuthoritySetSync, prover::SharedFinalityProver,
+    },
     message_relayer::{self, eth_to_gear, gear_to_eth},
     proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage},
     prover_interface, server,
@@ -371,6 +373,7 @@ async fn run() -> AnyResult<()> {
                         "gear-eth-token-paid-transfers".to_string(),
                         Some(sender),
                         None,
+                        None,
                     )
                     .context("Failed to create web server")?;
                     let handle_server = web_server.handle();
@@ -518,10 +521,26 @@ async fn run() -> AnyResult<()> {
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
+                    web_server_token,
+                    web_server_address,
                 } => {
                     let bridging_payment_address =
                         hex_utils::decode_h160(&bridging_payment_address)
                             .expect("Failed to parse address");
+
+                    let tcp_listener = TcpListener::bind(web_server_address)?;
+                    let (sender, receiver) = mpsc::unbounded_channel();
+                    let web_server = server::create(
+                        tcp_listener,
+                        web_server_token,
+                        "eth-gear-token-paid-transfers".to_string(),
+                        None,
+                        None,
+                        Some(sender),
+                    )
+                    .context("Failed to create web server")?;
+                    let handle_server = web_server.handle();
+                    task::spawn(web_server);
 
                     let relayer = eth_to_gear::paid_token_transfers::Relayer::new(
                         gear_args.suri,
@@ -535,6 +554,7 @@ async fn run() -> AnyResult<()> {
                         storage_path,
                         genesis_time,
                         ethereum_blocks.clone(),
+                        Some(receiver),
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -546,6 +566,14 @@ async fn run() -> AnyResult<()> {
                         .await;
 
                     relayer.run().await;
+
+                    if tokio::time::timeout(Duration::from_secs(5 * 60), handle_server.stop(true))
+                        .await
+                        .is_err()
+                    {
+                        log::error!("Failed to stop web server within timeout");
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -888,6 +916,7 @@ async fn start_gear_eth_core_relayer(
         format!("merkle-root relayer {}", config.id),
         None,
         Some(sender),
+        None,
     )
     .context("Failed to create web server")?;
     let handle_server = web_server.handle();

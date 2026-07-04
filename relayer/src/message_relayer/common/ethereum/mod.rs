@@ -10,3 +10,4 @@ pub mod merkle_root_extractor;
 pub mod message_paid_event_extractor;
 pub mod message_sender;
 pub mod status_fetcher;
+pub mod transaction_data_extractor;

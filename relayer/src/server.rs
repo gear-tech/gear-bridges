@@ -1,5 +1,5 @@
 use crate::message_relayer::common::web_request::{
-    MerkleRootBlocks, MerkleRootsRequest, Message, Messages,
+    EthTransaction, EthTransactions, MerkleRootBlocks, MerkleRootsRequest, Message, Messages,
 };
 use actix_web::{guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -48,6 +48,55 @@ async fn relay_messages(
             Err(e) => {
                 log::error!(
                     r#"[{}] Unable to send message "{message:?}": {e:?}"#,
+                    log_context.0.as_str()
+                );
+            }
+        }
+    }
+
+    if to_process == 0 {
+        HttpResponse::Ok().finish()
+    } else if to_process == len {
+        HttpResponse::InternalServerError().finish()
+    } else {
+        HttpResponse::Accepted().finish()
+    }
+}
+
+async fn relay_transactions(
+    request: HttpRequest,
+    transactions: web::Json<EthTransactions>,
+    secret: web::Data<Secret>,
+    log_context: web::Data<LogContext>,
+    channel: web::Data<UnboundedSender<EthTransaction>>,
+) -> HttpResponse {
+    if !request
+        .headers()
+        .get(HEADER_TOKEN)
+        .and_then(|h| h.to_str().ok())
+        .map(|t| t == secret.0.as_str())
+        .unwrap_or(false)
+    {
+        return HttpResponse::Unauthorized().finish();
+    }
+
+    let transactions = transactions.into_inner().transactions;
+    let len = transactions.len();
+    let mut to_process = len;
+
+    let mut seen = HashSet::with_capacity(len);
+
+    for transaction in transactions {
+        if !seen.insert(transaction.tx_hash.clone()) {
+            to_process -= 1;
+            continue;
+        }
+        match channel.send(transaction.clone()) {
+            Ok(_) => to_process -= 1,
+
+            Err(e) => {
+                log::error!(
+                    r#"[{}] Unable to send transaction "{transaction:?}": {e:?}"#,
                     log_context.0.as_str()
                 );
             }
@@ -138,9 +187,11 @@ pub fn create(
     log_context: String,
     messages_channel: Option<UnboundedSender<Message>>,
     merkle_roots_channel: Option<UnboundedSender<MerkleRootsRequest>>,
+    transactions_channel: Option<UnboundedSender<EthTransaction>>,
 ) -> std::io::Result<actix_web::dev::Server> {
     let messages_channel = messages_channel.map(web::Data::new);
     let merkle_roots_channel = merkle_roots_channel.map(web::Data::new);
+    let transactions_channel = transactions_channel.map(web::Data::new);
 
     let secret = web::Data::new(Secret(secret));
     let log_context = web::Data::new(LogContext(log_context));
@@ -173,6 +224,20 @@ pub fn create(
             app.app_data(channel.clone()).service(
                 web::resource("/get_merkle_root_proof")
                     .route(web::post().to(get_merkle_root_proof))
+                    .route(
+                        web::route()
+                            .guard(guard::Any(guard::Get()).or(guard::Post()))
+                            .to(HttpResponse::Unauthorized),
+                    ),
+            )
+        } else {
+            app
+        };
+
+        app = if let Some(channel) = transactions_channel.as_ref() {
+            app.app_data(channel.clone()).service(
+                web::resource("/relay_transactions")
+                    .route(web::post().to(relay_transactions))
                     .route(
                         web::route()
                             .guard(guard::Any(guard::Get()).or(guard::Post()))
@@ -223,6 +288,7 @@ mod tests {
             SECRET.to_string(),
             "test".to_string(),
             Some(channel),
+            None,
             None,
         )
         .unwrap();
@@ -334,6 +400,7 @@ mod tests {
             "test".to_string(),
             None,
             Some(channel),
+            None,
         )
         .unwrap();
 
@@ -471,6 +538,7 @@ mod tests {
             "test".to_string(),
             None,
             Some(channel),
+            None,
         )
         .unwrap();
 
@@ -510,6 +578,7 @@ mod tests {
             "test".to_string(),
             None,
             Some(channel),
+            None,
         )
         .unwrap();
 
@@ -565,6 +634,7 @@ mod tests {
             log_context.to_string(),
             None,
             Some(channel),
+            None,
         )
         .unwrap();
         task::spawn(server);

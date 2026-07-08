@@ -73,27 +73,41 @@ impl BlockStorage {
         };
     }
 
+    pub async fn is_transaction_pending(&self, slot: EthereumSlotNumber, tx_hash: TxHash) -> bool {
+        let blocks = self.blocks.read().await;
+        let Some(block) = blocks.get(&slot) else {
+            return false;
+        };
+
+        block.transactions.contains(&tx_hash)
+    }
+
     pub async fn add_block(
         &self,
         slot: EthereumSlotNumber,
         number: EthereumBlockNumber,
         txs: impl Iterator<Item = TxHash>,
     ) {
-        if self
-            .blocks
-            .write()
-            .await
-            .insert(
-                slot,
-                Block {
-                    number,
-                    transactions: txs.collect(),
-                },
-            )
-            .is_some()
-        {
-            log::warn!("Block at slot #{} is already in storage", slot.0);
-        };
+        let mut blocks = self.blocks.write().await;
+        if let Some(existing) = blocks.get(&slot) {
+            if existing.number != number {
+                log::warn!(
+                    "Slot #{} is already in storage with a different block (existing={}, new={})",
+                    slot.0,
+                    existing.number.0,
+                    number.0
+                );
+            }
+            return;
+        }
+
+        blocks.insert(
+            slot,
+            Block {
+                number,
+                transactions: txs.collect(),
+            },
+        );
     }
 
     pub async fn unprocessed_blocks(&self) -> UnprocessedBlocks {
@@ -493,5 +507,39 @@ impl Storage for JSONStorage {
 
     async fn save_blocks(&self) -> anyhow::Result<()> {
         self.block_storage().save(&self.path).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tx_hash(value: u8) -> TxHash {
+        TxHash::from([value; 32])
+    }
+
+    fn tx_in_slot(slot: u64, tx_hash: TxHash) -> TxHashWithSlot {
+        TxHashWithSlot {
+            slot_number: EthereumSlotNumber(slot),
+            tx_hash,
+        }
+    }
+
+    #[tokio::test]
+    async fn add_block_does_not_reintroduce_completed_transactions() {
+        let storage = BlockStorage::new();
+        let slot = EthereumSlotNumber(7);
+        let block = EthereumBlockNumber(70);
+        let tx1 = tx_hash(1);
+        let tx2 = tx_hash(2);
+
+        storage.add_block(slot, block, [tx1, tx2].into_iter()).await;
+        storage.complete_transaction(&tx_in_slot(slot.0, tx1)).await;
+
+        // Replay of the same block should be ignored and not restore tx1.
+        storage.add_block(slot, block, [tx1, tx2].into_iter()).await;
+
+        assert!(!storage.is_transaction_pending(slot, tx1).await);
+        assert!(storage.is_transaction_pending(slot, tx2).await);
     }
 }

@@ -9,7 +9,10 @@ use futures::StreamExt;
 use gear_common::api_provider::ApiProviderConnection;
 use prometheus::IntGauge;
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::{
+    sync::broadcast,
+    time::{Interval, MissedTickBehavior},
+};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct BlockListener {
@@ -69,28 +72,41 @@ impl BlockListener {
         let tx2 = tx.clone();
         tokio::task::spawn(async move {
             let relayer_id = self.relayer_id.clone();
-            let UnprocessedBlocks {
-                last_block,
-                first_block,
-                blocks: _,
-            } = self.block_storage.unprocessed_blocks().await;
             let mut last_finalized_block_number = None;
-            if let Some(from_block) = first_block.or(last_block) {
-                log::info!(
-                    "Gear block listener for relayer {relayer_id}: unprocessed blocks found, replaying from #{} in background",
-                    from_block.1
-                );
-                self.spawn_replay_to_latest(
+            match self
+                .replay_recovery_blocks(
                     tx2.clone(),
-                    from_block.1,
                     &mut last_finalized_block_number,
-                    "startup catch-up",
+                    "startup recovery",
                 )
-                .await;
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    log::info!(
+                        "Gear block listener for relayer {relayer_id}: no active receivers during startup recovery"
+                    );
+                    return;
+                }
+                Err(err) => {
+                    log::error!(
+                        "Gear block listener for relayer {relayer_id}: startup recovery failed: {err}"
+                    );
+                    return;
+                }
             }
+            let mut supervisor_interval = tokio::time::interval(crate::common::SUPERVISOR_INTERVAL);
+            supervisor_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            supervisor_interval.tick().await;
 
             loop {
-                let res = self.run_inner(&tx2, &mut last_finalized_block_number).await;
+                let res = self
+                    .run_inner(
+                        &tx2,
+                        &mut last_finalized_block_number,
+                        &mut supervisor_interval,
+                    )
+                    .await;
                 let e = match res {
                     Ok(false) => {
                         log::info!(
@@ -115,7 +131,7 @@ impl BlockListener {
                     log::error!(
                         r#"Gear block listener for relayer {relayer_id}: API provider unable to reconnect: "{e}""#
                     );
-                    continue;
+                    return;
                 }
 
                 log::debug!(
@@ -124,13 +140,29 @@ impl BlockListener {
                 let from_block = last_finalized_block_number
                     .map(|block| block.saturating_add(1))
                     .unwrap_or_default();
-                self.spawn_replay_to_latest(
-                    tx2.clone(),
-                    from_block,
-                    &mut last_finalized_block_number,
-                    "reconnect replay",
-                )
-                .await;
+                match self
+                    .replay_to_latest(
+                        &tx2,
+                        from_block,
+                        &mut last_finalized_block_number,
+                        "reconnect replay",
+                    )
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        log::info!(
+                            "Gear block listener for relayer {relayer_id}: no active receivers during reconnect replay"
+                        );
+                        return;
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "Gear block listener for relayer {relayer_id}: reconnect replay failed: {err}"
+                        );
+                        return;
+                    }
+                }
             }
         });
 
@@ -145,96 +177,175 @@ impl BlockListener {
         &mut self,
         tx: &broadcast::Sender<GearBlock>,
         last_finalized_block_number: &mut Option<u32>,
+        supervisor_interval: &mut Interval,
     ) -> anyhow::Result<bool> {
         let gear_api = self.api_provider.client();
 
         let mut subscription = gear_api.subscribe_grandpa_justifications().await?;
-        while let Some(justification) = subscription.next().await {
-            let justification = justification?;
+        loop {
+            tokio::select! {
+                justification = subscription.next() => {
+                    let Some(justification) = justification else {
+                        return Ok(true);
+                    };
+                    let justification = justification?;
 
-            let block_hash = justification.commit.target_hash;
-            let block_number = justification.commit.target_number;
+                    let block_hash = justification.commit.target_hash;
+                    let block_number = justification.commit.target_number;
 
-            // Check if there are missing blocks and fetch them
-            if let Some(last_finalized) = *last_finalized_block_number {
-                if last_finalized + 1 != block_number {
-                    log::info!("Gear block listener for relayer {}: detected gap: last finalized block was #{last_finalized}, current block is #{block_number}", self.relayer_id);
+                    // Check if there are missing blocks and fetch them
+                    if let Some(last_finalized) = *last_finalized_block_number {
+                        if last_finalized + 1 != block_number {
+                            log::info!("Gear block listener for relayer {}: detected gap: last finalized block was #{last_finalized}, current block is #{block_number}", self.relayer_id);
 
-                    self.spawn_replay_range(
+                            self.spawn_replay_range(
+                                tx.clone(),
+                                last_finalized + 1,
+                                block_number.saturating_sub(1),
+                                "live gap replay",
+                            );
+                        }
+                    }
+
+                    // Process the current block
+                    if !self
+                        .fetch_store_send(tx, block_number, Some(block_hash.0.into()))
+                        .await?
+                    {
+                        return Ok(false);
+                    }
+
+                    // Update the last finalized block number
+                    *last_finalized_block_number = Some(block_number);
+                    self.metrics.latest_block.set(block_number as i64);
+                }
+
+                _ = supervisor_interval.tick() => {
+                    if !self.replay_recovery_blocks(
                         tx.clone(),
-                        last_finalized + 1,
-                        block_number.saturating_sub(1),
-                        "live gap replay",
-                    );
+                        last_finalized_block_number,
+                        "supervisor recovery",
+                    )
+                    .await?
+                    {
+                        return Ok(false);
+                    }
                 }
             }
-
-            // Process the current block
-            if !self
-                .fetch_store_send(tx, block_number, Some(block_hash.0.into()))
-                .await?
-            {
-                return Ok(false);
-            }
-
-            // Update the last finalized block number
-            *last_finalized_block_number = Some(block_number);
-            self.metrics.latest_block.set(block_number as i64);
         }
-
-        Ok(true)
     }
 
-    async fn spawn_replay_to_latest(
+    async fn replay_to_latest(
         &mut self,
-        tx: broadcast::Sender<GearBlock>,
+        tx: &broadcast::Sender<GearBlock>,
         from_block: u32,
         last_finalized_block_number: &mut Option<u32>,
         reason: &'static str,
-    ) {
+    ) -> anyhow::Result<bool> {
         let latest = {
             let client = self.api_provider.client();
-            match client.latest_finalized_block().await {
-                Ok(hash) => match client.block_hash_to_number(hash).await {
-                    Ok(number) => Some(number),
-                    Err(err) => {
-                        log::warn!(
-                            "Gear block listener for relayer {} failed to inspect latest finalized block number for {reason}: {err}. Background replay will retry latest lookup",
-                            self.relayer_id
-                        );
-                        None
-                    }
-                },
-                Err(err) => {
-                    log::warn!(
-                    "Gear block listener for relayer {} failed to inspect latest finalized block for {reason}: {err}. Background replay will retry latest lookup",
-                    self.relayer_id
-                );
-                    None
-                }
-            }
+            let hash = client.latest_finalized_block().await?;
+            client.block_hash_to_number(hash).await?
         };
 
-        if let Some(latest) = latest {
-            if from_block > latest {
-                return;
+        if from_block > latest {
+            return Ok(true);
+        }
+
+        self.replay_range_to_known_latest(
+            tx,
+            from_block,
+            latest,
+            last_finalized_block_number,
+            reason,
+        )
+        .await
+    }
+
+    async fn replay_range_to_known_latest(
+        &mut self,
+        tx: &broadcast::Sender<GearBlock>,
+        from_block: u32,
+        latest: u32,
+        last_finalized_block_number: &mut Option<u32>,
+        reason: &'static str,
+    ) -> anyhow::Result<bool> {
+        if from_block > latest {
+            return Ok(true);
+        }
+
+        log::info!(
+            "Gear block listener for relayer {} {reason}: replaying blocks #{}..=#{latest}",
+            self.relayer_id,
+            from_block
+        );
+        for block_number in from_block..=latest {
+            if !self.fetch_store_send(tx, block_number, None).await? {
+                return Ok(false);
             }
             *last_finalized_block_number = Some(
                 last_finalized_block_number
-                    .map(|current| current.max(latest))
-                    .unwrap_or(latest),
-            );
-            self.spawn_replay_range(tx, from_block, latest, reason);
-        } else {
-            spawn_replay_to_latest(
-                self.api_provider.clone(),
-                self.block_storage.clone(),
-                self.relayer_id.clone(),
-                tx,
-                from_block,
-                reason,
+                    .map(|current| current.max(block_number))
+                    .unwrap_or(block_number),
             );
         }
+        Ok(true)
+    }
+
+    async fn replay_recovery_blocks(
+        &mut self,
+        tx: broadcast::Sender<GearBlock>,
+        last_finalized_block_number: &mut Option<u32>,
+        reason: &'static str,
+    ) -> anyhow::Result<bool> {
+        let UnprocessedBlocks {
+            last_block,
+            first_block,
+            blocks: _,
+        } = self.block_storage.unprocessed_blocks().await;
+        let latest = {
+            let client = self.api_provider.client();
+            let hash = client.latest_finalized_block().await?;
+            client.block_hash_to_number(hash).await?
+        };
+        let lookback_from = latest.saturating_sub(crate::common::SUPERVISOR_LOOKBACK_BLOCKS);
+
+        if let Some(from_block) = first_block.or(last_block) {
+            if from_block.1 < lookback_from {
+                log::warn!(
+                    "Gear block listener for relayer {} {reason}: oldest unprocessed block #{} is older than the supervisor lookback start #{lookback_from}, capping replay",
+                    self.relayer_id,
+                    from_block.1,
+                );
+            } else {
+                log::info!(
+                    "Gear block listener for relayer {} {reason}: unprocessed block #{} is inside the supervisor lookback window",
+                    self.relayer_id,
+                    from_block.1,
+                );
+            }
+        } else {
+            log::info!(
+                "Gear block listener for relayer {} {reason}: no persisted unprocessed blocks found",
+                self.relayer_id
+            );
+        }
+
+        log::info!(
+            "Gear block listener for relayer {} {reason}: replaying last {} finalized block(s) from #{}",
+            self.relayer_id,
+            crate::common::SUPERVISOR_LOOKBACK_BLOCKS,
+            lookback_from
+        );
+
+        self.replay_range_to_known_latest(
+            &tx,
+            lookback_from,
+            latest,
+            last_finalized_block_number,
+            reason,
+        )
+        .await
     }
 
     fn spawn_replay_range(
@@ -293,47 +404,6 @@ impl BlockListener {
         }
         Ok(true)
     }
-}
-
-fn spawn_replay_to_latest(
-    mut api_provider: ApiProviderConnection,
-    storage: Arc<dyn UnprocessedBlocksStorage>,
-    relayer_id: String,
-    tx: broadcast::Sender<GearBlock>,
-    from_block: u32,
-    reason: &'static str,
-) {
-    tokio::spawn(async move {
-        let latest = match rpc::retry_gear(
-            &mut api_provider,
-            "gear background latest finalized block",
-            |api| async move {
-                let hash = api.latest_finalized_block().await?;
-                api.block_hash_to_number(hash).await
-            },
-        )
-        .await
-        {
-            Ok(latest) => latest,
-            Err(err) => {
-                log::error!(
-                    "Gear block listener for relayer {relayer_id} {reason} failed to fetch latest block: {err}"
-                );
-                return;
-            }
-        };
-
-        replay_range(
-            api_provider,
-            storage,
-            relayer_id,
-            tx,
-            from_block,
-            latest,
-            reason,
-        )
-        .await;
-    });
 }
 
 fn spawn_replay_range(

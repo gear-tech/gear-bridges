@@ -18,7 +18,7 @@ use tokio::{
         mpsc::{error::TryRecvError, UnboundedReceiver},
         RwLock,
     },
-    time::{self, Duration},
+    time::{self, Duration, Interval, MissedTickBehavior},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
@@ -130,12 +130,26 @@ impl TransactionManager {
         mut proof_composer: ProofComposerIo,
         mut message_sender: MessageSenderIo,
     ) -> anyhow::Result<()> {
+        if !self
+            .resume(&mut message_sender, &mut proof_composer)
+            .await?
+        {
+            return Err(anyhow::anyhow!(
+                "eth-to-gear transaction manager supervisor channel closed during startup recovery"
+            ));
+        }
+
+        let mut supervisor_interval = time::interval(crate::common::SUPERVISOR_INTERVAL);
+        supervisor_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        supervisor_interval.tick().await;
+
         loop {
             let result = self
                 .process(
                     &mut message_paid_events,
                     &mut proof_composer,
                     &mut message_sender,
+                    &mut supervisor_interval,
                 )
                 .await;
 
@@ -143,8 +157,9 @@ impl TransactionManager {
 
             match result {
                 Ok(false) => {
-                    log::error!("One of channels are closed, terminating transaction manager");
-                    break;
+                    return Err(anyhow::anyhow!(
+                        "eth-to-gear transaction manager supervisor channel closed"
+                    ));
                 }
                 Ok(true) => continue,
                 Err(err) => {
@@ -153,8 +168,6 @@ impl TransactionManager {
                 }
             }
         }
-
-        Ok(())
     }
 
     pub async fn process(
@@ -162,6 +175,7 @@ impl TransactionManager {
         message_paid_events: &mut UnboundedReceiver<TxHashWithSlot>,
         proof_composer: &mut ProofComposerIo,
         message_sender: &mut MessageSenderIo,
+        supervisor_interval: &mut Interval,
     ) -> anyhow::Result<bool> {
         while let Some(response) = match message_sender.try_recv() {
             Ok(response) => Some(response),
@@ -179,6 +193,10 @@ impl TransactionManager {
         poll_interval.tick().await;
 
         tokio::select! {
+            _ = supervisor_interval.tick() => {
+                log::info!("Eth-to-gear supervisor scanning pending transactions");
+            }
+
             _ = poll_interval.tick() => {}
 
             value = message_paid_events.recv() => match value {

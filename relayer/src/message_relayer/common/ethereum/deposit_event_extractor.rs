@@ -164,10 +164,8 @@ impl DepositEventExtractor {
             .add_block(slot_number, block, events.iter().map(|ev| ev.tx_hash))
             .await;
         self.storage.save_blocks().await?;
-        self.metrics
-            .total_deposits_found
-            .inc_by(events.len() as u64);
 
+        let mut total = 0;
         for DepositEventEntry {
             tx_hash,
             from,
@@ -176,6 +174,16 @@ impl DepositEventExtractor {
             amount,
         } in events
         {
+            if !self
+                .storage
+                .block_storage()
+                .is_transaction_pending(slot_number, tx_hash)
+                .await
+            {
+                continue;
+            }
+
+            total += 1;
             log::info!(
                 "Found deposit event: tx_hash={}, from={}, to={}, token={}, amount={}, slot_number={}",
                 hex::encode(tx_hash.0),
@@ -192,6 +200,7 @@ impl DepositEventExtractor {
             })?;
         }
 
+        self.metrics.total_deposits_found.inc_by(total);
         Ok(())
     }
 }

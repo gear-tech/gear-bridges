@@ -352,7 +352,7 @@ async fn run() -> AnyResult<()> {
                         .await;
 
                     provider.spawn();
-                    relayer.run().await;
+                    relayer.run().await?;
                 }
 
                 GearEthTokensCommands::PaidTokenTransfers {
@@ -403,15 +403,9 @@ async fn run() -> AnyResult<()> {
                         .await;
 
                     provider.spawn();
-                    relayer.run().await;
-
-                    if tokio::time::timeout(Duration::from_secs(5 * 60), handle_server.stop(true))
-                        .await
-                        .is_err()
-                    {
-                        log::error!("Failed to stop web server within timeout");
-                        std::process::exit(1);
-                    }
+                    let result = relayer.run().await;
+                    stop_web_server(handle_server).await;
+                    result?;
                 }
             }
         }
@@ -517,7 +511,7 @@ async fn run() -> AnyResult<()> {
                         .run(prometheus_args.prometheus_endpoint)
                         .await;
 
-                    relayer.run().await;
+                    relayer.run().await?;
                 }
                 EthGearTokensCommands::PaidTokenTransfers {
                     bridging_payment_address,
@@ -565,15 +559,9 @@ async fn run() -> AnyResult<()> {
                         .run(prometheus_args.prometheus_endpoint)
                         .await;
 
-                    relayer.run().await;
-
-                    if tokio::time::timeout(Duration::from_secs(5 * 60), handle_server.stop(true))
-                        .await
-                        .is_err()
-                    {
-                        log::error!("Failed to stop web server within timeout");
-                        std::process::exit(1);
-                    }
+                    let result = relayer.run().await;
+                    stop_web_server(handle_server).await;
+                    result?;
                 }
             }
         }

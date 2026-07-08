@@ -169,7 +169,7 @@ impl Relayer {
         })
     }
 
-    pub async fn run(self) {
+    pub async fn run(self) -> anyhow::Result<()> {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.spawn();
 
@@ -194,12 +194,8 @@ impl Relayer {
             .await;
         let proof_composer = self.proof_composer.run(checkpoints);
         let message_sender = self.message_sender.run();
-        if let Err(err) = self
-            .tx_manager
+        self.tx_manager
             .run(message_paid_events, proof_composer, message_sender)
             .await
-        {
-            log::error!("Transaction manager exited with error: {err:?}");
-        }
     }
 }

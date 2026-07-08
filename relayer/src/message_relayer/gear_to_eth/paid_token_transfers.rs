@@ -150,7 +150,7 @@ impl Relayer {
         })
     }
 
-    pub async fn run(self) {
+    pub async fn run(self) -> AnyResult<()> {
         let [gear_blocks_0, gear_blocks_1] = self.gear_block_listener.run().await;
 
         let message_paid_receiver = self.message_paid_listener.run(gear_blocks_1).await;
@@ -167,8 +167,7 @@ impl Relayer {
         self.message_data_extractor.spawn();
         let message_sender_io = self.message_sender.spawn();
 
-        if let Err(err) = self
-            .tx_manager
+        self.tx_manager
             .run(
                 accumulator_io,
                 self.message_receiver,
@@ -177,9 +176,6 @@ impl Relayer {
                 status_fetcher_io,
             )
             .await
-        {
-            log::error!("Transaction manager exited with error: {err:?}");
-        }
     }
 }
 

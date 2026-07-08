@@ -7,7 +7,10 @@ use crate::{
 use ethereum_client::PollingEthApi;
 use prometheus::IntGauge;
 use std::{sync::Arc, time::Duration};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::{
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    time::MissedTickBehavior,
+};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub const ETHEREUM_BLOCK_TIME_APPROX: Duration = Duration::from_secs(12);
@@ -64,41 +67,80 @@ impl BlockListener {
     ) -> anyhow::Result<()> {
         self.metrics.latest_block.set(self.from_block as i64);
 
-        // Fetch unprocessed blocks in background
-        let storage = self.storage.clone();
-        let sender_clone = sender.clone();
-        tokio::spawn(async move {
-            match storage.unprocessed_blocks().await {
-                Ok(blocks) => {
-                    for block in blocks {
-                        if let Err(e) = sender_clone.send(EthereumBlockNumber(block)) {
-                            log::error!("Failed to send unprocessed block {block}: {e}");
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch unprocessed blocks: {e}");
-                }
-            }
-        });
+        self.replay_recovery_blocks(sender, "startup recovery")
+            .await?;
+        let mut supervisor_interval = tokio::time::interval(common::SUPERVISOR_INTERVAL);
+        supervisor_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        supervisor_interval.tick().await;
 
         loop {
-            let latest = self.eth_api.finalized_block().await?.header.number;
-            if latest >= self.from_block {
-                for block in self.from_block..=latest {
-                    if let Err(e) = self.storage.add_block(block).await {
-                        log::error!("Failed to add block {block} to storage: {e}");
-                    }
-                    sender.send(EthereumBlockNumber(block))?;
-                    self.from_block = block.saturating_add(1);
+            tokio::select! {
+                _ = supervisor_interval.tick() => {
+                    self.replay_recovery_blocks(sender, "supervisor recovery").await?;
                 }
 
-                self.metrics.latest_block.set(latest as i64);
-            } else {
-                tokio::time::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2).await;
+                latest = self.eth_api.finalized_block() => {
+                    let latest = latest?.header.number;
+                    if latest >= self.from_block {
+                        self.send_block_range(sender, self.from_block, latest).await?;
+                        self.metrics.latest_block.set(latest as i64);
+                    } else {
+                        tokio::time::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2).await;
+                    }
+                }
             }
         }
+    }
+
+    async fn replay_recovery_blocks(
+        &mut self,
+        sender: &UnboundedSender<EthereumBlockNumber>,
+        reason: &'static str,
+    ) -> anyhow::Result<()> {
+        let blocks = self.storage.unprocessed_blocks().await?;
+        let latest = self.eth_api.finalized_block().await?.header.number;
+        let lookback_from = latest.saturating_sub(u64::from(common::SUPERVISOR_LOOKBACK_BLOCKS));
+        if let Some(block) = blocks.first().copied() {
+            if block < lookback_from {
+                log::warn!(
+                    "Ethereum block listener {reason}: oldest unprocessed block #{block} is older than the supervisor lookback start #{lookback_from}, capping replay"
+                );
+            } else {
+                log::info!(
+                    "Ethereum block listener {reason}: unprocessed block #{block} is inside the supervisor lookback window"
+                );
+            }
+        } else {
+            log::info!("Ethereum block listener {reason}: no persisted unprocessed blocks found");
+        }
+
+        log::info!(
+            "Ethereum block listener {reason}: replaying last {} finalized block(s) from #{lookback_from}",
+            common::SUPERVISOR_LOOKBACK_BLOCKS,
+        );
+        self.send_block_range(sender, lookback_from, latest).await?;
+        self.metrics.latest_block.set(latest as i64);
+        Ok(())
+    }
+
+    async fn send_block_range(
+        &mut self,
+        sender: &UnboundedSender<EthereumBlockNumber>,
+        from_block: u64,
+        to_block: u64,
+    ) -> anyhow::Result<()> {
+        if from_block > to_block {
+            return Ok(());
+        }
+
+        for block in from_block..=to_block {
+            if let Err(e) = self.storage.add_block(block).await {
+                log::error!("Failed to add block {block} to storage: {e}");
+            }
+            sender.send(EthereumBlockNumber(block))?;
+            self.from_block = block.saturating_add(1);
+        }
+        Ok(())
     }
 }
 
@@ -117,16 +159,13 @@ async fn task(mut this: BlockListener, sender: UnboundedSender<EthereumBlockNumb
 
         tokio::time::sleep(Duration::from_secs(30)).await;
 
-        loop {
-            match this.eth_api.reconnect().await {
-                Ok(api) => {
-                    this.eth_api = api;
-                    break;
-                }
-                Err(e) => {
-                    log::error!("Failed to reconnect to Ethereum API: {e}. Retrying...");
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                }
+        match this.eth_api.reconnect().await {
+            Ok(api) => {
+                this.eth_api = api;
+            }
+            Err(e) => {
+                log::error!("Failed to reconnect to Ethereum API: {e}. Exiting...");
+                return;
             }
         }
     }

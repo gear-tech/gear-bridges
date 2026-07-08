@@ -113,11 +113,19 @@ impl MessagePaidEventExtractor {
             .add_block(slot_number, block, txs.iter().cloned())
             .await;
         self.storage.save_blocks().await?;
-        self.metrics
-            .total_paid_messages_found
-            .inc_by(txs.len() as u64);
 
+        let mut total = 0;
         for tx_hash in txs {
+            if !self
+                .storage
+                .block_storage()
+                .is_transaction_pending(slot_number, tx_hash)
+                .await
+            {
+                continue;
+            }
+
+            total += 1;
             log::info!(
                 "Found fee paid event: tx_hash={}, slot_number={}",
                 hex::encode(tx_hash.0),
@@ -130,6 +138,7 @@ impl MessagePaidEventExtractor {
             })?;
         }
 
+        self.metrics.total_paid_messages_found.inc_by(total);
         Ok(())
     }
 }

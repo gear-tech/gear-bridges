@@ -3,7 +3,16 @@ import { z } from 'zod';
 
 import { isUndefined } from '@/utils';
 
-import { ERROR_MESSAGE } from './consts';
+import { ERROR_MESSAGE, NETWORK } from './consts';
+
+type BridgeToken = {
+  network: (typeof NETWORK)[keyof typeof NETWORK];
+  symbol: string;
+};
+
+// TODO: temporarily disabled — bridged USDC is not tradeable on DEX
+const isEthToVaraUsdcBridgeDisabled = (token: BridgeToken | undefined) =>
+  token?.network === NETWORK.ETH && token.symbol.toLowerCase().includes('usdc');
 
 const getAmountSchema = (
   isNativeToken: boolean | undefined,
@@ -48,4 +57,4 @@ const estimateBridging = (txs: { gasLimit: bigint; value?: bigint }[], valuePerG
   return { totalGasLimit, totalValue };
 };
 
-export { getAmountSchema, estimateBridging };
+export { getAmountSchema, estimateBridging, isEthToVaraUsdcBridgeDisabled };

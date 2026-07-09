@@ -245,9 +245,10 @@ pub struct MerkleRootRelayer {
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
     last_submitted_block: Option<u32>,
-    /// (block_number, merkle_root) of the last supervisor-triggered proof request.
+    /// Merkle root hash of the last supervisor-triggered proof request.
     /// Used to avoid re-triggering the same root while it's in-flight.
-    last_supervisor_trigger: Option<(u32, H256)>,
+    /// Keyed on hash only — the same merkle root can appear at different block numbers.
+    last_supervisor_trigger: Option<H256>,
     first_pending_timestamp: Option<Instant>,
     queued_root_timestamps: VecDeque<Instant>,
     merkle_root_batch: Vec<PendingMerkleRoot>,
@@ -704,19 +705,19 @@ impl MerkleRootRelayer {
             );
         }
 
-        // Dedup: skip if this exact root was already triggered and is in-flight.
-        if self.last_supervisor_trigger == Some((block_number, merkle_root)) {
+        // Dedup: skip if this merkle root was already triggered and is in-flight.
+        if self.last_supervisor_trigger == Some(merkle_root) {
             if let Some(root) = self.roots.get(&(block_number, merkle_root)) {
                 if matches!(root.status, MerkleRootStatus::GenerateProof | MerkleRootStatus::SubmitProof) {
                     log::debug!(
-                        "Merkle root relayer {relayer_id} supervisor: merkle root {merkle_root} at block #{block_number} already in-flight, skipping"
+                        "Merkle root relayer {relayer_id} supervisor: merkle root {merkle_root} already in-flight, skipping"
                     );
                     return Ok(());
                 }
             }
         }
 
-        self.last_supervisor_trigger = Some((block_number, merkle_root));
+        self.last_supervisor_trigger = Some(merkle_root);
         self.try_proof_merkle_root(
             prover,
             authority_set_sync,
@@ -1205,7 +1206,7 @@ impl MerkleRootRelayer {
 
     async fn finalize_merkle_root(&mut self, response: submitter::Response) -> anyhow::Result<()> {
         // Clear supervisor dedup trigger so the next supervisor tick can re-trigger if needed.
-        if self.last_supervisor_trigger == Some((response.merkle_root_block, response.merkle_root)) {
+        if self.last_supervisor_trigger == Some(response.merkle_root) {
             self.last_supervisor_trigger = None;
         }
 

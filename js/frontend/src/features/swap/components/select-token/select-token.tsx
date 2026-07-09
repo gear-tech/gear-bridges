@@ -59,7 +59,10 @@ function SelectTokenModal({ close }: ModalProps) {
     );
   };
 
-  const filteredTokens = tokens[networkName]?.filter(({ displaySymbol }) => {
+  const filteredTokens = tokens[networkName]?.filter(({ displaySymbol, symbol }) => {
+    // TODO: temporarily hidden — bridged USDC is not tradeable on DEX
+    if (symbol.toLowerCase().includes('usdc')) return false;
+
     const lowerCaseSymbol = displaySymbol.toLocaleLowerCase();
     const lowerCaseSearchQuery = searchQuery.toLocaleLowerCase();
 

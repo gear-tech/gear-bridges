@@ -186,19 +186,18 @@ async fn task(
         {
             log::error!("Proof composer failed with error: {err:?}");
 
-            match this.api_provider.reconnect().await {
-                Ok(_) => log::info!("Successfully reconnected to Gear API"),
-                Err(err) => {
-                    log::error!("Failed to reconnect to Gear API: {err:?}");
-                    return;
-                }
+            if let Err(err) = this.api_provider.reconnect().await {
+                log::error!("Failed to reconnect to Gear API: {err:?}");
+                // Will retry on next loop iteration
+            } else {
+                log::info!("Successfully reconnected to Gear API");
             }
 
             match this.eth_api.reconnect().await {
                 Ok(_) => log::info!("Successfully reconnected to Ethereum API"),
                 Err(err) => {
                     log::error!("Failed to reconnect to Ethereum API: {err:?}");
-                    return;
+                    // Will retry on next loop iteration
                 }
             }
         } else {

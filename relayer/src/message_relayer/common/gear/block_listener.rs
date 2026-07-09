@@ -76,13 +76,31 @@ impl BlockListener {
             } = self.block_storage.unprocessed_blocks().await;
             let mut last_finalized_block_number = None;
             if let Some(from_block) = first_block.or(last_block) {
+                // Cap startup catch-up to ~24 hours (1 era = 14400 blocks) to avoid
+                // replaying weeks or months of blocks when the relayer has been down long.
+                const MAX_STARTUP_CATCHUP_BLOCKS: u32 = 14_400;
+                let capped_from = {
+                    let client = self.api_provider.client();
+                    match client.latest_finalized_block().await {
+                        Ok(hash) => match client.block_hash_to_number(hash).await {
+                            Ok(latest) => from_block.1.max(latest.saturating_sub(MAX_STARTUP_CATCHUP_BLOCKS)),
+                            Err(_) => from_block.1,
+                        },
+                        Err(_) => from_block.1,
+                    }
+                };
+                if capped_from > from_block.1 {
+                    log::info!(
+                        "Gear block listener for relayer {relayer_id}: capping startup catch-up from #{} to #{} (latest - {MAX_STARTUP_CATCHUP_BLOCKS} blocks)",
+                        from_block.1, capped_from
+                    );
+                }
                 log::info!(
-                    "Gear block listener for relayer {relayer_id}: unprocessed blocks found, replaying from #{} in background",
-                    from_block.1
+                    "Gear block listener for relayer {relayer_id}: unprocessed blocks found, replaying from #{capped_from} in background",
                 );
                 self.spawn_replay_to_latest(
                     tx2.clone(),
-                    from_block.1,
+                    capped_from,
                     &mut last_finalized_block_number,
                     "startup catch-up",
                 )

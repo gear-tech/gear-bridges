@@ -115,18 +115,18 @@ async fn task(
     mut channel: UnboundedReceiver<Request>,
     responses: UnboundedSender<Response>,
 ) {
-    let mut attempts = 0;
+    let mut consecutive_failures = 0;
 
     loop {
         match task_inner(&mut this, &mut channel, &responses).await {
             Ok(_) => break,
             Err(e) => {
-                attempts += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
+                consecutive_failures += 1;
+                let delay = BASE_RETRY_DELAY * 2u32.pow(consecutive_failures - 1);
                 log::error!(
-                "Ethereum message sender failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
+                "Ethereum status fetcher failed (attempt: {consecutive_failures}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
             );
-                if attempts >= MAX_RETRIES {
+                if consecutive_failures >= MAX_RETRIES {
                     log::error!("Maximum attempts reached, exiting...");
                     break;
                 }
@@ -134,13 +134,9 @@ async fn task(
                 tokio::time::sleep(delay).await;
 
                 if common::is_transport_error_recoverable(&e) {
-                    match this.eth_api.reconnect().await.inspect_err(|e| {
-                        log::error!("Failed to reconnect to Ethereum: {e}");
-                    }) {
-                        Ok(eth_api) => this.eth_api = eth_api,
-                        Err(_) => {
-                            break;
-                        }
+                    if let Err(reconnect_err) = rpc::reconnect_eth(&mut this.eth_api, "eth status_fetcher").await {
+                        log::error!("Failed to reconnect to Ethereum: {reconnect_err}");
+                        break;
                     }
                 }
             }

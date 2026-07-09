@@ -1,4 +1,4 @@
-use crate::{common::BASE_RETRY_DELAY, message_relayer::common::RelayedMerkleRoot};
+use crate::{common::BASE_RETRY_DELAY, message_relayer::common::RelayedMerkleRoot, rpc};
 use ethereum_client::{abi::IMessageQueue::IMessageQueueErrors, EthApi, TxHash};
 use gear_rpc_client::dto::{MerkleProof, Message};
 use prometheus::{Gauge, IntCounter};
@@ -120,16 +120,9 @@ async fn task(
         log::error!(r#"Ethereum message sender failed: "{e:?}". Retrying in {delay:?}"#,);
 
         tokio::time::sleep(delay).await;
-        match this.eth_api.reconnect().await {
-            Ok(eth_api) => {
-                this.eth_api = eth_api;
-                log::debug!("EthApi successfully reconnected");
-            }
-
-            Err(e) => {
-                log::error!(r#"Failed to reconnect to Ethereum: "{e:?}""#);
-                break;
-            }
+        if let Err(e) = rpc::reconnect_eth(&mut this.eth_api, "eth message_sender").await {
+            log::error!(r#"Failed to reconnect to Ethereum: "{e:?}""#);
+            break;
         }
     }
 }

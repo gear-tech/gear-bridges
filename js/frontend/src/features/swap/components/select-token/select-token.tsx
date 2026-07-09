@@ -13,6 +13,7 @@ import { cx, isUndefined } from '@/utils';
 import ArrowSVG from '../../assets/arrow.svg?react';
 import { NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
+import { isEthToVaraUsdcBridgeDisabled } from '../../utils';
 
 import styles from './select-token.module.scss';
 
@@ -59,10 +60,7 @@ function SelectTokenModal({ close }: ModalProps) {
     );
   };
 
-  const filteredTokens = tokens[networkName]?.filter(({ displaySymbol, symbol }) => {
-    // TODO: temporarily hidden — bridged USDC is not tradeable on DEX
-    if (symbol.toLowerCase().includes('usdc')) return false;
-
+  const filteredTokens = tokens[networkName]?.filter(({ displaySymbol }) => {
     const lowerCaseSymbol = displaySymbol.toLocaleLowerCase();
     const lowerCaseSearchQuery = searchQuery.toLocaleLowerCase();
 
@@ -72,11 +70,14 @@ function SelectTokenModal({ close }: ModalProps) {
   const renderTokens = () => {
     if (!filteredTokens) return;
 
-    return filteredTokens.map(({ address, symbol, displaySymbol, isNative }, index) => {
+    return filteredTokens.map(({ address, symbol, displaySymbol, isNative, network: tokenNetwork }, index) => {
       const isActive = address === token?.address;
+      const isDisabled = isEthToVaraUsdcBridgeDisabled({ network: tokenNetwork, symbol });
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {
+        if (isDisabled) return;
+
         token?.set(address);
         close();
       };
@@ -85,15 +86,18 @@ function SelectTokenModal({ close }: ModalProps) {
         <li key={index}>
           <button
             type="button"
-            className={cx(styles.tokenButton, isActive && styles.active)}
+            className={cx(styles.tokenButton, isActive && styles.active, isDisabled && styles.disabled)}
             onClick={handleClick}
-            disabled={isActive}>
+            disabled={isActive || isDisabled}
+            title={isDisabled ? 'USDC bridging from Ethereum is temporarily unavailable' : undefined}>
             <span className={styles.wallet}>
               <TokenSVG symbol={symbol} network={networkName} />
 
               <span className={styles.token}>
                 <span className={styles.symbol}>{displaySymbol}</span>
-                <span className={styles.network}>{networkText}</span>
+                <span className={styles.network}>
+                  {isDisabled ? 'Temporarily unavailable for bridging' : networkText}
+                </span>
               </span>
             </span>
 

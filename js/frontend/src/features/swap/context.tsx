@@ -6,6 +6,7 @@ import { Token, useTokens } from '@/context';
 import { useEthAccount } from '@/hooks';
 
 import { NETWORK } from './consts';
+import { isEthToVaraUsdcBridgeDisabled } from './utils';
 
 type Context = {
   network: {
@@ -58,7 +59,11 @@ function BridgeProvider({ children }: PropsWithChildren) {
       network: {
         name: token?.network || NETWORK.VARA,
         isVara: isVaraNetwork,
-        switch: () => setTokenAddress(destinationToken?.address),
+        switch: () => {
+          if (isEthToVaraUsdcBridgeDisabled(destinationToken)) return;
+
+          setTokenAddress(destinationToken?.address);
+        },
       },
 
       token: token ? { ...token, set: setTokenAddress } : undefined,

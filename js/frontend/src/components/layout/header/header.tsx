@@ -5,7 +5,6 @@ import LogoSVG from '@/assets/logo.svg?react';
 import { ROUTE } from '@/consts';
 import { useNetworkType } from '@/context/network-type';
 import { TransactionsCounter } from '@/features/history';
-import { NetworkSwitch } from '@/features/network-switch';
 import { LockedBalanceTooltip } from '@/features/token-tracker';
 import { Wallet } from '@/features/wallet';
 import { useAccountsConnection } from '@/hooks';
@@ -74,8 +73,6 @@ function Header() {
           <Link to={ROUTE.HOME} className={styles.logo}>
             <LogoSVG />
           </Link>
-
-          <NetworkSwitch />
         </div>
 
         <Wallet className={styles.wallet} />

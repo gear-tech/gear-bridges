@@ -18,7 +18,6 @@ import {
 import { Provider } from './context';
 import { EthNetworkMismatchModal } from './eth-network-mismatch-modal';
 import { NetworkType } from './types';
-import { getNetworkTypeFromUrl } from './utils';
 
 function useChainIdLogs() {
   const appKitNetwork = useAppKitNetwork();
@@ -44,18 +43,14 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
 
   const [networkType, setNetworkType] = useState(DEFAULT_NETWORK_TYPE);
   const isMainnet = networkType === NETWORK_TYPE.MAINNET;
-  const isTestnet = networkType === NETWORK_TYPE.TESTNET;
   const PRESET = NETWORK_PRESET[networkType.toUpperCase() as keyof typeof NETWORK_PRESET];
 
   useChainIdLogs();
 
   useEffect(() => {
-    if (getNetworkTypeFromUrl(searchParams)) return;
-
-    searchParams.set(NETWORK_SEARCH_PARAM, networkType);
+    searchParams.set(NETWORK_SEARCH_PARAM, NETWORK_TYPE.MAINNET);
     setSearchParams(searchParams, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, setSearchParams]);
 
   // useSwitchChain switches connector's network if wallet is connected,
   // so setting config directly to avoid it
@@ -72,7 +67,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   const switchNetworks = (value: NetworkType) => {
     const NEXT_PRESET = NETWORK_PRESET[value.toUpperCase() as keyof typeof NETWORK_PRESET];
 
-    setNetworkType(value);
+    setNetworkType(value as 'mainnet');
     switchWagmiNetwork(NEXT_PRESET.ETH_CHAIN_ID);
 
     searchParams.set(NETWORK_SEARCH_PARAM, value);
@@ -91,7 +86,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     () => ({
       networkType,
       isMainnet,
-      isTestnet,
+      isTestnet: false,
       isLoading,
       NETWORK_PRESET: PRESET,
       switchNetworks,

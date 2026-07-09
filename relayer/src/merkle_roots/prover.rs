@@ -262,10 +262,29 @@ impl FinalityProver {
 
         tokio::task::spawn_blocking(move || {
             block_on(async move {
-                if let Err(e) = self.process(&mut req_rx, &res_tx).await {
-                    log::error!("Error processing finality prover requests: {e}");
-                } else {
-                    log::info!("Prover exiting");
+                const MAX_RETRIES: u32 = 5;
+                let mut consecutive_failures = 0;
+                loop {
+                    match self.process(&mut req_rx, &res_tx).await {
+                        Ok(()) => {
+                            log::info!("Prover exiting");
+                            break;
+                        }
+                        Err(err) => {
+                            consecutive_failures += 1;
+                            log::error!(
+                                "Finality prover error ({consecutive_failures}/{MAX_RETRIES}): {err}"
+                            );
+                            if consecutive_failures >= MAX_RETRIES {
+                                log::error!(
+                                    "Finality prover: max retries exhausted, exiting permanently"
+                                );
+                                break;
+                            }
+                            let delay = Duration::from_secs(5 * consecutive_failures as u64);
+                            tokio::time::sleep(delay).await;
+                        }
+                    }
                 }
             })
         });
@@ -578,10 +597,29 @@ impl SharedFinalityProver {
 
         tokio::task::spawn_blocking(move || {
             block_on(async move {
-                if let Err(err) = process_shared_requests(&mut rx, &worker_metrics).await {
-                    log::error!("Error processing shared finality prover requests: {err}");
-                } else {
-                    log::info!("Shared prover exiting");
+                const MAX_RETRIES: u32 = 5;
+                let mut consecutive_failures = 0;
+                loop {
+                    match process_shared_requests(&mut rx, &worker_metrics).await {
+                        Ok(()) => {
+                            log::info!("Shared prover exiting");
+                            break;
+                        }
+                        Err(err) => {
+                            consecutive_failures += 1;
+                            log::error!(
+                                "Shared prover error ({consecutive_failures}/{MAX_RETRIES}): {err}"
+                            );
+                            if consecutive_failures >= MAX_RETRIES {
+                                log::error!(
+                                    "Shared prover: max retries exhausted, exiting permanently"
+                                );
+                                break;
+                            }
+                            let delay = Duration::from_secs(5 * consecutive_failures as u64);
+                            tokio::time::sleep(delay).await;
+                        }
+                    }
                 }
             })
         });

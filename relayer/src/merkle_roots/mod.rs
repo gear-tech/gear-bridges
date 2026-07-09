@@ -245,6 +245,9 @@ pub struct MerkleRootRelayer {
     waiting_for_authority_set_sync: BTreeMap<u64, Vec<GearBlock>>,
 
     last_submitted_block: Option<u32>,
+    /// (block_number, merkle_root) of the last supervisor-triggered proof request.
+    /// Used to avoid re-triggering the same root while it's in-flight.
+    last_supervisor_trigger: Option<(u32, H256)>,
     first_pending_timestamp: Option<Instant>,
     queued_root_timestamps: VecDeque<Instant>,
     merkle_root_batch: Vec<PendingMerkleRoot>,
@@ -288,6 +291,7 @@ impl MerkleRootRelayer {
             waiting_for_authority_set_sync: BTreeMap::new(),
 
             last_submitted_block: None,
+            last_supervisor_trigger: None,
             first_pending_timestamp: None,
             queued_root_timestamps: VecDeque::with_capacity(8),
             merkle_root_batch: Vec::with_capacity(8),
@@ -335,18 +339,23 @@ impl MerkleRootRelayer {
                 Default::default()
             }
         };
-        let gear_api = self.api_provider.client();
         let mut last_sealed = match self.options.last_sealed {
             Some(era) => era,
             None => {
-                let block = gear_api
-                    .latest_finalized_block()
-                    .await
-                    .context("Failed to get latest finalized block during startup")?;
-                gear_api
-                    .authority_set_id(block)
-                    .await
-                    .context("Failed to get authority set id for latest finalized block")?
+                let block = rpc::retry_gear(
+                    &mut self.api_provider,
+                    "startup latest finalized block",
+                    |api| async move { api.latest_finalized_block().await },
+                )
+                .await
+                .context("Failed to get latest finalized block during startup")?;
+                rpc::retry_gear(
+                    &mut self.api_provider,
+                    "startup authority set id",
+                    move |api| async move { api.authority_set_id(block).await },
+                )
+                .await
+                .context("Failed to get authority set id for latest finalized block")?
             }
         };
 
@@ -358,8 +367,6 @@ impl MerkleRootRelayer {
                 "Merkle root relayer {relayer_id}: failed to enqueue authority set sync startup job"
             ));
         }
-
-        let gear_api = self.api_provider.client();
 
         for ((block_number, hash), merkle_root) in roots.drain() {
             let block_hash = merkle_root.block_hash;
@@ -387,8 +394,14 @@ impl MerkleRootRelayer {
                         "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} is waiting for authority set sync with id {id}"
                     );
 
-                    let block = gear_api.get_block_at(block_hash).await?;
-                    let block = GearBlock::from_subxt_block(&gear_api, block).await?;
+                    let block = rpc::retry_gear(
+                        &mut self.api_provider,
+                        "recovery get_block_at",
+                        move |api| async move { api.get_block_at(block_hash).await },
+                    )
+                    .await?;
+                    let client = self.api_provider.client();
+                    let block = GearBlock::from_subxt_block(&client, block).await?;
 
                     match self
                         .storage
@@ -463,8 +476,15 @@ impl MerkleRootRelayer {
                     // if merkle root was saved in `generate proof` phase, it means
                     // that proof for authority set id is already generated and thus should be available in storage.
                     // If it is not found that is a hard error and storage should be fixed.
-                    let signed_by_authority_set_id =
-                        gear_api.signed_by_authority_set_id(block_hash).await?;
+                    let block_hash_for_authority = block_hash;
+                    let signed_by_authority_set_id = rpc::retry_gear(
+                        &mut self.api_provider,
+                        "recovery signed_by_authority_set_id",
+                        move |api| async move {
+                            api.signed_by_authority_set_id(block_hash_for_authority).await
+                        },
+                    )
+                    .await?;
                     let inner_proof = self
                         .storage
                         .proofs
@@ -559,12 +579,14 @@ impl MerkleRootRelayer {
         let relayer_id = &self.options.relayer_id;
         let max_block_number = eth_api.max_block_number().await?;
         let max_block_distance = eth_api.max_block_distance().await?;
-        let last_block_hash = self.api_provider.client().latest_finalized_block().await?;
-        let last_block = self
-            .api_provider
-            .client()
-            .block_hash_to_number(last_block_hash)
-            .await?;
+        let last_block_hash = rpc::retry_gear(
+            &mut self.api_provider,
+            "initialize_contract_cursor latest_finalized_block",
+            |api| async move { api.latest_finalized_block().await },
+        )
+        .await?;
+        let client = self.api_provider.client();
+        let last_block = client.block_hash_to_number(last_block_hash).await?;
         let max_block_number_in_storage = self.max_finalized_merkle_root_block();
 
         log::info!("Merkle root relayer {relayer_id}: latest finalized block is #{last_block}, max block number in Ethereum MessageQueue contract is #{max_block_number} (MAX_BLOCK_DISTANCE={max_block_distance})");
@@ -642,30 +664,59 @@ impl MerkleRootRelayer {
             return Ok(());
         }
 
-        let Some((last_submitted_block, threshold)) = critical_timeout_reached(
+        // Two independent triggers — either one is sufficient to schedule proof generation.
+        let merkle_hash_trigger = eth_root != Some(merkle_root);
+        let critical_threshold_trigger = critical_timeout_reached(
             self.options.critical_threshold,
             self.last_submitted_block,
             block_number,
-        ) else {
+        )
+        .is_some();
+
+        if !merkle_hash_trigger && !critical_threshold_trigger {
             log::debug!(
-                "Merkle root relayer {relayer_id} supervisor: critical threshold is not reached for block #{block_number}, skipping forced proof generation"
+                "Merkle root relayer {relayer_id} supervisor: Ethereum has merkle root and critical threshold not reached, skipping"
             );
             return Ok(());
-        };
-        log::warn!(
-            "Merkle root relayer {relayer_id} supervisor: last submitted block {last_submitted_block} is older than supervised block number {block_number} by at least {threshold}, forcing proof generation"
-        );
+        }
 
-        if let Some(eth_root) = eth_root {
+        if merkle_hash_trigger {
+            if eth_root.is_none() {
+                log::info!(
+                    "Merkle root relayer {relayer_id} supervisor: [merkle hash trigger] Ethereum has no merkle root for Vara queue root {merkle_root} at block #{block_number}"
+                );
+            } else {
+                log::warn!(
+                    "Merkle root relayer {relayer_id} supervisor: [merkle hash trigger] Ethereum has merkle root {:?} but Vara has {merkle_root} at block #{block_number}",
+                    eth_root.unwrap()
+                );
+            }
+        }
+        if critical_threshold_trigger {
+            let (last_submitted, threshold) = critical_timeout_reached(
+                self.options.critical_threshold,
+                self.last_submitted_block,
+                block_number,
+            )
+            .unwrap();
             log::warn!(
-                "Merkle root relayer {relayer_id} supervisor: Ethereum has merkle root {eth_root} for block #{block_number}, but Vara queue root is {merkle_root}; scheduling proof anyway"
-            );
-        } else {
-            log::info!(
-                "Merkle root relayer {relayer_id} supervisor: Ethereum has no merkle root for Vara queue root {merkle_root} at block #{block_number}; scheduling proof"
+                "Merkle root relayer {relayer_id} supervisor: [critical threshold trigger] last submitted block {last_submitted} is older than block #{block_number} by at least {threshold}"
             );
         }
 
+        // Dedup: skip if this exact root was already triggered and is in-flight.
+        if self.last_supervisor_trigger == Some((block_number, merkle_root)) {
+            if let Some(root) = self.roots.get(&(block_number, merkle_root)) {
+                if matches!(root.status, MerkleRootStatus::GenerateProof | MerkleRootStatus::SubmitProof) {
+                    log::debug!(
+                        "Merkle root relayer {relayer_id} supervisor: merkle root {merkle_root} at block #{block_number} already in-flight, skipping"
+                    );
+                    return Ok(());
+                }
+            }
+        }
+
+        self.last_supervisor_trigger = Some((block_number, merkle_root));
         self.try_proof_merkle_root(
             prover,
             authority_set_sync,
@@ -740,6 +791,14 @@ impl MerkleRootRelayer {
                         "Merkle root relayer {}: error processing blocks: {err}",
                         self.options.relayer_id
                     );
+                    if rpc::classify_anyhow(&err) == rpc::RetryDecision::Retry {
+                        log::warn!(
+                            "Merkle root relayer {}: recoverable error, reconnecting and resuming",
+                            self.options.relayer_id
+                        );
+                        self.api_provider.reconnect().await.ok();
+                        continue;
+                    }
                     return Err(err);
                 }
             }
@@ -756,7 +815,6 @@ impl MerkleRootRelayer {
         http: &mut UnboundedReceiver<MerkleRootsRequest>,
         eth_api: &EthApi,
     ) -> anyhow::Result<bool> {
-        let client = self.api_provider.client();
         tokio::select! {
             _ = self.save_interval.tick() => {
                 log::trace!("60 seconds passed, saving current state");
@@ -817,10 +875,11 @@ impl MerkleRootRelayer {
                             merkle_root.block_inclusion_proof.clone(),
                         ) {
                             log::warn!(
-                                "Merkle root relayer {}: prover connection closed, exiting",
+                                "Merkle root relayer {}: prover connection closed, will retry",
                                 self.options.relayer_id
                             );
-                            return Ok(false);
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            return Ok(true);
                         }
                     }
                 }
@@ -856,30 +915,46 @@ impl MerkleRootRelayer {
                                     }
                                 }
 
-                                let api = self.api_provider.client();
-                                let block_hash = api.block_number_to_hash(block_number).await?;
-                                let block = api.get_block_at(block_hash).await?;
-                                let block = GearBlock::from_subxt_block(&client, block).await?;
-
-                                match self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await {
-                                    Ok(Some((_, merkle_root))) => {
-                                        if let Some(r) = self.roots.get_mut(&(block_number, merkle_root)) { r.http_requests.push(response) } else {
+                                // Use the latest GRANDPA-justified block (chain len = 1) for
+                                // fast proof generation instead of fetching the specific
+                                // requested block. Retry up to 5 times with fresh blocks on failure.
+                                const HTTP_PROOF_RETRIES: u32 = 5;
+                                let mut http_attempt = 0u32;
+                                loop {
+                                    let block = match self.signed_block_after(block_number).await {
+                                        Ok(b) => b,
+                                        Err(err) => {
+                                            log::error!("Merkle root relayer {}: HTTP handle failed to find justified block: {err}", self.options.relayer_id);
                                             response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
+                                            return Ok(true);
                                         }
-                                    }
+                                    };
 
-                                    Ok(None) => {
-                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
-                                            log::error!("Merkle root relayer {}: HTTP response send failed", self.options.relayer_id);
-                                            return Ok(false);
-                                        };
-                                    }
-                                    Err(err) => {
-                                        let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
-                                            log::error!("Merkle root relayer {}: HTTP response send failed", self.options.relayer_id);
-                                            return Ok(false);
-                                        };
-                                        return Err(err);
+                                    match self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::Yes, ForceGeneration::Yes).await {
+                                        Ok(Some((_, merkle_root))) => {
+                                            if let Some(r) = self.roots.get_mut(&(block_number, merkle_root)) { r.http_requests.push(response) } else {
+                                                response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
+                                            }
+                                            break;
+                                        }
+
+                                        Ok(None) => {
+                                            let Ok(_) = response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }) else {
+                                                log::error!("Merkle root relayer {}: HTTP response send failed", self.options.relayer_id);
+                                                return Ok(false);
+                                            };
+                                            break;
+                                        }
+                                        Err(err) => {
+                                            http_attempt += 1;
+                                            if http_attempt >= HTTP_PROOF_RETRIES {
+                                                log::error!("Merkle root relayer {}: HTTP proof generation failed after {HTTP_PROOF_RETRIES} attempts: {err}", self.options.relayer_id);
+                                                response.send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number }).ok();
+                                                return Ok(true);
+                                            }
+                                            log::warn!("Merkle root relayer {}: HTTP proof attempt {http_attempt}/{HTTP_PROOF_RETRIES} failed: {err}, retrying with fresh block", self.options.relayer_id);
+                                            tokio::time::sleep(Duration::from_secs(2)).await;
+                                        }
                                     }
                                 }
                             }
@@ -918,8 +993,14 @@ impl MerkleRootRelayer {
 
                         if let Some(bridging_payment_address) = self.options.bridging_payment_address {
                             for (pblock, _) in storage::priority_bridging_paid(&block, bridging_payment_address) {
-                                let pblock = self.api_provider.client().get_block_at(pblock).await?;
-                                let pblock = GearBlock::from_subxt_block(&client, pblock).await?;
+                                let pblock_hash = rpc::retry_gear(
+                                    &mut self.api_provider,
+                                    "priority bridging get_block_at",
+                                    move |api| async move { api.get_block_at(pblock).await },
+                                )
+                                .await?;
+                                let client = self.api_provider.client();
+                                let pblock = GearBlock::from_subxt_block(&client, pblock_hash).await?;
                                 log::info!("Merkle root relayer {}: priority bridging requested at block #{}, generating proof for merkle-root at block #{}", self.options.relayer_id, block.number(), pblock.number());
 
                                 self.try_proof_merkle_root(prover, authority_set_sync, pblock, Batch::Yes, Priority::Yes, ForceGeneration::Yes).await?;
@@ -950,10 +1031,11 @@ impl MerkleRootRelayer {
             response = prover.recv() => {
                 let Some(response) = response else {
                     log::warn!(
-                        "Merkle root relayer {}: finality prover connection closed, exiting",
+                        "Merkle root relayer {}: finality prover connection closed, will retry",
                         self.options.relayer_id
                     );
-                    return Ok(false);
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    return Ok(true);
                 };
 
                 match response {
@@ -988,10 +1070,11 @@ impl MerkleRootRelayer {
 
                         if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
                             log::warn!(
-                                "Merkle root relayer {}: proof submitter connection closed, exiting",
+                                "Merkle root relayer {}: proof submitter connection closed, will retry",
                                 self.options.relayer_id
                             );
-                            return Ok(false);
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            return Ok(true);
                         }
                     }
 
@@ -1046,10 +1129,11 @@ impl MerkleRootRelayer {
 
                         if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
                             log::warn!(
-                                "Merkle root relayer {}: proof submitter connection closed, exiting",
+                                "Merkle root relayer {}: proof submitter connection closed, will retry",
                                 self.options.relayer_id
                             );
-                            return Ok(false);
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            return Ok(true);
                         }
                     }
                 }
@@ -1081,8 +1165,19 @@ impl MerkleRootRelayer {
                         }
 
                         if let CriticalThreshold::AuthoritySetChange = self.options.critical_threshold {
-                            let block_hash = client.search_for_authority_set_block(id).await?;
-                            let block = client.get_block_at(block_hash).await?;
+                            let block_hash = rpc::retry_gear(
+                                &mut self.api_provider,
+                                "authority-set-synced search_for_authority_set_block",
+                                move |api| async move { api.search_for_authority_set_block(id).await },
+                            )
+                            .await?;
+                            let block = rpc::retry_gear(
+                                &mut self.api_provider,
+                                "authority-set-synced get_block_at",
+                                move |api| async move { api.get_block_at(block_hash).await },
+                            )
+                            .await?;
+                            let client = self.api_provider.client();
                             let block = GearBlock::from_subxt_block(&client, block).await?;
                             log::info!("Merkle root relayer {}: critical threshold is set to AuthoritySetChange, forcing proof at block #{}", self.options.relayer_id, block.number());
                             self.try_proof_merkle_root(prover, authority_set_sync, block, Batch::No, Priority::No, ForceGeneration::Yes).await?;
@@ -1095,10 +1190,11 @@ impl MerkleRootRelayer {
             response = submitter.recv() => {
                 let Some(response) = response else {
                     log::warn!(
-                        "Merkle root relayer {}: proof submitter connection closed, exiting",
+                        "Merkle root relayer {}: proof submitter connection closed, will retry",
                         self.options.relayer_id
                     );
-                    return Ok(false);
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    return Ok(true);
                 };
 
                 self.finalize_merkle_root(response).await?;
@@ -1108,6 +1204,11 @@ impl MerkleRootRelayer {
     }
 
     async fn finalize_merkle_root(&mut self, response: submitter::Response) -> anyhow::Result<()> {
+        // Clear supervisor dedup trigger so the next supervisor tick can re-trigger if needed.
+        if self.last_supervisor_trigger == Some((response.merkle_root_block, response.merkle_root)) {
+            self.last_supervisor_trigger = None;
+        }
+
         if let Some(era) = response.era {
             log::info!(
                 "Merkle root relayer {}: era #{} merkle root {} for block #{} is finalized with status: {:?}",
@@ -1202,10 +1303,14 @@ impl MerkleRootRelayer {
         priority: Priority,
         force_generation: ForceGeneration,
     ) -> anyhow::Result<Option<(u64, H256)>> {
-        let api = self.api_provider.client();
-
+        let block_hash_for_fetch = block.hash();
         let (queue_id, merkle_root) = if force_generation == ForceGeneration::Yes {
-            api.fetch_queue_merkle_root(block.hash()).await?
+            rpc::retry_gear(
+                &mut self.api_provider,
+                "fetch_queue_merkle_root",
+                move |api| async move { api.fetch_queue_merkle_root(block_hash_for_fetch).await },
+            )
+            .await?
         } else {
             match storage::queue_merkle_root_changed(&block) {
                 Some(merkle_root) => merkle_root,
@@ -1231,7 +1336,10 @@ impl MerkleRootRelayer {
             Some(proof) => proof,
             None => match self.storage.blocks.read().await.get(&block.number()) {
                 Some(block) => block.inclusion_proof.clone(),
-                None => block.inclusion_proof(&api).await?,
+                None => {
+                let client = self.api_provider.client();
+                block.inclusion_proof(&client).await?
+            }
             },
         };
 

@@ -345,16 +345,27 @@ impl AuthoritySetSync {
                     shared_handle: Some(shared_handle),
                 };
 
+                let mut consecutive_reconnect_failures = 0u32;
+                const MAX_RECONNECT_RETRIES: u32 = 5;
                 loop {
                     if let Err(err) = runner.process(&mut blocks, &tx, &mut req_rx).await {
                         log::error!(
                             "Authority set sync for relayer {relayer_id} task failed: {err}"
                         );
 
+                        consecutive_reconnect_failures += 1;
+                        if consecutive_reconnect_failures >= MAX_RECONNECT_RETRIES {
+                            log::error!(
+                                "Authority set sync for relayer {relayer_id}: max reconnect retries exhausted, exiting"
+                            );
+                            return;
+                        }
+                        let delay = std::time::Duration::from_secs(5 * consecutive_reconnect_failures as u64);
+                        tokio::time::sleep(delay).await;
                         match runner.api_provider.reconnect().await {
                             Ok(_) => {
                                 log::info!(
-                                    "Authority set sync for relayer {relayer_id}: reconnected to Gear API, resuming"
+                                    "Authority set sync for relayer {relayer_id}: reconnected to Gear API, resuming (attempt {consecutive_reconnect_failures}/{MAX_RECONNECT_RETRIES})"
                                 );
                                 continue;
                             }
@@ -362,7 +373,7 @@ impl AuthoritySetSync {
                                 log::error!(
                                     "Authority set sync for relayer {relayer_id}: failed to reconnect to Gear API: {err}"
                                 );
-                                return;
+                                // Will retry on next loop iteration
                             }
                         }
                     } else {
@@ -385,16 +396,27 @@ impl AuthoritySetSync {
                         shared_handle: None,
                     };
 
+                    let mut consecutive_reconnect_failures = 0u32;
+                    const MAX_RECONNECT_RETRIES: u32 = 5;
                     loop {
                         if let Err(err) = runner.process(&mut blocks, &tx, &mut req_rx).await {
                             log::error!(
                                 "Authority set sync for relayer {relayer_id} task failed: {err}"
                             );
 
+                            consecutive_reconnect_failures += 1;
+                            if consecutive_reconnect_failures >= MAX_RECONNECT_RETRIES {
+                                log::error!(
+                                    "Authority set sync for relayer {relayer_id}: max reconnect retries exhausted, exiting"
+                                );
+                                return;
+                            }
+                            let delay = std::time::Duration::from_secs(5 * consecutive_reconnect_failures as u64);
+                            tokio::time::sleep(delay).await;
                             match runner.api_provider.reconnect().await {
                                 Ok(_) => {
                                     log::info!(
-                                        "Authority set sync for relayer {relayer_id}: reconnected to Gear API, resuming"
+                                        "Authority set sync for relayer {relayer_id}: reconnected to Gear API, resuming (attempt {consecutive_reconnect_failures}/{MAX_RECONNECT_RETRIES})"
                                     );
                                     continue;
                                 }
@@ -402,7 +424,7 @@ impl AuthoritySetSync {
                                     log::error!(
                                         "Authority set sync for relayer {relayer_id}: failed to reconnect to Gear API: {err}"
                                     );
-                                    return;
+                                    // Will retry on next loop iteration
                                 }
                             }
                         } else {

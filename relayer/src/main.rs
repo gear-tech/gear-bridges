@@ -818,34 +818,65 @@ async fn supervise_running_gear_eth_core_relayers(
         return Err(anyhow!("no merkle-root relayers started"));
     }
 
-    let mut tasks = Vec::with_capacity(running.len());
-    let mut ids = Vec::with_capacity(running.len());
-    let mut server_handles = Vec::with_capacity(running.len());
+    // When there's only one relayer, just wait for it directly (preserves existing behavior).
+    if running.len() == 1 {
+        let relayer = running.into_iter().next().unwrap();
+        return wait_single_relayer(relayer).await;
+    }
+
+    // Multi-relayer supervisor: when one dies, log it and let siblings continue.
+    // The process exits only when ALL relayers have died.
+    let total = running.len();
+    let mut entries: Vec<(String, ServerHandle)> = Vec::with_capacity(total);
+    let mut join_set = tokio::task::JoinSet::new();
 
     for relayer in running {
-        ids.push(relayer.id);
-        server_handles.push(relayer.server_handle);
-        tasks.push(relayer.task);
+        let id = relayer.id.clone();
+        entries.push((relayer.id, relayer.server_handle));
+        // Transfer the JoinHandle into the JoinSet by spawning a forwarding task
+        join_set.spawn(async move {
+            let result = relayer.task.await;
+            (id, result)
+        });
     }
 
-    let (result, index, remaining_tasks) = futures::future::select_all(tasks).await;
-    for server_handle in server_handles {
-        stop_web_server(server_handle).await;
-    }
-    for task in remaining_tasks {
-        task.abort();
+    let mut exited = 0usize;
+    while let Some(join_result) = join_set.join_next().await {
+        exited += 1;
+        let (id, task_result) = match join_result {
+            Ok(pair) => pair,
+            Err(join_err) => {
+                log::error!("supervisor task panicked: {join_err}");
+                continue;
+            }
+        };
+
+        match task_result {
+            Ok(Ok(())) => {
+                log::warn!(
+                    "merkle-root relayer {id} exited cleanly ({exited}/{total} exited)"
+                );
+            }
+            Ok(Err(err)) => {
+                log::error!(
+                    "merkle-root relayer {id} failed: {err:?} ({exited}/{total} exited)"
+                );
+            }
+            Err(err) => {
+                log::error!(
+                    "merkle-root relayer {id} task panicked: {err} ({exited}/{total} exited)"
+                );
+            }
+        }
+
+        // Stop the dead relayer's web server
+        if let Some(pos) = entries.iter().position(|(eid, _)| *eid == id) {
+            let (_, server_handle) = entries.remove(pos);
+            stop_web_server(server_handle).await;
+        }
     }
 
-    let id = ids
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| "<unknown>".to_string());
-
-    match result {
-        Ok(Ok(())) => Err(anyhow!("merkle-root relayer {id} exited unexpectedly")),
-        Ok(Err(err)) => Err(err).with_context(|| format!("merkle-root relayer {id} failed")),
-        Err(err) => Err(anyhow!("merkle-root relayer {id} task failed: {err}")),
-    }
+    Err(anyhow!("all {total} merkle-root relayers have exited"))
 }
 
 async fn wait_single_relayer(running: RunningGearEthCoreRelayer) -> AnyResult<()> {
@@ -856,7 +887,14 @@ async fn wait_single_relayer(running: RunningGearEthCoreRelayer) -> AnyResult<()
         ..
     } = running;
     match task.await {
-        Ok(result) => result,
+        Ok(Ok(())) => {
+            stop_web_server(server_handle).await;
+            Err(anyhow!("merkle-root relayer {id} exited unexpectedly"))
+        }
+        Ok(Err(err)) => {
+            stop_web_server(server_handle).await;
+            Err(err).with_context(|| format!("merkle-root relayer {id} failed"))
+        }
         Err(err) => {
             stop_web_server(server_handle).await;
             Err(anyhow!("merkle-root relayer {id} task failed: {err}"))

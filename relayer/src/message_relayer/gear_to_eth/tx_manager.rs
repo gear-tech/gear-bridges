@@ -4,10 +4,7 @@ use prometheus::IntCounter;
 use sails_rs::ActorId;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::{
-    sync::{mpsc::UnboundedReceiver, RwLock},
-    time::{self, Interval, MissedTickBehavior},
-};
+use tokio::sync::{mpsc::UnboundedReceiver, RwLock};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 
@@ -240,14 +237,9 @@ impl TransactionManager {
             )
             .await?
         {
-            return Err(anyhow::anyhow!(
-                "gear-to-eth transaction manager supervisor channel closed during startup recovery"
-            ));
+            log::warn!("Failed to resume transaction manager, exiting");
+            return Ok(());
         }
-
-        let mut supervisor_interval = time::interval(crate::common::SUPERVISOR_INTERVAL);
-        supervisor_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        supervisor_interval.tick().await;
 
         loop {
             let result = self
@@ -257,7 +249,6 @@ impl TransactionManager {
                     &mut proof_fetcher,
                     &mut message_sender,
                     &mut status_fetcher,
-                    &mut supervisor_interval,
                 )
                 .await;
 
@@ -265,9 +256,8 @@ impl TransactionManager {
 
             match result {
                 Ok(false) => {
-                    return Err(anyhow::anyhow!(
-                        "gear-to-eth transaction manager supervisor channel closed"
-                    ));
+                    log::warn!("No new transactions to process, exiting");
+                    break;
                 }
 
                 Ok(true) => continue,
@@ -277,6 +267,7 @@ impl TransactionManager {
                 }
             }
         }
+        Ok(())
     }
 
     pub async fn process(
@@ -286,22 +277,11 @@ impl TransactionManager {
         proof_fetcher: &mut MerkleRootFetcherIo,
         message_sender: &mut MessageSenderIo,
         status_fetcher: &mut StatusFetcherIo,
-        supervisor_interval: &mut Interval,
     ) -> anyhow::Result<bool> {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 log::info!("Received Ctrl+C signal, exiting");
                 return Ok(false);
-            }
-
-            _ = supervisor_interval.tick() => {
-                log::info!("Gear-to-eth supervisor scanning pending transactions");
-                if !self
-                    .resume(accumulator, proof_fetcher, message_sender, status_fetcher)
-                    .await?
-                {
-                    return Ok(false);
-                }
             }
 
             message = queued_messages.recv() => {

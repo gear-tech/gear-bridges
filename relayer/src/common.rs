@@ -198,6 +198,3 @@ pub fn create_range(from: Option<u64>, latest: u64) -> BlockRange {
 
 pub const MAX_RETRIES: u32 = 10;
 pub const BASE_RETRY_DELAY: Duration = Duration::from_secs(10);
-pub const SUPERVISOR_INTERVAL: Duration = Duration::from_secs(15 * 60);
-/// Twelve hours at roughly one block every three seconds.
-pub const SUPERVISOR_LOOKBACK_BLOCKS: u32 = 12 * 60 * 60 / 3;

@@ -40,6 +40,8 @@ pub mod prover;
 pub mod storage;
 pub mod submitter;
 
+const MERKLE_ROOT_SUPERVISOR_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
 pub struct Relayer {
     merkle_roots: MerkleRootRelayer,
     authority_set_sync: authority_set_sync::AuthoritySetSync,
@@ -274,7 +276,7 @@ impl MerkleRootRelayer {
         let mut main_interval = tokio::time::interval(options.check_interval);
         main_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let mut supervisor_interval = tokio::time::interval(crate::common::SUPERVISOR_INTERVAL);
+        let mut supervisor_interval = tokio::time::interval(MERKLE_ROOT_SUPERVISOR_INTERVAL);
         supervisor_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         MerkleRootRelayer {
@@ -640,6 +642,20 @@ impl MerkleRootRelayer {
             return Ok(());
         }
 
+        let Some((last_submitted_block, threshold)) = critical_timeout_reached(
+            self.options.critical_threshold,
+            self.last_submitted_block,
+            block_number,
+        ) else {
+            log::debug!(
+                "Merkle root relayer {relayer_id} supervisor: critical threshold is not reached for block #{block_number}, skipping forced proof generation"
+            );
+            return Ok(());
+        };
+        log::warn!(
+            "Merkle root relayer {relayer_id} supervisor: last submitted block {last_submitted_block} is older than supervised block number {block_number} by at least {threshold}, forcing proof generation"
+        );
+
         if let Some(eth_root) = eth_root {
             log::warn!(
                 "Merkle root relayer {relayer_id} supervisor: Ethereum has merkle root {eth_root} for block #{block_number}, but Vara queue root is {merkle_root}; scheduling proof anyway"
@@ -715,7 +731,7 @@ impl MerkleRootRelayer {
                 Ok(true) => continue,
                 Ok(false) => {
                     return Err(anyhow::anyhow!(
-                        "merkle root relayer {} supervisor channel closed",
+                        "merkle root relayer {} component channel closed",
                         self.options.relayer_id
                     ));
                 }
@@ -887,16 +903,16 @@ impl MerkleRootRelayer {
                         let mut force = ForceGeneration::No;
                         let mut batch = Batch::Yes;
                         let number = block.number();
-                        if let Some(last_submitted_block) = self.last_submitted_block
+                        if let Some((last_submitted_block, threshold)) =
+                            critical_timeout_reached(
+                                self.options.critical_threshold,
+                                self.last_submitted_block,
+                                number,
+                            )
                         {
-                            if let CriticalThreshold::Timeout(threshold) = self.options.critical_threshold
-                            {
-                                if last_submitted_block + threshold <= number {
-                                    log::warn!("Merkle root relayer {}: last submitted block {last_submitted_block} is older than current block number {number} by more than {threshold}, forcing proof generation", self.options.relayer_id);
-                                    force = ForceGeneration::Yes;
-                                    batch = Batch::No;
-                                }
-                            }
+                            log::warn!("Merkle root relayer {}: last submitted block {last_submitted_block} is older than current block number {number} by at least {threshold}, forcing proof generation", self.options.relayer_id);
+                            force = ForceGeneration::Yes;
+                            batch = Batch::No;
                         }
 
 
@@ -1554,9 +1570,62 @@ pub enum CriticalThreshold {
     AuthoritySetChange,
 }
 
+fn critical_timeout_reached(
+    critical_threshold: CriticalThreshold,
+    last_submitted_block: Option<u32>,
+    block_number: u32,
+) -> Option<(u32, u32)> {
+    let CriticalThreshold::Timeout(threshold) = critical_threshold else {
+        return None;
+    };
+    let last_submitted_block = last_submitted_block?;
+    if block_number >= last_submitted_block && block_number - last_submitted_block >= threshold {
+        Some((last_submitted_block, threshold))
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StartupSyncStrategy {
     CriticalThreshold,
     SkipCatchUp,
     Blocks(Vec<u32>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{critical_timeout_reached, CriticalThreshold};
+
+    #[test]
+    fn critical_timeout_is_reached_at_threshold() {
+        assert_eq!(
+            critical_timeout_reached(CriticalThreshold::Timeout(5), Some(10), 15),
+            Some((10, 5))
+        );
+    }
+
+    #[test]
+    fn critical_timeout_is_not_reached_before_threshold() {
+        assert_eq!(
+            critical_timeout_reached(CriticalThreshold::Timeout(5), Some(10), 14),
+            None
+        );
+    }
+
+    #[test]
+    fn critical_timeout_requires_last_submitted_block() {
+        assert_eq!(
+            critical_timeout_reached(CriticalThreshold::Timeout(5), None, 15),
+            None
+        );
+    }
+
+    #[test]
+    fn authority_set_change_is_not_a_timeout_threshold() {
+        assert_eq!(
+            critical_timeout_reached(CriticalThreshold::AuthoritySetChange, Some(10), 15),
+            None
+        );
+    }
 }

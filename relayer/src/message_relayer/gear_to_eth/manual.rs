@@ -116,9 +116,6 @@ pub async fn relay(
 
     let status_fetcher = StatusFetcher::new(eth_api, confirmations);
     let mut status_fetcher_io = status_fetcher.spawn();
-    let mut supervisor_interval = tokio::time::interval(crate::common::SUPERVISOR_INTERVAL);
-    supervisor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    supervisor_interval.tick().await;
 
     loop {
         match tx_manager
@@ -128,7 +125,6 @@ pub async fn relay(
                 &mut proof_fetcher_io,
                 &mut message_sender_io,
                 &mut status_fetcher_io,
-                &mut supervisor_interval,
             )
             .await
         {

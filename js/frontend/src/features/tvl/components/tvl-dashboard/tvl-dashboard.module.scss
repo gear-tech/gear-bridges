@@ -1,0 +1,23 @@
+.card {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 24px 32px;
+
+  background-color: #0e1217;
+  border: 1px solid #00ffc433;
+  border-radius: 16px;
+}
+
+.attribution {
+  font-size: 14px;
+  line-height: 140%;
+  color: #828b8e;
+  text-decoration: none;
+
+  transition: color 0.2s;
+
+  &:hover {
+    color: #00ffc4;
+  }
+}

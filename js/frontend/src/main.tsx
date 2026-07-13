@@ -9,7 +9,7 @@ import { useAccountsConnection } from '@/hooks';
 
 import { App } from './app';
 import { ROUTE, GTM_ID, SENTRY_DSN } from './consts';
-import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction } from './pages';
+import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction, TVL } from './pages';
 
 import './index.scss';
 
@@ -37,6 +37,7 @@ function PrivateRoute() {
 const PUBLIC_ROUTES = [
   { path: ROUTE.HOME, element: <Home /> },
   { path: ROUTE.TRANSACTIONS, element: <Transactions /> },
+  { path: ROUTE.TVL, element: <TVL /> },
   { path: ROUTE.FAQ, element: <FAQ /> },
   { path: ROUTE.TRANSACTION, element: <Transaction /> },
   { path: '*', element: <NotFound /> },

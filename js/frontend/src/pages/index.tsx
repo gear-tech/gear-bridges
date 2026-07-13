@@ -5,5 +5,6 @@ import { NotFound } from './not-found';
 import { TokenTracker } from './token-tracker';
 import { Transaction } from './transaction';
 import { Transactions } from './transactions';
+import { TVL } from './tvl';
 
-export { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction };
+export { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction, TVL };

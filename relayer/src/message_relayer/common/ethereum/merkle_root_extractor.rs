@@ -89,7 +89,6 @@ impl MerkleRootExtractor {
 
             if let Err(e) = self.api_provider.reconnect().await {
                 log::error!(r#"Merkle root extractor unable to reconnect: "{e}""#);
-                // Will retry on next loop iteration (bounded by caller)
                 return None;
             }
 
@@ -118,9 +117,17 @@ async fn task(mut this: MerkleRootExtractor) {
 
         log::error!(r#"Merkle root extractor failed: "{err:?}""#);
 
-        if let Err(err) = crate::rpc::reconnect_eth(&mut this.eth_api, "merkle_root_extractor").await {
-            log::error!(r#"Failed to reconnect to Ethereum after retries: "{err}""#);
-            // Continue the outer loop — task_inner will fail again and we'll retry
+        loop {
+            match this.eth_api.reconnect().await {
+                Ok(eth_api) => {
+                    this.eth_api = eth_api;
+                    break;
+                }
+                Err(err) => {
+                    log::error!(r#"Failed to reconnect to Ethereum: "{err}". Retrying..."#);
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
+            }
         }
     }
 }

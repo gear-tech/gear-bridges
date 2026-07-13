@@ -4,7 +4,6 @@ use std::{
 };
 
 use alloy::transports::{RpcError, TransportErrorKind};
-use ethereum_client::EthApi;
 use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::GearApi;
 use thiserror::Error;
@@ -65,10 +64,6 @@ pub fn classify_anyhow(err: &anyhow::Error) -> RetryDecision {
         return RetryDecision::Retry;
     }
 
-    if err.chain().any(is_permanent_error_text) {
-        return RetryDecision::Fail;
-    }
-
     if let Some(ethereum_client::Error::ErrorInHTTPTransport(err)) =
         err.downcast_ref::<ethereum_client::Error>()
     {
@@ -99,9 +94,7 @@ pub fn classify_anyhow(err: &anyhow::Error) -> RetryDecision {
         }
     }
 
-    // Default to retry for unknown errors — transient RPC failures are more common
-    // than permanent ones, and retrying a permanent error is harmless (it just fails again).
-    RetryDecision::Retry
+    RetryDecision::Fail
 }
 
 pub fn classify_alloy_rpc(err: &RpcError<TransportErrorKind>) -> RetryDecision {
@@ -137,19 +130,6 @@ pub fn is_recoverable_error_text(message: impl std::fmt::Display) -> bool {
         || message.contains("broken pipe")
         || message.contains("timed out")
         || message.contains("timeout")
-        || message.contains("internal error")
-        || message.contains("state not available")
-        || message.contains("block not found")
-        || message.contains("not available")
-}
-
-pub fn is_permanent_error_text(message: impl std::fmt::Display) -> bool {
-    let message = message.to_string().to_ascii_lowercase();
-    message.contains("invalid params")
-        || message.contains("method not found")
-        || message.contains("parse error")
-        || message.contains("no active receivers")
-        || message.contains("channel closed")
 }
 
 pub async fn retry_gear<T, F, Fut>(
@@ -192,36 +172,6 @@ where
             }
         }
     }
-}
-
-/// Maximum Ethereum reconnect attempts before giving up.
-pub const ETH_RECONNECT_RETRIES: u32 = 5;
-
-/// Reconnect `eth_api`, retrying with backoff up to `ETH_RECONNECT_RETRIES` times.
-/// Returns Ok(()) on success; Err after all retries exhausted.
-pub async fn reconnect_eth(eth_api: &mut EthApi, who: &str) -> anyhow::Result<()> {
-    let policy = RetryPolicy::default();
-    for attempt in 0..ETH_RECONNECT_RETRIES {
-        match eth_api.reconnect().await {
-            Ok(new) => {
-                *eth_api = new;
-                log::info!(
-                    "{who}: reconnected to Ethereum (attempt {})",
-                    attempt + 1
-                );
-                return Ok(());
-            }
-            Err(e) => {
-                let delay = policy.delay(attempt);
-                let n = attempt + 1;
-                log::warn!(
-                    "{who}: Ethereum reconnect failed: {e}; retrying in {delay:?} ({n}/{ETH_RECONNECT_RETRIES})"
-                );
-                tokio::time::sleep(delay).await;
-            }
-        }
-    }
-    anyhow::bail!("{who}: Ethereum reconnect failed after {ETH_RECONNECT_RETRIES} attempts")
 }
 
 fn is_recoverable_subxt(err: &subxt::Error) -> bool {
@@ -270,23 +220,5 @@ mod tests {
         let err = anyhow::anyhow!("transport error: connection refused");
 
         assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
-    }
-
-    #[test]
-    fn classifies_context_wrapped_transient_error_as_recoverable() {
-        // Simulates gear_rpc_client::GearApi::authority_set_id which wraps errors with
-        // .context("Failed to fetch authority set id"). The underlying RPC error is
-        // transient but doesn't match any known recoverable pattern.
-        let inner = anyhow::anyhow!("internal error: state missing for block 0xabc");
-        let err = inner.context("Failed to fetch authority set id");
-
-        assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
-    }
-
-    #[test]
-    fn does_not_retry_known_permanent_errors() {
-        let err = anyhow::anyhow!("Invalid params: method not found");
-
-        assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
     }
 }

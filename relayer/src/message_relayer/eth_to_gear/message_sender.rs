@@ -365,11 +365,15 @@ async fn task(
         };
 
         log::error!("Gear message sender got an error: {err:?}");
-        if let Err(err) = this.api_provider.reconnect().await {
-            log::error!("Failed to reconnect to Gear API: {err:?}");
-            // Will retry on next loop iteration
-        } else {
-            log::info!("Reconnected to Gear API");
+        match this.api_provider.reconnect().await {
+            Ok(_) => {
+                log::info!("Reconnected to Gear API");
+            }
+
+            Err(err) => {
+                log::error!("Failed to reconnect to Gear API: {err:?}");
+                break;
+            }
         }
     }
 }

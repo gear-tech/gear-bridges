@@ -466,19 +466,19 @@ async fn task(
     mut proofs: UnboundedReceiver<Request>,
     responses: UnboundedSender<Response>,
 ) {
-    let mut consecutive_failures = 0;
+    let mut attempts = 0;
 
     loop {
         match this.process(&mut proofs, &responses).await {
             Ok(_) => break,
             Err(e) => {
-                consecutive_failures += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(consecutive_failures - 1);
+                attempts += 1;
+                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
                 log::error!(
-                    "Merkle root relayer {} submitter failed (attempt: {consecutive_failures}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
+                    "Merkle root relayer {} submitter failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
                     this.relayer_id,
                 );
-                if consecutive_failures >= MAX_RETRIES {
+                if attempts >= MAX_RETRIES {
                     log::error!(
                         "Merkle root relayer {} submitter maximum attempts reached, exiting...",
                         this.relayer_id
@@ -487,12 +487,15 @@ async fn task(
                 }
                 tokio::time::sleep(delay).await;
 
-                if let Err(e) = rpc::reconnect_eth(&mut this.eth_api, &this.relayer_id).await {
-                    log::error!(
-                        "Merkle root relayer {} submitter failed to reconnect to Ethereum API: {e}",
-                        this.relayer_id
-                    );
-                    break;
+                match this.eth_api.reconnect().await {
+                    Ok(eth_api) => this.eth_api = eth_api,
+                    Err(e) => {
+                        log::error!(
+                            "Merkle root relayer {} submitter failed to reconnect to Ethereum API: {e}",
+                            this.relayer_id
+                        );
+                        break;
+                    }
                 }
             }
         }

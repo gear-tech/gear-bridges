@@ -47,6 +47,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: "Install: Linux packages"
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler
+
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -141,6 +146,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: "Install: Linux packages"
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler
+
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -192,6 +202,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: "Install: Linux packages"
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1

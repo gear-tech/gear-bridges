@@ -42,7 +42,7 @@ jobs:
   build:
     needs: check-frontend-changes
     if: ${{ github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true' }}
-    runs-on: kuberunner
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -136,7 +136,7 @@ jobs:
   lints:
     needs: check-frontend-changes
     if: ${{ github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true' }}
-    runs-on: kuberunner
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -186,7 +186,7 @@ jobs:
   tests:
     needs: check-frontend-changes
     if: ${{ github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true' }}
-    runs-on: kuberunner
+    runs-on: ubuntu-latest
     env:
       NODE_CONTAINER_NAME: gear_node${{ github.run_id }}_${{ github.run_number }}
     steps:
@@ -256,7 +256,7 @@ jobs:
         run: docker stop $NODE_CONTAINER_NAME
 
   check-zk-circuits-changed:
-    runs-on: kuberunner
+    runs-on: ubuntu-latest
     outputs:
       circuits_changed: ${{ steps.filter.outputs.circuits }}
       prover_changed: ${{ steps.filter.outputs.prover }}

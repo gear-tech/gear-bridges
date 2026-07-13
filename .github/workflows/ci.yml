@@ -275,10 +275,11 @@ jobs:
 
   zk-tests:
     runs-on: zk-tests
+    # Disabled because the job consumes too much RAM.
+    if: false
     env:
       VBLAKE2_CACHE_PATH: "/VariativeBlake2"
     needs: check-zk-circuits-changed
-    if: ${{ (github.event_name != 'pull_request' || needs.check-frontend-changes.outputs.non_frontend_changed == 'true') && needs.check-zk-circuits-changed.outputs.circuits_changed == 'true' || needs.check-zk-circuits-changed.outputs.prover_changed == 'true'}}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

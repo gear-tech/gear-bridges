@@ -27,6 +27,7 @@ function Header() {
   const linkRefs = useRef<{ [key: string]: HTMLAnchorElement | null }>({
     [ROUTE.HOME]: null,
     [ROUTE.TRANSACTIONS]: null,
+    [ROUTE.TVL]: null,
     [ROUTE.FAQ]: null,
   });
 

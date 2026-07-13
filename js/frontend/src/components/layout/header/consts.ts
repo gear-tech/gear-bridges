@@ -10,6 +10,7 @@ const LINKS = {
     [NETWORK_TYPE.TESTNET]: 'My Tokens & Faucet',
   },
 
+  [ROUTE.TVL]: 'TVL',
   [ROUTE.FAQ]: 'FAQ',
 } as const;
 

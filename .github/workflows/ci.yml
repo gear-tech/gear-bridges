@@ -24,10 +24,10 @@ jobs:
       non_frontend_changed: ${{ steps.filter.outputs.non_frontend }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Filter files
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             frontend:
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: "Install: Linux packages"
         run: |
@@ -58,7 +58,7 @@ jobs:
           cache: false
 
       - name: Install golang
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.20.1'
 
@@ -70,15 +70,15 @@ jobs:
         working-directory: ./ethereum
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
 
       - name: Install OpenZeppelin Foundry Upgrades
         run: |
           npm cache clean --force
-          # version from ethereum/dependencies/openzeppelin-foundry-upgrades-0.4.0/src/internal/Versions.sol
-          npx @openzeppelin/upgrades-core@^1.37.0
+          # version from ethereum/dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/Versions.sol
+          npx @openzeppelin/upgrades-core@^1.45.0
 
       - name: Check ethereum smart-contracts formatting
         run: forge fmt --check
@@ -144,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: "Install: Linux packages"
         run: |
@@ -157,7 +157,7 @@ jobs:
           cache: false
 
       - name: Install golang
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.20.1'
 
@@ -169,15 +169,15 @@ jobs:
         working-directory: ./ethereum
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
 
       - name: Install OpenZeppelin Foundry Upgrades
         run: |
           npm cache clean --force
-          # version from ethereum/dependencies/openzeppelin-foundry-upgrades-0.4.0/src/internal/Versions.sol
-          npx @openzeppelin/upgrades-core@^1.37.0
+          # version from ethereum/dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/Versions.sol
+          npx @openzeppelin/upgrades-core@^1.45.0
 
       - name: Check ethereum smart-contracts formatting
         run: forge fmt --check
@@ -201,7 +201,7 @@ jobs:
       NODE_CONTAINER_NAME: gear_node${{ github.run_id }}_${{ github.run_number }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: "Install: Linux packages"
         run: |
@@ -214,7 +214,7 @@ jobs:
           cache: false
 
       - name: Install golang
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.20.1'
 
@@ -226,15 +226,15 @@ jobs:
         working-directory: ./ethereum
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
 
       - name: Install OpenZeppelin Foundry Upgrades
         run: |
           npm cache clean --force
-          # version from ethereum/dependencies/openzeppelin-foundry-upgrades-0.4.0/src/internal/Versions.sol
-          npx @openzeppelin/upgrades-core@^1.37.0
+          # version from ethereum/dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/Versions.sol
+          npx @openzeppelin/upgrades-core@^1.45.0
 
       - name: Check ethereum smart-contracts formatting
         run: forge fmt --check
@@ -277,10 +277,10 @@ jobs:
       prover_changed: ${{ steps.filter.outputs.prover }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Filter files
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             circuits:
@@ -297,7 +297,7 @@ jobs:
     needs: check-zk-circuits-changed
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1

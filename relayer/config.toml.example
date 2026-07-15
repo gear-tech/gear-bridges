@@ -1,0 +1,89 @@
+[prometheus]
+endpoint = "0.0.0.0:9090"
+
+[relayers.mainnet]
+priority = 100
+
+[relayers.mainnet.gear]
+endpoint = "wss://vara.example"
+max_reconnect_attempts = 3
+
+[relayers.mainnet.ethereum]
+endpoint = "wss://ethereum.example"
+message_queue_address = "0x1111111111111111111111111111111111111111"
+fee_payer = "0x2222222222222222222222222222222222222222222222222222222222222222"
+max_retries = 3
+retry_interval_ms = 2000
+max_fee_per_gas = 2000000000
+max_priority_fee_per_gas = 500000000
+
+[relayers.mainnet.genesis]
+authority_set_hash = "0x3333333333333333333333333333333333333333333333333333333333333333"
+authority_set_id = 123
+
+[relayers.mainnet.http]
+address = "127.0.0.1:8443"
+token = "mainnet-secret"
+
+[relayers.mainnet.storage]
+block_storage = "/var/lib/gear-bridges/mainnet/merkle-roots.json"
+
+[relayers.mainnet.proof_storage]
+kind = "filesystem"
+filesystem_path = "/var/lib/gear-bridges/mainnet/proofs"
+
+[relayers.mainnet.options]
+confirmations_merkle_root = 8
+start_authority_set_id = 123
+bridging_payment_address = "0x4444444444444444444444444444444444444444444444444444444444444444"
+thread_count = 24
+critical_threshold = "4h"
+startup_sync_strategy = "critical-threshold"
+startup_sync_blocks = []
+spike_window = "15m"
+spike_timeout = "30m"
+priority_spike_timeout = "10m"
+spike_threshold = 8
+save_interval = "30m"
+check_interval = "30s"
+
+[relayers.testnet]
+priority = 50
+
+[relayers.testnet.gear]
+endpoint = "wss://testnet-vara.example"
+max_reconnect_attempts = 3
+
+[relayers.testnet.ethereum]
+endpoint = "wss://testnet-ethereum.example"
+message_queue_address = "0x5555555555555555555555555555555555555555"
+fee_payer = "0x6666666666666666666666666666666666666666666666666666666666666666"
+
+[relayers.testnet.genesis]
+authority_set_hash = "0x7777777777777777777777777777777777777777777777777777777777777777"
+authority_set_id = 456
+
+[relayers.testnet.http]
+address = "127.0.0.1:8444"
+token = "testnet-secret"
+
+[relayers.testnet.storage]
+block_storage = "/var/lib/gear-bridges/testnet/merkle-roots.json"
+
+[relayers.testnet.proof_storage]
+kind = "gear"
+gear_fee_payer = "//testnet-relayer"
+config_dir = "/var/lib/gear-bridges/testnet/onchain-proof-storage"
+
+[relayers.testnet.options]
+confirmations_merkle_root = 4
+thread_count = "auto"
+critical_threshold = "authority_set_change"
+startup_sync_strategy = "blocks"
+startup_sync_blocks = [100, 101, 102]
+spike_window = "15m"
+spike_timeout = "30m"
+priority_spike_timeout = "10m"
+spike_threshold = 8
+save_interval = "30m"
+check_interval = "30s"

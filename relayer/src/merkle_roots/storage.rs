@@ -203,11 +203,12 @@ impl MerkleRootStorage {
         let blocks = self.blocks.read().await;
         let submitted_merkle_roots = self.submitted_roots.read().await;
 
+        let tmp_path = self.path.with_extension("tmp");
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&self.path)
+            .open(&tmp_path)
             .await?;
 
         let storage = SerializedStorage {
@@ -220,6 +221,8 @@ impl MerkleRootStorage {
 
         file.write_all(serialized.as_bytes()).await?;
         file.flush().await?;
+        drop(file);
+        tokio::fs::rename(&tmp_path, &self.path).await?;
 
         Ok(())
     }

@@ -58,10 +58,11 @@ impl BlockListener {
         receiver
     }
 
-    async fn run_inner(&self, sender: &UnboundedSender<EthereumBlockNumber>) -> anyhow::Result<()> {
-        let mut current_block = self.from_block;
-
-        self.metrics.latest_block.set(current_block as i64);
+    async fn run_inner(
+        &mut self,
+        sender: &UnboundedSender<EthereumBlockNumber>,
+    ) -> anyhow::Result<()> {
+        self.metrics.latest_block.set(self.from_block as i64);
 
         // Fetch unprocessed blocks in background
         let storage = self.storage.clone();
@@ -84,15 +85,14 @@ impl BlockListener {
 
         loop {
             let latest = self.eth_api.finalized_block().await?.header.number;
-            if latest >= current_block {
-                for block in current_block..=latest {
+            if latest >= self.from_block {
+                for block in self.from_block..=latest {
                     if let Err(e) = self.storage.add_block(block).await {
                         log::error!("Failed to add block {block} to storage: {e}");
                     }
                     sender.send(EthereumBlockNumber(block))?;
+                    self.from_block = block.saturating_add(1);
                 }
-
-                current_block = latest + 1;
 
                 self.metrics.latest_block.set(latest as i64);
             } else {
@@ -117,11 +117,16 @@ async fn task(mut this: BlockListener, sender: UnboundedSender<EthereumBlockNumb
 
         tokio::time::sleep(Duration::from_secs(30)).await;
 
-        this.eth_api = match this.eth_api.reconnect().await {
-            Ok(api) => api,
-            Err(e) => {
-                log::error!("Failed to reconnect to Ethereum API: {e}");
-                return;
+        loop {
+            match this.eth_api.reconnect().await {
+                Ok(api) => {
+                    this.eth_api = api;
+                    break;
+                }
+                Err(e) => {
+                    log::error!("Failed to reconnect to Ethereum API: {e}. Retrying...");
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }
             }
         }
     }

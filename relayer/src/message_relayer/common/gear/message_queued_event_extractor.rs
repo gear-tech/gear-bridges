@@ -1,6 +1,9 @@
-use crate::message_relayer::{
-    common::{self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock},
-    gear_to_eth::storage::Storage,
+use crate::{
+    message_relayer::{
+        common::{self, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock},
+        gear_to_eth::storage::Storage,
+    },
+    rpc,
 };
 use gear_common::api_provider::ApiProviderConnection;
 use prometheus::IntCounter;
@@ -76,15 +79,21 @@ impl MessageQueuedEventExtractor {
         });
     }
 
-    async fn run_inner(&self, blocks: &mut Receiver<GearBlock>) -> anyhow::Result<()> {
-        let gear_api = self.api_provider.client();
+    async fn run_inner(&mut self, blocks: &mut Receiver<GearBlock>) -> anyhow::Result<()> {
         loop {
             match blocks.recv().await {
                 Ok(block) => {
                     let block_hash = block.hash();
-                    let authority_set_id = gear_api
-                        .signed_by_authority_set_id(block_hash.0.into())
-                        .await?;
+                    let authority_set_id = rpc::retry_gear(
+                        &mut self.api_provider,
+                        "message queued authority set id",
+                        move |gear_api| async move {
+                            gear_api
+                                .signed_by_authority_set_id(block_hash.0.into())
+                                .await
+                        },
+                    )
+                    .await?;
 
                     self.process_block_events(block, authority_set_id).await?;
                 }

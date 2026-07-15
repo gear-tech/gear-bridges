@@ -33,6 +33,7 @@ members = [
     "tools/checkpoints-tool",
     "tools/vft-tool",
     "tools/governance",
+    "tools/signed-block-id-tool",
     "tests",
     "gear-common",
     "tools/vft-manager-tool",

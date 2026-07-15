@@ -134,7 +134,7 @@ impl Relayer {
         })
     }
 
-    pub async fn run(self) {
+    pub async fn run(self) -> anyhow::Result<()> {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.spawn();
 
@@ -151,12 +151,8 @@ impl Relayer {
             log::error!("Failed to load transactions and blocks from storage: {err:?}");
         }
 
-        if let Err(err) = self
-            .tx_manager
+        self.tx_manager
             .run(deposit_events, proof_composer, message_sender)
             .await
-        {
-            log::error!("Transaction manager exited with error: {err:?}");
-        }
     }
 }

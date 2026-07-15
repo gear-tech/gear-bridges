@@ -8,12 +8,14 @@ use crate::message_relayer::common::{
         self, block_listener::BlockListener as EthereumBlockListener,
         block_storage::UnprocessedBlockStorage,
         message_paid_event_extractor::MessagePaidEventExtractor,
+        transaction_data_extractor::TransactionDataExtractor,
     },
     gear::{
         block_listener::BlockListener as GearBlockListener,
         checkpoints_extractor::CheckpointsExtractor,
     },
-    EthereumSlotNumber,
+    web_request::EthTransaction,
+    EthereumSlotNumber, TxHashWithSlot,
 };
 use ethereum_beacon_client::BeaconClient;
 use ethereum_client::PollingEthApi;
@@ -21,6 +23,7 @@ use gear_common::api_provider::ApiProviderConnection;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tx_manager::TransactionManager;
 use utils_prometheus::MeteredService;
 
@@ -35,6 +38,10 @@ pub struct Relayer {
     message_sender: message_sender::MessageSender,
     proof_composer: proof_composer::ProofComposer,
     tx_manager: TransactionManager,
+
+    transaction_data_extractor: Option<TransactionDataExtractor>,
+    tx_events_sender: Option<UnboundedSender<TxHashWithSlot>>,
+    tx_events_receiver: Option<UnboundedReceiver<TxHashWithSlot>>,
 
     storage: Arc<dyn Storage>,
 }
@@ -66,6 +73,7 @@ impl Relayer {
         storage_path: String,
         genesis_time: u64,
         eth_unprocessed_block_storage_path: Option<String>,
+        http_receiver: Option<UnboundedReceiver<EthTransaction>>,
     ) -> anyhow::Result<Self> {
         let block_storage: Arc<dyn UnprocessedBlockStorage> =
             if let Some(path) = eth_unprocessed_block_storage_path {
@@ -118,10 +126,28 @@ impl Relayer {
         let proof_composer = proof_composer::ProofComposer::new(
             api_provider,
             beacon_client,
-            eth_api,
+            eth_api.clone(),
             historical_proxy_address,
             suri,
         );
+
+        let (transaction_data_extractor, tx_events_sender, tx_events_receiver) =
+            if let Some(http_receiver) = http_receiver {
+                let (tx_events_sender, tx_events_receiver) = unbounded_channel();
+                let extractor = TransactionDataExtractor::new(
+                    eth_api,
+                    genesis_time,
+                    tx_events_sender.downgrade(),
+                    http_receiver,
+                );
+                (
+                    Some(extractor),
+                    Some(tx_events_sender),
+                    Some(tx_events_receiver),
+                )
+            } else {
+                (None, None, None)
+            };
 
         Ok(Self {
             gear_block_listener,
@@ -135,11 +161,15 @@ impl Relayer {
             proof_composer,
             tx_manager,
 
+            transaction_data_extractor,
+            tx_events_sender,
+            tx_events_receiver,
+
             storage,
         })
     }
 
-    pub async fn run(self) {
+    pub async fn run(self) -> anyhow::Result<()> {
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.spawn();
 
@@ -147,19 +177,25 @@ impl Relayer {
             log::warn!("Failed to load transaction and block status from storage: {err:?}")
         }
 
-        let message_paid_events = self.message_paid_event_extractor.spawn(ethereum_blocks);
+        let message_paid_events = if let Some(sender) = self.tx_events_sender {
+            self.message_paid_event_extractor
+                .spawn_into(ethereum_blocks, sender);
+            if let Some(extractor) = self.transaction_data_extractor {
+                extractor.spawn();
+            }
+            self.tx_events_receiver
+                .expect("tx events receiver must exist when HTTP relay is enabled")
+        } else {
+            self.message_paid_event_extractor.spawn(ethereum_blocks)
+        };
         let checkpoints = self
             .checkpoints_extractor
             .run(gear_blocks, self.latest_checkpoint)
             .await;
         let proof_composer = self.proof_composer.run(checkpoints);
         let message_sender = self.message_sender.run();
-        if let Err(err) = self
-            .tx_manager
+        self.tx_manager
             .run(message_paid_events, proof_composer, message_sender)
             .await
-        {
-            log::error!("Transaction manager exited with error: {err:?}");
-        }
     }
 }

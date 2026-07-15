@@ -91,7 +91,7 @@ pub struct PaidMessage {
     pub nonce: [u8; 32],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
     pub block_hash: H256,
@@ -248,6 +248,16 @@ pub mod web_request {
         pub messages: Vec<Message>,
     }
 
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub struct EthTransaction {
+        pub tx_hash: String,
+    }
+
+    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+    pub struct EthTransactions {
+        pub transactions: Vec<EthTransaction>,
+    }
+
     #[derive(Clone, Debug, Default, Deserialize, Serialize)]
     pub struct MerkleRootBlocks {
         pub blocks: Vec<u32>,
@@ -260,7 +270,7 @@ pub mod web_request {
         },
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
     pub enum MerkleRootsResponse {
         MerkleRootProof {
             proof: Vec<u8>,

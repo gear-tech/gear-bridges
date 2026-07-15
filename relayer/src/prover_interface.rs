@@ -12,7 +12,7 @@ use prover::{
 };
 use serde::{Deserialize, Serialize};
 use sp_consensus_grandpa::GrandpaJustification;
-use std::{str::FromStr, thread, time::Instant};
+use std::{path::PathBuf, str::FromStr, thread, time::Instant};
 use subxt::utils::H256;
 use utils_prometheus::MeteredService;
 pub struct Metrics;
@@ -228,6 +228,7 @@ pub async fn prove_final(
     genesis_config: GenesisConfig,
     at_block: H256,
     count_thread: Option<usize>,
+    gnark_data_path: PathBuf,
     inclusion_proof: Option<RawBlockInclusionProof>,
 ) -> anyhow::Result<FinalProof> {
     let (headers, proof) = if let Some(proof) = inclusion_proof {
@@ -276,6 +277,7 @@ pub async fn prove_final(
         genesis_config,
         (proof, headers),
         count_thread,
+        gnark_data_path,
     )
     .await
 }
@@ -286,6 +288,7 @@ pub async fn prove_final_with_block_finality(
     genesis_config: GenesisConfig,
     (block_finality_proof, headers): (RawBlockInclusionProof, Vec<GearHeader>),
     count_thread: Option<usize>,
+    gnark_data_path: PathBuf,
 ) -> anyhow::Result<FinalProof> {
     let Some(header_first) = headers.first() else {
         return Err(anyhow!(
@@ -323,7 +326,7 @@ pub async fn prove_final_with_block_finality(
             message_contents,
         );
 
-        gnark::prove_circuit(&proof)
+        gnark::prove_circuit(&proof, &gnark_data_path)
     });
 
     let proof = handler
@@ -394,7 +397,10 @@ fn parse_rpc_block_finality_proof(
 
 pub mod gnark {
     use core::ffi::c_char;
-    use std::ffi::{CStr, CString};
+    use std::{
+        ffi::{CStr, CString},
+        path::Path,
+    };
 
     use prover::proving::ExportedProofWithCircuitData;
     use serde::{Deserialize, Serialize};
@@ -406,14 +412,18 @@ pub mod gnark {
     }
 
     extern "C" {
-        fn prove(circuit_data: *const c_char) -> *const c_char;
+        fn prove(circuit_data: *const c_char, data_path: *const c_char) -> *const c_char;
     }
 
-    pub fn prove_circuit(s: &ExportedProofWithCircuitData) -> ProveResult {
+    pub fn prove_circuit(s: &ExportedProofWithCircuitData, data_path: &Path) -> ProveResult {
         let serialized = serde_json::to_string(s).expect("Failed to serialize data");
         let c_string = CString::new(serialized).expect("CString::new failed");
+        let data_path = data_path
+            .to_str()
+            .expect("Gnark data path should be valid UTF-8");
+        let data_path = CString::new(data_path).expect("CString::new failed");
         let result = unsafe {
-            let result_ptr = prove(c_string.as_ptr());
+            let result_ptr = prove(c_string.as_ptr(), data_path.as_ptr());
             if result_ptr.is_null() {
                 panic!("prove returned null pointer");
             }

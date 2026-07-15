@@ -8,8 +8,11 @@ use tokio::sync::{
     oneshot,
 };
 
-/// Timeout between reconnects. Default: 1m30s.
-const RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
+/// Reconnect backoff starts quickly so transient disconnects do not stall
+/// the whole relayer, but still caps at the historical 1m30s interval.
+const RECONNECT_BASE_TIMEOUT: Duration = Duration::from_secs(1);
+const RECONNECT_MAX_TIMEOUT: Duration = Duration::from_secs(90);
+const RECONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
 
 struct ApiConnectionRequest {
     session: u64,
@@ -131,28 +134,45 @@ impl ApiProvider {
     }
 
     async fn reconnect(&mut self) -> bool {
-        for attempt in 0..self.max_reconnect_attempts {
-            match Api::builder().uri(self.url.as_str()).build().await {
-                Ok(api) => {
+        let mut attempt: u64 = 1;
+        loop {
+            let url = self.url.clone();
+            let mut connect =
+                tokio::spawn(async move { Api::builder().uri(url.as_str()).build().await });
+
+            match tokio::time::timeout(RECONNECT_ATTEMPT_TIMEOUT, &mut connect).await {
+                Ok(Ok(Ok(api))) => {
                     self.api = api;
                     return true;
                 }
-                Err(err) => {
+                Ok(Ok(Err(err))) => {
                     log::error!(
-                        "Failed to create API connection (attempt {attempt}/{max_reconnect_attempts}): {err}",
-                        max_reconnect_attempts = self.max_reconnect_attempts
+                        "Failed to create API connection (runtime reconnect attempt {attempt}, initial max_reconnect_attempts={}): {err}",
+                        self.max_reconnect_attempts
                     );
 
-                    tokio::time::sleep(RECONNECT_TIMEOUT).await;
+                    tokio::time::sleep(reconnect_delay(attempt)).await;
+                }
+                Ok(Err(err)) => {
+                    log::error!(
+                        "API connection task failed (runtime reconnect attempt {attempt}, initial max_reconnect_attempts={}): {err}",
+                        self.max_reconnect_attempts
+                    );
+
+                    tokio::time::sleep(reconnect_delay(attempt)).await;
+                }
+                Err(_) => {
+                    connect.abort();
+                    log::error!(
+                        "Timed out creating API connection after {RECONNECT_ATTEMPT_TIMEOUT:?} (runtime reconnect attempt {attempt}, initial max_reconnect_attempts={})",
+                        self.max_reconnect_attempts
+                    );
+
+                    tokio::time::sleep(reconnect_delay(attempt)).await;
                 }
             }
+            attempt = attempt.saturating_add(1);
         }
-
-        log::error!(
-            "All {max_reconnect_attempts} attempts to connect to API failed. Giving up.",
-            max_reconnect_attempts = self.max_reconnect_attempts
-        );
-        false
     }
 
     pub fn spawn(mut self) {
@@ -214,5 +234,27 @@ impl ApiProvider {
                 }
             }
         });
+    }
+}
+
+fn reconnect_delay(attempt: u64) -> Duration {
+    let multiplier = 1u32
+        .checked_shl(attempt.saturating_sub(1).min(10) as u32)
+        .unwrap_or(1024);
+
+    RECONNECT_BASE_TIMEOUT
+        .saturating_mul(multiplier)
+        .min(RECONNECT_MAX_TIMEOUT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_delay_is_fast_initially_and_capped() {
+        assert_eq!(reconnect_delay(1), Duration::from_secs(1));
+        assert_eq!(reconnect_delay(2), Duration::from_secs(2));
+        assert_eq!(reconnect_delay(10), Duration::from_secs(90));
     }
 }

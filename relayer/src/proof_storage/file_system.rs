@@ -76,24 +76,31 @@ impl FileSystemProofStorage {
     async fn save_state(&self) -> Result<(), ProofStorageError> {
         let circuit_data = self.cache.get_circuit_data().await?;
 
-        fs::write(
-            self.save_to.join("circuit_data.bin"),
-            circuit_data.clone().into_bytes(),
-        )
-        .await
-        .map_err(|_| ProofStorageError::NotInitialized)?;
+        self.atomic_write("circuit_data.bin", circuit_data.clone().into_bytes())
+            .await?;
 
         let inner = self.cache.inner().read().await;
 
         for (validator_set_id, proof) in &inner.proofs {
-            fs::write(
-                self.save_to.join(format!("proof_{validator_set_id}.bin")),
+            self.atomic_write(
+                &format!("proof_{validator_set_id}.bin"),
                 proof.clone().into_bytes(),
             )
-            .await
-            .map_err(|_| ProofStorageError::NotInitialized)?;
+            .await?;
         }
 
+        Ok(())
+    }
+
+    async fn atomic_write(&self, name: &str, bytes: Vec<u8>) -> Result<(), ProofStorageError> {
+        let path = self.save_to.join(name);
+        let tmp_path = self.save_to.join(format!("{name}.tmp"));
+        fs::write(&tmp_path, bytes)
+            .await
+            .map_err(|_| ProofStorageError::NotInitialized)?;
+        fs::rename(&tmp_path, &path)
+            .await
+            .map_err(|_| ProofStorageError::NotInitialized)?;
         Ok(())
     }
 

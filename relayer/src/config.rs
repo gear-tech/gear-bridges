@@ -1013,8 +1013,10 @@ startup_sync_blocks = [1, 2]
 
     #[test]
     fn rejects_tiny_critical_threshold() {
-        let config =
-            valid_config().replace("critical_threshold = \"14h\"", "critical_threshold = \"2s\"");
+        let config = valid_config().replace(
+            "critical_threshold = \"14h\"",
+            "critical_threshold = \"2s\"",
+        );
         let err = config_error(&config);
         assert!(err.contains("at least 3 seconds"));
     }

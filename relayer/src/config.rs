@@ -686,7 +686,7 @@ fn parse_critical_threshold(
     value: Option<&str>,
     relayer_id: &str,
 ) -> anyhow::Result<cli::CriticalThreshold> {
-    cli::parse_critical_threshold(value.unwrap_or("4h"))
+    cli::parse_critical_threshold(value.unwrap_or("14h"))
         .with_context(|| format!("relayer {relayer_id}: options.critical_threshold is invalid"))
 }
 
@@ -789,7 +789,7 @@ data_path = "/tmp/mainnet-gnark"
 [relayers.mainnet.options]
 confirmations_merkle_root = 8
 thread_count = "auto"
-critical_threshold = "4h"
+critical_threshold = "14h"
 startup_sync_strategy = "critical-threshold"
 spike_window = "15m"
 spike_timeout = "30m"
@@ -1014,7 +1014,7 @@ startup_sync_blocks = [1, 2]
     #[test]
     fn rejects_tiny_critical_threshold() {
         let config =
-            valid_config().replace("critical_threshold = \"4h\"", "critical_threshold = \"2s\"");
+            valid_config().replace("critical_threshold = \"14h\"", "critical_threshold = \"2s\"");
         let err = config_error(&config);
         assert!(err.contains("at least 3 seconds"));
     }

@@ -610,7 +610,13 @@ impl MerkleRootRelayer {
         let block_hash = block.hash();
         let (queue_id, merkle_root) = client.fetch_queue_merkle_root(block_hash).await?;
 
-        if merkle_root == H256::zero() {
+        let threshold = critical_timeout_reached(
+            self.options.critical_threshold,
+            self.last_submitted_block,
+            block_number,
+        );
+
+        if merkle_root == H256::zero() && threshold.is_none() {
             log::trace!(
                 "Merkle root relayer {relayer_id} supervisor: latest Vara queue root is zero at block #{block_number}, skipping"
             );
@@ -642,11 +648,7 @@ impl MerkleRootRelayer {
             return Ok(());
         }
 
-        let Some((last_submitted_block, threshold)) = critical_timeout_reached(
-            self.options.critical_threshold,
-            self.last_submitted_block,
-            block_number,
-        ) else {
+        let Some((last_submitted_block, threshold)) = threshold else {
             log::debug!(
                 "Merkle root relayer {relayer_id} supervisor: critical threshold is not reached for block #{block_number}, skipping forced proof generation"
             );
@@ -656,7 +658,11 @@ impl MerkleRootRelayer {
             "Merkle root relayer {relayer_id} supervisor: last submitted block {last_submitted_block} is older than supervised block number {block_number} by at least {threshold}, forcing proof generation"
         );
 
-        if let Some(eth_root) = eth_root {
+        if merkle_root == H256::zero() {
+            log::warn!(
+                "Merkle root relayer {relayer_id} supervisor: Vara queue root is zero at block #{block_number}; scheduling proof anyway because critical threshold is reached"
+            );
+        } else if let Some(eth_root) = eth_root {
             log::warn!(
                 "Merkle root relayer {relayer_id} supervisor: Ethereum has merkle root {eth_root} for block #{block_number}, but Vara queue root is {merkle_root}; scheduling proof anyway"
             );

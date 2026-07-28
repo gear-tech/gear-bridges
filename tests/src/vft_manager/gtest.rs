@@ -2,8 +2,8 @@ use gtest::{Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
-    traits::*, Config, Error, InitConfig, TokenSupply, VftManager as VftManagerC,
-    VftManagerFactory as VftManagerFactoryC,
+    traits::*, Config, Error, InitConfig, MessageStatus, TokenSupply, TxDetails,
+    VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
 };
 use vft_vara_client::{traits::VftVaraFactory, Mainnet};
 
@@ -448,6 +448,443 @@ async fn test_pause_works() {
         .await
         .unwrap();
     assert_paused!(false);
+}
+
+fn tx_details(
+    vara_token_id: ActorId,
+    sender: ActorId,
+    amount: U256,
+    token_supply: TokenSupply,
+) -> TxDetails {
+    TxDetails {
+        vara_token_id,
+        sender,
+        amount,
+        receiver: ETH_TOKEN_RECEIVER,
+        token_supply,
+    }
+}
+
+async fn seed_msg_info(
+    remoting: &GTestRemoting,
+    vft_manager_program_id: ActorId,
+    msg_id: MessageId,
+    status: MessageStatus,
+    details: TxDetails,
+) {
+    VftManagerC::new(remoting.clone())
+        .insert_message_info(msg_id, status, details)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_interrupted_transfer_concurrent_reentry_eth_supply() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+    let msg_id: MessageId = [1u8; 32].into();
+
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::TokenDepositCompleted(true),
+        tx_details(eth_supply_vft, account_id, amount, TokenSupply::Ethereum),
+    )
+    .await;
+
+    // Queue two recovery calls for the same `msg_id` into a single block. The first
+    // call commits the `SendingMessageToReturnTokens` status when it starts waiting
+    // for the VFT reply, so the second call observes the refund already in flight.
+    let remoting = remoting.with_block_run_mode(BlockRunMode::Manual);
+    let mut client_1 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
+    let mut client_2 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
+
+    let ticket1 = client_1
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+    let ticket2 = client_2
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    for _ in 0..3 {
+        remoting.run_next_block();
+    }
+
+    ticket1.recv().await.unwrap().unwrap();
+    assert!(ticket2.recv().await.is_err());
+
+    // Exactly one refund must be executed despite the two concurrent calls.
+    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
+    assert_eq!(account_balance, amount);
+}
+
+#[tokio::test]
+async fn test_interrupted_transfer_concurrent_reentry_gear_supply() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        gear_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(1_000_000_000_000u128);
+    let msg_id: MessageId = [2u8; 32].into();
+
+    // Pre-fund the manager with liquidity of other users: twice the refunded amount,
+    // so a duplicated unlock has funds to drain.
+    VftAdminC::new(remoting.clone())
+        .mint(vft_manager_program_id, U256::from(2_000_000_000_000u128))
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::TokenDepositCompleted(true),
+        tx_details(gear_supply_vft, account_id, amount, TokenSupply::Gear),
+    )
+    .await;
+
+    let remoting = remoting.with_block_run_mode(BlockRunMode::Manual);
+    let mut client_1 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
+    let mut client_2 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
+
+    let ticket1 = client_1
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+    let ticket2 = client_2
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    for _ in 0..3 {
+        remoting.run_next_block();
+    }
+
+    ticket1.recv().await.unwrap().unwrap();
+    assert!(ticket2.recv().await.is_err());
+
+    // Exactly one unlock must be executed despite the two concurrent calls.
+    let account_balance = balance_of(&remoting, gear_supply_vft, account_id).await;
+    assert_eq!(account_balance, amount);
+    let manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
+    assert_eq!(manager_balance, amount);
+}
+
+#[tokio::test]
+async fn test_interrupted_transfer_recovers_from_intermediate_statuses() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        gear_supply_vft,
+        eth_supply_vft,
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+
+    let mut vft_manager = VftManagerC::new(remoting.clone().with_actor_id(account_id));
+
+    // Token lock/burn is complete, but the message to the bridge built-in actor
+    // hasn't been sent.
+    let eth_amount = U256::from(10_000_000_000_u64);
+    let msg_id: MessageId = [3u8; 32].into();
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::TokenDepositCompleted(true),
+        tx_details(
+            eth_supply_vft,
+            account_id,
+            eth_amount,
+            TokenSupply::Ethereum,
+        ),
+    )
+    .await;
+
+    vft_manager
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        eth_amount
+    );
+
+    // Reply from the bridge built-in actor hasn't been received (e.g. a timeout
+    // followed by an out-of-gas crash, which the critical hook lands on this status).
+    let msg_id: MessageId = [4u8; 32].into();
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::BridgeResponseReceived(None),
+        tx_details(
+            eth_supply_vft,
+            account_id,
+            eth_amount,
+            TokenSupply::Ethereum,
+        ),
+    )
+    .await;
+
+    vft_manager
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        U256::from(20_000_000_000_u64)
+    );
+
+    // Token refund message has been sent but it has failed.
+    let gear_amount = U256::from(1_000_000_000_000u128);
+    VftAdminC::new(remoting.clone())
+        .mint(vft_manager_program_id, gear_amount)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+
+    let msg_id: MessageId = [5u8; 32].into();
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::TokensReturnComplete(false),
+        tx_details(gear_supply_vft, account_id, gear_amount, TokenSupply::Gear),
+    )
+    .await;
+
+    vft_manager
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, gear_supply_vft, account_id).await,
+        gear_amount
+    );
+}
+
+#[tokio::test]
+async fn test_interrupted_transfer_rejects_in_flight_refund() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+
+    // A refund for this message is already in flight: the status was committed when
+    // the refund message to the VFT program was sent and the program started waiting
+    // for the reply.
+    let msg_id: MessageId = [6u8; 32].into();
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::SendingMessageToReturnTokens,
+        tx_details(
+            eth_supply_vft,
+            account_id,
+            U256::from(10_000_000_000_u64),
+            TokenSupply::Ethereum,
+        ),
+    )
+    .await;
+
+    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await;
+    assert!(result.is_err());
+
+    // No duplicated refund has been executed.
+    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
+    assert!(account_balance.is_zero());
+}
+
+#[tokio::test]
+async fn test_interrupted_transfer_caller_restrictions() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    let stranger_id: ActorId = 200_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    remoting
+        .system()
+        .mint_to(stranger_id, 100_000_000_000_000_000);
+
+    let amount = U256::from(10_000_000_000_u64);
+    let msg_id: MessageId = [7u8; 32].into();
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::TokenDepositCompleted(true),
+        tx_details(eth_supply_vft, account_id, amount, TokenSupply::Ethereum),
+    )
+    .await;
+
+    // A third party can't trigger the recovery. The panic rolls the state back, so
+    // the message info stays intact for the legit caller.
+    let result = VftManagerC::new(remoting.clone().with_actor_id(stranger_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await;
+    assert!(result.is_err());
+
+    // The admin can trigger the recovery; the refund still goes to the original sender.
+    VftManagerC::new(remoting.clone())
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
+    assert_eq!(account_balance, amount);
+}
+
+#[tokio::test]
+async fn test_interrupted_transfer_concurrent_reentry_pool_drain() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        gear_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let victim: ActorId = 100_001.into();
+    let attacker: ActorId = 100_002.into();
+    let amount = U256::from(1_000_000_000_000u128);
+
+    remoting.system().mint_to(victim, 100_000_000_000_000_000);
+    remoting.system().mint_to(attacker, 100_000_000_000_000_000);
+
+    let mut vft_admin = VftAdminC::new(remoting.clone());
+    vft_admin
+        .mint(victim, amount)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+    vft_admin
+        .mint(attacker, amount)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+
+    // Both users bridge once, so the vft-manager custody pool holds 2 * amount.
+    for who in [victim, attacker] {
+        VftC::new(remoting.clone().with_actor_id(who))
+            .approve(vft_manager_program_id, amount)
+            .send_recv(gear_supply_vft)
+            .await
+            .unwrap();
+        VftManagerC::new(remoting.clone().with_actor_id(who))
+            .request_bridging(gear_supply_vft, amount, ETH_TOKEN_RECEIVER)
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    let pool = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
+    assert_eq!(pool, amount + amount);
+    assert!(balance_of(&remoting, gear_supply_vft, attacker)
+        .await
+        .is_zero());
+
+    // The attacker's request is interrupted right after the lock — the documented
+    // recovery entry point for `handle_request_bridging_interrupted_transfer`.
+    let stuck = MessageId::from([42u8; 32]);
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        stuck,
+        MessageStatus::TokenDepositCompleted(true),
+        tx_details(gear_supply_vft, attacker, amount, TokenSupply::Gear),
+    )
+    .await;
+
+    // Two recovery calls submitted as two extrinsics of the same block.
+    let manual = remoting
+        .clone()
+        .with_block_run_mode(BlockRunMode::Manual)
+        .with_actor_id(attacker);
+
+    let mut client_1 = VftManagerC::new(manual.clone());
+    let mut client_2 = VftManagerC::new(manual.clone());
+
+    let call_1 = client_1
+        .handle_request_bridging_interrupted_transfer(stuck)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+    let call_2 = client_2
+        .handle_request_bridging_interrupted_transfer(stuck)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    for _ in 0..3 {
+        manual.run_next_block();
+    }
+
+    call_1.recv().await.unwrap().unwrap();
+    assert!(call_2.recv().await.is_err());
+
+    // Exactly one refund is executed: the attacker gets their own interrupted
+    // transfer back and the victim's locked tokens stay in the custody pool.
+    let attacker_balance = balance_of(&remoting, gear_supply_vft, attacker).await;
+    assert_eq!(attacker_balance, amount);
+    let pool_after = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
+    assert_eq!(pool_after, amount);
 }
 
 async fn balance_of(

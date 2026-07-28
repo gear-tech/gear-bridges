@@ -89,7 +89,7 @@ pub async fn request_bridging(
     let (nonce, hash, queue_id) = match bridge_builtin_reply {
         Ok(result) => result,
         Err(e) => {
-            // Set critical section ensuring the message status is `SendingMessageToReturnTokens`
+            // Set critical section ensuring the message status is `BridgeResponseReceived(None)`
             // regardless of the result of the next code execution.
             set_critical_hook(msg_id);
 
@@ -132,6 +132,8 @@ pub async fn request_bridging(
 /// the [request_bridging] execution unexpectedly finished (due to the insufficient gas amount
 /// or some other temporary error) but funds have already been locked/burnt.
 ///
+/// Can be called only by the sender of the original `request_bridging` message or by the admin.
+///
 /// This function can return funds back to the user in the following scenarios:
 /// - Token lock/burn is complete but message to the built-in actor haven't been sent yet. It can happen if
 ///   user haven't attached gas enough to process the message further after the first `wake` or if network
@@ -141,6 +143,10 @@ pub async fn request_bridging(
 ///   or if network is loaded and timeout we've set to the reply is expired.
 /// - Token refund message have been sent but it have failed. This case should be practically impossible
 ///   due to the invariants that `vft-manager` provides but left just in case.
+///
+/// The function panics if the token refund for the specified message is already in flight
+/// (i.e. the status is `SendingMessageToReturnTokens`): accepting such a call would send
+/// a duplicated mint/unlock message to the `VFT` program.
 pub async fn handle_interrupted_transfer(
     service: &mut VftManager,
     msg_id: MessageId,
@@ -159,6 +165,11 @@ pub async fn handle_interrupted_transfer(
         token_supply,
     } = msg_info.details;
 
+    let source = Syscall::message_source();
+    if source != sender && source != service.state().admin {
+        panic!("Access rejected");
+    }
+
     match msg_info.status {
         MessageStatus::TokenDepositCompleted(true)
         | MessageStatus::BridgeResponseReceived(None)
@@ -166,8 +177,6 @@ pub async fn handle_interrupted_transfer(
             msg_tracker_mut()
                 .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
         }
-
-        MessageStatus::SendingMessageToReturnTokens => (),
 
         _ => {
             panic!("Unexpected status or transaction completed.")
@@ -186,9 +195,14 @@ pub async fn handle_interrupted_transfer(
     Ok(())
 }
 
-/// Helper function to change message status to `SendingMessageToReturnTokens` in the rare case
+/// Helper function to change message status to `BridgeResponseReceived(None)` in the rare case
 /// when the reply hook of `send_message_to_bridge_builtin` does not get executed (because of
 /// the timeout for example).
+///
+/// The status is intentionally one from which [handle_interrupted_transfer] can retry the
+/// refund: it means that the token refund message hasn't been sent yet.
+/// `SendingMessageToReturnTokens` can't be used for that purpose since it is reserved for
+/// refunds that are already in flight and is rejected by [handle_interrupted_transfer].
 fn set_critical_hook(msg_id: MessageId) {
     gstd::critical::set_hook(move || {
         let msg_tracker = msg_tracker_mut();
@@ -197,7 +211,7 @@ fn set_critical_hook(msg_id: MessageId) {
             .expect("Unexpected: msg info does not exist");
 
         if let MessageStatus::SendingMessageToBridgeBuiltin = msg_info.status {
-            msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+            msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(None));
         }
     });
 }

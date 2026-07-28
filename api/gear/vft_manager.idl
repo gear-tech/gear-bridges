@@ -182,6 +182,9 @@ service VftManager {
   /// This method should be called only to recover funds that were stuck in the middle of the bridging
   /// and is not a part of a normal workflow.
   /// 
+  /// Can be called only by the sender of the original `request_bridging` message or by
+  /// the [State::admin].
+  /// 
   /// There can be several reasons for `request_bridging` to fail:
   /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
   /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.

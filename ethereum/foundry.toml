@@ -4,8 +4,8 @@ out = "out"
 libs = ["dependencies"]
 remappings = [
     "forge-std/=dependencies/forge-std-1.16.2/src/",
-    "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.6.1/",
-    "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.6.1/",
+    "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.7.0/",
+    "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.7.0/",
 ]
 evm_version = "osaka"
 solc = "0.8.35"
@@ -23,24 +23,20 @@ build_info = true
 extra_output = ["storageLayout"]
 # Some warnings should be omitted:
 # - https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades/issues/115
-# - https://github.com/OpenZeppelin/openzeppelin-contracts/issues/5577
 ignored_warnings_from = [
     "dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/Core.sol",
     "dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/DefenderDeploy.sol",
     "dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/StringFinder.sol",
 
-    "dependencies/@openzeppelin-contracts-5.6.1/utils/cryptography/ECDSA.sol",
-    "dependencies/@openzeppelin-contracts-5.6.1/utils/structs/EnumerableMap.sol",
-    "dependencies/@openzeppelin-contracts-5.6.1/utils/structs/EnumerableSet.sol",
-
-    "src/libraries/CustomEnumerableMap.sol",
-    "test/libraries/CustomEnumerableMap.t.sol",
+    "dependencies/@openzeppelin-contracts-5.7.0/utils/cryptography/ECDSA.sol",
+    "dependencies/@openzeppelin-contracts-5.7.0/utils/structs/EnumerableMap.sol",
+    "dependencies/@openzeppelin-contracts-5.7.0/utils/structs/EnumerableSet.sol",
 ]
 
 [dependencies]
 forge-std = "1.16.2"
-"@openzeppelin-contracts" = "5.6.1"
-"@openzeppelin-contracts-upgradeable" = "5.6.1"
+"@openzeppelin-contracts" = "5.7.0"
+"@openzeppelin-contracts-upgradeable" = "5.7.0"
 openzeppelin-foundry-upgrades = "0.4.1"
 
 [fmt]

@@ -405,7 +405,7 @@ contract ERC20Manager is
         bytes32[] memory result = new bytes32[](size);
 
         for (uint256 i = 0; i < size; i++) {
-            result[i] = bytes32Set.at(offset + i);
+            result[i] = bytes32Set.pos(offset + i);
         }
 
         return result;

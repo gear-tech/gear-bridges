@@ -31,8 +31,8 @@ contract CustomEnumerableMapWrapper {
         return map.length();
     }
 
-    function at(uint256 index) external view returns (address key, IERC20Manager.TokenType value) {
-        return map.at(index);
+    function pos(uint256 index) external view returns (address key, IERC20Manager.TokenType value) {
+        return map.pos(index);
     }
 
     function tryGet(address key) external view returns (bool exists, IERC20Manager.TokenType value) {
@@ -70,17 +70,17 @@ contract CustomEnumerableMapTest is Test {
         assertEq(length, 3);
 
         vm.expectRevert();
-        (address key, IERC20Manager.TokenType value) = customEnumerableMapWrapper.at(length);
+        (address key, IERC20Manager.TokenType value) = customEnumerableMapWrapper.pos(length);
 
-        (key, value) = customEnumerableMapWrapper.at(0);
+        (key, value) = customEnumerableMapWrapper.pos(0);
         assertEq(key, address(0x11));
         assertTrue(value == IERC20Manager.TokenType.Ethereum);
 
-        (key, value) = customEnumerableMapWrapper.at(1);
+        (key, value) = customEnumerableMapWrapper.pos(1);
         assertEq(key, address(0x22));
         assertTrue(value == IERC20Manager.TokenType.Ethereum);
 
-        (key, value) = customEnumerableMapWrapper.at(2);
+        (key, value) = customEnumerableMapWrapper.pos(2);
         assertEq(key, address(0x33));
         assertTrue(value == IERC20Manager.TokenType.Gear);
 
@@ -126,13 +126,13 @@ contract CustomEnumerableMapTest is Test {
         assertEq(length, 2);
 
         vm.expectRevert();
-        (key, value) = customEnumerableMapWrapper.at(length);
+        (key, value) = customEnumerableMapWrapper.pos(length);
 
-        (key, value) = customEnumerableMapWrapper.at(0);
+        (key, value) = customEnumerableMapWrapper.pos(0);
         assertEq(key, address(0x33));
         assertTrue(value == IERC20Manager.TokenType.Gear);
 
-        (key, value) = customEnumerableMapWrapper.at(1);
+        (key, value) = customEnumerableMapWrapper.pos(1);
         assertEq(key, address(0x22));
         assertTrue(value == IERC20Manager.TokenType.Ethereum);
 

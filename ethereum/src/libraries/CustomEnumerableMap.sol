@@ -70,12 +70,12 @@ library CustomEnumerableMap {
      *
      * - `index` must be strictly less than {length}.
      */
-    function at(AddressToTokenTypeMap storage map, uint256 index)
+    function pos(AddressToTokenTypeMap storage map, uint256 index)
         internal
         view
         returns (address key, IERC20Manager.TokenType value)
     {
-        (bytes32 atKey, bytes32 val) = EnumerableMap.at(map._inner, index);
+        (bytes32 atKey, bytes32 val) = EnumerableMap.pos(map._inner, index);
         return (address(uint160(uint256(atKey))), IERC20Manager.TokenType(uint256(val)));
     }
 

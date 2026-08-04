@@ -118,6 +118,22 @@ pub async fn submit_receipt(
         return Err(Error::TransactionTooOld);
     }
 
+    // Reserve the key BEFORE any async operation to prevent replay attacks.
+    //
+    // Without this, two concurrent `submit_receipt` calls for the same receipt
+    // can both pass the `contains` check above (since the insert only happens
+    // in the `handle_reply` hook after the VFT reply arrives), causing double
+    // minting/unlocking. By inserting now — synchronously, before yielding —
+    // the second call will see the key and return `AlreadyProcessed`.
+    //
+    // If the VFT operation fails, `handle_reply` removes the key so the
+    // receipt can be retried. If it times out (ambiguous state), the key is
+    // kept to conservatively prevent any retry.
+    if transactions.len() >= TX_HISTORY_DEPTH {
+        transactions.pop_first();
+    }
+    transactions.insert(key);
+
     let amount = U256::from_little_endian(event.amount.as_le_slice());
     let receiver = ActorId::from(event.to.0);
     let erc20_sender = H160::from(event.from.0 .0);

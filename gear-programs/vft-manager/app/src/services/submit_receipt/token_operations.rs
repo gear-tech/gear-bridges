@@ -154,18 +154,15 @@ where
     // An error means one of the two things:
     // - the VFT invocation failed
     // - we couldn't read the reply payload
-    // In either case we can't proceed with the event emission and transaction history update.
+    // In either case, remove the reservation made in `submit_receipt` so the
+    // receipt can be retried.
     if status.is_err() {
+        super::transactions_mut().remove(&(slot, transaction_index));
         return;
     }
 
-    let transactions = super::transactions_mut();
-    if super::TX_HISTORY_DEPTH <= transactions.len() {
-        transactions.pop_first();
-    }
-
-    transactions.insert((slot, transaction_index));
-
+    // Success: the key was already reserved in `submit_receipt`, so no need to
+    // insert again. Just emit the event.
     emit_event(receiver, erc20_sender, amount, token_id);
 }
 

@@ -21,14 +21,14 @@ const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
 const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
 
 #[derive(Debug, Clone, Copy)]
-enum BridgeBuiltinBehavior {
+enum ReplyBehavior {
     Queued,
     Rejected,
     Malformed,
 }
 
 #[derive(Debug, Clone)]
-struct GearBridgeBuiltinMock(BridgeBuiltinBehavior);
+struct ReplyMock(ReplyBehavior);
 
 fn queued_bridge_reply() -> Vec<u8> {
     #[derive(Encode)]
@@ -50,38 +50,17 @@ fn queued_bridge_reply() -> Vec<u8> {
     .encode()
 }
 
-impl WasmProgram for GearBridgeBuiltinMock {
+impl WasmProgram for ReplyMock {
     fn init(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
         Ok(None)
     }
 
     fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
         match self.0 {
-            BridgeBuiltinBehavior::Queued => Ok(Some(queued_bridge_reply())),
-            BridgeBuiltinBehavior::Rejected => Err("rejected"),
-            BridgeBuiltinBehavior::Malformed => Ok(Some(vec![0xff])),
+            ReplyBehavior::Queued => Ok(Some(queued_bridge_reply())),
+            ReplyBehavior::Rejected => Err("rejected"),
+            ReplyBehavior::Malformed => Ok(Some(vec![0xff])),
         }
-    }
-
-    fn clone_boxed(&self) -> Box<dyn WasmProgram> {
-        Box::new(self.clone())
-    }
-
-    fn state(&mut self) -> Result<Vec<u8>, &'static str> {
-        unimplemented!()
-    }
-}
-
-#[derive(Debug, Clone)]
-struct MalformedTokenReplyMock;
-
-impl WasmProgram for MalformedTokenReplyMock {
-    fn init(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
-        Ok(None)
-    }
-
-    fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
-        Ok(Some(vec![0xff]))
     }
 
     fn clone_boxed(&self) -> Box<dyn WasmProgram> {
@@ -128,11 +107,11 @@ async fn mint_eth_supply_tokens(
 }
 
 async fn setup_for_test() -> Fixture {
-    setup_for_test_with_builtin(Some(BridgeBuiltinBehavior::Queued), 100).await
+    setup_for_test_with_builtin(Some(ReplyBehavior::Queued), 100).await
 }
 
 async fn setup_for_test_with_builtin(
-    builtin_behavior: Option<BridgeBuiltinBehavior>,
+    builtin_behavior: Option<ReplyBehavior>,
     reply_timeout: u32,
 ) -> Fixture {
     let system = System::new();
@@ -144,11 +123,8 @@ async fn setup_for_test_with_builtin(
 
     // Bridge Builtin
     if let Some(behavior) = builtin_behavior {
-        let gear_bridge_builtin = Program::mock_with_id(
-            remoting.system(),
-            BRIDGE_BUILTIN_ID,
-            GearBridgeBuiltinMock(behavior),
-        );
+        let gear_bridge_builtin =
+            Program::mock_with_id(remoting.system(), BRIDGE_BUILTIN_ID, ReplyMock(behavior));
         let _ = gear_bridge_builtin.send_bytes(REMOTING_ACTOR_ID, b"INIT");
     } else {
         remoting
@@ -331,22 +307,15 @@ async fn test_eth_supply_token() {
         .mint_to(account_id, 100_000_000_000_000_000);
     let amount = U256::from(10_000_000_000_u64);
 
-    let receipt_rlp = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3u8; 20].into(),
+    mint_eth_supply_tokens(
+        &remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
         account_id,
-        ERC20_TOKEN_ETH_SUPPLY,
         amount,
-    );
-    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, 0, receipt_rlp)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap()
-        .unwrap();
-
-    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
-    assert_eq!(account_balance, amount);
+        0,
+    )
+    .await;
 
     let vft_manager_balance = balance_of(&remoting, eth_supply_vft, vft_manager_program_id).await;
     assert!(vft_manager_balance.is_zero());
@@ -844,7 +813,7 @@ async fn test_malformed_bridge_success_reply_is_quarantined() {
         vft_manager_program_id,
         eth_supply_vft,
         ..
-    } = setup_for_test_with_builtin(Some(BridgeBuiltinBehavior::Malformed), 100).await;
+    } = setup_for_test_with_builtin(Some(ReplyBehavior::Malformed), 100).await;
 
     let account_id: ActorId = 100_000.into();
     remoting
@@ -897,7 +866,7 @@ async fn test_definite_bridge_rejection_refunds_once() {
         vft_manager_program_id,
         eth_supply_vft,
         ..
-    } = setup_for_test_with_builtin(Some(BridgeBuiltinBehavior::Rejected), 100).await;
+    } = setup_for_test_with_builtin(Some(ReplyBehavior::Rejected), 100).await;
 
     let account_id: ActorId = 100_000.into();
     remoting
@@ -996,7 +965,7 @@ async fn test_malformed_token_refund_reply_remains_in_flight() {
     let token = Program::mock_with_id(
         remoting.system(),
         MALFORMED_TOKEN_ID,
-        MalformedTokenReplyMock,
+        ReplyMock(ReplyBehavior::Malformed),
     );
     token.send_bytes(REMOTING_ACTOR_ID, b"INIT");
     remoting.system().run_next_block();
@@ -1222,8 +1191,7 @@ async fn test_interrupted_transfer_recovers_from_intermediate_statuses() {
         eth_amount
     );
 
-    // Reply from the bridge built-in actor hasn't been received (e.g. a timeout
-    // followed by an out-of-gas crash, which the critical hook lands on this status).
+    // Reconciliation confirmed that the bridge request was not queued.
     let msg_id: MessageId = [4u8; 32].into();
     seed_msg_info(
         &remoting,

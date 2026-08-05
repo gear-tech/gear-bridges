@@ -192,18 +192,16 @@ fn claim_token_refund(msg_id: MessageId) -> bool {
         .expect("Unexpected: msg status does not exist")
         .status;
 
-    let claim = match status {
+    match status {
         MessageStatus::SendingMessageToReturnTokens | MessageStatus::TokensReturnComplete(true) => {
             false
         }
         MessageStatus::BridgeResponseReceived(None)
         | MessageStatus::TokensReturnComplete(false)
-        | MessageStatus::TokenDepositCompleted(true) => true,
+        | MessageStatus::TokenDepositCompleted(true) => {
+            msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+            true
+        }
         _ => panic!("Unexpected status or transaction completed."),
-    };
-
-    if claim {
-        msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
     }
-    claim
 }

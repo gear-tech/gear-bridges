@@ -105,27 +105,21 @@ fn handle_reply_hook(msg_id: MessageId) {
         return;
     }
 
-    match msg::reply_code() {
-        Ok(ReplyCode::Error(_)) => {
-            msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(None));
-        }
-        Ok(_) => {
-            let reply = msg::load_bytes()
-                .ok()
-                .and_then(|bytes| decode_bridge_reply(&bytes).ok().flatten());
-            if let Some(reply) = reply {
-                msg_tracker.update_message_status(
-                    msg_id,
-                    MessageStatus::BridgeResponseReceived(Some(reply)),
-                );
-            }
-        }
-        Err(_) => {}
+    let status = match msg::reply_code() {
+        Ok(ReplyCode::Error(_)) => Some(MessageStatus::BridgeResponseReceived(None)),
+        Ok(_) => msg::load_bytes()
+            .ok()
+            .and_then(|bytes| decode_bridge_reply(&bytes).ok())
+            .map(|reply| MessageStatus::BridgeResponseReceived(Some(reply))),
+        Err(_) => None,
+    };
+    if let Some(status) = status {
+        msg_tracker.update_message_status(msg_id, status);
     }
 }
 
 /// Decode reply received from `pallet-gear-eth-bridge` built-in actor.
-fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<(U256, H256, u64)>, Error> {
+fn decode_bridge_reply(mut bytes: &[u8]) -> Result<(U256, H256, u64), Error> {
     let reply = gbuiltin_eth_bridge::Response::decode(&mut bytes)
         .map_err(|e| Error::BuiltinDecode(format!("{e:?}")))?;
 
@@ -135,6 +129,6 @@ fn decode_bridge_reply(mut bytes: &[u8]) -> Result<Option<(U256, H256, u64)>, Er
             hash,
             queue_id,
             ..
-        } => Ok(Some((nonce, hash, queue_id))),
+        } => Ok((nonce, hash, queue_id)),
     }
 }

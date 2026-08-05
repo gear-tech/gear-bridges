@@ -7,8 +7,10 @@ use super::{error::Error, TokenSupply, VftManager};
 pub mod abi;
 pub mod token_operations;
 
-/// Successfully processed Ethereum transactions. They're stored to prevent
-/// double-spending attacks on this program.
+/// Processed Ethereum transactions. Keys are reserved in `submit_receipt`
+/// before the async VFT call and kept on success or timeout (ambiguous state)
+/// to prevent double-spending attacks on this program; only a definitive VFT
+/// failure removes them so the receipt can be retried.
 static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 
 /// Maximum amount of successfully processed Ethereum transactions that this

@@ -298,6 +298,67 @@ async fn test_eth_supply_token() {
 }
 
 #[tokio::test]
+async fn test_submit_receipt_concurrent_replay_prevents_double_mint() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_ETH_SUPPLY,
+        amount,
+    );
+
+    // Two identical submit_receipt calls for the same (slot, tx_index), queued
+    // into the same block from the historical proxy — simulating the parallel
+    // replay attack. Before the fix, both passed the dedup check because the
+    // key was only recorded in the handle_reply hook (after the VFT reply),
+    // so both mints executed.
+    let manual = remoting
+        .clone()
+        .with_block_run_mode(BlockRunMode::Manual)
+        .with_actor_id(HISTORICAL_PROXY_ID.into());
+
+    let mut client_1 = VftManagerC::new(manual.clone());
+    let mut client_2 = VftManagerC::new(manual.clone());
+
+    let ticket_1 = client_1
+        .submit_receipt(0, 0, receipt_rlp.clone())
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+    let ticket_2 = client_2
+        .submit_receipt(0, 0, receipt_rlp)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    for _ in 0..3 {
+        manual.run_next_block();
+    }
+
+    // First call succeeds; second is rejected as a duplicate.
+    ticket_1.recv().await.unwrap().unwrap();
+    let reply_2 = ticket_2.recv().await.unwrap();
+    assert_eq!(reply_2, Err(Error::AlreadyProcessed));
+
+    // Exactly one mint executed — no double mint.
+    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
+    assert_eq!(account_balance, amount);
+}
+
+#[tokio::test]
 async fn test_mapping_does_not_exists() {
     let Fixture {
         remoting,

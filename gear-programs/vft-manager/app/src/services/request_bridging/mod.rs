@@ -93,19 +93,20 @@ pub async fn request_bridging(
             // regardless of the result of the next code execution.
             set_critical_hook(msg_id);
 
-            msg_tracker_mut()
-                .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
-
-            match supply_type {
-                TokenSupply::Ethereum => {
-                    token_operations::mint(vara_token_id, sender, amount, config, msg_id)
-                        .await
-                        .expect("Failed to mint tokens");
-                }
-                TokenSupply::Gear => {
-                    token_operations::unlock(vara_token_id, sender, amount, config, msg_id)
-                        .await
-                        .expect("Failed to unlock tokens");
+            // A recovery call can run after the reply hook but before this
+            // continuation. Only the execution that claims the refund may send it.
+            if claim_token_refund(msg_id, true) {
+                match supply_type {
+                    TokenSupply::Ethereum => {
+                        token_operations::mint(vara_token_id, sender, amount, config, msg_id)
+                            .await
+                            .expect("Failed to mint tokens");
+                    }
+                    TokenSupply::Gear => {
+                        token_operations::unlock(vara_token_id, sender, amount, config, msg_id)
+                            .await
+                            .expect("Failed to unlock tokens");
+                    }
                 }
             }
 
@@ -170,17 +171,8 @@ pub async fn handle_interrupted_transfer(
         panic!("Access rejected");
     }
 
-    match msg_info.status {
-        MessageStatus::TokenDepositCompleted(true)
-        | MessageStatus::BridgeResponseReceived(None)
-        | MessageStatus::TokensReturnComplete(false) => {
-            msg_tracker_mut()
-                .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
-        }
-
-        _ => {
-            panic!("Unexpected status or transaction completed.")
-        }
+    if !claim_token_refund(msg_id, false) {
+        panic!("Token refund already in flight or completed")
     }
 
     match token_supply {
@@ -193,6 +185,31 @@ pub async fn handle_interrupted_transfer(
     }
 
     Ok(())
+}
+
+/// Atomically claim the single token refund for a failed bridge request.
+fn claim_token_refund(msg_id: MessageId, from_request: bool) -> bool {
+    let msg_tracker = msg_tracker_mut();
+    let status = &msg_tracker
+        .get_message_info(&msg_id)
+        .expect("Unexpected: msg status does not exist")
+        .status;
+
+    let claim = match status {
+        MessageStatus::SendingMessageToReturnTokens | MessageStatus::TokensReturnComplete(true) => {
+            false
+        }
+        MessageStatus::BridgeResponseReceived(None)
+        | MessageStatus::TokensReturnComplete(false) => true,
+        MessageStatus::SendingMessageToBridgeBuiltin if from_request => true,
+        MessageStatus::TokenDepositCompleted(true) if !from_request => true,
+        _ => panic!("Unexpected status or transaction completed."),
+    };
+
+    if claim {
+        msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+    }
+    claim
 }
 
 /// Helper function to change message status to `BridgeResponseReceived(None)` in the rare case

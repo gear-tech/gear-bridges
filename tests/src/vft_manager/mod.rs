@@ -2118,13 +2118,13 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
 
     assert!(emitted.is_none(), "BridgingAccepted event was emitted");
 
-    // Successful transactions number didn't change
+    // A timeout is ambiguous, so keep the receipt reserved to prevent replay.
     let txs = service
         .transactions(Order::Direct, 0, 1)
         .recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(txs.is_empty());
+    assert_eq!(txs, vec![(0, 1)]);
 
     assert!(
         matches!(result, Err(Error::ReplyTimeout(..))),

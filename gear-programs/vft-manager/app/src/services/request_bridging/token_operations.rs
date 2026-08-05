@@ -192,24 +192,40 @@ fn handle_reply_hook(msg_id: MessageId) {
     let msg_info = msg_tracker
         .get_message_info(&msg_id)
         .expect("Unexpected: msg info does not exist");
-    let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
+    // Unit replies decode successfully from any payload, including panic text.
+    // Reject an error reply code before decoding so a failed Burn/Mint can never
+    // become a recoverable successful token operation.
+    let reply_bytes = match msg::reply_code() {
+        Ok(ReplyCode::Error(_)) | Err(_) => None,
+        Ok(_) => msg::load_bytes().ok(),
+    };
 
     match msg_info.status {
         MessageStatus::SendingMessageToDepositTokens => {
-            let reply = match msg_info.details.token_supply {
-                TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
-                TokenSupply::Gear => decode_lock_reply(&reply_bytes),
-            }
-            .unwrap_or(false);
+            let reply = reply_bytes
+                .as_deref()
+                .and_then(|bytes| {
+                    match msg_info.details.token_supply {
+                        TokenSupply::Ethereum => decode_burn_reply(bytes),
+                        TokenSupply::Gear => decode_lock_reply(bytes),
+                    }
+                    .ok()
+                })
+                .unwrap_or(false);
 
             msg_tracker.update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
         }
         MessageStatus::SendingMessageToReturnTokens => {
-            let reply = match msg_info.details.token_supply {
-                TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
-                TokenSupply::Gear => decode_unlock_reply(&reply_bytes),
-            }
-            .unwrap_or(false);
+            let reply = reply_bytes
+                .as_deref()
+                .and_then(|bytes| {
+                    match msg_info.details.token_supply {
+                        TokenSupply::Ethereum => decode_mint_reply(bytes),
+                        TokenSupply::Gear => decode_unlock_reply(bytes),
+                    }
+                    .ok()
+                })
+                .unwrap_or(false);
 
             msg_tracker.update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
         }

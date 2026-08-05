@@ -103,26 +103,28 @@ pub async fn submit_receipt(
         })
         .ok_or(Error::UnsupportedEthEvent)?;
 
-    let transactions = transactions_mut();
+    let processed = transactions_mut();
     let key = (slot, transaction_index);
-    if transactions.contains(&key) {
+    if processed.contains(&key) {
         return Err(Error::AlreadyProcessed);
     }
 
-    if transactions.len() >= TX_HISTORY_DEPTH
-        && transactions
-            .first()
-            .map(|first| &key < first)
-            .unwrap_or(false)
+    if processed.len() >= TX_HISTORY_DEPTH
+        && processed.first().map(|first| &key < first).unwrap_or(false)
     {
         return Err(Error::TransactionTooOld);
     }
+
+    // Reserve before the first await so concurrent submissions cannot both mint.
+    // A definite VFT reply failure removes the reservation in `handle_reply`;
+    // ambiguous failures keep it to preserve at-most-once processing.
+    processed.insert(key);
 
     let amount = U256::from_little_endian(event.amount.as_le_slice());
     let receiver = ActorId::from(event.to.0);
     let erc20_sender = H160::from(event.from.0 .0);
 
-    match service.state().token_map.get_supply_type(&vara_token_id)? {
+    let result = match service.state().token_map.get_supply_type(&vara_token_id)? {
         TokenSupply::Ethereum => {
             token_operations::mint(
                 slot,
@@ -148,7 +150,16 @@ pub async fn submit_receipt(
             )
             .await
         }
+    };
+
+    // Do not evict a proven processed receipt until the new reservation's
+    // outcome is known. At most the bounded number of in-flight calls can make
+    // this set temporarily exceed its configured history depth.
+    if transactions().len() > TX_HISTORY_DEPTH {
+        transactions_mut().pop_first();
     }
+
+    result
 }
 
 pub fn fill_transactions() -> bool {

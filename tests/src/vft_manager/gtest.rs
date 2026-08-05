@@ -2,7 +2,7 @@ use gtest::{Log, Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
-    traits::*, Config, Error, InitConfig, MessageStatus, TokenSupply, TxDetails,
+    traits::*, Config, Error, InitConfig, MessageStatus, Order, TokenSupply, TxDetails,
     VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
 };
 use vft_vara_client::{traits::VftVaraFactory, Mainnet};
@@ -10,6 +10,7 @@ use vft_vara_client::{traits::VftVaraFactory, Mainnet};
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
+const MALFORMED_TOKEN_ID: u64 = 400;
 
 const WRONG_GEAR_SUPPLY_VFT: u64 = 666;
 
@@ -60,6 +61,27 @@ impl WasmProgram for GearBridgeBuiltinMock {
             BridgeBuiltinBehavior::Rejected => Err("rejected"),
             BridgeBuiltinBehavior::Malformed => Ok(Some(vec![0xff])),
         }
+    }
+
+    fn clone_boxed(&self) -> Box<dyn WasmProgram> {
+        Box::new(self.clone())
+    }
+
+    fn state(&mut self) -> Result<Vec<u8>, &'static str> {
+        unimplemented!()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MalformedTokenReplyMock;
+
+impl WasmProgram for MalformedTokenReplyMock {
+    fn init(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        Ok(None)
+    }
+
+    fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        Ok(Some(vec![0xff]))
     }
 
     fn clone_boxed(&self) -> Box<dyn WasmProgram> {
@@ -961,6 +983,81 @@ async fn seed_msg_info(
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn test_malformed_token_refund_reply_remains_in_flight() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        ..
+    } = setup_for_test().await;
+
+    let token = Program::mock_with_id(
+        remoting.system(),
+        MALFORMED_TOKEN_ID,
+        MalformedTokenReplyMock,
+    );
+    token.send_bytes(REMOTING_ACTOR_ID, b"INIT");
+    remoting.system().run_next_block();
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let msg_id: MessageId = [3u8; 32].into();
+    seed_msg_info(
+        &remoting,
+        vft_manager_program_id,
+        msg_id,
+        MessageStatus::TokenDepositCompleted(true),
+        tx_details(
+            MALFORMED_TOKEN_ID.into(),
+            account_id,
+            U256::from(1),
+            TokenSupply::Gear,
+        ),
+    )
+    .await;
+
+    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(result, Err(Error::InvalidMessageStatus));
+
+    let info = VftManagerC::new(remoting.clone())
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(id, _)| id == &msg_id)
+        .unwrap()
+        .1;
+    assert_eq!(info.status, MessageStatus::SendingMessageToReturnTokens);
+    assert!(VftManagerC::new(remoting.with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn test_transactions_large_count_is_bounded_by_entries() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        ..
+    } = setup_for_test().await;
+
+    let transactions = VftManagerC::new(remoting)
+        .transactions(Order::Direct, 0, u32::MAX)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert!(transactions.is_empty());
 }
 
 #[tokio::test]

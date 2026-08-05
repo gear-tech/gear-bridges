@@ -596,7 +596,7 @@ impl VftManager {
             let mut left = left.peekable();
             let mut right = right.peekable();
             let mut skipped = 0;
-            let mut result = Vec::with_capacity(count as usize);
+            let mut result = Vec::new();
 
             while result.len() < count as usize {
                 let next = match (left.peek(), right.peek()) {

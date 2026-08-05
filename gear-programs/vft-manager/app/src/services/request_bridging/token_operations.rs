@@ -192,13 +192,17 @@ fn handle_reply_hook(msg_id: MessageId) {
     let msg_info = msg_tracker
         .get_message_info(&msg_id)
         .expect("Unexpected: msg info does not exist");
-    // Unit replies decode successfully from any payload, including panic text.
-    // Reject an error reply code before decoding so a failed Burn/Mint can never
-    // become a recoverable successful token operation.
-    let reply_bytes = match msg::reply_code() {
-        Ok(ReplyCode::Error(_)) | Err(_) => None,
-        Ok(_) => msg::load_bytes().ok(),
+    // Only an explicit error reply proves that the token operation failed.
+    // Unreadable or malformed success replies are ambiguous and must leave the
+    // current in-flight state unchanged.
+    let reply_code = match msg::reply_code() {
+        Ok(reply_code) => reply_code,
+        Err(_) => return,
     };
+    let definite_failure = matches!(&reply_code, ReplyCode::Error(_));
+    let reply_bytes = (!definite_failure)
+        .then(|| msg::load_bytes().ok())
+        .flatten();
 
     match msg_info.status {
         MessageStatus::SendingMessageToDepositTokens => {
@@ -211,9 +215,12 @@ fn handle_reply_hook(msg_id: MessageId) {
                     }
                     .ok()
                 })
-                .unwrap_or(false);
+                .or_else(|| definite_failure.then_some(false));
 
-            msg_tracker.update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
+            if let Some(reply) = reply {
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
+            }
         }
         MessageStatus::SendingMessageToReturnTokens => {
             let reply = reply_bytes
@@ -225,9 +232,12 @@ fn handle_reply_hook(msg_id: MessageId) {
                     }
                     .ok()
                 })
-                .unwrap_or(false);
+                .or_else(|| definite_failure.then_some(false));
 
-            msg_tracker.update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
+            if let Some(reply) = reply {
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
+            }
         }
         _ => {}
     };

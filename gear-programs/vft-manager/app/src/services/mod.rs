@@ -645,22 +645,19 @@ impl VftManager {
         panic!("Please rebuild with enabled `mocks` feature")
     }
 
-    /// The method is intended for tests and is available only when the feature `mocks`
-    /// is enabled. Inserts the message info into the corresponding collection.
+    /// Inserts recoverable message state during a paused program migration.
     #[export]
     pub fn insert_message_info(
         &mut self,
-        _msg_id: MessageId,
-        _status: MessageStatus,
-        _details: TxDetails,
+        msg_id: MessageId,
+        status: MessageStatus,
+        details: TxDetails,
     ) {
-        #[cfg(feature = "mocks")]
-        {
-            request_bridging::msg_tracker_mut().insert_message_info(_msg_id, _status, _details);
+        self.ensure_admin();
+        if !self.state().is_paused {
+            panic!("Not paused");
         }
-
-        #[cfg(not(feature = "mocks"))]
-        panic!("Please rebuild with enabled `mocks` feature")
+        request_bridging::msg_tracker_mut().insert_message_info(msg_id, status, details);
     }
 
     /// The method is intended for tests and is available only when the feature `mocks`

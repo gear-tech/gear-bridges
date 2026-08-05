@@ -298,6 +298,160 @@ async fn test_eth_supply_token() {
 }
 
 #[tokio::test]
+async fn test_submit_receipt_concurrent_replay_prevents_double_mint() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_ETH_SUPPLY,
+        amount,
+    );
+
+    let manual = remoting
+        .clone()
+        .with_block_run_mode(BlockRunMode::Manual)
+        .with_actor_id(HISTORICAL_PROXY_ID.into());
+    let mut client_1 = VftManagerC::new(manual.clone());
+    let mut client_2 = VftManagerC::new(manual.clone());
+
+    let ticket_1 = client_1
+        .submit_receipt(0, 0, receipt_rlp.clone())
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+    let ticket_2 = client_2
+        .submit_receipt(0, 0, receipt_rlp)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    for _ in 0..3 {
+        manual.run_next_block();
+    }
+
+    ticket_1.recv().await.unwrap().unwrap();
+    assert_eq!(ticket_2.recv().await.unwrap(), Err(Error::AlreadyProcessed));
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        amount
+    );
+}
+
+#[tokio::test]
+async fn test_failed_mint_releases_receipt_for_retry() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_ETH_SUPPLY,
+        amount,
+    );
+
+    let mut vft = VftAdminC::new(remoting.clone());
+    vft.set_minter(REMOTING_ACTOR_ID.into())
+        .send_recv(eth_supply_vft)
+        .await
+        .unwrap();
+
+    let failed = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+        .submit_receipt(0, 0, receipt_rlp.clone())
+        .send_recv(vft_manager_program_id)
+        .await;
+    assert!(matches!(failed, Err(_) | Ok(Err(_))));
+    assert!(balance_of(&remoting, eth_supply_vft, account_id)
+        .await
+        .is_zero());
+
+    vft.set_minter(vft_manager_program_id)
+        .send_recv(eth_supply_vft)
+        .await
+        .unwrap();
+    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+        .submit_receipt(0, 0, receipt_rlp.clone())
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        amount
+    );
+
+    let replay = VftManagerC::new(remoting.with_actor_id(HISTORICAL_PROXY_ID.into()))
+        .submit_receipt(0, 0, receipt_rlp)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(replay, Err(Error::AlreadyProcessed));
+}
+
+#[tokio::test]
+async fn test_failed_burn_is_not_recoverable() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+
+    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .request_bridging(eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
+        .send_recv(vft_manager_program_id)
+        .await;
+    assert!(result.is_err());
+
+    let entries = VftManagerC::new(remoting.clone())
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    let (msg_id, info) = entries
+        .into_iter()
+        .find(|(_, info)| info.details.sender == account_id && info.details.amount == amount)
+        .expect("failed burn must remain visible for forensic inspection");
+    assert_eq!(info.status, MessageStatus::TokenDepositCompleted(false));
+
+    let recovery = VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await;
+    assert!(recovery.is_err());
+    assert!(balance_of(&remoting, eth_supply_vft, account_id)
+        .await
+        .is_zero());
+}
+
+#[tokio::test]
 async fn test_mapping_does_not_exists() {
     let Fixture {
         remoting,
@@ -472,8 +626,19 @@ async fn seed_msg_info(
     status: MessageStatus,
     details: TxDetails,
 ) {
-    VftManagerC::new(remoting.clone())
+    let mut manager = VftManagerC::new(remoting.clone());
+    manager
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    manager
         .insert_message_info(msg_id, status, details)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    manager
+        .unpause()
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();

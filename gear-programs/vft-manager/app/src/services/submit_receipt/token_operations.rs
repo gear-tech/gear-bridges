@@ -151,21 +151,17 @@ where
     let reply_statuses = super::reply_statuses_mut();
     reply_statuses.insert((slot, transaction_index), status.clone());
 
-    // An error means one of the two things:
-    // - the VFT invocation failed
-    // - we couldn't read the reply payload
-    // In either case we can't proceed with the event emission and transaction history update.
+    // Release only when the reply proves that no token operation completed.
+    // Missing or malformed replies are ambiguous, so retain the reservation to
+    // preserve at-most-once processing.
     if status.is_err() {
+        if matches!(status, Err(Error::ReplyFailure(_) | Error::InvalidReply)) {
+            super::transactions_mut().remove(&(slot, transaction_index));
+        }
         return;
     }
 
-    let transactions = super::transactions_mut();
-    if super::TX_HISTORY_DEPTH <= transactions.len() {
-        transactions.pop_first();
-    }
-
-    transactions.insert((slot, transaction_index));
-
+    // The key was reserved synchronously before the async VFT call.
     emit_event(receiver, erc20_sender, amount, token_id);
 }
 

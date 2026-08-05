@@ -1,4 +1,4 @@
-use gtest::{Program, System, WasmProgram};
+use gtest::{Log, Program, System, WasmProgram};
 use sails_rs::{calls::*, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
@@ -19,8 +19,35 @@ const ETH_TOKEN_RECEIVER: H160 = H160([6; 20]);
 const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
 const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
 
+#[derive(Debug, Clone, Copy)]
+enum BridgeBuiltinBehavior {
+    Queued,
+    Rejected,
+    Malformed,
+}
+
 #[derive(Debug, Clone)]
-struct GearBridgeBuiltinMock;
+struct GearBridgeBuiltinMock(BridgeBuiltinBehavior);
+
+fn queued_bridge_reply() -> Vec<u8> {
+    #[derive(Encode)]
+    enum Response {
+        MessageSent {
+            block_number: u32,
+            hash: H256,
+            nonce: U256,
+            queue_id: u64,
+        },
+    }
+
+    Response::MessageSent {
+        block_number: 1,
+        nonce: U256::from(1),
+        hash: [1; 32].into(),
+        queue_id: 1,
+    }
+    .encode()
+}
 
 impl WasmProgram for GearBridgeBuiltinMock {
     fn init(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
@@ -28,25 +55,11 @@ impl WasmProgram for GearBridgeBuiltinMock {
     }
 
     fn handle(&mut self, _payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
-        #[derive(Encode)]
-        enum Response {
-            MessageSent {
-                block_number: u32,
-                hash: H256,
-                nonce: U256,
-                queue_id: u64,
-            },
+        match self.0 {
+            BridgeBuiltinBehavior::Queued => Ok(Some(queued_bridge_reply())),
+            BridgeBuiltinBehavior::Rejected => Err("rejected"),
+            BridgeBuiltinBehavior::Malformed => Ok(Some(vec![0xff])),
         }
-
-        Ok(Some(
-            Response::MessageSent {
-                block_number: 1,
-                nonce: U256::from(1),
-                hash: [1; 32].into(),
-                queue_id: 1,
-            }
-            .encode(),
-        ))
     }
 
     fn clone_boxed(&self) -> Box<dyn WasmProgram> {
@@ -65,7 +78,41 @@ struct Fixture {
     eth_supply_vft: ActorId,
 }
 
+async fn mint_eth_supply_tokens(
+    remoting: &GTestRemoting,
+    vft_manager_program_id: ActorId,
+    eth_supply_vft: ActorId,
+    account_id: ActorId,
+    amount: U256,
+    transaction_index: u64,
+) {
+    let receipt_rlp = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_ETH_SUPPLY,
+        amount,
+    );
+    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+        .submit_receipt(0, transaction_index, receipt_rlp)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(remoting, eth_supply_vft, account_id).await,
+        amount
+    );
+}
+
 async fn setup_for_test() -> Fixture {
+    setup_for_test_with_builtin(Some(BridgeBuiltinBehavior::Queued), 100).await
+}
+
+async fn setup_for_test_with_builtin(
+    builtin_behavior: Option<BridgeBuiltinBehavior>,
+    reply_timeout: u32,
+) -> Fixture {
     let system = System::new();
     system.init_logger();
     system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000_000);
@@ -74,9 +121,18 @@ async fn setup_for_test() -> Fixture {
     let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
 
     // Bridge Builtin
-    let gear_bridge_builtin =
-        Program::mock_with_id(remoting.system(), BRIDGE_BUILTIN_ID, GearBridgeBuiltinMock);
-    let _ = gear_bridge_builtin.send_bytes(REMOTING_ACTOR_ID, b"INIT");
+    if let Some(behavior) = builtin_behavior {
+        let gear_bridge_builtin = Program::mock_with_id(
+            remoting.system(),
+            BRIDGE_BUILTIN_ID,
+            GearBridgeBuiltinMock(behavior),
+        );
+        let _ = gear_bridge_builtin.send_bytes(REMOTING_ACTOR_ID, b"INIT");
+    } else {
+        remoting
+            .system()
+            .mint_to(BRIDGE_BUILTIN_ID, 100_000_000_000_000);
+    }
 
     // Vft Manager
     let vft_manager_code_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
@@ -88,7 +144,7 @@ async fn setup_for_test() -> Fixture {
             gas_for_reply_deposit: 15_000_000_000,
             gas_to_send_request_to_builtin: 15_000_000_000,
             gas_for_swap_token_maps: 1_500_000_000,
-            reply_timeout: 100,
+            reply_timeout,
             fee_bridge: 0,
             fee_incoming: 0,
         },
@@ -602,6 +658,269 @@ async fn test_pause_works() {
         .await
         .unwrap();
     assert_paused!(false);
+}
+
+#[tokio::test]
+async fn test_upgrade_rejects_unpaused_destination_without_moving_balances() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        gear_supply_vft,
+        ..
+    } = setup_for_test().await;
+
+    let code_id = remoting.system().submit_code(vft_manager::WASM_BINARY);
+    let destination = VftManagerFactoryC::new(remoting.clone())
+        .new(InitConfig {
+            gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
+            historical_proxy_address: HISTORICAL_PROXY_ID.into(),
+            config: Config {
+                gas_for_token_ops: 15_000_000_000,
+                gas_for_reply_deposit: 15_000_000_000,
+                gas_to_send_request_to_builtin: 15_000_000_000,
+                gas_for_swap_token_maps: 1_500_000_000,
+                reply_timeout: 100,
+                fee_bridge: 0,
+                fee_incoming: 0,
+            },
+        })
+        .send_recv(code_id, b"unpaused-destination")
+        .await
+        .unwrap();
+
+    let amount = U256::from(1_000_000_000_000u64);
+    VftAdminC::new(remoting.clone())
+        .mint(vft_manager_program_id, amount)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+
+    let mut manager = VftManagerC::new(remoting.clone());
+    manager.unpause().send_recv(destination).await.unwrap();
+    manager
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    assert!(manager
+        .upgrade(destination)
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert!(manager
+        .is_paused()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+    assert_eq!(
+        balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await,
+        amount
+    );
+    assert!(balance_of(&remoting, gear_supply_vft, destination)
+        .await
+        .is_zero());
+}
+
+#[tokio::test]
+async fn test_bridge_timeout_is_quarantined_and_late_reply_does_not_refund() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test_with_builtin(None, 2).await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+    mint_eth_supply_tokens(
+        &remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        account_id,
+        amount,
+        0,
+    )
+    .await;
+
+    let manual = remoting
+        .clone()
+        .with_block_run_mode(BlockRunMode::Manual)
+        .with_actor_id(account_id);
+    let mut manager = VftManagerC::new(manual.clone());
+    let ticket = manager
+        .request_bridging(eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
+        .send(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    for _ in 0..8 {
+        manual.run_next_block();
+    }
+
+    assert!(matches!(
+        ticket.recv().await.unwrap(),
+        Err(Error::ReplyFailure(_))
+    ));
+    assert!(balance_of(&remoting, eth_supply_vft, account_id)
+        .await
+        .is_zero());
+
+    let entries = VftManagerC::new(remoting.clone())
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    let (msg_id, info) = entries
+        .into_iter()
+        .find(|(_, info)| info.details.sender == account_id && info.details.amount == amount)
+        .unwrap();
+    assert_eq!(info.status, MessageStatus::SendingMessageToBridgeBuiltin);
+
+    assert!(VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+
+    let request = Log::builder().source(vft_manager_program_id);
+    let mailbox = remoting.system().get_mailbox(BRIDGE_BUILTIN_ID);
+    assert!(mailbox.contains(&request));
+    mailbox
+        .reply_bytes(request.clone(), queued_bridge_reply(), 0)
+        .unwrap();
+    remoting.system().run_next_block();
+
+    let info = VftManagerC::new(remoting.clone())
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(id, _)| id == &msg_id)
+        .unwrap()
+        .1;
+    assert_eq!(
+        info.status,
+        MessageStatus::BridgeResponseReceived(Some((U256::from(1), [1; 32].into(), 1)))
+    );
+    assert!(balance_of(&remoting, eth_supply_vft, account_id)
+        .await
+        .is_zero());
+    assert!(mailbox
+        .reply_bytes(request, queued_bridge_reply(), 0)
+        .is_err());
+}
+
+#[tokio::test]
+async fn test_malformed_bridge_success_reply_is_quarantined() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test_with_builtin(Some(BridgeBuiltinBehavior::Malformed), 100).await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+    mint_eth_supply_tokens(
+        &remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        account_id,
+        amount,
+        0,
+    )
+    .await;
+
+    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .request_bridging(eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(result, Err(Error::InvalidMessageStatus));
+    assert!(balance_of(&remoting, eth_supply_vft, account_id)
+        .await
+        .is_zero());
+
+    let (msg_id, info) = VftManagerC::new(remoting.clone())
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(_, info)| info.details.sender == account_id && info.details.amount == amount)
+        .unwrap();
+    assert_eq!(info.status, MessageStatus::SendingMessageToBridgeBuiltin);
+    assert!(VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert!(balance_of(&remoting, eth_supply_vft, account_id)
+        .await
+        .is_zero());
+}
+
+#[tokio::test]
+async fn test_definite_bridge_rejection_refunds_once() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test_with_builtin(Some(BridgeBuiltinBehavior::Rejected), 100).await;
+
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let amount = U256::from(10_000_000_000_u64);
+    mint_eth_supply_tokens(
+        &remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        account_id,
+        amount,
+        0,
+    )
+    .await;
+
+    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .request_bridging(eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(result, Err(Error::MessageFailed));
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        amount
+    );
+
+    let (msg_id, info) = VftManagerC::new(remoting.clone())
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|(_, info)| info.details.sender == account_id && info.details.amount == amount)
+        .unwrap();
+    assert_eq!(info.status, MessageStatus::TokensReturnComplete(true));
+    assert!(VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        amount
+    );
 }
 
 fn tx_details(

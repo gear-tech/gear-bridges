@@ -462,11 +462,14 @@ impl VftManager {
         }
 
         let service = vft_manager_client::VftManager::new(GStdRemoting);
-        service
+        let destination_paused = service
             .is_paused()
             .recv(vft_manager_new)
             .await
             .expect("vft_manager_new doesn't seem to be a VftManager program");
+        if !destination_paused {
+            panic!("Destination VftManager is not paused");
+        }
 
         if self
             .state()
@@ -583,20 +586,54 @@ impl VftManager {
 
     #[export]
     pub fn transactions(&self, order: Order, start: u32, count: u32) -> Vec<(u64, u64)> {
-        fn collect<'a, T: 'a + Copy>(
-            start: u32,
-            count: u32,
-            iter: impl DoubleEndedIterator<Item = &'a T>,
-        ) -> Vec<T> {
-            iter.skip(start as usize)
-                .take(count as usize)
-                .copied()
-                .collect()
+        fn collect<'a, T, L, R, F>(start: u32, count: u32, left: L, right: R, before: F) -> Vec<T>
+        where
+            T: 'a + Copy + Ord,
+            L: Iterator<Item = &'a T>,
+            R: Iterator<Item = &'a T>,
+            F: Fn(&T, &T) -> bool,
+        {
+            let mut left = left.peekable();
+            let mut right = right.peekable();
+            let mut skipped = 0;
+            let mut result = Vec::with_capacity(count as usize);
+
+            while result.len() < count as usize {
+                let next = match (left.peek(), right.peek()) {
+                    (Some(a), Some(b)) if a == b => {
+                        right.next();
+                        left.next()
+                    }
+                    (Some(a), Some(b)) if before(a, b) => left.next(),
+                    (Some(_), Some(_)) => right.next(),
+                    (Some(_), None) => left.next(),
+                    (None, Some(_)) => right.next(),
+                    (None, None) => break,
+                };
+
+                if skipped < start {
+                    skipped += 1;
+                } else if let Some(value) = next {
+                    result.push(*value);
+                }
+            }
+
+            result
         }
 
+        let processed = submit_receipt::transactions();
+        let reserved = submit_receipt::reserved_transactions();
         match order {
-            Order::Direct => collect(start, count, submit_receipt::transactions().iter()),
-            Order::Reverse => collect(start, count, submit_receipt::transactions().iter().rev()),
+            Order::Direct => collect(start, count, processed.iter(), reserved.iter(), |a, b| {
+                a < b
+            }),
+            Order::Reverse => collect(
+                start,
+                count,
+                processed.iter().rev(),
+                reserved.iter().rev(),
+                |a, b| a > b,
+            ),
         }
     }
 
@@ -646,6 +683,9 @@ impl VftManager {
     }
 
     /// Inserts recoverable message state during a paused program migration.
+    /// An ambiguous bridge request may be changed to `BridgeResponseReceived(None)` only
+    /// after external reconciliation proves that no Ethereum message was queued. The
+    /// original transaction details must be preserved.
     #[export]
     pub fn insert_message_info(
         &mut self,

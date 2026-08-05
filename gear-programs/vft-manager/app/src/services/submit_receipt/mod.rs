@@ -11,6 +11,10 @@ pub mod token_operations;
 /// double-spending attacks on this program.
 static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 
+/// Receipt keys whose token operation has not reached a definite outcome yet.
+/// Reservations are kept separate so completed-history eviction cannot remove them.
+static mut RESERVED_TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+
 /// Maximum amount of successfully processed Ethereum transactions that this
 /// program can store.
 pub const TX_HISTORY_DEPTH: usize = 50_000_000;
@@ -29,6 +33,16 @@ pub fn transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe { static_mut!(TRANSACTIONS).as_mut() }.expect("Program should be constructed")
 }
 
+/// Get a reference to receipt reservations.
+pub fn reserved_transactions() -> &'static BTreeSet<(u64, u64)> {
+    unsafe { static_ref!(RESERVED_TRANSACTIONS).as_ref() }.expect("Program should be constructed")
+}
+
+/// Get a mutable reference to receipt reservations.
+pub fn reserved_transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
+    unsafe { static_mut!(RESERVED_TRANSACTIONS).as_mut() }.expect("Program should be constructed")
+}
+
 /// Get a reference to the reply statuses global map.
 pub fn reply_statuses() -> &'static BTreeMap<(u64, u64), Result<(), Error>> {
     unsafe { static_ref!(REPLY_STATUSES).as_ref() }.expect("Program should be constructed")
@@ -39,10 +53,34 @@ pub fn reply_statuses_mut() -> &'static mut BTreeMap<(u64, u64), Result<(), Erro
     unsafe { static_mut!(REPLY_STATUSES).as_mut() }.expect("Program should be constructed")
 }
 
+/// Move a successful receipt reservation into bounded processed history.
+pub fn complete_transaction(key: (u64, u64)) {
+    complete_transaction_in(
+        transactions_mut(),
+        reserved_transactions_mut(),
+        key,
+        TX_HISTORY_DEPTH,
+    );
+}
+
+fn complete_transaction_in(
+    processed: &mut BTreeSet<(u64, u64)>,
+    reserved: &mut BTreeSet<(u64, u64)>,
+    key: (u64, u64),
+    history_depth: usize,
+) {
+    reserved.remove(&key);
+    processed.insert(key);
+    if processed.len() > history_depth {
+        processed.pop_first();
+    }
+}
+
 /// Initialize state that's used by this VFT Manager method.
 pub fn seed() {
     unsafe {
         TRANSACTIONS = Some(BTreeSet::new());
+        RESERVED_TRANSACTIONS = Some(BTreeSet::new());
         REPLY_STATUSES = Some(BTreeMap::new());
     }
 }
@@ -103,28 +141,28 @@ pub async fn submit_receipt(
         })
         .ok_or(Error::UnsupportedEthEvent)?;
 
-    let processed = transactions_mut();
     let key = (slot, transaction_index);
-    if processed.contains(&key) {
+    if transactions().contains(&key) || reserved_transactions().contains(&key) {
         return Err(Error::AlreadyProcessed);
     }
 
-    if processed.len() >= TX_HISTORY_DEPTH
-        && processed.first().map(|first| &key < first).unwrap_or(false)
+    if transactions().len() >= TX_HISTORY_DEPTH
+        && transactions()
+            .first()
+            .map(|first| &key < first)
+            .unwrap_or(false)
     {
         return Err(Error::TransactionTooOld);
     }
 
     // Reserve before the first await so concurrent submissions cannot both mint.
-    // A definite VFT reply failure removes the reservation in `handle_reply`;
-    // ambiguous failures keep it to preserve at-most-once processing.
-    processed.insert(key);
+    reserved_transactions_mut().insert(key);
 
     let amount = U256::from_little_endian(event.amount.as_le_slice());
     let receiver = ActorId::from(event.to.0);
     let erc20_sender = H160::from(event.from.0 .0);
 
-    let result = match service.state().token_map.get_supply_type(&vara_token_id)? {
+    match service.state().token_map.get_supply_type(&vara_token_id)? {
         TokenSupply::Ethereum => {
             token_operations::mint(
                 slot,
@@ -150,16 +188,7 @@ pub async fn submit_receipt(
             )
             .await
         }
-    };
-
-    // Do not evict a proven processed receipt until the new reservation's
-    // outcome is known. At most the bounded number of in-flight calls can make
-    // this set temporarily exceed its configured history depth.
-    if transactions().len() > TX_HISTORY_DEPTH {
-        transactions_mut().pop_first();
     }
-
-    result
 }
 
 pub fn fill_transactions() -> bool {
@@ -178,4 +207,20 @@ pub fn fill_transactions() -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completed_history_never_evicts_an_in_flight_reservation() {
+        let mut processed = BTreeSet::from([(2, 0), (3, 0)]);
+        let mut reserved = BTreeSet::from([(1, 0), (4, 0)]);
+
+        complete_transaction_in(&mut processed, &mut reserved, (4, 0), 2);
+
+        assert_eq!(processed, BTreeSet::from([(3, 0), (4, 0)]));
+        assert_eq!(reserved, BTreeSet::from([(1, 0)]));
+    }
 }

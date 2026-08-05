@@ -116,7 +116,8 @@ type MessageStatus = enum {
   SendingMessageToDepositTokens,
   /// Reply is received for a token deposit message.
   TokenDepositCompleted: bool,
-  /// Message to the `pallet-gear-eth-bridge` is sent.
+  /// Message to the `pallet-gear-eth-bridge` is sent. This status is also the
+  /// fail-closed quarantine state when the outcome is ambiguous.
   SendingMessageToBridgeBuiltin,
   /// Reply is received for a message to the `pallet-gear-eth-bridge`.
   BridgeResponseReceived: opt struct { u256, h256, u64 },
@@ -190,6 +191,9 @@ service VftManager {
   /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
   HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
   /// Inserts recoverable message state during a paused program migration.
+  /// An ambiguous bridge request may be changed to `BridgeResponseReceived(None)` only
+  /// after external reconciliation proves that no Ethereum message was queued. The
+  /// original transaction details must be preserved.
   InsertMessageInfo : (msg_id: message_id, status: MessageStatus, details: TxDetails) -> null;
   InsertTransactions : (data: vec struct { u64, u64 }) -> null;
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].

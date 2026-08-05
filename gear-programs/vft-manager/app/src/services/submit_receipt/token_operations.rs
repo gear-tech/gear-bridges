@@ -151,18 +151,20 @@ where
     let reply_statuses = super::reply_statuses_mut();
     reply_statuses.insert((slot, transaction_index), status.clone());
 
-    // Release only when the reply proves that no token operation completed.
-    // Missing or malformed replies are ambiguous, so retain the reservation to
-    // preserve at-most-once processing.
-    if status.is_err() {
-        if matches!(status, Err(Error::ReplyFailure(_) | Error::InvalidReply)) {
-            super::transactions_mut().remove(&(slot, transaction_index));
+    let key = (slot, transaction_index);
+    match status {
+        Ok(()) => {
+            super::complete_transaction(key);
+            emit_event(receiver, erc20_sender, amount, token_id);
         }
-        return;
+        // These replies prove that no token operation completed, so a retry is safe.
+        Err(Error::ReplyFailure(_) | Error::InvalidReply) => {
+            super::reserved_transactions_mut().remove(&key);
+        }
+        // Missing or malformed replies are ambiguous. Retain the reservation to
+        // preserve at-most-once processing.
+        Err(_) => {}
     }
-
-    // The key was reserved synchronously before the async VFT call.
-    emit_event(receiver, erc20_sender, amount, token_id);
 }
 
 /// Mint `amount` tokens into the `receiver` address.

@@ -1,6 +1,6 @@
 //! Operations involving comunication with `pallet-gear-eth-bridge` built-in actor.
 
-use gstd::{msg, MessageId};
+use gstd::{errors::Error as GStdError, msg, MessageId};
 use sails_rs::prelude::*;
 
 use super::{
@@ -72,7 +72,10 @@ pub async fn send_message_to_bridge_builtin(
     .handle_reply(move || handle_reply_hook(msg_id))
     .map_err(|e| Error::ReplyHook(format!("{e:?}")))?
     .await
-    .map_err(|e| Error::ReplyFailure(format!("{e:?}")))?;
+    .map_err(|e| match e {
+        GStdError::ErrorReply(..) => Error::MessageFailed,
+        _ => Error::ReplyFailure(format!("{e:?}")),
+    })?;
 
     if let Some(info) = msg_tracker.get_message_info(&msg_id) {
         match info.status {
@@ -98,11 +101,26 @@ fn handle_reply_hook(msg_id: MessageId) {
     let msg_info = msg_tracker
         .get_message_info(&msg_id)
         .expect("Unexpected: msg info does not exist");
-    let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
+    if msg_info.status != MessageStatus::SendingMessageToBridgeBuiltin {
+        return;
+    }
 
-    if msg_info.status == MessageStatus::SendingMessageToBridgeBuiltin {
-        let reply = decode_bridge_reply(&reply_bytes).ok().flatten();
-        msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(reply));
+    match msg::reply_code() {
+        Ok(ReplyCode::Error(_)) => {
+            msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(None));
+        }
+        Ok(_) => {
+            let reply = msg::load_bytes()
+                .ok()
+                .and_then(|bytes| decode_bridge_reply(&bytes).ok().flatten());
+            if let Some(reply) = reply {
+                msg_tracker.update_message_status(
+                    msg_id,
+                    MessageStatus::BridgeResponseReceived(Some(reply)),
+                );
+            }
+        }
+        Err(_) => {}
     }
 }
 

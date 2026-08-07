@@ -44,7 +44,7 @@ impl HashedBranchParser {
         const MAX_DATA_LENGTH_ESTIMATION: usize =
             MAX_BRANCH_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
 
-        let circuit = Blake2CircuitTargets::new();
+        let circuit = Blake2CircuitTargets::cached();
         let hasher_proof =
             circuit.prove::<MAX_DATA_LENGTH_ESTIMATION>(&self.branch_parser.node_data);
         let branch_parser_proof = self.branch_parser.prove();

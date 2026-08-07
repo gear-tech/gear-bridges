@@ -55,8 +55,10 @@ struct HashedBranchParserCircuitTemplate {
     verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     hasher_proof_with_pis: ProofWithPublicInputsTarget<D>,
     branch_proof_with_pis: ProofWithPublicInputsTarget<D>,
+    hasher_verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     hasher_common_data: CommonCircuitData<F, D>,
     hasher_verifier_only: VerifierOnlyCircuitData<C, D>,
+    branch_verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     branch_common_data: CommonCircuitData<F, D>,
     branch_verifier_only: VerifierOnlyCircuitData<C, D>,
 }
@@ -70,24 +72,30 @@ impl HashedBranchParserCircuitTemplate {
         // node contents remain per-call witnesses.
         static CACHE: OnceLock<HashedBranchParserCircuitTemplate> = OnceLock::new();
         let template = CACHE.get_or_init(|| Self::build(hasher_proof, branch_proof));
-        let hasher_data = hasher_proof.circuit_data();
-        let branch_data = branch_proof.circuit_data();
-        assert_eq!(
-            &template.hasher_common_data, &hasher_data.common,
-            "HashedBranchParser cache received incompatible hasher common data"
-        );
-        assert_eq!(
-            &template.hasher_verifier_only, &hasher_data.verifier_only,
-            "HashedBranchParser cache received incompatible hasher verifier data"
-        );
-        assert_eq!(
-            &template.branch_common_data, &branch_data.common,
-            "HashedBranchParser cache received incompatible branch common data"
-        );
-        assert_eq!(
-            &template.branch_verifier_only, &branch_data.verifier_only,
-            "HashedBranchParser cache received incompatible branch verifier data"
-        );
+        let hasher_verifier_data = hasher_proof.shared_circuit_data();
+        if !Arc::ptr_eq(&template.hasher_verifier_data, &hasher_verifier_data) {
+            let hasher_data = hasher_verifier_data.as_ref();
+            assert_eq!(
+                &template.hasher_common_data, &hasher_data.common,
+                "HashedBranchParser cache received incompatible hasher common data"
+            );
+            assert_eq!(
+                &template.hasher_verifier_only, &hasher_data.verifier_only,
+                "HashedBranchParser cache received incompatible hasher verifier data"
+            );
+        }
+        let branch_verifier_data = branch_proof.shared_circuit_data();
+        if !Arc::ptr_eq(&template.branch_verifier_data, &branch_verifier_data) {
+            let branch_data = branch_verifier_data.as_ref();
+            assert_eq!(
+                &template.branch_common_data, &branch_data.common,
+                "HashedBranchParser cache received incompatible branch common data"
+            );
+            assert_eq!(
+                &template.branch_verifier_only, &branch_data.verifier_only,
+                "HashedBranchParser cache received incompatible branch verifier data"
+            );
+        }
         template
     }
 
@@ -172,8 +180,10 @@ impl HashedBranchParserCircuitTemplate {
             verifier_data,
             hasher_proof_with_pis,
             branch_proof_with_pis,
+            hasher_verifier_data: hasher_proof.shared_circuit_data(),
             hasher_common_data: hasher_data.common.clone(),
             hasher_verifier_only: hasher_data.verifier_only.clone(),
+            branch_verifier_data: branch_proof.shared_circuit_data(),
             branch_common_data: branch_data.common.clone(),
             branch_verifier_only: branch_data.verifier_only.clone(),
         }

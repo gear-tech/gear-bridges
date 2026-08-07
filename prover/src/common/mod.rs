@@ -164,6 +164,11 @@ where
         &self.circuit_data
     }
 
+    /// Clone the shared verifier data handle without cloning circuit metadata.
+    pub(crate) fn shared_circuit_data(&self) -> Arc<VerifierCircuitData<F, C, D>> {
+        Arc::clone(&self.circuit_data)
+    }
+
     /// Get type-erased public inouts.
     pub fn public_inputs(&self) -> Vec<GoldilocksField> {
         self.public_inputs.clone()

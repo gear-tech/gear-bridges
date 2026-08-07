@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark-crypto/kzg"
@@ -104,16 +105,82 @@ func dataFile(dataDir string, name string) string {
 	return filepath.Join(dataDir, name)
 }
 
-//export prove
-func prove(circuitData *C.char, dataPath *C.char) *C.char {
-	dataDir := C.GoString(dataPath)
-	pk, err := loadProvingKey(dataDir)
-	if err != nil {
-		compile(circuitData, dataDir)
-		pk, _ = loadProvingKey(dataDir)
+type provingArtifacts struct {
+	pk   plonk.ProvingKey
+	r1cs constraint.ConstraintSystem
+	vk   plonk.VerifyingKey
+}
+
+type provingArtifactsCacheEntry struct {
+	once      sync.Once
+	artifacts *provingArtifacts
+	err       error
+}
+
+// Proving keys, R1CS, and verifying keys are immutable for a generated
+// circuit. Keep them in memory for the lifetime of the Go archive instead of
+// deserializing all three files for every cgo prove call. A data directory must
+// not be replaced with artifacts for another circuit while this process runs.
+var provingArtifactsCache sync.Map // map[absolute data dir]*provingArtifactsCacheEntry
+
+func normalizedDataDir(dataDir string) string {
+	if dataDir == "" {
+		dataDir = defaultDataDir
+	}
+	absolute, err := filepath.Abs(dataDir)
+	if err == nil {
+		return absolute
+	}
+	return filepath.Clean(dataDir)
+}
+
+func loadProvingArtifacts(dataDir string, circuitData string) (*provingArtifacts, error) {
+	dataDir = normalizedDataDir(dataDir)
+	entry := &provingArtifactsCacheEntry{}
+	actual, _ := provingArtifactsCache.LoadOrStore(dataDir, entry)
+	entry = actual.(*provingArtifactsCacheEntry)
+
+	load := func() (*provingArtifacts, error) {
+		pk, err := loadProvingKey(dataDir)
+		if err != nil {
+			return nil, fmt.Errorf("load proving key: %w", err)
+		}
+		r1cs, err := loadR1CS(dataDir)
+		if err != nil {
+			return nil, fmt.Errorf("load R1CS: %w", err)
+		}
+		vk, err := loadVerifyingKey(dataDir)
+		if err != nil {
+			return nil, fmt.Errorf("load verifying key: %w", err)
+		}
+		return &provingArtifacts{pk: pk, r1cs: r1cs, vk: vk}, nil
 	}
 
-	r1cs := loadR1CS(dataDir)
+	entry.once.Do(func() {
+		artifacts, err := load()
+		if err != nil {
+			// Preserve the existing behavior of generating artifacts on a cache
+			// miss, while also recovering from a partially written artifact set.
+			compile(circuitData, dataDir)
+			artifacts, err = load()
+		}
+		if err != nil {
+			entry.err = err
+			return
+		}
+		entry.artifacts = artifacts
+	})
+
+	return entry.artifacts, entry.err
+}
+
+//export prove
+func prove(circuitData *C.char, dataPath *C.char) *C.char {
+	dataDir := normalizedDataDir(C.GoString(dataPath))
+	artifacts, err := loadProvingArtifacts(dataDir, C.GoString(circuitData))
+	if err != nil {
+		panic(err)
+	}
 
 	assignment, err := deserializeCircuit(C.GoString(circuitData))
 	if err != nil {
@@ -121,18 +188,17 @@ func prove(circuitData *C.char, dataPath *C.char) *C.char {
 	}
 	witness, _ := frontend.NewWitness(&assignment, ecc.BN254.ScalarField())
 
-	proof, err := plonk.Prove(r1cs, pk, witness)
+	proof, err := plonk.Prove(artifacts.r1cs, artifacts.pk, witness)
 	if err != nil {
 		errorString := fmt.Sprintf("Prover error: %s. Gnark circuit may be outdated or plonky2 proof is incorrect", err)
 		panic(errorString)
 	}
 
-	vk := loadVerifyingKey(dataDir)
 	publicWitness, err := witness.Public()
 	if err != nil {
 		panic(err)
 	}
-	err = plonk.Verify(proof, vk, publicWitness)
+	err = plonk.Verify(proof, artifacts.vk, publicWitness)
 	if err != nil {
 		errorString := fmt.Sprintf("Verifier error: %s. Gnark circuit may be outdated, please recompile it", err)
 		panic(errorString)
@@ -143,8 +209,8 @@ func prove(circuitData *C.char, dataPath *C.char) *C.char {
 	return C.CString(rawProof)
 }
 
-func compile(circuitData *C.char, dataDir string) {
-	circuit, err := deserializeCircuit(C.GoString(circuitData))
+func compile(circuitData string, dataDir string) {
+	circuit, err := deserializeCircuit(circuitData)
 	if err != nil {
 		panic(err)
 	}
@@ -290,19 +356,18 @@ func compressPublicInputs(pis []gl.Variable) []frontend.Variable {
 	return compressedPis
 }
 
-func loadVerifyingKey(dataDir string) plonk.VerifyingKey {
+func loadVerifyingKey(dataDir string) (plonk.VerifyingKey, error) {
 	vkFile, err := os.Open(dataFile(dataDir, "verifying.key"))
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
 	}
-	vk := plonk.NewVerifyingKey(ecc.BN254)
-	_, err = vk.ReadFrom(vkFile)
-	if err != nil {
-		fmt.Println(err)
-	}
-	vkFile.Close()
+	defer vkFile.Close()
 
-	return vk
+	vk := plonk.NewVerifyingKey(ecc.BN254)
+	if _, err = vk.ReadFrom(vkFile); err != nil {
+		return nil, err
+	}
+	return vk, nil
 }
 
 func loadProvingKey(dataDir string) (plonk.ProvingKey, error) {
@@ -310,31 +375,27 @@ func loadProvingKey(dataDir string) (plonk.ProvingKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer pkFile.Close()
+
 	pk := plonk.NewProvingKey(ecc.BN254)
-	pkReader := bufio.NewReader(pkFile)
-	_, err = pk.ReadFrom(pkReader)
-	if err != nil {
+	if _, err = pk.ReadFrom(bufio.NewReader(pkFile)); err != nil {
 		return nil, err
 	}
-	pkFile.Close()
-
 	return pk, nil
 }
 
-func loadR1CS(dataDir string) constraint.ConstraintSystem {
+func loadR1CS(dataDir string) (constraint.ConstraintSystem, error) {
 	r1cs := plonk.NewCS(ecc.BN254)
 	r1csFile, err := os.Open(dataFile(dataDir, "r1cs"))
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
 	}
-	r1csReader := bufio.NewReader(r1csFile)
-	_, err = r1cs.ReadFrom(r1csReader)
-	if err != nil {
-		fmt.Println(err)
-	}
-	r1csFile.Close()
+	defer r1csFile.Close()
 
-	return r1cs
+	if _, err = r1cs.ReadFrom(bufio.NewReader(r1csFile)); err != nil {
+		return nil, err
+	}
+	return r1cs, nil
 }
 
 func loadSRS(dataDir string) kzg.SRS {

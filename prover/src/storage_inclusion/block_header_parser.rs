@@ -46,7 +46,7 @@ pub struct BlockHeaderParser {
 
 impl BlockHeaderParser {
     pub fn prove(self) -> ProofWithCircuitData<BlockHeaderParserTarget> {
-        let circuit = Blake2CircuitTargets::new();
+        let circuit = Blake2CircuitTargets::cached();
         let hasher_proof = circuit.prove::<MAX_DATA_BYTES>(&self.header_data);
 
         let config = CircuitConfig::standard_recursion_config();

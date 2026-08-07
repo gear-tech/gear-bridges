@@ -142,6 +142,7 @@ struct CircuitTemplate {
     inner_common_num_gates: usize,
     inner_common_num_public_inputs: usize,
     inner_verifier_only: VerifierOnlyCircuitData<C, D>,
+    inner_common_data: CommonCircuitData<F, D>,
 }
 
 impl CircuitTemplate {
@@ -161,6 +162,14 @@ impl CircuitTemplate {
         assert_eq!(
             template.inner_verifier_only.circuit_digest, inner_data.verifier_only.circuit_digest,
             "BranchNodeChain cache received incompatible inner circuit digest"
+        );
+        assert_eq!(
+            &template.inner_common_data, &inner_data.common,
+            "BranchNodeChain cache received incompatible inner common data"
+        );
+        assert_eq!(
+            &template.inner_verifier_only, &inner_data.verifier_only,
+            "BranchNodeChain cache received incompatible inner verifier data"
         );
         template
     }
@@ -271,6 +280,7 @@ impl CircuitTemplate {
             inner_common_num_gates: inner_data.common.gates.len(),
             inner_common_num_public_inputs: inner_data.common.num_public_inputs,
             inner_verifier_only: inner_data.verifier_only.clone(),
+            inner_common_data: inner_data.common.clone(),
         }
     }
 }

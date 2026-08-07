@@ -7,17 +7,25 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
+            VerifierCircuitTarget, VerifierOnlyCircuitData,
+        },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
 };
 use plonky2_field::types::Field;
 use sp_core::{Blake2Hasher, Hasher};
-use std::iter;
+use std::{
+    iter,
+    sync::{Arc, OnceLock},
+};
 
 use super::{
-    hashed_branch_parser::HashedBranchParser, storage_address::StorageAddressTarget, BranchNodeData,
+    hashed_branch_parser::{HashedBranchParser, HashedBranchParserTarget},
+    storage_address::StorageAddressTarget,
+    BranchNodeData,
 };
 use crate::{
     common::{
@@ -108,7 +116,8 @@ impl BranchNodeChain {
                 },
             };
 
-            let circuit = Circuit::build(inner_circuit);
+            let inner_proof = inner_circuit.prove();
+            let circuit = CircuitTemplate::cached(&inner_proof).instantiate(&inner_proof);
 
             let new_proof = if let Some(composed_proof) = composed_proof {
                 circuit.prove_recursive(composed_proof.proof())
@@ -122,76 +131,71 @@ impl BranchNodeChain {
     }
 }
 
-struct Circuit {
-    cyclic_circuit_data: CircuitData<F, C, D>,
-
-    common_data: CommonCircuitData<F, D>,
-
-    condition: BoolTarget,
+struct CircuitTemplate {
+    cyclic_circuit_data: Arc<CircuitData<F, C, D>>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+    common_data: Arc<CommonCircuitData<F, D>>,
+    inner_proof_with_pis: ProofWithPublicInputsTarget<D>,
     inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
-
-    witness: PartialWitness<F>,
+    condition: BoolTarget,
+    verifier_data_target: VerifierCircuitTarget,
+    inner_common_num_gates: usize,
+    inner_common_num_public_inputs: usize,
+    inner_verifier_only: VerifierOnlyCircuitData<C, D>,
 }
 
-impl Circuit {
-    fn prove_initial(
-        mut self,
-        root_hash: [u8; BLAKE2_DIGEST_SIZE],
-    ) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
-        log::debug!("    Proving storage trie recursion layer(initial)...");
-
-        let root_hash_bits = array_to_bits(&root_hash);
-        let public_inputs = root_hash_bits
-            .into_iter()
-            .map(F::from_bool)
-            .enumerate()
-            .collect();
-
-        self.witness.set_bool_target(self.condition, false);
-        self.witness.set_proof_with_pis_target::<C, D>(
-            &self.inner_cyclic_proof_with_pis,
-            &cyclic_base_proof(
-                &self.common_data,
-                &self.cyclic_circuit_data.verifier_only,
-                public_inputs,
-            ),
+impl CircuitTemplate {
+    fn cached(inner_proof: &ProofWithCircuitData<HashedBranchParserTarget>) -> &'static Self {
+        static CACHE: OnceLock<CircuitTemplate> = OnceLock::new();
+        let template = CACHE.get_or_init(|| Self::build(inner_proof));
+        let inner_data = inner_proof.circuit_data();
+        assert_eq!(
+            template.inner_common_num_gates,
+            inner_data.common.gates.len(),
+            "BranchNodeChain cache received incompatible inner circuit gate count"
         );
-
-        let result =
-            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
-
-        log::debug!("    Proven storage trie recursion layer(initial)...");
-
-        result
+        assert_eq!(
+            template.inner_common_num_public_inputs, inner_data.common.num_public_inputs,
+            "BranchNodeChain cache received incompatible inner public-input count"
+        );
+        assert_eq!(
+            template.inner_verifier_only.circuit_digest, inner_data.verifier_only.circuit_digest,
+            "BranchNodeChain cache received incompatible inner circuit digest"
+        );
+        template
     }
 
-    fn prove_recursive(
-        mut self,
-        composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
-        log::debug!("    Proving storage trie recursion layer...");
-        self.witness.set_bool_target(self.condition, true);
-        self.witness
-            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
-
-        let result =
-            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
-
-        log::debug!("    Proven storage trie recursion layer");
-
-        result
+    fn instantiate<'a>(
+        &'a self,
+        inner_proof: &ProofWithCircuitData<HashedBranchParserTarget>,
+    ) -> Circuit<'a> {
+        let mut witness = PartialWitness::new();
+        witness.set_verifier_data_target(
+            &self.verifier_data_target,
+            &self.cyclic_circuit_data.verifier_only,
+        );
+        witness.set_proof_with_pis_target(&self.inner_proof_with_pis, &inner_proof.proof());
+        Circuit {
+            template: self,
+            witness,
+        }
     }
 
-    fn build(inner: HashedBranchParser) -> Circuit {
-        let inner_proof = inner.prove();
+    fn build(inner_proof: &ProofWithCircuitData<HashedBranchParserTarget>) -> Self {
+        log::debug!("    Building storage trie recursion template...");
 
-        log::debug!("    Building storage trie recursion layer...");
-
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::new(config);
-        let mut pw = PartialWitness::new();
-
-        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut pw);
+        let inner_data = inner_proof.circuit_data();
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let inner_proof_with_pis = builder.add_virtual_proof_with_pis(&inner_data.common);
+        let inner_verifier_data = builder.constant_verifier_data(&inner_data.verifier_only);
+        builder.verify_proof::<C>(
+            &inner_proof_with_pis,
+            &inner_verifier_data,
+            &inner_data.common,
+        );
+        let inner_proof_pis = HashedBranchParserTarget::parse_exact(
+            &mut inner_proof_with_pis.public_inputs.clone().into_iter(),
+        );
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
         let future_inner_cyclic_proof_pis =
@@ -251,18 +255,83 @@ impl Circuit {
             )
             .expect("Failed to build circuit");
 
-        let cyclic_circuit_data = builder.build::<C>();
+        let cyclic_circuit_data = Arc::new(builder.build::<C>());
+        let verifier_data = Arc::new(cyclic_circuit_data.verifier_data());
 
-        pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
+        log::debug!("    Built storage trie recursion template");
 
-        log::debug!("    Built storage parser recursion layer");
-
-        Circuit {
+        Self {
             cyclic_circuit_data,
-            common_data,
-            condition,
+            verifier_data,
+            common_data: Arc::new(common_data),
+            inner_proof_with_pis,
             inner_cyclic_proof_with_pis,
-            witness: pw,
+            condition,
+            verifier_data_target,
+            inner_common_num_gates: inner_data.common.gates.len(),
+            inner_common_num_public_inputs: inner_data.common.num_public_inputs,
+            inner_verifier_only: inner_data.verifier_only.clone(),
         }
+    }
+}
+
+struct Circuit<'a> {
+    template: &'a CircuitTemplate,
+    witness: PartialWitness<F>,
+}
+
+impl Circuit<'_> {
+    fn prove_initial(
+        mut self,
+        root_hash: [u8; BLAKE2_DIGEST_SIZE],
+    ) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
+        log::debug!("    Proving storage trie recursion layer(initial)...");
+
+        let root_hash_bits = array_to_bits(&root_hash);
+        let public_inputs = root_hash_bits
+            .into_iter()
+            .map(F::from_bool)
+            .enumerate()
+            .collect();
+
+        self.witness.set_bool_target(self.template.condition, false);
+        self.witness.set_proof_with_pis_target::<C, D>(
+            &self.template.inner_cyclic_proof_with_pis,
+            &cyclic_base_proof(
+                &self.template.common_data,
+                &self.template.cyclic_circuit_data.verifier_only,
+                public_inputs,
+            ),
+        );
+
+        let result = ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.template.cyclic_circuit_data,
+            Arc::clone(&self.template.verifier_data),
+            self.witness,
+        );
+
+        log::debug!("    Proven storage trie recursion layer(initial)...");
+
+        result
+    }
+
+    fn prove_recursive(
+        mut self,
+        composed_proof: ProofWithPublicInputs<F, C, D>,
+    ) -> ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData> {
+        log::debug!("    Proving storage trie recursion layer...");
+        self.witness.set_bool_target(self.template.condition, true);
+        self.witness
+            .set_proof_with_pis_target(&self.template.inner_cyclic_proof_with_pis, &composed_proof);
+
+        let result = ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.template.cyclic_circuit_data,
+            Arc::clone(&self.template.verifier_data),
+            self.witness,
+        );
+
+        log::debug!("    Proven storage trie recursion layer");
+
+        result
     }
 }

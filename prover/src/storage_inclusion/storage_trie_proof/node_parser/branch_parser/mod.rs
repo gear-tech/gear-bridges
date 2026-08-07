@@ -89,9 +89,9 @@ struct BranchParserCircuitTemplate {
     child_proof_with_pis: ProofWithPublicInputsTarget<D>,
     partial_address: StorageAddressTarget,
     claimed_child_node_nibble: Target,
+    child_verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     child_common_data: CommonCircuitData<F, D>,
     child_verifier_only: VerifierOnlyCircuitData<C, D>,
-    child_num_public_inputs: usize,
 }
 
 impl BranchParserCircuitTemplate {
@@ -100,33 +100,22 @@ impl BranchParserCircuitTemplate {
         // circuit shape is fixed by the compile-time trie bounds.
         static CACHE: OnceLock<BranchParserCircuitTemplate> = OnceLock::new();
         let template = CACHE.get_or_init(|| Self::build(child_proof));
-        let child_data = child_proof.circuit_data();
-        assert_eq!(
-            template.child_common_num_gates(),
-            child_data.common.gates.len(),
-            "BranchParser cache received incompatible child circuit gate count"
-        );
-        assert_eq!(
-            template.child_num_public_inputs, child_data.common.num_public_inputs,
-            "BranchParser cache received incompatible child public-input count"
-        );
-        assert_eq!(
-            template.child_verifier_only.circuit_digest, child_data.verifier_only.circuit_digest,
-            "BranchParser cache received incompatible child circuit digest"
-        );
-        assert_eq!(
-            &template.child_common_data, &child_data.common,
-            "BranchParser cache received incompatible child common data"
-        );
-        assert_eq!(
-            &template.child_verifier_only, &child_data.verifier_only,
-            "BranchParser cache received incompatible child verifier data"
-        );
+        let child_verifier_data = child_proof.shared_circuit_data();
+        if !Arc::ptr_eq(&template.child_verifier_data, &child_verifier_data) {
+            // The normal hot path reuses the exact cached verifier-data Arc.
+            // Retain a full fallback check for separately allocated but
+            // compatible circuit data.
+            let child_data = child_verifier_data.as_ref();
+            assert_eq!(
+                &template.child_common_data, &child_data.common,
+                "BranchParser cache received incompatible child common data"
+            );
+            assert_eq!(
+                &template.child_verifier_only, &child_data.verifier_only,
+                "BranchParser cache received incompatible child verifier data"
+            );
+        }
         template
-    }
-
-    fn child_common_num_gates(&self) -> usize {
-        self.child_common_data.gates.len()
     }
 
     fn instantiate(
@@ -243,9 +232,9 @@ impl BranchParserCircuitTemplate {
             child_proof_with_pis,
             partial_address: partial_address_target,
             claimed_child_node_nibble: claimed_child_node_nibble_target.to_target(),
+            child_verifier_data: child_proof.shared_circuit_data(),
             child_common_data: child_data.common.clone(),
             child_verifier_only: child_data.verifier_only.clone(),
-            child_num_public_inputs: child_data.common.num_public_inputs,
         }
     }
 }

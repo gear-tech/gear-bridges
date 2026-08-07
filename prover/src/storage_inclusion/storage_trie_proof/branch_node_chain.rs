@@ -71,6 +71,7 @@ struct FinalProjectionTemplate {
     circuit_data: Arc<CircuitData<F, C, D>>,
     verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     inner_proof_with_pis: ProofWithPublicInputsTarget<D>,
+    inner_verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     inner_common_data: CommonCircuitData<F, D>,
     inner_verifier_only: VerifierOnlyCircuitData<C, D>,
 }
@@ -83,15 +84,18 @@ impl FinalProjectionTemplate {
         // carried by the per-call inner proof witness.
         static CACHE: OnceLock<FinalProjectionTemplate> = OnceLock::new();
         let template = CACHE.get_or_init(|| Self::build(inner_proof));
-        let inner_data = inner_proof.circuit_data();
-        assert_eq!(
-            &template.inner_common_data, &inner_data.common,
-            "BranchNodeChain final projection received incompatible common data"
-        );
-        assert_eq!(
-            &template.inner_verifier_only, &inner_data.verifier_only,
-            "BranchNodeChain final projection received incompatible verifier data"
-        );
+        let inner_verifier_data = inner_proof.shared_circuit_data();
+        if !Arc::ptr_eq(&template.inner_verifier_data, &inner_verifier_data) {
+            let inner_data = inner_verifier_data.as_ref();
+            assert_eq!(
+                &template.inner_common_data, &inner_data.common,
+                "BranchNodeChain final projection received incompatible common data"
+            );
+            assert_eq!(
+                &template.inner_verifier_only, &inner_data.verifier_only,
+                "BranchNodeChain final projection received incompatible verifier data"
+            );
+        }
         template
     }
 
@@ -135,6 +139,7 @@ impl FinalProjectionTemplate {
             circuit_data,
             verifier_data,
             inner_proof_with_pis,
+            inner_verifier_data: inner_proof.shared_circuit_data(),
             inner_common_data: inner_data.common.clone(),
             inner_verifier_only: inner_data.verifier_only.clone(),
         }
@@ -217,8 +222,7 @@ struct CircuitTemplate {
     inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
     condition: BoolTarget,
     verifier_data_target: VerifierCircuitTarget,
-    inner_common_num_gates: usize,
-    inner_common_num_public_inputs: usize,
+    inner_verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     inner_verifier_only: VerifierOnlyCircuitData<C, D>,
     inner_common_data: CommonCircuitData<F, D>,
 }
@@ -227,28 +231,18 @@ impl CircuitTemplate {
     fn cached(inner_proof: &ProofWithCircuitData<HashedBranchParserTarget>) -> &'static Self {
         static CACHE: OnceLock<CircuitTemplate> = OnceLock::new();
         let template = CACHE.get_or_init(|| Self::build(inner_proof));
-        let inner_data = inner_proof.circuit_data();
-        assert_eq!(
-            template.inner_common_num_gates,
-            inner_data.common.gates.len(),
-            "BranchNodeChain cache received incompatible inner circuit gate count"
-        );
-        assert_eq!(
-            template.inner_common_num_public_inputs, inner_data.common.num_public_inputs,
-            "BranchNodeChain cache received incompatible inner public-input count"
-        );
-        assert_eq!(
-            template.inner_verifier_only.circuit_digest, inner_data.verifier_only.circuit_digest,
-            "BranchNodeChain cache received incompatible inner circuit digest"
-        );
-        assert_eq!(
-            &template.inner_common_data, &inner_data.common,
-            "BranchNodeChain cache received incompatible inner common data"
-        );
-        assert_eq!(
-            &template.inner_verifier_only, &inner_data.verifier_only,
-            "BranchNodeChain cache received incompatible inner verifier data"
-        );
+        let inner_verifier_data = inner_proof.shared_circuit_data();
+        if !Arc::ptr_eq(&template.inner_verifier_data, &inner_verifier_data) {
+            let inner_data = inner_verifier_data.as_ref();
+            assert_eq!(
+                &template.inner_common_data, &inner_data.common,
+                "BranchNodeChain cache received incompatible inner common data"
+            );
+            assert_eq!(
+                &template.inner_verifier_only, &inner_data.verifier_only,
+                "BranchNodeChain cache received incompatible inner verifier data"
+            );
+        }
         template
     }
 
@@ -355,8 +349,7 @@ impl CircuitTemplate {
             inner_cyclic_proof_with_pis,
             condition,
             verifier_data_target,
-            inner_common_num_gates: inner_data.common.gates.len(),
-            inner_common_num_public_inputs: inner_data.common.num_public_inputs,
+            inner_verifier_data: inner_proof.shared_circuit_data(),
             inner_verifier_only: inner_data.verifier_only.clone(),
             inner_common_data: inner_data.common.clone(),
         }

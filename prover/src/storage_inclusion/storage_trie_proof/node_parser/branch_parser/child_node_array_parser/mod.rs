@@ -8,8 +8,8 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{
-            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
-            VerifierOnlyCircuitData,
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
+            VerifierCircuitTarget, VerifierOnlyCircuitData,
         },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
@@ -25,7 +25,7 @@ use crate::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
         },
-        BuilderExt, ProofWithCircuitData,
+        ProofWithCircuitData,
     },
     prelude::{consts::BLAKE2_DIGEST_SIZE, *},
     storage_inclusion::storage_trie_proof::node_parser::{
@@ -79,27 +79,102 @@ pub struct ChildNodeArrayParser {
     pub children_lengths: Vec<usize>,
 }
 
-impl ChildNodeArrayParser {
-    pub fn prove(self) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
-        let inner_proof = self.inner_proof();
+struct FinalProjectionTemplate {
+    circuit_data: Arc<CircuitData<F, C, D>>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+    inner_proof_with_pis: ProofWithPublicInputsTarget<D>,
+    inner_common_data: CommonCircuitData<F, D>,
+    inner_verifier_only: VerifierOnlyCircuitData<C, D>,
+}
 
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::new(config);
+impl FinalProjectionTemplate {
+    fn cached(
+        inner_proof: &ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>,
+    ) -> &'static Self {
+        // The projection has one fixed inner proof shape; child contents are
+        // carried by the per-call inner proof witness.
+        static CACHE: OnceLock<FinalProjectionTemplate> = OnceLock::new();
+        let template = CACHE.get_or_init(|| Self::build(inner_proof));
+        let inner_data = inner_proof.circuit_data();
+        assert_eq!(
+            &template.inner_common_data, &inner_data.common,
+            "ChildNodeArrayParser final projection received incompatible common data"
+        );
+        assert_eq!(
+            &template.inner_verifier_only, &inner_data.verifier_only,
+            "ChildNodeArrayParser final projection received incompatible verifier data"
+        );
+        template
+    }
+
+    fn instantiate(
+        &self,
+        inner_proof: &ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>,
+    ) -> FinalProjectionCircuit<'_> {
         let mut witness = PartialWitness::new();
+        witness.set_proof_with_pis_target(&self.inner_proof_with_pis, &inner_proof.proof());
+        FinalProjectionCircuit {
+            template: self,
+            witness,
+        }
+    }
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(&inner_proof, &mut witness);
+    fn build(inner_proof: &ProofWithCircuitData<CyclicRecursionTargetWithVerifierData>) -> Self {
+        log::debug!("Building child node array parser final projection template...");
+
+        let inner_data = inner_proof.circuit_data();
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let inner_proof_with_pis = builder.add_virtual_proof_with_pis(&inner_data.common);
+        let inner_verifier = builder.constant_verifier_data(&inner_data.verifier_only);
+        builder.verify_proof::<C>(&inner_proof_with_pis, &inner_verifier, &inner_data.common);
+        let inner_target = CyclicRecursionTargetWithVerifierData::parse_exact(
+            &mut inner_proof_with_pis.public_inputs.clone().into_iter(),
+        );
 
         ChildNodeArrayParserTarget {
-            node_data: inner_proof_pis.inner.node_data,
-            initial_read_offset: inner_proof_pis.inner.initial_read_offset,
-            final_read_offset: inner_proof_pis.inner.read_offset,
-            overall_children_amount: inner_proof_pis.inner.overall_children_amount,
-            claimed_child_index_in_array: inner_proof_pis.inner.claimed_child_index_in_array,
-            claimed_child_hash: inner_proof_pis.inner.claimed_child_hash,
+            node_data: inner_target.inner.node_data,
+            initial_read_offset: inner_target.inner.initial_read_offset,
+            final_read_offset: inner_target.inner.read_offset,
+            overall_children_amount: inner_target.inner.overall_children_amount,
+            claimed_child_index_in_array: inner_target.inner.claimed_child_index_in_array,
+            claimed_child_hash: inner_target.inner.claimed_child_hash,
         }
         .register_as_public_inputs(&mut builder);
 
-        ProofWithCircuitData::prove_from_builder(builder, witness)
+        let circuit_data = Arc::new(builder.build::<C>());
+        let verifier_data = Arc::new(circuit_data.verifier_data());
+
+        Self {
+            circuit_data,
+            verifier_data,
+            inner_proof_with_pis,
+            inner_common_data: inner_data.common.clone(),
+            inner_verifier_only: inner_data.verifier_only.clone(),
+        }
+    }
+}
+
+struct FinalProjectionCircuit<'a> {
+    template: &'a FinalProjectionTemplate,
+    witness: PartialWitness<F>,
+}
+
+impl FinalProjectionCircuit<'_> {
+    fn prove(self) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
+        ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.template.circuit_data,
+            Arc::clone(&self.template.verifier_data),
+            self.witness,
+        )
+    }
+}
+
+impl ChildNodeArrayParser {
+    pub fn prove(self) -> ProofWithCircuitData<ChildNodeArrayParserTarget> {
+        let inner_proof = self.inner_proof();
+        FinalProjectionTemplate::cached(&inner_proof)
+            .instantiate(&inner_proof)
+            .prove()
     }
 
     fn inner_proof(self) -> ProofWithCircuitData<CyclicRecursionTargetWithVerifierData> {

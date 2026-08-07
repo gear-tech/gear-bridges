@@ -67,26 +67,104 @@ pub struct BranchNodeChain {
     pub nodes: Vec<BranchNodeData>,
 }
 
+struct FinalProjectionTemplate {
+    circuit_data: Arc<CircuitData<F, C, D>>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+    inner_proof_with_pis: ProofWithPublicInputsTarget<D>,
+    inner_common_data: CommonCircuitData<F, D>,
+    inner_verifier_only: VerifierOnlyCircuitData<C, D>,
+}
+
+impl FinalProjectionTemplate {
+    fn cached(
+        inner_proof: &ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData>,
+    ) -> &'static Self {
+        // The projection has one fixed inner proof shape; chain contents are
+        // carried by the per-call inner proof witness.
+        static CACHE: OnceLock<FinalProjectionTemplate> = OnceLock::new();
+        let template = CACHE.get_or_init(|| Self::build(inner_proof));
+        let inner_data = inner_proof.circuit_data();
+        assert_eq!(
+            &template.inner_common_data, &inner_data.common,
+            "BranchNodeChain final projection received incompatible common data"
+        );
+        assert_eq!(
+            &template.inner_verifier_only, &inner_data.verifier_only,
+            "BranchNodeChain final projection received incompatible verifier data"
+        );
+        template
+    }
+
+    fn instantiate(
+        &self,
+        inner_proof: &ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData>,
+    ) -> FinalProjectionCircuit<'_> {
+        let mut witness = PartialWitness::new();
+        witness.set_proof_with_pis_target(&self.inner_proof_with_pis, &inner_proof.proof());
+        FinalProjectionCircuit {
+            template: self,
+            witness,
+        }
+    }
+
+    fn build(
+        inner_proof: &ProofWithCircuitData<BranchNodeChainParserTargetWithVerifierData>,
+    ) -> Self {
+        log::debug!("Building branch node chain final projection template...");
+
+        let inner_data = inner_proof.circuit_data();
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let inner_proof_with_pis = builder.add_virtual_proof_with_pis(&inner_data.common);
+        let inner_verifier = builder.constant_verifier_data(&inner_data.verifier_only);
+        builder.verify_proof::<C>(&inner_proof_with_pis, &inner_verifier, &inner_data.common);
+        let inner_target = BranchNodeChainParserTargetWithVerifierData::parse_exact(
+            &mut inner_proof_with_pis.public_inputs.clone().into_iter(),
+        );
+
+        BranchNodeChainParserTarget {
+            root_hash: inner_target.inner.root_hash,
+            leaf_hash: inner_target.inner.leaf_hash,
+            partial_address: inner_target.inner.partial_address,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        let circuit_data = Arc::new(builder.build::<C>());
+        let verifier_data = Arc::new(circuit_data.verifier_data());
+
+        Self {
+            circuit_data,
+            verifier_data,
+            inner_proof_with_pis,
+            inner_common_data: inner_data.common.clone(),
+            inner_verifier_only: inner_data.verifier_only.clone(),
+        }
+    }
+}
+
+struct FinalProjectionCircuit<'a> {
+    template: &'a FinalProjectionTemplate,
+    witness: PartialWitness<F>,
+}
+
+impl FinalProjectionCircuit<'_> {
+    fn prove(self) -> ProofWithCircuitData<BranchNodeChainParserTarget> {
+        ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.template.circuit_data,
+            Arc::clone(&self.template.verifier_data),
+            self.witness,
+        )
+    }
+}
+
 impl BranchNodeChain {
     pub fn prove(self) -> ProofWithCircuitData<BranchNodeChainParserTarget> {
         log::debug!("Proving branch node chain...");
 
         let inner = self.inner_proof();
 
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::new(config);
-        let mut witness = PartialWitness::new();
-
-        let public_inputs = builder.recursively_verify_constant_proof(&inner, &mut witness);
-
-        BranchNodeChainParserTarget {
-            root_hash: public_inputs.inner.root_hash,
-            leaf_hash: public_inputs.inner.leaf_hash,
-            partial_address: public_inputs.inner.partial_address,
-        }
-        .register_as_public_inputs(&mut builder);
-
-        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
+        let result = FinalProjectionTemplate::cached(&inner)
+            .instantiate(&inner)
+            .prove();
 
         log::debug!("Proven branch node chain");
 

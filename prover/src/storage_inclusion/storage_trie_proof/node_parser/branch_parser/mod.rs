@@ -147,13 +147,11 @@ impl BranchParserCircuitTemplate {
         config.num_routed_wires = 130;
 
         let mut builder = CircuitBuilder::new(config);
-        let child_proof_with_pis = builder.add_virtual_proof_with_pis(&child_data.common);
-        let child_verifier = builder.constant_verifier_data(&child_data.verifier_only);
-        builder.verify_proof::<C>(&child_proof_with_pis, &child_verifier, &child_data.common);
-        let child_target = ChildNodeArrayParserTarget::parse_exact(
-            &mut child_proof_with_pis.public_inputs.clone().into_iter(),
-        );
 
+        // Keep the recursive child verifier at the same position as the
+        // pre-cache circuit. Plonky2 target/gate order is part of the circuit
+        // digest, so moving it earlier would invalidate existing recursive and
+        // Gnark verifier artifacts even though the constraints are equivalent.
         let node_data_target = BranchNodeDataPaddedTarget::add_virtual_safe(&mut builder);
         let partial_address_target = StorageAddressTarget::add_virtual_unsafe(&mut builder);
         let node_data_length_target = builder.add_virtual_target();
@@ -193,6 +191,13 @@ impl BranchParserCircuitTemplate {
                 claimed_child_node_nibble: claimed_child_node_nibble_target,
             },
             &mut builder,
+        );
+
+        let child_proof_with_pis = builder.add_virtual_proof_with_pis(&child_data.common);
+        let child_verifier = builder.constant_verifier_data(&child_data.verifier_only);
+        builder.verify_proof::<C>(&child_proof_with_pis, &child_verifier, &child_data.common);
+        let child_target = ChildNodeArrayParserTarget::parse_exact(
+            &mut child_proof_with_pis.public_inputs.clone().into_iter(),
         );
 
         child_target
@@ -339,6 +344,7 @@ impl BranchParser {
 
 #[cfg(test)]
 mod tests {
+    use plonky2_field::types::PrimeField64;
     use std::iter;
     use trie_db::NibbleSlice;
 
@@ -423,6 +429,21 @@ mod tests {
             BranchParserTarget::parse_public_inputs_exact(&mut proof.public_inputs().into_iter());
 
         assert!(proof.verify());
+        assert_eq!(
+            proof
+                .circuit_data()
+                .verifier_only
+                .circuit_digest
+                .elements
+                .map(|element| element.to_canonical_u64()),
+            [
+                17_409_790_683_616_089_390,
+                15_806_974_348_444_331_405,
+                16_311_428_230_950_506_818,
+                9_327_205_214_850_258_051,
+            ],
+            "BranchParser circuit digest changed; existing recursive and Gnark artifacts must remain compatible",
+        );
 
         assert_eq!(
             pis.resulting_partial_address.length,

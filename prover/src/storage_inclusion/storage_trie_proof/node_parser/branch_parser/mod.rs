@@ -15,7 +15,7 @@ use plonky2::{
         proof::ProofWithPublicInputsTarget,
     },
 };
-use plonky2_field::types::Field;
+use plonky2_field::types::{Field, PrimeField64};
 use sp_core::H256;
 use std::sync::{Arc, OnceLock};
 use trie_db::{node::Node, ChildReference, NodeCodec, TrieLayout};
@@ -46,6 +46,16 @@ use child_node_array_parser::ChildNodeArrayParser;
 
 mod bitmap_parser;
 mod child_node_array_parser;
+
+/// Circuit digest used by the deployed recursive and Gnark verifier artifacts.
+/// An intentional circuit change must update every dependent artifact before
+/// this fingerprint is changed.
+const DEPLOYED_BRANCH_PARSER_CIRCUIT_DIGEST: [u64; 4] = [
+    17_409_790_683_616_089_390,
+    15_806_974_348_444_331_405,
+    16_311_428_230_950_506_818,
+    9_327_205_214_850_258_051,
+];
 
 impl_parsable_target_set! {
     /// `BranchParser` public inputs.
@@ -229,6 +239,15 @@ impl BranchParserCircuitTemplate {
         .register_as_public_inputs(&mut builder);
 
         let circuit_data = Arc::new(builder.build::<C>());
+        assert_eq!(
+            circuit_data
+                .verifier_only
+                .circuit_digest
+                .elements
+                .map(|element| element.to_canonical_u64()),
+            DEPLOYED_BRANCH_PARSER_CIRCUIT_DIGEST,
+            "BranchParser circuit digest changed; regenerate all dependent recursive and Gnark artifacts before deployment",
+        );
         let verifier_data = Arc::new(circuit_data.verifier_data());
 
         Self {
@@ -436,12 +455,7 @@ mod tests {
                 .circuit_digest
                 .elements
                 .map(|element| element.to_canonical_u64()),
-            [
-                17_409_790_683_616_089_390,
-                15_806_974_348_444_331_405,
-                16_311_428_230_950_506_818,
-                9_327_205_214_850_258_051,
-            ],
+            DEPLOYED_BRANCH_PARSER_CIRCUIT_DIGEST,
             "BranchParser circuit digest changed; existing recursive and Gnark artifacts must remain compatible",
         );
 

@@ -1,44 +1,74 @@
 use super::*;
 use plonky2::plonk::circuit_data::ProverCircuitData;
 
-static CACHED_PROVER_TARGETS2: LazyLock<(ProverCircuitData<F, C, D>, Vec<Target>)> =
-    LazyLock::new(|| {
-        let index = 2;
+struct CachedProverTargets {
+    prover_data: ProverCircuitData<F, C, D>,
+    targets: Vec<Target>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+}
 
-        let path = env::var("VBLAKE2_CACHE_PATH")
-            .expect(r#"VariativeBlake2: "VBLAKE2_CACHE_PATH" is set"#);
-        let serializer_gate = GateSerializer;
-        let serializer_generator = GeneratorSerializer::<C, D>::default();
+fn load_cached_prover_targets(index: usize) -> CachedProverTargets {
+    let path =
+        env::var("VBLAKE2_CACHE_PATH").expect(r#"VariativeBlake2: "VBLAKE2_CACHE_PATH" is set"#);
+    let serializer_gate = GateSerializer;
+    let serializer_generator = GeneratorSerializer::<C, D>::default();
 
-        let now = Instant::now();
-        let prover_data = {
-            let file = fs::OpenOptions::new()
-                .read(true)
-                .open(format!("{path}/prover_circuit_data-{index}"))
-                .expect("VariativeBlake2: open a file with correctly formed data for read");
-            let reader = io::BufReader::with_capacity(*BUFFER_SIZE, file);
+    let now = Instant::now();
+    let prover_data = {
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .open(format!("{path}/prover_circuit_data-{index}"))
+            .expect("VariativeBlake2: open a file with correctly formed data for read");
+        let reader = io::BufReader::with_capacity(*BUFFER_SIZE, file);
 
-            let mut read_adapter = ReadAdapter::new(reader, None);
+        let mut read_adapter = ReadAdapter::new(reader, None);
 
-            read_adapter
-                .read_prover_circuit_data::<F, C, D>(&serializer_gate, &serializer_generator)
-                .expect("Correctly formed serialized data")
-        };
+        read_adapter
+            .read_prover_circuit_data::<F, C, D>(&serializer_gate, &serializer_generator)
+            .expect("Correctly formed serialized data")
+    };
 
-        log::trace!(
-            "Loading CACHED_PROVER_TARGETS2 time: {}ms",
-            now.elapsed().as_millis()
-        );
+    log::trace!(
+        "Loading cached VariativeBlake2 circuit (index = {index}) time: {}ms",
+        now.elapsed().as_millis()
+    );
 
-        let serialized = fs::read(format!("{path}/prover_circuit_data-targets-{index}"))
-            .expect("VariativeBlake2: Good file with serialized data");
-        let mut buffer_read = Buffer::new(&serialized[..]);
-        let targets = buffer_read
-            .read_target_vec()
-            .expect("VariativeBlake2: buffer_read.read_target_vec()");
+    let serialized = fs::read(format!("{path}/prover_circuit_data-targets-{index}"))
+        .expect("VariativeBlake2: Good file with serialized data");
+    let mut buffer_read = Buffer::new(&serialized[..]);
+    let targets = buffer_read
+        .read_target_vec()
+        .expect("VariativeBlake2: buffer_read.read_target_vec()");
 
-        (prover_data, targets)
+    // Clone the common data once when populating the process cache. Every
+    // proof below shares this Arc rather than cloning the 655k-gate metadata.
+    let verifier_data = Arc::new(VerifierCircuitData {
+        verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index - 1].clone(),
+        common: prover_data.common.clone(),
     });
+
+    CachedProverTargets {
+        prover_data,
+        targets,
+        verifier_data,
+    }
+}
+
+static CACHED_PROVER_TARGETS1: LazyLock<CachedProverTargets> =
+    LazyLock::new(|| load_cached_prover_targets(1));
+static CACHED_PROVER_TARGETS2: LazyLock<CachedProverTargets> =
+    LazyLock::new(|| load_cached_prover_targets(2));
+// Production traces show indices 3, 4, and 15 are also hot in storage and
+// validator-set proofs. Each serialized prover circuit is large, so keep this
+// explicit bounded set rather than retaining all 50 possible block counts.
+static CACHED_PROVER_TARGETS3: LazyLock<CachedProverTargets> =
+    LazyLock::new(|| load_cached_prover_targets(3));
+static CACHED_PROVER_TARGETS4: LazyLock<CachedProverTargets> =
+    LazyLock::new(|| load_cached_prover_targets(4));
+static CACHED_PROVER_TARGETS15: LazyLock<CachedProverTargets> =
+    LazyLock::new(|| load_cached_prover_targets(15));
+static CACHED_PROVER_TARGETS16: LazyLock<CachedProverTargets> =
+    LazyLock::new(|| load_cached_prover_targets(16));
 
 impl_target_set! {
     pub struct VariativeBlake2Target {
@@ -57,9 +87,68 @@ impl VariativeBlake2 {
     pub fn prove(data: &[u8]) -> ProofWithCircuitData<VariativeBlake2Target> {
         let index = data.len().div_ceil(BLOCK_BYTES).max(1);
 
-        if index == 2 {
-            let (ref prover_data, ref targets) = *CACHED_PROVER_TARGETS2;
-            return Self::prove_inner(index, prover_data, targets, data);
+        match index {
+            1 => {
+                let cached = &*CACHED_PROVER_TARGETS1;
+                return Self::prove_inner(
+                    index,
+                    &cached.prover_data,
+                    &cached.targets,
+                    Arc::clone(&cached.verifier_data),
+                    data,
+                );
+            }
+            2 => {
+                let cached = &*CACHED_PROVER_TARGETS2;
+                return Self::prove_inner(
+                    index,
+                    &cached.prover_data,
+                    &cached.targets,
+                    Arc::clone(&cached.verifier_data),
+                    data,
+                );
+            }
+            3 => {
+                let cached = &*CACHED_PROVER_TARGETS3;
+                return Self::prove_inner(
+                    index,
+                    &cached.prover_data,
+                    &cached.targets,
+                    Arc::clone(&cached.verifier_data),
+                    data,
+                );
+            }
+            4 => {
+                let cached = &*CACHED_PROVER_TARGETS4;
+                return Self::prove_inner(
+                    index,
+                    &cached.prover_data,
+                    &cached.targets,
+                    Arc::clone(&cached.verifier_data),
+                    data,
+                );
+            }
+            15 => {
+                let cached = &*CACHED_PROVER_TARGETS15;
+                return Self::prove_inner(
+                    index,
+                    &cached.prover_data,
+                    &cached.targets,
+                    Arc::clone(&cached.verifier_data),
+                    data,
+                );
+            }
+            16 => {
+                let cached = &*CACHED_PROVER_TARGETS16;
+                return Self::prove_inner(
+                    index,
+                    &cached.prover_data,
+                    &cached.targets,
+                    Arc::clone(&cached.verifier_data),
+                    data,
+                );
+            }
+            _ => {}
         }
 
         let path = env::var("VBLAKE2_CACHE_PATH")
@@ -94,13 +183,19 @@ impl VariativeBlake2 {
             .read_target_vec()
             .expect("VariativeBlake2: buffer_read.read_target_vec()");
 
-        Self::prove_inner(index, &prover_data, &targets, data)
+        let verifier_data = Arc::new(VerifierCircuitData {
+            verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index - 1].clone(),
+            common: prover_data.common.clone(),
+        });
+
+        Self::prove_inner(index, &prover_data, &targets, verifier_data, data)
     }
 
     fn prove_inner(
-        index: usize,
+        _index: usize,
         prover_data: &ProverCircuitData<F, C, D>,
         targets: &[Target],
+        verifier_data: Arc<VerifierCircuitData<F, C, D>>,
         data: &[u8],
     ) -> ProofWithCircuitData<VariativeBlake2Target> {
         let witness = Self::set_witness(targets, data);
@@ -117,15 +212,13 @@ impl VariativeBlake2 {
             now.elapsed().as_millis()
         );
 
-        ProofWithCircuitData {
-            proof,
-            circuit_data: Arc::from(VerifierCircuitData {
-                verifier_only: VERIFIER_DATA_BY_BLOCK_COUNT[index - 1].clone(),
-                common: prover_data.common.clone(),
-            }),
-            public_inputs,
-            public_inputs_parser: PhantomData,
-        }
+        ProofWithCircuitData::from_proof_and_shared_circuit_data(
+            ProofWithPublicInputs {
+                proof,
+                public_inputs,
+            },
+            verifier_data,
+        )
     }
 
     #[allow(dead_code)]

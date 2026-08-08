@@ -5,6 +5,7 @@ use crate::{
     common::{
         array_to_bits,
         blake2::{CircuitTargets as Blake2CircuitTargets, MAX_DATA_BYTES},
+        get_env_variable,
         targets::{
             impl_target_set, ArrayTarget, Blake2Target, Blake2TargetGoldilocks,
             MessageTargetGoldilocks, TargetBitOperations, TargetSet,
@@ -25,10 +26,24 @@ use plonky2::{
     plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
 };
 use rayon::{
-    iter::{IntoParallelIterator, ParallelIterator},
-    ThreadPoolBuilder,
+    iter::{IntoParallelRefIterator, ParallelIterator},
+    ThreadPool, ThreadPoolBuilder,
 };
-use std::env;
+
+use std::sync::LazyLock;
+
+fn header_thread_pool() -> &'static ThreadPool {
+    static POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
+        let stack_size = get_env_variable("RUST_MIN_STACK", crate::consts::SIZE_THREAD_STACK_MIN);
+        let thread_count = get_env_variable("HEADER_PROOF_THREADS", 5usize).max(1);
+        ThreadPoolBuilder::new()
+            .stack_size(stack_size)
+            .num_threads(thread_count)
+            .build()
+            .expect("MessageSent: failed to create ThreadPool")
+    });
+    &POOL
+}
 
 impl_target_set! {
     /// Public inputs for `MessageSent`.
@@ -93,38 +108,37 @@ impl MessageSent {
         let finality_proof_target =
             builder.recursively_verify_constant_proof(&finality_proof, &mut witness);
 
-        // prove chain of headers
-        let thread_pool = ThreadPoolBuilder::new()
-            .stack_size(
-                env::var("RUST_MIN_STACK")
-                    .expect("RUST_MIN_STACK should be set")
-                    .parse::<usize>()
-                    .expect("RUST_MIN_STACK should have the correct value"),
-            )
-            // TODO: 782
-            .num_threads(5)
-            .build()
-            .expect("MessageSent: failed to create ThreadPool");
+        // Prove the header chain in bounded chunks. The old implementation
+        // retained every per-header proof and nested a local pool inside the
+        // global Rayon pool. Both behaviors caused large memory spikes on long
+        // chains. Hash one chunk in a single explicit pool, fold it into the
+        // already-proven suffix, then release the chunk before continuing.
+        let chunk_size = get_env_variable("HEADER_PROOF_CHUNK_SIZE", 8usize).max(1);
+        let thread_pool = header_thread_pool();
 
-        let circuit_blake2 = Blake2CircuitTargets::new();
+        let circuit_blake2 = Blake2CircuitTargets::cached();
+        let circuit_chain = HeaderChainCircuit::cached();
         let mut headers = self.headers;
         headers.sort_by_key(|header| header.number);
 
-        let proof_hashes = headers
-            .into_par_iter()
-            .map(|header| {
-                thread_pool
-                    .scope(|_| circuit_blake2.prove::<MAX_DATA_BYTES>(header.encode().as_ref()))
-            })
-            .collect::<Vec<_>>();
+        let mut proof_chain = None;
+        for header_chunk in headers.rchunks(chunk_size) {
+            let proof_hashes = thread_pool.install(|| {
+                header_chunk
+                    .par_iter()
+                    .map(|header| circuit_blake2.prove::<MAX_DATA_BYTES>(header.encode().as_ref()))
+                    .collect::<Vec<_>>()
+            });
 
-        let circuit_chain = HeaderChainCircuit::default();
-        let proof_chain =
-            proof_hashes
-                .into_iter()
-                .rfold(None, |proof_recursive, proof_header_hash| {
+            // rchunks yields newest-to-oldest chunks. Folding each chunk from
+            // newest to oldest preserves the original parent-link direction.
+            proof_chain = proof_hashes.into_iter().rfold(
+                proof_chain,
+                |proof_recursive, proof_header_hash| {
                     Some(circuit_chain.prove(&proof_header_hash, proof_recursive.as_ref()))
-                });
+                },
+            );
+        }
         let proof_chain = proof_chain.expect("Headers is not an empty list");
 
         let target_proof_chain = builder.add_virtual_proof_with_pis(circuit_chain.common());

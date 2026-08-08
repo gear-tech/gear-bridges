@@ -15,10 +15,10 @@ RUN apt update && \
     forge compiler resolve && \
     forge soldeer install && \
     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash && \
-    \. "$NVM_DIR/nvm.sh"  && \
+    \. "$NVM_DIR/nvm.sh" && \
     nvm install --lts && \
     npm install -g npm@latest && \
     node --version && \
     npm --version && \
-    npx @openzeppelin/upgrades-core@^1.37.0 && \
+    npx @openzeppelin/upgrades-core@^1.45.0 && \
     rm -rf /var/lib/apt/lists/*

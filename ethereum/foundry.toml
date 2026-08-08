@@ -21,13 +21,7 @@ ffi = true
 ast = true
 build_info = true
 extra_output = ["storageLayout"]
-# Some warnings should be omitted:
-# - https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades/issues/115
 ignored_warnings_from = [
-    "dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/Core.sol",
-    "dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/DefenderDeploy.sol",
-    "dependencies/openzeppelin-foundry-upgrades-0.4.1/src/internal/StringFinder.sol",
-
     "dependencies/@openzeppelin-contracts-5.7.0/utils/cryptography/ECDSA.sol",
     "dependencies/@openzeppelin-contracts-5.7.0/utils/structs/EnumerableMap.sol",
     "dependencies/@openzeppelin-contracts-5.7.0/utils/structs/EnumerableSet.sol",
@@ -37,7 +31,7 @@ ignored_warnings_from = [
 forge-std = "1.16.2"
 "@openzeppelin-contracts" = "5.7.0"
 "@openzeppelin-contracts-upgradeable" = "5.7.0"
-openzeppelin-foundry-upgrades = "0.4.1"
+openzeppelin-foundry-upgrades = "0.4.2"
 
 [fmt]
 sort_imports = true

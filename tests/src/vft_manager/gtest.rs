@@ -366,6 +366,8 @@ async fn test_submit_receipt_concurrent_replay_prevents_double_mint() {
         amount,
     );
 
+    // Queue two identical submissions in the same block to verify the receipt
+    // reservation is visible before the first asynchronous VFT call yields.
     let manual = remoting
         .clone()
         .with_block_run_mode(BlockRunMode::Manual)
@@ -389,11 +391,11 @@ async fn test_submit_receipt_concurrent_replay_prevents_double_mint() {
     }
 
     ticket_1.recv().await.unwrap().unwrap();
-    assert_eq!(ticket_2.recv().await.unwrap(), Err(Error::AlreadyProcessed));
-    assert_eq!(
-        balance_of(&remoting, eth_supply_vft, account_id).await,
-        amount
-    );
+    let reply_2 = ticket_2.recv().await.unwrap();
+    assert_eq!(reply_2, Err(Error::AlreadyProcessed));
+
+    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
+    assert_eq!(account_balance, amount);
 }
 
 #[tokio::test]

@@ -155,7 +155,9 @@ pub async fn submit_receipt(
         return Err(Error::TransactionTooOld);
     }
 
-    // Reserve before the first await so concurrent submissions cannot both mint.
+    // Reserve before the first await so concurrent submissions cannot both
+    // pass the replay check. Success moves the key into bounded history; a
+    // definite failure releases it, while an ambiguous result keeps it reserved.
     reserved_transactions_mut().insert(key);
 
     let amount = U256::from_little_endian(event.amount.as_le_slice());

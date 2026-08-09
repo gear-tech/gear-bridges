@@ -235,7 +235,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 deployerAddress: _deploymentArguments.deployerAddress,
                 forkUrlOrAlias: _deploymentArguments.forkUrlOrAlias,
                 overrides: overrides,
-                vftManager: erc20Manager.vftManagers()[0],
+                vftManager: erc20Manager.vftManagers()[isMainnet ? 1 : 0],
                 governanceAdmin: governanceAdmin.governance(),
                 governancePauser: governancePauser.governance(),
                 emergencyStopAdmin: messageQueue.emergencyStopAdmin(),
@@ -528,18 +528,20 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(erc20Manager.governanceAdmin(), address(governanceAdmin));
         assertEq(erc20Manager.governancePauser(), address(governancePauser));
         assertEq(erc20Manager.messageQueue(), address(messageQueue));
-        assertEq(erc20Manager.totalVftManagers(), 1);
+        bool isMainnet = block.chainid == 1;
+        uint256 expectedVftManagers = isFork() && isMainnet ? 2 : 1;
+        assertEq(erc20Manager.totalVftManagers(), expectedVftManagers);
         bytes32[] memory vftManagers1 = erc20Manager.vftManagers();
-        assertEq(vftManagers1.length, 1);
-        assertEq(vftManagers1[0], deploymentArguments.vftManager);
-        bytes32[] memory vftManagers2 = erc20Manager.vftManagers(1, 1);
+        assertEq(vftManagers1.length, expectedVftManagers);
+        assertEq(vftManagers1[expectedVftManagers - 1], deploymentArguments.vftManager);
+        bytes32[] memory vftManagers2 = erc20Manager.vftManagers(expectedVftManagers, 1);
         assertEq(vftManagers2.length, 0);
-        bytes32[] memory vftManagers3 = erc20Manager.vftManagers(0, 1);
+        bytes32[] memory vftManagers3 = erc20Manager.vftManagers(expectedVftManagers - 1, 1);
         assertEq(vftManagers3.length, 1);
         assertEq(vftManagers3[0], deploymentArguments.vftManager);
         bytes32[] memory vftManagers4 = erc20Manager.vftManagers(0, 5);
-        assertEq(vftManagers4.length, 1);
-        assertEq(vftManagers4[0], deploymentArguments.vftManager);
+        assertEq(vftManagers4.length, expectedVftManagers);
+        assertEq(vftManagers4[expectedVftManagers - 1], deploymentArguments.vftManager);
         assertTrue(erc20Manager.isVftManager(deploymentArguments.vftManager));
         assertEq(erc20Manager.totalTokens(), 5);
         address[] memory tokens1 = erc20Manager.tokens();

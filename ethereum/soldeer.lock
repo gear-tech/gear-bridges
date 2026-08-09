@@ -21,7 +21,7 @@ integrity = "5fb4325b60d7d4194bd0481e2f94398cf1d9c6561dd12a66fb2748ef4a68205f"
 
 [[dependencies]]
 name = "openzeppelin-foundry-upgrades"
-version = "0.4.1"
-url = "https://soldeer-revisions.s3.amazonaws.com/openzeppelin-foundry-upgrades/0_4_1_01-06-2026_15:47:35_oz-pkg.zip"
-checksum = "934bc0ecb0f2509c7392c4a7375e6f4a58e532028c16ec42525d77ef9a1abd95"
-integrity = "f129a0da6ad83c1e65109daeca385eaafd66d8831dba728f2e35aac67a0f7b71"
+version = "0.4.2"
+url = "https://soldeer-revisions.s3.amazonaws.com/openzeppelin-foundry-upgrades/0_4_2_05-08-2026_15:52:28_openzeppelin-foundry-upgrades.zip"
+checksum = "52618e6037df7c02671d94599647ef4caccbcad043ad8d663551275bc47f5a2e"
+integrity = "64c8d2d87ba2d2e3ee5946f3638d386e05d0f37b137b0588058b7bbdf7fb233d"

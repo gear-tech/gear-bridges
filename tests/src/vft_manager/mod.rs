@@ -2118,7 +2118,8 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
 
     assert!(emitted.is_none(), "BridgingAccepted event was emitted");
 
-    // A timeout is ambiguous, so keep the receipt reserved to prevent replay.
+    // A timeout is ambiguous: the mint/unlock may have executed, so keep the
+    // reservation visible through transaction history to prevent retry/replay.
     let txs = service
         .transactions(Order::Direct, 0, 1)
         .recv(vft_manager_id)

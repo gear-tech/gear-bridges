@@ -256,7 +256,11 @@ impl TransactionManager {
                         hex::encode(tx.message.message.nonce_be),
                         tx_hash
                     );
-                    if !status_fetcher.send_request(tx.uuid, tx_hash) {
+                    if !status_fetcher.send_request_with_bridge_nonce(
+                        tx.uuid,
+                        tx_hash,
+                        tx.message.message.nonce_be,
+                    ) {
                         log::warn!("Status fetcher stopped accepting requests, exiting");
                         return Ok(false);
                     }
@@ -493,19 +497,21 @@ impl TransactionManager {
                     }
 
                     message_sender::Response::ProcessingStarted(tx_hash, tx_uuid) => {
-                        let known = if let Some(tx) =
+                        let bridge_nonce = if let Some(tx) =
                             self.transactions.write().await.get_mut(&tx_uuid)
                         {
                             tx.status = TxStatus::WaitConfirmations(tx_hash);
-                            true
+                            Some(tx.message.message.nonce_be)
                         } else {
                             log::warn!("Received message for unknown transaction: {tx_uuid}");
-                            false
+                            None
                         };
 
-                        if known && !status_fetcher.send_request(tx_uuid, tx_hash) {
-                            log::warn!("Status fetcher stopped accepting requests, exiting");
-                            return Ok(false);
+                        if let Some(bridge_nonce) = bridge_nonce {
+                            if !status_fetcher.send_request_with_bridge_nonce(tx_uuid, tx_hash, bridge_nonce) {
+                                log::warn!("Status fetcher stopped accepting requests, exiting");
+                                return Ok(false);
+                            }
                         }
                     }
 

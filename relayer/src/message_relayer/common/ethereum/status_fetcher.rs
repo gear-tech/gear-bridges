@@ -1,7 +1,4 @@
-use crate::{
-    common::{self, BASE_RETRY_DELAY, MAX_RETRIES},
-    rpc,
-};
+use crate::common::{self, BASE_RETRY_DELAY, MAX_RETRIES};
 use alloy::providers::{
     PendingTransactionBuilder, PendingTransactionError, Provider, RootProvider,
 };
@@ -23,9 +20,17 @@ pub struct StatusFetcher {
     metrics: Metrics,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct Request {
     pub tx_uuid: Uuid,
     pub tx_hash: TxHash,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TrackedRequest {
+    tx_uuid: Uuid,
+    tx_hash: TxHash,
+    bridge_nonce: Option<[u8; 32]>,
 }
 
 pub enum Response {
@@ -39,22 +44,56 @@ const TX_VISIBILITY_RECHECK_DELAY: Duration = Duration::from_secs(15);
 const TX_VISIBILITY_RECHECKS: usize = 3;
 
 enum TxWatchError {
-    Receipt(Uuid, TxHash, PendingTransactionError),
-    VisibilityCheck(Uuid, TxHash),
+    Receipt(TrackedRequest, PendingTransactionError),
+    VisibilityCheck(TrackedRequest),
 }
 
-type TxWatchResult = Result<(Uuid, alloy::rpc::types::TransactionReceipt), TxWatchError>;
+enum Visibility {
+    Visible,
+    DefinitelyAbsent,
+    Inconclusive,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WatcherFailure {
+    ConfirmationTimeout,
+    Infrastructure,
+}
+
+type TxWatchResult = Result<(TrackedRequest, alloy::rpc::types::TransactionReceipt), TxWatchError>;
 type TxWatch = BoxFuture<'static, TxWatchResult>;
+type VisibilityCheck = BoxFuture<'static, (TrackedRequest, Visibility, EthApi)>;
+type Reconciliation = BoxFuture<'static, (TrackedRequest, Result<bool, String>, EthApi)>;
 
 pub struct StatusFetcherIo {
-    requests: UnboundedSender<Request>,
+    requests: UnboundedSender<TrackedRequest>,
     responses: UnboundedReceiver<Response>,
 }
 
 impl StatusFetcherIo {
     pub fn send_request(&self, tx_uuid: Uuid, tx_hash: TxHash) -> bool {
-        let request = Request { tx_uuid, tx_hash };
-        self.requests.send(request).is_ok()
+        self.requests
+            .send(TrackedRequest {
+                tx_uuid,
+                tx_hash,
+                bridge_nonce: None,
+            })
+            .is_ok()
+    }
+
+    pub fn send_request_with_bridge_nonce(
+        &self,
+        tx_uuid: Uuid,
+        tx_hash: TxHash,
+        bridge_nonce: [u8; 32],
+    ) -> bool {
+        self.requests
+            .send(TrackedRequest {
+                tx_uuid,
+                tx_hash,
+                bridge_nonce: Some(bridge_nonce),
+            })
+            .is_ok()
     }
 
     pub async fn recv_message(&mut self) -> Option<Response> {
@@ -122,7 +161,7 @@ impl StatusFetcher {
 
 async fn task(
     mut this: StatusFetcher,
-    mut channel: UnboundedReceiver<Request>,
+    mut channel: UnboundedReceiver<TrackedRequest>,
     responses: UnboundedSender<Response>,
 ) {
     let mut attempts = 0;
@@ -160,10 +199,13 @@ async fn task(
 
 async fn task_inner(
     this: &mut StatusFetcher,
-    channel: &mut UnboundedReceiver<Request>,
+    channel: &mut UnboundedReceiver<TrackedRequest>,
     responses: &UnboundedSender<Response>,
 ) -> anyhow::Result<()> {
     let mut txs: FuturesUnordered<TxWatch> = FuturesUnordered::new();
+    let mut visibility_checks: FuturesUnordered<VisibilityCheck> = FuturesUnordered::new();
+    let mut reconciliations: FuturesUnordered<Reconciliation> = FuturesUnordered::new();
+
     loop {
         tokio::select! {
             message = channel.recv() => {
@@ -172,21 +214,13 @@ async fn task_inner(
                     return Ok(());
                 };
 
-                let Request { tx_uuid, tx_hash, .. } = request;
-
                 this.metrics.pending_tx_count.inc();
-
-                txs.push(watch_tx(
-                    this.eth_api.raw_provider().root().clone(),
-                    tx_uuid,
-                    tx_hash,
-                    this.confirmations,
-                ));
+                watch_with_api(&this.eth_api, &mut txs, request, this.confirmations);
             }
 
             Some(tx) = txs.next(), if !txs.is_empty() => {
                 match tx {
-                    Ok((uuid, receipt)) => {
+                    Ok((request, receipt)) => {
                         let tx_hash = receipt.transaction_hash;
                         let gas_used = receipt.gas_used;
 
@@ -201,46 +235,114 @@ async fn task_inner(
                             this.metrics.max_gas_used.set(gas_used);
                         }
 
-                        this.metrics.pending_tx_count.dec();
                         if receipt.status() {
-                            responses.send(Response::Success(uuid, tx_hash))?;
+                            this.metrics.pending_tx_count.dec();
+                            responses.send(Response::Success(request.tx_uuid, tx_hash))?;
                         } else {
                             this.metrics.total_failed_txs.inc();
-                            let error = format!("Ethereum transaction {tx_hash} reverted");
-                            log::error!("{error}");
-                            responses.send(Response::Failed(uuid, error))?;
+                            // A different submission can process the bridge message while this
+                            // transaction is pending. Reconcile against finalized bridge state;
+                            // an unprocessed message follows the bounded dropped-transaction retry.
+                            if request.bridge_nonce.is_some() {
+                                reconcile_reverted_receipt(
+                                    this.eth_api.clone(),
+                                    &mut reconciliations,
+                                    request,
+                                    Duration::ZERO,
+                                );
+                            } else {
+                                // Preserve the legacy two-argument API for callers that do not
+                                // have the bridge nonce; they still receive a bounded retry.
+                                this.metrics.pending_tx_count.dec();
+                                responses.send(reverted_receipt_response(request, false))?;
+                            }
                         }
                     }
-                    Err(TxWatchError::VisibilityCheck(uuid, tx_hash)) => {
-                        check_transaction_visibility(this, &mut txs, responses, uuid, tx_hash).await?;
-                    }
-                    Err(TxWatchError::Receipt(uuid, tx_hash, e))
-                        if is_timeout_error(&e) =>
-                    {
+                    Err(TxWatchError::VisibilityCheck(request)) => {
                         log::warn!(
-                            "Timed out while polling transaction {tx_hash}: {e}. Checking whether it is still visible"
+                            "Timed out while polling transaction {}. Checking whether it is still visible",
+                            request.tx_hash
                         );
-                        check_transaction_visibility(this, &mut txs, responses, uuid, tx_hash).await?;
+                        start_visibility_check(this.eth_api.clone(), &mut visibility_checks, request);
                     }
-                    Err(TxWatchError::Receipt(uuid, tx_hash, e))
-                        if rpc::is_recoverable_error_text(&e) =>
-                    {
-                        log::warn!("Recoverable error while polling transaction {tx_hash}: {e}. Reconnecting and continuing to watch");
-                        tokio::time::sleep(BASE_RETRY_DELAY).await;
-                        match this.eth_api.reconnect().await {
-                            Ok(eth_api) => this.eth_api = eth_api,
-                            Err(reconnect_error) => log::warn!(
-                                "Failed to reconnect while watching transaction {tx_hash}: {reconnect_error}"
+                    Err(TxWatchError::Receipt(request, error)) => {
+                        // PendingTransactionError describes watcher/transport infrastructure, not
+                        // EVM execution. Do not turn it into a terminal bridge-message failure.
+                        match classify_watcher_failure(&error) {
+                            WatcherFailure::ConfirmationTimeout => log::warn!(
+                                "Timed out while polling transaction {}: {error}. Checking whether it is still visible",
+                                request.tx_hash
+                            ),
+                            WatcherFailure::Infrastructure => log::warn!(
+                                "Transaction watcher infrastructure failed for {}: {error}. Checking visibility before continuing",
+                                request.tx_hash
                             ),
                         }
-                        rewatch(this, &mut txs, uuid, tx_hash);
+                        start_visibility_check(this.eth_api.clone(), &mut visibility_checks, request);
                     }
-                    Err(TxWatchError::Receipt(uuid, tx_hash, e)) => {
+                }
+            }
+
+            Some((request, visibility, eth_api)) = visibility_checks.next(), if !visibility_checks.is_empty() => {
+                match visibility {
+                    Visibility::Visible => {
+                        log::info!(
+                            "Transaction {} is still visible; continuing to watch",
+                            request.tx_hash
+                        );
+                        watch_with_api(&eth_api, &mut txs, request, this.confirmations);
+                    }
+                    Visibility::DefinitelyAbsent => {
                         this.metrics.pending_tx_count.dec();
                         this.metrics.total_failed_txs.inc();
-                        let error = format!("Failed to get transaction {tx_hash} status: {e}");
+                        let error = format!(
+                            "Ethereum transaction {} disappeared before receiving confirmations",
+                            request.tx_hash
+                        );
                         log::error!("{error}");
-                        responses.send(Response::Failed(uuid, error))?;
+                        responses.send(Response::Dropped(request.tx_uuid, error))?;
+                    }
+                    Visibility::Inconclusive => {
+                        log::warn!(
+                            "Transaction {} visibility remained inconclusive; continuing to watch without resubmitting",
+                            request.tx_hash
+                        );
+                        watch_with_api(&eth_api, &mut txs, request, this.confirmations);
+                    }
+                }
+            }
+
+            Some((request, processed, eth_api)) = reconciliations.next(), if !reconciliations.is_empty() => {
+                match processed {
+                    Ok(true) => {
+                        this.metrics.pending_tx_count.dec();
+                        log::info!(
+                            "Ethereum transaction {} reverted, but bridge message nonce {} is already processed",
+                            request.tx_hash,
+                            hex::encode(request.bridge_nonce.expect("reconciliation requires bridge nonce")),
+                        );
+                        responses.send(reverted_receipt_response(request, true))?;
+                    }
+                    Ok(false) => {
+                        this.metrics.pending_tx_count.dec();
+                        let response = reverted_receipt_response(request, false);
+                        if let Response::Dropped(_, ref error) = response {
+                            log::error!("{error}");
+                        }
+                        responses.send(response)?;
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to reconcile reverted transaction {} against bridge message nonce {}: {error}. Retrying",
+                            request.tx_hash,
+                            hex::encode(request.bridge_nonce.expect("reconciliation requires bridge nonce")),
+                        );
+                        reconcile_reverted_receipt(
+                            eth_api,
+                            &mut reconciliations,
+                            request,
+                            BASE_RETRY_DELAY,
+                        );
                     }
                 }
             }
@@ -248,105 +350,179 @@ async fn task_inner(
     }
 }
 
-fn rewatch(this: &StatusFetcher, txs: &mut FuturesUnordered<TxWatch>, uuid: Uuid, tx_hash: TxHash) {
+fn watch_with_api(
+    eth_api: &EthApi,
+    txs: &mut FuturesUnordered<TxWatch>,
+    request: TrackedRequest,
+    confirmations: u64,
+) {
     txs.push(watch_tx(
-        this.eth_api.raw_provider().root().clone(),
-        uuid,
-        tx_hash,
-        this.confirmations,
+        eth_api.raw_provider().root().clone(),
+        request,
+        confirmations,
     ));
 }
 
-async fn check_transaction_visibility(
-    this: &mut StatusFetcher,
-    txs: &mut FuturesUnordered<TxWatch>,
-    responses: &UnboundedSender<Response>,
-    uuid: Uuid,
-    tx_hash: TxHash,
-) -> anyhow::Result<()> {
-    let mut definitely_absent = true;
+fn start_visibility_check(
+    eth_api: EthApi,
+    checks: &mut FuturesUnordered<VisibilityCheck>,
+    request: TrackedRequest,
+) {
+    checks.push(check_transaction_visibility(eth_api, request));
+}
 
-    for attempt in 1..=TX_VISIBILITY_RECHECKS {
-        let transaction = this
-            .eth_api
-            .raw_provider()
-            .get_transaction_by_hash(tx_hash)
-            .await;
-        let receipt = this
-            .eth_api
-            .raw_provider()
-            .get_transaction_receipt(tx_hash)
-            .await;
+fn check_transaction_visibility(mut eth_api: EthApi, request: TrackedRequest) -> VisibilityCheck {
+    Box::pin(async move {
+        let mut definitely_absent = true;
 
-        match (transaction, receipt) {
-            (Ok(Some(_)), _) | (_, Ok(Some(_))) => {
-                log::info!("Transaction {tx_hash} is still visible; continuing to watch");
-                rewatch(this, txs, uuid, tx_hash);
-                return Ok(());
-            }
-            (Ok(None), Ok(None)) => {
-                log::warn!(
-                    "Transaction {tx_hash} was absent during visibility check {attempt}/{TX_VISIBILITY_RECHECKS}"
-                );
-                if attempt < TX_VISIBILITY_RECHECKS {
-                    match this.eth_api.reconnect().await {
-                        Ok(eth_api) => this.eth_api = eth_api,
-                        Err(reconnect_error) => log::warn!(
-                            "Failed to reconnect between visibility checks for transaction {tx_hash}: {reconnect_error}"
-                        ),
-                    }
+        for attempt in 1..=TX_VISIBILITY_RECHECKS {
+            let (transaction, receipt) = tokio::join!(
+                eth_api
+                    .raw_provider()
+                    .get_transaction_by_hash(request.tx_hash),
+                eth_api
+                    .raw_provider()
+                    .get_transaction_receipt(request.tx_hash),
+            );
+
+            match (transaction, receipt) {
+                (Ok(Some(_)), _) | (_, Ok(Some(_))) => {
+                    return (request, Visibility::Visible, eth_api);
+                }
+                (Ok(None), Ok(None)) => {
+                    log::warn!(
+                        "Transaction {} was absent during visibility check {attempt}/{TX_VISIBILITY_RECHECKS}",
+                        request.tx_hash
+                    );
+                }
+                (transaction, receipt) => {
+                    definitely_absent = false;
+                    log::warn!(
+                        "Transaction {} visibility check {attempt}/{TX_VISIBILITY_RECHECKS} was inconclusive: transaction={transaction:?}, receipt={receipt:?}",
+                        request.tx_hash
+                    );
                 }
             }
-            (transaction, receipt) => {
-                definitely_absent = false;
-                log::warn!(
-                    "Transaction {tx_hash} visibility check {attempt}/{TX_VISIBILITY_RECHECKS} was inconclusive: transaction={transaction:?}, receipt={receipt:?}"
-                );
-                match this.eth_api.reconnect().await {
-                    Ok(eth_api) => this.eth_api = eth_api,
-                    Err(reconnect_error) => log::warn!(
-                        "Failed to reconnect while checking transaction {tx_hash}: {reconnect_error}"
+
+            if attempt < TX_VISIBILITY_RECHECKS {
+                match eth_api.reconnect().await {
+                    Ok(reconnected) => eth_api = reconnected,
+                    Err(error) => log::warn!(
+                        "Failed to reconnect while checking transaction {}: {error}",
+                        request.tx_hash
                     ),
                 }
+                tokio::time::sleep(TX_VISIBILITY_RECHECK_DELAY).await;
             }
         }
 
-        if attempt < TX_VISIBILITY_RECHECKS {
-            tokio::time::sleep(TX_VISIBILITY_RECHECK_DELAY).await;
+        let visibility = if definitely_absent {
+            Visibility::DefinitelyAbsent
+        } else {
+            Visibility::Inconclusive
+        };
+        (request, visibility, eth_api)
+    })
+}
+
+fn reconcile_reverted_receipt(
+    mut eth_api: EthApi,
+    reconciliations: &mut FuturesUnordered<Reconciliation>,
+    request: TrackedRequest,
+    delay: Duration,
+) {
+    reconciliations.push(Box::pin(async move {
+        tokio::time::sleep(delay).await;
+        let bridge_nonce = request
+            .bridge_nonce
+            .expect("reconciliation requires bridge nonce");
+        let processed = eth_api
+            .is_message_processed(bridge_nonce)
+            .await
+            .map_err(|error| error.to_string());
+
+        if processed.is_err() {
+            match eth_api.reconnect().await {
+                Ok(reconnected) => eth_api = reconnected,
+                Err(error) => log::warn!(
+                    "Failed to reconnect after bridge-state reconciliation error for transaction {}: {error}",
+                    request.tx_hash
+                ),
+            }
         }
-    }
 
-    if definitely_absent {
-        this.metrics.pending_tx_count.dec();
-        this.metrics.total_failed_txs.inc();
-        let error =
-            format!("Ethereum transaction {tx_hash} disappeared before receiving confirmations");
-        log::error!("{error}");
-        responses.send(Response::Dropped(uuid, error))?;
+        (request, processed, eth_api)
+    }));
+}
+
+fn reverted_receipt_response(request: TrackedRequest, processed: bool) -> Response {
+    if processed {
+        Response::Success(request.tx_uuid, request.tx_hash)
     } else {
-        log::warn!(
-            "Transaction {tx_hash} visibility remained inconclusive; continuing to watch without resubmitting"
-        );
-        rewatch(this, txs, uuid, tx_hash);
+        Response::Dropped(
+            request.tx_uuid,
+            format!(
+                "Ethereum transaction {} reverted while the bridge message remained unprocessed",
+                request.tx_hash
+            ),
+        )
     }
-
-    Ok(())
 }
 
-fn is_timeout_error(error: &PendingTransactionError) -> bool {
-    let error = error.to_string().to_ascii_lowercase();
-    error.contains("timeout") || error.contains("timed out")
+fn classify_watcher_failure(error: &PendingTransactionError) -> WatcherFailure {
+    match error {
+        PendingTransactionError::TxWatcher(_) => WatcherFailure::ConfirmationTimeout,
+        PendingTransactionError::FailedToRegister
+        | PendingTransactionError::TransportError(_)
+        | PendingTransactionError::Recv(_) => WatcherFailure::Infrastructure,
+    }
 }
 
-fn watch_tx(provider: RootProvider, tx_uuid: Uuid, tx_hash: TxHash, confirmations: u64) -> TxWatch {
+fn watch_tx(provider: RootProvider, request: TrackedRequest, confirmations: u64) -> TxWatch {
     Box::pin(async move {
-        let pending = PendingTransactionBuilder::new(provider, tx_hash)
+        let pending = PendingTransactionBuilder::new(provider, request.tx_hash)
             .with_required_confirmations(confirmations);
 
         match tokio::time::timeout(TX_VISIBILITY_CHECK_INTERVAL, pending.get_receipt()).await {
-            Ok(Ok(receipt)) => Ok((tx_uuid, receipt)),
-            Ok(Err(error)) => Err(TxWatchError::Receipt(tx_uuid, tx_hash, error)),
-            Err(_) => Err(TxWatchError::VisibilityCheck(tx_uuid, tx_hash)),
+            Ok(Ok(receipt)) => Ok((request, receipt)),
+            Ok(Err(error)) => Err(TxWatchError::Receipt(request, error)),
+            Err(_) => Err(TxWatchError::VisibilityCheck(request)),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::providers::WatchTxError;
+
+    #[test]
+    fn classifies_watcher_failures_without_treating_infrastructure_as_execution_failure() {
+        assert_eq!(
+            classify_watcher_failure(&PendingTransactionError::FailedToRegister),
+            WatcherFailure::Infrastructure
+        );
+        assert_eq!(
+            classify_watcher_failure(&PendingTransactionError::TxWatcher(WatchTxError::Timeout)),
+            WatcherFailure::ConfirmationTimeout
+        );
+    }
+
+    #[test]
+    fn reverted_receipt_is_success_or_bounded_retry_based_on_bridge_state() {
+        let request = TrackedRequest {
+            tx_uuid: Uuid::new_v4(),
+            tx_hash: TxHash::from([9; 32]),
+            bridge_nonce: Some([7; 32]),
+        };
+
+        assert!(matches!(
+            reverted_receipt_response(request, true),
+            Response::Success(uuid, hash) if uuid == request.tx_uuid && hash == request.tx_hash
+        ));
+        assert!(matches!(
+            reverted_receipt_response(request, false),
+            Response::Dropped(uuid, _) if uuid == request.tx_uuid
+        ));
+    }
 }

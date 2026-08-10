@@ -427,6 +427,19 @@ impl Storage for JSONStorage {
             return Ok(());
         }
 
+        // Load failures first: legacy snapshots can contain both a UUID transaction
+        // file and the same UUID in `failed`. The failure record is authoritative,
+        // otherwise directory iteration order could resurrect a terminal transaction.
+        let failed_path = self.path.join("failed");
+        if failed_path.exists() {
+            let contents = tokio::fs::read_to_string(&failed_path)
+                .await
+                .context("Failed to read 'failed' transactions file")?;
+            let map: BTreeMap<Uuid, String> =
+                serde_json::from_str(&contents).context("Failed to parse 'failed' transactions")?;
+            tx_manager.failed.write().await.extend(map);
+        }
+
         let mut dir = tokio::fs::read_dir(&self.path).await?;
 
         while let Some(entry) = dir.next_entry().await? {
@@ -437,12 +450,8 @@ impl Storage for JSONStorage {
                 .is_file()
             {
                 if entry.file_name().to_str() == Some("failed") {
-                    let contents = tokio::fs::read_to_string(entry.path())
-                        .await
-                        .context("Failed to read 'failed' transactions file")?;
-                    let map: BTreeMap<Uuid, String> = serde_json::from_str(&contents)
-                        .context("Failed to parse 'failed' transactions")?;
-                    tx_manager.failed.write().await.extend(map);
+                    // Loaded before scanning transaction files.
+                    continue;
                 } else if entry.file_name().to_str() == Some("merkle_roots") {
                     let contents = tokio::fs::read_to_string(entry.path())
                         .await
@@ -467,6 +476,14 @@ impl Storage for JSONStorage {
                     *self.block_storage.blocks.write().await = map;
                 } else {
                     let tx = self.read_tx(entry.path(), entry.file_name()).await?;
+
+                    if tx_manager.failed.read().await.contains_key(&tx.uuid) {
+                        log::warn!(
+                            "Ignoring legacy transaction file {} because it is listed as failed",
+                            tx.uuid
+                        );
+                        continue;
+                    }
 
                     tx_manager.add_transaction(tx).await;
                 }
@@ -588,6 +605,41 @@ mod tests {
         assert_eq!(
             restored.failed.read().await.get(&uuid).map(String::as_str),
             Some("transaction dropped")
+        );
+
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_does_not_resume_legacy_transaction_also_listed_as_failed() {
+        use crate::message_relayer::gear_to_eth::tx_manager::TxStatus;
+        use std::sync::Arc;
+
+        let path = std::env::temp_dir().join(format!(
+            "gear-bridge-relayer-legacy-failed-test-{}",
+            Uuid::new_v4()
+        ));
+        tokio::fs::create_dir_all(&path).await.unwrap();
+
+        let storage = Arc::new(JSONStorage::new(&path));
+        let tx = Transaction::new(msg_in_block(43, 8), TxStatus::WaitForMerkleRoot);
+        let uuid = tx.uuid;
+        storage.write_tx(&uuid, &tx).await.unwrap();
+        tokio::fs::write(
+            path.join("failed"),
+            serde_json::to_vec(&BTreeMap::from([(uuid, "legacy failure")])).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let restored = TransactionManager::new(storage.clone());
+        storage.load(&restored).await.unwrap();
+
+        assert!(restored.transactions.read().await.is_empty());
+        assert!(restored.completed.read().await.is_empty());
+        assert_eq!(
+            restored.failed.read().await.get(&uuid).map(String::as_str),
+            Some("legacy failure")
         );
 
         tokio::fs::remove_dir_all(path).await.unwrap();

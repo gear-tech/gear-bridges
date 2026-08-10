@@ -18,7 +18,13 @@ use alloy::{
 use anyhow::{Context, Result as AnyResult};
 use primitive_types::{H160, H256};
 use reqwest::Url;
-use std::{ops::Deref, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    str::FromStr,
+    sync::{Arc, OnceLock, Weak},
+    time::Duration,
+};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 pub use alloy::primitives::TxHash;
@@ -42,6 +48,31 @@ pub struct ContentMessageSubmissionError {
 /// Holds exclusive ownership of Ethereum account submissions across retries.
 pub struct SubmissionGuard {
     _guard: OwnedMutexGuard<()>,
+}
+
+// Every EthApi for the same signer on the same chain must coordinate nonce allocation, including
+// independently constructed instances in this process. Weak entries avoid
+// retaining one lock per signer forever.
+type SubmissionAccount = (u64, Address);
+type SubmissionLocks = HashMap<SubmissionAccount, Weak<Mutex<()>>>;
+
+static SUBMISSION_LOCKS: OnceLock<std::sync::Mutex<SubmissionLocks>> = OnceLock::new();
+
+fn submission_lock(chain_id: u64, public_key: Address) -> Arc<Mutex<()>> {
+    let registry = SUBMISSION_LOCKS.get_or_init(Default::default);
+    let mut locks = registry
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    locks.retain(|_, lock| lock.strong_count() != 0);
+    let key = (chain_id, public_key);
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+        return lock;
+    }
+
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(key, Arc::downgrade(&lock));
+    lock
 }
 
 // 2 Gwei
@@ -341,6 +372,7 @@ impl EthApi {
             .connect_ws(ws)
             .await?;
 
+        let chain_id = provider.get_chain_id().await?;
         let contracts = Contracts::new(
             provider,
             message_queue_address.into_array(),
@@ -355,7 +387,7 @@ impl EthApi {
             wallet,
             ws_max_retry,
             ws_retry_interval,
-            submission_lock: Arc::new(Mutex::new(())),
+            submission_lock: submission_lock(chain_id, public_key),
         })
     }
 
@@ -571,6 +603,17 @@ impl EthApi {
                     matches!(error, Error::ErrorSendingTransaction(_)).then_some(account_nonce);
                 ContentMessageSubmissionError { error, nonce }
             })
+    }
+
+    /// Returns whether `account_nonce` has been consumed by a mined transaction.
+    /// A nonce that only exists in the pending pool is deliberately not considered
+    /// consumed and must remain pinned for replacement retries.
+    pub async fn is_account_nonce_consumed(&self, account_nonce: u64) -> Result<bool, Error> {
+        let latest_nonce = self
+            .raw_provider()
+            .get_transaction_count(self.public_key)
+            .await?;
+        Ok(latest_nonce > account_nonce)
     }
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
@@ -971,5 +1014,25 @@ impl Contracts {
         };
 
         Ok(status)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn submission_locks_are_shared_per_chain_and_public_key() {
+        let first_key = Address::from([1; 20]);
+        let second_key = Address::from([2; 20]);
+
+        let first = submission_lock(1, first_key);
+        let same_account = submission_lock(1, first_key);
+        let different_key = submission_lock(1, second_key);
+        let different_chain = submission_lock(2, first_key);
+
+        assert!(Arc::ptr_eq(&first, &same_account));
+        assert!(!Arc::ptr_eq(&first, &different_key));
+        assert!(!Arc::ptr_eq(&first, &different_chain));
     }
 }

@@ -345,18 +345,16 @@ impl Storage for JSONStorage {
                 })?;
         }
 
-        let mut failed = BTreeMap::new();
-        let failed_map = tx_manager.failed.read().await;
+        let mut persisted_transactions = HashSet::new();
 
         for (tx_uuid, tx) in tx_manager.transactions.read().await.iter() {
             self.write_tx(tx_uuid, tx).await?;
-            if let Some(reason) = failed_map.get(tx_uuid) {
-                failed.insert(*tx_uuid, reason.clone());
-            }
+            persisted_transactions.insert(*tx_uuid);
         }
 
         for (tx_uuid, tx) in tx_manager.completed.read().await.iter() {
             self.write_tx(tx_uuid, tx).await?;
+            persisted_transactions.insert(*tx_uuid);
         }
 
         let mut failed_file = tokio::fs::OpenOptions::new()
@@ -366,7 +364,8 @@ impl Storage for JSONStorage {
             .open(self.path.join("failed"))
             .await?;
 
-        let str = serde_json::to_string(&failed)
+        let failed = tx_manager.failed.read().await;
+        let str = serde_json::to_string(&*failed)
             .with_context(|| "Failed to serialize failed transactions")?;
 
         failed_file
@@ -393,6 +392,32 @@ impl Storage for JSONStorage {
         merkle_file.flush().await?;
 
         self.block_storage.save(&self.path).await?;
+
+        // Remove transaction files that are no longer active or completed only
+        // after every current state file has been saved successfully. Without
+        // this cleanup, a failed transaction is resurrected on the next load.
+        let mut entries = tokio::fs::read_dir(&self.path).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_type().await?.is_file() {
+                continue;
+            }
+
+            let Some(uuid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| Uuid::from_str(name).ok())
+            else {
+                continue;
+            };
+
+            if !persisted_transactions.contains(&uuid) {
+                tokio::fs::remove_file(entry.path())
+                    .await
+                    .with_context(|| {
+                        format!("Failed to remove stale transaction file for {uuid}")
+                    })?;
+            }
+        }
 
         Ok(())
     }
@@ -529,5 +554,42 @@ mod tests {
 
         assert!(!storage.is_message_pending(block, n1).await);
         assert!(storage.is_message_pending(block, n2).await);
+    }
+
+    #[tokio::test]
+    async fn save_removes_stale_transaction_files_without_resurrecting_them() {
+        use crate::message_relayer::gear_to_eth::tx_manager::TxStatus;
+        use std::sync::Arc;
+
+        let path = std::env::temp_dir().join(format!(
+            "gear-bridge-relayer-storage-test-{}",
+            Uuid::new_v4()
+        ));
+        let storage = Arc::new(JSONStorage::new(&path));
+        let manager = TransactionManager::new(storage.clone());
+        let tx = Transaction::new(msg_in_block(42, 7), TxStatus::WaitForMerkleRoot);
+        let uuid = tx.uuid;
+
+        manager.add_transaction(tx).await;
+        storage.save(&manager).await.unwrap();
+        assert!(path.join(uuid.to_string()).is_file());
+
+        manager.transactions.write().await.remove(&uuid);
+        manager
+            .fail_transaction(uuid, "transaction dropped".to_string())
+            .await;
+        storage.save(&manager).await.unwrap();
+        assert!(!path.join(uuid.to_string()).exists());
+
+        let restored = TransactionManager::new(storage.clone());
+        storage.load(&restored).await.unwrap();
+        assert!(restored.transactions.read().await.is_empty());
+        assert!(restored.completed.read().await.is_empty());
+        assert_eq!(
+            restored.failed.read().await.get(&uuid).map(String::as_str),
+            Some("transaction dropped")
+        );
+
+        tokio::fs::remove_dir_all(path).await.unwrap();
     }
 }

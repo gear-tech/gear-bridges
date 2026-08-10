@@ -1,5 +1,8 @@
-use crate::{common::BASE_RETRY_DELAY, message_relayer::common::RelayedMerkleRoot};
-use ethereum_client::{abi::IMessageQueue::IMessageQueueErrors, EthApi, TxHash};
+use crate::{
+    common::{is_transport_error_recoverable, BASE_RETRY_DELAY},
+    message_relayer::common::RelayedMerkleRoot,
+};
+use ethereum_client::{abi::IMessageQueue::IMessageQueueErrors, EthApi, SubmissionGuard, TxHash};
 use gear_rpc_client::dto::{MerkleProof, Message};
 use prometheus::{Gauge, IntCounter};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -16,6 +19,7 @@ pub struct Request {
 pub enum Response {
     MessageAlreadyProcessed(Uuid),
     ProcessingStarted(TxHash, Uuid),
+    Failed(Uuid, String),
 }
 
 pub struct MessageSenderIo {
@@ -103,103 +107,191 @@ impl MessageSender {
 
 async fn task(
     mut this: MessageSender,
-    mut channel_message_data: UnboundedReceiver<Request>,
-    channel_tx_data: UnboundedSender<Response>,
+    mut requests: UnboundedReceiver<Request>,
+    responses: UnboundedSender<Response>,
 ) {
-    if let Ok(fee_payer_balance) = this.eth_api.get_approx_balance().await {
-        this.metrics.fee_payer_balance.set(fee_payer_balance);
+    match this.eth_api.get_approx_balance().await {
+        Ok(fee_payer_balance) => this.metrics.fee_payer_balance.set(fee_payer_balance),
+        Err(e) => log::warn!("Failed to update Ethereum fee payer balance metric: {e}"),
     }
 
-    loop {
-        let Err(e) = task_inner(&mut this, &mut channel_message_data, &channel_tx_data).await
-        else {
-            break;
-        };
+    while let Some(request) = requests.recv().await {
+        let submission_guard = this.eth_api.reserve_submission().await;
+        let mut account_nonce = None;
+        loop {
+            match process_request(
+                &mut this,
+                &request,
+                &submission_guard,
+                &mut account_nonce,
+                &responses,
+            )
+            .await
+            {
+                Ok(true) => break,
+                Ok(false) => return,
+                Err(e) => {
+                    let delay = BASE_RETRY_DELAY * 6;
+                    log::error!(
+                        r#"Ethereum message sender failed: "{e:?}". Retrying the same request in {delay:?}""#,
+                    );
 
-        let delay = BASE_RETRY_DELAY * 6;
-        log::error!(r#"Ethereum message sender failed: "{e:?}". Retrying in {delay:?}"#,);
-
-        tokio::time::sleep(delay).await;
-        match this.eth_api.reconnect().await {
-            Ok(eth_api) => {
-                this.eth_api = eth_api;
-                log::debug!("EthApi successfully reconnected");
-            }
-
-            Err(e) => {
-                log::error!(r#"Failed to reconnect to Ethereum: "{e:?}""#);
-                break;
+                    loop {
+                        tokio::time::sleep(delay).await;
+                        match this.eth_api.reconnect().await {
+                            Ok(eth_api) => {
+                                this.eth_api = eth_api;
+                                log::debug!("EthApi successfully reconnected");
+                                break;
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    r#"Failed to reconnect to Ethereum: "{e:?}". Retrying in {delay:?}""#
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-async fn task_inner(
+/// Processes one request. `Ok(true)` means the request reached a durable outcome,
+/// while `Ok(false)` means the response channel was closed and the task should stop.
+async fn process_request(
     this: &mut MessageSender,
-    requests: &mut UnboundedReceiver<Request>,
+    request: &Request,
+    submission_guard: &SubmissionGuard,
+    account_nonce: &mut Option<u64>,
     responses: &UnboundedSender<Response>,
-) -> anyhow::Result<()> {
-    while let Some(request) = requests.recv().await {
-        let Request {
-            message,
-            relayed_root,
-            proof,
-            tx_uuid,
-        } = request;
+) -> anyhow::Result<bool> {
+    let Request {
+        message,
+        relayed_root,
+        proof,
+        tx_uuid,
+    } = request;
 
-        let tx_hash = match this
-            .eth_api
-            .provide_content_message(
-                relayed_root.block.0,
-                proof.num_leaves as u32,
-                proof.leaf_index as u32,
-                message.nonce_be,
-                message.source,
-                message.destination,
-                message.payload.to_vec(),
-                proof.proof,
-            )
-            .await
-        {
-            Ok(tx_hash) => tx_hash,
-            Err(ethereum_client::Error::MessageQueue(
-                IMessageQueueErrors::MessageAlreadyProcessed(_),
-            )) => {
+    let tx_hash = match this
+        .eth_api
+        .provide_content_message(
+            submission_guard,
+            relayed_root.block.0,
+            proof.num_leaves as u32,
+            proof.leaf_index as u32,
+            message.nonce_be,
+            message.source,
+            message.destination,
+            message.payload.to_vec(),
+            proof.proof.clone(),
+            *account_nonce,
+        )
+        .await
+    {
+        Ok((tx_hash, nonce)) => {
+            *account_nonce = Some(nonce);
+            tx_hash
+        }
+        Err(submission) => {
+            if let Some(nonce) = submission.nonce {
+                *account_nonce = Some(nonce);
+            }
+
+            if matches!(
+                &submission.error,
+                ethereum_client::Error::MessageQueue(IMessageQueueErrors::MessageAlreadyProcessed(
+                    _
+                ))
+            ) {
                 log::info!(
                     "Message with nonce {} already processed, skipping: tx_uuid = {}",
                     hex::encode(message.nonce_be),
                     tx_uuid
                 );
                 if responses
-                    .send(Response::MessageAlreadyProcessed(tx_uuid))
+                    .send(Response::MessageAlreadyProcessed(*tx_uuid))
                     .is_err()
                 {
                     log::info!("Response channel closed, exiting");
-                    return Ok(());
+                    return Ok(false);
                 }
-                continue;
+                return Ok(true);
             }
-            Err(e) => return Err(anyhow::anyhow!("Failed to provide content message: {e}")),
-        };
 
-        log::info!(
-            "Message with nonce {} relaying started: tx_hash = {tx_hash}",
-            hex::encode(message.nonce_be)
-        );
+            let retry_same_nonce = match &submission.error {
+                ethereum_client::Error::ErrorSendingTransaction(error) => {
+                    is_same_nonce_retry_error(&error.to_string())
+                }
+                _ => false,
+            };
+            let error = anyhow::Error::new(submission.error);
+            if retry_same_nonce || is_transport_error_recoverable(&error) {
+                return Err(error);
+            }
 
-        this.metrics.total_submissions.inc();
-
-        if responses
-            .send(Response::ProcessingStarted(tx_hash, tx_uuid))
-            .is_err()
-        {
-            log::info!("Response channel closed, exiting");
-            return Ok(());
+            let error = format!("Failed to provide content message: {error}");
+            log::error!("{error}");
+            if responses.send(Response::Failed(*tx_uuid, error)).is_err() {
+                log::info!("Response channel closed, exiting");
+                return Ok(false);
+            }
+            return Ok(true);
         }
+    };
 
-        let fee_payer_balance = this.eth_api.get_approx_balance().await?;
-        this.metrics.fee_payer_balance.set(fee_payer_balance);
+    log::info!(
+        "Message with nonce {} relaying started: tx_hash = {tx_hash}",
+        hex::encode(message.nonce_be)
+    );
+
+    this.metrics.total_submissions.inc();
+
+    if responses
+        .send(Response::ProcessingStarted(tx_hash, *tx_uuid))
+        .is_err()
+    {
+        log::info!("Response channel closed, exiting");
+        return Ok(false);
     }
 
-    Ok(())
+    match this.eth_api.get_approx_balance().await {
+        Ok(fee_payer_balance) => this.metrics.fee_payer_balance.set(fee_payer_balance),
+        Err(e) => log::warn!("Failed to update Ethereum fee payer balance metric: {e}"),
+    }
+
+    Ok(true)
+}
+
+fn is_same_nonce_retry_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("already known")
+        || error.contains("nonce too low")
+        || error.contains("replacement transaction underpriced")
+        || error.contains("replacement underpriced")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_same_nonce_retry_error;
+
+    #[test]
+    fn classifies_same_nonce_retry_errors() {
+        for error in [
+            "already known",
+            "nonce too low",
+            "replacement transaction underpriced",
+            "replacement underpriced",
+        ] {
+            assert!(is_same_nonce_retry_error(error), "{error}");
+        }
+
+        for error in [
+            "insufficient funds for gas * price + value",
+            "max fee per gas less than block base fee",
+            "intrinsic gas too low",
+        ] {
+            assert!(!is_same_nonce_retry_error(error), "{error}");
+        }
+    }
 }

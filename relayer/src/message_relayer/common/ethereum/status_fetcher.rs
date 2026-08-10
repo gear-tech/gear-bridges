@@ -11,6 +11,7 @@ use prometheus::{
     core::{AtomicU64, GenericCounter, GenericGauge},
     IntCounter, IntGauge,
 };
+use std::time::Duration;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
@@ -29,11 +30,20 @@ pub struct Request {
 
 pub enum Response {
     Success(Uuid, TxHash),
-    Failed(Uuid, PendingTransactionError),
+    Dropped(Uuid, String),
+    Failed(Uuid, String),
 }
 
-type TxWatchResult =
-    Result<(Uuid, alloy::rpc::types::TransactionReceipt), (Uuid, TxHash, PendingTransactionError)>;
+const TX_VISIBILITY_CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const TX_VISIBILITY_RECHECK_DELAY: Duration = Duration::from_secs(15);
+const TX_VISIBILITY_RECHECKS: usize = 3;
+
+enum TxWatchError {
+    Receipt(Uuid, TxHash, PendingTransactionError),
+    VisibilityCheck(Uuid, TxHash),
+}
+
+type TxWatchResult = Result<(Uuid, alloy::rpc::types::TransactionReceipt), TxWatchError>;
 type TxWatch = BoxFuture<'static, TxWatchResult>;
 
 pub struct StatusFetcherIo {
@@ -191,24 +201,46 @@ async fn task_inner(
                             this.metrics.max_gas_used.set(gas_used);
                         }
 
-
                         this.metrics.pending_tx_count.dec();
-                        responses.send(Response::Success(uuid, tx_hash))?;
+                        if receipt.status() {
+                            responses.send(Response::Success(uuid, tx_hash))?;
+                        } else {
+                            this.metrics.total_failed_txs.inc();
+                            let error = format!("Ethereum transaction {tx_hash} reverted");
+                            log::error!("{error}");
+                            responses.send(Response::Failed(uuid, error))?;
+                        }
                     }
-                    Err((uuid, tx_hash, e)) if rpc::is_recoverable_error_text(&e) => {
+                    Err(TxWatchError::VisibilityCheck(uuid, tx_hash)) => {
+                        check_transaction_visibility(this, &mut txs, responses, uuid, tx_hash).await?;
+                    }
+                    Err(TxWatchError::Receipt(uuid, tx_hash, e))
+                        if is_timeout_error(&e) =>
+                    {
+                        log::warn!(
+                            "Timed out while polling transaction {tx_hash}: {e}. Checking whether it is still visible"
+                        );
+                        check_transaction_visibility(this, &mut txs, responses, uuid, tx_hash).await?;
+                    }
+                    Err(TxWatchError::Receipt(uuid, tx_hash, e))
+                        if rpc::is_recoverable_error_text(&e) =>
+                    {
                         log::warn!("Recoverable error while polling transaction {tx_hash}: {e}. Reconnecting and continuing to watch");
-                        this.eth_api = this.eth_api.reconnect().await?;
-                        txs.push(watch_tx(
-                            this.eth_api.raw_provider().root().clone(),
-                            uuid,
-                            tx_hash,
-                            this.confirmations,
-                        ));
+                        tokio::time::sleep(BASE_RETRY_DELAY).await;
+                        match this.eth_api.reconnect().await {
+                            Ok(eth_api) => this.eth_api = eth_api,
+                            Err(reconnect_error) => log::warn!(
+                                "Failed to reconnect while watching transaction {tx_hash}: {reconnect_error}"
+                            ),
+                        }
+                        rewatch(this, &mut txs, uuid, tx_hash);
                     }
-                    Err((uuid, _tx_hash, e)) => {
+                    Err(TxWatchError::Receipt(uuid, tx_hash, e)) => {
+                        this.metrics.pending_tx_count.dec();
                         this.metrics.total_failed_txs.inc();
-                        log::error!("Failed to get transaction {uuid} status: {e}");
-                        responses.send(Response::Failed(uuid, e))?;
+                        let error = format!("Failed to get transaction {tx_hash} status: {e}");
+                        log::error!("{error}");
+                        responses.send(Response::Failed(uuid, error))?;
                     }
                 }
             }
@@ -216,16 +248,105 @@ async fn task_inner(
     }
 }
 
+fn rewatch(this: &StatusFetcher, txs: &mut FuturesUnordered<TxWatch>, uuid: Uuid, tx_hash: TxHash) {
+    txs.push(watch_tx(
+        this.eth_api.raw_provider().root().clone(),
+        uuid,
+        tx_hash,
+        this.confirmations,
+    ));
+}
+
+async fn check_transaction_visibility(
+    this: &mut StatusFetcher,
+    txs: &mut FuturesUnordered<TxWatch>,
+    responses: &UnboundedSender<Response>,
+    uuid: Uuid,
+    tx_hash: TxHash,
+) -> anyhow::Result<()> {
+    let mut definitely_absent = true;
+
+    for attempt in 1..=TX_VISIBILITY_RECHECKS {
+        let transaction = this
+            .eth_api
+            .raw_provider()
+            .get_transaction_by_hash(tx_hash)
+            .await;
+        let receipt = this
+            .eth_api
+            .raw_provider()
+            .get_transaction_receipt(tx_hash)
+            .await;
+
+        match (transaction, receipt) {
+            (Ok(Some(_)), _) | (_, Ok(Some(_))) => {
+                log::info!("Transaction {tx_hash} is still visible; continuing to watch");
+                rewatch(this, txs, uuid, tx_hash);
+                return Ok(());
+            }
+            (Ok(None), Ok(None)) => {
+                log::warn!(
+                    "Transaction {tx_hash} was absent during visibility check {attempt}/{TX_VISIBILITY_RECHECKS}"
+                );
+                if attempt < TX_VISIBILITY_RECHECKS {
+                    match this.eth_api.reconnect().await {
+                        Ok(eth_api) => this.eth_api = eth_api,
+                        Err(reconnect_error) => log::warn!(
+                            "Failed to reconnect between visibility checks for transaction {tx_hash}: {reconnect_error}"
+                        ),
+                    }
+                }
+            }
+            (transaction, receipt) => {
+                definitely_absent = false;
+                log::warn!(
+                    "Transaction {tx_hash} visibility check {attempt}/{TX_VISIBILITY_RECHECKS} was inconclusive: transaction={transaction:?}, receipt={receipt:?}"
+                );
+                match this.eth_api.reconnect().await {
+                    Ok(eth_api) => this.eth_api = eth_api,
+                    Err(reconnect_error) => log::warn!(
+                        "Failed to reconnect while checking transaction {tx_hash}: {reconnect_error}"
+                    ),
+                }
+            }
+        }
+
+        if attempt < TX_VISIBILITY_RECHECKS {
+            tokio::time::sleep(TX_VISIBILITY_RECHECK_DELAY).await;
+        }
+    }
+
+    if definitely_absent {
+        this.metrics.pending_tx_count.dec();
+        this.metrics.total_failed_txs.inc();
+        let error =
+            format!("Ethereum transaction {tx_hash} disappeared before receiving confirmations");
+        log::error!("{error}");
+        responses.send(Response::Dropped(uuid, error))?;
+    } else {
+        log::warn!(
+            "Transaction {tx_hash} visibility remained inconclusive; continuing to watch without resubmitting"
+        );
+        rewatch(this, txs, uuid, tx_hash);
+    }
+
+    Ok(())
+}
+
+fn is_timeout_error(error: &PendingTransactionError) -> bool {
+    let error = error.to_string().to_ascii_lowercase();
+    error.contains("timeout") || error.contains("timed out")
+}
+
 fn watch_tx(provider: RootProvider, tx_uuid: Uuid, tx_hash: TxHash, confirmations: u64) -> TxWatch {
     Box::pin(async move {
-        let pending = PendingTransactionBuilder::new(provider, tx_hash);
-        Ok((
-            tx_uuid,
-            pending
-                .with_required_confirmations(confirmations)
-                .get_receipt()
-                .await
-                .map_err(|e| (tx_uuid, tx_hash, e))?,
-        ))
+        let pending = PendingTransactionBuilder::new(provider, tx_hash)
+            .with_required_confirmations(confirmations);
+
+        match tokio::time::timeout(TX_VISIBILITY_CHECK_INTERVAL, pending.get_receipt()).await {
+            Ok(Ok(receipt)) => Ok((tx_uuid, receipt)),
+            Ok(Err(error)) => Err(TxWatchError::Receipt(tx_uuid, tx_hash, error)),
+            Err(_) => Err(TxWatchError::VisibilityCheck(tx_uuid, tx_hash)),
+        }
     })
 }

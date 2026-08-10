@@ -5,7 +5,7 @@ use alloy::{
     providers::{
         fillers::{
             BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller,
-            WalletFiller,
+            SimpleNonceManager, WalletFiller,
         },
         Identity, PendingTransactionBuilder, Provider, ProviderBuilder, RootProvider,
     },
@@ -18,7 +18,14 @@ use alloy::{
 use anyhow::{Context, Result as AnyResult};
 use primitive_types::{H160, H256};
 use reqwest::Url;
-use std::{ops::Deref, str::FromStr, time::Duration};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    str::FromStr,
+    sync::{Arc, OnceLock, Weak},
+    time::Duration,
+};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 pub use alloy::primitives::TxHash;
 
@@ -31,21 +38,58 @@ use abi::{
 pub mod error;
 pub use error::Error;
 
+#[derive(Debug)]
+pub struct ContentMessageSubmissionError {
+    pub error: Error,
+    /// Ethereum account nonce selected for this submission, when allocation succeeded.
+    pub nonce: Option<u64>,
+}
+
+/// Holds exclusive ownership of Ethereum account submissions across retries.
+pub struct SubmissionGuard {
+    _guard: OwnedMutexGuard<()>,
+}
+
+// Every EthApi for the same signer on the same chain must coordinate nonce allocation, including
+// independently constructed instances in this process. Weak entries avoid
+// retaining one lock per signer forever.
+type SubmissionAccount = (u64, Address);
+type SubmissionLocks = HashMap<SubmissionAccount, Weak<Mutex<()>>>;
+
+static SUBMISSION_LOCKS: OnceLock<std::sync::Mutex<SubmissionLocks>> = OnceLock::new();
+
+fn submission_lock(chain_id: u64, public_key: Address) -> Arc<Mutex<()>> {
+    let registry = SUBMISSION_LOCKS.get_or_init(Default::default);
+    let mut locks = registry
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    locks.retain(|_, lock| lock.strong_count() != 0);
+    let key = (chain_id, public_key);
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+        return lock;
+    }
+
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(key, Arc::downgrade(&lock));
+    lock
+}
+
 // 2 Gwei
 const MAX_FEE_PER_GAS: u128 = 2_000_000_000;
 // 0.5 Gwei
 const MAX_PRIORITY_FEE_PER_GAS: u128 = 500_000_000;
 
-type ProviderType = FillProvider<
+type ProviderFillers = JoinFill<
     JoinFill<
-        JoinFill<
-            Identity,
-            JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>,
-        >,
-        WalletFiller<EthereumWallet>,
+        JoinFill<JoinFill<Identity, GasFiller>, BlobGasFiller>,
+        NonceFiller<SimpleNonceManager>,
     >,
-    RootProvider<Ethereum>,
+    ChainIdFiller,
 >;
+
+type ProviderType =
+    FillProvider<JoinFill<ProviderFillers, WalletFiller<EthereumWallet>>, RootProvider<Ethereum>>;
 
 #[derive(Clone)]
 pub struct Contracts {
@@ -255,6 +299,9 @@ pub struct EthApi {
     url: Url,
     ws_max_retry: Option<u32>,
     ws_retry_interval: Option<Duration>,
+    // Simple nonce management queries the pending nonce for every send. Serialize
+    // submissions across all EthApi clones so concurrent calls cannot reuse it.
+    submission_lock: Arc<Mutex<()>>,
 }
 
 impl EthApi {
@@ -316,10 +363,16 @@ impl EthApi {
         }
 
         let provider: ProviderType = ProviderBuilder::new()
+            .disable_recommended_fillers()
+            .with_gas_estimation()
+            .with_blob_gas_estimation()
+            .with_simple_nonce_management()
+            .fetch_chain_id()
             .wallet(wallet.clone())
             .connect_ws(ws)
             .await?;
 
+        let chain_id = provider.get_chain_id().await?;
         let contracts = Contracts::new(
             provider,
             message_queue_address.into_array(),
@@ -334,6 +387,7 @@ impl EthApi {
             wallet,
             ws_max_retry,
             ws_retry_interval,
+            submission_lock: submission_lock(chain_id, public_key),
         })
     }
 
@@ -346,6 +400,11 @@ impl EthApi {
             ws = ws.with_retry_interval(ws_retry_interval);
         }
         let provider: ProviderType = ProviderBuilder::new()
+            .disable_recommended_fillers()
+            .with_gas_estimation()
+            .with_blob_gas_estimation()
+            .with_simple_nonce_management()
+            .fetch_chain_id()
             .wallet(self.wallet.clone())
             .connect_ws(ws)
             .await?;
@@ -364,12 +423,19 @@ impl EthApi {
             wallet: self.wallet.clone(),
             ws_max_retry: self.ws_max_retry,
             ws_retry_interval: self.ws_retry_interval,
+            submission_lock: self.submission_lock.clone(),
         })
     }
 
     // TODO: Don't expose provider here.
     pub fn raw_provider(&self) -> &ProviderType {
         &self.contracts.provider
+    }
+
+    pub async fn reserve_submission(&self) -> SubmissionGuard {
+        SubmissionGuard {
+            _guard: self.submission_lock.clone().lock_owned().await,
+        }
     }
 
     /// Returns the maximum block number that can be submitted as part of a
@@ -413,6 +479,7 @@ impl EthApi {
         merkle_root: [u8; 32],
         proof: Vec<u8>,
     ) -> Result<PendingTransactionBuilder<Ethereum>, Error> {
+        let _submission_guard = self.submission_lock.lock().await;
         self.contracts
             .provide_merkle_root(
                 U256::from(block_number),
@@ -423,6 +490,7 @@ impl EthApi {
     }
 
     pub async fn send_challenge_root(&self) -> Result<TxHash, Error> {
+        let _submission_guard = self.submission_lock.lock().await;
         self.contracts.challenge_root().await
     }
 
@@ -489,6 +557,7 @@ impl EthApi {
     #[allow(clippy::too_many_arguments)]
     pub async fn provide_content_message(
         &self,
+        _submission_guard: &SubmissionGuard,
         block_number: u32,
         total_leaves: u32,
         leaf_index: u32,
@@ -497,7 +566,21 @@ impl EthApi {
         receiver: [u8; 20],
         payload: Vec<u8>,
         proof: Vec<[u8; 32]>,
-    ) -> Result<TxHash, Error> {
+        account_nonce: Option<u64>,
+    ) -> Result<(TxHash, u64), ContentMessageSubmissionError> {
+        let account_nonce = match account_nonce {
+            Some(nonce) => nonce,
+            None => self
+                .raw_provider()
+                .get_transaction_count(self.public_key)
+                .pending()
+                .await
+                .map_err(|error| ContentMessageSubmissionError {
+                    error: error.into(),
+                    nonce: None,
+                })?,
+        };
+
         self.contracts
             .provide_content_message(
                 U256::from(block_number),
@@ -508,8 +591,29 @@ impl EthApi {
                 Address::from(receiver),
                 Bytes::from(payload),
                 proof.into_iter().map(B256::from).collect(),
+                account_nonce,
             )
             .await
+            .map(|tx_hash| (tx_hash, account_nonce))
+            .map_err(|error| {
+                // Only pin the nonce after eth_sendRawTransaction was attempted.
+                // Pre-send failures must re-query pending nonce on retry because
+                // another serialized submission may use this nonce meanwhile.
+                let nonce =
+                    matches!(error, Error::ErrorSendingTransaction(_)).then_some(account_nonce);
+                ContentMessageSubmissionError { error, nonce }
+            })
+    }
+
+    /// Returns whether `account_nonce` has been consumed by a mined transaction.
+    /// A nonce that only exists in the pending pool is deliberately not considered
+    /// consumed and must remain pinned for replacement retries.
+    pub async fn is_account_nonce_consumed(&self, account_nonce: u64) -> Result<bool, Error> {
+        let latest_nonce = self
+            .raw_provider()
+            .get_transaction_count(self.public_key)
+            .await?;
+        Ok(latest_nonce > account_nonce)
     }
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
@@ -744,6 +848,7 @@ impl Contracts {
         destination: Address,
         payload: Bytes,
         proof: Vec<B256>,
+        account_nonce: u64,
     ) -> Result<TxHash, Error> {
         log::trace!(
             "provide_content_message: block_number = {block_number}, total_leaves = {total_leaves}, leaf_index = {leaf_index}, nonce = {nonce}, source = {source}, destination = {destination}, payload = {payload}, proof = {proof:?}",
@@ -800,6 +905,7 @@ impl Contracts {
             .unwrap_or(MAX_PRIORITY_FEE_PER_GAS);
 
         let call = call
+            .nonce(account_nonce)
             .max_fee_per_gas(max_fee_per_gas)
             .max_priority_fee_per_gas(max_priority_fee_per_gas);
 
@@ -908,5 +1014,25 @@ impl Contracts {
         };
 
         Ok(status)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn submission_locks_are_shared_per_chain_and_public_key() {
+        let first_key = Address::from([1; 20]);
+        let second_key = Address::from([2; 20]);
+
+        let first = submission_lock(1, first_key);
+        let same_account = submission_lock(1, first_key);
+        let different_key = submission_lock(1, second_key);
+        let different_chain = submission_lock(2, first_key);
+
+        assert!(Arc::ptr_eq(&first, &same_account));
+        assert!(!Arc::ptr_eq(&first, &different_key));
+        assert!(!Arc::ptr_eq(&first, &different_chain));
     }
 }

@@ -21,12 +21,16 @@ use crate::message_relayer::{
     gear_to_eth::storage::Storage,
 };
 
+const MAX_DROPPED_RETRIES: u32 = 3;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Transaction {
     pub uuid: Uuid,
     pub message: MessageInBlock,
     pub message_hash: [u8; 32],
     pub status: TxStatus,
+    #[serde(default)]
+    pub dropped_retries: u32,
 }
 
 impl Transaction {
@@ -37,6 +41,7 @@ impl Transaction {
             status,
             message_hash: message_hash(&message.message),
             message,
+            dropped_retries: 0,
         }
     }
 }
@@ -48,6 +53,11 @@ pub enum TxStatus {
     SendMessage(RelayedMerkleRoot, MerkleProof),
     WaitConfirmations(TxHash),
     Completed,
+}
+
+enum ExistingTransaction {
+    Completed,
+    Active(Box<Transaction>),
 }
 
 impl_metered_service!(
@@ -102,12 +112,20 @@ impl TransactionManager {
         self.metrics.failed_transactions.inc();
     }
 
+    async fn fail_active_transaction(&self, tx_uuid: Uuid, reason: String) -> Option<Transaction> {
+        let tx = self.transactions.write().await.remove(&tx_uuid);
+        if tx.is_some() {
+            self.fail_transaction(tx_uuid, reason).await;
+        }
+        tx
+    }
+
     pub async fn add_transaction(&self, tx: Transaction) {
         self.metrics.total_transactions.inc();
 
         match tx.status {
             TxStatus::Completed => {
-                self.completed.write().await.insert(tx.uuid, tx.clone());
+                self.completed.write().await.insert(tx.uuid, tx);
                 self.metrics.completed_transactions.inc();
             }
 
@@ -115,6 +133,40 @@ impl TransactionManager {
                 self.transactions.write().await.insert(tx.uuid, tx);
             }
         }
+    }
+
+    async fn complete_transaction(&self, uuid: Uuid) -> bool {
+        let tx = self.transactions.write().await.remove(&uuid);
+        let Some(mut tx) = tx else {
+            return false;
+        };
+
+        tx.status = TxStatus::Completed;
+        self.completed.write().await.insert(uuid, tx);
+        self.failed.write().await.remove(&uuid);
+        self.metrics.completed_transactions.inc();
+        true
+    }
+
+    async fn existing_transaction(&self, message_hash: [u8; 32]) -> Option<ExistingTransaction> {
+        if self
+            .completed
+            .read()
+            .await
+            .values()
+            .any(|tx| tx.message_hash == message_hash)
+        {
+            return Some(ExistingTransaction::Completed);
+        }
+
+        self.transactions
+            .read()
+            .await
+            .values()
+            .find(|tx| tx.message_hash == message_hash)
+            .cloned()
+            .map(Box::new)
+            .map(ExistingTransaction::Active)
     }
 
     pub async fn update_storage(&self) {
@@ -204,7 +256,11 @@ impl TransactionManager {
                         hex::encode(tx.message.message.nonce_be),
                         tx_hash
                     );
-                    if !status_fetcher.send_request(tx.uuid, tx_hash) {
+                    if !status_fetcher.send_request_with_bridge_nonce(
+                        tx.uuid,
+                        tx_hash,
+                        tx.message.message.nonce_be,
+                    ) {
                         log::warn!("Status fetcher stopped accepting requests, exiting");
                         return Ok(false);
                     }
@@ -291,35 +347,31 @@ impl TransactionManager {
                 };
 
                 let hash = message_hash(&message.message);
-                {
-                    let completed = self.completed.read().await;
-                    if completed.values().any(|tx| tx.message_hash == hash) {
+                match self.existing_transaction(hash).await {
+                    Some(ExistingTransaction::Completed) => {
                         log::info!(
                             "Skipping completed message: nonce={}, block=#{}",
                             hex::encode(message.message.nonce_be),
                             message.block.0
                         );
-
                         return Ok(true);
                     }
+                    Some(ExistingTransaction::Active(tx)) => {
+                        log::info!(
+                            "Skipping active message: transaction={}, status={:?}, nonce={}, block=#{}",
+                            tx.uuid,
+                            tx.status,
+                            hex::encode(tx.message.message.nonce_be),
+                            tx.message.block.0,
+                        );
+                        return Ok(true);
+                    }
+                    None => {}
                 }
 
-                let tx_maybe = {
-                    let transactions = self.transactions.read().await;
-
-                    transactions.values().find(|tx| tx.message_hash == hash).cloned()
-                };
-
-                let (tx, is_new) = match tx_maybe {
-                    Some(tx) => (tx, false),
-                    None => {
-                        self.storage.block_storage().complete_transaction(&message).await;
-                        let tx = Transaction::new(message, TxStatus::WaitForMerkleRoot);
-                        self.add_transaction(tx.clone()).await;
-
-                        (tx, true)
-                    }
-                };
+                self.storage.block_storage().complete_transaction(&message).await;
+                let tx = Transaction::new(message, TxStatus::WaitForMerkleRoot);
+                self.add_transaction(tx.clone()).await;
 
                 let source = ActorId::from(tx.message.message.source);
                 let block_hash = tx.message.block_hash;
@@ -328,7 +380,7 @@ impl TransactionManager {
                 let uuid = tx.uuid;
 
                 log::info!(
-                    "Transaction (is new: {is_new}) {uuid}, nonce={} from source {source} at block #{} ({block_hash})",
+                    "New transaction {uuid}, nonce={} from source {source} at block #{} ({block_hash})",
                     hex::encode(tx.message.message.nonce_be),
                     block.0,
                 );
@@ -375,12 +427,29 @@ impl TransactionManager {
                     }
 
                     accumulator::Response::Overflowed(message) => {
-                        self.fail_transaction(message.tx_uuid, "Message overflowed".to_string()).await;
+                        if self
+                            .fail_active_transaction(
+                                message.tx_uuid,
+                                "Message overflowed".to_string(),
+                            )
+                            .await
+                            .is_none()
+                        {
+                            log::warn!(
+                                "Received overflow response for unknown transaction: {}",
+                                message.tx_uuid
+                            );
+                        }
                     }
 
                     accumulator::Response::Stuck { tx_uuid, .. } => {
-
-                        self.fail_transaction(tx_uuid, "Message stuck".to_string()).await;
+                        if self
+                            .fail_active_transaction(tx_uuid, "Message stuck".to_string())
+                            .await
+                            .is_none()
+                        {
+                            log::warn!("Received stuck response for unknown transaction: {tx_uuid}");
+                        }
                     }
                 }
             }
@@ -420,26 +489,43 @@ impl TransactionManager {
                 match message {
                     message_sender::Response::MessageAlreadyProcessed(tx_uuid) => {
                         log::info!(
-                            "Message already processed, skipping: tx_uuid = {tx_uuid}"
+                            "Message already processed, completing: tx_uuid = {tx_uuid}"
                         );
-                        if let Some(tx) = self.transactions.write().await.get_mut(&tx_uuid) {
-                            tx.status = TxStatus::Completed;
-                        } else {
+                        if !self.complete_transaction(tx_uuid).await {
                             log::warn!("Received message for unknown transaction: {tx_uuid}");
                         }
-
                     }
 
                     message_sender::Response::ProcessingStarted(tx_hash, tx_uuid) => {
-                        if let Some(tx) = self.transactions.write().await.get_mut(&tx_uuid) {
+                        let bridge_nonce = if let Some(tx) =
+                            self.transactions.write().await.get_mut(&tx_uuid)
+                        {
                             tx.status = TxStatus::WaitConfirmations(tx_hash);
+                            Some(tx.message.message.nonce_be)
                         } else {
                             log::warn!("Received message for unknown transaction: {tx_uuid}");
-                        }
+                            None
+                        };
 
-                        if !status_fetcher.send_request(tx_uuid, tx_hash) {
-                            log::warn!("Status fetcher stopped accepting requests, exiting");
-                            return Ok(false);
+                        if let Some(bridge_nonce) = bridge_nonce {
+                            if !status_fetcher.send_request_with_bridge_nonce(tx_uuid, tx_hash, bridge_nonce) {
+                                log::warn!("Status fetcher stopped accepting requests, exiting");
+                                return Ok(false);
+                            }
+                        }
+                    }
+
+                    message_sender::Response::Failed(tx_uuid, error) => {
+                        if let Some(tx) = self
+                            .fail_active_transaction(tx_uuid, error.clone())
+                            .await
+                        {
+                            let nonce = hex::encode(tx.message.message.nonce_be);
+                            log::error!(
+                                "Transaction {tx_uuid}, nonce={nonce} failed before broadcast: {error}"
+                            );
+                        } else {
+                            log::warn!("Received failure for unknown transaction: {tx_uuid}");
                         }
                     }
                 }
@@ -453,16 +539,7 @@ impl TransactionManager {
 
                 match status {
                     status_fetcher::Response::Success(uuid, tx_hash) => {
-                        if let Some(tx) = self.transactions.write().await.remove(&uuid) {
-                            let completed_tx = Transaction {
-                                uuid,
-                                message: tx.message,
-                                message_hash: tx.message_hash,
-                                status: TxStatus::Completed,
-                            };
-                            self.completed.write().await.insert(uuid, completed_tx);
-                            self.metrics.completed_transactions.inc();
-
+                        if self.complete_transaction(uuid).await {
                             log::info!(
                                 "Transaction {uuid} completed successfully: tx_hash = {tx_hash}"
                             );
@@ -471,11 +548,62 @@ impl TransactionManager {
                         }
                     }
 
-                    status_fetcher::Response::Failed(uuid, e) => {
-                        if let Some(tx) = self.transactions.write().await.remove(&uuid) {
-                            self.fail_transaction(uuid, e.to_string()).await;
+                    status_fetcher::Response::Dropped(uuid, error) => {
+                        let retry = {
+                            let mut transactions = self.transactions.write().await;
+                            transactions.get_mut(&uuid).map(|tx| {
+                                tx.dropped_retries = tx.dropped_retries.saturating_add(1);
+                                tx.status = TxStatus::WaitForMerkleRoot;
+                                (
+                                    tx.dropped_retries,
+                                    tx.message.authority_set_id,
+                                    tx.message.block,
+                                    tx.message.block_hash,
+                                    ActorId::from(tx.message.message.source),
+                                    hex::encode(tx.message.message.nonce_be),
+                                )
+                            })
+                        };
+
+                        if let Some((attempt, authority_set_id, block, block_hash, source, nonce)) =
+                            retry
+                        {
+                            if attempt > MAX_DROPPED_RETRIES {
+                                let reason = format!(
+                                    "Ethereum transaction repeatedly disappeared after {MAX_DROPPED_RETRIES} retries: {error}"
+                                );
+                                let _ = self.fail_active_transaction(uuid, reason.clone()).await;
+                                log::error!(
+                                    "Transaction {uuid}, nonce={nonce} failed terminally: {reason}"
+                                );
+                            } else {
+                                log::error!(
+                                    "Transaction {uuid}, nonce={nonce} was dropped: {error}. Retrying from merkle-root lookup ({attempt}/{MAX_DROPPED_RETRIES})"
+                                );
+                                if !accumulator.send_message(
+                                    uuid,
+                                    authority_set_id,
+                                    block,
+                                    block_hash,
+                                    source,
+                                ) {
+                                    log::warn!("Accumulator stopped accepting messages, exiting");
+                                    return Ok(false);
+                                }
+                            }
+                        } else {
+                            log::warn!("Received dropped response for unknown transaction: {uuid}");
+                        }
+                    }
+
+                    status_fetcher::Response::Failed(uuid, error) => {
+                        if let Some(tx) =
+                            self.fail_active_transaction(uuid, error.clone()).await
+                        {
                             let nonce = hex::encode(tx.message.message.nonce_be);
-                            log::error!("Transaction {uuid}, nonce={nonce} failed: {e}", );
+                            log::error!(
+                                "Transaction {uuid}, nonce={nonce} failed terminally: {error}"
+                            );
                         } else {
                             log::warn!("Received failure response for unknown transaction: {uuid}");
                         }
@@ -485,5 +613,148 @@ impl TransactionManager {
         }
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message_relayer::{
+        common::{AuthoritySetId, GearBlockNumber},
+        gear_to_eth::storage::NoStorage,
+    };
+    use gear_rpc_client::dto::Message;
+    use primitive_types::H256;
+
+    fn transaction() -> Transaction {
+        Transaction::new(
+            MessageInBlock {
+                message: Message {
+                    nonce_be: [7; 32],
+                    source: [1; 32],
+                    destination: [2; 20],
+                    payload: vec![3, 4],
+                },
+                block: GearBlockNumber(42),
+                block_hash: H256::from_low_u64_be(99),
+                authority_set_id: AuthoritySetId(5),
+            },
+            TxStatus::WaitForMerkleRoot,
+        )
+    }
+
+    #[tokio::test]
+    async fn complete_transaction_moves_active_transaction_to_completed() {
+        let manager = TransactionManager::new(Arc::new(NoStorage::new()));
+        let tx = transaction();
+        let uuid = tx.uuid;
+        let message_hash = tx.message_hash;
+
+        manager.add_transaction(tx).await;
+        manager
+            .failed
+            .write()
+            .await
+            .insert(uuid, "previous attempt failed".to_string());
+
+        assert!(manager.complete_transaction(uuid).await);
+        assert!(!manager.transactions.read().await.contains_key(&uuid));
+        assert!(!manager.failed.read().await.contains_key(&uuid));
+
+        let completed = manager.completed.read().await;
+        let completed_tx = completed.get(&uuid).unwrap();
+        assert_eq!(completed_tx.message_hash, message_hash);
+        assert!(matches!(completed_tx.status, TxStatus::Completed));
+        drop(completed);
+
+        assert!(!manager.complete_transaction(uuid).await);
+        assert_eq!(manager.metrics.completed_transactions.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn existing_transactions_are_classified_for_duplicate_suppression() {
+        let manager = TransactionManager::new(Arc::new(NoStorage::new()));
+        let tx = transaction();
+        let uuid = tx.uuid;
+        let message_hash = tx.message_hash;
+
+        manager.add_transaction(tx).await;
+        assert!(matches!(
+            manager.existing_transaction(message_hash).await,
+            Some(ExistingTransaction::Active(_))
+        ));
+
+        assert!(manager.complete_transaction(uuid).await);
+        assert!(matches!(
+            manager.existing_transaction(message_hash).await,
+            Some(ExistingTransaction::Completed)
+        ));
+        assert!(manager.existing_transaction([0; 32]).await.is_none());
+    }
+
+    #[test]
+    fn legacy_transaction_state_defaults_dropped_retry_count() {
+        let tx = transaction();
+        let mut value = serde_json::to_value(tx).unwrap();
+        value.as_object_mut().unwrap().remove("dropped_retries");
+
+        let restored: Transaction = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.dropped_retries, 0);
+    }
+
+    #[tokio::test]
+    async fn terminal_failure_removes_active_transaction_for_explicit_retry() {
+        let manager = TransactionManager::new(Arc::new(NoStorage::new()));
+        let tx = transaction();
+        let uuid = tx.uuid;
+        let message_hash = tx.message_hash;
+        manager.add_transaction(tx).await;
+
+        assert!(manager
+            .fail_active_transaction(uuid, "terminal failure".to_string())
+            .await
+            .is_some());
+        assert!(manager.existing_transaction(message_hash).await.is_none());
+        assert_eq!(
+            manager.failed.read().await.get(&uuid).map(String::as_str),
+            Some("terminal failure")
+        );
+    }
+
+    #[tokio::test]
+    async fn every_active_status_suppresses_duplicate_submission() {
+        let root = RelayedMerkleRoot {
+            block: GearBlockNumber(43),
+            block_hash: H256::from_low_u64_be(100),
+            timestamp: 123,
+            authority_set_id: AuthoritySetId(6),
+            merkle_root: H256::from_low_u64_be(101),
+        };
+        let proof = MerkleProof {
+            root: [0; 32],
+            proof: vec![],
+            num_leaves: 1,
+            leaf_index: 0,
+        };
+        let statuses = [
+            TxStatus::WaitForMerkleRoot,
+            TxStatus::FetchMerkleRoot(root),
+            TxStatus::SendMessage(root, proof),
+            TxStatus::WaitConfirmations(TxHash::from([0; 32])),
+            TxStatus::Completed,
+        ];
+
+        for status in statuses {
+            let manager = TransactionManager::new(Arc::new(NoStorage::new()));
+            let mut tx = transaction();
+            tx.status = status;
+            let message_hash = tx.message_hash;
+            manager.transactions.write().await.insert(tx.uuid, tx);
+
+            assert!(matches!(
+                manager.existing_transaction(message_hash).await,
+                Some(ExistingTransaction::Active(_))
+            ));
+        }
     }
 }

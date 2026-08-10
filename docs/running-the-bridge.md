@@ -78,6 +78,8 @@ RUST_MIN_STACK=4194304 \
 
 The flag names map to environment variables such as `GEAR_ENDPOINT`, `ETH_MESSAGE_QUEUE_ADDRESS`, `ETH_FEE_PAYER`, `GENESIS_CONFIG_AUTHORITY_SET_HASH`, `GENESIS_CONFIG_AUTHORITY_SET_ID`, `WEB_SERVER_TOKEN`, and `GEAR_BLOCK_STORAGE`. The CLI help is authoritative for defaults and required values. Commands for token relayers, manual relays, the kill switch, queue cleaner, root fetching, and verifier generation expose different argument groups; do not reuse a core command's flags without checking that subcommand's help.
 
+Each Ethereum fee-payer account must have exactly one submitting process. The in-process nonce lock is shared by clients in one relayer process, but it cannot coordinate replicas, manual relay commands, or external signer tools. Assign distinct fee-payer accounts to those writers, and do not run active-active replicas with the same `ETH_FEE_PAYER`.
+
 ## Run with Docker
 
 The [Dockerfile](../Dockerfile) builds the complete relayer image. Build it from the repository root:

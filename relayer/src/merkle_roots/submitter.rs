@@ -456,6 +456,10 @@ impl MerkleRootSubmitter {
     }
 }
 
+fn should_retry_process_error(err: &anyhow::Error) -> bool {
+    rpc::classify_anyhow(err) == rpc::RetryDecision::Retry
+}
+
 async fn task(
     mut this: MerkleRootSubmitter,
     mut proofs: UnboundedReceiver<Request>,
@@ -466,6 +470,16 @@ async fn task(
     loop {
         match this.process(&mut proofs, &responses).await {
             Ok(_) => break,
+            Err(e) if !should_retry_process_error(&e) => {
+                // Dropping `responses` closes the parent channel and makes the Merkle
+                // relayer fail visibly. Restarting this task would lose any request or
+                // receipt result already removed from its in-memory queue.
+                log::error!(
+                    "Merkle root relayer {} submitter failed with a non-recoverable error, exiting: {e}",
+                    this.relayer_id
+                );
+                break;
+            }
             Err(e) => {
                 attempts += 1;
                 let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
@@ -494,5 +508,33 @@ async fn task(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::transports::{RpcError, TransportErrorKind};
+
+    #[test]
+    fn permanent_reconciliation_error_stops_submitter_task() {
+        let err = ethereum_client::Error::ErrorDuringContractExecution(
+            alloy::contract::Error::TransportError(RpcError::ErrorResp(
+                serde_json::from_str(r#"{"code":-32603,"message":"execution failed"}"#).unwrap(),
+            )),
+        );
+
+        assert!(!should_retry_process_error(&err.into()));
+    }
+
+    #[test]
+    fn backend_disconnect_retries_submitter_task() {
+        let err = ethereum_client::Error::ErrorDuringContractExecution(
+            alloy::contract::Error::TransportError(RpcError::Transport(
+                TransportErrorKind::BackendGone,
+            )),
+        );
+
+        assert!(should_retry_process_error(&err.into()));
     }
 }

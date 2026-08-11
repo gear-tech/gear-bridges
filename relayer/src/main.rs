@@ -1127,7 +1127,7 @@ async fn create_proof_storage_from_config(
         }
         EffectiveProofStorageConfig::FileSystem { path } => {
             log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
-            Arc::new(FileSystemProofStorage::new(path.clone()).await)
+            Arc::new(FileSystemProofStorage::new(path.clone()).await?)
         }
     };
 

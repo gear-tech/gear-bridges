@@ -211,6 +211,18 @@ impl MerkleRootSubmitter {
         }
     }
 
+    async fn read_finalized_merkle_root(
+        &mut self,
+        gear_block: u32,
+    ) -> Result<Option<[u8; 32]>, ethereum_client::Error> {
+        rpc::retry_eth(
+            &mut self.eth_api,
+            "read finalized MessageQueue merkle root",
+            |api| async move { api.read_finalized_merkle_root(gear_block).await },
+        )
+        .await
+    }
+
     async fn process(
         &mut self,
         proofs: &mut UnboundedReceiver<Request>,
@@ -218,7 +230,7 @@ impl MerkleRootSubmitter {
     ) -> anyhow::Result<()> {
         let mut pending_transactions = FuturesUnordered::new();
         loop {
-            let relayer_id = self.relayer_id.as_str();
+            let relayer_id = self.relayer_id.clone();
             let balance = self.eth_api.get_approx_balance().await?;
             self.metrics.fee_payer_balance.set(balance);
             self.metrics
@@ -249,8 +261,16 @@ impl MerkleRootSubmitter {
                         continue;
                     }
 
-                    loop {
-                    match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
+                    match rpc::retry_eth(
+                        &mut self.eth_api,
+                        "submit merkle root",
+                        |api| {
+                            let proof = request.proof.clone();
+                            async move { submit_merkle_root_to_ethereum(&api, proof).await }
+                        },
+                    )
+                    .await
+                    {
                         Ok(pending_tx) => {
                             log::info!(
                                 "Merkle root relayer {relayer_id}: submitted merkle root to Ethereum, tx hash: {}",
@@ -266,14 +286,13 @@ impl MerkleRootSubmitter {
                                 request.proof,
                                 self.confirmations,
                             ));
-                            break;
+                            continue;
                         }
                         // How do we get here?
                         // - Relayer crashed and already submitted the merkle root but not yet confirmed it
                         // - Somebody else submitted the merkle root
                         Err(ethereum_client::Error::ErrorDuringContractExecution(err)) => {
-                            let root_exists = self.eth_api
-                                .read_finalized_merkle_root(request.proof.block_number)
+                            let root_exists = self.read_finalized_merkle_root(request.proof.block_number)
                                 .await?
                                 .is_some();
 
@@ -288,7 +307,7 @@ impl MerkleRootSubmitter {
                                 }).is_err() {
                                     return Ok(());
                                 };
-                                break;
+                                continue;
                             } else {
                                 log::error!("Merkle root relayer {relayer_id}: failed to submit merkle root {}: Error during contract execution: {err:?}", H256::from(request.proof.merkle_root));
                                 self.metrics.failed_submissions.inc();
@@ -302,21 +321,9 @@ impl MerkleRootSubmitter {
                                 }).is_err() {
                                     return Ok(());
                                 };
-                                break;
+                                continue;
                             }
                         }
-
-
-                        Err(err) if is_recoverable_eth_error(&err) => {
-                            log::warn!(
-                                "Merkle root relayer {relayer_id}: recoverable error while submitting merkle root {}: {err}. Reconnecting and retrying",
-                                H256::from(request.proof.merkle_root)
-                            );
-                            tokio::time::sleep(BASE_RETRY_DELAY).await;
-                            self.eth_api = self.eth_api.reconnect().await?;
-                            continue;
-                        }
-
                         Err(err) => {
 
                             log::error!("Merkle root relayer {relayer_id}: failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
@@ -331,9 +338,8 @@ impl MerkleRootSubmitter {
                             }).is_err() {
                                 return Ok(());
                             };
-                            break;
+                            continue;
                         }
-                    }
                     }
                 },
 
@@ -353,8 +359,7 @@ impl MerkleRootSubmitter {
                             self.metrics.last_gas_used.set(gas_used);
 
                             if !submitted.receipt.status() {
-                                let root_exists = self.eth_api
-                                    .read_finalized_merkle_root(submitted.proof.block_number)
+                                let root_exists = self.read_finalized_merkle_root(submitted.proof.block_number)
                                     .await?
                                     .is_some();
 
@@ -403,8 +408,7 @@ impl MerkleRootSubmitter {
                         }
 
                         Err(err) => {
-                            let root_exists = self.eth_api
-                                .read_finalized_merkle_root(err.proof.block_number)
+                            let root_exists = self.read_finalized_merkle_root(err.proof.block_number)
                                 .await?
                                 .is_some();
 
@@ -449,15 +453,6 @@ impl MerkleRootSubmitter {
         tokio::task::spawn(task(self, rx, response_tx));
 
         SubmitterIo::new(tx, response_rx)
-    }
-}
-
-fn is_recoverable_eth_error(err: &ethereum_client::Error) -> bool {
-    match err {
-        ethereum_client::Error::ErrorInHTTPTransport(err) => {
-            crate::common::is_rpc_transport_error_recoverable(err)
-        }
-        _ => rpc::is_recoverable_error_text(err),
     }
 }
 

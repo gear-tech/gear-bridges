@@ -1,11 +1,20 @@
 use super::{AuthoritySetId, InMemoryProofStorage, ProofStorage, ProofStorageError};
 use prover::proving::{CircuitData, Proof, ProofWithCircuitData};
-use std::path::PathBuf;
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 use tokio::fs;
 
 pub struct FileSystemProofStorage {
     cache: InMemoryProofStorage,
     save_to: PathBuf,
+}
+
+fn io_error(operation: &str, path: &Path, err: io::Error) -> ProofStorageError {
+    ProofStorageError::InnerError(
+        anyhow::Error::new(err).context(format!("{operation}: {}", path.display())),
+    )
 }
 
 #[async_trait::async_trait]
@@ -51,26 +60,25 @@ impl ProofStorage for FileSystemProofStorage {
 }
 
 impl FileSystemProofStorage {
-    pub async fn new(save_to: PathBuf) -> FileSystemProofStorage {
+    pub async fn new(save_to: PathBuf) -> Result<FileSystemProofStorage, ProofStorageError> {
         fs::create_dir_all(&save_to)
             .await
-            .expect("Failed to create directory for proof storage");
-        if !save_to.is_dir() {
-            panic!("Please provide directory as a path");
-        }
+            .map_err(|err| io_error("create proof storage directory", &save_to, err))?;
 
         let mut storage = FileSystemProofStorage {
             cache: InMemoryProofStorage::default(),
             save_to,
         };
 
-        if storage.load_state().await.is_ok() {
-            log::info!("Proof storage state loaded successfully");
-        } else {
-            log::info!("Proof storage state not found. Waiting for initialization");
+        match storage.load_state().await {
+            Ok(()) => log::info!("Proof storage state loaded successfully"),
+            Err(ProofStorageError::NotInitialized) => {
+                log::info!("Proof storage state not found. Waiting for initialization")
+            }
+            Err(err) => return Err(err),
         }
 
-        storage
+        Ok(storage)
     }
 
     async fn save_state(&self) -> Result<(), ProofStorageError> {
@@ -97,52 +105,66 @@ impl FileSystemProofStorage {
         let tmp_path = self.save_to.join(format!("{name}.tmp"));
         fs::write(&tmp_path, bytes)
             .await
-            .map_err(|_| ProofStorageError::NotInitialized)?;
+            .map_err(|err| io_error("write proof storage temporary file", &tmp_path, err))?;
         fs::rename(&tmp_path, &path)
             .await
-            .map_err(|_| ProofStorageError::NotInitialized)?;
+            .map_err(|err| io_error("replace proof storage file", &path, err))?;
         Ok(())
     }
 
     async fn load_state(&mut self) -> Result<(), ProofStorageError> {
-        let circuit_data = fs::read(self.save_to.join("circuit_data.bin"))
-            .await
-            .map_err(|_| ProofStorageError::NotInitialized)?;
+        let circuit_data_path = self.save_to.join("circuit_data.bin");
+        let circuit_data = match fs::read(&circuit_data_path).await {
+            Ok(circuit_data) => circuit_data,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Err(ProofStorageError::NotInitialized);
+            }
+            Err(err) => {
+                return Err(io_error(
+                    "read proof storage circuit data",
+                    &circuit_data_path,
+                    err,
+                ));
+            }
+        };
         self.cache.inner().write().await.circuit_data = Some(CircuitData::from_bytes(circuit_data));
 
         let prefix = "proof_";
         let postfix = ".bin";
         let mut read_dir = fs::read_dir(&self.save_to)
             .await
-            .map_err(|_| ProofStorageError::NotInitialized)?;
+            .map_err(|err| io_error("read proof storage directory", &self.save_to, err))?;
 
         let mut found_validator_set_ids = Vec::new();
 
         while let Some(entry) = read_dir
             .next_entry()
             .await
-            .map_err(|_| ProofStorageError::NotInitialized)?
+            .map_err(|err| io_error("read proof storage directory entry", &self.save_to, err))?
         {
             let file_name = entry.file_name();
-            let file_name = file_name.to_str();
-
-            let valid_name = file_name
-                .map(|str| (&str[..prefix.len()], &str[str.len() - postfix.len()..]))
-                == Some((prefix, postfix));
-
-            if valid_name {
-                let file_name = file_name.expect("Invalid file name");
-                let set_id = &file_name[prefix.len()..file_name.len() - postfix.len()];
-                let set_id: u64 = set_id.parse().expect("Invalid file name");
-                found_validator_set_ids.push(set_id);
-            }
+            let Some(set_id) = file_name
+                .to_str()
+                .and_then(|name| name.strip_prefix(prefix))
+                .and_then(|name| name.strip_suffix(postfix))
+            else {
+                continue;
+            };
+            let set_id = set_id.parse::<u64>().map_err(|err| {
+                ProofStorageError::InnerError(anyhow::anyhow!(
+                    "invalid authority-set proof file name {}: {err}",
+                    entry.path().display()
+                ))
+            })?;
+            found_validator_set_ids.push(set_id);
         }
 
         let mut inner = self.cache.inner().write().await;
         for validator_set_id in found_validator_set_ids {
-            let proof = fs::read(self.save_to.join(format!("proof_{validator_set_id}.bin")))
+            let proof_path = self.save_to.join(format!("proof_{validator_set_id}.bin"));
+            let proof = fs::read(&proof_path)
                 .await
-                .map_err(|_| ProofStorageError::NotInitialized)?;
+                .map_err(|err| io_error("read authority-set proof", &proof_path, err))?;
 
             inner
                 .proofs
@@ -150,5 +172,80 @@ impl FileSystemProofStorage {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temporary_storage_path(test_name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("gear-bridges-{test_name}-{}", uuid::Uuid::new_v4()))
+    }
+
+    fn assert_inner_io_error(err: ProofStorageError) {
+        match err {
+            ProofStorageError::InnerError(err) => {
+                assert!(err.chain().any(|cause| cause.is::<io::Error>()));
+            }
+            err => panic!("expected filesystem error, got {err}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_state_is_treated_as_uninitialized() {
+        let path = temporary_storage_path("missing-proof-state");
+        let storage = FileSystemProofStorage::new(path.clone()).await.unwrap();
+
+        assert_eq!(storage.get_latest_authority_set_id().await, None);
+
+        fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn storage_path_that_is_a_file_returns_io_error() {
+        let path = temporary_storage_path("storage-path-is-file");
+        fs::write(&path, b"not a directory").await.unwrap();
+
+        let err = FileSystemProofStorage::new(path.clone())
+            .await
+            .err()
+            .expect("a regular file cannot be used as a storage directory");
+        assert_inner_io_error(err);
+
+        fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unreadable_circuit_data_is_reported_as_io_error() {
+        let path = temporary_storage_path("invalid-circuit-data");
+        fs::create_dir_all(path.join("circuit_data.bin"))
+            .await
+            .unwrap();
+
+        let err = FileSystemProofStorage::new(path.clone())
+            .await
+            .err()
+            .expect("a directory cannot be read as circuit data");
+        assert_inner_io_error(err);
+
+        fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn atomic_write_preserves_the_io_error() {
+        let path = temporary_storage_path("failed-atomic-write");
+        let storage = FileSystemProofStorage::new(path.clone()).await.unwrap();
+        fs::create_dir(path.join("circuit_data.bin.tmp"))
+            .await
+            .unwrap();
+
+        let err = storage
+            .atomic_write("circuit_data.bin", vec![1, 2, 3])
+            .await
+            .unwrap_err();
+        assert_inner_io_error(err);
+
+        fs::remove_dir_all(path).await.unwrap();
     }
 }

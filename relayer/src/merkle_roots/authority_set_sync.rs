@@ -1,7 +1,7 @@
 use crate::{
     common::{sync_authority_set_id, SyncStepCount},
     message_relayer::common::GearBlock,
-    proof_storage::ProofStorage,
+    proof_storage::{ProofStorage, ProofStorageError},
     rpc,
 };
 use futures::{executor::block_on, FutureExt};
@@ -22,6 +22,12 @@ use tokio::sync::{
 };
 
 use utils_prometheus::{impl_metered_service, MeteredService};
+
+fn is_recoverable_authority_sync_error(err: &anyhow::Error) -> bool {
+    !err.chain()
+        .any(|cause| cause.downcast_ref::<ProofStorageError>().is_some())
+        && rpc::classify_anyhow(err) == rpc::RetryDecision::Retry
+}
 
 pub struct AuthoritySetSyncIo {
     response: UnboundedReceiver<Response>,
@@ -350,6 +356,12 @@ impl AuthoritySetSync {
                         log::error!(
                             "Authority set sync for relayer {relayer_id} task failed: {err}"
                         );
+                        if !is_recoverable_authority_sync_error(&err) {
+                            log::error!(
+                                "Authority set sync for relayer {relayer_id}: non-recoverable error, stopping"
+                            );
+                            return;
+                        }
 
                         match runner.api_provider.reconnect().await {
                             Ok(_) => {
@@ -390,6 +402,12 @@ impl AuthoritySetSync {
                             log::error!(
                                 "Authority set sync for relayer {relayer_id} task failed: {err}"
                             );
+                            if !is_recoverable_authority_sync_error(&err) {
+                                log::error!(
+                                    "Authority set sync for relayer {relayer_id}: non-recoverable error, stopping"
+                                );
+                                return;
+                            }
 
                             match runner.api_provider.reconnect().await {
                                 Ok(_) => {
@@ -645,8 +663,10 @@ async fn execute_sync_authority_set(
     let proof_storage = proof_storage.clone();
     let responses = responses.clone();
 
-    let (sync_steps, latest_authority_set_id, latest_proven_authority_set_id) =
-        rpc::retry_gear(api_provider, "authority set sync", move |gear_api| {
+    let (sync_steps, latest_authority_set_id, latest_proven_authority_set_id) = rpc::retry_gear_if(
+        api_provider,
+        "authority set sync",
+        move |gear_api| {
             let proof_storage = proof_storage.clone();
             let responses = responses.clone();
             async move {
@@ -669,8 +689,10 @@ async fn execute_sync_authority_set(
                     latest_proven_authority_set_id,
                 ))
             }
-        })
-        .await?;
+        },
+        is_recoverable_authority_sync_error,
+    )
+    .await?;
 
     metrics
         .latest_observed_gear_era
@@ -680,4 +702,59 @@ async fn execute_sync_authority_set(
     }
 
     Ok((sync_steps, latest_authority_set_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn does_not_reconnect_gear_for_proof_storage_errors() {
+        let err = anyhow::Error::new(ProofStorageError::InnerError(anyhow::anyhow!(
+            "proof storage write timed out"
+        )));
+
+        assert!(!is_recoverable_authority_sync_error(&err));
+    }
+
+    #[test]
+    fn wrapped_storage_error_remains_nonrecoverable_and_preserves_sources() {
+        let storage_error = ProofStorageError::InnerError(anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "disk timed out",
+        )));
+        let err = anyhow::Error::new(rpc::RpcFailure {
+            operation: "authority set sync",
+            kind: rpc::RpcFailureKind::Permanent,
+            source: anyhow::Error::new(storage_error),
+        });
+
+        assert!(!is_recoverable_authority_sync_error(&err));
+        let storage_error = err
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ProofStorageError>())
+            .expect("proof storage error should remain in the source chain");
+        let ProofStorageError::InnerError(storage_error) = storage_error else {
+            panic!("expected inner proof storage error");
+        };
+        assert!(storage_error
+            .chain()
+            .any(|cause| cause.is::<std::io::Error>()));
+    }
+
+    #[test]
+    fn does_not_reconnect_gear_for_uninitialized_proof_storage() {
+        let err = anyhow::Error::new(ProofStorageError::NotInitialized);
+
+        assert!(!is_recoverable_authority_sync_error(&err));
+    }
+
+    #[test]
+    fn reconnects_gear_for_recoverable_rpc_errors() {
+        let err = anyhow::anyhow!(
+            "RPC error: client error: The background task closed connection closed; restart required"
+        );
+
+        assert!(is_recoverable_authority_sync_error(&err));
+    }
 }

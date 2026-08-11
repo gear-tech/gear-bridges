@@ -61,19 +61,19 @@ impl RetryPolicy {
 }
 
 pub fn classify_anyhow(err: &anyhow::Error) -> RetryDecision {
+    if let Some(err) = err.downcast_ref::<RpcFailure>() {
+        return match err.kind {
+            RpcFailureKind::Recoverable => RetryDecision::Retry,
+            RpcFailureKind::Permanent => RetryDecision::Fail,
+        };
+    }
+
     if let Some(err) = err.downcast_ref::<ethereum_client::Error>() {
         return classify_ethereum_error(err);
     }
 
     if let Some(err) = err.downcast_ref::<RpcError<TransportErrorKind>>() {
         return classify_alloy_rpc(err);
-    }
-
-    if let Some(err) = err.downcast_ref::<RpcFailure>() {
-        return match err.kind {
-            RpcFailureKind::Recoverable => RetryDecision::Retry,
-            RpcFailureKind::Permanent => RetryDecision::Fail,
-        };
     }
 
     if let Some(gclient::Error::GearSDK(gsdk::Error::Subxt(err))) =
@@ -338,6 +338,27 @@ mod tests {
         });
 
         assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
+    }
+
+    #[test]
+    fn explicit_rpc_failure_kind_overrides_recoverable_source() {
+        let source = ethereum_client::Error::ErrorInHTTPTransport(RpcError::Transport(
+            TransportErrorKind::BackendGone,
+        ));
+        let permanent = anyhow::Error::new(RpcFailure {
+            operation: "proof storage",
+            kind: RpcFailureKind::Permanent,
+            source: anyhow::Error::new(source),
+        });
+
+        assert_eq!(classify_anyhow(&permanent), RetryDecision::Fail);
+
+        let recoverable = anyhow::Error::new(RpcFailure {
+            operation: "RPC request",
+            kind: RpcFailureKind::Recoverable,
+            source: anyhow::anyhow!("non-recoverable source text"),
+        });
+        assert_eq!(classify_anyhow(&recoverable), RetryDecision::Retry);
     }
 
     #[test]

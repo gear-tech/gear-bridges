@@ -41,6 +41,12 @@ pub mod storage;
 pub mod submitter;
 
 const MERKLE_ROOT_SUPERVISOR_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const MERKLE_ROOT_SUPERVISOR_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
+enum EthereumRootRead {
+    Fetched(Option<H256>),
+    RetryLater,
+}
 
 pub struct Relayer {
     merkle_roots: MerkleRootRelayer,
@@ -322,7 +328,7 @@ impl MerkleRootRelayer {
         mut authority_set_sync: AuthoritySetSyncIo,
         mut http: UnboundedReceiver<MerkleRootsRequest>,
 
-        eth_api: EthApi,
+        mut eth_api: EthApi,
     ) -> anyhow::Result<()> {
         let relayer_id = self.options.relayer_id.clone();
         log::info!("Starting merkle root relayer {relayer_id}");
@@ -529,10 +535,12 @@ impl MerkleRootRelayer {
             }
         }
 
-        self.initialize_contract_cursor(&eth_api).await?;
-        self.supervise_contract_state(&mut prover, &mut authority_set_sync, &eth_api)
-            .await?;
+        self.initialize_contract_cursor(&mut eth_api).await?;
+        // Consume the interval's immediate first tick before supervision so a failed
+        // startup probe can schedule an actual short retry instead of losing it here.
         self.supervisor_interval.tick().await;
+        self.supervise_contract_state(&mut prover, &mut authority_set_sync, &mut eth_api)
+            .await?;
 
         if let Err(err) = self
             .run_inner(
@@ -541,7 +549,7 @@ impl MerkleRootRelayer {
                 &mut blocks_rx,
                 &mut authority_set_sync,
                 &mut http,
-                &eth_api,
+                &mut eth_api,
             )
             .await
         {
@@ -555,10 +563,20 @@ impl MerkleRootRelayer {
         }
     }
 
-    async fn initialize_contract_cursor(&mut self, eth_api: &EthApi) -> anyhow::Result<()> {
+    async fn initialize_contract_cursor(&mut self, eth_api: &mut EthApi) -> anyhow::Result<()> {
         let relayer_id = &self.options.relayer_id;
-        let max_block_number = eth_api.max_block_number().await?;
-        let max_block_distance = eth_api.max_block_distance().await?;
+        let max_block_number = rpc::retry_eth(
+            eth_api,
+            "read MessageQueue max block number",
+            |api| async move { api.max_block_number().await },
+        )
+        .await?;
+        let max_block_distance = rpc::retry_eth(
+            eth_api,
+            "read MessageQueue max block distance",
+            |api| async move { api.max_block_distance().await },
+        )
+        .await?;
         let last_block_hash = self.api_provider.client().latest_finalized_block().await?;
         let last_block = self
             .api_provider
@@ -594,7 +612,7 @@ impl MerkleRootRelayer {
         &mut self,
         prover: &mut FinalityProverIo,
         authority_set_sync: &mut AuthoritySetSyncIo,
-        eth_api: &EthApi,
+        eth_api: &mut EthApi,
     ) -> anyhow::Result<()> {
         let relayer_id = self.options.relayer_id.clone();
         let client = self.api_provider.client();
@@ -623,10 +641,17 @@ impl MerkleRootRelayer {
             return Ok(());
         }
 
-        let eth_root = eth_api
-            .read_chainhead_merkle_root(block_number)
+        let eth_root = match self
+            .read_chainhead_merkle_root(eth_api, block_number)
             .await?
-            .map(H256::from);
+        {
+            EthereumRootRead::Fetched(root) => root,
+            EthereumRootRead::RetryLater => {
+                self.supervisor_interval
+                    .reset_after(MERKLE_ROOT_SUPERVISOR_RETRY_INTERVAL);
+                return Ok(());
+            }
+        };
         if eth_root == Some(merkle_root) {
             log::info!(
                 "Merkle root relayer {relayer_id} supervisor: Ethereum already has merkle root {merkle_root} for block #{block_number}"
@@ -687,6 +712,46 @@ impl MerkleRootRelayer {
         Ok(())
     }
 
+    async fn read_chainhead_merkle_root(
+        &self,
+        eth_api: &mut EthApi,
+        block_number: u32,
+    ) -> anyhow::Result<EthereumRootRead> {
+        let relayer_id = &self.options.relayer_id;
+        match eth_api.read_chainhead_merkle_root(block_number).await {
+            Ok(root) => return Ok(EthereumRootRead::Fetched(root.map(H256::from))),
+            Err(err) if rpc::classify_ethereum_error(&err) == rpc::RetryDecision::Retry => {
+                log::warn!(
+                    "Merkle root relayer {relayer_id} supervisor: recoverable Ethereum RPC error while reading merkle root for block #{block_number}: {err}. Reconnecting"
+                );
+            }
+            Err(err) => return Err(err.into()),
+        }
+
+        let reconnected = match eth_api.reconnect().await {
+            Ok(reconnected) => reconnected,
+            Err(err) if rpc::classify_ethereum_error(&err) == rpc::RetryDecision::Retry => {
+                log::warn!(
+                    "Merkle root relayer {relayer_id} supervisor: Ethereum reconnect failed: {err}. Retrying supervisor in {MERKLE_ROOT_SUPERVISOR_RETRY_INTERVAL:?}"
+                );
+                return Ok(EthereumRootRead::RetryLater);
+            }
+            Err(err) => return Err(err.into()),
+        };
+        *eth_api = reconnected;
+
+        match eth_api.read_chainhead_merkle_root(block_number).await {
+            Ok(root) => Ok(EthereumRootRead::Fetched(root.map(H256::from))),
+            Err(err) if rpc::classify_ethereum_error(&err) == rpc::RetryDecision::Retry => {
+                log::warn!(
+                    "Merkle root relayer {relayer_id} supervisor: Ethereum merkle-root read still unavailable after reconnect: {err}. Retrying supervisor in {MERKLE_ROOT_SUPERVISOR_RETRY_INTERVAL:?}"
+                );
+                Ok(EthereumRootRead::RetryLater)
+            }
+            Err(err) => Err(err.into()),
+        }
+    }
+
     async fn signed_block_after(&self, block_number: u32) -> anyhow::Result<GearBlock> {
         let api = self.api_provider.client();
         let (justification, _) = api
@@ -712,7 +777,7 @@ impl MerkleRootRelayer {
         authority_set_sync: &mut AuthoritySetSyncIo,
 
         http: &mut UnboundedReceiver<MerkleRootsRequest>,
-        eth_api: &EthApi,
+        eth_api: &mut EthApi,
     ) -> anyhow::Result<()> {
         loop {
             let result = self
@@ -760,7 +825,7 @@ impl MerkleRootRelayer {
         authority_set_sync: &mut AuthoritySetSyncIo,
 
         http: &mut UnboundedReceiver<MerkleRootsRequest>,
-        eth_api: &EthApi,
+        eth_api: &mut EthApi,
     ) -> anyhow::Result<bool> {
         let client = self.api_provider.client();
         tokio::select! {

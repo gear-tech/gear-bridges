@@ -183,9 +183,12 @@ mod tests {
         std::env::temp_dir().join(format!("gear-bridges-{test_name}-{}", uuid::Uuid::new_v4()))
     }
 
-    fn assert_inner_io_error(err: ProofStorageError) {
+    fn assert_inner_io_error(err: ProofStorageError, operation: &str, path: &Path) {
         match err {
             ProofStorageError::InnerError(err) => {
+                let message = err.to_string();
+                assert!(message.contains(operation), "{message}");
+                assert!(message.contains(&path.display().to_string()), "{message}");
                 assert!(err.chain().any(|cause| cause.is::<io::Error>()));
             }
             err => panic!("expected filesystem error, got {err}"),
@@ -211,7 +214,7 @@ mod tests {
             .await
             .err()
             .expect("a regular file cannot be used as a storage directory");
-        assert_inner_io_error(err);
+        assert_inner_io_error(err, "create proof storage directory", &path);
 
         fs::remove_file(path).await.unwrap();
     }
@@ -227,7 +230,11 @@ mod tests {
             .await
             .err()
             .expect("a directory cannot be read as circuit data");
-        assert_inner_io_error(err);
+        assert_inner_io_error(
+            err,
+            "read proof storage circuit data",
+            &path.join("circuit_data.bin"),
+        );
 
         fs::remove_dir_all(path).await.unwrap();
     }
@@ -244,7 +251,30 @@ mod tests {
             .atomic_write("circuit_data.bin", vec![1, 2, 3])
             .await
             .unwrap_err();
-        assert_inner_io_error(err);
+        assert_inner_io_error(
+            err,
+            "write proof storage temporary file",
+            &path.join("circuit_data.bin.tmp"),
+        );
+
+        fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn atomic_write_preserves_rename_error_context() {
+        let path = temporary_storage_path("failed-atomic-rename");
+        let storage = FileSystemProofStorage::new(path.clone()).await.unwrap();
+        fs::create_dir(path.join("circuit_data.bin")).await.unwrap();
+
+        let err = storage
+            .atomic_write("circuit_data.bin", vec![1, 2, 3])
+            .await
+            .unwrap_err();
+        assert_inner_io_error(
+            err,
+            "replace proof storage file",
+            &path.join("circuit_data.bin"),
+        );
 
         fs::remove_dir_all(path).await.unwrap();
     }

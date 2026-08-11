@@ -76,6 +76,18 @@ pub fn classify_anyhow(err: &anyhow::Error) -> RetryDecision {
         return classify_alloy_rpc(err);
     }
 
+    if classify_gear_transport_error(err) == RetryDecision::Retry {
+        return RetryDecision::Retry;
+    }
+
+    if err.chain().any(is_recoverable_error_text) {
+        return RetryDecision::Retry;
+    }
+
+    RetryDecision::Fail
+}
+
+pub(crate) fn classify_gear_transport_error(err: &anyhow::Error) -> RetryDecision {
     if let Some(gclient::Error::GearSDK(gsdk::Error::Subxt(err))) =
         err.downcast_ref::<gclient::Error>()
     {
@@ -96,10 +108,6 @@ pub fn classify_anyhow(err: &anyhow::Error) -> RetryDecision {
         }
     }
 
-    if err.chain().any(is_recoverable_error_text) {
-        return RetryDecision::Retry;
-    }
-
     RetryDecision::Fail
 }
 
@@ -107,7 +115,6 @@ pub fn classify_ethereum_error(err: &ethereum_client::Error) -> RetryDecision {
     match err {
         ethereum_client::Error::ErrorInHTTPTransport(err) => classify_alloy_rpc(err),
         ethereum_client::Error::ErrorDuringContractExecution(err)
-        | ethereum_client::Error::ErrorSendingTransaction(err)
         | ethereum_client::Error::ErrorQueryingEvent(err) => match err {
             alloy::contract::Error::TransportError(err) => classify_alloy_rpc(err),
             _ => RetryDecision::Fail,
@@ -159,46 +166,103 @@ pub fn is_recoverable_error_text(message: impl std::fmt::Display) -> bool {
 /// Retry an Ethereum operation without dropping its in-memory work item.
 ///
 /// This helper intentionally waits until a recoverable outage ends. Callers in a
-/// multiplexed event loop should instead bound reconnection and reschedule the work.
+/// multiplexed event loop should use [`retry_eth_bounded`] instead.
 pub async fn retry_eth<T, F, Fut>(
     api: &mut ethereum_client::EthApi,
     operation: &'static str,
-    mut f: F,
+    f: F,
 ) -> Result<T, ethereum_client::Error>
 where
     F: FnMut(ethereum_client::EthApi) -> Fut,
     Fut: Future<Output = Result<T, ethereum_client::Error>>,
 {
-    let mut attempt = 0;
-    let policy = RetryPolicy::default();
+    retry(
+        api,
+        operation,
+        RetryPolicy::default(),
+        None,
+        f,
+        |api| async move { api.reconnect().await },
+        classify_ethereum_error,
+    )
+    .await
+}
+
+pub(crate) async fn retry_eth_bounded<T, F, Fut>(
+    api: &mut ethereum_client::EthApi,
+    operation: &'static str,
+    max_retries: u32,
+    f: F,
+) -> Result<T, ethereum_client::Error>
+where
+    F: FnMut(ethereum_client::EthApi) -> Fut,
+    Fut: Future<Output = Result<T, ethereum_client::Error>>,
+{
+    retry(
+        api,
+        operation,
+        RetryPolicy::default(),
+        Some(max_retries),
+        f,
+        |api| async move { api.reconnect().await },
+        classify_ethereum_error,
+    )
+    .await
+}
+
+async fn retry<T, A, E, F, Fut, R, ReconnectFut, C>(
+    api: &mut A,
+    operation: &'static str,
+    policy: RetryPolicy,
+    max_retries: Option<u32>,
+    mut f: F,
+    mut reconnect: R,
+    classify: C,
+) -> Result<T, E>
+where
+    A: Clone,
+    E: std::fmt::Display,
+    F: FnMut(A) -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    R: FnMut(A) -> ReconnectFut,
+    ReconnectFut: Future<Output = Result<A, E>>,
+    C: Fn(&E) -> RetryDecision,
+{
+    let mut attempts = 0;
 
     loop {
         match f(api.clone()).await {
             Ok(value) => return Ok(value),
-            Err(err) if classify_ethereum_error(&err) == RetryDecision::Retry => {
-                let delay = policy.delay(attempt);
+            Err(err) if classify(&err) == RetryDecision::Retry => {
+                if max_retries.is_some_and(|max| attempts >= max) {
+                    return Err(err);
+                }
+
+                let delay = policy.delay(attempts);
+                attempts = attempts.saturating_add(1);
                 log::warn!(
-                    "{operation} failed with recoverable Ethereum RPC error: {err}. Reconnecting in {delay:?}"
+                    "{operation} failed with recoverable RPC error: {err}. Reconnecting in {delay:?}"
                 );
                 tokio::time::sleep(delay).await;
 
                 loop {
-                    match api.reconnect().await {
+                    match reconnect(api.clone()).await {
                         Ok(reconnected) => {
                             *api = reconnected;
-                            attempt = attempt.saturating_add(1);
-                            log::info!(
-                                "{operation}: reconnected to Ethereum API, retrying operation"
-                            );
+                            log::info!("{operation}: reconnected, retrying operation");
                             break;
                         }
-                        Err(err) if classify_ethereum_error(&err) == RetryDecision::Retry => {
-                            let delay = policy.delay(attempt);
+                        Err(err) if classify(&err) == RetryDecision::Retry => {
+                            if max_retries.is_some_and(|max| attempts >= max) {
+                                return Err(err);
+                            }
+
+                            let delay = policy.delay(attempts);
+                            attempts = attempts.saturating_add(1);
                             log::warn!(
-                                "{operation} failed to reconnect to Ethereum after a recoverable RPC error: {err}. Retrying in {delay:?}"
+                                "{operation} failed to reconnect after a recoverable RPC error: {err}. Retrying in {delay:?}"
                             );
                             tokio::time::sleep(delay).await;
-                            attempt = attempt.saturating_add(1);
                         }
                         Err(err) => return Err(err),
                     }
@@ -374,6 +438,15 @@ mod tests {
     }
 
     #[test]
+    fn does_not_retry_ambiguous_transaction_send_failures() {
+        let err = ethereum_client::Error::ErrorSendingTransaction(
+            alloy::contract::Error::TransportError(RpcError::NullResp),
+        );
+
+        assert_eq!(classify_ethereum_error(&err), RetryDecision::Fail);
+    }
+
+    #[test]
     fn keeps_typed_error_response_permanent_even_when_message_says_timeout() {
         let err = ethereum_client::Error::ErrorDuringContractExecution(
             alloy::contract::Error::TransportError(RpcError::ErrorResp(
@@ -397,5 +470,93 @@ mod tests {
         let err = anyhow::anyhow!("transport error: connection refused");
 
         assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+    }
+
+    #[tokio::test]
+    async fn retry_survives_a_recoverable_reconnect_failure() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let operation_calls = Arc::new(AtomicUsize::new(0));
+        let reconnect_calls = Arc::new(AtomicUsize::new(0));
+        let mut api = 0u32;
+        let result = retry(
+            &mut api,
+            "test operation",
+            RetryPolicy {
+                base_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+            },
+            Some(3),
+            {
+                let operation_calls = operation_calls.clone();
+                move |api| {
+                    let call = operation_calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        if call == 0 {
+                            Err("retry")
+                        } else {
+                            Ok(api + 10)
+                        }
+                    }
+                }
+            },
+            {
+                let reconnect_calls = reconnect_calls.clone();
+                move |api| {
+                    let call = reconnect_calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        if call == 0 {
+                            Err("retry")
+                        } else {
+                            Ok(api + 1)
+                        }
+                    }
+                }
+            },
+            |_| RetryDecision::Retry,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, 11);
+        assert_eq!(operation_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(reconnect_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn bounded_retry_returns_after_its_reconnect_budget() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let reconnect_calls = Arc::new(AtomicUsize::new(0));
+        let mut api = ();
+        let err = retry(
+            &mut api,
+            "bounded test operation",
+            RetryPolicy {
+                base_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+            },
+            Some(1),
+            |_| async { Err::<(), _>("operation unavailable") },
+            {
+                let reconnect_calls = reconnect_calls.clone();
+                move |_| {
+                    reconnect_calls.fetch_add(1, Ordering::SeqCst);
+                    async { Err("reconnect unavailable") }
+                }
+            },
+            |_| RetryDecision::Retry,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err, "reconnect unavailable");
+        assert_eq!(reconnect_calls.load(Ordering::SeqCst), 1);
     }
 }

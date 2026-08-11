@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{submit_merkle_root_to_ethereum, BASE_RETRY_DELAY, MAX_RETRIES},
+    common::{submit_merkle_root_to_ethereum, MAX_RETRIES},
     prover_interface::FinalProof,
     rpc,
 };
@@ -215,9 +215,10 @@ impl MerkleRootSubmitter {
         &mut self,
         gear_block: u32,
     ) -> Result<Option<[u8; 32]>, ethereum_client::Error> {
-        rpc::retry_eth(
+        rpc::retry_eth_bounded(
             &mut self.eth_api,
             "read finalized MessageQueue merkle root",
+            MAX_RETRIES,
             |api| async move { api.read_finalized_merkle_root(gear_block).await },
         )
         .await
@@ -231,8 +232,12 @@ impl MerkleRootSubmitter {
         let mut pending_transactions = FuturesUnordered::new();
         loop {
             let relayer_id = self.relayer_id.clone();
-            let balance = self.eth_api.get_approx_balance().await?;
-            self.metrics.fee_payer_balance.set(balance);
+            match self.eth_api.get_approx_balance().await {
+                Ok(balance) => self.metrics.fee_payer_balance.set(balance),
+                Err(err) => log::warn!(
+                    "Merkle root relayer {relayer_id}: failed to update Ethereum fee payer balance metric: {err}"
+                ),
+            }
             self.metrics
                 .pending_submissions
                 .set(pending_transactions.len() as i64);
@@ -261,9 +266,10 @@ impl MerkleRootSubmitter {
                         continue;
                     }
 
-                    match rpc::retry_eth(
+                    match rpc::retry_eth_bounded(
                         &mut self.eth_api,
                         "submit merkle root",
+                        MAX_RETRIES,
                         |api| {
                             let proof = request.proof.clone();
                             async move { submit_merkle_root_to_ethereum(&api, proof).await }
@@ -287,6 +293,12 @@ impl MerkleRootSubmitter {
                                 self.confirmations,
                             ));
                             continue;
+                        }
+                        Err(err)
+                            if rpc::classify_ethereum_error(&err)
+                                == rpc::RetryDecision::Retry =>
+                        {
+                            return Err(err.into());
                         }
                         // How do we get here?
                         // - Relayer crashed and already submitted the merkle root but not yet confirmed it
@@ -456,85 +468,18 @@ impl MerkleRootSubmitter {
     }
 }
 
-fn should_retry_process_error(err: &anyhow::Error) -> bool {
-    rpc::classify_anyhow(err) == rpc::RetryDecision::Retry
-}
-
 async fn task(
     mut this: MerkleRootSubmitter,
     mut proofs: UnboundedReceiver<Request>,
     responses: UnboundedSender<Response>,
 ) {
-    let mut attempts = 0;
-
-    loop {
-        match this.process(&mut proofs, &responses).await {
-            Ok(_) => break,
-            Err(e) if !should_retry_process_error(&e) => {
-                // Dropping `responses` closes the parent channel and makes the Merkle
-                // relayer fail visibly. Restarting this task would lose any request or
-                // receipt result already removed from its in-memory queue.
-                log::error!(
-                    "Merkle root relayer {} submitter failed with a non-recoverable error, exiting: {e}",
-                    this.relayer_id
-                );
-                break;
-            }
-            Err(e) => {
-                attempts += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                    "Merkle root relayer {} submitter failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
-                    this.relayer_id,
-                );
-                if attempts >= MAX_RETRIES {
-                    log::error!(
-                        "Merkle root relayer {} submitter maximum attempts reached, exiting...",
-                        this.relayer_id
-                    );
-                    break;
-                }
-                tokio::time::sleep(delay).await;
-
-                match this.eth_api.reconnect().await {
-                    Ok(eth_api) => this.eth_api = eth_api,
-                    Err(e) => {
-                        log::error!(
-                            "Merkle root relayer {} submitter failed to reconnect to Ethereum API: {e}",
-                            this.relayer_id
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy::transports::{RpcError, TransportErrorKind};
-
-    #[test]
-    fn permanent_reconciliation_error_stops_submitter_task() {
-        let err = ethereum_client::Error::ErrorDuringContractExecution(
-            alloy::contract::Error::TransportError(RpcError::ErrorResp(
-                serde_json::from_str(r#"{"code":-32603,"message":"execution failed"}"#).unwrap(),
-            )),
+    if let Err(err) = this.process(&mut proofs, &responses).await {
+        // Restarting only this task would lose requests and receipt results that
+        // `process` already removed from its in-memory queues. Closing the response
+        // channel makes the parent relayer restart from its durable root state.
+        log::error!(
+            "Merkle root relayer {} submitter failed, exiting: {err}",
+            this.relayer_id
         );
-
-        assert!(!should_retry_process_error(&err.into()));
-    }
-
-    #[test]
-    fn backend_disconnect_retries_submitter_task() {
-        let err = ethereum_client::Error::ErrorDuringContractExecution(
-            alloy::contract::Error::TransportError(RpcError::Transport(
-                TransportErrorKind::BackendGone,
-            )),
-        );
-
-        assert!(should_retry_process_error(&err.into()));
     }
 }

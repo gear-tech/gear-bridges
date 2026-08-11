@@ -24,9 +24,17 @@ use tokio::sync::{
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 fn is_recoverable_authority_sync_error(err: &anyhow::Error) -> bool {
-    !err.chain()
-        .any(|cause| cause.downcast_ref::<ProofStorageError>().is_some())
-        && rpc::classify_anyhow(err) == rpc::RetryDecision::Retry
+    if let Some(storage_error) = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<ProofStorageError>())
+    {
+        let ProofStorageError::InnerError(source) = storage_error else {
+            return false;
+        };
+        return rpc::classify_gear_transport_error(source) == rpc::RetryDecision::Retry;
+    }
+
+    rpc::classify_anyhow(err) == rpc::RetryDecision::Retry
 }
 
 pub struct AuthoritySetSyncIo {
@@ -715,6 +723,16 @@ mod tests {
         )));
 
         assert!(!is_recoverable_authority_sync_error(&err));
+    }
+
+    #[test]
+    fn reconnects_for_gear_backed_proof_storage_disconnects() {
+        let disconnect = subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped);
+        let err = anyhow::Error::new(ProofStorageError::InnerError(anyhow::Error::new(
+            disconnect,
+        )));
+
+        assert!(is_recoverable_authority_sync_error(&err));
     }
 
     #[test]

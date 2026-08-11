@@ -178,7 +178,9 @@ async fn podman_ethereum_contract_read_recovers_after_real_proxy_outage() -> any
 
     let proxy_for_restart = proxy.clone();
     let restarter = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(750)).await;
+        // `retry_eth` waits at most two seconds before its first reconnect, so
+        // keeping the proxy down longer proves that a failed reconnect is retried.
+        tokio::time::sleep(Duration::from_secs(5)).await;
         proxy_for_restart.start_container().await
     });
 

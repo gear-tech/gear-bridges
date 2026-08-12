@@ -1,6 +1,9 @@
 use std::ops::ControlFlow;
 
-use crate::message_relayer::common::{EthereumSlotNumber, TxHashWithSlot};
+use crate::{
+    message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
+    rpc,
+};
 use alloy::providers::Provider;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_rlp::Encodable;
@@ -194,8 +197,8 @@ async fn task(
                 }
             }
 
-            match this.eth_api.reconnect().await {
-                Ok(_) => log::info!("Successfully reconnected to Ethereum API"),
+            match rpc::reconnect_polling_eth(&mut this.eth_api).await {
+                Ok(()) => log::info!("Successfully reconnected to Ethereum API"),
                 Err(err) => {
                     log::error!("Failed to reconnect to Ethereum API: {err:?}");
                     return;

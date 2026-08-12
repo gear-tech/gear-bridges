@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
-    common::{submit_merkle_root_to_ethereum, BASE_RETRY_DELAY, MAX_RETRIES},
+    common::{submit_merkle_root_to_ethereum, MAX_RETRIES},
     prover_interface::FinalProof,
     rpc,
 };
@@ -211,6 +211,19 @@ impl MerkleRootSubmitter {
         }
     }
 
+    async fn read_finalized_merkle_root(
+        &mut self,
+        gear_block: u32,
+    ) -> Result<Option<[u8; 32]>, ethereum_client::Error> {
+        rpc::retry_eth_bounded(
+            &mut self.eth_api,
+            "read finalized MessageQueue merkle root",
+            MAX_RETRIES,
+            |api| async move { api.read_finalized_merkle_root(gear_block).await },
+        )
+        .await
+    }
+
     async fn process(
         &mut self,
         proofs: &mut UnboundedReceiver<Request>,
@@ -218,9 +231,13 @@ impl MerkleRootSubmitter {
     ) -> anyhow::Result<()> {
         let mut pending_transactions = FuturesUnordered::new();
         loop {
-            let relayer_id = self.relayer_id.as_str();
-            let balance = self.eth_api.get_approx_balance().await?;
-            self.metrics.fee_payer_balance.set(balance);
+            let relayer_id = self.relayer_id.clone();
+            match self.eth_api.get_approx_balance().await {
+                Ok(balance) => self.metrics.fee_payer_balance.set(balance),
+                Err(err) => log::warn!(
+                    "Merkle root relayer {relayer_id}: failed to update Ethereum fee payer balance metric: {err}"
+                ),
+            }
             self.metrics
                 .pending_submissions
                 .set(pending_transactions.len() as i64);
@@ -249,8 +266,17 @@ impl MerkleRootSubmitter {
                         continue;
                     }
 
-                    loop {
-                    match submit_merkle_root_to_ethereum(&self.eth_api, request.proof.clone()).await {
+                    match rpc::retry_eth_bounded(
+                        &mut self.eth_api,
+                        "submit merkle root",
+                        MAX_RETRIES,
+                        |api| {
+                            let proof = request.proof.clone();
+                            async move { submit_merkle_root_to_ethereum(&api, proof).await }
+                        },
+                    )
+                    .await
+                    {
                         Ok(pending_tx) => {
                             log::info!(
                                 "Merkle root relayer {relayer_id}: submitted merkle root to Ethereum, tx hash: {}",
@@ -266,14 +292,19 @@ impl MerkleRootSubmitter {
                                 request.proof,
                                 self.confirmations,
                             ));
-                            break;
+                            continue;
+                        }
+                        Err(err)
+                            if rpc::classify_ethereum_error(&err)
+                                == rpc::RetryDecision::Retry =>
+                        {
+                            return Err(err.into());
                         }
                         // How do we get here?
                         // - Relayer crashed and already submitted the merkle root but not yet confirmed it
                         // - Somebody else submitted the merkle root
                         Err(ethereum_client::Error::ErrorDuringContractExecution(err)) => {
-                            let root_exists = self.eth_api
-                                .read_finalized_merkle_root(request.proof.block_number)
+                            let root_exists = self.read_finalized_merkle_root(request.proof.block_number)
                                 .await?
                                 .is_some();
 
@@ -288,7 +319,7 @@ impl MerkleRootSubmitter {
                                 }).is_err() {
                                     return Ok(());
                                 };
-                                break;
+                                continue;
                             } else {
                                 log::error!("Merkle root relayer {relayer_id}: failed to submit merkle root {}: Error during contract execution: {err:?}", H256::from(request.proof.merkle_root));
                                 self.metrics.failed_submissions.inc();
@@ -302,21 +333,9 @@ impl MerkleRootSubmitter {
                                 }).is_err() {
                                     return Ok(());
                                 };
-                                break;
+                                continue;
                             }
                         }
-
-
-                        Err(err) if is_recoverable_eth_error(&err) => {
-                            log::warn!(
-                                "Merkle root relayer {relayer_id}: recoverable error while submitting merkle root {}: {err}. Reconnecting and retrying",
-                                H256::from(request.proof.merkle_root)
-                            );
-                            tokio::time::sleep(BASE_RETRY_DELAY).await;
-                            self.eth_api = self.eth_api.reconnect().await?;
-                            continue;
-                        }
-
                         Err(err) => {
 
                             log::error!("Merkle root relayer {relayer_id}: failed to submit merkle root {}: {}", H256::from(request.proof.merkle_root), err);
@@ -331,9 +350,8 @@ impl MerkleRootSubmitter {
                             }).is_err() {
                                 return Ok(());
                             };
-                            break;
+                            continue;
                         }
-                    }
                     }
                 },
 
@@ -353,8 +371,7 @@ impl MerkleRootSubmitter {
                             self.metrics.last_gas_used.set(gas_used);
 
                             if !submitted.receipt.status() {
-                                let root_exists = self.eth_api
-                                    .read_finalized_merkle_root(submitted.proof.block_number)
+                                let root_exists = self.read_finalized_merkle_root(submitted.proof.block_number)
                                     .await?
                                     .is_some();
 
@@ -403,8 +420,7 @@ impl MerkleRootSubmitter {
                         }
 
                         Err(err) => {
-                            let root_exists = self.eth_api
-                                .read_finalized_merkle_root(err.proof.block_number)
+                            let root_exists = self.read_finalized_merkle_root(err.proof.block_number)
                                 .await?
                                 .is_some();
 
@@ -452,52 +468,18 @@ impl MerkleRootSubmitter {
     }
 }
 
-fn is_recoverable_eth_error(err: &ethereum_client::Error) -> bool {
-    match err {
-        ethereum_client::Error::ErrorInHTTPTransport(err) => {
-            crate::common::is_rpc_transport_error_recoverable(err)
-        }
-        _ => rpc::is_recoverable_error_text(err),
-    }
-}
-
 async fn task(
     mut this: MerkleRootSubmitter,
     mut proofs: UnboundedReceiver<Request>,
     responses: UnboundedSender<Response>,
 ) {
-    let mut attempts = 0;
-
-    loop {
-        match this.process(&mut proofs, &responses).await {
-            Ok(_) => break,
-            Err(e) => {
-                attempts += 1;
-                let delay = BASE_RETRY_DELAY * 2u32.pow(attempts - 1);
-                log::error!(
-                    "Merkle root relayer {} submitter failed (attempt: {attempts}/{MAX_RETRIES}): {e}. Retrying in {delay:?}",
-                    this.relayer_id,
-                );
-                if attempts >= MAX_RETRIES {
-                    log::error!(
-                        "Merkle root relayer {} submitter maximum attempts reached, exiting...",
-                        this.relayer_id
-                    );
-                    break;
-                }
-                tokio::time::sleep(delay).await;
-
-                match this.eth_api.reconnect().await {
-                    Ok(eth_api) => this.eth_api = eth_api,
-                    Err(e) => {
-                        log::error!(
-                            "Merkle root relayer {} submitter failed to reconnect to Ethereum API: {e}",
-                            this.relayer_id
-                        );
-                        break;
-                    }
-                }
-            }
-        }
+    if let Err(err) = this.process(&mut proofs, &responses).await {
+        // Restarting only this task would lose requests and receipt results that
+        // `process` already removed from its in-memory queues. Closing the response
+        // channel makes the parent relayer restart from its durable root state.
+        log::error!(
+            "Merkle root relayer {} submitter failed, exiting: {err}",
+            this.relayer_id
+        );
     }
 }

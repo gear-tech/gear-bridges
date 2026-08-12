@@ -195,7 +195,10 @@ async fn task(
             }
 
             match this.eth_api.reconnect().await {
-                Ok(_) => log::info!("Successfully reconnected to Ethereum API"),
+                Ok(eth_api) => {
+                    this.eth_api = eth_api;
+                    log::info!("Successfully reconnected to Ethereum API");
+                }
                 Err(err) => {
                     log::error!("Failed to reconnect to Ethereum API: {err:?}");
                     return;

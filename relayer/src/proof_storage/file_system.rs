@@ -61,6 +61,12 @@ impl ProofStorage for FileSystemProofStorage {
 
 impl FileSystemProofStorage {
     pub async fn new(save_to: PathBuf) -> Result<FileSystemProofStorage, ProofStorageError> {
+        if save_to.as_os_str().is_empty() {
+            return Err(ProofStorageError::InnerError(anyhow::anyhow!(
+                "proof storage path must not be empty"
+            )));
+        }
+
         fs::create_dir_all(&save_to)
             .await
             .map_err(|err| io_error("create proof storage directory", &save_to, err))?;
@@ -193,6 +199,19 @@ mod tests {
             }
             err => panic!("expected filesystem error, got {err}"),
         }
+    }
+
+    #[tokio::test]
+    async fn empty_storage_path_is_rejected() {
+        let err = FileSystemProofStorage::new(PathBuf::new())
+            .await
+            .err()
+            .expect("an empty path must not use the process working directory");
+
+        assert!(
+            err.to_string().contains("path must not be empty"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]

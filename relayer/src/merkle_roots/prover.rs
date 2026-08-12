@@ -50,6 +50,28 @@ pub enum Response {
         batch_roots: Vec<(u32, H256)>,
     },
 }
+async fn receive_batch<T>(
+    requests: &mut UnboundedReceiver<T>,
+    batch: &mut Vec<T>,
+    limit: usize,
+    collection_window: Duration,
+) -> (usize, bool) {
+    let mut received = requests.recv_many(batch, limit).await;
+    if received == 0 {
+        return (0, false);
+    }
+
+    let deadline = tokio::time::Instant::now() + collection_window;
+    while received < limit {
+        match tokio::time::timeout_at(deadline, requests.recv_many(batch, limit - received)).await {
+            Ok(0) => return (received, false),
+            Ok(additional) => received += additional,
+            Err(_) => return (received, true),
+        }
+    }
+
+    (received, false)
+}
 
 #[derive(Clone)]
 struct ProverContext {
@@ -288,30 +310,16 @@ impl FinalityProver {
         let mut non_batch_requests: Vec<Request> = Vec::new();
 
         loop {
-            let mut n = requests.recv_many(&mut batch_vec, BATCH_SIZE).await;
+            let (n, collection_timed_out) = receive_batch(
+                requests,
+                &mut batch_vec,
+                BATCH_SIZE,
+                Duration::from_secs(10),
+            )
+            .await;
             if n == 0 {
                 log::info!("Requests channel closed, exiting");
                 break;
-            }
-
-            // Collect until the channel has been quiet for ten seconds. Startup
-            // recovery enqueues roots around RPC calls, so a single extra
-            // recv_many can return before the best request arrives.
-            let mut collection_timed_out = false;
-            while n < BATCH_SIZE {
-                match tokio::time::timeout(
-                    Duration::from_secs(10),
-                    requests.recv_many(&mut batch_vec, BATCH_SIZE - n),
-                )
-                .await
-                {
-                    Ok(0) => break,
-                    Ok(rest) => n += rest,
-                    Err(_) => {
-                        collection_timed_out = true;
-                        break;
-                    }
-                }
             }
 
             if collection_timed_out && n == 1 {
@@ -1194,13 +1202,15 @@ fn proof_request_order_key(
 mod tests {
     use super::{
         clear_current_shared_request, plan_shared_relayer_requests, proof_request_order_key,
-        record_current_shared_request, record_pending_request_counts, select_next_relayer_id,
-        send_shared_response, Metrics, Response, SharedProofRequestInfo, SharedProofWork,
+        receive_batch, record_current_shared_request, record_pending_request_counts,
+        select_next_relayer_id, send_shared_response, Metrics, Response, SharedProofRequestInfo,
+        SharedProofWork,
     };
     use crate::prover_interface::FinalProof;
     use primitive_types::H256;
     use prometheus::Registry;
-    use tokio::sync::mpsc;
+    use std::time::Duration;
+    use tokio::{sync::mpsc, time::sleep};
     use utils_prometheus::MeteredService;
 
     #[test]
@@ -1209,6 +1219,32 @@ mod tests {
         let current_root = proof_request_order_key(3625, 597, 35_361_830, 35_361_830);
 
         assert!(current_root < long_recovery);
+    }
+    #[tokio::test]
+    async fn batch_collection_uses_one_deadline() {
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        sender.send(0).unwrap();
+
+        let producer = tokio::spawn(async move {
+            for value in 1..100 {
+                sleep(Duration::from_millis(5)).await;
+                if sender.send(value).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let mut batch = Vec::new();
+        let (received, timed_out) =
+            receive_batch(&mut receiver, &mut batch, 100, Duration::from_millis(40)).await;
+        producer.abort();
+
+        assert!(timed_out, "collection should stop at the original deadline");
+        assert_eq!(received, batch.len());
+        assert!(
+            received < 100,
+            "a steady stream must not renew the deadline"
+        );
     }
 
     #[test]

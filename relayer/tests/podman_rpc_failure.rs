@@ -72,11 +72,8 @@ async fn eth_finalized_with_reconnect(api: &mut PollingEthApi) -> anyhow::Result
 async fn reconnect_polling_api(api: &mut PollingEthApi) -> anyhow::Result<()> {
     tokio::time::sleep(Duration::from_millis(250)).await;
     loop {
-        match tokio::time::timeout(Duration::from_secs(10), api.reconnect()).await {
-            Ok(Ok(reconnected)) => {
-                *api = reconnected;
-                return Ok(());
-            }
+        match tokio::time::timeout(Duration::from_secs(10), rpc::reconnect_polling_eth(api)).await {
+            Ok(Ok(())) => return Ok(()),
             Ok(Err(reconnect_err))
                 if rpc::classify_anyhow(&reconnect_err) == RetryDecision::Retry =>
             {
@@ -174,31 +171,39 @@ async fn podman_ethereum_contract_read_recovers_after_real_proxy_outage() -> any
 
     let baseline = api.max_block_number().await?;
     proxy.stop_container().await?;
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
-    let proxy_for_restart = proxy.clone();
-    let restarter = tokio::spawn(async move {
-        // `retry_eth` waits at most two seconds before its first reconnect, so
-        // keeping the proxy down longer proves that a failed reconnect is retried.
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        proxy_for_restart.start_container().await
-    });
+    let read_err = tokio::time::timeout(Duration::from_secs(10), api.max_block_number())
+        .await
+        .context("timed out waiting for the contract read to fail during the outage")?
+        .expect_err("contract read unexpectedly succeeded while the proxy was stopped");
+    assert_eq!(
+        rpc::classify_ethereum_error(&read_err),
+        RetryDecision::Retry,
+        "proxy outage returned a permanent contract-read error: {read_err}"
+    );
 
-    let worker = tokio::spawn(async move {
+    let reconnect_err = tokio::time::timeout(Duration::from_secs(10), api.reconnect())
+        .await
+        .context("timed out waiting for Ethereum reconnect to fail during the outage")?
+        .err()
+        .expect("Ethereum reconnect unexpectedly succeeded while the proxy was stopped");
+    assert_eq!(
+        rpc::classify_ethereum_error(&reconnect_err),
+        RetryDecision::Retry,
+        "proxy outage returned a permanent reconnect error: {reconnect_err}"
+    );
+
+    proxy.start_container().await?;
+    let recovered = tokio::time::timeout(
+        Duration::from_secs(90),
         rpc::retry_eth(
             &mut api,
             "podman test MessageQueue max block number",
             |api| async move { api.max_block_number().await },
-        )
-        .await
-    });
-
-    tokio::time::timeout(Duration::from_secs(30), restarter)
-        .await
-        .context("timed out waiting for Ethereum proxy restart")???;
-    let recovered = tokio::time::timeout(Duration::from_secs(90), worker)
-        .await
-        .context("timed out waiting for Ethereum contract read to recover")???;
+        ),
+    )
+    .await
+    .context("timed out waiting for Ethereum contract read to recover")??;
 
     assert!(
         recovered >= baseline,
@@ -224,13 +229,21 @@ async fn podman_ethereum_polling_recovers_after_real_proxy_outage() -> anyhow::R
 
     let baseline = worker_api.finalized_block().await?.header.number;
     proxy.stop_container().await?;
-    tokio::time::sleep(Duration::from_millis(250)).await;
 
-    let proxy_for_restart = proxy.clone();
-    let restarter = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(750)).await;
-        proxy_for_restart.start_container().await
-    });
+    let reconnect_err = tokio::time::timeout(
+        Duration::from_secs(10),
+        rpc::reconnect_polling_eth(&mut worker_api),
+    )
+    .await
+    .context("timed out waiting for polling reconnect to fail during the outage")?
+    .expect_err("polling reconnect unexpectedly succeeded while the proxy was stopped");
+    assert_eq!(
+        rpc::classify_anyhow(&reconnect_err),
+        RetryDecision::Retry,
+        "proxy outage returned a permanent polling reconnect error: {reconnect_err}"
+    );
+
+    proxy.start_container().await?;
 
     let worker = tokio::spawn(async move {
         let mut observed = Vec::new();
@@ -246,9 +259,6 @@ async fn podman_ethereum_polling_recovers_after_real_proxy_outage() -> anyhow::R
         eth_finalized_with_reconnect(&mut sibling_api).await
     });
 
-    tokio::time::timeout(Duration::from_secs(30), restarter)
-        .await
-        .context("timed out waiting for Ethereum proxy restart")???;
     let sibling_block = tokio::time::timeout(Duration::from_secs(90), sibling_reconnector)
         .await
         .context("timed out waiting for sibling Ethereum reconnect")???;

@@ -130,7 +130,7 @@ pub fn classify_alloy_rpc(err: &RpcError<TransportErrorKind>) -> RetryDecision {
                 RetryDecision::Retry
             }
             TransportErrorKind::HttpError(err)
-                if err.status == 429 || matches!(err.status, 500 | 502 | 503 | 504) =>
+                if matches!(err.status, 408 | 429 | 500 | 502 | 503 | 504) =>
             {
                 RetryDecision::Retry
             }
@@ -186,6 +186,11 @@ where
         classify_ethereum_error,
     )
     .await
+}
+/// Reconnect a polling Ethereum client and retain the replacement provider.
+pub async fn reconnect_polling_eth(api: &mut ethereum_client::PollingEthApi) -> anyhow::Result<()> {
+    *api = api.reconnect().await?;
+    Ok(())
 }
 
 pub(crate) async fn retry_eth_bounded<T, F, Fut>(
@@ -375,7 +380,7 @@ mod tests {
 
     #[test]
     fn classifies_only_retryable_http_statuses_as_recoverable() {
-        for status in [429, 500, 502, 503, 504] {
+        for status in [408, 429, 500, 502, 503, 504] {
             let err = TransportErrorKind::http_error(status, String::new());
             assert_eq!(classify_alloy_rpc(&err), RetryDecision::Retry);
         }

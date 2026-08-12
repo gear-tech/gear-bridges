@@ -294,57 +294,59 @@ impl FinalityProver {
                 break;
             }
 
-            // Leave a short collection window even when recv_many returned more
-            // than one request. Startup recovery can enqueue saved roots first
-            // and a cheaper supervisor proof immediately afterwards.
-            let rest = if n < BATCH_SIZE {
-                tokio::time::timeout(
+            // Collect until the channel has been quiet for ten seconds. Startup
+            // recovery enqueues roots around RPC calls, so a single extra
+            // recv_many can return before the best request arrives.
+            let mut collection_timed_out = false;
+            while n < BATCH_SIZE {
+                match tokio::time::timeout(
                     Duration::from_secs(10),
                     requests.recv_many(&mut batch_vec, BATCH_SIZE - n),
                 )
                 .await
-            } else {
-                Ok(0)
-            };
-
-            match rest {
-                Err(_) if n == 1 => {
-                    log::info!("Only one request received, processing it immediately");
-                    let request = batch_vec.pop().expect("at least one request is received");
-
-                    self.metrics.pending_requests.set(0);
-                    self.metrics.currently_processing.set(1);
-                    self.metrics
-                        .current_root_block
-                        .set(request.block_number as i64);
-
-                    let proof = self
-                        .generate_proof(
-                            request.block_number,
-                            request.block_hash,
-                            request.merkle_root,
-                            request.inner_proof,
-                            request.block_inclusion_proof,
-                        )
-                        .await?;
-
-                    if responses
-                        .send(Response::Single {
-                            block_number: request.block_number,
-                            merkle_root: request.merkle_root,
-                            proof,
-                        })
-                        .is_err()
-                    {
-                        log::warn!("Response channel closed, exiting");
-                        return Ok(());
+                {
+                    Ok(0) => break,
+                    Ok(rest) => n += rest,
+                    Err(_) => {
+                        collection_timed_out = true;
+                        break;
                     }
+                }
+            }
 
-                    continue;
+            if collection_timed_out && n == 1 {
+                log::info!("Only one request received, processing it immediately");
+                let request = batch_vec.pop().expect("at least one request is received");
+
+                self.metrics.pending_requests.set(0);
+                self.metrics.currently_processing.set(1);
+                self.metrics
+                    .current_root_block
+                    .set(request.block_number as i64);
+
+                let proof = self
+                    .generate_proof(
+                        request.block_number,
+                        request.block_hash,
+                        request.merkle_root,
+                        request.inner_proof,
+                        request.block_inclusion_proof,
+                    )
+                    .await?;
+
+                if responses
+                    .send(Response::Single {
+                        block_number: request.block_number,
+                        merkle_root: request.merkle_root,
+                        proof,
+                    })
+                    .is_err()
+                {
+                    log::warn!("Response channel closed, exiting");
+                    return Ok(());
                 }
 
-                Ok(rest) => n += rest,
-                Err(_) => {}
+                continue;
             }
 
             log::info!("Received {n} requests, grouping by authority set...");

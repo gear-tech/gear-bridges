@@ -283,70 +283,69 @@ impl FinalityProver {
 
         let mut batch_vec = Vec::with_capacity(BATCH_SIZE);
         // Group requests by authority set ID and queue ID, storing all blocks for each set.
-        // Use BTreeMap to have a deterministic order of processing: from older to newer authority sets.
         let mut request_groups: BTreeMap<(u64, u64), BatchProofRequest> = BTreeMap::new();
 
         let mut non_batch_requests: Vec<Request> = Vec::new();
 
         loop {
-            // Receives messages into `batch_vec` but has one big downside requiring another `recv_many`
-            // down below: will receive only one element first *and* only then will receive the full batch.
-            let n = requests.recv_many(&mut batch_vec, BATCH_SIZE).await;
+            let mut n = requests.recv_many(&mut batch_vec, BATCH_SIZE).await;
             if n == 0 {
                 log::info!("Requests channel closed, exiting");
                 break;
             }
 
-            let n = if n == 1 {
-                // attempt to receive more requests in 10 second timeout.
-                let rest = tokio::time::timeout(
+            // Leave a short collection window even when recv_many returned more
+            // than one request. Startup recovery can enqueue saved roots first
+            // and a cheaper supervisor proof immediately afterwards.
+            let rest = if n < BATCH_SIZE {
+                tokio::time::timeout(
                     Duration::from_secs(10),
-                    requests.recv_many(&mut batch_vec, BATCH_SIZE - 1),
+                    requests.recv_many(&mut batch_vec, BATCH_SIZE - n),
                 )
-                .await;
+                .await
+            } else {
+                Ok(0)
+            };
 
-                match rest {
-                    Err(_) => {
-                        log::info!("Only one request received, processing it immediately");
-                        let request = batch_vec.pop().expect("at least one request is received");
+            match rest {
+                Err(_) if n == 1 => {
+                    log::info!("Only one request received, processing it immediately");
+                    let request = batch_vec.pop().expect("at least one request is received");
 
-                        self.metrics.pending_requests.set(0);
-                        self.metrics.currently_processing.set(1);
-                        self.metrics
-                            .current_root_block
-                            .set(request.block_number as i64);
+                    self.metrics.pending_requests.set(0);
+                    self.metrics.currently_processing.set(1);
+                    self.metrics
+                        .current_root_block
+                        .set(request.block_number as i64);
 
-                        let proof = self
-                            .generate_proof(
-                                request.block_number,
-                                request.block_hash,
-                                request.merkle_root,
-                                request.inner_proof,
-                                request.block_inclusion_proof,
-                            )
-                            .await?;
+                    let proof = self
+                        .generate_proof(
+                            request.block_number,
+                            request.block_hash,
+                            request.merkle_root,
+                            request.inner_proof,
+                            request.block_inclusion_proof,
+                        )
+                        .await?;
 
-                        if responses
-                            .send(Response::Single {
-                                block_number: request.block_number,
-                                merkle_root: request.merkle_root,
-                                proof,
-                            })
-                            .is_err()
-                        {
-                            log::warn!("Response channel closed, exiting");
-                            return Ok(());
-                        }
-
-                        continue;
+                    if responses
+                        .send(Response::Single {
+                            block_number: request.block_number,
+                            merkle_root: request.merkle_root,
+                            proof,
+                        })
+                        .is_err()
+                    {
+                        log::warn!("Response channel closed, exiting");
+                        return Ok(());
                     }
 
-                    // received more requests, process them in batch
-                    Ok(rest) => rest + 1,
+                    continue;
                 }
-            } else {
-                n
-            };
+
+                Ok(rest) => n += rest,
+                Err(_) => {}
+            }
 
             log::info!("Received {n} requests, grouping by authority set...");
 
@@ -424,7 +423,21 @@ impl FinalityProver {
                 }
             }
 
-            for ((authority_set_id, queue_id), request) in request_groups.iter() {
+            // Bound memory by proving one group at a time, but do not start a
+            // multi-thousand-header proof while a short proof is already queued.
+            let mut ordered_request_groups = std::mem::take(&mut request_groups)
+                .into_iter()
+                .collect::<Vec<_>>();
+            ordered_request_groups.sort_by_key(|((authority_set_id, queue_id), request)| {
+                proof_request_order_key(
+                    *authority_set_id,
+                    *queue_id,
+                    request.block_number,
+                    request.block_inclusion_proof.block_number,
+                )
+            });
+
+            for ((authority_set_id, queue_id), request) in ordered_request_groups {
                 let BatchProofRequest {
                     block_number,
                     block_hash,
@@ -432,9 +445,10 @@ impl FinalityProver {
                     inner_proof,
                     batch_roots,
                     block_inclusion_proof,
-                } = request.clone();
+                } = request;
                 log::info!(
-                    "Proving finality for latest block #{block_number} with authority set #{authority_set_id}, merkle-root {merkle_root} and queue #{queue_id} (will apply to {} blocks)",
+                    "Proving finality for latest block #{block_number} with authority set #{authority_set_id}, merkle-root {merkle_root} and queue #{queue_id} (span {}, will apply to {} blocks)",
+                    block_inclusion_proof.block_number.saturating_sub(block_number),
                     batch_roots.len()
                 );
                 self.metrics
@@ -469,7 +483,7 @@ impl FinalityProver {
                 }
             }
 
-            request_groups.clear();
+            debug_assert!(request_groups.is_empty());
         }
 
         Ok(())
@@ -1160,18 +1174,40 @@ impl BatchProofRequest {
     }
 }
 
+fn proof_request_order_key(
+    authority_set_id: u64,
+    queue_id: u64,
+    block_number: u32,
+    signed_block_number: u32,
+) -> (u32, u64, u64, u32) {
+    (
+        signed_block_number.saturating_sub(block_number),
+        authority_set_id,
+        queue_id,
+        block_number,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_current_shared_request, plan_shared_relayer_requests, record_current_shared_request,
-        record_pending_request_counts, select_next_relayer_id, send_shared_response, Metrics,
-        Response, SharedProofRequestInfo, SharedProofWork,
+        clear_current_shared_request, plan_shared_relayer_requests, proof_request_order_key,
+        record_current_shared_request, record_pending_request_counts, select_next_relayer_id,
+        send_shared_response, Metrics, Response, SharedProofRequestInfo, SharedProofWork,
     };
     use crate::prover_interface::FinalProof;
     use primitive_types::H256;
     use prometheus::Registry;
     use tokio::sync::mpsc;
     use utils_prometheus::MeteredService;
+
+    #[test]
+    fn direct_scheduler_prefers_shortest_finality_span() {
+        let long_recovery = proof_request_order_key(3625, 0, 35_355_709, 35_360_325);
+        let current_root = proof_request_order_key(3625, 597, 35_361_830, 35_361_830);
+
+        assert!(current_root < long_recovery);
+    }
 
     #[test]
     fn shared_scheduler_selects_highest_priority_relayer() {

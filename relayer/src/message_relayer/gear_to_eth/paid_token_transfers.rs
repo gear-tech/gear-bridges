@@ -1,24 +1,20 @@
-use crate::{
-    common::BlockRange,
-    message_relayer::{
-        common::{
-            ethereum::{
-                accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
-                message_sender::MessageSender, status_fetcher::StatusFetcher,
-            },
-            gear::{
-                block_listener::BlockListener as GearBlockListener,
-                merkle_proof_fetcher::MerkleProofFetcher,
-                message_data_extractor::MessageDataExtractor,
-                message_paid_event_extractor::MessagePaidEventExtractor,
-                message_queued_event_extractor::MessageQueuedEventExtractor,
-            },
-            paid_messages_filter::PaidMessagesFilter,
-            web_request::Message,
-            AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+use crate::message_relayer::{
+    common::{
+        ethereum::{
+            accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+            message_sender::MessageSender, status_fetcher::StatusFetcher,
         },
-        gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
+        gear::{
+            block_listener::BlockListener as GearBlockListener,
+            merkle_proof_fetcher::MerkleProofFetcher, message_data_extractor::MessageDataExtractor,
+            message_paid_event_extractor::MessagePaidEventExtractor,
+            message_queued_event_extractor::MessageQueuedEventExtractor,
+        },
+        paid_messages_filter::PaidMessagesFilter,
+        web_request::Message,
+        MessageInBlock,
     },
+    gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
 };
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
@@ -27,10 +23,7 @@ use gear_common::api_provider::ApiProviderConnection;
 use primitive_types::H256;
 use sails_rs::ActorId;
 use std::{collections::HashSet, iter, path::Path, sync::Arc};
-use tokio::{
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    task, time,
-};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 use utils_prometheus::MeteredService;
 
 pub struct Relayer {
@@ -122,12 +115,6 @@ impl Relayer {
             eth_api.clone(),
         );
 
-        task::spawn(self::fetch_merkle_roots(
-            eth_api,
-            api_provider,
-            roots_sender,
-        ));
-
         Ok(Self {
             gear_block_listener,
 
@@ -177,80 +164,4 @@ impl Relayer {
             )
             .await
     }
-}
-
-async fn fetch_merkle_roots(
-    eth_api: EthApi,
-    api_provider: ApiProviderConnection,
-    sender: UnboundedSender<RelayedMerkleRoot>,
-) {
-    if let Err(e) = fetch_merkle_roots_inner(eth_api, api_provider, sender).await {
-        log::error!("Task fetch_merkle_roots failed: {e:?}");
-    }
-}
-
-async fn fetch_merkle_roots_inner(
-    eth_api: EthApi,
-    api_provider: ApiProviderConnection,
-    sender: UnboundedSender<RelayedMerkleRoot>,
-) -> AnyResult<()> {
-    const COUNT: u64 = 2_000;
-    const COUNT_STEP: u64 = 50;
-
-    let block_finalized = eth_api.finalized_block_number().await?;
-    let block_latest = eth_api.latest_block_number().await?;
-    let gear_api = api_provider.client();
-
-    for i in 0..COUNT_STEP {
-        let block_range = crate::common::create_range(
-            (block_finalized - (i + 1) * COUNT).into(),
-            block_finalized - i * COUNT,
-        );
-
-        fetch_merkle_roots_in_range(&eth_api, &gear_api, &sender, i, block_range).await?;
-
-        time::sleep(time::Duration::from_secs(5)).await;
-    }
-
-    // to that moment block_latest should have the required number of confirmations
-    let block_range = crate::common::create_range((block_finalized + 1).into(), block_latest);
-
-    fetch_merkle_roots_in_range(&eth_api, &gear_api, &sender, COUNT_STEP, block_range).await
-}
-
-async fn fetch_merkle_roots_in_range(
-    eth_api: &EthApi,
-    gear_api: &gear_rpc_client::GearApi,
-    sender: &UnboundedSender<RelayedMerkleRoot>,
-    i: u64,
-    block_range: BlockRange,
-) -> AnyResult<()> {
-    let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
-        .await?;
-
-    let len = merkle_roots.len();
-    log::trace!("Found {len} entry(ies) with merkle roots (i = {i})");
-    for (root, _block_number_eth) in merkle_roots
-        .into_iter()
-        .filter_map(|(root, block)| block.map(|block| (root, block)))
-    {
-        let timestamp = eth_api.get_block_timestamp(_block_number_eth).await?;
-        let block_hash = gear_api
-            .block_number_to_hash(root.block_number as u32)
-            .await?;
-        let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-
-        sender.send(RelayedMerkleRoot {
-            block: GearBlockNumber(root.block_number as u32),
-            block_hash,
-            authority_set_id: AuthoritySetId(authority_set_id),
-            merkle_root: root.merkle_root,
-            timestamp,
-        })?;
-    }
-
-    log::trace!("Successfuly sent {len} merkle root entry(ies) (i = {i})");
-
-    Ok(())
 }

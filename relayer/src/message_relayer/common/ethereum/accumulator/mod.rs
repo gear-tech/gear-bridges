@@ -255,7 +255,7 @@ async fn run_inner(
 
                 let mut merkle_roots = this.merkle_roots.write().await;
                 match merkle_roots.add(merkle_root) {
-                    Ok(Added::Ok | Added::Overwritten(_)) => {}
+                    Ok(Added::Ok | Added::Overwritten(_) | Added::IgnoredOlder) => {}
 
                     Ok(Added::Removed(merkle_root_old)) => {
                         log::warn!("Removing merkle root = {merkle_root_old:?}");

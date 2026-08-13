@@ -1,4 +1,7 @@
-use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot};
+use crate::{
+    message_relayer::common::{AuthoritySetId, GearBlockNumber, RelayedMerkleRoot},
+    rpc,
+};
 use anyhow::Context;
 use ethereum_client::{EthApi, MerkleRootEntry};
 use gear_common::api_provider::ApiProviderConnection;
@@ -6,6 +9,7 @@ use gear_rpc_client::GearApi;
 use primitive_types::H256;
 use prometheus::{IntCounter, IntGauge};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
 use utils_prometheus::{impl_metered_service, MeteredService};
 
@@ -15,6 +19,13 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 const QUERY_CHUNK_SIZE: u64 = 2_000;
 const STARTUP_HISTORY_BLOCKS: u64 = 100_000;
 const REORG_LOOKBACK_BLOCKS: u64 = 64;
+
+#[derive(Debug, Error)]
+#[error("Gear operation failed: {source}")]
+struct GearOperationError {
+    #[source]
+    source: anyhow::Error,
+}
 
 pub struct MerkleRootExtractor {
     eth_api: EthApi,
@@ -89,26 +100,15 @@ impl MerkleRootExtractor {
         &mut self,
         block_number_gear: u32,
     ) -> anyhow::Result<(H256, AuthoritySetId)> {
-        let gear_api = self.api_provider.client();
-
-        match self::fetch_hash_auth_id(&gear_api, block_number_gear).await {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                log::error!(
-                    r#"Merkle root extractor failed to fetch Gear block metadata: "{err:?}""#
-                );
-                for cause in err.chain() {
-                    log::trace!(r#"cause: "{cause:?}""#);
-                }
-
-                self.api_provider
-                    .reconnect()
-                    .await
-                    .context("Merkle root extractor unable to reconnect to Gear API")?;
-
-                Err(err).context("Failed to fetch Gear block metadata; retrying the scan range")
-            }
-        }
+        rpc::retry_gear(
+            &mut self.api_provider,
+            "fetch merkle root Gear block metadata",
+            move |gear_api| async move {
+                self::fetch_hash_auth_id(&gear_api, block_number_gear).await
+            },
+        )
+        .await
+        .map_err(|source| GearOperationError { source }.into())
     }
 
     async fn scan_range(&mut self, range: ScanRange) -> anyhow::Result<()> {
@@ -197,11 +197,15 @@ async fn fetch_hash_auth_id(
 
 async fn task(mut this: MerkleRootExtractor) {
     let mut scan_state = ScanState::default();
+    // Keep the interval across failures so a retained range cannot be replayed in a tight loop.
+    let mut interval = tokio::time::interval(POLL_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
+        interval.tick().await;
+
         let Err(err) = task_inner(&mut this, &mut scan_state).await else {
-            log::info!("Merkle root extractor exiting");
-            break;
+            continue;
         };
 
         this.metrics.scan_failures_total.inc();
@@ -210,6 +214,10 @@ async fn task(mut this: MerkleRootExtractor) {
         if this.sender.is_closed() {
             log::info!("Merkle root receiver channel closed, exiting");
             break;
+        }
+
+        if !should_reconnect_ethereum(&err) {
+            continue;
         }
 
         loop {
@@ -232,21 +240,19 @@ async fn task_inner(
     this: &mut MerkleRootExtractor,
     scan_state: &mut ScanState,
 ) -> anyhow::Result<()> {
-    let mut interval = tokio::time::interval(POLL_INTERVAL);
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-    loop {
-        interval.tick().await;
-
-        if !this.api_provider.is_alive() {
-            this.api_provider
-                .reconnect()
-                .await
-                .context("Merkle root extractor unable to reconnect to Gear API")?;
-        }
-
-        scan_once(this, scan_state).await?;
+    if !this.api_provider.is_alive() {
+        this.api_provider
+            .reconnect()
+            .await
+            .map_err(|source| GearOperationError { source })?;
     }
+
+    scan_once(this, scan_state).await
+}
+
+fn should_reconnect_ethereum(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<GearOperationError>().is_none()
+        && rpc::classify_anyhow(err) == rpc::RetryDecision::Retry
 }
 
 async fn scan_once(
@@ -409,6 +415,18 @@ impl ScanState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gear_failures_do_not_reconnect_ethereum() {
+        let err = anyhow::Error::new(GearOperationError {
+            source: anyhow::anyhow!("backend connection task has stopped"),
+        });
+
+        assert!(!should_reconnect_ethereum(&err));
+        assert!(should_reconnect_ethereum(&anyhow::anyhow!(
+            "backend connection task has stopped"
+        )));
+    }
 
     #[test]
     fn confirmation_horizon_includes_the_event_block_as_first_confirmation() {

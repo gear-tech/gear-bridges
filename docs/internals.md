@@ -108,7 +108,7 @@ Once the inner authority-set proof is available, the root is recorded as Generat
 - whether the request may be batched;
 - the relayer-specific context needed to reconnect to Gear and invoke the prover.
 
-Normal, paid-priority, and supervisor work is batchable and may use an authenticated cumulative root at a later GRANDPA-signed target. Non-batched generation is reserved for authenticated exact-block HTTP requests and forced health anchors.
+Normal and paid-priority work is batchable; supervisor work may also use an authenticated cumulative root at a GRANDPA-signed target. Non-batched generation is reserved for forced health anchors and authenticated exact-block HTTP requests, which remain priority work and retain the requested block/root metadata.
 
 ### 4. Compose and generate the proof
 
@@ -131,12 +131,11 @@ The root relayer keeps a pending batch with timestamps and message-nonce counts.
 - spike_timeout flushes an ordinary batch after its timeout.
 - priority_spike_timeout flushes a batch containing a priority request sooner.
 - A bridging_payment_address enables priority handling for recognized priority-payment events.
-- critical_threshold compares Gear timestamps from the latest signed block and the last Ethereum-confirmed root. When the configured duration elapses, it schedules a forced health anchor; authority_set_change remains an alternative trigger around an authority-set transition.
-- An authenticated /get_merkle_root_proof request is handled as a priority, non-batched request and retains the requested block and root metadata.
+- critical_threshold compares Gear timestamps from the latest finalized block and the last Ethereum-confirmed root. When the configured duration elapses, it schedules a forced health anchor; authority_set_change instead triggers at an authority-set transition.
 
-A supervisor tick periodically compares the latest Gear queue root with finalized Ethereum state. When Ethereum has no matching root and the configured time threshold has elapsed, it schedules a forced health anchor, using an intermediate signed anchor when MessageQueue's maximum block-distance window requires one. Signed-anchor work is deduplicated while in flight; authenticated exact-block requests remain separate.
+A supervisor tick periodically compares the latest Gear queue root with finalized Ethereum state. When Ethereum has no matching root and the configured time threshold has elapsed, it schedules a forced health anchor at the latest signed block within MessageQueue's maximum block-distance window. Persisted proof work is dispatched after this startup check. Signed-anchor work is deduplicated while in flight; authenticated exact-block requests remain separate.
 
-The prover gives non-batched requests priority over ordinary batches. Batches are grouped by authority-set id and queue id, and responses are sent back through the channel associated with the originating request.
+The prover gives non-batched requests priority over ordinary batches and orders them by finality-proof span before block number. Batches are grouped by authority-set id and queue id, and responses are sent back through the channel associated with the originating request.
 
 ## Ethereum-to-Gear core
 

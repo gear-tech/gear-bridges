@@ -242,6 +242,35 @@ impl_metered_service!(
     }
 );
 
+struct DeferredStartupProof {
+    block_number: u32,
+    block_hash: H256,
+    merkle_root: H256,
+    authority_set_id: u64,
+    queue_id: u64,
+    batch: bool,
+    block_inclusion_proof: RawBlockInclusionProof,
+}
+
+fn defer_startup_proof(
+    roots: &mut HashMap<(u32, H256), MerkleRoot>,
+    deferred: &mut Vec<DeferredStartupProof>,
+    key: (u32, H256),
+    authority_set_id: u64,
+) {
+    let root = roots.get_mut(&key).expect("persisted root was reinstated");
+    root.single_proof_in_flight = false;
+    deferred.push(DeferredStartupProof {
+        block_number: root.block_number,
+        block_hash: root.block_hash,
+        merkle_root: key.1,
+        authority_set_id,
+        queue_id: root.queue_id,
+        batch: root.batch,
+        block_inclusion_proof: root.block_inclusion_proof.clone(),
+    });
+}
+
 pub struct MerkleRootRelayer {
     api_provider: ApiProviderConnection,
 
@@ -393,6 +422,7 @@ impl MerkleRootRelayer {
         }
 
         let gear_api = self.api_provider.client();
+        let mut deferred_startup_proofs = Vec::new();
 
         for ((block_number, hash), merkle_root) in roots.drain() {
             let block_hash = merkle_root.block_hash;
@@ -436,25 +466,14 @@ impl MerkleRootRelayer {
                         .get_proof_for_authority_set_id(*id)
                         .await
                     {
-                        Ok(authority_set_proof) => {
+                        Ok(_) => {
                             reinstate(MerkleRootStatus::GenerateProof);
-
-                            if !prover.prove(
-                                block_number,
-                                block_hash,
-                                hash,
-                                authority_set_proof,
-                                merkle_root.queue_id,
-                                merkle_root.batch,
-                                merkle_root.block_inclusion_proof.clone(),
-                            ) {
-                                log::error!(
-                                    "Merkle root relayer {relayer_id}: prover connection closed, exiting..."
-                                );
-                                return Err(anyhow::anyhow!(
-                                    "Merkle root relayer {relayer_id}: prover connection closed during startup recovery"
-                                ));
-                            }
+                            defer_startup_proof(
+                                &mut self.roots,
+                                &mut deferred_startup_proofs,
+                                (block_number, hash),
+                                *id,
+                            );
                         }
                         Err(_) => {
                             log::warn!("Merkle root relayer {relayer_id}: authority set proof for #{id} not found, waiting for authority set sync");
@@ -493,39 +512,16 @@ impl MerkleRootRelayer {
 
                 MerkleRootStatus::GenerateProof => {
                     reinstate(MerkleRootStatus::GenerateProof);
-
-                    log::info!(
-                        "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} is waiting for proof generation"
+                    defer_startup_proof(
+                        &mut self.roots,
+                        &mut deferred_startup_proofs,
+                        (block_number, hash),
+                        merkle_root.block_inclusion_proof.required_authority_set_id,
                     );
 
-                    // if merkle root was saved in `generate proof` phase, it means
-                    // that proof for authority set id is already generated and thus should be available in storage.
-                    // If it is not found that is a hard error and storage should be fixed.
-                    let signed_by_authority_set_id =
-                        merkle_root.block_inclusion_proof.required_authority_set_id;
-                    let inner_proof = self
-                        .storage
-                        .proofs
-                        .get_proof_for_authority_set_id(signed_by_authority_set_id)
-                        .await
-                        .with_context(|| format!("Proof for authority set #{signed_by_authority_set_id} not found, please clean-up your storage and restart relayer"))?;
-
-                    if !prover.prove(
-                        block_number,
-                        block_hash,
-                        hash,
-                        inner_proof,
-                        merkle_root.queue_id,
-                        merkle_root.batch,
-                        merkle_root.block_inclusion_proof.clone(),
-                    ) {
-                        log::error!(
-                            "Merkle root relayer {relayer_id}: prover connection closed, exiting..."
-                        );
-                        return Err(anyhow::anyhow!(
-                            "Merkle root relayer {relayer_id}: prover connection closed during startup recovery"
-                        ));
-                    }
+                    log::info!(
+                        "Merkle root relayer {relayer_id}: deferring persisted proof for merkle root {hash} at block #{block_number} until after startup supervision"
+                    );
                 }
 
                 MerkleRootStatus::SubmitProof if merkle_root.proof.is_some() => {
@@ -568,6 +564,42 @@ impl MerkleRootRelayer {
         self.supervisor_interval.tick().await;
         self.supervise_contract_state(&mut prover, &mut authority_set_sync, &mut eth_api)
             .await?;
+
+        for deferred in deferred_startup_proofs {
+            let key = (deferred.block_number, deferred.merkle_root);
+            if self
+                .roots
+                .get(&key)
+                .is_some_and(|root| root.single_proof_in_flight)
+            {
+                continue;
+            }
+            let inner_proof = self
+                .storage
+                .proofs
+                .get_proof_for_authority_set_id(deferred.authority_set_id)
+                .await
+                .with_context(|| format!("Proof for authority set #{} not found, please clean-up your storage and restart relayer", deferred.authority_set_id))?;
+            if !deferred.batch {
+                self.roots
+                    .get_mut(&key)
+                    .expect("persisted root was reinstated")
+                    .single_proof_in_flight = true;
+            }
+            if !prover.prove(
+                deferred.block_number,
+                deferred.block_hash,
+                deferred.merkle_root,
+                inner_proof,
+                deferred.queue_id,
+                deferred.batch,
+                deferred.block_inclusion_proof,
+            ) {
+                return Err(anyhow::anyhow!(
+                    "Merkle root relayer {relayer_id}: prover connection closed while resuming persisted proof"
+                ));
+            }
+        }
 
         if let Err(err) = self
             .run_inner(
@@ -662,6 +694,23 @@ impl MerkleRootRelayer {
             .fetch_authenticated_queue_merkle_root(confirmed_block_hash)
             .await?;
 
+        if self.last_confirmed_timestamp_ms.is_none() {
+            self.last_confirmed_timestamp_ms =
+                Some(client.fetch_timestamp(confirmed_block_hash).await?);
+        }
+        let threshold = critical_timeout_reached(
+            self.options.critical_threshold,
+            self.last_confirmed_block,
+            self.last_confirmed_timestamp_ms,
+            latest_timestamp_ms,
+        );
+        let Some((last_confirmed_block, threshold)) = threshold else {
+            log::debug!(
+                "Merkle root relayer {relayer_id} supervisor: critical threshold is not reached at latest finalized Vara block #{latest_block}, skipping forced proof generation"
+            );
+            return Ok(());
+        };
+
         if !queue_state_changed(confirmed_queue_state, latest_queue_state) {
             log::trace!(
                 "Merkle root relayer {relayer_id} supervisor: Vara queue state has not changed since Ethereum MessageQueue block #{confirmed_block}, skipping proof generation"
@@ -675,7 +724,7 @@ impl MerkleRootRelayer {
             latest_block,
         ) else {
             log::debug!(
-                "Merkle root relayer {relayer_id} supervisor: changed Vara queue state is still inside the MessageQueue window after block #{confirmed_block}, leaving proof generation to the event path"
+                "Merkle root relayer {relayer_id} supervisor: no finalized Vara block advances MessageQueue block #{confirmed_block}"
             );
             return Ok(());
         };
@@ -693,23 +742,6 @@ impl MerkleRootRelayer {
         let (_, merkle_root) = client
             .fetch_authenticated_queue_merkle_root(block_hash)
             .await?;
-        if self.last_confirmed_timestamp_ms.is_none() {
-            self.last_confirmed_timestamp_ms =
-                Some(client.fetch_timestamp(confirmed_block_hash).await?);
-        }
-
-        let threshold = critical_timeout_reached(
-            self.options.critical_threshold,
-            self.last_confirmed_block,
-            self.last_confirmed_timestamp_ms,
-            latest_timestamp_ms,
-        );
-        let Some((last_confirmed_block, threshold)) = threshold else {
-            log::debug!(
-                "Merkle root relayer {relayer_id} supervisor: critical threshold is not reached at latest finalized Vara block #{latest_block}, skipping forced proof generation"
-            );
-            return Ok(());
-        };
 
         let eth_root = match self
             .read_finalized_merkle_root(eth_api, block_number)
@@ -732,7 +764,7 @@ impl MerkleRootRelayer {
         }
 
         log::warn!(
-            "Merkle root relayer {relayer_id} supervisor: MessageQueue block #{last_confirmed_block} is stale by at least {threshold:?}; scheduling recovery at signed Vara block #{block_number} within upper bound #{target_limit}, not at latest block #{latest_block}"
+            "Merkle root relayer {relayer_id} supervisor: MessageQueue block #{last_confirmed_block} is stale by at least {threshold:?}; scheduling recovery at signed Vara block #{block_number} within upper bound #{target_limit} (latest finalized #{latest_block})"
         );
         if let Some(eth_root) = eth_root {
             log::warn!(
@@ -1194,6 +1226,7 @@ impl MerkleRootRelayer {
                             }
                         }
                         if !local_proof_only {
+                            self.storage.save(&self.roots).await?;
                             self.queue_submission(root_key);
                         }
                     }
@@ -1214,6 +1247,7 @@ impl MerkleRootRelayer {
                                 "Selected batched merkle root {merkle_root} for block #{block_number} not found in storage"
                             ));
                         }
+                        self.storage.save(&self.roots).await?;
                         self.queue_submission((block_number, merkle_root));
                     }
                 }
@@ -2254,9 +2288,9 @@ fn recovery_target_limit(
     latest_block: u32,
 ) -> Option<u32> {
     let last_confirmed_block = last_confirmed_block?;
-    let max_block_distance = max_block_distance?;
-    let target = last_confirmed_block.saturating_add(max_block_distance);
-    (target > last_confirmed_block && latest_block >= target).then_some(target)
+    let target =
+        contract_anchor_limit(Some(last_confirmed_block), max_block_distance, latest_block);
+    (target > last_confirmed_block).then_some(target)
 }
 
 fn anchor_covers_source(
@@ -2311,7 +2345,7 @@ pub enum StartupSyncStrategy {
 #[cfg(test)]
 mod tests {
     use super::{
-        anchor_covers_source, contract_anchor_limit, critical_timeout_reached,
+        anchor_covers_source, contract_anchor_limit, critical_timeout_reached, defer_startup_proof,
         finalize_confirmed_roots, is_local_proof_only, queue_state_changed,
         recover_finalized_continuations, recovery_target_limit, reusable_finalized_root,
         CriticalThreshold, FinalProof, MerkleRoot, MerkleRootStatus, RawBlockInclusionProof, H256,
@@ -2405,10 +2439,60 @@ mod tests {
     }
 
     #[test]
-    fn recovery_target_waits_for_and_stops_at_contract_bound() {
-        assert_eq!(recovery_target_limit(Some(100), Some(25), 124), None);
+    fn recovery_target_uses_latest_inside_contract_window_and_caps_beyond_it() {
+        assert_eq!(recovery_target_limit(Some(100), Some(25), 100), None);
+        assert_eq!(recovery_target_limit(Some(100), Some(25), 124), Some(124));
         assert_eq!(recovery_target_limit(Some(100), Some(25), 125), Some(125));
         assert_eq!(recovery_target_limit(Some(100), Some(25), 200), Some(125));
+    }
+
+    #[test]
+    fn timeout_inside_window_schedules_fresh_proof_before_resumed_1034_header_proof() {
+        const CONFIRMED: u32 = 35_490_266;
+        const OLD_BLOCK: u32 = 35_491_497;
+        const OLD_SIGNED_BLOCK: u32 = 35_492_530;
+        const LATEST: u32 = 35_509_509;
+        const MAX_DISTANCE: u32 = 57_600;
+
+        let threshold = Duration::from_secs(14 * 60 * 60);
+        assert_eq!(
+            critical_timeout_reached(
+                CriticalThreshold::Timeout(threshold),
+                Some(CONFIRMED),
+                Some(0),
+                15 * 60 * 60 * 1_000,
+            ),
+            Some((CONFIRMED, threshold))
+        );
+        assert!(queue_state_changed(
+            (1, H256::repeat_byte(1)),
+            (1, H256::repeat_byte(2)),
+        ));
+        let recovery_target =
+            recovery_target_limit(Some(CONFIRMED), Some(MAX_DISTANCE), LATEST).unwrap();
+        assert_eq!(recovery_target, LATEST);
+
+        let old_key = (OLD_BLOCK, H256::repeat_byte(3));
+        let mut old_root = root(OLD_BLOCK, H256::repeat_byte(4));
+        old_root.block_inclusion_proof.block_number = OLD_SIGNED_BLOCK;
+        let mut roots = HashMap::from([(old_key, old_root)]);
+        let mut deferred = Vec::new();
+        defer_startup_proof(&mut roots, &mut deferred, old_key, 1);
+
+        assert!(matches!(
+            roots[&old_key].status,
+            MerkleRootStatus::GenerateProof
+        ));
+        assert!(!roots[&old_key].single_proof_in_flight);
+        assert_eq!(deferred.len(), 1);
+
+        let old_span = super::prover::proof_span_order_key(
+            deferred[0].block_number,
+            deferred[0].block_inclusion_proof.block_number,
+        );
+        let recovery_span = super::prover::proof_span_order_key(recovery_target, recovery_target);
+        assert_eq!(old_span.0, 1_033);
+        assert!(recovery_span < old_span);
     }
 
     #[test]

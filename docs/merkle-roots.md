@@ -119,7 +119,7 @@ The root relayer periodically reads:
 - the root recorded by Ethereum's MessageQueue for the same Gear block;
 - local submission state.
 
-If Ethereum has no matching root and the time threshold is reached, the supervisor schedules a forced proof. If the signed target would exceed MessageQueue's maximum block-distance window, the scheduler first selects an intermediate GRANDPA-signed anchor at or below the contract limit. The source block remains unprocessed until a confirmed anchor actually covers it.
+If Ethereum has no matching root and the time threshold is reached, the supervisor schedules a forced proof at the latest finalized signed target, capped by MessageQueue's maximum block-distance window. Persisted GenerateProof work is restored only after this startup check, and shorter finality spans are processed first so a stale long proof cannot block recovery. The source block remains unprocessed until a confirmed anchor actually covers it.
 
 If Ethereum already has the expected root, local storage is reconciled with finalized submission state. Active signed-anchor work is deduplicated, while authenticated exact-block requests remain separate so batching cannot return mismatched proof metadata.
 
@@ -141,7 +141,7 @@ Once a root is stored, MessageQueue.processMessage still enforces the applicable
 
 ## Persistent format and atomic writes
 
-The root storage path is a JSON file configured as storage.block_storage. It contains a version, unprocessed block records, Ethereum submission states, and a roots map whose keys encode the Gear block number and root hash.
+The root storage path is a JSON file configured as storage.block_storage. It contains every unresolved block record, the latest 100 block records for replay context, Ethereum submission states, and a roots map whose keys encode the Gear block number and root hash.
 
 Writes use:
 

@@ -251,23 +251,16 @@ impl MerkleRootStorage {
 
     pub async fn prune_blocks(&self) {
         let mut blocks = self.blocks.write().await;
-        let mut remove_until = None;
-        for (index, (number, block)) in blocks.iter().enumerate() {
-            if index + 100 > blocks.len() {
-                remove_until = Some(*number);
-                break;
-            }
-
-            if !block.is_processed() {
-                remove_until = Some(*number);
-                break;
-            }
-        }
-
-        if let Some(remove_until) = remove_until {
-            *blocks = blocks.split_off(&remove_until);
-        }
+        prune_processed_blocks(&mut blocks);
     }
+}
+
+fn prune_processed_blocks(blocks: &mut BTreeMap<u32, Block>) {
+    let Some(keep_from) = blocks.keys().rev().nth(99).copied() else {
+        return;
+    };
+
+    blocks.retain(|number, block| *number >= keep_from || !block.is_processed());
 }
 
 struct SerializedStorage<'a> {
@@ -347,5 +340,45 @@ impl<'de> Deserialize<'de> for DeserializedStorage {
             submitted_merkle_roots: helper.submitted_merkle_roots,
             roots,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prune_processed_blocks, Block};
+    use gear_rpc_client::dto::RawBlockInclusionProof;
+    use primitive_types::H256;
+    use std::collections::BTreeMap;
+
+    fn processed_block(block_number: u32) -> Block {
+        Block {
+            block_hash: H256::zero(),
+            merkle_root_changed: None,
+            authority_set_changed: false,
+            inclusion_proof: RawBlockInclusionProof {
+                justification_round: 0,
+                required_authority_set_id: 0,
+                validator_set: Vec::new(),
+                block_hash: H256::zero(),
+                block_number,
+                pre_commits: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn unresolved_event_does_not_retain_processed_backlog() {
+        let mut blocks = (0..200)
+            .map(|number| (number, processed_block(number)))
+            .collect::<BTreeMap<_, _>>();
+        blocks.get_mut(&0).unwrap().merkle_root_changed = Some((1, H256::repeat_byte(1)));
+
+        prune_processed_blocks(&mut blocks);
+
+        assert_eq!(blocks.len(), 101);
+        assert!(blocks.contains_key(&0));
+        assert!(!blocks.contains_key(&99));
+        assert!(blocks.contains_key(&100));
+        assert!(blocks.contains_key(&199));
     }
 }

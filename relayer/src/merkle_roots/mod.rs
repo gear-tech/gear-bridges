@@ -19,7 +19,7 @@ use primitive_types::{H256, U256};
 use prometheus::IntGauge;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -43,6 +43,7 @@ pub mod submitter;
 const MERKLE_ROOT_SUPERVISOR_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const MERKLE_ROOT_SUPERVISOR_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_PENDING_HTTP_REQUESTS_PER_ROOT: usize = 128;
+type PendingContinuation = ((u32, H256), u32);
 
 enum EthereumRootRead {
     Fetched(Option<H256>),
@@ -257,6 +258,9 @@ pub struct MerkleRootRelayer {
     first_pending_timestamp: Option<Instant>,
     queued_root_timestamps: VecDeque<Instant>,
     merkle_root_batch: Vec<PendingMerkleRoot>,
+    pending_continuations: VecDeque<PendingContinuation>,
+    pending_submissions: VecDeque<(u32, H256)>,
+    pending_submission_keys: HashSet<(u32, H256)>,
 
     options: MerkleRootRelayerOptions,
 
@@ -302,6 +306,9 @@ impl MerkleRootRelayer {
             first_pending_timestamp: None,
             queued_root_timestamps: VecDeque::with_capacity(8),
             merkle_root_batch: Vec::with_capacity(8),
+            pending_continuations: VecDeque::new(),
+            pending_submissions: VecDeque::new(),
+            pending_submission_keys: HashSet::new(),
 
             options,
             save_interval,
@@ -321,6 +328,12 @@ impl MerkleRootRelayer {
             } else {
                 break;
             }
+        }
+    }
+
+    fn queue_submission(&mut self, key: (u32, H256)) {
+        if self.pending_submission_keys.insert(key) {
+            self.pending_submissions.push_back(key);
         }
     }
 
@@ -519,21 +532,8 @@ impl MerkleRootRelayer {
                     log::info!(
                         "Merkle root relayer {relayer_id}: merkle root {hash} for block #{block_number} is waiting for proof submission"
                     );
-                    let proof = merkle_root
-                        .proof
-                        .clone()
-                        .expect("proof should be available if root is in SubmitProof state; check your storage");
-
                     reinstate(MerkleRootStatus::SubmitProof);
-
-                    if !submitter.submit_merkle_root(block_number, hash, proof) {
-                        log::error!(
-                            "Merkle root relayer {relayer_id}: proof submitter connection closed, exiting"
-                        );
-                        return Err(anyhow::anyhow!(
-                            "Merkle root relayer {relayer_id}: proof submitter connection closed during startup recovery"
-                        ));
-                    }
+                    self.queue_submission((block_number, hash));
                 }
 
                 MerkleRootStatus::SubmitProof => {
@@ -559,6 +559,8 @@ impl MerkleRootRelayer {
                 }
             }
         }
+        self.pending_continuations
+            .extend(recover_finalized_continuations(&self.roots));
 
         self.initialize_contract_cursor(&mut eth_api).await?;
         // Consume the interval's immediate first tick before supervision so a failed
@@ -735,7 +737,7 @@ impl MerkleRootRelayer {
                 prover,
                 authority_set_sync,
                 block,
-                ProofTarget::SignedAnchor,
+                ProofTarget::Recovery,
                 Batch::No,
                 Priority::No,
                 ForceGeneration::Yes,
@@ -849,13 +851,6 @@ impl MerkleRootRelayer {
                 )
                 .await;
 
-            if let Err(err) = self.storage.save(&self.roots).await {
-                log::error!(
-                    "Merkle root relayer {}: failed to save block state: {err:?}",
-                    self.options.relayer_id
-                );
-            }
-
             match result {
                 Ok(true) => continue,
                 Ok(false) => {
@@ -886,7 +881,48 @@ impl MerkleRootRelayer {
         eth_api: &mut EthApi,
     ) -> anyhow::Result<bool> {
         let client = self.api_provider.client();
+        let pending_submission = self
+            .pending_submissions
+            .front()
+            .map(|&(block_number, merkle_root)| {
+                let proof = self
+                    .roots
+                    .get(&(block_number, merkle_root))
+                    .and_then(|root| root.proof.clone())
+                    .with_context(|| {
+                        format!(
+                            "Queued merkle root {merkle_root} for block #{block_number} has no proof"
+                        )
+                    })?;
+                Ok::<_, anyhow::Error>(submitter::Request {
+                    era: None,
+                    merkle_root_block: block_number,
+                    merkle_root,
+                    proof,
+                })
+            })
+            .transpose()?;
+        let has_pending_submission = pending_submission.is_some();
+        let submission_tx = submitter.request_sender();
         tokio::select! {
+            submission = async {
+                submission_tx
+                    .send(pending_submission.expect("submission branch requires queued work"))
+                    .await
+            }, if has_pending_submission => {
+                if submission.is_err() {
+                    log::warn!(
+                        "Merkle root relayer {}: proof submitter connection closed, exiting",
+                        self.options.relayer_id
+                    );
+                    return Ok(false);
+                }
+                let key = self
+                    .pending_submissions
+                    .pop_front()
+                    .expect("submitted work was read from the pending queue");
+                self.pending_submission_keys.remove(&key);
+            }
             _ = self.save_interval.tick() => {
                 log::trace!("60 seconds passed, saving current state");
                 if let Err(err) = self.storage.save(&self.roots).await {
@@ -1005,6 +1041,8 @@ impl MerkleRootRelayer {
                                         if let Some(root) =
                                             self.roots.get_mut(&(block_number, merkle_root))
                                         {
+                                            root.http_requests
+                                                .retain(|request| !request.is_closed());
                                             if root.http_requests.len()
                                                 >= MAX_PENDING_HTTP_REQUESTS_PER_ROOT
                                             {
@@ -1147,16 +1185,8 @@ impl MerkleRootRelayer {
                                 );
                             }
                         }
-                        self.storage.save(&self.roots).await?;
-
-                        if !local_proof_only
-                            && !submitter.submit_merkle_root(block_number, merkle_root, proof)
-                        {
-                            log::warn!(
-                                "Merkle root relayer {}: proof submitter connection closed, exiting",
-                                self.options.relayer_id
-                            );
-                            return Ok(false);
+                        if !local_proof_only {
+                            self.queue_submission(root_key);
                         }
                     }
                     prover::Response::Batched {
@@ -1176,15 +1206,7 @@ impl MerkleRootRelayer {
                                 "Selected batched merkle root {merkle_root} for block #{block_number} not found in storage"
                             ));
                         }
-                        self.storage.save(&self.roots).await?;
-
-                        if !submitter.submit_merkle_root(block_number, merkle_root, proof) {
-                            log::warn!(
-                                "Merkle root relayer {}: proof submitter connection closed, exiting",
-                                self.options.relayer_id
-                            );
-                            return Ok(false);
-                        }
+                        self.queue_submission((block_number, merkle_root));
                     }
                 }
             }
@@ -1286,6 +1308,38 @@ impl MerkleRootRelayer {
                 }
             }
 
+            continuation = async { self.pending_continuations.pop_front() },
+                if !self.pending_continuations.is_empty() => {
+                let Some((anchor_key, block_number)) = continuation else {
+                    unreachable!("continuation branch requires queued work");
+                };
+                let block_hash = client.block_number_to_hash(block_number).await?;
+                let block = client.get_block_at(block_hash).await?;
+                let block = GearBlock::from_subxt_block(&client, block).await?;
+                self.try_proof_merkle_root(
+                    prover,
+                    authority_set_sync,
+                    block,
+                    ProofTarget::SignedAnchor,
+                    Batch::No,
+                    Priority::No,
+                    ForceGeneration::Yes,
+                )
+                .await?;
+
+                if let Some(root) = self.roots.get_mut(&anchor_key) {
+                    if let Some(index) = root
+                        .continuation_source_blocks
+                        .iter()
+                        .position(|block| *block == block_number)
+                    {
+                        root.continuation_source_blocks.remove(index);
+                    }
+                }
+                self.storage.save(&self.roots).await?;
+                tokio::task::yield_now().await;
+            }
+
             response = submitter.recv() => {
                 let Some(response) = response else {
                     log::warn!(
@@ -1295,22 +1349,8 @@ impl MerkleRootRelayer {
                     return Ok(false);
                 };
 
-                let continuation_blocks = self.finalize_merkle_root(response).await?;
-                for block_number in continuation_blocks {
-                    let block_hash = client.block_number_to_hash(block_number).await?;
-                    let block = client.get_block_at(block_hash).await?;
-                    let block = GearBlock::from_subxt_block(&client, block).await?;
-                    self.try_proof_merkle_root(
-                        prover,
-                        authority_set_sync,
-                        block,
-                        ProofTarget::SignedAnchor,
-                        Batch::No,
-                        Priority::No,
-                        ForceGeneration::Yes,
-                    )
-                    .await?;
-                }
+                let continuations = self.finalize_merkle_root(response).await?;
+                self.pending_continuations.extend(continuations);
             }
         }
         Ok(true)
@@ -1319,7 +1359,7 @@ impl MerkleRootRelayer {
     async fn finalize_merkle_root(
         &mut self,
         response: submitter::Response,
-    ) -> anyhow::Result<Vec<u32>> {
+    ) -> anyhow::Result<Vec<PendingContinuation>> {
         if let Some(era) = response.era {
             log::info!(
                 "Merkle root relayer {}: era #{} merkle root {} for block #{} is finalized with status: {:?}",
@@ -1556,7 +1596,7 @@ impl MerkleRootRelayer {
                 block_inclusion_proof.required_authority_set_id,
                 true,
             ),
-            ProofTarget::SignedAnchor => {
+            ProofTarget::SignedAnchor | ProofTarget::Recovery => {
                 let signed_target_block_number = block_inclusion_proof.block_number;
                 let contract_limit = contract_anchor_limit(
                     self.last_confirmed_block,
@@ -1651,26 +1691,16 @@ impl MerkleRootRelayer {
             }
         };
         let proof_target_block_hash = block_inclusion_proof.block_hash;
-        let (chain_queue_id, chain_merkle_root) = api
-            .fetch_authenticated_queue_merkle_root(block_hash)
-            .await?;
-        if chain_queue_id != queue_id || chain_merkle_root != merkle_root {
-            return Err(anyhow::anyhow!(
-                "Selected proof target #{block_number} does not match Vara queue state"
-            ));
-        }
 
         let selected_key = (block_number, merkle_root);
         let selected_state = self.roots.get(&selected_key).and_then(|root| {
-            if matches!(root.status, MerkleRootStatus::Finalized)
-                && self
-                    .last_confirmed_block
-                    .is_some_and(|confirmed| block_number <= confirmed)
-                && root.proof.as_ref().is_some_and(|proof| {
-                    proof.block_number == block_number
-                        && H256::from(proof.merkle_root) == merkle_root
-                })
-            {
+            if reusable_finalized_root(
+                root,
+                self.last_confirmed_block,
+                block_number,
+                merkle_root,
+                matches!(proof_target, ProofTarget::Recovery),
+            ) {
                 Some(true)
             } else if matches!(
                 root.status,
@@ -1717,8 +1747,12 @@ impl MerkleRootRelayer {
             {
                 root.continuation_source_blocks.push(source_block_number);
             }
-            let should_schedule_single =
-                matches!(batch, Batch::No) && root.promote_to_single_proof();
+            let should_schedule_single = matches!(batch, Batch::No)
+                && if matches!(proof_target, ProofTarget::Recovery) {
+                    root.promote_to_recovery_proof()
+                } else {
+                    root.promote_to_single_proof()
+                };
 
             if let Some(index) = self.merkle_root_batch.iter().position(|pending| {
                 pending.block_number == block_number && pending.merkle_root == merkle_root
@@ -2005,6 +2039,45 @@ impl MerkleRoot {
             false
         }
     }
+
+    fn promote_to_recovery_proof(&mut self) -> bool {
+        if matches!(self.status, MerkleRootStatus::Finalized) {
+            self.status = MerkleRootStatus::GenerateProof;
+        }
+        self.promote_to_single_proof()
+    }
+}
+
+fn recover_finalized_continuations(
+    roots: &HashMap<(u32, H256), MerkleRoot>,
+) -> Vec<PendingContinuation> {
+    let mut continuations = roots
+        .iter()
+        .filter(|(_, root)| matches!(root.status, MerkleRootStatus::Finalized))
+        .flat_map(|(key, root)| {
+            root.continuation_source_blocks
+                .iter()
+                .map(|block| (*key, *block))
+        })
+        .collect::<Vec<_>>();
+    continuations.sort_unstable();
+    continuations.dedup();
+    continuations
+}
+
+fn reusable_finalized_root(
+    root: &MerkleRoot,
+    last_confirmed_block: Option<u32>,
+    block_number: u32,
+    merkle_root: H256,
+    force_recovery: bool,
+) -> bool {
+    !force_recovery
+        && matches!(root.status, MerkleRootStatus::Finalized)
+        && last_confirmed_block.is_some_and(|confirmed| block_number <= confirmed)
+        && root.proof.as_ref().is_some_and(|proof| {
+            proof.block_number == block_number && H256::from(proof.merkle_root) == merkle_root
+        })
 }
 fn is_local_proof_only(roots: &HashMap<(u32, H256), MerkleRoot>, root_key: (u32, H256)) -> bool {
     roots
@@ -2024,23 +2097,27 @@ fn finalize_confirmed_roots(
     roots: &mut HashMap<(u32, H256), MerkleRoot>,
     confirmed_root: (u32, H256),
     covered_roots: &[(u32, H256)],
-) -> (Vec<u32>, Vec<u32>) {
+) -> (Vec<u32>, Vec<PendingContinuation>) {
     let mut covered_source_blocks = Vec::new();
-    let mut continuation_blocks = Vec::new();
+    let mut continuations = Vec::new();
 
     for key in std::iter::once(&confirmed_root).chain(covered_roots) {
         if let Some(root) = roots.get_mut(key) {
             root.status = MerkleRootStatus::Finalized;
             covered_source_blocks.extend_from_slice(&root.covered_source_blocks);
-            continuation_blocks.extend_from_slice(&root.continuation_source_blocks);
+            continuations.extend(
+                root.continuation_source_blocks
+                    .iter()
+                    .map(|block| (*key, *block)),
+            );
         }
     }
 
     covered_source_blocks.sort_unstable();
     covered_source_blocks.dedup();
-    continuation_blocks.sort_unstable();
-    continuation_blocks.dedup();
-    (covered_source_blocks, continuation_blocks)
+    continuations.sort_unstable();
+    continuations.dedup();
+    (covered_source_blocks, continuations)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2131,6 +2208,7 @@ pub struct PendingMerkleRoot {
 enum ProofTarget {
     Exact,
     SignedAnchor,
+    Recovery,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -2211,10 +2289,36 @@ pub enum StartupSyncStrategy {
 mod tests {
     use super::{
         anchor_covers_source, contract_anchor_limit, critical_timeout_reached,
-        finalize_confirmed_roots, is_local_proof_only, CriticalThreshold, FinalProof, MerkleRoot,
-        MerkleRootStatus, RawBlockInclusionProof, H256,
+        finalize_confirmed_roots, is_local_proof_only, recover_finalized_continuations,
+        reusable_finalized_root, CriticalThreshold, FinalProof, MerkleRoot, MerkleRootStatus,
+        RawBlockInclusionProof, H256,
     };
     use std::{collections::HashMap, time::Duration};
+
+    fn root(block_number: u32, block_hash: H256) -> MerkleRoot {
+        MerkleRoot {
+            block_number,
+            block_hash,
+            queue_id: 1,
+            message_nonces: Vec::new(),
+            http_requests: Vec::new(),
+            proof: None,
+            covered_roots: Vec::new(),
+            covered_source_blocks: Vec::new(),
+            continuation_source_blocks: Vec::new(),
+            batch: true,
+            single_proof_in_flight: false,
+            status: MerkleRootStatus::GenerateProof,
+            block_inclusion_proof: RawBlockInclusionProof {
+                justification_round: 0,
+                required_authority_set_id: 1,
+                validator_set: Vec::new(),
+                block_hash,
+                block_number,
+                pre_commits: Vec::new(),
+            },
+        }
+    }
 
     #[test]
     fn critical_timeout_is_reached_at_threshold() {
@@ -2297,31 +2401,6 @@ mod tests {
 
     #[test]
     fn confirmed_anchor_finalizes_covered_roots_and_releases_sources() {
-        fn root(block_number: u32, block_hash: H256) -> MerkleRoot {
-            MerkleRoot {
-                block_number,
-                block_hash,
-                queue_id: 1,
-                message_nonces: Vec::new(),
-                http_requests: Vec::new(),
-                proof: None,
-                covered_roots: Vec::new(),
-                covered_source_blocks: Vec::new(),
-                continuation_source_blocks: Vec::new(),
-                batch: true,
-                single_proof_in_flight: false,
-                status: MerkleRootStatus::GenerateProof,
-                block_inclusion_proof: RawBlockInclusionProof {
-                    justification_round: 0,
-                    required_authority_set_id: 1,
-                    validator_set: Vec::new(),
-                    block_hash,
-                    block_number,
-                    pre_commits: Vec::new(),
-                },
-            }
-        }
-
         let covered_key = (100, H256::repeat_byte(1));
         let anchor_key = (120, H256::repeat_byte(2));
         let mut covered_root = root(covered_key.0, H256::repeat_byte(3));
@@ -2366,7 +2445,56 @@ mod tests {
         assert!(exact_root.promote_to_single_proof());
         assert!(matches!(exact_root.status, MerkleRootStatus::Finalized));
         assert_eq!(covered_sources, vec![90]);
-        assert_eq!(continuation_blocks, vec![130]);
+        assert_eq!(continuation_blocks, vec![(anchor_key, 130)]);
+    }
+
+    #[test]
+    fn recovery_does_not_reuse_a_locally_finalized_root() {
+        let block_number = 120;
+        let merkle_root = H256::repeat_byte(2);
+        let mut root = root(block_number, H256::repeat_byte(4));
+        root.status = MerkleRootStatus::Finalized;
+        root.proof = Some(FinalProof {
+            proof: vec![1],
+            block_number,
+            merkle_root: *merkle_root.as_fixed_bytes(),
+        });
+
+        assert!(reusable_finalized_root(
+            &root,
+            Some(block_number),
+            block_number,
+            merkle_root,
+            false,
+        ));
+        assert!(!reusable_finalized_root(
+            &root,
+            Some(block_number),
+            block_number,
+            merkle_root,
+            true,
+        ));
+
+        assert!(root.promote_to_recovery_proof());
+        assert!(matches!(root.status, MerkleRootStatus::GenerateProof));
+        assert!(root.single_proof_in_flight);
+    }
+
+    #[test]
+    fn restart_recovers_only_finalized_continuations() {
+        let finalized_key = (120, H256::repeat_byte(2));
+        let pending_key = (121, H256::repeat_byte(3));
+        let mut finalized = root(finalized_key.0, H256::repeat_byte(4));
+        finalized.status = MerkleRootStatus::Finalized;
+        finalized.continuation_source_blocks = vec![131, 130];
+        let mut pending = root(pending_key.0, H256::repeat_byte(5));
+        pending.continuation_source_blocks = vec![132];
+        let roots = HashMap::from([(finalized_key, finalized), (pending_key, pending)]);
+
+        assert_eq!(
+            recover_finalized_continuations(&roots),
+            vec![(finalized_key, 130), (finalized_key, 131)]
+        );
     }
 
     #[test]

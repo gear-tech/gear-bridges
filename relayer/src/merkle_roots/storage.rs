@@ -110,6 +110,9 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
     ) -> anyhow::Result<()> {
         let merkle_root_changed = queue_merkle_root_changed(block);
         let authority_set_changed = authority_set_changed(block);
+        if merkle_root_changed.is_none() && !authority_set_changed {
+            return Ok(());
+        }
 
         let proof = api
             .produce_finality_proof(&block.grandpa_justification)

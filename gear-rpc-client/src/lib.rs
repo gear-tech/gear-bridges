@@ -62,6 +62,13 @@ fn validate_block_header_hash(expected: H256, encoded_header: &[u8]) -> AnyResul
     Ok(())
 }
 
+fn decode_authenticated_queue_id(storage: Option<&[u8]>) -> AnyResult<u64> {
+    match storage {
+        Some(mut data) => u64::decode(&mut data).context("Failed to decode authenticated queue id"),
+        None => Ok(0),
+    }
+}
+
 #[derive(Clone)]
 pub struct GearApi {
     pub api: gsdk::Api,
@@ -583,6 +590,38 @@ impl GearApi {
         })
     }
 
+    async fn fetch_authenticated_storage_value(
+        &self,
+        block: H256,
+        address: &[u8],
+    ) -> AnyResult<Option<Vec<u8>>> {
+        let expected_block_hash = block;
+        let block = (*self.api).blocks().at(expected_block_hash).await?;
+        let encoded_header = block.header().encode();
+        validate_block_header_hash(expected_block_hash, &encoded_header)?;
+
+        let storage_proof = self
+            .api
+            .legacy()
+            .state_get_read_proof(vec![address], Some(block.hash()))
+            .await?
+            .proof
+            .into_iter()
+            .map(|bytes| bytes.0);
+        let storage_proof =
+            sp_trie::StorageProof::new(storage_proof).to_memory_db::<sp_core::Blake2Hasher>();
+        let state_root = block.header().state_root.0.into();
+
+        sp_trie::read_trie_value::<sp_trie::LayoutV1<sp_core::Blake2Hasher>, _>(
+            &storage_proof,
+            &state_root,
+            address,
+            None,
+            None,
+        )
+        .map_err(|err| anyhow!("Failed to authenticate storage at address {address:?}: {err}"))
+    }
+
     async fn fetch_storage_inclusion_proof(
         &self,
         block: H256,
@@ -783,11 +822,13 @@ impl GearApi {
             .context("Failed to decode authenticated queue merkle root")?;
 
         let queue_id_address = gsdk::gear::storage().gear_eth_bridge().queue_id();
-        let queue_id_proof = self
-            .fetch_block_inclusion_proof(block, &queue_id_address.to_root_bytes())
+        let queue_id_storage = self
+            .fetch_authenticated_storage_value(block, &queue_id_address.to_root_bytes())
             .await?;
-        let queue_id = u64::decode(&mut queue_id_proof.stored_data.as_slice())
-            .context("Failed to decode authenticated queue id")?;
+        if queue_id_storage.is_none() {
+            log::warn!("Authenticated QueueId entry not found in storage, using 0 as default");
+        }
+        let queue_id = decode_authenticated_queue_id(queue_id_storage.as_deref())?;
 
         Ok((queue_id, merkle_root))
     }
@@ -965,5 +1006,19 @@ mod tests {
         let hash = H256::from(Blake2Hasher::hash(header).0);
         assert!(validate_block_header_hash(hash, header).is_ok());
         assert!(validate_block_header_hash(hash, b"forged header").is_err());
+    }
+
+    #[test]
+    fn authenticated_queue_id_preserves_legacy_missing_value() {
+        assert_eq!(decode_authenticated_queue_id(None).unwrap(), 0);
+        assert_eq!(
+            decode_authenticated_queue_id(Some(&42u64.encode())).unwrap(),
+            42
+        );
+    }
+
+    #[test]
+    fn authenticated_queue_id_rejects_malformed_value() {
+        assert!(decode_authenticated_queue_id(Some(&[1, 2, 3])).is_err());
     }
 }

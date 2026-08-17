@@ -847,23 +847,32 @@ impl GearApi {
         block: H256,
     ) -> AnyResult<u64> {
         let address = gsdk::gear::storage().grandpa().current_set_id();
-        let proof = self
-            .fetch_block_inclusion_proof(block, &address.to_root_bytes())
-            .await?;
-        let stored_set_id = u64::decode(&mut proof.stored_data.as_slice())
-            .context("Failed to decode authenticated authority set id")?;
-        let header = GearHeader::decode(&mut proof.block_header.as_slice())
+        let stored_set_id = self
+            .fetch_authenticated_storage_value(block, &address.to_root_bytes())
+            .await?
+            .context("Authenticated authority set id is missing")
+            .and_then(|data| {
+                u64::decode(&mut data.as_slice())
+                    .context("Failed to decode authenticated authority set id")
+            })?;
+        let block_data = (*self.api).blocks().at(block).await?;
+        let encoded_header = block_data.header().encode();
+        validate_block_header_hash(block, &encoded_header)?;
+        let header = GearHeader::decode(&mut encoded_header.as_slice())
             .context("Failed to decode authenticated block header")?;
         if header.number == 0 {
             return Ok(stored_set_id);
         }
 
         let previous_block: H256 = header.parent_hash.0.into();
-        let previous_proof = self
-            .fetch_block_inclusion_proof(previous_block, &address.to_root_bytes())
-            .await?;
-        let previous_set_id = u64::decode(&mut previous_proof.stored_data.as_slice())
-            .context("Failed to decode authenticated parent authority set id")?;
+        let previous_set_id = self
+            .fetch_authenticated_storage_value(previous_block, &address.to_root_bytes())
+            .await?
+            .context("Authenticated parent authority set id is missing")
+            .and_then(|data| {
+                u64::decode(&mut data.as_slice())
+                    .context("Failed to decode authenticated parent authority set id")
+            })?;
 
         Ok(if previous_set_id != stored_set_id {
             previous_set_id

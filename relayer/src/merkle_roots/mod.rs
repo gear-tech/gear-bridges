@@ -648,40 +648,68 @@ impl MerkleRootRelayer {
     ) -> anyhow::Result<()> {
         let relayer_id = self.options.relayer_id.clone();
         let client = self.api_provider.client();
-        let last_block_hash = client.latest_finalized_block().await?;
-        let last_block = client.block_hash_to_number(last_block_hash).await?;
+        let latest_block_hash = client.latest_finalized_block().await?;
+        let latest_block = client.block_hash_to_number(latest_block_hash).await?;
+        let latest_timestamp_ms = client.fetch_timestamp(latest_block_hash).await?;
+        let latest_queue_state = client
+            .fetch_authenticated_queue_merkle_root(latest_block_hash)
+            .await?;
+        let confirmed_block = self
+            .last_confirmed_block
+            .context("Ethereum MessageQueue max block number is not initialized")?;
+        let confirmed_block_hash = client.block_number_to_hash(confirmed_block).await?;
+        let confirmed_queue_state = client
+            .fetch_authenticated_queue_merkle_root(confirmed_block_hash)
+            .await?;
 
-        log::info!(
-            "Merkle root relayer {relayer_id} supervisor: checking Vara queue state near latest finalized block #{last_block}"
-        );
+        if !queue_state_changed(confirmed_queue_state, latest_queue_state) {
+            log::trace!(
+                "Merkle root relayer {relayer_id} supervisor: Vara queue state has not changed since Ethereum MessageQueue block #{confirmed_block}, skipping proof generation"
+            );
+            return Ok(());
+        }
 
-        let block = self.signed_block_after(last_block).await?;
+        let Some(target_limit) = recovery_target_limit(
+            self.last_confirmed_block,
+            self.max_block_distance,
+            latest_block,
+        ) else {
+            log::debug!(
+                "Merkle root relayer {relayer_id} supervisor: changed Vara queue state is still inside the MessageQueue window after block #{confirmed_block}, leaving proof generation to the event path"
+            );
+            return Ok(());
+        };
+
+        let block = self.signed_block_at_or_before(target_limit).await?;
         let block_number = block.number();
+        if block_number <= confirmed_block {
+            log::warn!(
+                "Merkle root relayer {relayer_id} supervisor: no signed Vara block advances MessageQueue block #{confirmed_block} inside the bound ending at #{target_limit}"
+            );
+            return Ok(());
+        }
         let block_hash = block.hash();
         let block_timestamp_ms = client.fetch_timestamp(block_hash).await?;
-        let (_queue_id, merkle_root) = client
+        let (_, merkle_root) = client
             .fetch_authenticated_queue_merkle_root(block_hash)
             .await?;
         if self.last_confirmed_timestamp_ms.is_none() {
-            if let Some(last_confirmed_block) = self.last_confirmed_block {
-                let hash = client.block_number_to_hash(last_confirmed_block).await?;
-                self.last_confirmed_timestamp_ms = Some(client.fetch_timestamp(hash).await?);
-            }
+            self.last_confirmed_timestamp_ms =
+                Some(client.fetch_timestamp(confirmed_block_hash).await?);
         }
 
         let threshold = critical_timeout_reached(
             self.options.critical_threshold,
             self.last_confirmed_block,
             self.last_confirmed_timestamp_ms,
-            block_timestamp_ms,
+            latest_timestamp_ms,
         );
-
-        if merkle_root == H256::zero() && threshold.is_none() {
-            log::trace!(
-                "Merkle root relayer {relayer_id} supervisor: latest Vara queue root is zero at block #{block_number}, skipping"
+        let Some((last_confirmed_block, threshold)) = threshold else {
+            log::debug!(
+                "Merkle root relayer {relayer_id} supervisor: critical threshold is not reached at latest finalized Vara block #{latest_block}, skipping forced proof generation"
             );
             return Ok(());
-        }
+        };
 
         let eth_root = match self
             .read_finalized_merkle_root(eth_api, block_number)
@@ -696,39 +724,19 @@ impl MerkleRootRelayer {
         };
         if eth_root == Some(merkle_root) {
             log::info!(
-                "Merkle root relayer {relayer_id} supervisor: finalized Ethereum state already has merkle root {merkle_root} for block #{block_number}"
+                "Merkle root relayer {relayer_id} supervisor: finalized Ethereum state already has merkle root {merkle_root} for bounded Vara block #{block_number}"
             );
-            if self
-                .last_confirmed_block
-                .is_none_or(|confirmed| block_number >= confirmed)
-            {
-                self.last_confirmed_block = Some(block_number);
-                self.last_confirmed_timestamp_ms = Some(block_timestamp_ms);
-            }
+            self.last_confirmed_block = Some(block_number);
+            self.last_confirmed_timestamp_ms = Some(block_timestamp_ms);
             return Ok(());
         }
 
-        let Some((last_confirmed_block, threshold)) = threshold else {
-            log::debug!(
-                "Merkle root relayer {relayer_id} supervisor: critical threshold is not reached for block #{block_number}, skipping forced proof generation"
-            );
-            return Ok(());
-        };
         log::warn!(
-            "Merkle root relayer {relayer_id} supervisor: last confirmed block {last_confirmed_block} is older than supervised block number {block_number} by at least {threshold:?}, forcing proof generation"
+            "Merkle root relayer {relayer_id} supervisor: MessageQueue block #{last_confirmed_block} is stale by at least {threshold:?}; scheduling recovery at signed Vara block #{block_number} within upper bound #{target_limit}, not at latest block #{latest_block}"
         );
-
-        if merkle_root == H256::zero() {
+        if let Some(eth_root) = eth_root {
             log::warn!(
-                "Merkle root relayer {relayer_id} supervisor: Vara queue root is zero at block #{block_number}; scheduling proof anyway because critical threshold is reached"
-            );
-        } else if let Some(eth_root) = eth_root {
-            log::warn!(
-                "Merkle root relayer {relayer_id} supervisor: Ethereum has merkle root {eth_root} for block #{block_number}, but Vara queue root is {merkle_root}; scheduling proof anyway"
-            );
-        } else {
-            log::info!(
-                "Merkle root relayer {relayer_id} supervisor: Ethereum has no merkle root for Vara queue root {merkle_root} at block #{block_number}; scheduling proof"
+                "Merkle root relayer {relayer_id} supervisor: Ethereum has merkle root {eth_root} for bounded Vara block #{block_number}, but Vara queue root is {merkle_root}"
             );
         }
 
@@ -745,7 +753,7 @@ impl MerkleRootRelayer {
             .await?
         {
             log::info!(
-                "Merkle root relayer {relayer_id} supervisor: proof request selected queue #{selected_queue_id}, merkle root {selected_merkle_root} from supervised block #{block_number}"
+                "Merkle root relayer {relayer_id} supervisor: bounded proof request selected queue #{selected_queue_id}, merkle root {selected_merkle_root} at Vara block #{block_number}"
             );
         }
         Ok(())
@@ -2240,6 +2248,17 @@ fn contract_anchor_limit(
     }
 }
 
+fn recovery_target_limit(
+    last_confirmed_block: Option<u32>,
+    max_block_distance: Option<u32>,
+    latest_block: u32,
+) -> Option<u32> {
+    let last_confirmed_block = last_confirmed_block?;
+    let max_block_distance = max_block_distance?;
+    let target = last_confirmed_block.saturating_add(max_block_distance);
+    (target > last_confirmed_block && latest_block >= target).then_some(target)
+}
+
 fn anchor_covers_source(
     source_block: u32,
     target_block: u32,
@@ -2257,6 +2276,10 @@ fn anchor_covers_source(
 pub enum CriticalThreshold {
     Timeout(Duration),
     AuthoritySetChange,
+}
+
+fn queue_state_changed(confirmed: (u64, H256), latest: (u64, H256)) -> bool {
+    confirmed != latest
 }
 
 fn critical_timeout_reached(
@@ -2289,9 +2312,9 @@ pub enum StartupSyncStrategy {
 mod tests {
     use super::{
         anchor_covers_source, contract_anchor_limit, critical_timeout_reached,
-        finalize_confirmed_roots, is_local_proof_only, recover_finalized_continuations,
-        reusable_finalized_root, CriticalThreshold, FinalProof, MerkleRoot, MerkleRootStatus,
-        RawBlockInclusionProof, H256,
+        finalize_confirmed_roots, is_local_proof_only, queue_state_changed,
+        recover_finalized_continuations, recovery_target_limit, reusable_finalized_root,
+        CriticalThreshold, FinalProof, MerkleRoot, MerkleRootStatus, RawBlockInclusionProof, H256,
     };
     use std::{collections::HashMap, time::Duration};
 
@@ -2371,6 +2394,21 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn recovery_requires_queue_state_change_since_contract_max_block() {
+        let confirmed = (7, H256::repeat_byte(1));
+        assert!(!queue_state_changed(confirmed, confirmed));
+        assert!(queue_state_changed(confirmed, (7, H256::repeat_byte(2))));
+        assert!(queue_state_changed(confirmed, (8, H256::repeat_byte(1))));
+    }
+
+    #[test]
+    fn recovery_target_waits_for_and_stops_at_contract_bound() {
+        assert_eq!(recovery_target_limit(Some(100), Some(25), 124), None);
+        assert_eq!(recovery_target_limit(Some(100), Some(25), 125), Some(125));
+        assert_eq!(recovery_target_limit(Some(100), Some(25), 200), Some(125));
     }
 
     #[test]

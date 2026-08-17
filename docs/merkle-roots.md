@@ -101,15 +101,13 @@ Normal roots are placed in a batch. The batch is flushed when:
 
 The spike_window limits how far back timestamps are counted. A bridging-payment event associated with the configured payment address marks the relevant root as priority.
 
-A non-batched proof is used for:
+For normal, paid-priority, and supervisor work, the relayer prefers the cumulative queue root at the GRANDPA-signed target already carried by the block inclusion proof. Before using cumulative coverage, it verifies the source and target queue ID/root pairs with Vara storage proofs tied to their block headers. It uses the target only when it is not older than the source block and the authenticated authority-set ID and queue ID still match. Otherwise it keeps the exact source root. This normally reduces final proof composition to the signed target instead of replaying every header from the source event.
 
-- startup/catch-up recovery;
-- a critical block-distance threshold;
-- an authority-set-change threshold;
-- an authenticated HTTP request for a particular block;
-- the periodic supervisor's mismatch check.
+Batched source roots remain in a proving state until Ethereum confirms the selected anchor. Only then are the older roots marked covered; the anchor proof is never exposed as an exact proof for an older block.
 
-The configuration parser accepts a human duration for critical_threshold, but the current effective options convert a timeout to a block-distance using seconds divided by three; the runtime compares that value against finalized Gear block numbers. Treat the setting as a deployment policy and verify it against the exact binary version before changing it.
+Non-batched generation is reserved for authenticated exact-block HTTP requests and forced health anchors. Exact requests retain the requested block/root metadata even when normal transfer processing would use a later cumulative anchor.
+
+The configuration parser carries `critical_threshold` as a duration. The supervisor compares actual Gear timestamp values for the latest signed block and the last Ethereum-confirmed root; queued or proving work does not advance that confirmation cursor.
 
 The startup_sync_strategy setting accepts critical-threshold, skip, or blocks, and the blocks list is validated to be present only for the blocks strategy. The option is carried into the root-relayer configuration; confirm the behavior of the deployed revision when using a non-default strategy.
 
@@ -121,9 +119,9 @@ The root relayer periodically reads:
 - the root recorded by Ethereum's MessageQueue for the same Gear block;
 - local submission state.
 
-If Ethereum has no matching root, or the critical threshold is reached, the supervisor schedules a forced proof. If Ethereum already has the expected root, local storage is marked submitted/confirmed. If local state says a root was submitted but Ethereum does not show it in finalized state, the root remains eligible for recovery.
+If Ethereum has no matching root and the time threshold is reached, the supervisor schedules a forced proof. If the signed target would exceed MessageQueue's maximum block-distance window, the scheduler first selects an intermediate GRANDPA-signed anchor at or below the contract limit. The source block remains unprocessed until a confirmed anchor actually covers it.
 
-The supervisor deduplicates a root while the same hash is already in GenerateProof or SubmitProof. It clears that deduplication marker after the submitter reports success or failure.
+If Ethereum already has the expected root, local storage is reconciled with finalized submission state. Active signed-anchor work is deduplicated, while authenticated exact-block requests remain separate so batching cannot return mismatched proof metadata.
 
 ## Ethereum submission semantics
 
@@ -136,6 +134,8 @@ The submitter calls MessageQueue.submitMerkleRoot with the Gear block number, ro
 5. emits a MerkleRoot event.
 
 The contract documents that anyone may submit a valid root; the configured fee payer is the process's transaction sender, not a trust assumption for proof validity. MessageQueue can reject submissions during challenge/emergency-stop conditions, and a conflicting root can enable the emergency stop path. Operators must treat such rejections as protocol incidents, not as generic RPC retries.
+
+The local submitted marker is tentative while a transaction is in flight. A transaction is reported as submitted only after its receipt succeeds and finalized Ethereum contract state contains the expected root; restart recovery rechecks persisted markers against the same finalized view before confirming or resubmitting them.
 
 Once a root is stored, MessageQueue.processMessage still enforces the applicable delay and verifies an individual binary Merkle proof for the message. A root being Finalized in the relayer does not by itself complete a token transfer.
 
@@ -163,6 +163,8 @@ The root's serialized proof is not the only required artifact. Recovery may also
 ## Process isolation
 
 Run separate process instances when relayers need different networks, signers, storage, or restart policies. Give each instance its own HTTP address, root-storage file, proof-storage directory, transaction-storage directory, and metrics identity. Sharing mutable state between two processes can cause duplicate work or make recovery ambiguous.
+
+If a relayer component channel closes or a submission fails, the command exits non-zero before the Tokio runtime waits for blocking prover tasks. The process supervisor must restart the container; startup recovery reloads durable proving/submission state.
 
 ## HTTP proof API
 

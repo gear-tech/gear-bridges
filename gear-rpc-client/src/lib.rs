@@ -52,6 +52,16 @@ struct StorageTrieInclusionProof {
 
 pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
+fn validate_block_header_hash(expected: H256, encoded_header: &[u8]) -> AnyResult<()> {
+    let actual = H256::from(Blake2Hasher::hash(encoded_header).0);
+    if actual != expected {
+        return Err(anyhow!(
+            "Block header hash mismatch: expected {expected}, got {actual}"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct GearApi {
     pub api: gsdk::Api,
@@ -370,7 +380,10 @@ impl GearApi {
             Some(justification) => justification,
             None => self.get_justification(block).await?,
         };
-        let required_authority_set_id = self.signed_by_authority_set_id(block).await?;
+        let target_block: H256 = justification.commit.target_hash.0.into();
+        let required_authority_set_id = self
+            .fetch_authenticated_signed_by_authority_set_id(target_block)
+            .await?;
         let validator_set = self.fetch_authority_set(required_authority_set_id).await?;
 
         let pre_commits: Vec<_> = justification
@@ -533,8 +546,10 @@ impl GearApi {
     ) -> AnyResult<StorageInclusionProof> {
         let storage_inclusion_proof = self.fetch_storage_inclusion_proof(block, address).await?;
 
-        let block = (*self.api).blocks().at(block).await?;
+        let expected_block_hash = block;
+        let block = (*self.api).blocks().at(expected_block_hash).await?;
         let encoded_header = block.header().encode();
+        validate_block_header_hash(expected_block_hash, &encoded_header)?;
 
         // Assume that encoded_header have the folowing structure:
         // - previous block hash    (32 bytes)
@@ -608,10 +623,13 @@ impl GearApi {
             _,
             _,
         >(&storage_proof, state_root.0.into(), storage_keys.iter())
-        .unwrap_or_else(|err| panic!("Failed to generate trie proof for {address:?}: {err}"));
+        .map_err(|err| anyhow!("Failed to generate trie proof for {address:?}: {err}"))?;
 
-        let leaf = proof.pop().expect("At least one node in trie proof");
-        let leaf = TrieCodec::decode(&leaf).expect("Failed to decode last node in trie proof");
+        let leaf = proof
+            .pop()
+            .ok_or_else(|| anyhow!("Storage trie proof is empty"))?;
+        let leaf = TrieCodec::decode(&leaf)
+            .map_err(|err| anyhow!("Failed to decode last node in trie proof: {err:?}"))?;
         let encoded_leaf = if let Node::Leaf(nibbles, value) = leaf {
             if !matches!(value, Value::Inline(b) if b.is_empty()) {
                 return Err(anyhow!(
@@ -620,51 +638,50 @@ impl GearApi {
             }
 
             let storage_data_hash = Blake2Hasher::hash(&storage_data).0;
-
             let value = match storage_data.len() {
-                32 => Value::Inline(&storage_data),
-                l if l > 32 => Value::Node(&storage_data_hash),
-                _ => panic!("Unsupported leaf data length"),
+                0..=32 => Value::Inline(&storage_data),
+                _ => Value::Node(&storage_data_hash),
             };
 
             TrieCodec::leaf_node(nibbles.right_iter(), nibbles.len(), value)
         } else {
-            panic!("The last node in proof is expected to be leaf");
+            return Err(anyhow!("The last node in proof is expected to be a leaf"));
         };
 
         let mut current_hash = Blake2Hasher::hash(&encoded_leaf).0;
         let mut branch_nodes = Vec::with_capacity(proof.len());
         for node_data in proof.iter().rev() {
-            let node = TrieCodec::decode(node_data).expect("Correctly encoded node");
+            let node = TrieCodec::decode(node_data)
+                .map_err(|err| anyhow!("Failed to decode trie branch node: {err:?}"))?;
             if let Node::NibbledBranch(nibbles, children, value) = node {
-                // There will be only one NodeHandle::Inline(&[]) children and this
-                // children will lead to the target leaf.
                 let mut target_child_nibble = None;
-                let children: Vec<Option<ChildReference<H256>>> = children
-                    .into_iter()
-                    .enumerate()
-                    .map(|(child_nibble, mut child)| {
-                        if matches!(child, Some(NodeHandle::Inline(&[]))) {
-                            assert!(target_child_nibble.is_none());
-                            target_child_nibble = Some(child_nibble as u8);
-                            child = Some(NodeHandle::Hash(&current_hash));
+                let mut child_references: Vec<Option<ChildReference<H256>>> =
+                    Vec::with_capacity(16);
+                for (child_nibble, mut child) in children.into_iter().enumerate() {
+                    if matches!(child, Some(NodeHandle::Inline(&[]))) {
+                        if target_child_nibble.is_some() {
+                            return Err(anyhow!(
+                                "Trie branch contains multiple inline target children"
+                            ));
                         }
+                        target_child_nibble = Some(child_nibble as u8);
+                        child = Some(NodeHandle::Hash(&current_hash));
+                    }
 
-                        child.map(|child| {
-                            child
-                                .try_into()
-                                .expect("Failed to convert NodeHandle to ChildReference")
-                        })
-                    })
-                    .collect();
+                    child_references.push(match child {
+                        Some(child) => Some(child.try_into().map_err(|_| {
+                            anyhow!("Failed to convert trie node handle to child reference")
+                        })?),
+                        None => None,
+                    });
+                }
 
                 let target_child_nibble = target_child_nibble
-                    .expect("At least one child should be NodeHandle::Inline([])");
-
+                    .ok_or_else(|| anyhow!("Trie branch has no inline target child"))?;
                 let encoded_node = TrieCodec::branch_node_nibbled(
                     nibbles.right_iter(),
                     nibbles.len(),
-                    children.into_iter().map(|x| {
+                    child_references.into_iter().map(|x| {
                         x.map(|x| match x {
                             ChildReference::Hash(hash) => ChildReference::Hash(hash.0.into()),
                             ChildReference::Inline(hash, data) => {
@@ -676,13 +693,14 @@ impl GearApi {
                 );
 
                 current_hash = Blake2Hasher::hash(&encoded_node).0;
-
                 branch_nodes.push(BranchNodeData {
                     data: encoded_node,
                     target_child: target_child_nibble,
                 });
             } else {
-                panic!("All remaining nodes are expected to be nibbled branches");
+                return Err(anyhow!(
+                    "All remaining trie proof nodes must be nibbled branches"
+                ));
             };
         }
 
@@ -754,6 +772,56 @@ impl GearApi {
         };
 
         Ok((queue_id, merkle_root))
+    }
+    /// Fetches queue metadata with storage proofs tied to the requested block header.
+    pub async fn fetch_authenticated_queue_merkle_root(
+        &self,
+        block: H256,
+    ) -> AnyResult<(u64, H256)> {
+        let merkle_root_proof = self.fetch_sent_message_inclusion_proof(block).await?;
+        let merkle_root = H256::decode(&mut merkle_root_proof.stored_data.as_slice())
+            .context("Failed to decode authenticated queue merkle root")?;
+
+        let queue_id_address = gsdk::gear::storage().gear_eth_bridge().queue_id();
+        let queue_id_proof = self
+            .fetch_block_inclusion_proof(block, &queue_id_address.to_root_bytes())
+            .await?;
+        let queue_id = u64::decode(&mut queue_id_proof.stored_data.as_slice())
+            .context("Failed to decode authenticated queue id")?;
+
+        Ok((queue_id, merkle_root))
+    }
+
+    /// Fetches the authority-set ID that signed `block` from storage proofs tied to
+    /// the requested block and its authenticated parent header.
+    pub async fn fetch_authenticated_signed_by_authority_set_id(
+        &self,
+        block: H256,
+    ) -> AnyResult<u64> {
+        let address = gsdk::gear::storage().grandpa().current_set_id();
+        let proof = self
+            .fetch_block_inclusion_proof(block, &address.to_root_bytes())
+            .await?;
+        let stored_set_id = u64::decode(&mut proof.stored_data.as_slice())
+            .context("Failed to decode authenticated authority set id")?;
+        let header = GearHeader::decode(&mut proof.block_header.as_slice())
+            .context("Failed to decode authenticated block header")?;
+        if header.number == 0 {
+            return Ok(stored_set_id);
+        }
+
+        let previous_block: H256 = header.parent_hash.0.into();
+        let previous_proof = self
+            .fetch_block_inclusion_proof(previous_block, &address.to_root_bytes())
+            .await?;
+        let previous_set_id = u64::decode(&mut previous_proof.stored_data.as_slice())
+            .context("Failed to decode authenticated parent authority set id")?;
+
+        Ok(if previous_set_id != stored_set_id {
+            previous_set_id
+        } else {
+            stored_set_id
+        })
     }
 
     pub async fn get_events_at(
@@ -863,6 +931,7 @@ impl GearApi {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn storage_correct() {
@@ -888,5 +957,13 @@ mod tests {
             next_validator_set_address,
             expected_next_validator_set_address.to_root_bytes()
         );
+    }
+
+    #[test]
+    fn block_header_hash_must_match_requested_block() {
+        let header = b"authenticated header";
+        let hash = H256::from(Blake2Hasher::hash(header).0);
+        assert!(validate_block_header_hash(hash, header).is_ok());
+        assert!(validate_block_header_hash(hash, b"forged header").is_err());
     }
 }

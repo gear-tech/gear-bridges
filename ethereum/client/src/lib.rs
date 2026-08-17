@@ -443,6 +443,12 @@ impl EthApi {
     pub async fn max_block_number(&self) -> Result<u32, Error> {
         self.contracts.max_block_number().await
     }
+    /// Returns MessageQueue's maximum Gear block from finalized Ethereum state.
+    pub async fn finalized_max_block_number(&self) -> Result<u32, Error> {
+        self.contracts
+            .max_block_number_at(BlockNumberOrTag::Finalized)
+            .await
+    }
 
     /// Returns the maximum block distance allowed between `max_block_number`
     /// and the block number being submitted as part of a merkle-root submission
@@ -660,6 +666,15 @@ impl Contracts {
     pub async fn max_block_number(&self) -> Result<u32, Error> {
         self.message_queue_instance
             .maxBlockNumber()
+            .call()
+            .await
+            .map(|num| num.to())
+            .map_err(Error::ErrorDuringContractExecution)
+    }
+    pub async fn max_block_number_at(&self, block_tag: BlockNumberOrTag) -> Result<u32, Error> {
+        self.message_queue_instance
+            .maxBlockNumber()
+            .block(BlockId::Number(block_tag))
             .call()
             .await
             .map(|num| num.to())

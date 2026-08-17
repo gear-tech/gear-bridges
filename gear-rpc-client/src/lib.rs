@@ -69,6 +69,11 @@ fn decode_authenticated_queue_id(storage: Option<&[u8]>) -> AnyResult<u64> {
     }
 }
 
+fn decode_authenticated_queue_merkle_root(storage: Option<&[u8]>) -> AnyResult<H256> {
+    let mut data = storage.context("Authenticated queue merkle root is missing")?;
+    H256::decode(&mut data).context("Failed to decode authenticated queue merkle root")
+}
+
 #[derive(Clone)]
 pub struct GearApi {
     pub api: gsdk::Api,
@@ -817,9 +822,11 @@ impl GearApi {
         &self,
         block: H256,
     ) -> AnyResult<(u64, H256)> {
-        let merkle_root_proof = self.fetch_sent_message_inclusion_proof(block).await?;
-        let merkle_root = H256::decode(&mut merkle_root_proof.stored_data.as_slice())
-            .context("Failed to decode authenticated queue merkle root")?;
+        let merkle_root_address = gsdk::gear::storage().gear_eth_bridge().queue_merkle_root();
+        let merkle_root_storage = self
+            .fetch_authenticated_storage_value(block, &merkle_root_address.to_root_bytes())
+            .await?;
+        let merkle_root = decode_authenticated_queue_merkle_root(merkle_root_storage.as_deref())?;
 
         let queue_id_address = gsdk::gear::storage().gear_eth_bridge().queue_id();
         let queue_id_storage = self
@@ -1020,5 +1027,16 @@ mod tests {
     #[test]
     fn authenticated_queue_id_rejects_malformed_value() {
         assert!(decode_authenticated_queue_id(Some(&[1, 2, 3])).is_err());
+    }
+
+    #[test]
+    fn authenticated_queue_merkle_root_requires_valid_value() {
+        let root = H256::repeat_byte(7);
+        assert_eq!(
+            decode_authenticated_queue_merkle_root(Some(&root.encode())).unwrap(),
+            root
+        );
+        assert!(decode_authenticated_queue_merkle_root(None).is_err());
+        assert!(decode_authenticated_queue_merkle_root(Some(&[1, 2, 3])).is_err());
     }
 }

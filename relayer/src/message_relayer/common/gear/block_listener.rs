@@ -155,17 +155,31 @@ impl BlockListener {
             let block_hash = justification.commit.target_hash;
             let block_number = justification.commit.target_number;
 
-            // Check if there are missing blocks and fetch them
+            // GRANDPA justifications commonly skip block numbers. Replay the gap
+            // inline so slow archive RPCs cannot create overlapping replay tasks.
             if let Some(last_finalized) = *last_finalized_block_number {
-                if last_finalized + 1 != block_number {
+                if block_number <= last_finalized {
+                    log::trace!(
+                        "Gear block listener for relayer {}: skipping already replayed finalized block #{block_number}",
+                        self.relayer_id
+                    );
+                    continue;
+                }
+
+                if last_finalized.saturating_add(1) < block_number {
                     log::info!("Gear block listener for relayer {}: detected gap: last finalized block was #{last_finalized}, current block is #{block_number}", self.relayer_id);
 
-                    self.spawn_replay_range(
-                        tx.clone(),
-                        last_finalized + 1,
-                        block_number.saturating_sub(1),
-                        "live gap replay",
-                    );
+                    if !self
+                        .replay_gap(
+                            tx,
+                            last_finalized.saturating_add(1),
+                            block_number.saturating_sub(1),
+                            last_finalized_block_number,
+                        )
+                        .await?
+                    {
+                        return Ok(false);
+                    }
                 }
             }
 
@@ -235,6 +249,35 @@ impl BlockListener {
                 reason,
             );
         }
+    }
+
+    async fn replay_gap(
+        &mut self,
+        tx: &broadcast::Sender<GearBlock>,
+        from_block: u32,
+        to_block: u32,
+        last_finalized_block_number: &mut Option<u32>,
+    ) -> anyhow::Result<bool> {
+        log::info!(
+            "Gear block listener for relayer {} live gap replay: replaying blocks #{from_block}..=#{to_block}",
+            self.relayer_id
+        );
+        for block_number in from_block..=to_block {
+            log::trace!(
+                "Gear block listener for relayer {} live gap replay: replaying finalized block #{block_number}",
+                self.relayer_id
+            );
+            if !self.fetch_store_send(tx, block_number, None).await? {
+                return Ok(false);
+            }
+            *last_finalized_block_number = Some(block_number);
+            self.metrics.latest_block.set(block_number as i64);
+        }
+        log::info!(
+            "Gear block listener for relayer {} live gap replay: replay finished",
+            self.relayer_id
+        );
+        Ok(true)
     }
 
     fn spawn_replay_range(

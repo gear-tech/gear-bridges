@@ -97,7 +97,20 @@ impl BeaconClient {
             self.rpc_url, period, count
         );
 
-        get::<UpdateResponse>(self.client.get(&url)).await
+        let mut updates = get::<UpdateResponse>(self.client.get(&url)).await?;
+
+        // Some Beacon API providers ignore `start_period` and `count` and return
+        // cached updates for unrelated periods. Restore the endpoint semantics
+        // locally so callers can safely rely on the requested range and size.
+        let period_end = period.saturating_add(u64::from(count));
+        updates.retain(|update| {
+            let update_period = eth_utils::calculate_period(update.data.signature_slot);
+            (period..period_end).contains(&update_period)
+        });
+        updates.sort_unstable_by_key(|update| update.data.signature_slot);
+        updates.truncate(usize::from(count));
+
+        Ok(updates)
     }
 
     pub async fn get_block_header(&self, slot: u64) -> AnyResult<BeaconBlockHeader> {

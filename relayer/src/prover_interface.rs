@@ -231,10 +231,49 @@ pub async fn prove_final(
     gnark_data_path: PathBuf,
     inclusion_proof: Option<RawBlockInclusionProof>,
 ) -> anyhow::Result<FinalProof> {
+    let requested_block_number = gear_api.block_hash_to_number(at_block).await?;
+    log::info!(
+        "prove_final: started; requested block = {at_block:?} (#{requested_block_number}); inclusion proof source = {}",
+        if inclusion_proof.is_some() {
+            "provided by caller"
+        } else {
+            "grandpa_proveFinality RPC"
+        }
+    );
+
     let (headers, proof) = if let Some(proof) = inclusion_proof {
+        let expected_chain_len = proof
+            .block_number
+            .checked_sub(requested_block_number)
+            .map(|span| span as usize + 1);
+        log::info!(
+            "prove_final: provided inclusion proof targets {:?} (#{}); requested-to-signed span = {:?}; expected chain len = {:?}; authority set = {}; GRANDPA round = {}; precommits = {}; validators = {}",
+            proof.block_hash,
+            proof.block_number,
+            proof.block_number.checked_sub(requested_block_number),
+            expected_chain_len,
+            proof.required_authority_set_id,
+            proof.justification_round,
+            proof.pre_commits.len(),
+            proof.validator_set.len(),
+        );
+        if proof.block_number > requested_block_number {
+            log::warn!(
+                "prove_final: provided inclusion proof is for a later block: requested #{requested_block_number}, signed #{}; reconstructing {} headers via chain_getHeader RPC",
+                proof.block_number,
+                expected_chain_len.expect("signed block is later than requested block"),
+            );
+        } else if proof.block_number < requested_block_number {
+            log::warn!(
+                "prove_final: provided inclusion proof block #{} is older than requested block #{requested_block_number}; the requested block cannot be reached by walking parent hashes",
+                proof.block_number,
+            );
+        }
+
         // capacity is enough to store all headers of an about single era
         let mut headers = Vec::with_capacity(15_000);
         let mut hash = proof.block_hash;
+        let started_at = Instant::now();
         loop {
             if headers.len() == headers.capacity() {
                 return Err(anyhow!("Unable to construct chain of headers"));
@@ -244,6 +283,13 @@ pub async fn prove_final(
             let parent_hash = header.parent_hash;
 
             headers.push(header);
+            let fetched = headers.len();
+            if fetched == 1 || fetched % 256 == 0 || hash == at_block {
+                log::info!(
+                    "prove_final: header-chain reconstruction progress; fetched = {fetched}; current block = {hash:?} (#{}); target block = {at_block:?} (#{requested_block_number})",
+                    headers.last().expect("a header was just pushed").number,
+                );
+            }
             if hash == at_block {
                 break;
             }
@@ -251,11 +297,35 @@ pub async fn prove_final(
             hash = parent_hash.0.into();
         }
 
+        let actual_chain_len = headers.len();
+        log::info!(
+            "prove_final: header-chain reconstruction finished; chain len = {actual_chain_len}; chain_getHeader RPC calls = {actual_chain_len}; elapsed = {}ms",
+            started_at.elapsed().as_millis(),
+        );
+        if expected_chain_len != Some(actual_chain_len) {
+            log::warn!(
+                "prove_final: reconstructed chain length does not match block-number span; expected = {expected_chain_len:?}, actual = {actual_chain_len}"
+            );
+        }
+
         let headers = headers.into_iter().rev().collect();
 
         (headers, proof)
     } else {
+        log::info!(
+            "prove_final: requesting GRANDPA finality proof at or after block #{requested_block_number} via grandpa_proveFinality RPC"
+        );
+        let rpc_started_at = Instant::now();
         let (justification, headers) = get_justification_and_headers(gear_api, at_block).await?;
+        log::info!(
+            "prove_final: grandpa_proveFinality RPC path finished; justification target = {:?} (#{}); returned header chain len = {}; round = {}; precommits = {}; elapsed = {}ms",
+            justification.commit.target_hash,
+            justification.commit.target_number,
+            headers.len(),
+            justification.round,
+            justification.commit.precommits.len(),
+            rpc_started_at.elapsed().as_millis(),
+        );
 
         (
             headers,
@@ -264,10 +334,13 @@ pub async fn prove_final(
     };
 
     log::info!(
-        "Proving message sent; requested block = {at_block:?} ({:?}); signed block = {:?} ({:?}); chain len = {}",
-        headers.first().map(|header| header.number),
+        "Proving message sent; requested block = {at_block:?} ({requested_block_number}); signed block = {:?} ({}); chain first = {:?} ({:?}); chain last = {:?} ({:?}); chain len = {}",
         proof.block_hash,
         proof.block_number,
+        headers.first().map(|header| header.hash()),
+        headers.first().map(|header| header.number),
+        headers.last().map(|header| header.hash()),
+        headers.last().map(|header| header.number),
         headers.len(),
     );
 
@@ -306,15 +379,46 @@ pub async fn prove_final_with_block_finality(
         ));
     }
 
+    log::info!(
+        "prove_final: validated header chain; first block = {:?} (#{}); last block = {:?} (#{:?}); chain len = {}; signed block = {:?} (#{}); fetching sent-message storage inclusion proof for the first block",
+        header_first.hash(),
+        header_first.number,
+        block_last_maybe_hash,
+        headers.last().map(|header| header.number),
+        headers.len(),
+        block_finality_proof.block_hash,
+        block_finality_proof.block_number,
+    );
+    let storage_rpc_started_at = Instant::now();
     let sent_message_inclusion_proof = gear_api
         .fetch_sent_message_inclusion_proof(header_first.hash().0.into())
         .await?;
+
+    log::info!(
+        "prove_final: sent-message storage inclusion proof fetched; address bytes = {}; header bytes = {}; branch nodes = {}; leaf-node bytes = {}; stored-data bytes = {}; elapsed = {}ms",
+        sent_message_inclusion_proof.address.len(),
+        sent_message_inclusion_proof.block_header.len(),
+        sent_message_inclusion_proof.branch_nodes_data.len(),
+        sent_message_inclusion_proof.leaf_node_data.len(),
+        sent_message_inclusion_proof.stored_data.len(),
+        storage_rpc_started_at.elapsed().as_millis(),
+    );
 
     let message_contents = sent_message_inclusion_proof.stored_data.clone();
     let sent_message_inclusion_proof = parse_rpc_inclusion_proof(sent_message_inclusion_proof);
 
     let now = Instant::now();
     let timer = PROVING_TIME.with_label_values(&["final"]).start_timer();
+
+    log::info!(
+        "prove_final: starting recursive Plonky2 message-sent proof and gnark proof; headers = {}; signed block = {:?} (#{}); authority set = {}; precommits = {}; worker threads = {:?}",
+        headers.len(),
+        block_finality_proof.block_hash,
+        block_finality_proof.block_number,
+        block_finality_proof.required_authority_set_id,
+        block_finality_proof.pre_commits.len(),
+        count_thread,
+    );
 
     let handler = thread::spawn(move || {
         let proof = proving::prove_message_sent(
@@ -334,7 +438,10 @@ pub async fn prove_final_with_block_finality(
         .expect("proving::prove_message_sent & gnark handle should be joined");
 
     timer.stop_and_record();
-    log::info!("Final prove time: {}ms", now.elapsed().as_millis());
+    log::info!(
+        "prove_final: recursive Plonky2 message-sent proof and gnark proof finished in {}ms",
+        now.elapsed().as_millis()
+    );
 
     let public_inputs: [_; 2] = proof
         .public_inputs

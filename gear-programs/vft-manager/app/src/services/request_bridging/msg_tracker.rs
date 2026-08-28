@@ -45,7 +45,8 @@ pub enum MessageStatus {
     /// Reply is received for a token deposit message.
     TokenDepositCompleted(bool),
 
-    /// Message to the `pallet-gear-eth-bridge` is sent.
+    /// Message to the `pallet-gear-eth-bridge` is sent. This status is also the
+    /// fail-closed quarantine state when the outcome is ambiguous.
     SendingMessageToBridgeBuiltin,
     /// Reply is received for a message to the `pallet-gear-eth-bridge`.
     BridgeResponseReceived(Option<(U256, H256, u64)>),

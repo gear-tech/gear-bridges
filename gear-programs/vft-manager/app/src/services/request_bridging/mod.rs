@@ -21,8 +21,9 @@ pub fn seed() {
 }
 
 /// Lock/burn `vft` tokens (specific operation depends on the token supply type) and send
-/// request to the bridge built-in actor. If request is failed then tokens will be refunded back
-/// to the sender.
+/// request to the bridge built-in actor. Tokens are refunded only when the bridge built-in
+/// actor definitively rejects the request. Ambiguous outcomes remain quarantined in the
+/// message tracker.
 pub async fn request_bridging(
     service: &mut VftManagerExposure<VftManager>,
     sender: ActorId,
@@ -89,23 +90,20 @@ pub async fn request_bridging(
     let (nonce, hash, queue_id) = match bridge_builtin_reply {
         Ok(result) => result,
         Err(e) => {
-            // Set critical section ensuring the message status is `BridgeResponseReceived(None)`
-            // regardless of the result of the next code execution.
-            set_critical_hook(msg_id);
-
-            msg_tracker_mut()
-                .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
-
-            match supply_type {
-                TokenSupply::Ethereum => {
-                    token_operations::mint(vara_token_id, sender, amount, config, msg_id)
-                        .await
-                        .expect("Failed to mint tokens");
-                }
-                TokenSupply::Gear => {
-                    token_operations::unlock(vara_token_id, sender, amount, config, msg_id)
-                        .await
-                        .expect("Failed to unlock tokens");
+            // A recovery call can run after a definite failure reply hook but before
+            // this continuation. Only the execution that claims the refund may send it.
+            if e == Error::MessageFailed && claim_token_refund(msg_id) {
+                match supply_type {
+                    TokenSupply::Ethereum => {
+                        token_operations::mint(vara_token_id, sender, amount, config, msg_id)
+                            .await
+                            .expect("Failed to mint tokens");
+                    }
+                    TokenSupply::Gear => {
+                        token_operations::unlock(vara_token_id, sender, amount, config, msg_id)
+                            .await
+                            .expect("Failed to unlock tokens");
+                    }
                 }
             }
 
@@ -135,14 +133,14 @@ pub async fn request_bridging(
 /// Can be called only by the sender of the original `request_bridging` message or by the admin.
 ///
 /// This function can return funds back to the user in the following scenarios:
-/// - Token lock/burn is complete but message to the built-in actor haven't been sent yet. It can happen if
-///   user haven't attached gas enough to process the message further after the first `wake` or if network
-///   is loaded and timeout we've set to the reply is expired.
+/// - Token lock/burn is complete but a message to the built-in actor has not been sent yet.
 /// - Message to the built-in actor have returned error but token refund message haven't been sent yet. It
-///   can happen if user haven't attached gas enough to process the message further after the second `wake`
-///   or if network is loaded and timeout we've set to the reply is expired.
+///   can happen if user haven't attached gas enough to process the message further after the second `wake`.
 /// - Token refund message have been sent but it have failed. This case should be practically impossible
 ///   due to the invariants that `vft-manager` provides but left just in case.
+///
+/// A request in `SendingMessageToBridgeBuiltin` is ambiguous and cannot be refunded until an
+/// administrator has reconciled it with the bridge queue while the manager is paused.
 ///
 /// The function panics if the token refund for the specified message is already in flight
 /// (i.e. the status is `SendingMessageToReturnTokens`): accepting such a call would send
@@ -170,17 +168,8 @@ pub async fn handle_interrupted_transfer(
         panic!("Access rejected");
     }
 
-    match msg_info.status {
-        MessageStatus::TokenDepositCompleted(true)
-        | MessageStatus::BridgeResponseReceived(None)
-        | MessageStatus::TokensReturnComplete(false) => {
-            msg_tracker_mut()
-                .update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
-        }
-
-        _ => {
-            panic!("Unexpected status or transaction completed.")
-        }
+    if !claim_token_refund(msg_id) {
+        panic!("Token refund already in flight or completed")
     }
 
     match token_supply {
@@ -195,23 +184,24 @@ pub async fn handle_interrupted_transfer(
     Ok(())
 }
 
-/// Helper function to change message status to `BridgeResponseReceived(None)` in the rare case
-/// when the reply hook of `send_message_to_bridge_builtin` does not get executed (because of
-/// the timeout for example).
-///
-/// The status is intentionally one from which [handle_interrupted_transfer] can retry the
-/// refund: it means that the token refund message hasn't been sent yet.
-/// `SendingMessageToReturnTokens` can't be used for that purpose since it is reserved for
-/// refunds that are already in flight and is rejected by [handle_interrupted_transfer].
-fn set_critical_hook(msg_id: MessageId) {
-    gstd::critical::set_hook(move || {
-        let msg_tracker = msg_tracker_mut();
-        let msg_info = msg_tracker
-            .get_message_info(&msg_id)
-            .expect("Unexpected: msg info does not exist");
+/// Atomically claim the single token refund for a failed bridge request.
+fn claim_token_refund(msg_id: MessageId) -> bool {
+    let msg_tracker = msg_tracker_mut();
+    let status = &msg_tracker
+        .get_message_info(&msg_id)
+        .expect("Unexpected: msg status does not exist")
+        .status;
 
-        if let MessageStatus::SendingMessageToBridgeBuiltin = msg_info.status {
-            msg_tracker.update_message_status(msg_id, MessageStatus::BridgeResponseReceived(None));
+    match status {
+        MessageStatus::SendingMessageToReturnTokens | MessageStatus::TokensReturnComplete(true) => {
+            false
         }
-    });
+        MessageStatus::BridgeResponseReceived(None)
+        | MessageStatus::TokensReturnComplete(false)
+        | MessageStatus::TokenDepositCompleted(true) => {
+            msg_tracker.update_message_status(msg_id, MessageStatus::SendingMessageToReturnTokens);
+            true
+        }
+        _ => panic!("Unexpected status or transaction completed."),
+    }
 }

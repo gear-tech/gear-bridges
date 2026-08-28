@@ -192,26 +192,52 @@ fn handle_reply_hook(msg_id: MessageId) {
     let msg_info = msg_tracker
         .get_message_info(&msg_id)
         .expect("Unexpected: msg info does not exist");
-    let reply_bytes = msg::load_bytes().expect("Unable to load bytes");
+    // Only an explicit error reply proves that the token operation failed.
+    // Unreadable or malformed success replies are ambiguous and must leave the
+    // current in-flight state unchanged.
+    let reply_code = match msg::reply_code() {
+        Ok(reply_code) => reply_code,
+        Err(_) => return,
+    };
+    let definite_failure = matches!(&reply_code, ReplyCode::Error(_));
+    let reply_bytes = (!definite_failure)
+        .then(|| msg::load_bytes().ok())
+        .flatten();
 
     match msg_info.status {
         MessageStatus::SendingMessageToDepositTokens => {
-            let reply = match msg_info.details.token_supply {
-                TokenSupply::Ethereum => decode_burn_reply(&reply_bytes),
-                TokenSupply::Gear => decode_lock_reply(&reply_bytes),
-            }
-            .unwrap_or(false);
+            let reply = reply_bytes
+                .as_deref()
+                .and_then(|bytes| {
+                    match msg_info.details.token_supply {
+                        TokenSupply::Ethereum => decode_burn_reply(bytes),
+                        TokenSupply::Gear => decode_lock_reply(bytes),
+                    }
+                    .ok()
+                })
+                .or_else(|| definite_failure.then_some(false));
 
-            msg_tracker.update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
+            if let Some(reply) = reply {
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
+            }
         }
         MessageStatus::SendingMessageToReturnTokens => {
-            let reply = match msg_info.details.token_supply {
-                TokenSupply::Ethereum => decode_mint_reply(&reply_bytes),
-                TokenSupply::Gear => decode_unlock_reply(&reply_bytes),
-            }
-            .unwrap_or(false);
+            let reply = reply_bytes
+                .as_deref()
+                .and_then(|bytes| {
+                    match msg_info.details.token_supply {
+                        TokenSupply::Ethereum => decode_mint_reply(bytes),
+                        TokenSupply::Gear => decode_unlock_reply(bytes),
+                    }
+                    .ok()
+                })
+                .or_else(|| definite_failure.then_some(false));
 
-            msg_tracker.update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
+            if let Some(reply) = reply {
+                msg_tracker
+                    .update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
+            }
         }
         _ => {}
     };

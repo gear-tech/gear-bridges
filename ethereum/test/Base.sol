@@ -209,6 +209,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 wrappedBitcoin: erc20Tokens[4]
             });
 
+            circleToken = IERC20Metadata(overrides.circleToken);
+            tetherToken = IERC20Metadata(overrides.tetherToken);
+            wrappedEther = IERC20Metadata(overrides.wrappedEther);
+            wrappedBitcoin = IERC20Metadata(overrides.wrappedBitcoin);
+
             bool isMainnet = block.chainid == 1;
             if (isMainnet) {
                 bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
@@ -242,6 +247,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 emergencyStopObservers: messageQueue.emergencyStopObservers(),
                 bridgingPaymentFee: bridgingPayment.fee()
             });
+
+            if (messageQueue.isChallengingRoot()) {
+                vm.prank(deploymentArguments.emergencyStopAdmin);
+                messageQueue.disableChallengeRoot();
+            }
 
             // TODO: all manipulations with the forked contracts should be done here
         }

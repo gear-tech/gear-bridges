@@ -29,18 +29,18 @@ on:
         type: boolean
         description: Deploy mainnet-explorer
         default: true
-      deploy_hoodi_gear_indexer:
-        type: boolean
-        description: Deploy hoodi-gear-indexer
-        default: true
-      deploy_hoodi_eth_indexer:
-        type: boolean
-        description: Deploy hoodi-eth-indexer
-        default: true
-      deploy_hoodi_explorer:
-        type: boolean
-        description: Deploy hoodi-explorer
-        default: true
+      # deploy_hoodi_gear_indexer:
+      #   type: boolean
+      #   description: Deploy hoodi-gear-indexer
+      #   default: true
+      # deploy_hoodi_eth_indexer:
+      #   type: boolean
+      #   description: Deploy hoodi-eth-indexer
+      #   default: true
+      # deploy_hoodi_explorer:
+      #   type: boolean
+      #   description: Deploy hoodi-explorer
+      #   default: true
       deploy_frontend:
         type: boolean
         description: Deploy frontend
@@ -125,73 +125,73 @@ jobs:
       WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
       ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
 
-  deploy_hoodi_gear_indexer:
-    uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
-    with:
-      argocd_server: ${{ vars.ARGOCD_SERVER }}
-      vault_server: ${{ vars.VAULT_SERVER }}
-      app: bridge
-      component: hoodi-gear-indexer
-      env: ${{ inputs.env }}
-      dockerfile: js/indexer/Dockerfile
-      context: .
-      paths_filter: |
-        js/indexer/**
-        js/common/**
-        api/gear/**
-        package.json
-        yarn.lock
-        lerna.json
-        .yarnrc.yml
-        .yarn/**
-    secrets:
-      WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
-      ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
+  # deploy_hoodi_gear_indexer:
+  #   uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
+  #   with:
+  #     argocd_server: ${{ vars.ARGOCD_SERVER }}
+  #     vault_server: ${{ vars.VAULT_SERVER }}
+  #     app: bridge
+  #     component: hoodi-gear-indexer
+  #     env: ${{ inputs.env }}
+  #     dockerfile: js/indexer/Dockerfile
+  #     context: .
+  #     paths_filter: |
+  #       js/indexer/**
+  #       js/common/**
+  #       api/gear/**
+  #       package.json
+  #       yarn.lock
+  #       lerna.json
+  #       .yarnrc.yml
+  #       .yarn/**
+  #   secrets:
+  #     WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
+  #     ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
 
-  deploy_hoodi_eth_indexer:
-    uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
-    with:
-      argocd_server: ${{ vars.ARGOCD_SERVER }}
-      vault_server: ${{ vars.VAULT_SERVER }}
-      app: bridge
-      component: hoodi-eth-indexer
-      env: ${{ inputs.env }}
-      dockerfile: js/indexer/Dockerfile
-      context: .
-      paths_filter: |
-        js/indexer/**
-        js/common/**
-        api/ethereum/**
-        package.json
-        yarn.lock
-        lerna.json
-        .yarnrc.yml
-        .yarn/**
-    secrets:
-      WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
-      ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
+  # deploy_hoodi_eth_indexer:
+  #   uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
+  #   with:
+  #     argocd_server: ${{ vars.ARGOCD_SERVER }}
+  #     vault_server: ${{ vars.VAULT_SERVER }}
+  #     app: bridge
+  #     component: hoodi-eth-indexer
+  #     env: ${{ inputs.env }}
+  #     dockerfile: js/indexer/Dockerfile
+  #     context: .
+  #     paths_filter: |
+  #       js/indexer/**
+  #       js/common/**
+  #       api/ethereum/**
+  #       package.json
+  #       yarn.lock
+  #       lerna.json
+  #       .yarnrc.yml
+  #       .yarn/**
+  #   secrets:
+  #     WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
+  #     ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
 
-  deploy_hoodi_explorer:
-    uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
-    with:
-      argocd_server: ${{ vars.ARGOCD_SERVER }}
-      vault_server: ${{ vars.VAULT_SERVER }}
-      app: bridge
-      component: hoodi-explorer
-      env: ${{ inputs.env }}
-      dockerfile: js/indexer/Dockerfile
-      context: .
-      paths_filter: |
-        js/indexer/**
-        js/common/**
-        package.json
-        yarn.lock
-        lerna.json
-        .yarnrc.yml
-        .yarn/**
-    secrets:
-      WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
-      ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
+  # deploy_hoodi_explorer:
+  #   uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
+  #   with:
+  #     argocd_server: ${{ vars.ARGOCD_SERVER }}
+  #     vault_server: ${{ vars.VAULT_SERVER }}
+  #     app: bridge
+  #     component: hoodi-explorer
+  #     env: ${{ inputs.env }}
+  #     dockerfile: js/indexer/Dockerfile
+  #     context: .
+  #     paths_filter: |
+  #       js/indexer/**
+  #       js/common/**
+  #       package.json
+  #       yarn.lock
+  #       lerna.json
+  #       .yarnrc.yml
+  #       .yarn/**
+  #   secrets:
+  #     WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
+  #     ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
 
   deploy_frontend:
     uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main

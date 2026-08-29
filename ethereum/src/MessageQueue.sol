@@ -103,12 +103,7 @@ contract MessageQueue is
     /**
      * @custom:oz-upgrades-validate-as-initializer
      */
-    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(6) {
-        // Prevent malicious message from being processed after challenge period expires
-        // Message: https://vara.subscan.io/event/35774782-18
-        // Message hash: 0xa1d35b04d21bfe733125ada498b6bcd361d04a8abbc0576a615be1d0493a3ba2
-        _processedMessages[836] = true;
-    }
+    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {}
 
     /**
      * @dev Returns governance admin address.

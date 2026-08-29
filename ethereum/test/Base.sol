@@ -31,11 +31,6 @@ import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
 import {VerifierMock} from "src/mocks/VerifierMock.sol";
 
-import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {ERC20ManagerPacker, TransferMessage} from "src/interfaces/IERC20Manager.sol";
-import {GovernancePacker, UpgradeProxyMessage} from "src/interfaces/IGovernance.sol";
-import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
-
 struct Overrides {
     address circleToken;
     address tetherToken;
@@ -70,12 +65,6 @@ library BaseConstants {
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
-    using Hasher for VaraMessage;
-
-    using GovernancePacker for UpgradeProxyMessage;
-
-    using ERC20ManagerPacker for TransferMessage;
-
     uint256 public messageNonce;
     uint256 public currentBlockNumber;
 
@@ -259,99 +248,12 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 bridgingPaymentFee: bridgingPayment.fee()
             });
 
-            // TODO: all manipulations with the forked contracts should be done here
-
-            // upgrade
-
             if (messageQueue.isChallengingRoot()) {
-                vm.startPrank(deploymentArguments.emergencyStopAdmin);
-
-                vm.expectEmit(address(messageQueue));
-                emit IMessageQueue.ChallengeRootDisabled();
-
+                vm.prank(deploymentArguments.emergencyStopAdmin);
                 messageQueue.disableChallengeRoot();
-
-                vm.stopPrank();
             }
 
-            address newImplementation = 0xAdF9F599277F41907Cf86109833d1601b433dC5b;
-
-            VaraMessage memory message1 = VaraMessage({
-                nonce: 837,
-                source: governanceAdmin.governance(),
-                destination: address(governanceAdmin),
-                payload: UpgradeProxyMessage({
-                    proxy: address(messageQueue),
-                    newImplementation: newImplementation,
-                    data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
-                }).pack()
-            });
-            assertEq(message1.nonce, 837);
-            assertEq(message1.source, 0x6d6f646c70792f6765746862306272696467655f61646d696e00000000000000);
-            assertEq(message1.destination, 0x3681A3e25F5652389B8f52504D517E96352830C3);
-            assertEq(message1.payload, hex"038e01fbf136ca97627ca241db9eff1dfe3f2195f6adf9f599277f41907cf86109833d1601b433dc5b6c2eb350");
-            assertEq(messageQueue.isProcessed(message1.nonce), false);
-
-            bytes32 messageHash = message1.hash();
-            assertEq(messageHash, 0xc0bbeac3cec0f313dc02e4aaad0b961210a48671d3cbc1c706f18fdf3e875099);
-
-            uint256 blockNumber = currentBlockNumber++;
-            bytes32 merkleRoot = messageHash;
-            bytes memory proof1 = "";
-
-            vm.expectEmit(address(messageQueue));
-            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
-
-            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
-
-            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
-
-            uint256 totalLeaves = 1;
-            uint256 leafIndex = 0;
-            bytes32[] memory proof2 = new bytes32[](0);
-
-            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
-            assertEq(
-                address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
-                address(newImplementation)
-            );
-
-            // test after upgrade
-
-            // https://vara.subscan.io/event/35774782-18
-            address receiver = 0x8d8565f7B0403e474246961fb3295d8308b80687;
-            VaraMessage memory message2 = VaraMessage({
-                nonce: 836,
-                source: deploymentArguments.vftManager,
-                destination: address(erc20Manager),
-                payload: TransferMessage({
-                    sender: 0xd85e198e149f034135571defe78c222834aeb80a34030d7af2b4d94b5e52eb21,
-                    receiver: receiver,
-                    token: deploymentArguments.overrides.tetherToken,
-                    amount: 10476299891 // 10476.299891 USDT
-                }).pack()
-            });
-            uint256 balanceBefore = tetherToken.balanceOf(receiver);
-            assertTrue(messageQueue.isProcessed(message2.nonce));
-
-            messageHash = message2.hash();
-            assertEq(messageHash, 0xa1d35b04d21bfe733125ada498b6bcd361d04a8abbc0576a615be1d0493a3ba2);
-
-            blockNumber = currentBlockNumber++;
-            merkleRoot = messageHash;
-
-            vm.expectEmit(address(messageQueue));
-            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
-
-            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
-
-            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
-
-            vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, message2.nonce));
-            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
-
-            uint256 balanceAfter = tetherToken.balanceOf(receiver);
-            assertEq(balanceAfter, balanceBefore);
+            // TODO: all manipulations with the forked contracts should be done here
         }
 
         console.log("Deployment arguments:");

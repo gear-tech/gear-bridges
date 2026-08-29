@@ -64,6 +64,8 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
 
       - name: Install dependencies
         run: forge soldeer install
@@ -163,6 +165,8 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
 
       - name: Install dependencies
         run: forge soldeer install
@@ -220,6 +224,8 @@ jobs:
 
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
 
       - name: Install dependencies
         run: forge soldeer install

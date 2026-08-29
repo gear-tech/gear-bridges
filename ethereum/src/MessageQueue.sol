@@ -103,7 +103,7 @@ contract MessageQueue is
     /**
      * @custom:oz-upgrades-validate-as-initializer
      */
-    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(6) {}
+    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {}
 
     /**
      * @dev Returns governance admin address.

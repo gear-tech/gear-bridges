@@ -135,6 +135,8 @@ pub enum Added {
     Removed(RelayedMerkleRoot),
     /// The provided root overwrites existing one with the same authority set id.
     Overwritten(GearBlockNumber),
+    /// The provided root is older than every retained root and is ignored.
+    IgnoredOlder,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -260,10 +262,9 @@ impl MerkleRoots {
 
         let (result, i) = if self.0.len() < self.0.capacity() {
             (None, i)
+        } else if i >= self.0.len() {
+            return Ok(Added::IgnoredOlder);
         } else {
-            // adjust insertion index
-            let i = if i >= self.0.len() { i - 1 } else { i };
-
             (self.0.pop(), i)
         };
 
@@ -499,6 +500,20 @@ mod tests {
                 0
             )
             .is_none());
+
+        // An older backfilled root must not evict any of the retained recent roots.
+        let retained_roots = merkle_roots.0.clone();
+        let retained_oldest = *retained_roots.last().unwrap();
+        let older_backfilled_root = RelayedMerkleRoot {
+            block: GearBlockNumber(retained_oldest.block.0.saturating_sub(1)),
+            authority_set_id: AuthoritySetId(retained_oldest.authority_set_id.0.saturating_sub(1)),
+            ..retained_oldest
+        };
+        assert!(matches!(
+            merkle_roots.add(older_backfilled_root),
+            Ok(Added::IgnoredOlder)
+        ));
+        assert_eq!(merkle_roots.0, retained_roots);
 
         // attempt to add a newer merkle root should displace the oldest one
         let root_expected_removed = *merkle_roots.get(merkle_roots.len() - 1).unwrap();

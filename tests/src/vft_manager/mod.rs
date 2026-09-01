@@ -507,17 +507,44 @@ async fn msg_tracker_state() -> Result<()> {
     );
 
     let mut service = vft_manager_client::VftManager::new(GClientRemoting::new(api.clone()));
+    if !service
+        .is_paused()
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?
+    {
+        service
+            .pause()
+            .send_recv(vft_manager_id)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?;
+    }
+
+    let details = vft_manager_client::TxDetails {
+        vara_token_id: Default::default(),
+        sender: Default::default(),
+        amount: Default::default(),
+        receiver: Default::default(),
+        token_supply: vft_manager_client::TokenSupply::Ethereum,
+    };
+    assert!(
+        service
+            .insert_message_info(
+                Default::default(),
+                vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin,
+                details.clone(),
+            )
+            .send_recv(vft_manager_id)
+            .await
+            .is_err(),
+        "in-flight message tracker entries must be rejected"
+    );
+
     service
         .insert_message_info(
             Default::default(),
-            vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin,
-            vft_manager_client::TxDetails {
-                vara_token_id: Default::default(),
-                sender: Default::default(),
-                amount: Default::default(),
-                receiver: Default::default(),
-                token_supply: vft_manager_client::TokenSupply::Ethereum,
-            },
+            vft_manager_client::MessageStatus::BridgeResponseReceived(None),
+            details,
         )
         .send_recv(vft_manager_id)
         .await
@@ -541,7 +568,7 @@ async fn msg_tracker_state() -> Result<()> {
         (
             Default::default(),
             vft_manager_client::MessageInfo {
-                status: vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin,
+                status: vft_manager_client::MessageStatus::BridgeResponseReceived(None),
                 details: vft_manager_client::TxDetails {
                     vara_token_id: Default::default(),
                     sender: Default::default(),
@@ -759,6 +786,55 @@ async fn upgrade() -> Result<()> {
         "program_id = {:?} (vft_manager2)",
         hex::encode(vft_manager2_id)
     );
+
+    // An unpaused replacement must be rejected before state or balances change.
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager2_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(!service
+        .is_paused()
+        .recv(vft_manager2_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?);
+
+    let result = service
+        .upgrade(vft_manager2_id)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await;
+    assert!(result.is_err(), "result = {result:?}");
+    assert!(service
+        .is_paused()
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?);
+    let service_vft_before_upgrade = vft_client::Vft::new(remoting.clone());
+    assert_eq!(
+        balance_1,
+        service_vft_before_upgrade
+            .balance_of(vft_manager_id)
+            .recv(vft_id_1)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?
+    );
+    assert_eq!(
+        balance_2,
+        service_vft_before_upgrade
+            .balance_of(vft_manager_id)
+            .recv(vft_id_2)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?
+    );
+
+    service
+        .pause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager2_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
 
     // upgrade the VftManager
     let mut service = vft_manager_client::VftManager::new(remoting.clone());

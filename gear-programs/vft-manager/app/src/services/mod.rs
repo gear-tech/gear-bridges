@@ -26,6 +26,8 @@ mod vft_manager_client {
 }
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
+/// Two days at Vara's three-second block time.
+pub const EMERGENCY_STOP_DURATION_BLOCKS: u32 = 57_600;
 
 #[derive(Debug, Clone, Decode, TypeInfo)]
 pub enum Order {
@@ -38,7 +40,7 @@ pub enum Order {
 pub struct VftManager;
 
 /// Type of the token supply.
-#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy)]
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TokenSupply {
     /// Token supply is located on Ethereum.
@@ -124,6 +126,10 @@ pub enum Event {
     ///
     /// It means that normal operation is continued after the pause.
     Unpaused,
+    /// A bridge observer stopped user operations for a bounded period.
+    EmergencyStopped { observer: ActorId, until_block: u32 },
+    /// A bridge admin ended an emergency stop before its deadline.
+    EmergencyStopDisabled,
     /// Address of the `historical-proxy` program was changed.
     HistoricalProxyAddressChanged { old: ActorId, new: ActorId },
     /// Address of the `ERC20Manager` contract address on Ethereum was changed.
@@ -161,6 +167,10 @@ pub struct State {
     /// Governance of this program. This address is in charge of
     /// pausing and unpausing the current program.
     pause_admin: ActorId,
+    /// Accounts allowed to stop user operations for two days.
+    emergency_stop_observers: Vec<ActorId>,
+    /// First block at which the emergency stop is no longer active.
+    emergency_stop_until: u32,
     /// Address of the `ERC20Manager` contract address on Ethereum.
     ///
     /// Can be adjusted by the [State::admin].
@@ -320,6 +330,66 @@ impl VftManager {
 
         self.state_mut().pause_admin = new_pause_admin;
     }
+    /// Add an account allowed to stop user operations for two days.
+    #[export]
+    pub fn add_emergency_stop_observer(&mut self, observer: ActorId) {
+        self.ensure_admin();
+
+        let observers = &mut self.state_mut().emergency_stop_observers;
+        if observers.contains(&observer) {
+            return;
+        }
+        observers.push(observer);
+    }
+
+    /// Remove an emergency stop observer.
+    #[export]
+    pub fn remove_emergency_stop_observer(&mut self, observer: ActorId) {
+        self.ensure_admin();
+
+        let observers = &mut self.state_mut().emergency_stop_observers;
+        let position = observers
+            .iter()
+            .position(|candidate| *candidate == observer)
+            .expect("Not an emergency stop observer");
+        observers.swap_remove(position);
+    }
+
+    /// Stop user operations for two days. Can be called only by an emergency stop observer.
+    #[export]
+    pub fn emergency_stop(&mut self) {
+        let observer = Syscall::message_source();
+        if !self.state().emergency_stop_observers.contains(&observer) {
+            panic!("Access rejected");
+        }
+
+        let until_block = exec::block_height().saturating_add(EMERGENCY_STOP_DURATION_BLOCKS);
+        self.state_mut().emergency_stop_until = until_block;
+        self.emit_event(Event::EmergencyStopped {
+            observer,
+            until_block,
+        })
+        .expect("Failed to emit event");
+    }
+
+    /// End an emergency stop before its deadline.
+    ///
+    /// Can be called only by a [State::admin] or [State::pause_admin].
+    #[export]
+    pub fn disable_emergency_stop(&mut self) {
+        let sender = Syscall::message_source();
+        let state = self.state();
+        if sender != state.admin && sender != state.pause_admin {
+            panic!("Access rejected");
+        }
+        if !self.is_emergency_stopped() {
+            panic!("Emergency stop is not active");
+        }
+
+        self.state_mut().emergency_stop_until = 0;
+        self.emit_event(Event::EmergencyStopDisabled)
+            .expect("Failed to emit event");
+    }
 
     /// Ensure that message sender is a [State::admin].
     fn ensure_admin(&self) {
@@ -383,7 +453,7 @@ impl VftManager {
     }
 
     fn ensure_running(&self) -> Result<(), Error> {
-        if self.state().is_paused {
+        if self.state().is_paused || self.is_emergency_stopped() {
             Err(Error::Paused)
         } else {
             Ok(())
@@ -566,10 +636,28 @@ impl VftManager {
         self.state().pause_admin
     }
 
-    /// Check if `vft-manager` is currently paused.
+    /// Check if `vft-manager` is manually paused.
     #[export]
     pub fn is_paused(&self) -> bool {
         self.state().is_paused
+    }
+
+    /// Check if an observer's bounded emergency stop is active.
+    #[export]
+    pub fn is_emergency_stopped(&self) -> bool {
+        exec::block_height() < self.state().emergency_stop_until
+    }
+
+    /// Get the block at which the current or latest emergency stop expires.
+    #[export]
+    pub fn emergency_stop_until(&self) -> u32 {
+        self.state().emergency_stop_until
+    }
+
+    /// Get accounts allowed to activate the bounded emergency stop.
+    #[export]
+    pub fn emergency_stop_observers(&self) -> Vec<ActorId> {
+        self.state().emergency_stop_observers.clone()
     }
 
     /// Get current [Config].
@@ -684,8 +772,8 @@ impl VftManager {
 
     /// Inserts recoverable message state during a paused program migration.
     /// An ambiguous bridge request may be changed to `BridgeResponseReceived(None)` only
-    /// after external reconciliation proves that no Ethereum message was queued. The
-    /// original transaction details must be preserved.
+    /// after external reconciliation proves that no Ethereum message was queued. Replays
+    /// are idempotent; conflicting or still in-flight state is rejected.
     #[export]
     pub fn insert_message_info(
         &mut self,
@@ -697,7 +785,23 @@ impl VftManager {
         if !self.state().is_paused {
             panic!("Not paused");
         }
-        request_bridging::msg_tracker_mut().insert_message_info(msg_id, status, details);
+        if matches!(
+            &status,
+            MessageStatus::SendingMessageToDepositTokens
+                | MessageStatus::SendingMessageToBridgeBuiltin
+                | MessageStatus::SendingMessageToReturnTokens
+        ) {
+            panic!("Cannot migrate in-flight message info");
+        }
+
+        let tracker = request_bridging::msg_tracker_mut();
+        if let Some(existing) = tracker.message_info.get(&msg_id) {
+            if existing.status != status || existing.details != details {
+                panic!("Conflicting message info");
+            }
+            return;
+        }
+        tracker.insert_message_info(msg_id, status, details);
     }
 
     /// The method is intended for tests and is available only when the feature `mocks`
@@ -778,6 +882,8 @@ impl VftManager {
                 gear_bridge_builtin: config.gear_bridge_builtin,
                 admin: source,
                 pause_admin: source,
+                emergency_stop_observers: Vec::new(),
+                emergency_stop_until: 0,
                 erc20_manager_address: None,
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,

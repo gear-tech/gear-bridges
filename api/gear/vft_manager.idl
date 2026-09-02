@@ -176,7 +176,7 @@ service VftManager {
   /// Swaps internal hash maps of the TokenMap instance.
   CalculateGasForTokenMapSwap : () -> null;
   /// End an emergency stop before its deadline.
-  ///
+  /// 
   /// Can be called only by a [State::admin] or [State::pause_admin].
   DisableEmergencyStop : () -> null;
   /// Stop user operations for two days. Can be called only by an emergency stop observer.

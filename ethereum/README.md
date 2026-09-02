@@ -68,6 +68,20 @@ $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $MAINNET_RPC_U
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
+### Relaying
+
+```shell
+$ source .env
+
+$ forge script script/relayers/ProcessMessage.s.sol:ProcessMessageScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
+$ forge script script/relayers/ProcessMessage.s.sol:ProcessMessageScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/relayers/ProcessMessage.s.sol:ProcessMessageScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+
+$ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
+$ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+```
+
 ### Upgrade
 
 > [!WARNING]

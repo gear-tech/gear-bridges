@@ -14,7 +14,7 @@ pub struct MessageTracker {
 }
 
 /// Entry for a single message in [MessageTracker].
-#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
 pub struct MessageInfo {
     /// State of the message.
     pub status: MessageStatus,
@@ -23,7 +23,7 @@ pub struct MessageInfo {
 }
 
 /// Details about a request associated with a message stored in [MessageTracker].
-#[derive(Debug, Clone, Encode, Decode, TypeInfo)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
 pub struct TxDetails {
     /// Address of the `VFT` token which is being bridged.
     pub vara_token_id: ActorId,
@@ -38,7 +38,7 @@ pub struct TxDetails {
 }
 
 /// State in which message processing can be.
-#[derive(Debug, Clone, PartialEq, Encode, Decode, TypeInfo)]
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, TypeInfo)]
 pub enum MessageStatus {
     /// Message to deposit tokens is sent.
     SendingMessageToDepositTokens,

@@ -130,13 +130,14 @@ async fn proxy() {
     println!("endpoint {endpoint:?}\nproxy: {proxy_program_id:?}\nadmin: {admin:?}");
 
     let gas_limit = api.block_gas_limit().unwrap();
+    let route = ("VftManager".to_owned(), "SubmitReceipt".to_owned()).encode();
     let mut listener = api.subscribe().await.unwrap();
     let result = proxy_client
         .redirect(
             message.proof_block.block.slot,
             message.encode(),
             admin,
-            vft_manager::io::SubmitReceipt::ROUTE.to_vec(),
+            route.clone(),
         )
         .with_gas_limit(gas_limit / 100 * 95)
         .send(proxy_program_id)
@@ -211,7 +212,7 @@ async fn proxy() {
         {
             message
                 .payload_bytes()
-                .starts_with(vft_manager::io::SubmitReceipt::ROUTE)
+                .starts_with(route.as_slice())
                 .then_some((Some(message.id()), None))
         }
 
@@ -243,7 +244,7 @@ async fn proxy() {
     println!("Submit receipt request");
     let reply: <vft_manager::io::SubmitReceipt as ActionIo>::Reply = Ok(());
     let payload = {
-        let mut result = vft_manager::io::SubmitReceipt::ROUTE.to_vec();
+        let mut result = route.clone();
         reply.encode_to(&mut result);
 
         result
@@ -264,7 +265,7 @@ async fn proxy() {
             1 + slot_expected,
             message.encode(),
             admin,
-            <vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+            route.clone(),
         )
         .with_gas_limit(gas_limit / 100 * 95)
         .send(proxy_program_id)
@@ -336,8 +337,7 @@ async fn proxy() {
                 if message.destination().into_bytes() == admin.into_bytes()
                     && message.details().is_none() =>
             {
-                let route = vft_manager::io::SubmitReceipt::ROUTE;
-                if message.payload_bytes().starts_with(route) {
+                if message.payload_bytes().starts_with(route.as_slice()) {
                     let slice = &message.payload_bytes()[route.len()..];
                     let (slot, ..) = <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(
                         &mut &slice[..],

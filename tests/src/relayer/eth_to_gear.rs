@@ -22,10 +22,7 @@ use relayer::message_relayer::{
     },
 };
 use ruzstd::{self, StreamingDecoder};
-use sails_rs::{
-    calls::{ActionIo, Call},
-    gclient::calls::GClientRemoting,
-};
+use sails_rs::{calls::Call, gclient::calls::GClientRemoting, Encode};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -361,7 +358,7 @@ async fn test_tx_manager() {
 
     let message_sender = MessageSender::new(
         contracts.vft_manager.into_bytes().into(),
-        <vft_manager_client::vft_manager::io::SubmitReceipt as ActionIo>::ROUTE.to_vec(),
+        ("VftManager".to_owned(), "SubmitReceipt".to_owned()).encode(),
         contracts.historical_proxy.into_bytes().into(),
         conn.clone(),
         contracts.suri2.clone(),

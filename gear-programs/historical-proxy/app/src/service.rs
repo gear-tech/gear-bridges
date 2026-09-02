@@ -15,6 +15,18 @@ use crate::{
     state::{ProxyState, Slot},
 };
 
+fn decode_client_route(mut input: &[u8]) -> Result<(String, String), ProxyError> {
+    let route = <(String, String)>::decode(&mut input)
+        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode client route: {e:?}")))?;
+    if !input.is_empty() {
+        return Err(ProxyError::DecodeFailure(format!(
+            "client route contains {} trailing bytes",
+            input.len()
+        )));
+    }
+    Ok(route)
+}
+
 /// Events enmitted by the Historical Proxy service.
 #[event]
 #[derive(Encode, TypeInfo)]
@@ -136,6 +148,7 @@ impl<'a> HistoricalProxyService<'a> {
         client: ActorId,
         client_route: Vec<u8>,
     ) -> Result<(Vec<u8>, Vec<u8>), ProxyError> {
+        let client_route = decode_client_route(&client_route)?;
         let state = self.state.borrow();
         let endpoint = state.endpoints.endpoint_for(slot)?;
         drop(state);
@@ -160,11 +173,18 @@ impl<'a> HistoricalProxyService<'a> {
         .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {e:?}")))?
         .map_err(ProxyError::EthereumEventClient)?;
 
+        if self.state.borrow().endpoints.endpoint_for(slot)? != endpoint {
+            return Err(ProxyError::DecodeFailure(format!(
+                "verified slot {slot} is outside the selected endpoint range"
+            )));
+        }
+
         // 2) Invoke client with a receipt. Uses route and address suplied by the user.
         let submit_receipt = {
             let params = (slot, transaction_index, receipt_rlp.clone());
-            let mut payload = Vec::with_capacity(params.encoded_size() + client_route.len());
-            payload.extend_from_slice(&client_route);
+            let mut payload =
+                Vec::with_capacity(client_route.encoded_size() + params.encoded_size());
+            client_route.encode_to(&mut payload);
             params.encode_to(&mut payload);
             payload
         };

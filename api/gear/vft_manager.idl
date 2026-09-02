@@ -162,6 +162,8 @@ constructor {
 };
 
 service VftManager {
+  /// Add an account allowed to stop user operations for two days.
+  AddEmergencyStopObserver : (observer: actor_id) -> null;
   /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
   /// on the `_supply_type`.
@@ -173,6 +175,12 @@ service VftManager {
   /// 
   /// Swaps internal hash maps of the TokenMap instance.
   CalculateGasForTokenMapSwap : () -> null;
+  /// End an emergency stop before its deadline.
+  /// 
+  /// Can be called only by a [State::admin] or [State::pause_admin].
+  DisableEmergencyStop : () -> null;
+  /// Stop user operations for two days. Can be called only by an emergency stop observer.
+  EmergencyStop : () -> null;
   /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Populates the collection with processed transactions.
   /// 
@@ -192,8 +200,8 @@ service VftManager {
   HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
   /// Inserts recoverable message state during a paused program migration.
   /// An ambiguous bridge request may be changed to `BridgeResponseReceived(None)` only
-  /// after external reconciliation proves that no Ethereum message was queued. The
-  /// original transaction details must be preserved.
+  /// after external reconciliation proves that no Ethereum message was queued. Replays
+  /// are idempotent; conflicting or still in-flight state is rejected.
   InsertMessageInfo : (msg_id: message_id, status: MessageStatus, details: TxDetails) -> null;
   InsertTransactions : (data: vec struct { u64, u64 }) -> null;
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
@@ -206,6 +214,8 @@ service VftManager {
   /// 
   /// Can be called only by a [State::admin] or [State::pause_admin].
   Pause : () -> null;
+  /// Remove an emergency stop observer.
+  RemoveEmergencyStopObserver : (observer: actor_id) -> null;
   /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
   RemoveVaraToEthAddress : (vara_token_id: actor_id) -> null;
   /// Request bridging of tokens from Gear to Ethereum.
@@ -242,6 +252,10 @@ service VftManager {
   Upgrade : (vft_manager_new: actor_id) -> null;
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
+  /// Get accounts allowed to activate the bounded emergency stop.
+  query EmergencyStopObservers : () -> vec actor_id;
+  /// Get the block at which the current or latest emergency stop expires.
+  query EmergencyStopUntil : () -> u32;
   /// Get current [State::erc20_manager_address] address.
   query Erc20ManagerAddress : () -> opt h160;
   /// Get current [State::gear_bridge_builtin] address.
@@ -250,7 +264,9 @@ service VftManager {
   query GetConfig : () -> Config;
   /// Get current [State::historical_proxy_address].
   query HistoricalProxyAddress : () -> actor_id;
-  /// Check if `vft-manager` is currently paused.
+  /// Check if an observer's bounded emergency stop is active.
+  query IsEmergencyStopped : () -> bool;
+  /// Check if `vft-manager` is manually paused.
   query IsPaused : () -> bool;
   /// Get current [State::pause_admin] address.
   query PauseAdmin : () -> actor_id;
@@ -314,6 +330,13 @@ service VftManager {
     /// 
     /// It means that normal operation is continued after the pause.
     Unpaused;
+    /// A bridge observer stopped user operations for a bounded period.
+    EmergencyStopped: struct {
+      observer: actor_id,
+      until_block: u32,
+    };
+    /// A bridge admin ended an emergency stop before its deadline.
+    EmergencyStopDisabled;
     /// Address of the `historical-proxy` program was changed.
     HistoricalProxyAddressChanged: struct {
       old: actor_id,

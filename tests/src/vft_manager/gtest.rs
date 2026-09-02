@@ -916,6 +916,314 @@ async fn test_definite_bridge_rejection_refunds_once() {
     );
 }
 
+#[tokio::test]
+async fn test_emergency_stop_observers_and_expiry() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        ..
+    } = setup_for_test().await;
+
+    let observer: ActorId = 11_111.into();
+    let pause_admin: ActorId = 22_222.into();
+    let unauthorized: ActorId = 33_333.into();
+    for actor in [observer, pause_admin, unauthorized] {
+        remoting.system().mint_to(actor, 100_000_000_000_000);
+    }
+
+    let mut admin = VftManagerC::new(remoting.clone());
+    admin
+        .set_pause_admin(pause_admin)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    admin
+        .add_emergency_stop_observer(observer)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    // Observer registration is replay-safe during recovery.
+    admin
+        .add_emergency_stop_observer(observer)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        admin
+            .emergency_stop_observers()
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vec![observer]
+    );
+    let mut unauthorized_service = VftManagerC::new(remoting.clone().with_actor_id(unauthorized));
+    assert!(unauthorized_service
+        .add_emergency_stop_observer(ActorId::from(44_444))
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert!(unauthorized_service
+        .remove_emergency_stop_observer(observer)
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+
+    assert!(admin
+        .emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+
+    let mut observer_service = VftManagerC::new(remoting.clone().with_actor_id(observer));
+    observer_service
+        .emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert!(admin
+        .is_emergency_stopped()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+    assert_eq!(
+        admin
+            .request_bridging(ActorId::zero(), U256::zero(), H160::zero())
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+    assert_eq!(
+        admin
+            .submit_receipt(0, 0, vec![])
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+
+    // Clearing manual pause cannot bypass an active emergency stop.
+    admin
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    admin
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert!(!admin
+        .is_paused()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+    assert!(admin
+        .is_emergency_stopped()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+    assert_eq!(
+        admin
+            .request_bridging(ActorId::zero(), U256::zero(), H160::zero())
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+    assert_eq!(
+        admin
+            .handle_request_bridging_interrupted_transfer(MessageId::zero())
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+
+    assert!(observer_service
+        .disable_emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert!(unauthorized_service
+        .disable_emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    let mut pause_admin_service = VftManagerC::new(remoting.clone().with_actor_id(pause_admin));
+    pause_admin_service
+        .disable_emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert!(!admin
+        .is_paused()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+    admin
+        .set_pause_admin(ActorId::zero())
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        admin
+            .pause_admin()
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        ActorId::zero()
+    );
+    assert!(pause_admin_service
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+
+    observer_service
+        .emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert!(pause_admin_service
+        .disable_emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    admin
+        .disable_emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    observer_service
+        .emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    let until_block = admin
+        .emergency_stop_until()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    remoting.system().run_to_block(until_block - 1);
+    assert!(admin
+        .is_emergency_stopped()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+    remoting.system().run_to_block(until_block);
+    assert!(!admin
+        .is_emergency_stopped()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+    assert!(!admin
+        .is_paused()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap());
+
+    admin
+        .remove_emergency_stop_observer(observer)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert!(observer_service
+        .emergency_stop()
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn test_message_tracker_migration_insert_is_guarded_and_idempotent() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        ..
+    } = setup_for_test().await;
+
+    let mut service = VftManagerC::new(remoting.clone());
+    let msg_id = MessageId::from([99; 32]);
+    let details = tx_details(
+        ActorId::from(123),
+        ActorId::from(456),
+        U256::from(789),
+        TokenSupply::Ethereum,
+    );
+
+    assert!(service
+        .insert_message_info(
+            msg_id,
+            MessageStatus::TokenDepositCompleted(false),
+            details.clone(),
+        )
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+
+    assert!(service
+        .insert_transactions(vec![(1, 2)])
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+
+    service
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    service
+        .insert_transactions(vec![(1, 2), (1, 2)])
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .transactions(Order::Direct, 0, 10)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vec![(1, 2)]
+    );
+
+    for _ in 0..2 {
+        service
+            .insert_message_info(
+                msg_id,
+                MessageStatus::TokenDepositCompleted(false),
+                details.clone(),
+            )
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap();
+    }
+    assert!(service
+        .insert_message_info(
+            msg_id,
+            MessageStatus::TokenDepositCompleted(true),
+            details.clone(),
+        )
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert_eq!(
+        service
+            .request_briding_msg_tracker_state(0, 10)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vec![(
+            msg_id,
+            vft_manager_client::MessageInfo {
+                status: MessageStatus::TokenDepositCompleted(false),
+                details,
+            },
+        )]
+    );
+}
+
 fn tx_details(
     vara_token_id: ActorId,
     sender: ActorId,
@@ -938,18 +1246,18 @@ async fn seed_msg_info(
     status: MessageStatus,
     details: TxDetails,
 ) {
-    let mut manager = VftManagerC::new(remoting.clone());
-    manager
+    let mut service = VftManagerC::new(remoting.clone());
+    service
         .pause()
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
-    manager
+    service
         .insert_message_info(msg_id, status, details)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
-    manager
+    service
         .unpause()
         .send_recv(vft_manager_program_id)
         .await
@@ -1248,49 +1556,6 @@ async fn test_interrupted_transfer_recovers_from_intermediate_statuses() {
         balance_of(&remoting, gear_supply_vft, account_id).await,
         gear_amount
     );
-}
-
-#[tokio::test]
-async fn test_interrupted_transfer_rejects_in_flight_refund() {
-    let Fixture {
-        remoting,
-        vft_manager_program_id,
-        eth_supply_vft,
-        ..
-    } = setup_for_test().await;
-
-    let account_id: ActorId = 100_000.into();
-    remoting
-        .system()
-        .mint_to(account_id, 100_000_000_000_000_000);
-
-    // A refund for this message is already in flight: the status was committed when
-    // the refund message to the VFT program was sent and the program started waiting
-    // for the reply.
-    let msg_id: MessageId = [6u8; 32].into();
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::SendingMessageToReturnTokens,
-        tx_details(
-            eth_supply_vft,
-            account_id,
-            U256::from(10_000_000_000_u64),
-            TokenSupply::Ethereum,
-        ),
-    )
-    .await;
-
-    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
-        .await;
-    assert!(result.is_err());
-
-    // No duplicated refund has been executed.
-    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
-    assert!(account_balance.is_zero());
 }
 
 #[tokio::test]

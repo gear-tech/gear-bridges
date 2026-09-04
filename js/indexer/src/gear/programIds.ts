@@ -34,13 +34,14 @@ export async function init(programs: Record<string, string>): Promise<Map<string
   }
 
   for (const [name, id] of Object.entries(programs)) {
-    const res = await client.query('SELECT * FROM gear_programs WHERE name = $1', [name]);
-    if (res.rows.length === 0) {
-      await client.query('INSERT INTO gear_programs (name, program_id) VALUES ($1, $2)', [name, id]);
-      console.log(`Inserted program ${name} with ID ${id}`);
-    } else {
-      console.log(`Program ${name} set to ${res.rows[0].program_id}`);
-    }
+    await client.query(
+      `INSERT INTO gear_programs (name, program_id)
+       VALUES ($1, $2)
+       ON CONFLICT (name)
+       DO UPDATE SET program_id = EXCLUDED.program_id`,
+      [name, id],
+    );
+    console.log(`Program ${name} set to ${id}`);
   }
 
   const ids = await client.query('SELECT name, program_id FROM gear_programs WHERE name = ANY($1::text[])', [

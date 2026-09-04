@@ -70,6 +70,15 @@ impl IndexedValidatorSign {
         let index_target = builder.add_virtual_target();
         witness.set_target(index_target, F::from_canonical_usize(self.index));
 
+        // SECURITY(CR-1): `random_read` only bounds the index by the padded
+        // `MAX_VALIDATOR_COUNT`-slot array, so a vote had to be addressed to a *real* validator:
+        // constrain `validator_idx < validator_count`.
+        Self::constrain_vote_index(
+            &mut builder,
+            validator_set_hash_target.validator_set_length,
+            index_target,
+        );
+
         let validator = validator_set_hash_target
             .validator_set
             .random_read(index_target, &mut builder);
@@ -88,5 +97,18 @@ impl IndexedValidatorSign {
         .register_as_public_inputs(&mut builder);
 
         ProofWithCircuitData::prove_from_builder(builder, witness)
+    }
+
+    /// Asserts `validator_idx < validator_count`, i.e. that `validator_count - validator_idx - 1`
+    /// is a non-negative 32-bit integer.
+    pub(super) fn constrain_vote_index(
+        builder: &mut CircuitBuilder<F, D>,
+        validator_count: Target,
+        validator_idx: Target,
+    ) {
+        // SECURITY(CR-1): same idiom as the strictly-increasing index check in `SignComposition`.
+        let idx_diff = builder.sub(validator_count, validator_idx);
+        let to_compare_with_zero = builder.add_const(idx_diff, F::NEG_ONE);
+        builder.range_check(to_compare_with_zero, 32);
     }
 }

@@ -398,6 +398,10 @@ impl MerkleRootSubmitter {
                                 }).is_err() {
                                     return Ok(());
                                 };
+                                // SECURITY(M-1): a reverted submission must not also fall through to the
+                                // Submitted arm below — dual responses desynchronize the listener into a
+                                // phantom Finalized state (validated cluster2/W1, rust-poc2 sim).
+                                continue;
                             }
 
                             if responses.send(Response {

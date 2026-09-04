@@ -203,6 +203,15 @@ impl VariativeBlake2 {
         let length_valid = builder.or(length_is_max, data_end);
         builder.assert_one(length_valid.target);
 
+        // SECURITY(CR-1): `data` bytes beyond the hashed window are still public inputs of this
+        // circuit — validator slots are carved from them downstream — and `length` can never
+        // reach them (upper bound asserted above), so they are unconditional padding and must
+        // be constrained to zero as well. Without this, attacker-chosen bytes sat in padded
+        // slots >= 4*ceil(validator_count/4) and forged finality votes passed.
+        for byte in data_target.iter().skip(block_count * BLOCK_BYTES) {
+            builder.assert_zero(byte.as_target());
+        }
+
         // Assert lower bound for length.
         let max_length = builder.constant(F::from_canonical_usize(block_count * BLOCK_BYTES));
         let padded_length = builder.sub(max_length, length_target);

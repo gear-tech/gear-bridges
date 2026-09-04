@@ -6,6 +6,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
@@ -33,6 +34,12 @@ contract MessageQueue is
 
     using Hasher for VaraMessage;
 
+    /**
+     * @dev Message nonce is below the processed nonce watermark.
+     *      SECURITY(H-2): blocks replay of pre-watermark messages into a reseeded deployment.
+     */
+    error NonceBelowWatermark(uint256 messageNonce, uint256 nonceWatermark);
+
     bytes32 public constant PAUSER_ROLE = bytes32(uint256(0x01));
 
     uint256 public constant CHALLENGE_ROOT_DELAY = 2 days;
@@ -56,6 +63,9 @@ contract MessageQueue is
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
+    // SECURITY(H-2): processed-nonce floor pinned at (re-)initialization time.
+    // Appended at the end of the storage layout: never reorder existing slots.
+    uint256 private _nonceWatermark;
 
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
@@ -68,19 +78,32 @@ contract MessageQueue is
      * @dev Initializes the MessageQueue contract with the Verifier address.
      *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
      *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
+     *
+     *      SECURITY(H-2): `genesisBlock_` and `nonceWatermark_` pin the fresh-deployment replay
+     *      boundaries at initialization time: merkle root submissions with a block number below the
+     *      genesis block are rejected, and messages with a nonce below the watermark are rejected as
+     *      replays. The function is marked with `reinitializer(7)` following the monotonic pattern of
+     *      the reserved `reinitialize()` stub below (the deployed proxy has been reinitialized through
+     *      version 6), so it can seed both a fresh deployment and an upgraded existing proxy exactly once.
      * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
      * @param emergencyStopAdmin_ The address of EOA that will control `submitMerkleRoot` and `processMessage`
      *                            in case of an emergency stop.
+     * @param emergencyStopObservers_ The addresses of EOAs that can trigger `challengeRoot`.
      * @param verifier_ The address of the Verifier contract that will verify merkle roots.
+     * @param genesisBlock_ Vara block number to pin as genesis floor (0 keeps the legacy behavior where
+     *                      the first submitted merkle root defines the genesis block).
+     * @param nonceWatermark_ Processed message nonce watermark to pin as replay floor (0 disables the floor).
      */
     function initialize(
         IGovernance governanceAdmin_,
         IGovernance governancePauser_,
         address emergencyStopAdmin_,
         address[] memory emergencyStopObservers_,
-        IVerifier verifier_
-    ) public initializer {
+        IVerifier verifier_,
+        uint256 genesisBlock_,
+        uint256 nonceWatermark_
+    ) public reinitializer(7) {
         __AccessControl_init();
         __Pausable_init();
 
@@ -98,12 +121,20 @@ contract MessageQueue is
         }
 
         _verifier = verifier_;
+
+        // SECURITY(H-2): pin replay floors up front so neither the genesis block nor the nonce
+        // watermark can be frontrun or rewritten after deployment.
+        _genesisBlock = genesisBlock_;
+        _maxBlockNumber = genesisBlock_;
+        _nonceWatermark = nonceWatermark_;
     }
 
     /**
+     * @dev Reserved for the next auditable reinitialization step (SECURITY(H-2) monotonic pattern):
+     *      `initialize` above now occupies version 7, so a future reinitializer must use version 8.
      * @custom:oz-upgrades-validate-as-initializer
      */
-    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {}
+    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(8) {}
 
     /**
      * @dev Returns governance admin address.
@@ -179,6 +210,14 @@ contract MessageQueue is
     }
 
     /**
+     * @dev Returns processed nonce watermark.
+     * @return nonceWatermark Nonce watermark below which messages are rejected as replays.
+     */
+    function nonceWatermark() external view returns (uint256) {
+        return _nonceWatermark;
+    }
+
+    /**
      * @dev Pauses the contract.
      */
     function pause() public onlyRole(PAUSER_ROLE) {
@@ -202,19 +241,26 @@ contract MessageQueue is
      * @dev Puts MessageQueue into a high-priority paused state.
      *      Only the emergency stop admin or time expiry (CHALLENGE_ROOT_DELAY) can lift it.
      *
+     *      SECURITY(H-3): challenge decay — re-challenging while a previous challenge window is
+     *      still pending moves the deadline to max(block.timestamp, previous + CHALLENGE_ROOT_DELAY),
+     *      extending the freeze by exactly one delay per re-challenge instead of resetting a full
+     *      window from the moment of the re-challenge, so repeated challenges cannot chain
+     *      indefinitely beyond 2 days of decay per re-challenge.
+     *
      * @dev Reverts if:
      *      - msg.sender is not emergency stop observer with `NotEmergencyStopObserver` error.
      *
-     * @dev Emits `ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY)` event.
+     * @dev Emits `ChallengeRootEnabled(_challengingRootTimestamp + CHALLENGE_ROOT_DELAY)` event.
      */
     function challengeRoot() external {
         if (!_emergencyStopObservers.contains(msg.sender)) {
             revert NotEmergencyStopObserver();
         }
 
-        _challengingRootTimestamp = block.timestamp;
+        // SECURITY(H-3): decay from the previous window instead of resetting a full one.
+        _challengingRootTimestamp = Math.max(block.timestamp, _challengingRootTimestamp + CHALLENGE_ROOT_DELAY);
 
-        emit ChallengeRootEnabled(block.timestamp + CHALLENGE_ROOT_DELAY);
+        emit ChallengeRootEnabled(_challengingRootTimestamp + CHALLENGE_ROOT_DELAY);
     }
 
     /**
@@ -294,6 +340,8 @@ contract MessageQueue is
             _genesisBlock = blockNumber;
             _maxBlockNumber = blockNumber;
         } else {
+            // SECURITY(H-2): genesis floor — when the floor was pinned at initialization, every
+            // submission below it (e.g. a self-proved pre-genesis replay) reverts here.
             if (blockNumber < _genesisBlock) {
                 revert BlockNumberBeforeGenesis(blockNumber, _genesisBlock);
             }
@@ -390,9 +438,11 @@ contract MessageQueue is
      *              was included into `blockNumber`.
      *
      * @dev Reverts if:
-     *      - MessageQueue is in challenging root status with `ChallengeRoot` error.
+     *      - MessageQueue is in challenging root status with `ChallengeRoot` error, unless the
+     *        message source is the governance admin or the caller is the GovernanceAdmin contract.
      *      - MessageQueue is paused and message source is not any governance address.
      *      - MessageQueue emergency stop status is set.
+     *      - Message nonce is below the processed nonce watermark with `NonceBelowWatermark` error.
      *      - Message nonce is already processed.
      *      - Merkle root is not set for the block number in MessageQueue smart contract.
      *      - Merkle proof is invalid.
@@ -405,12 +455,18 @@ contract MessageQueue is
         VaraMessage calldata message,
         bytes32[] calldata proof
     ) external {
-        if (isChallengingRoot()) {
-            revert ChallengeRoot();
-        }
-
         bytes32 governanceAdminAddress = _governanceAdmin.governance();
         bytes32 governancePauserAddress = _governancePauser.governance();
+
+        // SECURITY(H-3): governance liveness — messages whose source is the configured governance
+        // admin (or that are relayed by the GovernanceAdmin contract itself, per the existing
+        // admin-address pattern) skip the challengingRoot gate, so a single observer veto cannot
+        // freeze governance recovery paths during a challenge window.
+        bool isGovernanceChallengeBypass =
+            message.source == governanceAdminAddress || msg.sender == address(_governanceAdmin);
+        if (isChallengingRoot() && !isGovernanceChallengeBypass) {
+            revert ChallengeRoot();
+        }
 
         bool isFromAdminOrPauser = message.source == governanceAdminAddress || message.source == governancePauserAddress;
         bool canBypassPause = isFromAdminOrPauser;
@@ -422,6 +478,12 @@ contract MessageQueue is
         bool canBypassEmergencyStop = isFromEmergencyStopAdmin || _allowMessageProcessing;
         if (_emergencyStop && !canBypassEmergencyStop) {
             revert EmergencyStop();
+        }
+
+        // SECURITY(H-2): processed-nonce floor — messages below the watermark pinned at
+        // (re-)initialization are replays from a previous deployment epoch and are rejected.
+        if (message.nonce < _nonceWatermark) {
+            revert NonceBelowWatermark(message.nonce, _nonceWatermark);
         }
 
         if (_processedMessages[message.nonce]) {

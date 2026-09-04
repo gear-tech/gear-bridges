@@ -497,4 +497,217 @@ mod tests {
         assert_eq!(pairs, vec![(0, 1)]);
         assert_eq!(singles, vec![2]);
     }
+
+    // ---- SECURITY(CR-1) regression tests -------------------------------------------
+    //
+    // Constraint-satisfaction level (no `VBLAKE2_CACHE_PATH` needed): circuits are built
+    // straight from `VariativeBlake2::create_builder_targets`, mirroring the exact wiring of
+    // `ValidatorSetHash::prove` (bit carve) and `IndexedValidatorSign::prove`
+    // (slot read + slot<->pk connect).
+
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use plonky2_blake2b256::circuit::BLOCK_BYTES;
+
+    use crate::common::{
+        blake2::{variative::VariativeBlake2, MAX_DATA_BYTES},
+        targets::{ByteTarget, Ed25519PublicKeyTarget, PaddedValidatorSetTarget},
+    };
+
+    /// Deterministic fake validator public key; every byte is non-zero so any constraint
+    /// check against zeroed padding fires regardless of bit ordering.
+    fn fake_public_key(seed: usize) -> [u8; consts::ED25519_PUBLIC_KEY_SIZE] {
+        core::array::from_fn(|i| (((seed + 1) * 31 + i * 7) as u8) | 1)
+    }
+
+    /// Constraint violations surface either as a prover panic (copy-constraint collision)
+    /// or as an error from `prove`; both mean "not satisfied".
+    fn prove_satisfies(circuit: &CircuitData<F, C, D>, witness: PartialWitness<F>) -> bool {
+        catch_unwind(AssertUnwindSafe(move || circuit.prove(witness).is_ok())).unwrap_or(false)
+    }
+
+    /// Carve the 64 padded validator slots out of the blake2 `data` byte targets, exactly
+    /// like `ValidatorSetHash::prove` does.
+    fn carve_validator_set(
+        builder: &mut CircuitBuilder<F, D>,
+        data_targets: &[Target],
+    ) -> PaddedValidatorSetTarget {
+        let mut bit_targets = data_targets.iter().flat_map(|target| {
+            ByteTarget::from_target_unsafe(*target)
+                .as_bit_targets(builder)
+                .0
+                .into_iter()
+                .rev()
+                .map(|bit| bit.target)
+        });
+        PaddedValidatorSetTarget::parse(&mut bit_targets)
+    }
+
+    /// Connect a read public key target to fixed expected bytes (MSB-first per byte, the
+    /// same order the carve above produces), standing in for the `SingleValidatorSign`
+    /// proof the vote would carry.
+    fn connect_pk_to_constants(
+        builder: &mut CircuitBuilder<F, D>,
+        pk: &Ed25519PublicKeyTarget,
+        expected: &[u8; consts::ED25519_PUBLIC_KEY_SIZE],
+    ) {
+        for (bit, expected_bit) in (**pk).0.iter().zip(array_to_bits(expected)) {
+            let constant = builder.constant(F::from_canonical_usize(expected_bit as usize));
+            builder.connect(bit.target, constant);
+        }
+    }
+
+    /// Set the full `VariativeBlake2` witness: declared `length` + all data bytes (zeroed
+    /// past `data`). `data` may extend beyond `length` — that tail is what the padding
+    /// constraints must force to zero.
+    fn set_blake2_witness(
+        length_target: Target,
+        data_targets: &[Target],
+        declared_length: usize,
+        data: &[u8],
+        witness: &mut PartialWitness<F>,
+    ) {
+        assert_eq!(data_targets.len(), MAX_DATA_BYTES);
+        assert!(data.len() <= MAX_DATA_BYTES);
+        witness.set_target(length_target, F::from_canonical_usize(declared_length));
+        for (target, byte) in data_targets.iter().zip(
+            data.iter()
+                .copied()
+                .chain(iter::repeat(0))
+                .take(MAX_DATA_BYTES),
+        ) {
+            witness.set_target(*target, F::from_canonical_u8(byte));
+        }
+    }
+
+    /// (a) Negative: attacker keys planted into padded validator slots beyond
+    /// `4*ceil(n/4)` — i.e. past the zero-constrained blake2 window — must fail constraint
+    /// satisfaction. Pre-fix these bytes were unconstrained public inputs, so an attacker
+    /// vote reading such a slot satisfied every circuit (forgery, see CR-1 PoC).
+    #[test]
+    fn padded_attacker_validator_keys_fail_constraints() {
+        const N: usize = 15; // historical Vara era size (probed live)
+        let honest_set: Vec<u8> = (0..N).flat_map(fake_public_key).collect();
+        let honest_len = honest_set.len();
+
+        // Blakes2 window is ceil(480/128)*128 = 512 bytes = slots [0, 16); the first slot
+        // not covered by the pre-fix padding check is 4*ceil(15/4) = 16.
+        let attacker_slot = 4 * N.div_ceil(4);
+        assert_eq!(
+            attacker_slot * consts::ED25519_PUBLIC_KEY_SIZE,
+            honest_set.len().div_ceil(BLOCK_BYTES) * BLOCK_BYTES
+        );
+        let attacker_key = fake_public_key(attacker_slot + 64);
+
+        let (mut builder, targets) = VariativeBlake2::create_builder_targets(honest_set.len());
+        let (length_target, data_targets) = targets.split_first().expect("length + data targets");
+
+        // Mirror the forged `IndexedValidatorSign`: the vote reads the attacker slot and
+        // the slot<->pk connect passes against the attacker's key.
+        let validator_set = carve_validator_set(&mut builder, data_targets);
+        let read_at = builder.constant(F::from_canonical_usize(attacker_slot));
+        let read_pk = validator_set.random_read(read_at, &mut builder);
+        connect_pk_to_constants(&mut builder, &read_pk, &attacker_key);
+
+        // data = honest keys, zero window padding, attacker key just past the window end.
+        let mut data = honest_set;
+        data.resize(attacker_slot * consts::ED25519_PUBLIC_KEY_SIZE, 0);
+        data.extend(attacker_key);
+
+        let mut witness = PartialWitness::new();
+        set_blake2_witness(*length_target, data_targets, honest_len, &data, &mut witness);
+
+        assert!(
+            !prove_satisfies(&builder.build::<C>(), witness),
+            "CR-1: padded attacker key in slot {attacker_slot} must violate the \
+             full-window padding zero constraints"
+        );
+    }
+
+    /// (b) Negative: a vote whose index equals (or exceeds) the real validator count must
+    /// fail the `IndexedValidatorSign` range gate; the last honest index must pass.
+    #[test]
+    fn vote_index_must_be_below_validator_count() {
+        let mut builder = CircuitBuilder::new(CircuitConfig::standard_recursion_config());
+        let count_target = builder.add_virtual_target();
+        let idx_target = builder.add_virtual_target();
+        IndexedValidatorSign::constrain_vote_index(&mut builder, count_target, idx_target);
+        let circuit = builder.build::<C>();
+
+        let witness = |count: usize, idx: usize| {
+            let mut w = PartialWitness::new();
+            w.set_target(count_target, F::from_canonical_usize(count));
+            w.set_target(idx_target, F::from_canonical_usize(idx));
+            w
+        };
+
+        // The first padded slot address, idx == validator_count.
+        assert!(
+            !prove_satisfies(&circuit, witness(15, 15)),
+            "CR-1: idx == validator_count must fail the range gate"
+        );
+        assert!(
+            !prove_satisfies(&circuit, witness(15, 16)),
+            "CR-1: idx > validator_count must fail the range gate"
+        );
+        assert!(
+            prove_satisfies(&circuit, witness(15, 14)),
+            "the last real validator (idx == validator_count - 1) must pass"
+        );
+    }
+
+    /// (c) Positive (compat guard): honest full-signature quorums at the historical era
+    /// sizes n = 15 and n = 59 — zeroed padding within the full data window, every vote
+    /// index < validator_count, quorum inequality `3*sign_count - 2*validator_count - 1 >= 0`
+    /// — must still satisfy the constraints.
+    #[test]
+    fn honest_full_sign_quorum_still_satisfies_at_historical_sizes() {
+        for n in [15usize, 59] {
+            let honest_set: Vec<u8> = (0..n).flat_map(fake_public_key).collect();
+            let (mut builder, targets) = VariativeBlake2::create_builder_targets(honest_set.len());
+            let (length_target, data_targets) =
+                targets.split_first().expect("length + data targets");
+
+            // Same count<->length binding as `ValidatorSetHash::prove`.
+            let validator_count = builder.add_virtual_target();
+            let desired_len = builder
+                .mul_const(F::from_canonical_usize(consts::ED25519_PUBLIC_KEY_SIZE), validator_count);
+            builder.connect(desired_len, *length_target);
+
+            // Full quorum: every one of the n validators signs, each vote through the
+            // new range gate.
+            for idx in 0..n {
+                let idx_target = builder.constant(F::from_canonical_usize(idx));
+                IndexedValidatorSign::constrain_vote_index(&mut builder, validator_count, idx_target);
+            }
+
+            // Representative votes: slot reads for the first and last honest validator,
+            // connected to their real keys (the slot<->pk connect of each vote proof).
+            let validator_set = carve_validator_set(&mut builder, data_targets);
+            for slot in [0usize, n - 1] {
+                let read_at = builder.constant(F::from_canonical_usize(slot));
+                let pk = validator_set.random_read(read_at, &mut builder);
+                connect_pk_to_constants(&mut builder, &pk, &fake_public_key(slot));
+            }
+
+            // Same quorum inequality as the final check of `ValidatorSignsChain::prove`.
+            let sign_count = builder.constant(F::from_canonical_usize(n));
+            let triple_sign_count = builder.mul_const(F::from_canonical_usize(3), sign_count);
+            let double_validator_count = builder.mul_const(F::TWO, validator_count);
+            let lhs = builder.sub(triple_sign_count, double_validator_count);
+            let lhs = builder.add_const(lhs, F::NEG_ONE);
+            builder.range_check(lhs, 32);
+
+            let mut witness = PartialWitness::new();
+            set_blake2_witness(*length_target, data_targets, honest_set.len(), &honest_set, &mut witness);
+            witness.set_target(validator_count, F::from_canonical_usize(n));
+
+            assert!(
+                prove_satisfies(&builder.build::<C>(), witness),
+                "CR-1 compat guard: honest full-sign quorum at n={n} must satisfy"
+            );
+        }
+    }
+
+
 }

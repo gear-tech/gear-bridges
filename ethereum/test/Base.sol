@@ -406,7 +406,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                             governancePauser,
                             deploymentArguments.emergencyStopAdmin,
                             deploymentArguments.emergencyStopObservers,
-                            verifier
+                            verifier,
+                            // SECURITY(H-2): 0 keeps legacy lazy genesis / no nonce watermark for test deploys;
+                            // seeded values are exercised in MessageQueueSecurity.t.sol.
+                            0,
+                            0
                         )
                     )
                 )

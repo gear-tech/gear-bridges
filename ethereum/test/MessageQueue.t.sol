@@ -534,18 +534,22 @@ contract MessageQueueTest is Test, Base {
     }
 
     function test_ChallengeRootTwice() public {
+        uint256 timestamp = vm.getBlockTimestamp();
+
         vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
 
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
+        emit IMessageQueue.ChallengeRootEnabled(timestamp + messageQueue.CHALLENGE_ROOT_DELAY());
 
         messageQueue.challengeRoot();
         assertEq(messageQueue.isChallengingRoot(), true);
 
         vm.warp(vm.getBlockTimestamp() + 1);
 
+        // SECURITY(H-3): re-challenge extends the deadline by exactly one CHALLENGE_ROOT_DELAY
+        // (decay from the previous window) instead of resetting a full window from the new block.
         vm.expectEmit(address(messageQueue));
-        emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
+        emit IMessageQueue.ChallengeRootEnabled(timestamp + 2 * messageQueue.CHALLENGE_ROOT_DELAY());
 
         messageQueue.challengeRoot();
         assertEq(messageQueue.isChallengingRoot(), true);

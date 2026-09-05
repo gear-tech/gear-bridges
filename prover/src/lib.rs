@@ -14,6 +14,11 @@ pub mod serialization;
 mod storage_inclusion;
 pub mod utils;
 
+// SECURITY(CR-1 release): public re-export so the cache tooling examples
+// (`examples/setup_cache.rs`, `examples/cache_check.rs`) can drive the exact
+// production constraint/read paths without vendoring copies.
+pub use common::blake2::variative::VariativeBlake2;
+
 pub type GearHeader = sp_runtime::generic::Header<u32, sp_runtime::traits::BlakeTwo256>;
 
 pub(crate) mod prelude {

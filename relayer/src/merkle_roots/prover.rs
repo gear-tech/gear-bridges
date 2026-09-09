@@ -386,8 +386,13 @@ impl FinalityProver {
                 .pending_requests
                 .set((non_batch_requests.len() + request_groups.len()) as i64);
 
-            // sort by block number ascending to process older requests first
-            non_batch_requests.sort_by_key(|r| r.block_number);
+            // A short recovery proof must not wait behind a resumed long-span proof.
+            non_batch_requests.sort_by_key(|request| {
+                proof_span_order_key(
+                    request.block_number,
+                    request.block_inclusion_proof.block_number,
+                )
+            });
 
             // First process all non-batched requests, then batched requests.
             // Non batched requests are processed first as they're the most important ones, and
@@ -799,12 +804,17 @@ async fn take_next_shared_proof_work(
         return Ok(None);
     };
 
-    if let Some((index, _)) = pending
-        .iter()
-        .enumerate()
-        .filter(|(_, request)| request.relayer_id == relayer_id && !request.request.batch)
-        .min_by_key(|(_, request)| (request.request.block_number, request.sequence))
-    {
+    if let Some(index) = select_short_proof_with_fifo_aging(
+        pending,
+        |request| request.relayer_id == relayer_id && !request.request.batch,
+        |request| request.sequence,
+        |request| {
+            proof_span_order_key(
+                request.request.block_number,
+                request.request.block_inclusion_proof.block_number,
+            )
+        },
+    ) {
         return Ok(Some(SelectedSharedProofWork::Single(pending.remove(index))));
     }
 
@@ -1184,27 +1194,65 @@ impl BatchProofRequest {
     }
 }
 
+const MAX_SHORT_PROOFS_BEFORE_FIFO: u64 = 8;
+
+fn select_short_proof_with_fifo_aging<T>(
+    requests: &[T],
+    eligible: impl Fn(&T) -> bool,
+    sequence: impl Fn(&T) -> u64,
+    span: impl Fn(&T) -> (u32, u32),
+) -> Option<usize> {
+    let mut oldest = None;
+    let mut newest_sequence = 0;
+    for (index, request) in requests
+        .iter()
+        .enumerate()
+        .filter(|(_, request)| eligible(request))
+    {
+        let request_sequence = sequence(request);
+        if oldest.is_none_or(|(_, oldest_sequence)| request_sequence < oldest_sequence) {
+            oldest = Some((index, request_sequence));
+        }
+        newest_sequence = newest_sequence.max(request_sequence);
+    }
+
+    let (oldest_index, oldest_sequence) = oldest?;
+    if newest_sequence.saturating_sub(oldest_sequence) >= MAX_SHORT_PROOFS_BEFORE_FIFO {
+        return Some(oldest_index);
+    }
+
+    requests
+        .iter()
+        .enumerate()
+        .filter(|(_, request)| eligible(request))
+        .min_by_key(|(_, request)| (span(request), sequence(request)))
+        .map(|(index, _)| index)
+}
+
+pub(super) fn proof_span_order_key(block_number: u32, signed_block_number: u32) -> (u32, u32) {
+    (
+        signed_block_number.saturating_sub(block_number),
+        block_number,
+    )
+}
+
 fn proof_request_order_key(
     authority_set_id: u64,
     queue_id: u64,
     block_number: u32,
     signed_block_number: u32,
 ) -> (u32, u64, u64, u32) {
-    (
-        signed_block_number.saturating_sub(block_number),
-        authority_set_id,
-        queue_id,
-        block_number,
-    )
+    let (proof_span, block_number) = proof_span_order_key(block_number, signed_block_number);
+    (proof_span, authority_set_id, queue_id, block_number)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         clear_current_shared_request, plan_shared_relayer_requests, proof_request_order_key,
-        receive_batch, record_current_shared_request, record_pending_request_counts,
-        select_next_relayer_id, send_shared_response, Metrics, Response, SharedProofRequestInfo,
-        SharedProofWork,
+        proof_span_order_key, receive_batch, record_current_shared_request,
+        record_pending_request_counts, select_next_relayer_id, select_short_proof_with_fifo_aging,
+        send_shared_response, Metrics, Response, SharedProofRequestInfo, SharedProofWork,
     };
     use crate::prover_interface::FinalProof;
     use primitive_types::H256;
@@ -1219,6 +1267,39 @@ mod tests {
         let current_root = proof_request_order_key(3625, 597, 35_361_830, 35_361_830);
 
         assert!(current_root < long_recovery);
+    }
+
+    #[test]
+    fn recovery_scheduler_prefers_fresh_short_span_over_resumed_1034_header_proof() {
+        let resumed = proof_span_order_key(35_491_497, 35_492_530);
+        let fresh = proof_span_order_key(35_509_509, 35_509_509);
+
+        assert_eq!(resumed.0, 1_033);
+        assert!(fresh < resumed);
+    }
+
+    #[test]
+    fn shared_scheduler_ages_long_proof_into_fifo() {
+        let requests = [
+            (0_u64, 35_491_497_u32, 35_492_530_u32),
+            (7, 35_509_509, 35_509_509),
+        ];
+        let selected = select_short_proof_with_fifo_aging(
+            &requests,
+            |_| true,
+            |request| request.0,
+            |request| proof_span_order_key(request.1, request.2),
+        );
+        assert_eq!(selected, Some(1));
+
+        let aged_requests = [requests[0], (8, 35_509_510, 35_509_510)];
+        let selected = select_short_proof_with_fifo_aging(
+            &aged_requests,
+            |_| true,
+            |request| request.0,
+            |request| proof_span_order_key(request.1, request.2),
+        );
+        assert_eq!(selected, Some(0));
     }
     #[tokio::test]
     async fn batch_collection_uses_one_deadline() {

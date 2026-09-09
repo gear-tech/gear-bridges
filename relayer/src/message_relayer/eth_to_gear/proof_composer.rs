@@ -286,24 +286,48 @@ pub async fn compose(
     tx_hash: TxHash,
     historical_proxy_id: ActorId,
 ) -> anyhow::Result<EthToVaraEvent> {
+    log::info!("compose: start tx_hash={tx_hash:?} historical_proxy={historical_proxy_id:?}");
     let receipt = eth_client
         .get_transaction_receipt(tx_hash)
-        .await?
+        .await
+        .inspect_err(|e| {
+            log::info!("compose: get_transaction_receipt failed tx_hash={tx_hash:?} err={e:?}")
+        })?
         .ok_or(anyhow::anyhow!("Transaction receipt is missing"))?;
+    log::info!(
+        "compose: receipt ok tx_hash={tx_hash:?} block_number={:?} block_hash={:?} tx_index={:?} status={:?}",
+        receipt.block_number,
+        receipt.block_hash,
+        receipt.transaction_index,
+        receipt.status()
+    );
 
     let block = match receipt.block_hash {
-        Some(hash) => eth_client
-            .get_block_by_hash(hash)
-            .await?
-            .ok_or(anyhow::anyhow!("Ethereum block (hash) is missing"))?,
+        Some(hash) => {
+            log::info!("compose: fetching block by hash {hash:?} tx_hash={tx_hash:?}");
+            eth_client
+                .get_block_by_hash(hash)
+                .await
+                .inspect_err(|e| log::info!("compose: get_block_by_hash failed hash={hash:?} tx_hash={tx_hash:?} err={e:?}"))?
+                .ok_or(anyhow::anyhow!("Ethereum block (hash) is missing"))?
+        }
         None => match receipt.block_number {
-            Some(number) => eth_client
-                .get_block_by_number(BlockNumberOrTag::Number(number))
-                .await?
-                .ok_or(anyhow::anyhow!("Ethereum block (number) is missing"))?,
+            Some(number) => {
+                log::info!("compose: fetching block by number {number} tx_hash={tx_hash:?}");
+                eth_client
+                    .get_block_by_number(BlockNumberOrTag::Number(number))
+                    .await
+                    .inspect_err(|e| log::info!("compose: get_block_by_number failed number={number} tx_hash={tx_hash:?} err={e:?}"))?
+                    .ok_or(anyhow::anyhow!("Ethereum block (number) is missing"))?
+            }
             None => return Err(anyhow::anyhow!("Unable to get Ethereum block")),
         },
     };
+    log::info!(
+        "compose: block ok tx_hash={tx_hash:?} block_number={} parent_beacon_root={:?}",
+        block.header.number,
+        block.header.parent_beacon_block_root
+    );
 
     let beacon_root_parent = block
         .header
@@ -312,6 +336,7 @@ pub async fn compose(
             "Unable to determine root of parent beacon block"
         ))?;
     let block_number = block.header.number;
+    log::info!("compose: building inclusion proof tx_hash={tx_hash:?} block_number={block_number} beacon_root_parent={beacon_root_parent:?}");
 
     let proof_block = build_inclusion_proof(
         beacon_client,
@@ -320,15 +345,23 @@ pub async fn compose(
         block_number,
         historical_proxy_id,
     )
-    .await?;
+    .await
+    .inspect_err(|e| log::info!("compose: build_inclusion_proof failed tx_hash={tx_hash:?} block_number={block_number} err={e:?}"))?;
+    log::info!(
+        "compose: inclusion proof ok tx_hash={tx_hash:?} slot={} headers={} block_number={block_number}",
+        proof_block.block.slot,
+        proof_block.headers.len()
+    );
 
     // receipt Merkle-proof
     let tx_index = receipt
         .transaction_index
         .ok_or(anyhow::anyhow!("Unable to determine transaction index"))?;
+    log::info!("compose: fetching block receipts tx_hash={tx_hash:?} block_number={block_number} tx_index={tx_index}");
     let receipts = eth_client
         .get_block_receipts(BlockId::Number(BlockNumberOrTag::Number(block_number)))
-        .await?
+        .await
+        .inspect_err(|e| log::info!("compose: get_block_receipts failed block_number={block_number} tx_hash={tx_hash:?} err={e:?}"))?
         .unwrap_or_default()
         .iter()
         .map(|tx_receipt| {
@@ -340,11 +373,25 @@ pub async fn compose(
         })
         .collect::<Option<Vec<_>>>()
         .unwrap_or_default();
+    log::info!(
+        "compose: receipts ok tx_hash={tx_hash:?} count={} tx_index={tx_index}",
+        receipts.len()
+    );
 
-    let MerkleProof { proof, receipt } = eth_utils::generate_merkle_proof(tx_index, &receipts[..])?;
+    let MerkleProof { proof, receipt } = eth_utils::generate_merkle_proof(tx_index, &receipts[..])
+        .inspect_err(|e| log::info!("compose: generate_merkle_proof failed tx_hash={tx_hash:?} tx_index={tx_index} err={e:?}"))?;
+    log::info!(
+        "compose: merkle proof ok tx_hash={tx_hash:?} proof_len={}",
+        proof.len()
+    );
 
     let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
     Encodable::encode(&receipt, &mut receipt_rlp);
+    log::info!(
+        "compose: success tx_hash={tx_hash:?} tx_index={tx_index} receipt_rlp_len={} slot={}",
+        receipt_rlp.len(),
+        proof_block.block.slot
+    );
 
     Ok(EthToVaraEvent {
         proof_block,
@@ -361,45 +408,106 @@ async fn build_inclusion_proof(
     block_number: u64,
     historical_proxy_id: ActorId,
 ) -> anyhow::Result<BlockInclusionProof> {
+    log::info!("build_inclusion_proof: start block_number={block_number} beacon_root_parent={beacon_root_parent:?} historical_proxy={historical_proxy_id:?}");
     let remoting = GClientRemoting::new(gear_api.clone());
 
     let historical_proxy = HistoricalProxy::new(remoting.clone());
     let eth_events = eth_events_electra_client::EthereumEventClient::new(remoting.clone());
     let service_checkpoint = ServiceCheckpointFor::new(remoting);
 
+    log::info!("build_inclusion_proof: get_block_by_hash parent_root={beacon_root_parent:?} block_number={block_number}");
     let beacon_block_parent = beacon_client
         .get_block_by_hash::<beacon::electra::Block>(beacon_root_parent)
-        .await?;
+        .await
+        .inspect_err(|e| log::info!("build_inclusion_proof: get_block_by_hash failed parent_root={beacon_root_parent:?} err={e:?}"))?;
+    log::info!(
+        "build_inclusion_proof: parent ok slot={} block_number={block_number}",
+        beacon_block_parent.slot
+    );
 
+    log::info!(
+        "build_inclusion_proof: find_beacon_block block_number={block_number} parent_slot={}",
+        beacon_block_parent.slot
+    );
     let beacon_block = beacon_client
         .find_beacon_block(block_number, beacon_block_parent)
-        .await?;
+        .await
+        .inspect_err(|e| log::info!("build_inclusion_proof: find_beacon_block failed block_number={block_number} err={e:?}"))?;
+    log::info!(
+        "build_inclusion_proof: find ok slot={} block_number={block_number}",
+        beacon_block.slot
+    );
+
+    log::info!(
+        "build_inclusion_proof: get_block slot={} block_number={block_number}",
+        beacon_block.slot
+    );
     let beacon_block = beacon_client
         .get_block::<beacon::electra::Block>(beacon_block.slot)
-        .await?;
+        .await
+        .inspect_err(|e| {
+            log::info!(
+                "build_inclusion_proof: get_block failed slot={} err={e:?}",
+                beacon_block.slot,
+            )
+        })?;
+    log::info!(
+        "build_inclusion_proof: get_block ok slot={} proposer={}",
+        beacon_block.slot,
+        beacon_block.proposer_index
+    );
 
     let slot = beacon_block.slot;
-    let gas_limit = gear_api.block_gas_limit()?;
+    let gas_limit = gear_api
+        .block_gas_limit()
+        .inspect_err(|e| log::info!("build_inclusion_proof: block_gas_limit failed err={e:?}"))?;
+    log::info!("build_inclusion_proof: historical_proxy.endpoint_for slot={slot} proxy={historical_proxy_id:?} gas_limit={gas_limit}");
     let endpoint = historical_proxy
         .endpoint_for(slot)
         .recv(historical_proxy_id)
         .await
+        .inspect_err(|e| {
+            log::info!("build_inclusion_proof: endpoint_for recv failed slot={slot} err={e:?}")
+        })
         .map_err(|e| anyhow::anyhow!("Failed to receive endpoint: {e:?}"))?
+        .inspect_err(|e| {
+            log::info!("build_inclusion_proof: endpoint_for Proxy error slot={slot} err={e:?}")
+        })
         .map_err(|e| anyhow::anyhow!("Proxy failed to get endpoint for slot #{slot}: {e:?}"))?;
+    log::info!("build_inclusion_proof: endpoint ok slot={slot} endpoint={endpoint:?}");
 
+    log::info!(
+        "build_inclusion_proof: checkpoint_light_client_address endpoint={endpoint:?} slot={slot}"
+    );
     let checkpoint_endpoint = eth_events
         .checkpoint_light_client_address()
         .recv(endpoint)
         .await
+        .inspect_err(|e| log::info!("build_inclusion_proof: checkpoint_light_client_address failed endpoint={endpoint:?} err={e:?}"))
         .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint endpoint: {e:?}"))?;
+    log::info!("build_inclusion_proof: checkpoint_endpoint ok {checkpoint_endpoint:?} slot={slot}");
 
+    log::info!("build_inclusion_proof: service_checkpoint.get slot={slot} checkpoint_endpoint={checkpoint_endpoint:?}");
     let (checkpoint_slot, checkpoint) = service_checkpoint
         .get(slot)
         .with_gas_limit(gas_limit)
         .recv(checkpoint_endpoint)
         .await
+        .inspect_err(|e| {
+            log::info!(
+                "build_inclusion_proof: service_checkpoint.get recv failed slot={slot} err={e:?}"
+            )
+        })
         .map_err(|e| anyhow::anyhow!("Failed to receive checkpoint: {e:?}"))?
+        .inspect_err(|e| {
+            log::info!(
+                "build_inclusion_proof: service_checkpoint.get Proxy error slot={slot} err={e:?}"
+            )
+        })
         .map_err(|e| anyhow::anyhow!("Checkpoint error: {e:?}"))?;
+    log::info!(
+        "build_inclusion_proof: checkpoint ok slot={slot} checkpoint_slot={checkpoint_slot}"
+    );
 
     let block = BlockGenericForBlockBody {
         slot,

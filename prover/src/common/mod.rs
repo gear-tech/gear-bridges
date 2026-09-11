@@ -86,9 +86,20 @@ where
             public_inputs,
         } = circuit_data.prove(witness).unwrap();
 
-        ProofWithCircuitData {
+        // Move the verifier data out of the owned circuit instead of cloning the
+        // (potentially very large) common circuit data.
+        let CircuitData {
+            verifier_only,
+            common,
+            ..
+        } = circuit_data;
+
+        Self {
             proof,
-            circuit_data: Arc::from(circuit_data.verifier_data()),
+            circuit_data: Arc::new(VerifierCircuitData {
+                verifier_only,
+                common,
+            }),
             public_inputs,
             public_inputs_parser: PhantomData,
         }
@@ -99,14 +110,24 @@ where
         circuit_data: &CircuitData<F, C, D>,
         witness: PartialWitness<F>,
     ) -> ProofWithCircuitData<TS> {
+        let verifier_data = Arc::new(circuit_data.verifier_data());
+        Self::prove_from_shared_circuit_data(circuit_data, verifier_data, witness)
+    }
+
+    /// Prove using circuit data and verifier data shared by a cached circuit.
+    pub(crate) fn prove_from_shared_circuit_data(
+        circuit_data: &CircuitData<F, C, D>,
+        verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+        witness: PartialWitness<F>,
+    ) -> ProofWithCircuitData<TS> {
         let ProofWithPublicInputs {
             proof,
             public_inputs,
         } = circuit_data.prove(witness).unwrap();
 
-        ProofWithCircuitData {
+        Self {
             proof,
-            circuit_data: Arc::from(circuit_data.verifier_data()),
+            circuit_data: verifier_data,
             public_inputs,
             public_inputs_parser: PhantomData,
         }
@@ -117,6 +138,14 @@ where
         proof: ProofWithPublicInputs<F, C, D>,
         circuit_data: VerifierCircuitData<F, C, D>,
     ) -> Self {
+        Self::from_proof_and_shared_circuit_data(proof, Arc::new(circuit_data))
+    }
+
+    /// Create a new `ProofWithCircuitData` using shared verifier data.
+    pub(crate) fn from_proof_and_shared_circuit_data(
+        proof: ProofWithPublicInputs<F, C, D>,
+        circuit_data: Arc<VerifierCircuitData<F, C, D>>,
+    ) -> Self {
         let ProofWithPublicInputs {
             proof,
             public_inputs,
@@ -124,7 +153,7 @@ where
 
         Self {
             proof,
-            circuit_data: Arc::from(circuit_data),
+            circuit_data,
             public_inputs,
             public_inputs_parser: PhantomData,
         }
@@ -133,6 +162,11 @@ where
     /// Get circuit data.
     pub fn circuit_data(&self) -> &VerifierCircuitData<F, C, D> {
         &self.circuit_data
+    }
+
+    /// Clone the shared verifier data handle without cloning circuit metadata.
+    pub(crate) fn shared_circuit_data(&self) -> Arc<VerifierCircuitData<F, C, D>> {
+        Arc::clone(&self.circuit_data)
     }
 
     /// Get type-erased public inouts.
@@ -187,15 +221,18 @@ pub trait CircuitImplBuilder {
 
 pub struct CircuitDataCache<BUILDER: CircuitImplBuilder> {
     circuit_data: CircuitData<F, C, D>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     witness_targets: BUILDER::WitnessTargets,
 }
 
 impl<BUILDER: CircuitImplBuilder> CircuitDataCache<BUILDER> {
     pub fn new() -> CircuitDataCache<BUILDER> {
         let (circuit_data, witness_targets) = BUILDER::build();
+        let verifier_data = Arc::new(circuit_data.verifier_data());
 
         CircuitDataCache {
             circuit_data,
+            verifier_data,
             witness_targets,
         }
     }
@@ -206,7 +243,11 @@ impl<BUILDER: CircuitImplBuilder> CircuitDataCache<BUILDER> {
     ) -> ProofWithCircuitData<BUILDER::PublicInputsTarget> {
         let mut witness = PartialWitness::new();
         impl_builder.set_witness(self.witness_targets.clone(), &mut witness);
-        ProofWithCircuitData::prove_from_circuit_data(&self.circuit_data, witness)
+        ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.circuit_data,
+            Arc::clone(&self.verifier_data),
+            witness,
+        )
     }
 }
 

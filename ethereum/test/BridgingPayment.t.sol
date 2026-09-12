@@ -1,25 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Test} from "forge-std/Test.sol";
-import {ERC20Manager} from "src/ERC20Manager.sol";
 import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
 import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
 import {Base} from "test/Base.sol";
-
-contract BridgingPaymentOwner {
-    ERC20Manager public erc20Manager;
-
-    constructor(ERC20Manager _erc20Manager) {
-        erc20Manager = _erc20Manager;
-    }
-
-    function createBridgingPayment(uint256 fee) external returns (address) {
-        return erc20Manager.createBridgingPayment(fee);
-    }
-}
+import {BridgingPaymentOwner} from "test/BridgingPaymentOwner.sol";
 
 contract BridgingPaymentTest is Test, Base {
     function setUp() public {
@@ -67,17 +55,20 @@ contract BridgingPaymentTest is Test, Base {
                 ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
             } else {
                 IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-                tetherToken.approve(address(erc20Manager), amount);
+                bool success = tetherToken.approve(address(erc20Manager), amount);
+                assertTrue(success);
             }
         } else {
             IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-            tetherToken.approve(address(erc20Manager), amount);
+            bool success = tetherToken.approve(address(erc20Manager), amount);
+            assertTrue(success);
         }
 
         BridgingPaymentOwner bridgingPaymentOwner = new BridgingPaymentOwner(erc20Manager);
         address bridgingPayment_ = bridgingPaymentOwner.createBridgingPayment(deploymentArguments.bridgingPaymentFee);
 
         vm.expectRevert(IBridgingPayment.PayFeeFailed.selector);
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
             token, amount, to, bridgingPayment_
         );

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {IPausable} from "src/interfaces/IPausable.sol";
 
 /**
  * @dev Type representing message being bridged from Gear-based chain (Vara Network) to Ethereum.
- *      - https://github.com/gear-tech/gear/blob/v1.9.2/pallets/gear-eth-bridge/primitives/src/lib.rs#L65
+ *      - https://github.com/gear-tech/gear/blob/master/vara/pallets/gear-eth-bridge/primitives/src/lib.rs#L50
  */
 struct VaraMessage {
     uint256 nonce;
@@ -18,6 +18,11 @@ struct VaraMessage {
  * @dev Interface for the MessageQueue contract.
  */
 interface IMessageQueue is IPausable {
+    /**
+     * @dev Emergency stop admin is invalid (zero address).
+     */
+    error InvalidEmergencyStopAdmin();
+
     /**
      * @dev Challenge root status is enabled.
      */
@@ -124,6 +129,7 @@ interface IMessageQueue is IPausable {
      */
     event MessageProcessingAllowed();
 
+    /// forge-lint: disable-next-item(event-fields)
     /**
      * @dev Emitted when message is processed.
      */
@@ -293,29 +299,4 @@ interface IMessageQueue is IPausable {
      * @return isProcessed `true` if message was already processed, `false` otherwise.
      */
     function isProcessed(uint256 messageNonce) external view returns (bool);
-}
-
-/**
- * @dev Library for hashing VaraMessage.
- */
-library Hasher {
-    /**
-     * @dev Hashes VaraMessage.
-     * @param message Message to hash.
-     * @return hash Hash of the message.
-     */
-    function hashCalldata(VaraMessage calldata message) internal pure returns (bytes32) {
-        /// forge-lint: disable-next-line(asm-keccak256)
-        return keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-    }
-
-    /**
-     * @dev Hashes VaraMessage.
-     * @param message Message to hash.
-     * @return hash Hash of the message.
-     */
-    function hash(VaraMessage memory message) internal pure returns (bytes32) {
-        /// forge-lint: disable-next-line(asm-keccak256)
-        return keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-    }
 }

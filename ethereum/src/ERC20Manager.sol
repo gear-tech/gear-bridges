@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -10,6 +10,7 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {BridgingPayment} from "src/BridgingPayment.sol";
+import {MessageQueue} from "src/MessageQueue.sol";
 import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
 import {IERC20Burnable} from "src/interfaces/IERC20Burnable.sol";
@@ -171,7 +172,7 @@ contract ERC20Manager is
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
-    address private _messageQueue;
+    MessageQueue private _messageQueue;
     EnumerableSet.Bytes32Set private _vftManagers;
     CustomEnumerableMap.AddressToTokenTypeMap private _tokens;
     EnumerableSet.AddressSet private _bridgingPayments;
@@ -189,14 +190,14 @@ contract ERC20Manager is
      *      GovernancePauser contract is used to pause/unpause the ERC20Manager contract.
      * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
-     * @param messageQueue_ The address of the message queue contract.
+     * @param messageQueue_ The MessageQueue contract.
      * @param vftManager The address of the VFT manager contract (on Vara Network).
      * @param tokens_ The tokens that will be registered.
      */
     function initialize(
         IGovernance governanceAdmin_,
         IGovernance governancePauser_,
-        address messageQueue_,
+        MessageQueue messageQueue_,
         bytes32 vftManager,
         TokenInfo[] memory tokens_
     ) public initializer {
@@ -217,6 +218,7 @@ contract ERC20Manager is
             TokenInfo memory tokenInfo = tokens_[i];
 
             if (tokenInfo.tokenType == TokenType.Unknown) {
+                // forge-lint: disable-next-item(require-revert-in-loop)
                 revert InvalidTokenType();
             } else {
                 _tokens.set(tokenInfo.token, tokenInfo.tokenType);
@@ -314,7 +316,9 @@ contract ERC20Manager is
         bytes32[] memory store = paginate(_tokens._inner._keys, offset, limit);
         address[] memory result;
 
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             result := store
         }
 
@@ -355,14 +359,18 @@ contract ERC20Manager is
      */
     function bridgingPayments(uint256 offset, uint256 limit) external view returns (address[] memory) {
         EnumerableSet.Bytes32Set storage bytes32Set;
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             bytes32Set.slot := _bridgingPayments.slot
         }
 
         bytes32[] memory store = paginate(bytes32Set, offset, limit);
         address[] memory result;
 
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             result := store
         }
 
@@ -454,6 +462,7 @@ contract ERC20Manager is
             IERC20Burnable(token).burnFrom(msg.sender, amount);
         }
 
+        // forge-lint: disable-next-item(reentrancy-events)
         emit BridgingRequested(msg.sender, to, token, amount);
     }
 
@@ -473,6 +482,7 @@ contract ERC20Manager is
             revert InvalidBridgingPayment();
         }
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
         requestBridging(token, amount, to);
     }
@@ -529,6 +539,7 @@ contract ERC20Manager is
             revert InvalidBridgingPayment();
         }
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         IBridgingPayment(bridgingPayment).payFee{value: msg.value}();
         requestBridgingWithPermit(token, amount, to, deadline, v, r, s);
     }
@@ -540,11 +551,12 @@ contract ERC20Manager is
      * @return bridgingPaymentAddress Address of the created `bridgingPayment` contract.
      */
     function createBridgingPayment(uint256 fee) external whenNotPaused returns (address) {
-        BridgingPayment bridgingPayment = new BridgingPayment(address(this), fee, msg.sender);
+        BridgingPayment bridgingPayment = new BridgingPayment(this, fee, msg.sender);
 
         address bridgingPaymentAddress = address(bridgingPayment);
         _bridgingPayments.add(bridgingPaymentAddress);
 
+        // forge-lint: disable-next-item(reentrancy-events)
         emit BridgingPaymentCreated(bridgingPaymentAddress);
 
         return bridgingPaymentAddress;
@@ -556,7 +568,7 @@ contract ERC20Manager is
      * @param payload Payload of the message (message from Vara Network).
      */
     function handleMessage(bytes32 source, bytes calldata payload) external {
-        if (msg.sender != _messageQueue) {
+        if (msg.sender != address(_messageQueue)) {
             revert InvalidSender();
         }
 
@@ -598,7 +610,9 @@ contract ERC20Manager is
         uint256 amount;
 
         // we use offset `OFFSET1 = SENDER_SIZE` to skip `bytes32 sender`
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             sender := calldataload(payload.offset)
             // `RECEIVER_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
             receiver := shr(RECEIVER_BIT_SHIFT, calldataload(add(payload.offset, OFFSET1)))
@@ -617,6 +631,7 @@ contract ERC20Manager is
             IERC20Mintable(token).mint(receiver, amount);
         }
 
+        // forge-lint: disable-next-item(reentrancy-events)
         emit Bridged(sender, receiver, token, amount);
 
         return true;
@@ -657,7 +672,9 @@ contract ERC20Manager is
         }
 
         uint256 discriminant;
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             // `DISCRIMINANT_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
             discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
         }
@@ -673,12 +690,15 @@ contract ERC20Manager is
 
             // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
             bytes32 vftManager;
+            // forge-lint: disable-next-item(inline-assembly)
             assembly ("memory-safe") {
+                /* reviewed: ... */
                 vftManager := calldataload(add(payload.offset, OFFSET4))
             }
 
             _vftManagers.add(vftManager);
 
+            // forge-lint: disable-next-item(reentrancy-events)
             emit VftManagerAdded(vftManager);
 
             return true;
@@ -691,13 +711,16 @@ contract ERC20Manager is
 
             // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
             address token;
+            // forge-lint: disable-next-item(inline-assembly)
             assembly ("memory-safe") {
+                /* reviewed: ... */
                 // `ETHEREUM_TOKEN_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
                 token := shr(ETHEREUM_TOKEN_BIT_SHIFT, calldataload(add(payload.offset, OFFSET4)))
             }
 
             _tokens.set(token, TokenType.Ethereum);
 
+            // forge-lint: disable-next-item(reentrancy-events)
             emit EthereumTokenRegistered(token);
 
             return true;
@@ -715,7 +738,9 @@ contract ERC20Manager is
         // we use offset `OFFSET4 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
         // we use offset `OFFSET5 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE` to skip `uint8 discriminant` and `bytes32 tokenName`
         // we use offset `OFFSET6 = DISCRIMINANT_SIZE + TOKEN_NAME_SIZE + TOKEN_SYMBOL_SIZE` to skip `uint8 discriminant`, `bytes32 tokenName` and `bytes32 tokenSymbol`
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             tokenName := calldataload(add(payload.offset, OFFSET4))
             tokenSymbol := calldataload(add(payload.offset, OFFSET5))
             tokenDecimals := calldataload(add(payload.offset, OFFSET6))
@@ -741,6 +766,7 @@ contract ERC20Manager is
 
         _tokens.set(tokenAddress, TokenType.Gear);
 
+        // forge-lint: disable-next-item(reentrancy-events)
         emit GearTokenRegistered(tokenAddress, tokenNameStr, tokenSymbolStr, tokenDecimals);
 
         return true;

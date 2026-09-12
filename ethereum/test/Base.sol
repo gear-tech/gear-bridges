@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {CommonBase} from "forge-std/Base.sol";
@@ -30,6 +30,7 @@ import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
 import {VerifierMock} from "src/mocks/VerifierMock.sol";
+import {BaseConstants} from "test/BaseConstants.sol";
 
 struct Overrides {
     address circleToken;
@@ -49,19 +50,6 @@ struct DeploymentArguments {
     address emergencyStopAdmin;
     address[] emergencyStopObservers;
     uint256 bridgingPaymentFee;
-}
-
-library BaseConstants {
-    address internal constant ZERO_ADDRESS = address(0);
-    uint256 internal constant DEPLOYER_INITIAL_BALANCE = 100 ether;
-    address internal constant DEPLOYER_ADDRESS = 0x1111111111111111111111111111111111111111;
-    bytes32 internal constant VFT_MANAGER = 0x2222222222222222222222222222222222222222222222222222222222222222;
-    bytes32 internal constant GOVERNANCE_ADMIN = 0x3333333333333333333333333333333333333333333333333333333333333333;
-    bytes32 internal constant GOVERNANCE_PAUSER = 0x4444444444444444444444444444444444444444444444444444444444444444;
-    address internal constant EMERGENCY_STOP_ADMIN = 0x5555555555555555555555555555555555555555;
-    address internal constant EMERGENCY_STOP_OBSERVER1 = 0x6666666666666666666666666666666666666666;
-    address internal constant EMERGENCY_STOP_OBSERVER2 = 0x7777777777777777777777777777777777777777;
-    uint256 internal constant BRIDGING_PAYMENT_FEE = 1 wei;
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
@@ -171,6 +159,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         );
     }
 
+    /// forge-lint: disable-next-item(cyclomatic-complexity)
     function deployBridge(DeploymentArguments memory _deploymentArguments) public {
         deploymentArguments = _deploymentArguments;
 
@@ -183,17 +172,20 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
             console.log();
 
+            // forge-lint: disable-next-item(reentrancy-no-eth, unused-return)
             vm.createSelectFork(deploymentArguments.forkUrlOrAlias);
 
             governanceAdmin = GovernanceAdmin(vm.envAddress("GOVERNANCE_ADMIN_CONTRACT"));
             governancePauser = GovernancePauser(vm.envAddress("GOVERNANCE_PAUSER_CONTRACT"));
 
-            wrappedVara = WrappedVara(governanceAdmin.wrappedVara());
-            messageQueue = MessageQueue(governanceAdmin.messageQueue());
-            erc20Manager = ERC20Manager(governanceAdmin.erc20Manager());
+            wrappedVara = governanceAdmin.wrappedVara();
+            messageQueue = governanceAdmin.messageQueue();
+            erc20Manager = governanceAdmin.erc20Manager();
 
             verifier = IVerifier(messageQueue.verifier());
+            // forge-lint: disable-next-item(reentrancy-no-eth)
             vm.etch(address(verifier), type(VerifierMock).runtimeCode);
+            // forge-lint: disable-next-item(reentrancy-no-eth)
             VerifierMock(address(verifier)).setValue(true);
 
             messageNonce = 100_000_000;
@@ -219,19 +211,24 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 bytes32 slot = bytes32(uint256(0x08)); // address masterMinter
                 bytes32 value = ((vm.load(address(overrides.circleToken), slot) >> 160) << 160)
                     | bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 vm.store(address(overrides.circleToken), slot, value);
 
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 vm.prank(deploymentArguments.deployerAddress);
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 ICircleToken(address(overrides.circleToken))
                     .configureMinter(deploymentArguments.deployerAddress, type(uint256).max);
 
                 slot = bytes32(0x00); // address owner
                 value = bytes32(uint256(uint160(deploymentArguments.deployerAddress)));
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 vm.store(overrides.tetherToken, slot, value);
 
                 slot = bytes32(uint256(0x05)); // address owner
                 value = ((vm.load(address(overrides.wrappedBitcoin), slot) << 248) >> 248)
                     | (bytes32(uint256(uint160(deploymentArguments.deployerAddress))) << 8);
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 vm.store(overrides.wrappedBitcoin, slot, value);
             }
 
@@ -240,7 +237,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 deployerAddress: _deploymentArguments.deployerAddress,
                 forkUrlOrAlias: _deploymentArguments.forkUrlOrAlias,
                 overrides: overrides,
-                vftManager: erc20Manager.vftManagers()[isMainnet ? 1 : 0],
+                vftManager: erc20Manager.vftManagers()[isMainnet ? 2 : 0],
                 governanceAdmin: governanceAdmin.governance(),
                 governancePauser: governancePauser.governance(),
                 emergencyStopAdmin: messageQueue.emergencyStopAdmin(),
@@ -249,10 +246,13 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             });
 
             if (messageQueue.isChallengingRoot()) {
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 vm.prank(deploymentArguments.emergencyStopAdmin);
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 messageQueue.disableChallengeRoot();
             }
 
+            // forge-lint: disable-next-line(todo-comment)
             // TODO: all manipulations with the forked contracts should be done here
         }
 
@@ -266,11 +266,15 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         if (isTest) {
             if (!isFork) {
+                // forge-lint: disable-next-item(reentrancy-no-eth)
                 vm.warp(vm.unixTime() / 1000);
             }
+            // forge-lint: disable-next-item(reentrancy-no-eth)
             vm.deal(deploymentArguments.deployerAddress, BaseConstants.DEPLOYER_INITIAL_BALANCE);
+            // forge-lint: disable-next-item(reentrancy-no-eth)
             vm.startPrank(deploymentArguments.deployerAddress, deploymentArguments.deployerAddress);
         } else if (isScript) {
+            // forge-lint: disable-next-item(reentrancy-no-eth)
             vm.startBroadcast(deploymentArguments.privateKey);
         }
 
@@ -311,6 +315,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
             deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 3
         );
 
+        // forge-lint: disable-next-line(todo-comment)
         // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
         if (!isFork) {
             wrappedVara = WrappedVara(
@@ -318,7 +323,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                     "WrappedVara.sol",
                     abi.encodeCall(
                         WrappedVara.initialize,
-                        (IGovernance(governanceAdminAddress), IGovernance(governancePauserAddress), erc20ManagerAddress)
+                        (
+                            IGovernance(governanceAdminAddress),
+                            IGovernance(governancePauserAddress),
+                            ERC20Manager(erc20ManagerAddress)
+                        )
                     )
                 )
             );
@@ -354,7 +363,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         if (!isFork) {
             governanceAdmin = new GovernanceAdmin(
-                deploymentArguments.governanceAdmin, address(wrappedVara), messageQueueAddress, erc20ManagerAddress
+                deploymentArguments.governanceAdmin,
+                wrappedVara,
+                MessageQueue(messageQueueAddress),
+                ERC20Manager(erc20ManagerAddress)
             );
         }
         console.log("    GovernanceAdmin:     ", address(governanceAdmin));
@@ -365,7 +377,10 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         if (!isFork) {
             governancePauser = new GovernancePauser(
-                deploymentArguments.governancePauser, address(wrappedVara), messageQueueAddress, erc20ManagerAddress
+                deploymentArguments.governancePauser,
+                wrappedVara,
+                MessageQueue(messageQueueAddress),
+                ERC20Manager(erc20ManagerAddress)
             );
         }
         console.log("    GovernancePauser:    ", address(governancePauser));
@@ -394,6 +409,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         console.log("    Verifier:            ", address(verifier));
 
+        // forge-lint: disable-next-line(todo-comment)
         // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
         if (!isFork) {
             messageQueue = MessageQueue(
@@ -436,13 +452,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                     "ERC20Manager.sol",
                     abi.encodeCall(
                         ERC20Manager.initialize,
-                        (
-                            governanceAdmin,
-                            governancePauser,
-                            address(messageQueue),
-                            deploymentArguments.vftManager,
-                            tokens
-                        )
+                        (governanceAdmin, governancePauser, messageQueue, deploymentArguments.vftManager, tokens)
                     )
                 )
             );
@@ -456,6 +466,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridging payment:");
 
         if (!isFork) {
+            // forge-lint: disable-next-item(reentrancy-no-eth)
             bridgingPayment =
                 BridgingPayment(erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee));
         }
@@ -539,7 +550,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(erc20Manager.governancePauser(), address(governancePauser));
         assertEq(erc20Manager.messageQueue(), address(messageQueue));
         bool isMainnet = block.chainid == 1;
-        uint256 expectedVftManagers = isFork() && isMainnet ? 2 : 1;
+        uint256 expectedVftManagers = isFork() && isMainnet ? 3 : 1;
         assertEq(erc20Manager.totalVftManagers(), expectedVftManagers);
         bytes32[] memory vftManagers1 = erc20Manager.vftManagers();
         assertEq(vftManagers1.length, expectedVftManagers);

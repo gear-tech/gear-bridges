@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
-import {GovernanceConstants, IGovernance} from "src/interfaces/IGovernance.sol";
+import {ERC20Manager} from "src/ERC20Manager.sol";
+import {GovernanceConstants} from "src/GovernanceConstants.sol";
+import {MessageQueue} from "src/MessageQueue.sol";
+import {WrappedVara} from "src/erc20/WrappedVara.sol";
+import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
 
@@ -26,18 +30,18 @@ contract GovernancePauser is IMessageHandler, IGovernance {
     uint256 internal constant OFFSET1 = 1;
 
     bytes32 public governance;
-    address public wrappedVara;
-    address public messageQueue;
-    address public erc20Manager;
+    WrappedVara public wrappedVara;
+    MessageQueue public messageQueue;
+    ERC20Manager public erc20Manager;
 
     /**
      * @dev Initializes the GovernancePauser contract.
      * @param _governance The governance address (Vara Network address).
-     * @param _wrappedVara The WrappedVara address.
-     * @param _messageQueue The message queue address.
-     * @param _erc20Manager The ERC20Manager address.
+     * @param _wrappedVara The WrappedVara contract.
+     * @param _messageQueue The MessageQueue contract.
+     * @param _erc20Manager The ERC20Manager contract.
      */
-    constructor(bytes32 _governance, address _wrappedVara, address _messageQueue, address _erc20Manager) {
+    constructor(bytes32 _governance, WrappedVara _wrappedVara, MessageQueue _messageQueue, ERC20Manager _erc20Manager) {
         governance = _governance;
         wrappedVara = _wrappedVara;
         messageQueue = _messageQueue;
@@ -50,7 +54,7 @@ contract GovernancePauser is IMessageHandler, IGovernance {
      * @param payload Payload of the message (message from Vara Network).
      */
     function handleMessage(bytes32 source, bytes calldata payload) external {
-        if (msg.sender != messageQueue) {
+        if (msg.sender != address(messageQueue)) {
             revert InvalidSender();
         }
 
@@ -96,7 +100,9 @@ contract GovernancePauser is IMessageHandler, IGovernance {
         }
 
         uint256 discriminant;
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             // `DISCRIMINANT_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
             discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
         }
@@ -113,13 +119,16 @@ contract GovernancePauser is IMessageHandler, IGovernance {
 
             // we use offset `OFFSET1 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
             bytes32 newGovernance;
+            // forge-lint: disable-next-item(inline-assembly)
             assembly ("memory-safe") {
+                /* reviewed: ... */
                 newGovernance := calldataload(add(payload.offset, OFFSET1))
             }
 
             bytes32 previousGovernance = governance;
             governance = newGovernance;
 
+            // forge-lint: disable-next-item(reentrancy-events)
             emit GovernanceChanged(previousGovernance, newGovernance);
 
             return true;
@@ -131,12 +140,14 @@ contract GovernancePauser is IMessageHandler, IGovernance {
 
         // we use offset `OFFSET1 = DISCRIMINANT_SIZE` to skip `uint8 discriminant`
         address proxy;
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             // `PROXY_ADDRESS_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
             proxy := shr(PROXY_ADDRESS_BIT_SHIFT, calldataload(add(payload.offset, OFFSET1)))
         }
 
-        if (!(proxy == wrappedVara || proxy == messageQueue || proxy == erc20Manager)) {
+        if (!(proxy == address(wrappedVara) || proxy == address(messageQueue) || proxy == address(erc20Manager))) {
             return false;
         }
 

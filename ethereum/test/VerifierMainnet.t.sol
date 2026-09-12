@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {Test} from "forge-std/Test.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
@@ -17,7 +17,7 @@ contract VerifierMainnetTest is Test {
         );
 
         uint256 blockNumber = 30068803;
-        bytes32 merkleRoot = 0x0000000000000000000000000000000000000000000000000000000000000000;
+        bytes32 merkleRoot = 0;
 
         uint256[] memory publicInputs = new uint256[](2);
         publicInputs[0] = uint256(merkleRoot) >> 64;

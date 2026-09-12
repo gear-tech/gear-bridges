@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {Test} from "forge-std/Test.sol";
-import {
-    ChangeGovernanceMessage,
-    GovernanceConstants,
-    GovernancePacker,
-    IGovernance,
-    PauseProxyMessage
-} from "src/interfaces/IGovernance.sol";
-import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {GovernanceConstants} from "src/GovernanceConstants.sol";
+import {IGovernance} from "src/interfaces/IGovernance.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
+import {ChangeGovernanceMessage, GovernancePacker, PauseProxyMessage} from "src/libraries/packing/GovernancePacker.sol";
 import {Base} from "test/Base.sol";
 
 contract GovernancePauserTest is Test, Base {
@@ -43,6 +40,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -74,6 +72,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -90,6 +89,8 @@ contract GovernancePauserTest is Test, Base {
     }
 
     function test_HandleMessageWithInvalidDiscriminant() public {
+        // casting to 'uint8' is safe because [explain why]
+        // forge-lint: disable-next-item(unsafe-typecast)
         VaraMessage memory message = VaraMessage({
             nonce: messageNonce++,
             source: governancePauser.governance(),
@@ -105,6 +106,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -139,6 +141,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -150,6 +153,7 @@ contract GovernancePauserTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(governancePauser));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IGovernance.GovernanceChanged(previousGovernance, newGovernance);
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
@@ -158,6 +162,8 @@ contract GovernancePauserTest is Test, Base {
     }
 
     function test_HandleMessageWithChangeGovernanceAndNotEnoughPayload() public {
+        // casting to 'uint8' is safe because [explain why]
+        // forge-lint: disable-next-item(unsafe-typecast)
         VaraMessage memory message = VaraMessage({
             nonce: messageNonce++,
             source: governancePauser.governance(),
@@ -173,6 +179,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -189,6 +196,8 @@ contract GovernancePauserTest is Test, Base {
     }
 
     function test_HandleMessageWithPauseAndNotEnoughPayload() public {
+        // casting to 'uint8' is safe because [explain why]
+        // forge-lint: disable-next-item(unsafe-typecast)
         VaraMessage memory message = VaraMessage({
             nonce: messageNonce++,
             source: governancePauser.governance(),
@@ -204,6 +213,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -236,6 +246,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -267,6 +278,7 @@ contract GovernancePauserTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);

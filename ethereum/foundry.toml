@@ -8,7 +8,7 @@ remappings = [
     "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.7.0/",
 ]
 evm_version = "osaka"
-solc = "0.8.35"
+solc = "0.8.37"
 optimizer = true
 extra_output_files = ["irOptimized"]
 via_ir = true
@@ -35,6 +35,9 @@ openzeppelin-foundry-upgrades = "0.4.2"
 
 [fmt]
 sort_imports = true
+
+[lint]
+exclude_lints = ["literal-instead-of-constant"]
 
 [rpc_endpoints]
 mainnet = "${MAINNET_RPC_URL}"

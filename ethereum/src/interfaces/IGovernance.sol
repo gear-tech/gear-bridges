@@ -1,72 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
+import {ERC20Manager} from "src/ERC20Manager.sol";
+import {MessageQueue} from "src/MessageQueue.sol";
+import {WrappedVara} from "src/erc20/WrappedVara.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
-
-/**
- * @dev Governance constants.
- */
-library GovernanceConstants {
-    /**
-     * @dev Change governance message discriminant.
-     */
-    uint256 internal constant CHANGE_GOVERNANCE = 0x00;
-    /**
-     * @dev Pause proxy message discriminant.
-     */
-    uint256 internal constant PAUSE_PROXY = 0x01;
-    /**
-     * @dev Unpause proxy message discriminant.
-     */
-    uint256 internal constant UNPAUSE_PROXY = 0x02;
-    /**
-     * @dev Upgrade proxy message discriminant.
-     */
-    uint256 internal constant UPGRADE_PROXY = 0x03;
-
-    /**
-     * @dev `uint8 discriminant` size.
-     */
-    uint256 internal constant DISCRIMINANT_SIZE = 1;
-    /**
-     * @dev `bytes32 newGovernance` size.
-     */
-    uint256 internal constant NEW_GOVERNANCE_SIZE = 32;
-    /**
-     * @dev `address proxy` size.
-     */
-    uint256 internal constant PROXY_ADDRESS_SIZE = 20;
-    /**
-     * @dev `address newImplementation` size.
-     */
-    uint256 internal constant NEW_IMPLEMENTATION_SIZE = 20;
-
-    /**
-     * @dev `DISCRIMINANT_SIZE` offset.
-     */
-    uint256 internal constant OFFSET1 = 1;
-    /**
-     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE` offset.
-     */
-    uint256 internal constant OFFSET2 = 21;
-    /**
-     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE` offset.
-     */
-    uint256 internal constant OFFSET3 = 41;
-
-    /**
-     * @dev `DISCRIMINANT_SIZE + NEW_GOVERNANCE_SIZE` size.
-     */
-    uint256 internal constant CHANGE_GOVERNANCE_SIZE = 33;
-    /**
-     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE` size.
-     */
-    uint256 internal constant PAUSE_UNPAUSE_PROXY_SIZE = 21;
-    /**
-     * @dev `DISCRIMINANT_SIZE + PROXY_ADDRESS_SIZE + NEW_IMPLEMENTATION_SIZE` size.
-     */
-    uint256 internal constant UPGRADE_PROXY_SIZE = 41;
-}
 
 /**
  * @dev Interface for the Governance contract.
@@ -101,93 +39,20 @@ interface IGovernance is IMessageHandler {
     function governance() external view returns (bytes32);
 
     /**
-     * @dev Returns the WrappedVara address.
-     * @return wrappedVara The WrappedVara address.
+     * @dev Returns the WrappedVara contract.
+     * @return wrappedVara The WrappedVara contract.
      */
-    function wrappedVara() external view returns (address);
+    function wrappedVara() external view returns (WrappedVara);
 
     /**
-     * @dev Returns the MessageQueue address.
-     * @return messageQueue The MessageQueue address.
+     * @dev Returns the MessageQueue contract.
+     * @return messageQueue The MessageQueue contract.
      */
-    function messageQueue() external view returns (address);
+    function messageQueue() external view returns (MessageQueue);
 
     /**
-     * @dev Returns the ERC20Manager address.
-     * @return erc20Manager The ERC20Manager address.
+     * @dev Returns the ERC20Manager contract.
+     * @return erc20Manager The ERC20Manager contract.
      */
-    function erc20Manager() external view returns (address);
-}
-
-/**
- * @dev Type representing payload of the message that changes governance address.
- */
-struct ChangeGovernanceMessage {
-    bytes32 newGovernance;
-}
-
-/**
- * @dev Type representing payload of the message that pauses proxy.
- */
-struct PauseProxyMessage {
-    address proxy;
-}
-
-/**
- * @dev Type representing payload of the message that unpauses proxy.
- */
-struct UnpauseProxyMessage {
-    address proxy;
-}
-
-/**
- * @dev Type representing payload of the message that upgrades proxy.
- */
-struct UpgradeProxyMessage {
-    address proxy;
-    address newImplementation;
-    bytes data;
-}
-
-/**
- * @dev Library for packing `Governance` messages into a binary format.
- */
-library GovernancePacker {
-    /**
-     * @dev Packs `ChangeGovernanceMessage` into a binary format.
-     * @param message Message to pack.
-     * @return packed Packed message.
-     */
-    function pack(ChangeGovernanceMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(uint8(GovernanceConstants.CHANGE_GOVERNANCE), message.newGovernance);
-    }
-
-    /**
-     * @dev Packs `PauseProxyMessage` into a binary format.
-     * @param message Message to pack.
-     * @return packed Packed message.
-     */
-    function pack(PauseProxyMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(uint8(GovernanceConstants.PAUSE_PROXY), message.proxy);
-    }
-
-    /**
-     * @dev Packs `UnpauseProxyMessage` into a binary format.
-     * @param message Message to pack.
-     * @return packed Packed message.
-     */
-    function pack(UnpauseProxyMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(uint8(GovernanceConstants.UNPAUSE_PROXY), message.proxy);
-    }
-
-    /**
-     * @dev Packs `UpgradeProxyMessage` into a binary format.
-     * @param message Message to pack.
-     * @return packed Packed message.
-     */
-    function pack(UpgradeProxyMessage memory message) internal pure returns (bytes memory) {
-        return abi.encodePacked(
-            uint8(GovernanceConstants.UPGRADE_PROXY), message.proxy, message.newImplementation, message.data
-        );
-    }
+    function erc20Manager() external view returns (ERC20Manager);
 }

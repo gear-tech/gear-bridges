@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
@@ -14,6 +14,7 @@ import {
 } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import {ERC20Manager} from "src/ERC20Manager.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
@@ -45,7 +46,7 @@ contract WrappedVara is
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
-    address private _minter;
+    ERC20Manager private _erc20Manager;
 
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
@@ -58,9 +59,9 @@ contract WrappedVara is
      * @dev Initializes the WrappedVara contract with the token name and symbol.
      * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
-     * @param minter_ The address that will be able to mint tokens.
+     * @param erc20Manager_ The ERC20Manager contract that will be able to mint tokens.
      */
-    function initialize(IGovernance governanceAdmin_, IGovernance governancePauser_, address minter_)
+    function initialize(IGovernance governanceAdmin_, IGovernance governancePauser_, ERC20Manager erc20Manager_)
         public
         initializer
     {
@@ -80,11 +81,11 @@ contract WrappedVara is
         _grantRole(PAUSER_ROLE, address(governanceAdmin_));
         _grantRole(PAUSER_ROLE, address(governancePauser_));
 
-        _grantRole(MINTER_ROLE, minter_);
+        _grantRole(MINTER_ROLE, address(erc20Manager_));
 
         _governanceAdmin = governanceAdmin_;
         _governancePauser = governancePauser_;
-        _minter = minter_;
+        _erc20Manager = erc20Manager_;
     }
 
     /**
@@ -113,7 +114,7 @@ contract WrappedVara is
      * @return minter Minter address.
      */
     function minter() external view returns (address) {
-        return _minter;
+        return address(_erc20Manager);
     }
 
     /**

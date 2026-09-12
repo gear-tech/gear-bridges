@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -28,6 +28,7 @@ library CustomEnumerableMap {
         return EnumerableMap.set(map._inner, bytes32(uint256(uint160(key))), bytes32(uint256(value)));
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Removes a value from a map. O(1).
      *
@@ -37,6 +38,7 @@ library CustomEnumerableMap {
         return EnumerableMap.remove(map._inner, bytes32(uint256(uint160(key))));
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Removes all the entries from a map. O(n).
      *
@@ -47,6 +49,7 @@ library CustomEnumerableMap {
         EnumerableMap.clear(map._inner);
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Returns true if the key is in the map. O(1).
      */
@@ -61,6 +64,7 @@ library CustomEnumerableMap {
         return EnumerableMap.length(map._inner);
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Returns the element stored at position `index` in the map. O(1).
      * Note that there are no guarantees on the ordering of values inside the
@@ -92,6 +96,7 @@ library CustomEnumerableMap {
         return (success, IERC20Manager.TokenType(uint256(val)));
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Returns the value associated with `key`. O(1).
      *
@@ -115,7 +120,9 @@ library CustomEnumerableMap {
         bytes32[] memory store = EnumerableMap.keys(map._inner);
         address[] memory result;
 
+        // forge-lint: disable-next-item(inline-assembly)
         assembly ("memory-safe") {
+            /* reviewed: ... */
             result := store
         }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
@@ -7,15 +7,16 @@ import {IERC1967} from "@openzeppelin/contracts/interfaces/IERC1967.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {Test} from "forge-std/Test.sol";
 import {VerifierTestnet} from "src/VerifierTestnet.sol";
+import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {IVerifierMock} from "src/interfaces/IVerifierMock.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
 import {
     GovernancePacker,
     PauseProxyMessage,
     UnpauseProxyMessage,
     UpgradeProxyMessage
-} from "src/interfaces/IGovernance.sol";
-import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
-import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
-import {IVerifierMock} from "src/interfaces/IVerifierMock.sol";
+} from "src/libraries/packing/GovernancePacker.sol";
 import {Base} from "test/Base.sol";
 
 contract MessageQueueTest is Test, Base {
@@ -88,20 +89,27 @@ contract MessageQueueTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governanceAdmin));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
@@ -133,20 +141,27 @@ contract MessageQueueTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governancePauser));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
@@ -187,20 +202,27 @@ contract MessageQueueTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governanceAdmin));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
@@ -212,7 +234,9 @@ contract MessageQueueTest is Test, Base {
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -230,6 +254,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -237,6 +262,7 @@ contract MessageQueueTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Unpaused(address(governanceAdmin));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message3, proof2);
@@ -258,20 +284,27 @@ contract MessageQueueTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governancePauser));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
@@ -283,7 +316,9 @@ contract MessageQueueTest is Test, Base {
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -301,6 +336,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -308,6 +344,7 @@ contract MessageQueueTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Unpaused(address(governancePauser));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message3, proof2);
@@ -341,6 +378,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -352,6 +390,7 @@ contract MessageQueueTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC1967.Upgraded(address(newImplementationMock));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -363,6 +402,7 @@ contract MessageQueueTest is Test, Base {
         // just to get coverage for NewImplementationMock contract
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC1967.Upgraded(address(newImplementationMock));
 
         messageQueue.upgradeToAndCall(address(newImplementationMock), "");
@@ -398,6 +438,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -409,6 +450,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0x33)); // invalid root, suspicious address managed to send it
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -420,6 +462,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0x44)); // invalid root, suspicious address managed to send it
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -430,6 +473,7 @@ contract MessageQueueTest is Test, Base {
         vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
 
         messageQueue.challengeRoot();
@@ -450,16 +494,21 @@ contract MessageQueueTest is Test, Base {
         blockNumber = blockNumber4;
         merkleRoot = messageHash; // valid root, just to check that no one can submit any root now
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.ChallengeRoot.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.startPrank(deploymentArguments.emergencyStopAdmin);
 
         blockNumber = blockNumber2;
@@ -468,12 +517,17 @@ contract MessageQueueTest is Test, Base {
 
         // emergency stop admin managed to submit valid root for first challenged block
         // and enabled emergency stop status
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.EmergencyStopEnabled();
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.ChallengeRootDisabled();
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
         assertEq(messageQueue.isEmergencyStopped(), true);
@@ -486,6 +540,7 @@ contract MessageQueueTest is Test, Base {
         previousMerkleRoot = bytes32(uint256(0x44));
 
         // emergency stop admin managed to submit valid root for second challenged block
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), bytes32(0));
@@ -510,6 +565,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -517,6 +573,7 @@ contract MessageQueueTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC1967.Upgraded(address(newImplementationMock));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
@@ -537,6 +594,7 @@ contract MessageQueueTest is Test, Base {
         vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
 
         messageQueue.challengeRoot();
@@ -545,6 +603,7 @@ contract MessageQueueTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + 1);
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
 
         messageQueue.challengeRoot();
@@ -558,9 +617,12 @@ contract MessageQueueTest is Test, Base {
         bytes32 merkleRoot = bytes32(uint256(0x22)); // valid root, update max block height
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
@@ -579,34 +641,46 @@ contract MessageQueueTest is Test, Base {
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash; // invalid root, suspicious address managed to send pause
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
         assertEq(messageQueue.getMerkleRoot(blockNumber), merkleRoot);
         assertEq(messageQueue.getMerkleRootTimestamp(merkleRoot), vm.getBlockTimestamp());
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governancePauser));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.challengeRoot();
         assertEq(messageQueue.isChallengingRoot(), true);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.stopPrank();
 
         blockNumber = currentBlockNumber++;
@@ -623,6 +697,7 @@ contract MessageQueueTest is Test, Base {
         vm.startPrank(deploymentArguments.emergencyStopObservers[0]);
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.ChallengeRootEnabled(vm.getBlockTimestamp() + messageQueue.CHALLENGE_ROOT_DELAY());
 
         messageQueue.challengeRoot();
@@ -633,6 +708,7 @@ contract MessageQueueTest is Test, Base {
         vm.startPrank(deploymentArguments.emergencyStopAdmin);
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.ChallengeRootDisabled();
 
         messageQueue.disableChallengeRoot();
@@ -660,6 +736,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -670,6 +747,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0x33));
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.EmergencyStopEnabled();
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -698,6 +776,7 @@ contract MessageQueueTest is Test, Base {
         vm.startPrank(deploymentArguments.emergencyStopAdmin);
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MessageProcessingAllowed();
 
         messageQueue.allowMessageProcessing();
@@ -730,6 +809,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -747,6 +827,7 @@ contract MessageQueueTest is Test, Base {
             blockNumber += 42;
 
             vm.expectEmit(address(messageQueue));
+            // forge-lint: disable-next-item(reentrancy-events)
             emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
             messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -776,6 +857,7 @@ contract MessageQueueTest is Test, Base {
             blockNumber += 42;
 
             vm.expectEmit(address(messageQueue));
+            // forge-lint: disable-next-item(reentrancy-events)
             emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
             messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -804,6 +886,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -832,6 +915,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -843,6 +927,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0x33));
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.EmergencyStopEnabled();
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -869,6 +954,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -880,6 +966,7 @@ contract MessageQueueTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(messageHandlerMock));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageHandlerMock.MessageHandled(message.source, message.payload);
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
@@ -904,6 +991,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -915,6 +1003,7 @@ contract MessageQueueTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(messageHandlerMock));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageHandlerMock.MessageHandled(message.source, message.payload);
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
@@ -927,6 +1016,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -937,6 +1027,7 @@ contract MessageQueueTest is Test, Base {
         merkleRoot = bytes32(uint256(0x33));
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.EmergencyStopEnabled();
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof);
@@ -979,6 +1070,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -990,6 +1082,7 @@ contract MessageQueueTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(messageHandlerMock));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageHandlerMock.MessageHandled(message.source, message.payload);
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
@@ -1035,6 +1128,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -1064,6 +1158,7 @@ contract MessageQueueTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);

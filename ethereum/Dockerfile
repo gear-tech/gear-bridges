@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 WORKDIR /contracts
 COPY . .
 ENV PATH="${PATH}:/root/.foundry/bin"
@@ -10,11 +10,11 @@ RUN apt update && \
         git \
         lcov && \
     curl -L https://foundry.paradigm.xyz | bash && \
-    foundryup && \
+    foundryup -i v1.8.1 && \
     forge --version && \
     forge compiler resolve && \
     forge soldeer install && \
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash && \
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.7/install.sh | bash && \
     \. "$NVM_DIR/nvm.sh" && \
     nvm install --lts && \
     npm install -g npm@latest && \

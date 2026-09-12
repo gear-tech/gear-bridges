@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
@@ -70,9 +70,12 @@ contract WrappedEther is ERC20 {
         address from = _msgSender();
         _burn(from, value);
 
+        // forge-lint: disable-next-item(low-level-calls)
         (bool success,) = from.call{value: value}("");
+        // forge-lint: disable-next-item(custom-errors)
         require(success);
 
+        // forge-lint: disable-next-item(reentrancy-events)
         emit Withdrawal(from, value);
     }
 

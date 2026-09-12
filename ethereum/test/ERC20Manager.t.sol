@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
@@ -14,22 +14,23 @@ import {ERC20Manager} from "src/ERC20Manager.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
 import {ITetherToken} from "src/erc20/interfaces/ITetherToken.sol";
 import {IBridgingPayment} from "src/interfaces/IBridgingPayment.sol";
+import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
 import {
     AddVftManagerMessage,
     ERC20ManagerPacker,
-    IERC20Manager,
     RegisterEthereumTokenMessage,
     RegisterGearTokenMessage,
     TransferMessage
-} from "src/interfaces/IERC20Manager.sol";
-import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
+} from "src/libraries/packing/ERC20ManagerPacker.sol";
 import {
     GovernancePacker,
     PauseProxyMessage,
     UnpauseProxyMessage,
     UpgradeProxyMessage
-} from "src/interfaces/IGovernance.sol";
-import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+} from "src/libraries/packing/GovernancePacker.sol";
 import {Base} from "test/Base.sol";
 
 contract ERC20ManagerTest is Test, Base {
@@ -58,7 +59,7 @@ contract ERC20ManagerTest is Test, Base {
             implementation,
             abi.encodeCall(
                 ERC20Manager.initialize,
-                (governanceAdmin, governancePauser, address(messageQueue), deploymentArguments.vftManager, tokens)
+                (governanceAdmin, governancePauser, messageQueue, deploymentArguments.vftManager, tokens)
             )
         );
     }
@@ -79,6 +80,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -90,6 +92,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governanceAdmin));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -114,6 +117,7 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridgingPayingFeeWithPermit(token, amount, to, deadline, v, r, s, bridgingPayment_);
 
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(unused-return)
         erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee);
     }
 
@@ -133,6 +137,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -144,6 +149,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governancePauser));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -168,6 +174,7 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridgingPayingFeeWithPermit(token, amount, to, deadline, v, r, s, bridgingPayment_);
 
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(unused-return)
         erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee);
     }
 
@@ -195,20 +202,27 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governanceAdmin));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
@@ -216,7 +230,9 @@ contract ERC20ManagerTest is Test, Base {
         uint256 amount = 100 * (10 ** circleToken.decimals());
         bytes32 to = bytes32(uint256(0x11));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         erc20Manager.requestBridging(token, amount, to);
 
         VaraMessage memory message2 = VaraMessage({
@@ -233,6 +249,7 @@ contract ERC20ManagerTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -240,6 +257,7 @@ contract ERC20ManagerTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Unpaused(address(governanceAdmin));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
@@ -261,20 +279,27 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governancePauser));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
@@ -282,7 +307,9 @@ contract ERC20ManagerTest is Test, Base {
         uint256 amount = 100 * (10 ** circleToken.decimals());
         bytes32 to = bytes32(uint256(0x11));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         erc20Manager.requestBridging(token, amount, to);
 
         VaraMessage memory message2 = VaraMessage({
@@ -299,6 +326,7 @@ contract ERC20ManagerTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -306,6 +334,7 @@ contract ERC20ManagerTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Unpaused(address(governancePauser));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
@@ -339,6 +368,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -350,6 +380,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC1967.Upgraded(address(newImplementationMock));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -383,9 +414,11 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 balanceBeforeMint = circleToken.balanceOf(address(erc20Manager));
         IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, amount);
-        circleToken.approve(address(erc20Manager), amount);
+        bool success = circleToken.approve(address(erc20Manager), amount);
+        assertTrue(success);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
         erc20Manager.requestBridging(token, amount, to);
@@ -406,9 +439,11 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 balanceBeforeMint = wrappedBitcoin.balanceOf(address(erc20Manager));
         IERC20Mintable(address(wrappedBitcoin)).mint(deploymentArguments.deployerAddress, amount);
-        wrappedBitcoin.approve(address(erc20Manager), amount);
+        bool success = wrappedBitcoin.approve(address(erc20Manager), amount);
+        assertTrue(success);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
         erc20Manager.requestBridging(token, amount, to);
@@ -429,7 +464,8 @@ contract ERC20ManagerTest is Test, Base {
             bytes32 to = 0;
 
             IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, amount);
-            circleToken.approve(address(erc20Manager), amount);
+            bool success = circleToken.approve(address(erc20Manager), amount);
+            assertTrue(success);
 
             vm.expectRevert(IERC20Manager.InvalidAmount.selector);
             erc20Manager.requestBridging(token, amount, to);
@@ -462,6 +498,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -473,15 +510,18 @@ contract ERC20ManagerTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.Bridged(to, deploymentArguments.deployerAddress, token, amount);
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
         assertEq(wrappedVara.balanceOf(deploymentArguments.deployerAddress), amount);
 
-        wrappedVara.approve(address(erc20Manager), amount);
+        bool success = wrappedVara.approve(address(erc20Manager), amount);
+        assertTrue(success);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
         erc20Manager.requestBridging(token, amount, to);
@@ -515,16 +555,20 @@ contract ERC20ManagerTest is Test, Base {
                 ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
             } else {
                 IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-                tetherToken.approve(address(erc20Manager), amount);
+                bool success = tetherToken.approve(address(erc20Manager), amount);
+                assertTrue(success);
             }
         } else {
             IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-            tetherToken.approve(address(erc20Manager), amount);
+            bool success = tetherToken.approve(address(erc20Manager), amount);
+            assertTrue(success);
         }
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
             token, amount, to, bridgingPayment_
         );
@@ -561,11 +605,13 @@ contract ERC20ManagerTest is Test, Base {
                 ITetherToken(address(tetherToken)).approve(address(erc20Manager), amount);
             } else {
                 IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-                tetherToken.approve(address(erc20Manager), amount);
+                bool success = tetherToken.approve(address(erc20Manager), amount);
+                assertTrue(success);
             }
         } else {
             IERC20Mintable(address(tetherToken)).mint(deploymentArguments.deployerAddress, amount);
-            tetherToken.approve(address(erc20Manager), amount);
+            bool success = tetherToken.approve(address(erc20Manager), amount);
+            assertTrue(success);
         }
 
         vm.expectRevert(IBridgingPayment.IncorrectFeeAmount.selector);
@@ -611,8 +657,10 @@ contract ERC20ManagerTest is Test, Base {
         address bridgingPayment_ = address(bridgingPayment);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.BridgingRequested(owner, to, token, value);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         erc20Manager.requestBridgingPayingFeeWithPermit{value: deploymentArguments.bridgingPaymentFee}(
             token, value, to, deadline, v, r, s, bridgingPayment_
         );
@@ -655,6 +703,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -686,6 +735,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -730,6 +780,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -760,6 +811,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -788,6 +840,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -819,6 +872,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -851,6 +905,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -862,6 +917,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.VftManagerAdded(newVftManager);
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
@@ -884,6 +940,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -919,6 +976,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -930,6 +988,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.EthereumTokenRegistered(address(newTetherToken));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -941,13 +1000,16 @@ contract ERC20ManagerTest is Test, Base {
         address bridgingPayment_ = address(bridgingPayment);
 
         newTetherToken.mint(deploymentArguments.deployerAddress, amount);
-        newTetherToken.approve(address(erc20Manager), amount);
+        bool success = newTetherToken.approve(address(erc20Manager), amount);
+        assertTrue(success);
 
         assertEq(newTetherToken.balanceOf(deploymentArguments.deployerAddress), amount);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
             token, amount, to, bridgingPayment_
         );
@@ -974,6 +1036,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -1012,11 +1075,15 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
@@ -1024,9 +1091,12 @@ contract ERC20ManagerTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         address token = vm.computeCreateAddress(address(erc20Manager), vm.getNonce(address(erc20Manager)));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.GearTokenRegistered(token, tokenName, tokenSymbol, tokenDecimals);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
@@ -1050,6 +1120,7 @@ contract ERC20ManagerTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -1060,11 +1131,14 @@ contract ERC20ManagerTest is Test, Base {
         assertEq(messageQueue.isProcessed(message2.nonce), true);
 
         assertEq(IERC20Metadata(token).balanceOf(deploymentArguments.deployerAddress), amount);
-        IERC20Metadata(token).approve(address(erc20Manager), amount);
+        bool success = IERC20Metadata(token).approve(address(erc20Manager), amount);
+        assertTrue(success);
 
         vm.expectEmit(address(erc20Manager));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC20Manager.BridgingRequested(deploymentArguments.deployerAddress, to, token, amount);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         erc20Manager.requestBridgingPayingFee{value: deploymentArguments.bridgingPaymentFee}(
             token, amount, to, bridgingPayment_
         );
@@ -1090,6 +1164,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -1121,6 +1196,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -1152,6 +1228,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);

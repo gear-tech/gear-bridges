@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
 
 /**
  * @dev Tether USD (USDT) is represents USDT on Ethereum as ERC20 token.
@@ -14,7 +15,7 @@ import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC2
  *
  *      This smart contract tries to be as similar as possible to Ethereum mainnet USDT.
  */
-contract TetherToken is ERC20, ERC20Burnable, Ownable {
+contract TetherToken is ERC20, IERC20Mintable, ERC20Burnable, Ownable {
     string private constant TOKEN_NAME = "Tether USD";
     string private constant TOKEN_SYMBOL = "USDT";
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -8,10 +8,11 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeab
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
-import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {BinaryMerkleTree} from "src/libraries/BinaryMerkleTree.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
 
 /**
  * @dev MessageQueue smart contract is responsible for storing Merkle roots for blocks
@@ -41,7 +42,7 @@ contract MessageQueue is
     uint256 public constant PROCESS_PAUSER_MESSAGE_DELAY = 5 minutes;
     uint256 public constant PROCESS_USER_MESSAGE_DELAY = 5 minutes;
 
-    uint256 public constant MAX_BLOCK_DISTANCE = 57600;
+    uint256 public constant MAX_BLOCK_DISTANCE = 57_600;
 
     IGovernance private _governanceAdmin;
     IGovernance private _governancePauser;
@@ -88,6 +89,10 @@ contract MessageQueue is
 
         _grantRole(PAUSER_ROLE, address(governanceAdmin_));
         _grantRole(PAUSER_ROLE, address(governancePauser_));
+
+        if (emergencyStopAdmin_ == address(0)) {
+            revert InvalidEmergencyStopAdmin();
+        }
 
         _governanceAdmin = governanceAdmin_;
         _governancePauser = governancePauser_;
@@ -150,7 +155,7 @@ contract MessageQueue is
      * @return isChallengingRoot challenging root status.
      */
     function isChallengingRoot() public view returns (bool) {
-        // forge-lint: disable-next-line(block-timestamp)
+        // forge-lint: disable-next-item(block-timestamp)
         return block.timestamp < _challengingRootTimestamp + CHALLENGE_ROOT_DELAY;
     }
 
@@ -261,6 +266,7 @@ contract MessageQueue is
         emit MessageProcessingAllowed();
     }
 
+    /// forge-lint: disable-next-item(cyclomatic-complexity)
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
@@ -325,11 +331,14 @@ contract MessageQueue is
                 if (!_emergencyStop) {
                     _emergencyStop = true;
 
+                    // forge-lint: disable-next-item(reentrancy-events)
                     emit EmergencyStopEnabled();
 
                     if (isChallengingRoot()) {
+                        // forge-lint: disable-next-item(missing-events-access-control)
                         _challengingRootTimestamp = 0;
 
+                        // forge-lint: disable-next-item(reentrancy-events)
                         emit ChallengeRootDisabled();
                     }
                 }
@@ -344,6 +353,7 @@ contract MessageQueue is
                 _maxBlockNumber = blockNumber;
             }
 
+            // forge-lint: disable-next-item(reentrancy-events)
             emit MerkleRoot(blockNumber, merkleRoot);
         }
     }
@@ -443,7 +453,7 @@ contract MessageQueue is
         }
 
         uint256 timestamp = _merkleRootTimestamps[merkleRoot];
-        // forge-lint: disable-next-line(block-timestamp)
+        // forge-lint: disable-next-item(block-timestamp)
         if (block.timestamp < timestamp + messageDelay) {
             revert MerkleRootDelayNotPassed();
         }
@@ -457,6 +467,7 @@ contract MessageQueue is
 
         IMessageHandler(message.destination).handleMessage(message.source, message.payload);
 
+        // forge-lint: disable-next-item(reentrancy-events)
         emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);
     }
 

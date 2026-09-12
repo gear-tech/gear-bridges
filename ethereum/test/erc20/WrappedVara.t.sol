@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC1967} from "@openzeppelin/contracts/interfaces/IERC1967.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {Test} from "forge-std/Test.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
 import {
     GovernancePacker,
     PauseProxyMessage,
     UnpauseProxyMessage,
     UpgradeProxyMessage
-} from "src/interfaces/IGovernance.sol";
-import {Hasher, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+} from "src/libraries/packing/GovernancePacker.sol";
 import {Base} from "test/Base.sol";
 
 contract WrappedVaraTest is Test, Base {
@@ -42,6 +43,7 @@ contract WrappedVaraTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -53,6 +55,7 @@ contract WrappedVaraTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governanceAdmin));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -82,6 +85,7 @@ contract WrappedVaraTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -93,6 +97,7 @@ contract WrappedVaraTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governancePauser));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -130,28 +135,39 @@ contract WrappedVaraTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governanceAdmin));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.startPrank(address(erc20Manager));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         wrappedVara.mint(address(this), 1000);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.stopPrank();
 
         VaraMessage memory message2 = VaraMessage({
@@ -168,6 +184,7 @@ contract WrappedVaraTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -175,6 +192,7 @@ contract WrappedVaraTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
 
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Unpaused(address(governanceAdmin));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
@@ -202,28 +220,39 @@ contract WrappedVaraTest is Test, Base {
         bytes32 merkleRoot = messageHash;
         bytes memory proof1 = "";
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         uint256 totalLeaves = 1;
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Paused(address(governancePauser));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
         assertEq(messageQueue.isProcessed(message1.nonce), true);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.startPrank(address(erc20Manager));
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         wrappedVara.mint(address(this), 1000);
 
+        // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.stopPrank();
 
         VaraMessage memory message2 = VaraMessage({
@@ -240,6 +269,7 @@ contract WrappedVaraTest is Test, Base {
         merkleRoot = messageHash;
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -247,6 +277,7 @@ contract WrappedVaraTest is Test, Base {
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
 
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit PausableUpgradeable.Unpaused(address(governancePauser));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
@@ -286,6 +317,7 @@ contract WrappedVaraTest is Test, Base {
         bytes memory proof1 = "";
 
         vm.expectEmit(address(messageQueue));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
 
         messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
@@ -297,6 +329,7 @@ contract WrappedVaraTest is Test, Base {
         bytes32[] memory proof2 = new bytes32[](0);
 
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC1967.Upgraded(address(newImplementationMock));
 
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
@@ -308,6 +341,7 @@ contract WrappedVaraTest is Test, Base {
         // just to get coverage for NewImplementationMock contract
 
         vm.expectEmit(address(wrappedVara));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit IERC1967.Upgraded(address(newImplementationMock));
 
         wrappedVara.upgradeToAndCall(address(newImplementationMock), "");

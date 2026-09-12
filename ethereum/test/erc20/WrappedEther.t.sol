@@ -1,32 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {Test} from "forge-std/Test.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
-
-contract ReentrancyAttackToWrappedEther {
-    WrappedEther public wrappedEther;
-    uint256 public value;
-
-    constructor(WrappedEther _wrappedEther) payable {
-        wrappedEther = _wrappedEther;
-        value = msg.value;
-    }
-
-    function deposit() public {
-        wrappedEther.deposit{value: value}();
-    }
-
-    function withdraw() public {
-        wrappedEther.withdraw(value);
-    }
-
-    receive() external payable {
-        if (address(wrappedEther).balance > 0) {
-            withdraw();
-        }
-    }
-}
+import {ReentrancyAttackToWrappedEther} from "test/erc20/ReentrancyAttackToWrappedEther.sol";
 
 contract WrappedEtherTest is Test {
     address constant USER = address(1234);
@@ -45,8 +22,10 @@ contract WrappedEtherTest is Test {
         vm.startPrank(USER);
 
         vm.expectEmit(address(wrappedEther));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit WrappedEther.Deposit(USER, ETHER_VALUE);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         wrappedEther.deposit{value: ETHER_VALUE}();
 
         assertEq(wrappedEther.balanceOf(USER), ETHER_VALUE);
@@ -54,6 +33,7 @@ contract WrappedEtherTest is Test {
         assertEq(address(wrappedEther).balance, ETHER_VALUE);
 
         vm.expectEmit(address(wrappedEther));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit WrappedEther.Withdrawal(USER, ETHER_VALUE);
 
         wrappedEther.withdraw(ETHER_VALUE);
@@ -68,8 +48,10 @@ contract WrappedEtherTest is Test {
         vm.startPrank(USER);
 
         vm.expectEmit(address(wrappedEther));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit WrappedEther.Deposit(USER, ETHER_VALUE);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth, low-level-calls)
         (bool success,) = address(wrappedEther).call{value: ETHER_VALUE}("");
         assertTrue(success);
 
@@ -78,6 +60,7 @@ contract WrappedEtherTest is Test {
         assertEq(address(wrappedEther).balance, ETHER_VALUE);
 
         vm.expectEmit(address(wrappedEther));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit WrappedEther.Withdrawal(USER, ETHER_VALUE);
 
         wrappedEther.withdraw(ETHER_VALUE);
@@ -92,8 +75,10 @@ contract WrappedEtherTest is Test {
         vm.startPrank(USER);
 
         vm.expectEmit(address(wrappedEther));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit WrappedEther.Deposit(USER, ETHER_VALUE);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         wrappedEther.deposit{value: ETHER_VALUE}();
 
         assertEq(wrappedEther.balanceOf(USER), ETHER_VALUE);
@@ -114,14 +99,17 @@ contract WrappedEtherTest is Test {
         vm.startPrank(USER);
 
         vm.expectEmit(address(wrappedEther));
+        // forge-lint: disable-next-item(reentrancy-events)
         emit WrappedEther.Deposit(USER, ETHER_VALUE);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         wrappedEther.deposit{value: ETHER_VALUE}();
 
         assertEq(wrappedEther.balanceOf(USER), ETHER_VALUE);
         assertEq(USER.balance, INITIAL_ETHER_BALANCE - ETHER_VALUE);
         assertEq(address(wrappedEther).balance, ETHER_VALUE);
 
+        // forge-lint: disable-next-item(arbitrary-send-eth)
         ReentrancyAttackToWrappedEther proxy = new ReentrancyAttackToWrappedEther{value: ETHER_VALUE / 2}(wrappedEther);
 
         proxy.deposit();

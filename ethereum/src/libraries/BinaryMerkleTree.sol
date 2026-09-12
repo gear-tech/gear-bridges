@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {Hashes} from "@openzeppelin/contracts/utils/cryptography/Hashes.sol";
 
@@ -43,6 +43,7 @@ library BinaryMerkleTree {
         return processProofCalldata(proof, numberOfLeaves, leafIndex, leafHash) == root;
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Processes a Merkle proof and returns the computed root hash.
      *
@@ -70,6 +71,7 @@ library BinaryMerkleTree {
                 positionPlusOne = position + 1;
             }
 
+            // forge-lint: disable-next-line(todo-comment)
             // TODO: consider optimizing this (use OpenZeppelin's `commutativeKeccak256` instead of `efficientKeccak256`).
             if (position % 2 == 1 || positionPlusOne == width) {
                 computed = Hashes.efficientKeccak256(b, a);
@@ -86,6 +88,7 @@ library BinaryMerkleTree {
         return computed;
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Verifies a Merkle proof against a given root hash.
      *
@@ -116,6 +119,7 @@ library BinaryMerkleTree {
         return processProof(proof, numberOfLeaves, leafIndex, leafHash) == root;
     }
 
+    /// forge-lint: disable-next-item(internal-function-used-once)
     /**
      * @dev Processes a Merkle proof and returns the computed root hash.
      *
@@ -143,6 +147,7 @@ library BinaryMerkleTree {
                 positionPlusOne = position + 1;
             }
 
+            // forge-lint: disable-next-line(todo-comment)
             // TODO: consider optimizing this (use OpenZeppelin's `commutativeKeccak256` instead of `efficientKeccak256`).
             if (position % 2 == 1 || positionPlusOne == width) {
                 computed = Hashes.efficientKeccak256(b, a);

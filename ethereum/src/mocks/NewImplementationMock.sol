@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
@@ -9,6 +9,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
  *      It is used for testing purposes.
  */
 contract NewImplementationMock is UUPSUpgradeable {
+    /// forge-lint: disable-next-item(empty-block)
     /**
      * @dev Function that should revert when `msg.sender` is not authorized to upgrade the contract.
      *      Called by {upgradeToAndCall}.

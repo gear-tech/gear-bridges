@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {Test} from "forge-std/Test.sol";
 import {DeploymentScript} from "script/Deployment.s.sol";
-import {BaseConstants} from "test/Base.sol";
+import {BaseConstants} from "test/BaseConstants.sol";
 
 contract DeploymentScriptTest is Test {
-    function setUp() public {}
-
     function test_DeploymentMainnet() public {
         vm.chainId(1);
         vm.warp(vm.unixTime() / 1000);
-        /// forge-lint: disable-start(unsafe-cheatcode)
+        // forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("CIRCLE_TOKEN", vm.toString(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48));
         vm.setEnv("TETHER_TOKEN", vm.toString(0xdAC17F958D2ee523a2206206994597C13D831ec7));
@@ -29,16 +27,15 @@ contract DeploymentScriptTest is Test {
             )
         );
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
-        /// forge-lint: disable-end(unsafe-cheatcode)
+        // forge-lint: disable-end(unsafe-cheatcode)
         DeploymentScript deploymentScript = new DeploymentScript();
-        deploymentScript.setUp();
         deploymentScript.run();
     }
 
     function test_DeploymentHoodi() public {
         vm.chainId(560048);
         vm.warp(vm.unixTime() / 1000);
-        /// forge-lint: disable-start(unsafe-cheatcode)
+        // forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("VFT_MANAGER", vm.toString(BaseConstants.VFT_MANAGER));
         vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
@@ -53,9 +50,8 @@ contract DeploymentScriptTest is Test {
             )
         );
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
-        /// forge-lint: disable-end(unsafe-cheatcode)
+        // forge-lint: disable-end(unsafe-cheatcode)
         DeploymentScript deploymentScript = new DeploymentScript();
-        deploymentScript.setUp();
         deploymentScript.run();
     }
 }

@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.35;
+pragma solidity ^0.8.37;
 
 import {Script, console} from "forge-std/Script.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
 
 contract MessageQueueScript is Script {
     MessageQueue public messageQueue;
-
-    function setUp() public {}
 
     function run() public {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");

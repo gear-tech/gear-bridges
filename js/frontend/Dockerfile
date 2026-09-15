@@ -1,7 +1,7 @@
 FROM node:20-alpine AS node
 RUN apk update
 RUN apk add xsel
-RUN npm install --global serve
+RUN npm install --global serve@14.2.5
 
 FROM node
 COPY package.json yarn.lock lerna.json .yarnrc.yml /app/
@@ -54,4 +54,4 @@ ENV VITE_VARA_NODE_ADDRESSES=${VITE_VARA_NODE_ADDRESSES} \
 WORKDIR /app/js/frontend
 RUN yarn build
 
-CMD ["serve", "-s", "/app/js/frontend/dist"]
+CMD ["serve", "-s", "/app/js/frontend/dist", "--config", "../serve.json"]

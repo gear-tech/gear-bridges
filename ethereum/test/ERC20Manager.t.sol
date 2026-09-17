@@ -586,7 +586,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 to = 0;
         address bridgingPayment_ = address(0);
 
-        vm.expectRevert(abi.encodeWithSelector(IERC20Manager.InvalidBridgingPayment.selector, bridgingPayment_));
+        vm.expectRevert(abi.encodeWithSelector(IERC20Manager.InvalidBridgingPayment.selector));
         erc20Manager.requestBridgingPayingFee(token, amount, to, bridgingPayment_);
     }
 
@@ -675,7 +675,7 @@ contract ERC20ManagerTest is Test, Base {
         address bridgingPayment_ = address(0);
         (uint256 deadline, uint8 v, bytes32 r, bytes32 s) = (0, 0, 0, 0);
 
-        vm.expectRevert(abi.encodeWithSelector(IERC20Manager.InvalidBridgingPayment.selector, bridgingPayment_));
+        vm.expectRevert(abi.encodeWithSelector(IERC20Manager.InvalidBridgingPayment.selector));
         erc20Manager.requestBridgingPayingFeeWithPermit(token, amount, to, deadline, v, r, s, bridgingPayment_);
     }
 

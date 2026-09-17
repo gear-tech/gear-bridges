@@ -131,6 +131,18 @@ interface IMessageQueue is IPausable {
 
     /// forge-lint: disable-next-item(event-fields)
     /**
+     * @dev Emitted when emergency stop observer is added.
+     */
+    event EmergencyStopObserverAdded(address observer);
+
+    /// forge-lint: disable-next-item(event-fields)
+    /**
+     * @dev Emitted when emergency stop observer is removed.
+     */
+    event EmergencyStopObserverRemoved(address observer);
+
+    /// forge-lint: disable-next-item(event-fields)
+    /**
      * @dev Emitted when message is processed.
      */
     event MessageProcessed(uint256 blockNumber, bytes32 messageHash, uint256 messageNonce, address messageDestination);
@@ -221,6 +233,33 @@ interface IMessageQueue is IPausable {
      *      - emergency stop status is not enabled with `EmergencyStopNotEnabled` error.
      */
     function allowMessageProcessing() external;
+
+    /**
+     * @dev Adds emergency stop observer.
+     *
+     * @param observer Address of observer to add.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *
+     * @dev Emits `EmergencyStopObserverAdded` event if observer was not already present.
+     */
+    function addEmergencyStopObserver(address observer) external;
+
+    /**
+     * @dev Removes emergency stop observer.
+     *
+     * @param observer Address of observer to remove.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *
+     * @dev Emits `EmergencyStopObserverRemoved` event if observer was present.
+     *
+     * @dev Note: If removed observer had active challenge via `challengeRoot`, it remains active
+     *      until `disableChallengeRoot` is called or `CHALLENGE_ROOT_DELAY` (2 days) expires.
+     */
+    function removeEmergencyStopObserver(address observer) external;
 
     /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.

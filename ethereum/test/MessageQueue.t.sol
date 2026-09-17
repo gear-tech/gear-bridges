@@ -1137,7 +1137,7 @@ contract MessageQueueTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootDelayNotPassed.selector, blockNumber));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootDelayNotPassed.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -1173,5 +1173,102 @@ contract MessageQueueTest is Test, Base {
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidMerkleProof.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
+    }
+
+    function test_AddEmergencyStopObserver() public {
+        address newObserver = address(0x11);
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopAdmin.selector));
+        messageQueue.addEmergencyStopObserver(newObserver);
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.EmergencyStopObserverAdded(newObserver);
+
+        messageQueue.addEmergencyStopObserver(newObserver);
+
+        vm.stopPrank();
+
+        vm.startPrank(newObserver);
+
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.stopPrank();
+    }
+
+    function test_RemoveEmergencyStopObserver() public {
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        address newObserver = address(0x11);
+        messageQueue.addEmergencyStopObserver(newObserver);
+
+        vm.stopPrank();
+
+        vm.startPrank(newObserver);
+
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.stopPrank();
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        messageQueue.disableChallengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), false);
+
+        vm.stopPrank();
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        vm.expectEmit(address(messageQueue));
+        emit IMessageQueue.EmergencyStopObserverRemoved(newObserver);
+
+        messageQueue.removeEmergencyStopObserver(newObserver);
+
+        vm.stopPrank();
+
+        vm.startPrank(newObserver);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopObserver.selector));
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), false);
+
+        vm.stopPrank();
+    }
+
+    function test_RemoveEmergencyStopObserverDuringActiveChallenge() public {
+        address observer = deploymentArguments.emergencyStopObservers[0];
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopAdmin.selector));
+        messageQueue.removeEmergencyStopObserver(observer);
+
+        vm.startPrank(observer);
+
+        messageQueue.challengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.stopPrank();
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        messageQueue.removeEmergencyStopObserver(observer);
+        assertEq(messageQueue.isChallengingRoot(), true);
+
+        vm.stopPrank();
+
+        vm.startPrank(deploymentArguments.emergencyStopAdmin);
+
+        messageQueue.disableChallengeRoot();
+        assertEq(messageQueue.isChallengingRoot(), false);
+
+        vm.stopPrank();
+
+        vm.startPrank(observer);
+
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.NotEmergencyStopObserver.selector));
+        messageQueue.challengeRoot();
+
+        vm.stopPrank();
     }
 }

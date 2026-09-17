@@ -10,7 +10,7 @@ RUN apt update && \
         git \
         lcov && \
     curl -L https://foundry.paradigm.xyz | bash && \
-    foundryup -i v1.8.1 && \
+    foundryup -i v1.8.3 && \
     forge --version && \
     forge compiler resolve && \
     forge soldeer install && \

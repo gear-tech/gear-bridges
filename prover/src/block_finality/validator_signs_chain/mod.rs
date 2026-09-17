@@ -7,21 +7,28 @@ use plonky2::{
     },
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CircuitData, CommonCircuitData},
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
+            VerifierCircuitTarget,
+        },
         proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget},
     },
     recursion::dummy_circuit::cyclic_base_proof,
 };
 use plonky2_field::types::Field;
 use rayon::ThreadPoolBuilder;
-use std::{iter, time::Instant};
+use std::{
+    iter,
+    sync::{Arc, Mutex, OnceLock},
+    time::Instant,
+};
 
 mod indexed_validator_sign;
 mod single_validator_sign;
 
 use crate::{
     common::{
-        array_to_bits, common_data_for_recursion,
+        array_to_bits, common_data_for_recursion, get_env_variable,
         targets::{
             impl_parsable_target_set, impl_target_set, Blake2Target, ParsableTargetSet, TargetSet,
             VerifierDataTarget,
@@ -131,94 +138,99 @@ impl ValidatorSignsChain {
         self.pre_commits
             .sort_by(|a, b| a.validator_idx.cmp(&b.validator_idx));
 
-        let (sender, receiver) = std::sync::mpsc::channel::<Request>();
-        let thread = std::thread::spawn(move || {
-            let Ok(request) = receiver.recv() else {
-                return None;
-            };
+        // Bound the queue so slow recursive composition cannot retain every
+        // large signer proof while workers continue producing them.
+        let channel_capacity = get_env_variable("SIGN_PROOF_CHANNEL_CAPACITY", 2usize).max(1);
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<Request>(channel_capacity);
+        let composed_result = Arc::new(Mutex::new(None));
 
-            let (proof_initial, proof_maybe) = request.into();
+        // Keep one bounded pool for both concurrent signer proofs. The old
+        // implementation nested a two-thread scheduler around two pools of
+        // `worker_thread_count` threads, which could create roughly twice the
+        // requested workers and contend with Plonky2's parallel prover.
+        // One worker is needed for composition while another proves a signer.
+        let worker_thread_count = self.count_thread.unwrap_or(30).max(2);
+        let pool = ThreadPoolBuilder::new()
+            .stack_size(get_env_variable(
+                "RUST_MIN_STACK",
+                crate::consts::SIZE_THREAD_STACK_MIN,
+            ))
+            .num_threads(worker_thread_count)
+            .build()
+            .expect("ValidatorSignsChain: failed to create ThreadPool");
 
-            let initial_data = SignCompositionInitialData {
-                validator_set_hash,
+        let worker_func = |pre_commit: &ProcessedPreCommit| {
+            let proof = IndexedValidatorSign {
+                public_key: pre_commit.public_key,
+                index: pre_commit.validator_idx,
+                signature: pre_commit.signature,
                 message: self.message,
-            };
-            let mut composed_proof =
-                SignComposition::build(&proof_initial).prove_initial(initial_data);
-            if let Some(proof) = proof_maybe {
-                composed_proof =
-                    SignComposition::build(&proof).prove_recursive(composed_proof.proof());
             }
+            .prove(&validator_set_hash_proof);
 
-            while let Ok(request) = receiver.recv() {
-                let (proof, proof_maybe) = request.into();
-
-                composed_proof =
-                    SignComposition::build(&proof).prove_recursive(composed_proof.proof());
-                if let Some(proof) = proof_maybe {
-                    composed_proof =
-                        SignComposition::build(&proof).prove_recursive(composed_proof.proof());
-                }
-            }
-
-            Some(composed_proof)
-        });
-
-        let pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
-        let worker_thread_count = self.count_thread.unwrap_or(30);
-        let pools = [
-            ThreadPoolBuilder::new()
-                .num_threads(worker_thread_count)
-                .build()
-                .unwrap(),
-            ThreadPoolBuilder::new()
-                .num_threads(worker_thread_count)
-                .build()
-                .unwrap(),
-        ];
-
-        let worker_func = |pre_commit: &ProcessedPreCommit, pool: &rayon::ThreadPool| {
-            let (index, proof) = pool.install(|| {
-                let proof = IndexedValidatorSign {
-                    public_key: pre_commit.public_key,
-                    index: pre_commit.validator_idx,
-                    signature: pre_commit.signature,
-                    message: self.message,
-                }
-                .prove(&validator_set_hash_proof);
-
-                (pre_commit.validator_idx, proof)
-            });
-
-            (index, proof)
+            (pre_commit.validator_idx, proof)
         };
 
-        send_proof_requests_for_pre_commits(
-            &self.pre_commits,
-            |left, right| {
-                let (result_1, result_2) = pool.join(
-                    || worker_func(left, &pools[0]),
-                    || worker_func(right, &pools[1]),
-                );
+        // Run composition inside the same pool as signer proofs, rather than
+        // creating a separate OS thread that falls back to Rayon’s global pool.
+        pool.scope(|scope| {
+            let composed_result = Arc::clone(&composed_result);
+            scope.spawn(move |_| {
+                let result = (|| {
+                    let Ok(request) = receiver.recv() else {
+                        return None;
+                    };
 
-                sender
-                    .send(Request::Pair(Box::new((result_1, result_2))))
-                    .unwrap();
-            },
-            |single| {
-                sender
-                    .send(Request::SingleItem(Box::new(worker_func(
-                        single, &pools[1],
-                    ))))
-                    .unwrap();
-            },
-        );
+                    let (proof_initial, proof_maybe) = request.into();
+                    let initial_data = SignCompositionInitialData {
+                        validator_set_hash,
+                        message: self.message,
+                    };
+                    let mut composed_proof =
+                        SignComposition::build(&proof_initial).prove_initial(initial_data);
+                    if let Some(proof) = proof_maybe {
+                        composed_proof =
+                            SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                    }
 
-        drop(sender);
-        let composed_proof = thread
-            .join()
-            .expect("should be joinable")
-            .expect("there is a proof");
+                    while let Ok(request) = receiver.recv() {
+                        let (proof, proof_maybe) = request.into();
+                        composed_proof =
+                            SignComposition::build(&proof).prove_recursive(composed_proof.proof());
+                        if let Some(proof) = proof_maybe {
+                            composed_proof = SignComposition::build(&proof)
+                                .prove_recursive(composed_proof.proof());
+                        }
+                    }
+
+                    Some(composed_proof)
+                })();
+                *composed_result.lock().unwrap() = result;
+            });
+
+            send_proof_requests_for_pre_commits(
+                &self.pre_commits,
+                |left, right| {
+                    let (result_1, result_2) =
+                        pool.join(|| worker_func(left), || worker_func(right));
+
+                    sender
+                        .send(Request::Pair(Box::new((result_1, result_2))))
+                        .unwrap();
+                },
+                |single| {
+                    let result = pool.install(|| worker_func(single));
+                    sender.send(Request::SingleItem(Box::new(result))).unwrap();
+                },
+            );
+
+            drop(sender);
+        });
+        let composed_proof = composed_result
+            .lock()
+            .unwrap()
+            .take()
+            .expect("composition worker should return");
 
         log::info!("inner_proofs time: {}ms", now.elapsed().as_millis());
 
@@ -283,87 +295,49 @@ struct SignCompositionInitialData {
     message: [u8; GRANDPA_VOTE_LENGTH],
 }
 
-/// Inner cyclic recursion proof.
-struct SignComposition {
-    cyclic_circuit_data: CircuitData<F, C, D>,
-
-    common_data: CommonCircuitData<F, D>,
-
+/// Circuit shape shared by all signer-composition layers.
+///
+/// The inner proof and verifier data are supplied through the witness for each
+/// use; only the recursive circuit shape is cached.
+struct SignCompositionCircuitTemplate {
+    cyclic_circuit_data: Arc<CircuitData<F, C, D>>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+    common_data: Arc<CommonCircuitData<F, D>>,
     condition: BoolTarget,
+    inner_proof_with_pis: ProofWithPublicInputsTarget<D>,
     inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
-
-    witness: PartialWitness<F>,
+    verifier_data_target: VerifierCircuitTarget,
 }
 
-impl SignComposition {
-    fn prove_initial(
-        mut self,
-        initial_data: SignCompositionInitialData,
-    ) -> ProofWithCircuitData<SignCompositionTarget> {
-        log::debug!("    Proving sign composition recursion layer(initial)...");
-
-        let validator_set_hash = array_to_bits(&initial_data.validator_set_hash);
-        let message = array_to_bits(&initial_data.message);
-
-        let public_inputs = validator_set_hash
-            .into_iter()
-            .map(|bit| bit as usize)
-            .chain(iter::once(0))
-            .chain(message.into_iter().map(|bit| bit as usize))
-            .chain(iter::once(0))
-            .chain(iter::once(0))
-            .map(F::from_canonical_usize);
-
-        // Length check.
-        SignCompositionTargetWithoutCircuitData::parse_public_inputs_exact(
-            &mut public_inputs.clone(),
-        );
-
-        let public_inputs = public_inputs.enumerate().collect();
-
-        self.witness.set_bool_target(self.condition, false);
-        self.witness.set_proof_with_pis_target::<C, D>(
-            &self.inner_cyclic_proof_with_pis,
-            &cyclic_base_proof(
-                &self.common_data,
-                &self.cyclic_circuit_data.verifier_only,
-                public_inputs,
-            ),
-        );
-
-        let result =
-            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
-
-        log::debug!("    Proven sign composition recursion layer(initial)...");
-
-        result
+impl SignCompositionCircuitTemplate {
+    fn cached(inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>) -> &'static Self {
+        // All IndexedValidatorSign proofs in one proving run use the same
+        // circuit. Keep one recursion template instead of rebuilding it for
+        // every validator signature. This process-wide cache assumes all
+        // signer proofs use the deployment's single circuit configuration.
+        static CACHE: OnceLock<SignCompositionCircuitTemplate> = OnceLock::new();
+        CACHE.get_or_init(|| Self::build(inner_proof))
     }
 
-    fn prove_recursive(
-        mut self,
-        composed_proof: ProofWithPublicInputs<F, C, D>,
-    ) -> ProofWithCircuitData<SignCompositionTarget> {
-        log::debug!("    Proving sign composition recursion layer...");
-        self.witness.set_bool_target(self.condition, true);
-        self.witness
-            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
-
-        let result =
-            ProofWithCircuitData::prove_from_circuit_data(&self.cyclic_circuit_data, self.witness);
-
-        log::debug!("    Proven sign composition recursion layer");
-
-        result
-    }
-
-    fn build(inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>) -> SignComposition {
-        log::debug!("    Building sign composition recursion layer...");
+    fn build(inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>) -> Self {
+        log::debug!("    Building sign composition recursion template...");
 
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::new(config);
-        let mut pw = PartialWitness::new();
+        let mut inner_proof_witness = PartialWitness::new();
 
-        let inner_proof_pis = builder.recursively_verify_constant_proof(inner_proof, &mut pw);
+        let inner_circuit_data = inner_proof.circuit_data();
+        let inner_proof_with_pis = builder.add_virtual_proof_with_pis(&inner_circuit_data.common);
+        let inner_verifier_data = builder.constant_verifier_data(&inner_circuit_data.verifier_only);
+        builder.verify_proof::<C>(
+            &inner_proof_with_pis,
+            &inner_verifier_data,
+            &inner_circuit_data.common,
+        );
+        inner_proof_witness.set_proof_with_pis_target(&inner_proof_with_pis, &inner_proof.proof());
+        let inner_proof_pis = IndexedValidatorSignTarget::parse_exact(
+            &mut inner_proof_with_pis.public_inputs.clone().into_iter(),
+        );
 
         let mut virtual_targets = iter::repeat(()).map(|_| builder.add_virtual_target());
         let future_inner_cyclic_proof_pis =
@@ -438,18 +412,116 @@ impl SignComposition {
             )
             .expect("Failed to build circuit");
 
-        let cyclic_circuit_data = builder.build::<C>();
+        let cyclic_circuit_data = Arc::new(builder.build::<C>());
+        let verifier_data = Arc::new(cyclic_circuit_data.verifier_data());
 
-        pw.set_verifier_data_target(&verifier_data_target, &cyclic_circuit_data.verifier_only);
+        log::debug!("    Built sign composition recursion template");
 
-        log::debug!("    Built sign composition recursion layer");
-
-        SignComposition {
+        Self {
             cyclic_circuit_data,
-            common_data,
+            verifier_data,
+            common_data: Arc::new(common_data),
             condition,
+            inner_proof_with_pis,
             inner_cyclic_proof_with_pis,
-            witness: pw,
+            verifier_data_target,
+        }
+    }
+}
+
+/// Inner cyclic recursion proof.
+struct SignComposition {
+    cyclic_circuit_data: Arc<CircuitData<F, C, D>>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+    common_data: Arc<CommonCircuitData<F, D>>,
+    condition: BoolTarget,
+    inner_cyclic_proof_with_pis: ProofWithPublicInputsTarget<D>,
+    witness: PartialWitness<F>,
+}
+
+impl SignComposition {
+    fn prove_initial(
+        mut self,
+        initial_data: SignCompositionInitialData,
+    ) -> ProofWithCircuitData<SignCompositionTarget> {
+        log::debug!("    Proving sign composition recursion layer(initial)...");
+
+        let validator_set_hash = array_to_bits(&initial_data.validator_set_hash);
+        let message = array_to_bits(&initial_data.message);
+
+        let public_inputs = validator_set_hash
+            .into_iter()
+            .map(|bit| bit as usize)
+            .chain(iter::once(0))
+            .chain(message.into_iter().map(|bit| bit as usize))
+            .chain(iter::once(0))
+            .chain(iter::once(0))
+            .map(F::from_canonical_usize);
+
+        // Length check.
+        SignCompositionTargetWithoutCircuitData::parse_public_inputs_exact(
+            &mut public_inputs.clone(),
+        );
+
+        let public_inputs = public_inputs.enumerate().collect();
+
+        self.witness.set_bool_target(self.condition, false);
+        self.witness.set_proof_with_pis_target::<C, D>(
+            &self.inner_cyclic_proof_with_pis,
+            &cyclic_base_proof(
+                &self.common_data,
+                &self.cyclic_circuit_data.verifier_only,
+                public_inputs,
+            ),
+        );
+
+        let result = ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.cyclic_circuit_data,
+            Arc::clone(&self.verifier_data),
+            self.witness,
+        );
+
+        log::debug!("    Proven sign composition recursion layer(initial)...");
+
+        result
+    }
+
+    fn prove_recursive(
+        mut self,
+        composed_proof: ProofWithPublicInputs<F, C, D>,
+    ) -> ProofWithCircuitData<SignCompositionTarget> {
+        log::debug!("    Proving sign composition recursion layer...");
+        self.witness.set_bool_target(self.condition, true);
+        self.witness
+            .set_proof_with_pis_target(&self.inner_cyclic_proof_with_pis, &composed_proof);
+
+        let result = ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.cyclic_circuit_data,
+            Arc::clone(&self.verifier_data),
+            self.witness,
+        );
+
+        log::debug!("    Proven sign composition recursion layer");
+
+        result
+    }
+
+    fn build(inner_proof: &ProofWithCircuitData<IndexedValidatorSignTarget>) -> Self {
+        let template = SignCompositionCircuitTemplate::cached(inner_proof);
+        let mut witness = PartialWitness::new();
+        witness.set_proof_with_pis_target(&template.inner_proof_with_pis, &inner_proof.proof());
+        witness.set_verifier_data_target(
+            &template.verifier_data_target,
+            &template.cyclic_circuit_data.verifier_only,
+        );
+
+        Self {
+            cyclic_circuit_data: Arc::clone(&template.cyclic_circuit_data),
+            verifier_data: Arc::clone(&template.verifier_data),
+            common_data: Arc::clone(&template.common_data),
+            condition: template.condition,
+            inner_cyclic_proof_with_pis: template.inner_cyclic_proof_with_pis.clone(),
+            witness,
         }
     }
 }

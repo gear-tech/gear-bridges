@@ -59,7 +59,7 @@ impl ValidatorSetHash {
 
         const MAX_DATA_LENGTH_ESTIMATION: usize = ED25519_PUBLIC_KEY_SIZE * MAX_VALIDATOR_COUNT;
 
-        let circuit = Blake2CircuitTargets::new();
+        let circuit = Blake2CircuitTargets::cached();
         let hasher_proof = circuit.prove::<MAX_DATA_LENGTH_ESTIMATION>(
             self.validator_set
                 .into_iter()

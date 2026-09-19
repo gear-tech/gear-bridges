@@ -75,7 +75,7 @@ The expensive proof work is isolated behind channels so block listening, schedul
 3. Produces and stores the raw block-inclusion/finality material in MerkleRootStorage.
 4. Broadcasts the block to the root relayer and authority-set synchronizer.
 
-The listener has a large broadcast capacity because proving and era synchronization can lag behind block production. It replays unprocessed state at startup, detects gaps in live justifications, and replays missing ranges. On recoverable provider errors it reconnects and starts replay from the last finalized cursor.
+The listener has a large broadcast capacity because proving and era synchronization can lag behind block production. It replays unprocessed state at startup and, when a live GRANDPA justification skips block numbers, replays the missing range serially before broadcasting the current block. On recoverable provider errors it reconnects and starts replay from the last finalized cursor.
 
 The block storage is a source of recovery, not just a cache. A consumer that falls behind can be restarted from the persisted block set. A broadcast lag warning is therefore different from a proof being lost; operators should inspect persisted state before deleting anything.
 
@@ -108,7 +108,7 @@ Once the inner authority-set proof is available, the root is recorded as Generat
 - whether the request may be batched;
 - the relayer-specific context needed to reconnect to Gear and invoke the prover.
 
-Normal block traffic is batchable. Non-batched requests are used for catch-up, critical-threshold recovery, supervisor checks, and authenticated HTTP requests that need a specific proof quickly.
+Normal and paid-priority work is batchable; supervisor work may also use an authenticated cumulative root at a GRANDPA-signed target. Non-batched generation is reserved for forced health anchors and authenticated exact-block HTTP requests, which remain priority work and retain the requested block/root metadata.
 
 ### 4. Compose and generate the proof
 
@@ -131,12 +131,11 @@ The root relayer keeps a pending batch with timestamps and message-nonce counts.
 - spike_timeout flushes an ordinary batch after its timeout.
 - priority_spike_timeout flushes a batch containing a priority request sooner.
 - A bridging_payment_address enables priority handling for recognized priority-payment events.
-- critical_threshold forces a non-batched proof when the last confirmed root is too far behind. authority_set_change is an alternative trigger that forces a proof around an authority-set transition.
-- An authenticated /get_merkle_root_proof request is handled as a priority, non-batched request and may use a fresh justified block while the requested block is being caught up.
+- critical_threshold compares Gear timestamps from the latest finalized block and the last Ethereum-confirmed root. When the configured duration elapses, it schedules a forced health anchor; authority_set_change instead triggers at an authority-set transition.
 
-A supervisor tick periodically reads the latest Gear queue root and the corresponding Ethereum root. If Ethereum has no matching root, or a configured critical threshold is reached, it schedules a recovery proof. It deduplicates a root while the same proof is in flight.
+A supervisor tick periodically compares the latest Gear queue root with finalized Ethereum state. When Ethereum has no matching root and the configured time threshold has elapsed, it schedules a forced health anchor at the latest signed block within MessageQueue's maximum block-distance window. Persisted proof work is dispatched after this startup check. Signed-anchor work is deduplicated while in flight; authenticated exact-block requests remain separate.
 
-The prover gives non-batched requests priority over ordinary batches. Batches are grouped by authority-set id and queue id, and responses are sent back through the channel associated with the originating request.
+The prover gives non-batched requests priority over ordinary batches and orders them by finality-proof span before block number. Batches are grouped by authority-set id and queue id, and responses are sent back through the channel associated with the originating request.
 
 ## Ethereum-to-Gear core
 

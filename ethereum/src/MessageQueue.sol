@@ -268,6 +268,50 @@ contract MessageQueue is
 
     /// forge-lint: disable-next-item(cyclomatic-complexity)
     /**
+     * @dev Adds emergency stop observer.
+     *
+     * @param observer Address of observer to add.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *
+     * @dev Emits `EmergencyStopObserverAdded` event if observer was not already present.
+     */
+    function addEmergencyStopObserver(address observer) external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (_emergencyStopObservers.add(observer)) {
+            emit EmergencyStopObserverAdded(observer);
+        }
+    }
+
+    /**
+     * @dev Removes emergency stop observer.
+     *
+     * @param observer Address of observer to remove.
+     *
+     * @dev Reverts if:
+     *      - msg.sender is not emergency stop admin with `NotEmergencyStopAdmin` error.
+     *
+     * @dev Emits `EmergencyStopObserverRemoved` event if observer was present.
+     *
+     * @dev Note: If removed observer had active challenge via `challengeRoot`, it remains active
+     *      until `disableChallengeRoot` is called or `CHALLENGE_ROOT_DELAY` (2 days) expires.
+     */
+    function removeEmergencyStopObserver(address observer) external {
+        if (msg.sender != _emergencyStopAdmin) {
+            revert NotEmergencyStopAdmin();
+        }
+
+        if (_emergencyStopObservers.remove(observer)) {
+            emit EmergencyStopObserverRemoved(observer);
+        }
+    }
+
+    /// forge-lint: disable-next-item(cyclomatic-complexity)
+    /**
      * @dev Receives, verifies and stores Merkle roots from Vara Network.
      *
      *      Upon successfully storing data about block number and corresponding Merkle root,
@@ -331,14 +375,11 @@ contract MessageQueue is
                 if (!_emergencyStop) {
                     _emergencyStop = true;
 
-                    // forge-lint: disable-next-item(reentrancy-events)
                     emit EmergencyStopEnabled();
 
                     if (isChallengingRoot()) {
-                        // forge-lint: disable-next-item(missing-events-access-control)
                         _challengingRootTimestamp = 0;
 
-                        // forge-lint: disable-next-item(reentrancy-events)
                         emit ChallengeRootDisabled();
                     }
                 }
@@ -353,7 +394,6 @@ contract MessageQueue is
                 _maxBlockNumber = blockNumber;
             }
 
-            // forge-lint: disable-next-item(reentrancy-events)
             emit MerkleRoot(blockNumber, merkleRoot);
         }
     }

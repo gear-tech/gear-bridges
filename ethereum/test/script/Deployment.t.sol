@@ -2,10 +2,28 @@
 pragma solidity ^0.8.37;
 
 import {Test} from "forge-std/Test.sol";
+import {BeefyLocal} from "script/BeefyLocal.s.sol";
 import {DeploymentScript} from "script/Deployment.s.sol";
+import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
+import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {BaseConstants} from "test/BaseConstants.sol";
 
 contract DeploymentScriptTest is Test {
+    function test_DeploymentBeefyLocal() public {
+        BeefyLocal deployment = new BeefyLocal();
+        vm.chainId(1);
+        vm.expectRevert();
+        deployment.run();
+        vm.chainId(31337);
+        vm.warp(vm.unixTime() / 1000);
+        vm.setEnv("PRIVATE_KEY", "1");
+        vm.setEnv("BEEFY_AUTHORITY_ROOT", vm.toString(keccak256("local authority checkpoint")));
+        (address client, address verifier,,) = deployment.run();
+        assertEq(address(VaraQueueRootVerifier(verifier).beefyClient()), client);
+        assertEq(BeefyClient(client).latestMMRRoot(), bytes32(0));
+        assertEq(BeefyClient(client).latestBeefyBlock(), 0);
+    }
+
     function test_DeploymentMainnet() public {
         vm.chainId(1);
         vm.warp(vm.unixTime() / 1000);

@@ -396,15 +396,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridge core:");
 
         if (!isFork) {
-            if (isTest) {
-                verifier = new VerifierMock(true);
-            } else if (isScript) {
-                if (chainId == 1) {
-                    verifier = new VerifierMainnet();
-                } else {
-                    verifier = new VerifierTestnet();
-                }
-            }
+            verifier = _deployVerifier(isTest, isScript, chainId);
         }
 
         console.log("    Verifier:            ", address(verifier));
@@ -509,6 +501,19 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         } else if (isScript) {
             vm.stopBroadcast();
         }
+    }
+
+    function _deployVerifier(bool isTest, bool isScript, uint256 chainId) internal virtual returns (IVerifier) {
+        if (isTest) {
+            return new VerifierMock(true);
+        }
+        if (isScript) {
+            if (chainId == 1) {
+                return new VerifierMainnet();
+            }
+            return new VerifierTestnet();
+        }
+        return IVerifier(address(0));
     }
 
     function deployTestTokens() public {

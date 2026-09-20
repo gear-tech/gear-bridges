@@ -32,3 +32,12 @@ async fn main() -> Result<()> {
         } => rehearsal::run(&gear_node, &output_dir).await,
     }
 }
+
+fn message_hash(message: &gear_rpc_client::dto::Message) -> beefy_relay::Hash32 {
+    let mut preimage = Vec::with_capacity(84 + message.payload.len());
+    preimage.extend_from_slice(&message.nonce_be);
+    preimage.extend_from_slice(&message.source);
+    preimage.extend_from_slice(&message.destination);
+    preimage.extend_from_slice(&message.payload);
+    beefy_relay::keccak256(&preimage)
+}

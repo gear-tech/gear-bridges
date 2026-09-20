@@ -8,10 +8,9 @@ use sp_mmr_primitives::mmr_lib;
 use std::{collections::BTreeMap, path::Path};
 
 use crate::{
-    decode_versioned_finality_proof,
     protocol::{
         authority_addresses, authority_root, convert_mmr_proof, encode_outer_leaf,
-        encode_public_inputs, encode_queue_proof, keccak256, outer_leaf_hash, public_inputs_bytes,
+        encode_public_inputs, encode_queue_proof, keccak256, public_inputs_bytes,
         verify_native_mmr_proof, verify_simplified_mmr, Hash32, QueueSnapshot, RuntimeLeafProof,
         MAX_MMR_PROOF_ITEMS,
     },
@@ -265,17 +264,16 @@ fn make_case(
         bridge_commitment,
     );
     let leaf_bytes = encode_outer_leaf(&leaf)?;
-    let leaf_hash = outer_leaf_hash(&leaf)?;
+    let leaf_hash = keccak256(&leaf_bytes);
     let mut leaves = (0..leaf_count)
         .map(|index| keccak256(format!("{name}:mmr-leaf:{index}").as_bytes()))
         .collect::<Vec<_>>();
     leaves[leaf_index as usize] = leaf_hash;
     let (mmr_root, nodes) = build_mmr(&leaves);
-    let mmr_items = native_items(leaf_index, leaf_count, &nodes);
     let proof = RuntimeLeafProof {
         leaf_indices: vec![leaf_index],
         leaf_count,
-        items: mmr_items.clone(),
+        items: native_items(leaf_index, leaf_count, &nodes),
     };
     ensure!(
         verify_native_mmr_proof(mmr_root, &proof, leaf_hash)?,
@@ -297,7 +295,6 @@ fn make_case(
         validated.commitment_hash == commitment_hash && validated.mmr_root == mmr_root,
         "synthetic commitment failed cross-pin validation"
     );
-    let _ = decode_versioned_finality_proof(&signed_bytes)?;
     let queue_proof = encode_queue_proof(
         0,
         0,
@@ -324,7 +321,7 @@ fn make_case(
         outer_leaf_hash: hex0x(&leaf_hash),
         leaf_index,
         leaf_count,
-        mmr_items: mmr_items.iter().map(|item| hex0x(item)).collect(),
+        mmr_items: proof.items.iter().map(|item| hex0x(item)).collect(),
         simplified_items: simplified.items.iter().map(|item| hex0x(item)).collect(),
         proof_order: hex0x(&simplified.proof_order),
         mmr_root: hex0x(&mmr_root),

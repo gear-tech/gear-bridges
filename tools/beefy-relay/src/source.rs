@@ -25,13 +25,12 @@ use beefy_relay::{
     authority_addresses, authority_root, convert_mmr_proof, decode_outer_leaf,
     decode_versioned_finality_proof, keccak256, outer_leaf_hash, validate_mmr_coordinates,
     validate_signed_commitment, verify_native_mmr_proof, Hash32, QueueSnapshot, RuntimeLeaf,
-    RuntimeLeafProof, SimplifiedMmrProof, ValidatedCommitment,
+    RuntimeLeafProof, SimplifiedMmrProof, ValidatedCommitment, SNAPSHOT_VERSION_UNINITIALIZED,
 };
 
 const MAX_WAIT: Duration = Duration::from_secs(45);
 const BEEFY_ENGINE: [u8; 4] = *b"BEEF";
 const AUTHORITY_KEY_TYPE: &str = "beef";
-const SNAPSHOT_UNINITIALIZED: u8 = 255;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct AuthoritySet {
@@ -162,8 +161,7 @@ impl Source {
         if start > finalized {
             return Ok(());
         }
-        let end = finalized;
-        for block in start..=end {
+        for block in start..=finalized {
             let hash = self.api.block_number_to_hash(block).await?;
             let raw = self
                 .api
@@ -262,7 +260,7 @@ impl Source {
             .and_then(|v| v.get("digest"))
             .and_then(|v| v.get("logs"))
             .and_then(JsonValue::as_array)
-            .cloned()
+            .map(Vec::as_slice)
             .unwrap_or_default();
         for log in logs {
             let Some(hex_log) = log.as_str() else {
@@ -309,7 +307,7 @@ impl Source {
                 self.api.fetch_queue_merkle_root(H256(source_hash)).await?;
             QueueSnapshot::new(0, queue_id, queue_root.0)
         } else {
-            QueueSnapshot::new(SNAPSHOT_UNINITIALIZED, 0, [0; 32])
+            QueueSnapshot::new(SNAPSHOT_VERSION_UNINITIALIZED, 0, [0; 32])
         };
         let params = rpc_params![
             vec![source.saturating_add(1)],
@@ -581,7 +579,7 @@ async fn rotate(api: &GearApi, authority: &str, uri: &str) -> Result<RotationEvi
     Ok(RotationEvidence {
         authority: authority.to_owned(),
         stash,
-        beefy_key: beefy_key.to_vec(),
+        beefy_key,
         extrinsic_hash,
         block,
         block_hash: finalized_hash.0,
@@ -643,7 +641,7 @@ pub async fn send_message(
         "message was queued before bridge initialization"
     );
     let snapshot = QueueSnapshot::new(0, queue_id, queue_root.0);
-    let message_hash = message_hash(&message);
+    let message_hash = crate::message_hash(&message);
     let inclusion = api
         .fetch_message_inclusion_merkle_proof(block_hash, H256(message_hash))
         .await
@@ -957,15 +955,6 @@ fn decode_exact<T: Decode>(bytes: &[u8]) -> Result<T> {
     let value = T::decode(&mut input)?;
     ensure!(input.is_empty(), "SCALE value has trailing bytes");
     Ok(value)
-}
-
-fn message_hash(message: &dto::Message) -> Hash32 {
-    let mut preimage = Vec::with_capacity(84 + message.payload.len());
-    preimage.extend_from_slice(&message.nonce_be);
-    preimage.extend_from_slice(&message.source);
-    preimage.extend_from_slice(&message.destination);
-    preimage.extend_from_slice(&message.payload);
-    keccak256(&preimage)
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>> {

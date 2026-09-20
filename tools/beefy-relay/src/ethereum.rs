@@ -280,10 +280,7 @@ impl Ethereum {
             wire_keys.len() <= 256,
             "BEEFY authority set exceeds uint256 bitfield"
         );
-        let mut bitfield = vec![U256::ZERO; (wire_keys.len().saturating_add(255)) / 256];
-        if bitfield.is_empty() {
-            bitfield.push(U256::ZERO);
-        }
+        let mut bitfield = vec![U256::ZERO];
         let available: BTreeSet<usize> = validated
             .signed_indices
             .iter()
@@ -364,7 +361,7 @@ impl Ethereum {
             receipt.status(),
             "Fiat-Shamir commitment transaction reverted"
         );
-        self.record_receipt("submitFiatShamir", &receipt);
+        self.record_receipt("submitFiatShamir", &receipt, None);
 
         let after = self.checkpoint().await?;
         ensure!(
@@ -402,7 +399,7 @@ impl Ethereum {
             .await
             .context("wait for queue-root receipt")?;
         ensure!(receipt.status(), "queue-root transaction reverted");
-        self.record_receipt("submitMerkleRoot", &receipt);
+        self.record_receipt("submitMerkleRoot", &receipt, None);
         ensure!(
             self.api
                 .read_chainhead_merkle_root(source)
@@ -475,7 +472,7 @@ impl Ethereum {
         .await
         .context("wait for message transaction receipt")?;
         ensure!(receipt.status(), "message transaction reverted");
-        self.record_receipt_with_nonce("processMessage", &receipt, account_nonce);
+        self.record_receipt("processMessage", &receipt, Some(account_nonce));
         ensure!(
             self.is_processed(message.nonce_be).await?,
             "message receipt did not mark nonce processed"
@@ -580,18 +577,14 @@ impl Ethereum {
         Ok(())
     }
 
-    fn record_receipt(&mut self, label: &str, receipt: &alloy::rpc::types::TransactionReceipt) {
-        self.transactions.push(receipt_value(label, receipt, None));
-    }
-
-    fn record_receipt_with_nonce(
+    fn record_receipt(
         &mut self,
         label: &str,
         receipt: &alloy::rpc::types::TransactionReceipt,
-        account_nonce: u64,
+        account_nonce: Option<u64>,
     ) {
         self.transactions
-            .push(receipt_value(label, receipt, Some(account_nonce)));
+            .push(receipt_value(label, receipt, account_nonce));
     }
 
     fn assert_message_processed(
@@ -603,7 +596,7 @@ impl Ethereum {
         let signature = B256::from(keccak256(
             b"MessageProcessed(uint256,bytes32,uint256,address)",
         ));
-        let expected_hash = B256::from(message_hash(message));
+        let expected_hash = B256::from(crate::message_hash(message));
         let expected_nonce = U256::from_be_slice(&message.nonce_be);
         for log in receipt.as_ref().logs() {
             if log.address() != self.queue_address || log.topic0() != Some(&signature) {
@@ -792,14 +785,6 @@ fn commitment_payload(payload: &impl Encode) -> Result<Vec<BeefyClient::PayloadI
             data: Bytes::from(data),
         })
         .collect())
-}
-fn message_hash(message: &Message) -> Hash32 {
-    let mut encoded = Vec::with_capacity(84 + message.payload.len());
-    encoded.extend_from_slice(&message.nonce_be);
-    encoded.extend_from_slice(&message.source);
-    encoded.extend_from_slice(&message.destination);
-    encoded.extend_from_slice(&message.payload);
-    keccak256(&encoded)
 }
 fn to_sol_leaf(leaf: &RuntimeLeaf) -> Result<BeefyClient::MMRLeaf> {
     let version = leaf.version.encode();

@@ -16,14 +16,17 @@ use plonky2::{
     plonk::{
         circuit_builder::CircuitBuilder,
         circuit_data::{
-            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitTarget,
-            VerifierOnlyCircuitData,
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
+            VerifierCircuitTarget, VerifierOnlyCircuitData,
         },
         proof::ProofWithPublicInputsTarget,
     },
     recursion::dummy_circuit,
 };
-use std::time::Instant;
+use std::{
+    sync::{Arc, LazyLock},
+    time::Instant,
+};
 
 impl_parsable_target_set! {
     pub struct HeaderChainTarget {
@@ -58,12 +61,12 @@ impl BuilderTargets {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         let one = builder.one();
 
-        let (circuit, ..) = Blake2CircuitTargets::new().into_inner();
+        let circuit = Blake2CircuitTargets::cached();
 
-        let target_proof_inner = builder.add_virtual_proof_with_pis(&circuit.common);
-        let target_verifier = builder.constant_verifier_data(&circuit.verifier_only);
+        let target_proof_inner = builder.add_virtual_proof_with_pis(circuit.common());
+        let target_verifier = builder.constant_verifier_data(circuit.verifier_only());
 
-        builder.verify_proof::<C>(&target_proof_inner, &target_verifier, &circuit.common);
+        builder.verify_proof::<C>(&target_proof_inner, &target_verifier, circuit.common());
 
         let mut iter_public_inputs = target_proof_inner.public_inputs.iter().copied();
         let GenericBlake2Target {
@@ -146,6 +149,7 @@ impl BuilderTargets {
 
 pub struct CircuitTargets {
     circuit: CircuitData<F, C, D>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     target_verifier_circuit: VerifierCircuitTarget,
     target_proof_inner: ProofWithPublicInputsTarget<D>,
     target_condition: BoolTarget,
@@ -164,6 +168,7 @@ impl From<BuilderTargets> for CircuitTargets {
         let now = Instant::now();
 
         let circuit = value.builder.build::<C>();
+        let verifier_data = Arc::new(circuit.verifier_data());
 
         log::trace!(
             "From<BuilderTargets> for CircuitTargets exit. Time: {}ms",
@@ -172,6 +177,7 @@ impl From<BuilderTargets> for CircuitTargets {
 
         Self {
             circuit,
+            verifier_data,
             target_verifier_circuit: value.target_verifier_circuit,
             target_proof_inner: value.target_proof_inner,
             target_condition: value.target_condition,
@@ -181,6 +187,14 @@ impl From<BuilderTargets> for CircuitTargets {
 }
 
 impl CircuitTargets {
+    /// Return the process-wide header-chain circuit. The circuit shape is
+    /// independent of the headers being proved. The cache assumes one
+    /// deployment circuit configuration per process.
+    pub fn cached() -> &'static Self {
+        static CACHE: LazyLock<CircuitTargets> = LazyLock::new(CircuitTargets::default);
+        &CACHE
+    }
+
     pub fn prove(
         &self,
         proof_inner: &ProofWithCircuitData<GenericBlake2Target>,
@@ -231,7 +245,10 @@ impl CircuitTargets {
             now.elapsed().as_millis()
         );
 
-        ProofWithCircuitData::from_proof_and_circuit_data(proof, self.circuit.verifier_data())
+        ProofWithCircuitData::from_proof_and_shared_circuit_data(
+            proof,
+            Arc::clone(&self.verifier_data),
+        )
     }
 
     pub fn common(&self) -> &CommonCircuitData<F, D> {

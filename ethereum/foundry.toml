@@ -2,6 +2,7 @@
 src = "src"
 out = "out"
 libs = ["dependencies"]
+fs_permissions = [{ access = "read", path = "./test/fixtures" }, { access = "read", path = "./out" }]
 remappings = [
     "forge-std/=dependencies/forge-std-1.16.2/src/",
     "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.7.0/",

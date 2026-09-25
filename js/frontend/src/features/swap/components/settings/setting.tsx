@@ -12,29 +12,99 @@ import styles from './setting.module.scss';
 type Props<T extends string> = {
   value: T;
   heading: string;
-  buttons: { value: T; text: string; SVG: SVGComponent; SVGColorType?: 'fill' | 'stroke' }[];
+  buttons: {
+    value: T;
+    text: string;
+    description?: string;
+    badge?: string;
+    SVG: SVGComponent;
+    SVGColorType?: 'fill' | 'stroke';
+  }[];
   disabled: boolean;
   tooltip: () => JSX.Element;
   onChange: (value: T) => void;
+  advanced?: boolean;
+  advancedLabel?: string;
+  advancedWarning?: string;
 };
 
-function Setting<T extends string>({ value, heading, tooltip: TooltipContent, buttons, disabled, onChange }: Props<T>) {
+function Setting<T extends string>({
+  value,
+  heading,
+  tooltip: TooltipContent,
+  buttons,
+  disabled,
+  onChange,
+  advanced = false,
+  advancedLabel = 'Advanced options',
+  advancedWarning,
+}: Props<T>) {
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
-  const isFirstSelected = value === buttons[0].value;
+  const renderButton = ({
+    text,
+    description,
+    badge,
+    SVG,
+    SVGColorType = 'fill',
+    ...button
+  }: Props<T>['buttons'][number]) => {
+    const isSelected = value === button.value;
 
-  const renderButtons = () =>
-    buttons.map(({ text, SVG, SVGColorType = 'fill', ...button }) => (
+    return (
       <button
         key={button.value}
         type="button"
-        className={styles.button}
-        disabled={value === button.value}
+        className={cx(styles.button, isSelected && styles.selected)}
+        disabled={disabled}
+        aria-pressed={isSelected}
         onClick={() => onChange(button.value)}>
         <SVG className={styles[SVGColorType]} />
-        <span>{text}</span>
+        <span className={styles.copy}>
+          <span className={styles.labelRow}>
+            <span>{text}</span>
+            {badge && <span className={styles.badge}>{badge}</span>}
+          </span>
+          {description && <span className={styles.description}>{description}</span>}
+        </span>
       </button>
-    ));
+    );
+  };
+
+  const renderButtons = () => {
+    if (!advanced) return <div className={styles.buttons}>{buttons.map(renderButton)}</div>;
+
+    const [recommendedButton, advancedButton] = buttons;
+    const isAdvancedSelected = value === advancedButton.value;
+
+    return (
+      <div className={styles.claimOptions}>
+        {renderButton(recommendedButton)}
+
+        <button
+          type="button"
+          className={styles.advancedToggle}
+          disabled={disabled}
+          aria-expanded={isAdvancedOpen}
+          onClick={() => setIsAdvancedOpen((currentValue) => !currentValue)}>
+          <span className={styles.advancedIcon} aria-hidden="true">
+            +
+          </span>
+          <span>{advancedLabel}</span>
+          {isAdvancedSelected && <span className={styles.selectedLabel}>{advancedButton.text} selected</span>}
+          <span className={cx(styles.chevron, isAdvancedOpen && styles.open)} aria-hidden="true" />
+        </button>
+
+        {isAdvancedOpen && (
+          <div className={styles.advancedPanel}>
+            {renderButton(advancedButton)}
+            {advancedWarning && <p className={styles.warning}>{advancedWarning}</p>}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -51,9 +121,7 @@ function Setting<T extends string>({ value, heading, tooltip: TooltipContent, bu
         </Button>
       </h4>
 
-      <div className={cx(styles.buttons, isFirstSelected && styles.active, disabled && styles.disabled)}>
-        {renderButtons()}
-      </div>
+      <div className={cx(disabled && styles.disabled)}>{renderButtons()}</div>
     </div>
   );
 }

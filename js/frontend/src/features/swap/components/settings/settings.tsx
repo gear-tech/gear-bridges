@@ -11,13 +11,31 @@ import styles from './settings.module.scss';
 import { TooltipContent } from './tooltip-content';
 
 const PRIORITY_BUTTONS = [
-  { value: PRIORITY.HIGH, text: 'Fast', SVG: LightningSVG },
-  { value: PRIORITY.DEFAULT, text: 'Common', SVG: ClockSVG },
+  {
+    value: PRIORITY.HIGH,
+    text: 'Fast',
+    description: 'Usually delivered in ~20 min',
+    badge: 'Recommended',
+    SVG: LightningSVG,
+  },
+  { value: PRIORITY.DEFAULT, text: 'Common', description: '~1 hour · Lower fee', SVG: ClockSVG },
 ];
 
 const CLAIM_TYPE_BUTTONS = [
-  { value: CLAIM_TYPE.AUTO, text: 'Automatic', SVG: CircleCheckSVG },
-  { value: CLAIM_TYPE.MANUAL, text: 'Manual', SVG: HandSVG, SVGColorType: 'stroke' as const },
+  {
+    value: CLAIM_TYPE.AUTO,
+    text: 'Automatic',
+    description: 'Delivered directly to your wallet',
+    badge: 'Recommended',
+    SVG: CircleCheckSVG,
+  },
+  {
+    value: CLAIM_TYPE.MANUAL,
+    text: 'Manual',
+    description: 'Claim the transfer yourself after it arrives',
+    SVG: HandSVG,
+    SVGColorType: 'stroke' as const,
+  },
 ];
 
 type Priority = (typeof PRIORITY)[keyof typeof PRIORITY];
@@ -59,6 +77,9 @@ function Settings({
             value={priority}
             onChange={onPriorityChange}
             disabled={disabled}
+            advanced
+            advancedLabel="Lower-fee option"
+            advancedWarning="Common transfer takes around 1 hour. Choose it when saving on fees matters more than speed."
           />
         )}
 
@@ -69,6 +90,9 @@ function Settings({
           value={claimType}
           onChange={onClaimTypeChange}
           disabled={disabled}
+          advanced
+          advancedLabel="Manual claim"
+          advancedWarning="You will need the destination network's native token (VARA or ETH) to pay the gas fee."
         />
       </div>
 

@@ -52,7 +52,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
   >();
 
-  const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.DEFAULT);
+  const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.HIGH);
   const shouldPayPriorityFee = priority === PRIORITY.HIGH;
   const time = shouldPayPriorityFee || !network.isVara ? '20 mins' : '1 hour';
 

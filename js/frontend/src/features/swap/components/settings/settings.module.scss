@@ -17,7 +17,16 @@
 .body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 20px;
+  gap: 16px;
+
+  > * {
+    min-width: 0;
+    padding: 14px;
+
+    background-color: #0a0f1380;
+    border: 1px solid #202a30;
+    border-radius: 10px;
+  }
 
   @include sm {
     display: flex;

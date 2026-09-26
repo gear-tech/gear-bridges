@@ -1,3 +1,4 @@
+// Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.37;
 
@@ -135,6 +136,16 @@ contract ERC20Manager is
      * @dev `uint8 tokenDecimals` bit shift.
      */
     uint256 internal constant TOKEN_DECIMALS_BIT_SHIFT = 248;
+
+    /**
+     * @dev Minimum length of `tokenName` and `tokenSymbol`.
+     */
+    uint256 internal constant MIN_TOKEN_STRING_LENGTH = 1;
+
+    /**
+     * @dev Maximum length of `tokenName` and `tokenSymbol`.
+     */
+    uint256 internal constant MAX_TOKEN_STRING_LENGTH = 31;
 
     /**
      * @dev `DISCRIMINANT_SIZE + TOKEN_NAME_SIZE` offset.
@@ -749,12 +760,12 @@ contract ERC20Manager is
         }
 
         uint8 tokenNameLength = uint8(tokenName[0]);
-        if (!(tokenNameLength >= 1 && tokenNameLength <= 31)) {
+        if (!(tokenNameLength >= MIN_TOKEN_STRING_LENGTH && tokenNameLength <= MAX_TOKEN_STRING_LENGTH)) {
             return false;
         }
 
         uint8 tokenSymbolLength = uint8(tokenSymbol[0]);
-        if (!(tokenSymbolLength >= 1 && tokenSymbolLength <= 31)) {
+        if (!(tokenSymbolLength >= MIN_TOKEN_STRING_LENGTH && tokenSymbolLength <= MAX_TOKEN_STRING_LENGTH)) {
             return false;
         }
 

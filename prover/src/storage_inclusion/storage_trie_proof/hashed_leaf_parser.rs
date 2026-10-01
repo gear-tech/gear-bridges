@@ -44,7 +44,7 @@ impl HashedLeafParser {
         const MAX_DATA_LENGTH_ESTIMATION: usize =
             MAX_LEAF_NODE_DATA_LENGTH_IN_BLOCKS * NODE_DATA_BLOCK_BYTES;
 
-        let circuit = Blake2CircuitTargets::new();
+        let circuit = Blake2CircuitTargets::cached();
         let hasher_proof = circuit.prove::<MAX_DATA_LENGTH_ESTIMATION>(&self.leaf_parser.node_data);
         let leaf_parser_proof = self.leaf_parser.prove();
 

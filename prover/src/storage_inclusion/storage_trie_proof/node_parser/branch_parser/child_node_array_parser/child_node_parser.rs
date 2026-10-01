@@ -5,14 +5,17 @@ use plonky2::{
         target::{BoolTarget, Target},
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{CircuitConfig, CircuitData},
+    },
 };
 use plonky2_field::types::Field;
 
 use crate::{
     common::{
         targets::{impl_parsable_target_set, ArrayTarget, Blake2Target, TargetSet},
-        ProofWithCircuitData,
+        CircuitDataCache, CircuitImplBuilder, ProofWithCircuitData,
     },
     prelude::{
         consts::{BLAKE2_DIGEST_SIZE, BLAKE2_DIGEST_SIZE_IN_BITS},
@@ -60,24 +63,31 @@ impl ChildNodeParser {
     pub fn prove(self) -> ProofWithCircuitData<ChildNodeParserTarget> {
         log::debug!("Proving child node parser...");
 
+        static CACHE: std::sync::OnceLock<CircuitDataCache<ChildNodeParser>> =
+            std::sync::OnceLock::new();
+        let data = CACHE.get_or_init(CircuitDataCache::new).prove(self);
+
+        log::debug!("Proven child node parser");
+
+        data
+    }
+}
+
+impl CircuitImplBuilder for ChildNodeParser {
+    type WitnessTargets = ChildNodeParserWitnessTargets;
+    type PublicInputsTarget = ChildNodeParserTarget;
+
+    fn build() -> (CircuitData<F, C, D>, Self::WitnessTargets) {
         let mut config = CircuitConfig::standard_recursion_config();
         config.num_wires = 160;
         config.num_routed_wires = 130;
 
         let mut builder = CircuitBuilder::<F, D>::new(config);
-        let mut pw = PartialWitness::new();
 
         let node_data = BranchNodeDataPaddedTarget::add_virtual_unsafe(&mut builder);
-        node_data.set_witness(&self.node_data, &mut pw);
-
         let read_offset = builder.add_virtual_target();
-        pw.set_target(read_offset, F::from_canonical_usize(self.read_offset));
-
         let assert_child_hash = builder.add_virtual_bool_target_unsafe();
-        pw.set_bool_target(assert_child_hash, self.assert_child_hash);
-
         let claimed_child_hash = Blake2Target::add_virtual_unsafe(&mut builder);
-        claimed_child_hash.set_witness(&self.claimed_child_hash, &mut pw);
 
         // Read only one byte as we don't support compact integers in other modes than single-byte.
         let encoded_length_size = builder.one();
@@ -126,20 +136,43 @@ impl ChildNodeParser {
         ]);
 
         ChildNodeParserTarget {
-            node_data,
+            node_data: node_data.clone(),
             read_offset,
             resulting_read_offset,
             assert_child_hash,
-            claimed_child_hash,
+            claimed_child_hash: claimed_child_hash.clone(),
         }
         .register_as_public_inputs(&mut builder);
 
-        let data = ProofWithCircuitData::prove_from_builder(builder, pw);
+        let witness_targets = ChildNodeParserWitnessTargets {
+            node_data: node_data.clone(),
+            read_offset,
+            assert_child_hash,
+            claimed_child_hash: claimed_child_hash.clone(),
+        };
 
-        log::debug!("Proven child node parser");
-
-        data
+        (builder.build::<C>(), witness_targets)
     }
+
+    fn set_witness(&self, targets: Self::WitnessTargets, witness: &mut PartialWitness<F>) {
+        targets.node_data.set_witness(&self.node_data, witness);
+        witness.set_target(
+            targets.read_offset,
+            F::from_canonical_usize(self.read_offset),
+        );
+        witness.set_bool_target(targets.assert_child_hash, self.assert_child_hash);
+        targets
+            .claimed_child_hash
+            .set_witness(&self.claimed_child_hash, witness);
+    }
+}
+
+#[derive(Clone)]
+pub struct ChildNodeParserWitnessTargets {
+    node_data: BranchNodeDataPaddedTarget,
+    read_offset: Target,
+    assert_child_hash: BoolTarget,
+    claimed_child_hash: Blake2Target,
 }
 
 #[cfg(test)]

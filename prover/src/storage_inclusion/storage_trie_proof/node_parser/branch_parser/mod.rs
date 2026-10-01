@@ -6,10 +6,18 @@ use plonky2::{
         target::Target,
         witness::{PartialWitness, WitnessWrite},
     },
-    plonk::{circuit_builder::CircuitBuilder, circuit_data::CircuitConfig},
+    plonk::{
+        circuit_builder::CircuitBuilder,
+        circuit_data::{
+            CircuitConfig, CircuitData, CommonCircuitData, VerifierCircuitData,
+            VerifierOnlyCircuitData,
+        },
+        proof::ProofWithPublicInputsTarget,
+    },
 };
-use plonky2_field::types::Field;
+use plonky2_field::types::{Field, PrimeField64};
 use sp_core::H256;
+use std::sync::{Arc, OnceLock};
 use trie_db::{node::Node, ChildReference, NodeCodec, TrieLayout};
 
 use super::{
@@ -20,7 +28,7 @@ use super::{
 use crate::{
     common::{
         targets::{Blake2Target, HalfByteTarget, TargetSet},
-        BuilderExt, ProofWithCircuitData,
+        ProofWithCircuitData,
     },
     consts::BLAKE2_DIGEST_SIZE,
     impl_parsable_target_set,
@@ -38,6 +46,16 @@ use child_node_array_parser::ChildNodeArrayParser;
 
 mod bitmap_parser;
 mod child_node_array_parser;
+
+/// Circuit digest used by the deployed recursive and Gnark verifier artifacts.
+/// An intentional circuit change must update every dependent artifact before
+/// this fingerprint is changed.
+const DEPLOYED_BRANCH_PARSER_CIRCUIT_DIGEST: [u64; 4] = [
+    17_409_790_683_616_089_390,
+    15_806_974_348_444_331_405,
+    16_311_428_230_950_506_818,
+    9_327_205_214_850_258_051,
+];
 
 impl_parsable_target_set! {
     /// `BranchParser` public inputs.
@@ -75,13 +93,197 @@ struct Metadata {
     claimed_child_hash: [u8; BLAKE2_DIGEST_SIZE],
 }
 
+struct BranchParserCircuitTemplate {
+    circuit_data: Arc<CircuitData<F, C, D>>,
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+    child_proof_with_pis: ProofWithPublicInputsTarget<D>,
+    partial_address: StorageAddressTarget,
+    claimed_child_node_nibble: Target,
+    child_verifier_data: Arc<VerifierCircuitData<F, C, D>>,
+    child_common_data: CommonCircuitData<F, D>,
+    child_verifier_only: VerifierOnlyCircuitData<C, D>,
+}
+
+impl BranchParserCircuitTemplate {
+    fn cached(child_proof: &ProofWithCircuitData<ChildNodeArrayParserTarget>) -> &'static Self {
+        // Node bytes, addresses, and child metadata are witnesses; the parser
+        // circuit shape is fixed by the compile-time trie bounds.
+        static CACHE: OnceLock<BranchParserCircuitTemplate> = OnceLock::new();
+        let template = CACHE.get_or_init(|| Self::build(child_proof));
+        let child_verifier_data = child_proof.shared_circuit_data();
+        if !Arc::ptr_eq(&template.child_verifier_data, &child_verifier_data) {
+            // The normal hot path reuses the exact cached verifier-data Arc.
+            // Retain a full fallback check for separately allocated but
+            // compatible circuit data.
+            let child_data = child_verifier_data.as_ref();
+            assert_eq!(
+                &template.child_common_data, &child_data.common,
+                "BranchParser cache received incompatible child common data"
+            );
+            assert_eq!(
+                &template.child_verifier_only, &child_data.verifier_only,
+                "BranchParser cache received incompatible child verifier data"
+            );
+        }
+        template
+    }
+
+    fn instantiate(
+        &self,
+        child_proof: &ProofWithCircuitData<ChildNodeArrayParserTarget>,
+        partial_address_nibbles: &[u8],
+        claimed_child_node_nibble: u8,
+    ) -> BranchParserCircuit<'_> {
+        let mut witness = PartialWitness::new();
+        witness.set_proof_with_pis_target(&self.child_proof_with_pis, &child_proof.proof());
+        self.partial_address
+            .set_witness(partial_address_nibbles, &mut witness);
+        witness.set_target(
+            self.claimed_child_node_nibble,
+            F::from_canonical_u8(claimed_child_node_nibble),
+        );
+        BranchParserCircuit {
+            template: self,
+            witness,
+        }
+    }
+
+    fn build(child_proof: &ProofWithCircuitData<ChildNodeArrayParserTarget>) -> Self {
+        log::debug!("Building branch parser circuit template...");
+
+        let child_data = child_proof.circuit_data();
+        let mut config = CircuitConfig::standard_recursion_config();
+        config.num_wires = 160;
+        config.num_routed_wires = 130;
+
+        let mut builder = CircuitBuilder::new(config);
+
+        // Keep the recursive child verifier at the same position as the
+        // pre-cache circuit. Plonky2 target/gate order is part of the circuit
+        // digest, so moving it earlier would invalidate existing recursive and
+        // Gnark verifier artifacts even though the constraints are equivalent.
+        let node_data_target = BranchNodeDataPaddedTarget::add_virtual_safe(&mut builder);
+        let partial_address_target = StorageAddressTarget::add_virtual_unsafe(&mut builder);
+        let node_data_length_target = builder.add_virtual_target();
+        let claimed_child_node_nibble_target = builder.add_virtual_target();
+        let claimed_child_node_nibble_target =
+            HalfByteTarget::from_target_safe(claimed_child_node_nibble_target, &mut builder);
+        let child_node_hash_target = Blake2Target::add_virtual_safe(&mut builder);
+
+        let first_node_data_block = node_data_target.constant_read(0);
+        let parsed_node_header = header_parser::define(
+            HeaderParserInputTarget {
+                first_bytes: first_node_data_block.constant_read_array(0),
+            },
+            header_parser::HeaderDescriptor::branch_without_value(),
+            &mut builder,
+        );
+        let parsed_nibbles = nibble_parser::define(
+            NibbleParserInputTarget {
+                first_node_data_block: first_node_data_block.clone(),
+                read_offset: parsed_node_header.resulting_offset,
+                nibble_count: parsed_node_header.nibble_count,
+                partial_address: partial_address_target.clone(),
+            },
+            &mut builder,
+        );
+        let child_nibble_address_part = StorageAddressTarget::from_single_nibble_target(
+            claimed_child_node_nibble_target,
+            &mut builder,
+        );
+        let resulting_address = parsed_nibbles
+            .partial_address
+            .append(child_nibble_address_part, &mut builder);
+        let parsed_bitmap = bitmap_parser::define(
+            BitmapParserInputTarget {
+                first_node_data_block,
+                read_offset: parsed_nibbles.resulting_offset,
+                claimed_child_node_nibble: claimed_child_node_nibble_target,
+            },
+            &mut builder,
+        );
+
+        let child_proof_with_pis = builder.add_virtual_proof_with_pis(&child_data.common);
+        let child_verifier = builder.constant_verifier_data(&child_data.verifier_only);
+        builder.verify_proof::<C>(&child_proof_with_pis, &child_verifier, &child_data.common);
+        let child_target = ChildNodeArrayParserTarget::parse_exact(
+            &mut child_proof_with_pis.public_inputs.clone().into_iter(),
+        );
+
+        child_target
+            .node_data
+            .connect(&node_data_target, &mut builder);
+        child_target
+            .initial_read_offset
+            .connect(&parsed_bitmap.resulting_offset, &mut builder);
+        child_target
+            .final_read_offset
+            .connect(&node_data_length_target, &mut builder);
+        child_target
+            .overall_children_amount
+            .connect(&parsed_bitmap.overall_children_amount, &mut builder);
+        child_target
+            .claimed_child_index_in_array
+            .connect(&parsed_bitmap.child_index_in_array, &mut builder);
+        child_target
+            .claimed_child_hash
+            .connect(&child_node_hash_target, &mut builder);
+
+        BranchParserTarget {
+            padded_node_data: node_data_target.clone(),
+            node_data_length: node_data_length_target,
+            child_node_hash: child_node_hash_target,
+            partial_address: partial_address_target.clone(),
+            resulting_partial_address: resulting_address,
+        }
+        .register_as_public_inputs(&mut builder);
+
+        let circuit_data = Arc::new(builder.build::<C>());
+        assert_eq!(
+            circuit_data
+                .verifier_only
+                .circuit_digest
+                .elements
+                .map(|element| element.to_canonical_u64()),
+            DEPLOYED_BRANCH_PARSER_CIRCUIT_DIGEST,
+            "BranchParser circuit digest changed; regenerate all dependent recursive and Gnark artifacts before deployment",
+        );
+        let verifier_data = Arc::new(circuit_data.verifier_data());
+
+        Self {
+            circuit_data,
+            verifier_data,
+            child_proof_with_pis,
+            partial_address: partial_address_target,
+            claimed_child_node_nibble: claimed_child_node_nibble_target.to_target(),
+            child_verifier_data: child_proof.shared_circuit_data(),
+            child_common_data: child_data.common.clone(),
+            child_verifier_only: child_data.verifier_only.clone(),
+        }
+    }
+}
+
+struct BranchParserCircuit<'a> {
+    template: &'a BranchParserCircuitTemplate,
+    witness: PartialWitness<F>,
+}
+
+impl BranchParserCircuit<'_> {
+    fn prove(self) -> ProofWithCircuitData<BranchParserTarget> {
+        ProofWithCircuitData::prove_from_shared_circuit_data(
+            &self.template.circuit_data,
+            Arc::clone(&self.template.verifier_data),
+            self.witness,
+        )
+    }
+}
+
 impl BranchParser {
     pub fn prove(self) -> ProofWithCircuitData<BranchParserTarget> {
         let metadata = self.parse_metadata();
-
         let child_node_parser_proof = ChildNodeArrayParser {
             initial_data: child_node_array_parser::InitialData {
-                node_data: compose_padded_node_data(self.node_data),
+                node_data: compose_padded_node_data(self.node_data.clone()),
                 read_offset: metadata.children_data_offset,
                 claimed_child_index_in_array: metadata.claimed_child_index_in_array,
                 claimed_child_hash: metadata.claimed_child_hash,
@@ -91,100 +293,13 @@ impl BranchParser {
         .prove();
 
         log::debug!("Proving branch node parser...");
-
-        let mut config = CircuitConfig::standard_recursion_config();
-        config.num_wires = 160;
-        config.num_routed_wires = 130;
-
-        let mut builder = CircuitBuilder::new(config);
-        let mut witness = PartialWitness::new();
-
-        let node_data_target = BranchNodeDataPaddedTarget::add_virtual_safe(&mut builder);
-
-        let partial_address_target = StorageAddressTarget::add_virtual_unsafe(&mut builder);
-        partial_address_target.set_witness(&self.partial_address_nibbles, &mut witness);
-
-        let node_data_length_target: Target = builder.add_virtual_target();
-
-        let claimed_child_node_nibble_target = builder.add_virtual_target();
-        witness.set_target(
-            claimed_child_node_nibble_target,
-            F::from_canonical_u8(self.claimed_child_node_nibble),
+        let template = BranchParserCircuitTemplate::cached(&child_node_parser_proof);
+        let circuit = template.instantiate(
+            &child_node_parser_proof,
+            &self.partial_address_nibbles,
+            self.claimed_child_node_nibble,
         );
-        let claimed_child_node_nibble_target =
-            HalfByteTarget::from_target_safe(claimed_child_node_nibble_target, &mut builder);
-
-        let child_node_hash_target = Blake2Target::add_virtual_safe(&mut builder);
-
-        let first_node_data_block = node_data_target.constant_read(0);
-
-        let parsed_node_header = {
-            let first_bytes = first_node_data_block.constant_read_array(0);
-
-            let input = HeaderParserInputTarget { first_bytes };
-            header_parser::define(
-                input,
-                header_parser::HeaderDescriptor::branch_without_value(),
-                &mut builder,
-            )
-        };
-
-        let parsed_nibbles = {
-            let input = NibbleParserInputTarget {
-                first_node_data_block: first_node_data_block.clone(),
-                read_offset: parsed_node_header.resulting_offset,
-                nibble_count: parsed_node_header.nibble_count,
-                partial_address: partial_address_target.clone(),
-            };
-            nibble_parser::define(input, &mut builder)
-        };
-
-        let child_nibble_address_part = StorageAddressTarget::from_single_nibble_target(
-            claimed_child_node_nibble_target,
-            &mut builder,
-        );
-        let resulting_address = parsed_nibbles
-            .partial_address
-            .append(child_nibble_address_part, &mut builder);
-
-        let parsed_bitmap = {
-            let input = BitmapParserInputTarget {
-                first_node_data_block,
-                read_offset: parsed_nibbles.resulting_offset,
-                claimed_child_node_nibble: claimed_child_node_nibble_target,
-            };
-
-            bitmap_parser::define(input, &mut builder)
-        };
-
-        {
-            let ChildNodeArrayParserTarget {
-                node_data,
-                initial_read_offset,
-                final_read_offset,
-                overall_children_amount,
-                claimed_child_index_in_array,
-                claimed_child_hash,
-            } = builder.recursively_verify_constant_proof(&child_node_parser_proof, &mut witness);
-
-            node_data.connect(&node_data_target, &mut builder);
-            initial_read_offset.connect(&parsed_bitmap.resulting_offset, &mut builder);
-            final_read_offset.connect(&node_data_length_target, &mut builder);
-            overall_children_amount.connect(&parsed_bitmap.overall_children_amount, &mut builder);
-            claimed_child_index_in_array.connect(&parsed_bitmap.child_index_in_array, &mut builder);
-            claimed_child_hash.connect(&child_node_hash_target, &mut builder);
-        }
-
-        BranchParserTarget {
-            padded_node_data: node_data_target,
-            node_data_length: node_data_length_target,
-            child_node_hash: child_node_hash_target,
-            partial_address: partial_address_target,
-            resulting_partial_address: resulting_address,
-        }
-        .register_as_public_inputs(&mut builder);
-
-        let result = ProofWithCircuitData::prove_from_builder(builder, witness);
+        let result = circuit.prove();
 
         log::debug!("Proven branch node parser");
 
@@ -248,6 +363,7 @@ impl BranchParser {
 
 #[cfg(test)]
 mod tests {
+    use plonky2_field::types::PrimeField64;
     use std::iter;
     use trie_db::NibbleSlice;
 
@@ -332,6 +448,16 @@ mod tests {
             BranchParserTarget::parse_public_inputs_exact(&mut proof.public_inputs().into_iter());
 
         assert!(proof.verify());
+        assert_eq!(
+            proof
+                .circuit_data()
+                .verifier_only
+                .circuit_digest
+                .elements
+                .map(|element| element.to_canonical_u64()),
+            DEPLOYED_BRANCH_PARSER_CIRCUIT_DIGEST,
+            "BranchParser circuit digest changed; existing recursive and Gnark artifacts must remain compatible",
+        );
 
         assert_eq!(
             pis.resulting_partial_address.length,

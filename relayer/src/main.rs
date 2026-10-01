@@ -57,11 +57,16 @@ fn main() -> AnyResult<()> {
 
     // we need at least 2 native threads to run some of the blocking tasks like proof composition
     // so lets set minimum to 4 threads or to available parallelism.
-    tokio::runtime::Builder::new_multi_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .max_blocking_threads(std::thread::available_parallelism()?.get().max(4))
-        .build()?
-        .block_on(run())
+        .build()?;
+    let result = runtime.block_on(run());
+    if let Err(error) = result {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 async fn run() -> AnyResult<()> {

@@ -32,7 +32,6 @@ use plonky2_blake2b256::circuit::{
 use plonky2_field::types::Field;
 use std::{
     env, fs, io, iter,
-    marker::PhantomData,
     sync::{Arc, LazyLock},
     time::Instant,
 };
@@ -168,6 +167,9 @@ impl BuilderTargets {
 /// the valid inputs.
 pub struct CircuitTargets {
     circuit: CircuitData<F, C, D>,
+    // The verifier data is immutable. Keep one shared copy instead of cloning
+    // CommonCircuitData for every hash proof.
+    verifier_data: Arc<VerifierCircuitData<F, C, D>>,
     target_block_count: Target,
     target_proof: ProofWithPublicInputsTarget<D>,
 }
@@ -179,6 +181,7 @@ impl From<BuilderTargets> for CircuitTargets {
         let now = Instant::now();
 
         let circuit = value.builder.build::<C>();
+        let verifier_data = Arc::new(circuit.verifier_data());
 
         log::trace!(
             "From<BuilderTargets> for CircuitTargets exit. Time: {}ms",
@@ -187,6 +190,7 @@ impl From<BuilderTargets> for CircuitTargets {
 
         Self {
             circuit,
+            verifier_data,
             target_block_count: value.target_block_count,
             target_proof: value.target_proof,
         }
@@ -198,6 +202,15 @@ impl CircuitTargets {
         let builder_targets = BuilderTargets::new();
 
         builder_targets.into()
+    }
+
+    /// Return the process-wide generic Blake2 circuit. Its shape and verifier
+    /// data are independent of the input, so rebuilding it per hash is wasted
+    /// work and duplicates a large CommonCircuitData allocation. The cache is
+    /// process-wide and assumes one deployment configuration per process.
+    pub fn cached() -> &'static Self {
+        static CACHE: LazyLock<CircuitTargets> = LazyLock::new(CircuitTargets::new);
+        &CACHE
     }
 
     pub fn prove<const MAX_DATA_LENGTH_ESTIMATION: usize>(
@@ -239,14 +252,24 @@ impl CircuitTargets {
             now.elapsed().as_millis()
         );
 
-        ProofWithCircuitData {
-            proof,
-            circuit_data: Arc::from(self.circuit.verifier_data()),
-            public_inputs,
-            public_inputs_parser: PhantomData,
-        }
+        ProofWithCircuitData::from_proof_and_shared_circuit_data(
+            ProofWithPublicInputs {
+                proof,
+                public_inputs,
+            },
+            Arc::clone(&self.verifier_data),
+        )
     }
 
+    pub fn common(&self) -> &CommonCircuitData<F, D> {
+        &self.circuit.common
+    }
+
+    pub fn verifier_only(&self) -> &VerifierOnlyCircuitData<C, D> {
+        &self.circuit.verifier_only
+    }
+
+    #[allow(dead_code)]
     pub fn into_inner(self) -> (CircuitData<F, C, D>, Target, ProofWithPublicInputsTarget<D>) {
         (self.circuit, self.target_block_count, self.target_proof)
     }

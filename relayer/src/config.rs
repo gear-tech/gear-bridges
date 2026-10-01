@@ -525,7 +525,7 @@ fn build_options(source: OptionSource<'_>) -> anyhow::Result<MerkleRootRelayerOp
                     source.relayer_id
                 ));
             }
-            CriticalThreshold::Timeout((duration.as_secs() / 3) as u32)
+            CriticalThreshold::Timeout(duration)
         }
         cli::CriticalThreshold::AuthoritySetChange => CriticalThreshold::AuthoritySetChange,
     };
@@ -864,6 +864,10 @@ data_path = "/tmp/testnet-gnark"
             PathBuf::from("/tmp/mainnet-gnark")
         );
         assert_eq!(relayer.options.count_thread, None);
+        assert_eq!(
+            relayer.options.critical_threshold,
+            CriticalThreshold::Timeout(Duration::from_secs(14 * 60 * 60))
+        );
     }
 
     #[test]

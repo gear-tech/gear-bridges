@@ -1,0 +1,32 @@
+[package]
+name = "beefy-relay"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+hash-db = "0.16.0"
+binary-merkle-tree.workspace = true
+hex = { workspace = true, features = ["std"] }
+k256.workspace = true
+parity-scale-codec = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std"] }
+serde_json.workspace = true
+sp-consensus-beefy = { workspace = true, features = ["std"] }
+sp-mmr-primitives = { workspace = true, features = ["std"] }
+sp-core = { workspace = true, features = ["std"] }
+sp-runtime = { workspace = true, features = ["std"] }
+tiny-keccak.workspace = true
+alloy.workspace = true
+clap.workspace = true
+ethereum-client.workspace = true
+gear-rpc-client.workspace = true
+gsdk.workspace = true
+subxt.workspace = true
+subxt-rpcs.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tempfile = "3.23.0"

@@ -14,15 +14,16 @@ library MMRProof {
      * @param proof an array of hashes
      * @param proofOrder a bitfield describing the order of each item (left vs right)
      */
-    function verifyLeafProof(
-        bytes32 root,
-        bytes32 leafHash,
-        bytes32[] calldata proof,
-        uint256 proofOrder
-    ) internal pure returns (bool) {
-        // Size of the proof is bounded, since `proofOrder` can only contain `MAXIMUM_PROOF_SIZE` orderings.
+    function verifyLeafProof(bytes32 root, bytes32 leafHash, bytes32[] calldata proof, uint256 proofOrder)
+        internal
+        pure
+        returns (bool)
+    {
         if (proof.length > MAXIMUM_PROOF_SIZE) {
             revert ProofSizeExceeded();
+        }
+        if (proof.length < MAXIMUM_PROOF_SIZE && (proofOrder >> proof.length) != 0) {
+            return false;
         }
 
         bytes32 acc = leafHash;
@@ -32,11 +33,7 @@ library MMRProof {
         return root == acc;
     }
 
-    function hashPairs(bytes32 x, bytes32 y, uint256 order)
-        internal
-        pure
-        returns (bytes32 value)
-    {
+    function hashPairs(bytes32 x, bytes32 y, uint256 order) internal pure returns (bytes32 value) {
         assembly {
             switch order
             case 0 {

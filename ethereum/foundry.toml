@@ -7,6 +7,7 @@ remappings = [
     "forge-std/=dependencies/forge-std-1.16.2/src/",
     "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.7.0/",
     "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.7.0/",
+    "openzeppelin-foundry-upgrades/=dependencies/openzeppelin-foundry-upgrades-0.4.2/src/",
 ]
 evm_version = "osaka"
 solc = "0.8.37"

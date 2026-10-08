@@ -1,5 +1,5 @@
 import { GearApi } from '@gear-js/api';
-import { relayVaraToEth } from '@gear-js/bridge';
+import { relayVaraToEth, type OutboundEffect } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
 import { useConfig, usePublicClient } from 'wagmi';
 import { getWalletClient } from 'wagmi/actions';
@@ -11,17 +11,17 @@ import { useInitArchiveApi } from './use-init-archive-api';
 
 type Params = {
   onLog: (message: string) => void;
-  onReceipt: () => void;
+  onFinalized: () => void;
   onError: (error: Error) => void;
 };
 
-function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
+function useRelayVaraTx(nonce: bigint, blockNumber: bigint, expectedEffect: OutboundEffect) {
   const { NETWORK_PRESET, syncEthWalletNetwork } = useNetworkType();
   const config = useConfig();
   const publicClient = usePublicClient();
   const initArchiveApi = useInitArchiveApi();
 
-  const relay = async ({ onLog, onReceipt, onError }: Params) => {
+  const relay = async ({ onLog, onFinalized, onError }: Params) => {
     let archiveApi: GearApi | undefined;
 
     try {
@@ -41,13 +41,14 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
         ethereumAccount: walletClient.account,
         gearApi: archiveApi,
         messageQueueAddress: NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
+        expectedEffect,
         statusCb: onLog,
       });
 
       if (error) throw new Error(error);
       if (!success) throw new Error('Failed to relay Vara transaction');
 
-      onReceipt();
+      onFinalized();
     } catch (error) {
       onError(error as Error);
     } finally {

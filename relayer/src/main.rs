@@ -45,7 +45,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::{sync::mpsc, task, time};
+use tokio::{sync::mpsc, task};
 use utils_prometheus::{MeteredService, MetricsBuilder};
 use vft_manager_client::traits::VftManager;
 use zeroize::Zeroizing;
@@ -334,13 +334,13 @@ async fn run() -> AnyResult<()> {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         eth_api,
                         provider.connection(),
+                        args.from_block,
                         args.confirmations_merkle_root
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.storage_path,
-                        governance_admin,
-                        governance_pauser,
+                        (governance_admin, governance_pauser),
                     )
                     .await
                     .unwrap();
@@ -383,6 +383,7 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         bridging_payment_address,
                         provider.connection(),
+                        args.from_block,
                         args.confirmations_merkle_root
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.confirmations_status
@@ -434,7 +435,7 @@ async fn run() -> AnyResult<()> {
                 .run(args.prometheus_args.prometheus_endpoint)
                 .await;
 
-            relayer.run().await;
+            relayer.run().await?;
         }
         CliCommands::EthGearTokens(EthGearTokensArgs {
             command,
@@ -445,6 +446,7 @@ async fn run() -> AnyResult<()> {
             prometheus_args,
             storage_path,
             ethereum_blocks,
+            ethereum_start_block,
         }) => {
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
@@ -500,6 +502,7 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_start_block,
                         ethereum_blocks.clone(),
                     )
                     .await
@@ -547,6 +550,7 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_start_block,
                         ethereum_blocks.clone(),
                         Some(receiver),
                     )
@@ -599,12 +603,14 @@ async fn run() -> AnyResult<()> {
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                 governance_admin,
                 governance_pauser,
+                &args.storage,
             )
-            .await;
+            .await?;
         }
 
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
+            storage,
             checkpoint_light_client,
             historical_proxy,
             receiver_program,
@@ -690,13 +696,9 @@ async fn run() -> AnyResult<()> {
                 receiver_address,
                 receiver_route,
                 tx_hash,
+                &storage,
             )
             .await?;
-
-            loop {
-                // relay() spawns thread and exits, so we need to add this loop after calling run.
-                time::sleep(Duration::from_secs(1)).await;
-            }
         }
 
         CliCommands::FetchMerkleRoots(args) => fetch_merkle_roots(args).await?,

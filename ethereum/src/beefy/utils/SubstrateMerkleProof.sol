@@ -20,37 +20,44 @@ library SubstrateMerkleProof {
      * @param proof the array of proofs to help verify the leaf's membership, ordered from leaf to root
      * @return a boolean value representing the success or failure of the operation
      */
-    function verify(
-        bytes32 root,
-        bytes32 leaf,
-        uint256 position,
-        uint256 width,
-        bytes32[] calldata proof
-    ) internal pure returns (bool) {
-        if (position >= width) {
-            return false;
-        }
-        return root == computeRoot(leaf, position, width, proof);
+    function verify(bytes32 root, bytes32 leaf, uint256 position, uint256 width, bytes32[] calldata proof)
+        internal
+        pure
+        returns (bool)
+    {
+        (bool valid, bytes32 node) = computeRoot(leaf, position, width, proof);
+        return valid && root == node;
     }
 
     function computeRoot(bytes32 leaf, uint256 position, uint256 width, bytes32[] calldata proof)
         internal
         pure
-        returns (bytes32)
+        returns (bool valid, bytes32 node)
     {
-        bytes32 node = leaf;
-        unchecked {
-            for (uint256 i = 0; i < proof.length; i++) {
-                if (position & 1 == 1 || position + 1 == width) {
-                    node = efficientHash(proof[i], node);
-                } else {
-                    node = efficientHash(node, proof[i]);
-                }
-                position = position >> 1;
-                width = ((width - 1) >> 1) + 1;
-            }
-            return node;
+        if (position >= width) {
+            return (false, bytes32(0));
         }
+
+        node = leaf;
+        uint256 proofIndex;
+        unchecked {
+            while (width > 1) {
+                if ((position & 1) == 1) {
+                    if (proofIndex >= proof.length) {
+                        return (false, bytes32(0));
+                    }
+                    node = efficientHash(proof[proofIndex++], node);
+                } else if (position + 1 < width) {
+                    if (proofIndex >= proof.length) {
+                        return (false, bytes32(0));
+                    }
+                    node = efficientHash(node, proof[proofIndex++]);
+                }
+                position >>= 1;
+                width = (width >> 1) + (width & 1);
+            }
+        }
+        return (proofIndex == proof.length, node);
     }
 
     function efficientHash(bytes32 a, bytes32 b) internal pure returns (bytes32 value) {

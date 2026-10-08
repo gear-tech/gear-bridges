@@ -9,6 +9,11 @@ mod msg_tracker;
 mod token_operations;
 
 use bridge_builtin_operations::Payload;
+pub use bridge_builtin_operations::{
+    evidence as source_request_evidence, handle_persistent_reply as handle_bridge_reply,
+    reconcile as reconcile_source_request, SourceRequestEvidence, SourceRequestOutcome,
+};
+pub use token_operations::handle_persistent_reply as handle_source_token_reply;
 
 pub use msg_tracker::{
     msg_tracker_mut, msg_tracker_ref, MessageInfo as MsgTrackerMessageInfo, MessageStatus,
@@ -31,16 +36,16 @@ pub async fn request_bridging(
     amount: U256,
     receiver: H160,
 ) -> Result<(U256, H160), Error> {
-    let state = service.state();
+    let gear_bridge_builtin = service.state().gear_bridge_builtin;
 
-    let Some(erc20_manager_address) = state.erc20_manager_address else {
+    let Some(erc20_manager_address) = service.state().erc20_manager_address else {
         panic!("Address of the ERC20Manger is not set");
     };
 
     let msg_id = gstd::msg::id();
     let eth_token_id = service.state().token_map.get_eth_token_id(&vara_token_id)?;
     let supply_type = service.state().token_map.get_supply_type(&vara_token_id)?;
-    let config = service.config();
+    let config = service.config().clone();
 
     let transaction_details = TxDetails {
         vara_token_id,
@@ -58,17 +63,25 @@ pub async fn request_bridging(
 
     match supply_type {
         TokenSupply::Ethereum => {
-            token_operations::burn(vara_token_id, sender, amount, config, msg_id)
+            token_operations::burn(vara_token_id, sender, amount, &config, msg_id)
                 .await
                 .expect("Failed to burn tokens");
         }
         TokenSupply::Gear => {
-            token_operations::lock(vara_token_id, sender, amount, config, msg_id)
+            token_operations::lock(vara_token_id, sender, amount, &config, msg_id)
                 .await
                 .expect("Failed to lock tokens");
         }
     }
 
+    // A recovery execution may already own the refund after the deposit reply.
+    // It must fence this old continuation before any source queue request is sent.
+    if !msg_tracker_mut()
+        .get_message_info(&msg_id)
+        .is_some_and(|i| i.status == MessageStatus::TokenDepositCompleted(true))
+    {
+        return Err(Error::InvalidMessageStatus);
+    }
     let payload = Payload {
         sender,
         receiver,
@@ -79,10 +92,10 @@ pub async fn request_bridging(
     msg_tracker_mut().update_message_status(msg_id, MessageStatus::SendingMessageToBridgeBuiltin);
 
     let bridge_builtin_reply = bridge_builtin_operations::send_message_to_bridge_builtin(
-        state.gear_bridge_builtin,
+        gear_bridge_builtin,
         erc20_manager_address,
         payload,
-        config,
+        &config,
         msg_id,
     )
     .await;
@@ -95,12 +108,12 @@ pub async fn request_bridging(
             if e == Error::MessageFailed && claim_token_refund(msg_id) {
                 match supply_type {
                     TokenSupply::Ethereum => {
-                        token_operations::mint(vara_token_id, sender, amount, config, msg_id)
+                        token_operations::mint(vara_token_id, sender, amount, &config, msg_id)
                             .await
                             .expect("Failed to mint tokens");
                     }
                     TokenSupply::Gear => {
-                        token_operations::unlock(vara_token_id, sender, amount, config, msg_id)
+                        token_operations::unlock(vara_token_id, sender, amount, &config, msg_id)
                             .await
                             .expect("Failed to unlock tokens");
                     }
@@ -153,7 +166,8 @@ pub async fn handle_interrupted_transfer(
 
     let msg_info = msg_tracker_mut()
         .get_message_info(&msg_id)
-        .expect("Unexpected: msg status does not exist");
+        .expect("Unexpected: msg status does not exist")
+        .clone();
 
     let TxDetails {
         vara_token_id,
@@ -174,10 +188,10 @@ pub async fn handle_interrupted_transfer(
 
     match token_supply {
         TokenSupply::Ethereum => {
-            token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
+            token_operations::mint(vara_token_id, sender, amount, &config, msg_id).await?;
         }
         TokenSupply::Gear => {
-            token_operations::unlock(vara_token_id, sender, amount, config, msg_id).await?;
+            token_operations::unlock(vara_token_id, sender, amount, &config, msg_id).await?;
         }
     }
 

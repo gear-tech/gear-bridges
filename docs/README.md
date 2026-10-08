@@ -5,6 +5,7 @@ This directory documents the bridge as it is implemented in this repository. The
 ## Start here
 
 - [Running the bridge](running-the-bridge.md): build prerequisites, configuration, Docker, startup, and shutdown.
+- [Runtime upgrade and BEEFY activation](runtime-upgrade-and-beefy-activation.md): unsigned governance procedure, real-key readiness, atomic domain binding, and finalized-state checks; preparation is not execution authorization.
 - [Usage and operations](usage-and-operations.md): relayer modes, token workflows, manual operations, monitoring, and recovery.
 - [Internals](internals.md): component boundaries and end-to-end message flow.
 - [Merkle roots](merkle-roots.md): root extraction, accumulation, proving, persistence, and submission.

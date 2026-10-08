@@ -6,7 +6,7 @@ mod state;
 mod utils;
 
 use cell::RefCell;
-use checkpoint_light_client_io::Init;
+use checkpoint_light_client_io::{Error, Init};
 use ethereum_common::{merkle, tree_hash::TreeHash, utils as eth_utils};
 use sails_rs::prelude::*;
 
@@ -18,36 +18,51 @@ pub struct CheckpointLightClientProgram(RefCell<State>);
 
 #[sails_rs::program]
 impl CheckpointLightClientProgram {
-    pub async fn init(init: Init) -> Self {
+    #[export(unwrap_result)]
+    pub async fn init(init: Init) -> Result<Self, Error> {
+        if init.bootstrap_header.tree_hash_root() != init.trusted_bootstrap_root {
+            return Err(Error::InvalidBootstrapRoot);
+        }
+        let period = eth_utils::calculate_period(init.update.finalized_header.slot)
+            .checked_sub(1)
+            .ok_or(Error::UnsupportedBootstrapPeriod)?;
         let Init {
             network,
+            bootstrap_header,
             sync_committee_current_pub_keys,
             sync_committee_current_aggregate_pubkey,
             sync_committee_current_branch,
             update,
             sync_aggregate_encoded,
+            trusted_bootstrap_root: _,
         } = init;
 
-        let sync_aggregate = Decode::decode(&mut &sync_aggregate_encoded[..])
-            .expect("Correctly scale-encoded SyncAggregate");
+        let sync_aggregate = <ethereum_common::beacon::SyncAggregate as sails_rs::scale_codec::DecodeAll>::decode_all(&mut &sync_aggregate_encoded[..])
+            .map_err(|_| Error::InvalidSyncAggregate)?;
 
         let Some(sync_committee_current) = utils::construct_sync_committee(
             sync_committee_current_aggregate_pubkey,
             &sync_committee_current_pub_keys,
         ) else {
-            panic!("Wrong public committee keys for {network:?} network");
+            return Err(Error::InvalidPublicKeys);
         };
+
+        if !(bootstrap_header.slot <= update.finalized_header.slot
+            && eth_utils::calculate_period(bootstrap_header.slot)
+                == eth_utils::calculate_period(update.finalized_header.slot))
+        {
+            return Err(Error::InvalidBootstrapUpdate);
+        }
 
         if !merkle::is_current_committee_proof_valid(
             &network,
-            &update.finalized_header,
+            &bootstrap_header,
             &sync_committee_current,
             &sync_committee_current_branch,
         ) {
-            panic!("Current sync committee proof is not valid for {network:?} network");
+            return Err(Error::InvalidBootstrapProof);
         }
 
-        let period = eth_utils::calculate_period(update.finalized_header.slot) - 1;
         match services::sync_update::verify(
             &network,
             eth_utils::calculate_slot(period),
@@ -58,29 +73,28 @@ impl CheckpointLightClientProgram {
         )
         .await
         {
-            Err(e) => {
-                panic!("Failed to verify sync committee update for {network:?} network: {e:?}")
+            Err(e) => Err(e),
+
+            Ok((Some(finalized_header), Some(sync_committee_next))) => {
+                Ok(Self(RefCell::new(State {
+                    network,
+                    sync_committee_current: sync_committee_current_pub_keys.into(),
+                    sync_committee_next,
+                    checkpoints: {
+                        let mut checkpoints = state::Checkpoints::new();
+                        checkpoints
+                            .push(finalized_header.slot, finalized_header.tree_hash_root())
+                            .expect("Initial checkpoint");
+
+                        checkpoints
+                    },
+                    finalized_header,
+                    replay_back: None,
+                    revision: 0,
+                })))
             }
 
-            Ok((Some(finalized_header), Some(sync_committee_next))) => Self(RefCell::new(State {
-                network,
-                sync_committee_current: sync_committee_current_pub_keys.into(),
-                sync_committee_next,
-                checkpoints: {
-                    let mut checkpoints = state::Checkpoints::new();
-                    checkpoints.push(finalized_header.slot, finalized_header.tree_hash_root());
-
-                    checkpoints
-                },
-                finalized_header,
-                replay_back: None,
-            })),
-
-            Ok((finalized_header, sync_committee_next)) => panic!(
-                "Incorrect initial sync committee update for {network:?} network ({}, {})",
-                finalized_header.is_some(),
-                sync_committee_next.is_some()
-            ),
+            Ok(_) => Err(Error::InvalidBootstrapUpdate),
         }
     }
 

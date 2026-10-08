@@ -9,27 +9,20 @@ library Bitfield {
 
     error InvalidSamplingParams();
     error InvalidBitfieldPadding();
+    error InvalidBitfieldIndex();
 
     /**
      * @dev Constants used to efficiently calculate the hamming weight of a bitfield. See
      * https://en.wikipedia.org/wiki/Hamming_weight#Efficient_implementation for an explanation of those constants.
      */
-    uint256 internal constant M1 =
-        0x5555555555555555555555555555555555555555555555555555555555555555;
-    uint256 internal constant M2 =
-        0x3333333333333333333333333333333333333333333333333333333333333333;
-    uint256 internal constant M4 =
-        0x0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f;
-    uint256 internal constant M8 =
-        0x00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff;
-    uint256 internal constant M16 =
-        0x0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff;
-    uint256 internal constant M32 =
-        0x00000000ffffffff00000000ffffffff00000000ffffffff00000000ffffffff;
-    uint256 internal constant M64 =
-        0x0000000000000000ffffffffffffffff0000000000000000ffffffffffffffff;
-    uint256 internal constant M128 =
-        0x00000000000000000000000000000000ffffffffffffffffffffffffffffffff;
+    uint256 internal constant M1 = 0x5555555555555555555555555555555555555555555555555555555555555555;
+    uint256 internal constant M2 = 0x3333333333333333333333333333333333333333333333333333333333333333;
+    uint256 internal constant M4 = 0x0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f;
+    uint256 internal constant M8 = 0x00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff;
+    uint256 internal constant M16 = 0x0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff;
+    uint256 internal constant M32 = 0x00000000ffffffff00000000ffffffff00000000ffffffff00000000ffffffff;
+    uint256 internal constant M64 = 0x0000000000000000ffffffffffffffff0000000000000000ffffffffffffffff;
+    uint256 internal constant M128 = 0x00000000000000000000000000000000ffffffffffffffffffffffffffffffff;
 
     uint256 internal constant ONE = uint256(1);
 
@@ -42,12 +35,11 @@ library Bitfield {
      * @param n Number of unique bits in priorBitfield that must be set in the output.
      *          Must be <= number of set bits in priorBitfield.
      */
-    function subsample(
-        uint256 seed,
-        uint256[] memory priorBitfield,
-        uint256 priorBitfieldSize,
-        uint256 n
-    ) internal pure returns (uint256[] memory outputBitfield) {
+    function subsample(uint256 seed, uint256[] memory priorBitfield, uint256 priorBitfieldSize, uint256 n)
+        internal
+        pure
+        returns (uint256[] memory outputBitfield)
+    {
         if (
             priorBitfield.length != Bitfield.containerLength(priorBitfieldSize)
                 || n > countSetBits(priorBitfield, priorBitfieldSize)
@@ -89,6 +81,7 @@ library Bitfield {
         bitfield = new uint256[](containerLength(length));
 
         for (uint256 i = 0; i < bitsToSet.length; i++) {
+            if (bitsToSet[i] >= length || isSet(bitfield, bitsToSet[i])) revert InvalidBitfieldIndex();
             set(bitfield, bitsToSet[i]);
         }
 
@@ -194,11 +187,7 @@ library Bitfield {
         self[element] = self[element].clearBit(uint8(index));
     }
 
-    function makeIndex(uint256 seed, uint256 iteration, uint256 length)
-        internal
-        pure
-        returns (uint256 index)
-    {
+    function makeIndex(uint256 seed, uint256 iteration, uint256 length) internal pure returns (uint256 index) {
         // Handle case where length is 0 to prevent infinite loop in subsample
         if (length == 0) {
             return 0;

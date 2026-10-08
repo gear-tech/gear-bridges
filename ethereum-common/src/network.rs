@@ -12,6 +12,34 @@ pub enum Network {
 }
 
 impl Network {
+    /// Consensus genesis timestamps (seconds), pinned independently of Beacon RPC.
+    pub const fn genesis_time(&self) -> u64 {
+        match self {
+            // eth-clients/mainnet@f6b7882618a5ad2c1d2731ae35e5d16a660d5bb7/metadata/genesis.ssz
+            Mainnet => 1_606_824_023,
+            // eth-clients/sepolia@b038b85c7db1cb4eb240dab6a2f0a6d61224848a/metadata/genesis.ssz
+            Sepolia => 1_655_733_600,
+            // eth-clients/holesky@874c199423ccd180607320c38cbaca05d9a1573a/metadata/genesis.ssz
+            Holesky => 1_695_902_400,
+            // eth-clients/hoodi@617ea32823e22ff78f66f8534abbb91cecd76962/metadata/genesis.ssz
+            Hoodi => 1_742_213_400,
+        }
+    }
+
+    pub const fn epoch_deneb(&self) -> u64 {
+        match self {
+            Mainnet => 269_568,
+            Sepolia => 132_608,
+            Holesky => 29_696,
+            Hoodi => 0,
+        }
+    }
+
+    pub fn current_slot(&self, timestamp_ms: u64) -> Option<u64> {
+        (timestamp_ms / 1_000)
+            .checked_sub(self.genesis_time())
+            .map(|elapsed| elapsed / SECONDS_PER_SLOT)
+    }
     pub fn genesis_validators_root(&self) -> Hash256 {
         match self {
             Mainnet => hex!("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),

@@ -66,7 +66,7 @@ impl Relayer {
         }
     }
 
-    pub async fn run(self) {
+    pub async fn run(self) -> AnyResult<()> {
         log::info!("Started");
 
         let mut signal_interrupt =
@@ -85,56 +85,8 @@ impl Relayer {
         let gas_limit = gas_limit_block / 100 * 95;
         log::info!("Gas limit for extrinsics: {gas_limit}");
 
-        let SyncUpdate {
-            sync_update,
-            sync_aggregate_encoded,
-        } = receiver
-            .recv()
-            .await
-            .expect("Updates receiver should be open before the loop");
-
-        let mut slot_last = sync_update.finalized_header.slot;
+        let mut slot_last = 0;
         let remoting = GClientRemoting::new(self.gear_api.clone());
-
-        match sync_update::try_to_apply(
-            &remoting,
-            self.program_id.0,
-            sync_update.clone(),
-            sync_aggregate_encoded.clone(),
-            gas_limit,
-        )
-        .await
-        {
-            Err(e) => {
-                log::error!("{e:?}");
-                return;
-            }
-            Ok(Err(Error::ReplayBackRequired {
-                replay_back,
-                checkpoint,
-            })) => {
-                if let Err(e) = replay_back::execute(replay_back::Args {
-                    beacon_client: &self.beacon_client,
-                    remoting: &remoting,
-                    program_id: self.program_id.0,
-                    gas_limit,
-                    replay_back,
-                    checkpoint,
-                    sync_update,
-                    size_batch: self.size_batch,
-                    sync_aggregate_encoded,
-                })
-                .await
-                {
-                    log::error!("{e:?}. Exiting");
-                    return;
-                }
-            }
-            Ok(Ok(_) | Err(Error::NotActual)) => (),
-            _ => {
-                slot_last = 0;
-            }
-        }
 
         update_total_balance(&self.gear_api, &self.metrics).await;
 
@@ -151,13 +103,12 @@ impl Relayer {
             } = match future::select(future_interrupt, future_update).await {
                 Either::Left((_interrupted, _)) => {
                     log::info!("Caught SIGINT. Exiting");
-                    return;
+                    return Ok(());
                 }
 
                 Either::Right((Some(sync_update), _)) => sync_update,
                 Either::Right((None, _)) => {
-                    log::info!("Updates receiver has been closed. Exiting");
-                    return;
+                    return Err(anyhow!("Checkpoint update receiver closed unexpectedly"));
                 }
             };
             let slot = sync_update.finalized_header.slot;
@@ -171,20 +122,41 @@ impl Relayer {
                 self.metrics.total_fetched_finality_updates.inc();
             }
 
-            if slot == slot_last {
+            if slot <= slot_last {
                 continue;
             }
 
-            match sync_update::try_to_apply(
+            let result = sync_update::try_to_apply(
                 &remoting,
                 self.program_id.0,
-                sync_update,
-                sync_aggregate_encoded,
+                sync_update.clone(),
+                sync_aggregate_encoded.clone(),
                 gas_limit,
             )
-            .await
-            {
-                Ok(Ok(_)) => {
+            .await?;
+            let result = match result {
+                Err(Error::ReplayBackRequired {
+                    replay_back,
+                    checkpoint,
+                }) => {
+                    replay_back::execute(replay_back::Args {
+                        beacon_client: &self.beacon_client,
+                        remoting: &remoting,
+                        program_id: self.program_id.0,
+                        gas_limit,
+                        replay_back,
+                        checkpoint,
+                        sync_update,
+                        size_batch: self.size_batch,
+                        sync_aggregate_encoded,
+                    })
+                    .await?;
+                    Ok(())
+                }
+                result => result,
+            };
+            match result {
+                Ok(()) => {
                     slot_last = slot;
 
                     if committee_update {
@@ -193,19 +165,16 @@ impl Relayer {
                         self.metrics.processed_finality_updates.inc();
                     }
                 }
-                Ok(Err(Error::ReplayBackRequired { .. })) => {
-                    log::error!("Replay back within the main loop. Exiting");
-                    return;
+                Err(Error::StateChanged) => {
+                    log::info!(
+                        "Checkpoint state changed during verification; retrying fresh updates"
+                    );
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     log::error!("The program failed with: {e:?}. Skipping");
                     if let Error::NotActual = e {
                         slot_last = slot;
                     }
-                }
-                Err(e) => {
-                    log::error!("{e:?}");
-                    return;
                 }
             }
 

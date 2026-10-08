@@ -6,6 +6,7 @@ use crate::{
     },
     proof_storage::ProofStorage,
 };
+use anyhow::Context;
 use gear_rpc_client::dto::RawBlockInclusionProof;
 use primitive_types::{H256, U256};
 use sails_rs::events::EventIo;
@@ -112,7 +113,12 @@ impl UnprocessedBlocksStorage for MerkleRootStorage {
         let authority_set_changed = authority_set_changed(block);
 
         let proof = api
-            .produce_finality_proof(&block.grandpa_justification)
+            .produce_finality_proof(
+                block
+                    .grandpa_justification
+                    .as_ref()
+                    .context("Merkle-root proof requires a GRANDPA justification")?,
+            )
             .await?;
 
         let block_hash = block.hash();

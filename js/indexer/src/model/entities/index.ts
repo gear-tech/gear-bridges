@@ -8,3 +8,5 @@ export * from './completedTransfer.model.js';
 export * from './varaBridgeProgram.model.js';
 export * from './ethBridgeProgram.model.js';
 export * from './merkleRoot.js';
+export * from './receiptSettlement.model.js';
+export * from './receiptRelay.model.js';

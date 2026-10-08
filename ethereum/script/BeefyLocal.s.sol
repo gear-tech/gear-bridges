@@ -21,14 +21,58 @@ contract BeefyLocal is Script, Base {
         }
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        bytes32 authorityRoot = vm.envBytes32("BEEFY_AUTHORITY_ROOT");
+        address recoveryWallet = vm.envAddress("BEEFY_RECOVERY_WALLET");
+        _validateRecoveryWallet(recoveryWallet);
+        bytes32 sourceDomain = vm.envBytes32("BEEFY_SOURCE_DOMAIN");
+        require(sourceDomain != bytes32(0), "missing source domain");
+        uint64 mmrStartBlock = _envUint64("BEEFY_MMR_START_BLOCK");
+        uint64 initialBeefyBlock = _envUint64("BEEFY_INITIAL_BLOCK");
+        uint64 initialSourceTimestampMs = _envUint64("BEEFY_INITIAL_SOURCE_TIMESTAMP_MS");
+        BeefyClient.ValidatorSet memory currentSet = BeefyClient.ValidatorSet({
+            id: _envUint128("BEEFY_CURRENT_ID"),
+            length: _envUint128("BEEFY_CURRENT_LENGTH"),
+            root: vm.envBytes32("BEEFY_CURRENT_ROOT")
+        });
+        BeefyClient.ValidatorSet memory nextSet = BeefyClient.ValidatorSet({
+            id: _envUint128("BEEFY_NEXT_ID"),
+            length: _envUint128("BEEFY_NEXT_LENGTH"),
+            root: vm.envBytes32("BEEFY_NEXT_ROOT")
+        });
         address deployerAddress = vm.addr(privateKey);
-
-        BeefyClient.ValidatorSet memory currentSet = BeefyClient.ValidatorSet({id: 0, length: 2, root: authorityRoot});
-        BeefyClient.ValidatorSet memory nextSet = BeefyClient.ValidatorSet({id: 1, length: 2, root: authorityRoot});
+        uint256 startingNonce = vm.getNonce(deployerAddress);
+        address predictedQueue = vm.computeCreateAddress(deployerAddress, startingNonce + 12);
+        expectedMessageQueueAddress = predictedQueue;
+        bytes32 configuredBridgeDomain = vm.envBytes32("BEEFY_BRIDGE_DOMAIN");
+        bytes32 predictedBridgeDomain = keccak256(
+            abi.encodePacked("vara/gear-eth-bridge-domain/v2", sourceDomain, bytes32(block.chainid), predictedQueue)
+        );
+        require(
+            configuredBridgeDomain != bytes32(0) && configuredBridgeDomain == predictedBridgeDomain,
+            "configured bridge domain mismatch"
+        );
 
         vm.startBroadcast(privateKey);
-        beefyClient = new BeefyClient(128, 24, 17, 111, 0, currentSet, nextSet);
+        beefyClient = new BeefyClient(
+            sourceDomain,
+            block.chainid,
+            predictedQueue,
+            mmrStartBlock,
+            initialBeefyBlock,
+            initialSourceTimestampMs,
+            currentSet,
+            nextSet
+        );
+        require(
+            beefyClient.minNumRequiredSignatures() == 86 && beefyClient.fiatShamirRequiredSignatures() == 86
+                && beefyClient.MAX_VALIDATORS() == 256 && beefyClient.randaoCommitDelay() == 128
+                && beefyClient.randaoCommitExpiration() == 24,
+            "client policy mismatch"
+        );
+        require(
+            beefyClient.destinationChainId() == block.chainid && beefyClient.destinationQueue() == predictedQueue
+                && beefyClient.bridgeDomain() == configuredBridgeDomain,
+            "client destination authentication mismatch"
+        );
         vm.stopBroadcast();
 
         address[] memory emergencyStopObservers = new address[](2);
@@ -51,9 +95,11 @@ contract BeefyLocal is Script, Base {
                 governancePauser: BaseConstants.GOVERNANCE_PAUSER,
                 emergencyStopAdmin: BaseConstants.EMERGENCY_STOP_ADMIN,
                 emergencyStopObservers: emergencyStopObservers,
-                bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE
+                bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE,
+                recoveryWallet: recoveryWallet
             })
         );
+        require(address(messageQueue) == predictedQueue, "deployed queue differs from prediction");
 
         vm.startBroadcast(privateKey);
         MessageHandlerMock receiver = new MessageHandlerMock();
@@ -62,10 +108,26 @@ contract BeefyLocal is Script, Base {
         return (address(beefyClient), address(verifier), address(messageQueue), address(receiver));
     }
 
-    function _deployVerifier(bool isTest, bool isScript, uint256 chainId) internal override returns (IVerifier) {
+    function _envUint64(string memory key) internal view returns (uint64 value) {
+        uint256 raw = vm.envUint(key);
+        require(raw <= type(uint64).max, string.concat(key, " exceeds uint64"));
+        return uint64(raw);
+    }
+
+    function _envUint128(string memory key) internal view returns (uint128 value) {
+        uint256 raw = vm.envUint(key);
+        require(raw <= type(uint128).max, string.concat(key, " exceeds uint128"));
+        return uint128(raw);
+    }
+
+    function _deployVerifier(bool isTest, bool isScript, uint256 chainId, address messageQueueAddress)
+        internal
+        override
+        returns (IVerifier)
+    {
         if (isScript) {
-            return new VaraQueueRootVerifier(beefyClient);
+            return new VaraQueueRootVerifier(beefyClient, messageQueueAddress, chainId);
         }
-        return super._deployVerifier(isTest, isScript, chainId);
+        return super._deployVerifier(isTest, isScript, chainId, messageQueueAddress);
     }
 }

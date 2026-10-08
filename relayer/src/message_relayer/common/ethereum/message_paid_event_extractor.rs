@@ -1,8 +1,13 @@
 use crate::{
     common::{self, BASE_RETRY_DELAY},
     message_relayer::{
-        common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot},
-        eth_to_gear::storage::{Storage, UnprocessedBlocks},
+        common::{
+            ethereum::block_storage::{
+                finalized_block, replay_pending_handoffs, BlockCursor, JSONBlockStorage,
+            },
+            EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot,
+        },
+        eth_to_gear::storage::Storage,
     },
 };
 use ethereum_client::PollingEthApi;
@@ -10,13 +15,14 @@ use ethereum_common::SECONDS_PER_SLOT;
 use primitive_types::H160;
 use prometheus::IntCounter;
 use std::sync::Arc;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessagePaidEventExtractor {
     eth_api: PollingEthApi,
 
     storage: Arc<dyn Storage>,
+    discovery: Arc<JSONBlockStorage>,
 
     bridging_payment_address: H160,
 
@@ -46,10 +52,12 @@ impl MessagePaidEventExtractor {
         bridging_payment_address: H160,
         storage: Arc<dyn Storage>,
         genesis_time: u64,
+        discovery: Arc<JSONBlockStorage>,
     ) -> Self {
         Self {
             storage,
             eth_api,
+            discovery,
 
             bridging_payment_address,
 
@@ -59,10 +67,7 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub fn spawn(
-        self,
-        blocks: UnboundedReceiver<EthereumBlockNumber>,
-    ) -> UnboundedReceiver<TxHashWithSlot> {
+    pub fn spawn(self, blocks: Receiver<EthereumBlockNumber>) -> UnboundedReceiver<TxHashWithSlot> {
         let (sender, receiver) = unbounded_channel();
 
         tokio::task::spawn(self::task(self, blocks, sender));
@@ -72,7 +77,7 @@ impl MessagePaidEventExtractor {
 
     pub fn spawn_into(
         self,
-        blocks: UnboundedReceiver<EthereumBlockNumber>,
+        blocks: Receiver<EthereumBlockNumber>,
         sender: UnboundedSender<TxHashWithSlot>,
     ) {
         tokio::task::spawn(self::task(self, blocks, sender));
@@ -81,15 +86,25 @@ impl MessagePaidEventExtractor {
     async fn run_inner(
         &self,
         sender: &UnboundedSender<TxHashWithSlot>,
-        blocks: &mut UnboundedReceiver<EthereumBlockNumber>,
+        blocks: &mut Receiver<EthereumBlockNumber>,
         missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
-        while let Some(block) = missing_blocks.pop() {
+        replay_pending_handoffs(
+            &self.eth_api,
+            self.storage.as_ref(),
+            self.genesis_time,
+            sender,
+        )
+        .await?;
+        while let Some(&block) = missing_blocks.last() {
             self.process_block_events(block, sender).await?;
+            missing_blocks.pop();
         }
 
         while let Some(block) = blocks.recv().await {
+            missing_blocks.push(block);
             self.process_block_events(block, sender).await?;
+            missing_blocks.pop();
         }
 
         Ok(())
@@ -100,22 +115,36 @@ impl MessagePaidEventExtractor {
         block: EthereumBlockNumber,
         sender: &UnboundedSender<TxHashWithSlot>,
     ) -> anyhow::Result<()> {
-        let timestamp = self.eth_api.get_block(block.0).await?.header.timestamp;
-        let slot_number =
-            EthereumSlotNumber(timestamp.saturating_sub(self.genesis_time) / SECONDS_PER_SLOT);
-
-        let txs = self
+        let header = finalized_block(&self.eth_api, block.0).await?;
+        let cursor = BlockCursor {
+            number: block.0,
+            hash: header.header.hash.0.into(),
+        };
+        if !self.discovery.is_pending(cursor).await? {
+            return Ok(());
+        }
+        let timestamp = header
+            .header
+            .timestamp
+            .checked_sub(self.genesis_time)
+            .ok_or_else(|| {
+                anyhow::anyhow!("HOLD: Ethereum block timestamp precedes Beacon genesis")
+            })?;
+        let slot_number = EthereumSlotNumber(timestamp / SECONDS_PER_SLOT);
+        let transactions = self
             .eth_api
-            .fetch_fee_paid_events_txs(self.bridging_payment_address, block.0)
+            .fetch_fee_paid_events_txs_at(self.bridging_payment_address, block.0, cursor.hash)
             .await?;
-        self.storage
-            .block_storage()
-            .add_block(slot_number, block, txs.iter().cloned())
-            .await;
-        self.storage.save_blocks().await?;
-
+        super::block_storage::store_extracted_transactions(
+            self.storage.as_ref(),
+            &self.discovery,
+            slot_number,
+            cursor,
+            transactions.iter().copied(),
+        )
+        .await?;
         let mut total = 0;
-        for tx_hash in txs {
+        for tx_hash in transactions {
             if !self
                 .storage
                 .block_storage()
@@ -124,20 +153,17 @@ impl MessagePaidEventExtractor {
             {
                 continue;
             }
-
             total += 1;
             log::info!(
                 "Found fee paid event: tx_hash={}, slot_number={}",
                 hex::encode(tx_hash.0),
-                slot_number.0,
+                slot_number.0
             );
-
             sender.send(TxHashWithSlot {
                 slot_number,
                 tx_hash,
             })?;
         }
-
         self.metrics.total_paid_messages_found.inc_by(total);
         Ok(())
     }
@@ -145,24 +171,10 @@ impl MessagePaidEventExtractor {
 
 async fn task(
     mut this: MessagePaidEventExtractor,
-    mut blocks: UnboundedReceiver<EthereumBlockNumber>,
+    mut blocks: Receiver<EthereumBlockNumber>,
     sender: UnboundedSender<TxHashWithSlot>,
 ) {
-    let UnprocessedBlocks {
-        last_block,
-        mut unprocessed,
-    } = this.storage.block_storage().unprocessed_blocks().await;
-
-    if let Some(last_block) = last_block {
-        let Some(latest_finalized_block) = blocks.recv().await else {
-            log::error!("Failed to get latest finalized block: channel closed");
-            return;
-        };
-
-        for block in last_block.0 + 1..=latest_finalized_block.0 {
-            unprocessed.push(EthereumBlockNumber(block));
-        }
-    }
+    let mut unprocessed = Vec::new();
 
     let mut attempts: u32 = 0;
     loop {

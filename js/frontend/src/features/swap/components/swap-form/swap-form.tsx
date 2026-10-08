@@ -37,6 +37,7 @@ type Props = {
 function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsEstimate }: Props) {
   const { NETWORK_PRESET } = useNetworkType();
   const { network, token, destinationToken } = useBridgeContext();
+  const inboundHold = !network.isVara ? NETWORK_PRESET.INBOUND_PROOF_PROFILE.hold : undefined;
 
   const { api } = useApi();
 
@@ -103,6 +104,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const totalFees = getTotalFees();
 
   const openTransactionModal = (values: FormattedValues) => {
+    if (inboundHold) throw new Error(inboundHold);
     definedAssert(token, 'Token');
     definedAssert(destinationToken, 'Destination token');
     definedAssert(totalFees, 'Transaction estimation');
@@ -145,12 +147,14 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   };
 
   const isEnoughBalance = () => {
+    if (inboundHold) return false;
     if (!api || !token || isUndefined(bridgingFee) || !txsEstimate.data || !accountBalance.data) return false;
 
     return accountBalance.data > txsEstimate.data.requiredBalance;
   };
 
   const getButtonText = () => {
+    if (inboundHold) return 'HOLD: inbound deployment not approved';
     if (!txsEstimate.data) return 'Fill the form';
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 

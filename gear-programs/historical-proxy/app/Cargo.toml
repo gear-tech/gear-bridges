@@ -16,10 +16,18 @@ eth-events-common.workspace = true
 eth-events-deneb = { workspace = true, features = ["wasm-binary"] }
 eth-events-deneb-client.workspace = true
 eth-events-electra-client.workspace = true
+eth-events-electra = { workspace = true, features = ["wasm-binary"] }
+ruzstd.workspace = true
 sails-rs = { workspace = true, features = ["gtest", "gclient", "debug"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 historical-proxy = { workspace = true, features = ["wasm-binary"] }
 historical-proxy-client.workspace = true
+alloy.workspace = true
+alloy-rlp.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+checkpoint-light-client-client.workspace = true
+ethereum-common = { workspace = true, features = ["std"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "none"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }

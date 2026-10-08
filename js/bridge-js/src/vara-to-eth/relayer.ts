@@ -1,10 +1,13 @@
-import { Account, PublicClient, WalletClient, bytesToHex } from 'viem';
+import { Account, PublicClient, WalletClient } from 'viem';
 import { GearApi, HexString } from '@gear-js/api';
+import { hexToBn } from '@polkadot/util';
 
-import { getMessageQueueClient } from '../ethereum/index.js';
+import { getMessageQueueClient, getProcessMessageArgs } from '../ethereum/index.js';
 import { GearClient } from '../vara/index.js';
+import { VaraMessage, Proof } from '../vara/types.js';
 import { messageHash } from './util.js';
-import { StatusCb } from '../util.js';
+import { StatusCb, withOriginalDeadline } from '../util.js';
+import type { OutboundEffect } from '../ethereum/message-queue.js';
 
 /**
  * Parameters for relaying a Vara network message to Ethereum.
@@ -40,6 +43,7 @@ export type RelayVaraToEthParams = {
    * Address of the Ethereum message queue contract
    */
   messageQueueAddress: `0x${string}`;
+  expectedEffect: OutboundEffect;
   /**
    * If true, waits for MerkleRoot to appear on MessageQueue contract instead of throwing error
    */
@@ -48,150 +52,114 @@ export type RelayVaraToEthParams = {
    * Optional callback function to track relay operation status
    */
   statusCb?: StatusCb;
+  deadline?: number;
 };
 
-/**
- * Relays a message from the Vara network to Ethereum through the bridge infrastructure.
- *
- * This function performs the complete relay process:
- * 1. Fetches the queued message from the Vara network using the provided nonce and block
- * 2. Retrieves or waits for the merkle root to appear in the Ethereum message queue contract
- * 3. Generates a merkle proof for the message
- * 4. Processes the message through the Ethereum message queue contract
- *
- * @param params - Configuration parameters for the relay operation
- * @param params.nonce - The message nonce to relay (bigint or hex string, little endian encoded if hex)
- * @param params.blockNumber - The Vara block number containing the message sent by EthBridge builtin
- * @param params.ethereumPublicClient - Viem public client for reading Ethereum blockchain state
- * @param params.ethereumWalletClient - Viem wallet client for sending Ethereum transactions
- * @param params.ethereumAccount - Ethereum account to use for transaction signing and sending
- * @param params.gearApi - Gear API instance for interacting with the Vara network
- * @param params.messageQueueAddress - Address of the Ethereum message queue contract
- * @param params.wait - If true, waits for MerkleRoot to appear on MessageQueue contract instead of throwing error
- * @param params.statusCb - Optional callback function to track relay operation status
- *
- * @returns Promise resolving to message processing result with transaction details and status
- *
- * @throws {Error} When message with specified nonce is not found in the block
- * @throws {Error} When wallet client is not provided for transaction signing
- * @throws {Error} When merkle proof generation fails
- * @throws {Error} When Ethereum transaction submission fails
- *
- * @example
- * ```typescript
- * const result = await relayVaraToEth({
- *   nonce: 123n,
- *   blockNumber: 456789n,
- *   ethereumPublicClient: publicClient,
- *   ethereumWalletClient: walletClient,
- *   ethereumAccount: account,
- *   gearApi: gearApi,
- *   messageQueueAddress: '0x123...',
- *   wait: true,
- *   statusCb: (status, details) => console.log(status, details)
- * });
- *
- * if (result.success) {
- *   console.log('Message relayed successfully:', result.transactionHash);
- * } else {
- *   console.error('Relay failed:', result.error);
- * }
- * ```
- */
-export async function relayVaraToEth(params: RelayVaraToEthParams) {
-  const {
-    ethereumPublicClient,
-    ethereumWalletClient,
-    ethereumAccount,
-    gearApi,
-    messageQueueAddress,
-    wait = false,
-    statusCb = () => {},
-  } = params;
+export type PrepareVaraToEthParams = Omit<RelayVaraToEthParams, 'ethereumWalletClient' | 'ethereumAccount' | 'expectedEffect'>;
 
-  let nonce = params.nonce;
-  let blockNumber = params.blockNumber;
+export type PreparedVaraToEthRelay = {
+  blockNumber: bigint;
+  message: VaraMessage;
+  proof: Proof;
+  args: ReturnType<typeof getProcessMessageArgs>;
+};
+
+/** Discover a proof against the actual stored root, regardless of GRANDPA handovers. */
+export function prepareVaraToEthRelay(params: PrepareVaraToEthParams): Promise<PreparedVaraToEthRelay> {
+  const deadline = params.deadline ?? Date.now() + 44 * 60 * 1000;
+  return withOriginalDeadline(deadline, () => prepareOriginalVaraToEthRelay({ ...params, deadline }));
+}
+
+async function prepareOriginalVaraToEthRelay(params: PrepareVaraToEthParams & { deadline: number }): Promise<PreparedVaraToEthRelay> {
+  const { gearApi, ethereumPublicClient, messageQueueAddress, blockNumber, wait = false, statusCb = () => {} } = params;
+  const deadline = params.deadline;
+  const nonce = typeof params.nonce === 'string'
+    ? (() => {
+        if (!/^0x[0-9a-fA-F]{64}$/.test(params.nonce)) throw new Error('Hex nonce must contain exactly 32 little-endian bytes');
+        return BigInt(hexToBn(params.nonce, { isLe: true }).toString());
+      })()
+    : params.nonce;
+  if (nonce < 0n || nonce >= 1n << 256n) throw new Error('Nonce is outside the uint256 range');
+  if (blockNumber < 0n || blockNumber > 0xffffffffn) throw new Error('Source block number is outside the uint32 range');
+  const originalSourceFinalizedHash = await gearApi.blocks.getFinalizedHead();
+  const originalSourceFinalized = await gearApi.rpc.chain.getHeader(originalSourceFinalizedHash);
+  if (blockNumber > originalSourceFinalized.number.toBigInt()) throw new Error('Original queued message block is not finalized');
   const gearClient = new GearClient(gearApi);
-  const msgQClient = getMessageQueueClient(
-    messageQueueAddress,
-    ethereumPublicClient,
-    ethereumWalletClient,
-    ethereumAccount,
-  );
-
-  let blockHash = (await gearApi.blocks.getBlockHash(Number(blockNumber))).toHex();
-
-  if (typeof nonce === 'string') {
-    nonce = BigInt(nonce);
-  }
-
-  statusCb(`Fetching message from block`, { nonce: nonce.toString(), blockHash });
-  const msg = await gearClient.findMessageQueuedEvent(Number(blockNumber), nonce);
-
-  if (!msg) {
-    throw new Error(`Message with nonce ${nonce} not found in block ${blockNumber}`);
-  }
-
-  statusCb(`Message found`, {
-    nonce: msg.nonce.toString(),
-    source: bytesToHex(msg.source),
-    destination: bytesToHex(msg.destination),
-    payload: bytesToHex(msg.payload),
-  });
-
-  const authoritySetId = await gearClient.getAuthoritySetIdByBlockNumber(blockNumber);
-  statusCb(`Retrieved authority set ID`, {
-    blockNumber: blockNumber.toString(),
-    authoritySetId: authoritySetId.toString(),
-  });
-
-  statusCb(`Fetching merkle root`, { blockNumber: blockNumber.toString() });
-  let merkleRoot = await msgQClient.getMerkleRoot(blockNumber);
-
-  if (!merkleRoot) {
-    statusCb(`Merkle root not found. Looking for suitable submitted merkle root`);
-    const gearBlockTimestamp = (await gearApi.blocks.getBlockTimestamp(blockHash)).toNumber();
-    const ethereumHead = await ethereumPublicClient.getBlock();
-    const ethereumHeadTimestamp = Number(ethereumHead.timestamp);
-
-    const diff = ethereumHeadTimestamp - gearBlockTimestamp / 1000;
-
-    const [from, to] = [ethereumHead.number - BigInt(Math.floor(diff / 12)), ethereumHead.number];
-
-    statusCb(`Requesting MerkleRoot logs`, { fromBlock: from.toString(), toBlock: to.toString() });
-
-    const merkleRootFromLogs = wait
-      ? await msgQClient.waitForMerkleRoot(blockNumber, from, statusCb)
-      : await msgQClient.findMerkleRootInRangeOfBlocks(from, to, blockNumber);
-
-    if (merkleRootFromLogs.blockNumber === blockNumber) {
-      merkleRoot = merkleRootFromLogs.merkleRoot;
-      statusCb(`Merkle root received`, { blockNumber: blockNumber.toString(), merkleRoot });
-    } else {
-      const authoritySetIdForClosestBlock = await gearClient.getAuthoritySetIdByBlockNumber(
-        merkleRootFromLogs.blockNumber,
-      );
-
-      statusCb(`Merkle root received for a different block`, {
-        blockNumber: merkleRootFromLogs.blockNumber.toString(),
-        merkleRoot: merkleRootFromLogs.merkleRoot,
-      });
-
-      if (authoritySetIdForClosestBlock === authoritySetId) {
-        merkleRoot = merkleRootFromLogs.merkleRoot;
-        blockNumber = merkleRootFromLogs.blockNumber;
-        blockHash = (await gearApi.blocks.getBlockHash(Number(blockNumber))).toHex();
-      } else {
-        throw new Error(
-          `Authority set ID mismatch. Required: ${authoritySetId}, Received: ${authoritySetIdForClosestBlock}`,
-        );
+  const queue = getMessageQueueClient(messageQueueAddress, ethereumPublicClient);
+  const originalHash = await gearApi.blocks.getBlockHash(blockNumber);
+  const message = await gearClient.findMessageQueuedEvent(Number(blockNumber), nonce);
+  if (!message) throw new Error('Message with nonce ' + nonce + ' is unavailable in original finalized block ' + blockNumber);
+  const hash = messageHash(message);
+  let scanFrom = 0n;
+  const candidates = new Map<bigint, HexString>();
+  const failures = new Map<bigint, string>();
+  for (;;) {
+    if (Date.now() >= deadline) throw new Error('Original relay deadline expired during stored-root discovery');
+    const sourceFinalizedHash = await gearApi.blocks.getFinalizedHead();
+    const sourceFinalized = await gearApi.rpc.chain.getHeader(sourceFinalizedHash);
+    if (sourceFinalized.number.toBigInt() < originalSourceFinalized.number.toBigInt() ||
+        !(await gearApi.blocks.getBlockHash(originalSourceFinalized.number.toBigInt())).eq(originalSourceFinalizedHash)) {
+      throw new Error('Original canonical finalized source history changed');
+    }
+    const finalized = await ethereumPublicClient.getBlock({ blockTag: 'finalized' });
+    const tryRoot = async (height: bigint, root: HexString): Promise<PreparedVaraToEthRelay | null> => {
+      if (height < blockNumber || height > sourceFinalized.number.toBigInt()) return null;
+      if (await queue.getMerkleRoot(height, finalized.number) !== root) return null;
+      let proof: Proof;
+      try {
+        proof = await gearClient.fetchMerkleProof(Number(height), hash);
+      } catch (error) {
+        failures.set(height, error instanceof Error ? error.message : 'Historical proof unavailable');
+        return null;
+      }
+      if (proof.root.toLowerCase() !== root.toLowerCase() || proof.numLeaves <= 0n ||
+          proof.leafIndex < 0n || proof.leafIndex >= proof.numLeaves) {
+        failures.set(height, 'Historical inclusion proof does not match the selected stored root');
+        return null;
+      }
+      if (!(await gearApi.blocks.getBlockHash(blockNumber)).eq(originalHash) ||
+          !(await gearApi.blocks.getBlockHash(sourceFinalized.number.toBigInt())).eq(sourceFinalizedHash) ||
+          (await ethereumPublicClient.getBlock({ blockNumber: finalized.number })).hash !== finalized.hash) {
+        throw new Error('Canonical finalized source or queue history changed during proof preparation');
+      }
+      statusCb('Historical message proof matched stored root', { blockNumber: height.toString(), merkleRoot: root, msgHash: hash });
+      return { blockNumber: height, message, proof, args: getProcessMessageArgs(height, message, proof) };
+    };
+    const exact = await queue.getMerkleRoot(blockNumber, finalized.number);
+    if (exact) {
+      const prepared = await tryRoot(blockNumber, exact);
+      if (prepared) return prepared;
+    }
+    for (; scanFrom <= finalized.number; scanFrom += 2000n) {
+      const end = scanFrom + 1999n < finalized.number ? scanFrom + 1999n : finalized.number;
+      const logs = await queue.getMerkleRootLogsInRange(scanFrom, end);
+      for (const log of logs) {
+        if (!log.removed && log.args.blockNumber >= blockNumber) candidates.set(log.args.blockNumber, log.args.merkleRoot);
+      }
+      if (end === finalized.number) {
+        scanFrom = end + 1n;
+        break;
       }
     }
+    const heights = [...candidates.keys()].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    for (const height of heights) {
+      if (height === blockNumber && exact) continue;
+      const prepared = await tryRoot(height, candidates.get(height)!);
+      if (prepared) return prepared;
+    }
+    if (!wait) {
+      throw new Error('No authenticated stored-root claim is available for original nonce ' + nonce +
+        (failures.size ? ': ' + [...failures.entries()].map(([height, reason]) => height + ': ' + reason).join('; ') : ''));
+    }
+    statusCb('Waiting for a finalized stored root with an available original-message inclusion proof');
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, Math.min(ethereumPublicClient.pollingInterval, deadline - Date.now()))));
   }
+}
 
-  const msgHash = messageHash(msg);
-  statusCb(`Fetching merkle proof`, { blockNumber: blockNumber.toString(), msgHash });
-  const merkleProof = await gearClient.fetchMerkleProof(Number(blockNumber), msgHash);
-
-  return msgQClient.processMessage(blockNumber, msg, merkleProof, statusCb);
+export async function relayVaraToEth(params: RelayVaraToEthParams) {
+  const deadline = params.deadline ?? Date.now() + 44 * 60 * 1000;
+  const prepared = await prepareVaraToEthRelay({ ...params, deadline });
+  const queue = getMessageQueueClient(params.messageQueueAddress, params.ethereumPublicClient,
+    params.ethereumWalletClient, params.ethereumAccount);
+  return queue.processMessage(prepared.blockNumber, prepared.message, prepared.proof, params.expectedEffect, params.statusCb, deadline);
 }

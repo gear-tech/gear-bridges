@@ -58,4 +58,8 @@ pub enum Error {
     Internal(String),
     /// Invalid or unexpected reply received from a VFT program.
     InvalidReply,
+    NativeSettlementPending,
+    NativeSettlementReturned,
+    ReceiptLeaseActive,
+    InvalidReconciliation,
 }

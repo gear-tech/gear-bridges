@@ -17,12 +17,13 @@ import { config } from './config.js';
 import { queryVftManagerPairs } from './rpc-queries.js';
 import { Network, Pair } from '../model/index.js';
 import { createPairHash } from 'gear-bridge-common';
-
+import { requireFinalizedBatch } from './finality.js';
 const state = new BatchState();
 
 let isFirstRun = true;
 
 const handler = async (ctx: ProcessorContext) => {
+  await requireFinalizedBatch(ctx);
   await state.new(ctx);
 
   if (ctx.isHead && isFirstRun) {

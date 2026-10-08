@@ -41,6 +41,7 @@ export class CheckpointClient {
       CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
       ReplayBack: { finalized_header: 'u64', last_header: 'u64' },
       Order: { _enum: ['Direct', 'Reverse'] },
+      Network: { _enum: ['Mainnet', 'Sepolia', 'Holesky', 'Hoodi'] },
       StateData: { checkpoints: 'Vec<(u64, H256)>', replay_back: 'Option<ReplayBack>' },
     };
 
@@ -136,6 +137,11 @@ export class ServiceSyncUpdate {
 
 export class ServiceState {
   constructor(private _program: CheckpointClient) {}
+  public network(): QueryBuilder<'Mainnet' | 'Sepolia' | 'Holesky' | 'Hoodi'> {
+    return new QueryBuilder(this._program.api, this._program.registry, this._program.programId,
+      'ServiceState', 'Network', null, null, 'Network');
+  }
+
 
   public getLatestSlot(): Promise<StateData> {
     const query = new QueryBuilder<StateData>(

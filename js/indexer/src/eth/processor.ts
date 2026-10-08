@@ -18,8 +18,11 @@ export const processor = new EvmBatchProcessor()
   .setRpcEndpoint({
     url: config.rpcUrl,
     rateLimit: config.rateLimit,
+    requestTimeout: 15_000,
+    retryAttempts: 2,
   })
-  .setFinalityConfirmation(75)
+  // Only an ingestion/scheduling buffer; the handler authenticates finalized hashes.
+  .setFinalityConfirmation(0)
   .setFields({
     log: {
       transactionHash: true,

@@ -1,13 +1,16 @@
 use crate::{
-    message_relayer::common::{
-        self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
+    message_relayer::{
+        common::{
+            self, web_request::Message, AuthoritySetId, GearBlock, GearBlockNumber, MessageInBlock,
+        },
+        gear_to_eth::storage::Storage,
     },
     rpc,
 };
-use anyhow::Result as AnyResult;
+use anyhow::{ensure, Result as AnyResult};
 use ethereum_common::U256;
 use gear_common::api_provider::ApiProviderConnection;
-use std::{cmp::Ordering, ops::Deref};
+use std::{cmp::Ordering, ops::Deref, sync::Arc};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, WeakUnboundedSender},
     task,
@@ -24,6 +27,7 @@ pub struct MessageDataExtractor {
     sender: WeakUnboundedSender<MessageInBlock>,
     receiver: UnboundedReceiver<Message>,
     blocks: BlockDataList,
+    storage: Arc<dyn Storage>,
 }
 
 impl MessageDataExtractor {
@@ -31,12 +35,14 @@ impl MessageDataExtractor {
         api_provider: ApiProviderConnection,
         sender: WeakUnboundedSender<MessageInBlock>,
         receiver: UnboundedReceiver<Message>,
+        storage: Arc<dyn Storage>,
     ) -> Self {
         Self {
             api_provider,
             sender,
             receiver,
             blocks: BlockDataList::new(1_000),
+            storage,
         }
     }
 
@@ -49,29 +55,27 @@ impl MessageDataExtractor {
     }
 
     async fn retreive_block_data(&mut self, block_number: u32) -> AnyResult<BlockData> {
-        let (header, events, justification, _block_hash, authority_set_id) = rpc::retry_gear(
+        let (header, events, authority_set_id) = rpc::retry_gear(
             &mut self.api_provider,
             "message data block fetch",
             move |gear_api| async move {
+                let finalized = gear_api.latest_finalized_block().await?;
+                ensure!(
+                    block_number <= gear_api.block_hash_to_number(finalized).await?,
+                    "requested Gear message block has not finalized"
+                );
                 let block_hash = gear_api.block_number_to_hash(block_number).await?;
                 let block = gear_api.get_block_at(block_hash).await?;
                 let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
                 let header = block.header().clone();
                 let events = gear_api.get_events_at(Some(block_hash)).await?;
-                let justification = gear_api.get_justification(block_hash).await?;
-                Ok::<_, anyhow::Error>((
-                    header,
-                    events,
-                    justification,
-                    block_hash,
-                    authority_set_id,
-                ))
+                Ok::<_, anyhow::Error>((header, events, authority_set_id))
             },
         )
         .await?;
 
         let block_data = (
-            GearBlock::new(header, events, justification),
+            GearBlock::new(header, events, None),
             AuthoritySetId(authority_set_id),
         );
         self.blocks.push(block_data.clone());
@@ -145,15 +149,19 @@ async fn run_inner(
 
             log::trace!("Processing message in block: {message_queued:?}");
 
-            if sender
-                .send(MessageInBlock {
-                    message: message_queued,
-                    block: GearBlockNumber(block.number()),
-                    block_hash: block_hash.0.into(),
-                    authority_set_id,
-                })
-                .is_err()
-            {
+            let message_in_block = MessageInBlock {
+                message: message_queued,
+                block: GearBlockNumber(block.number()),
+                block_hash: block_hash.0.into(),
+                authority_set_id,
+            };
+            if !this.storage.message_is_eligible(&message_in_block).await? {
+                log::info!(
+                    "Deferring operator message until its durable queued/fee evidence is available"
+                );
+                break;
+            }
+            if sender.send(message_in_block).is_err() {
                 log::info!("Sender channel closed.");
                 return Ok(());
             }

@@ -1,6 +1,7 @@
 use ark_bls12_381::{Bls12_381, G1Affine, G2Affine};
 use ark_ec::{pairing::Pairing, AffineRepr};
 use ark_ff::{Field, Zero};
+use ark_serialize::Valid;
 use checkpoint_light_client_io::{ArkScale, G1, G2};
 use core::ops::Neg;
 use ethereum_common::{
@@ -21,9 +22,13 @@ pub async fn verify_sync_committee_signature(
     signature: &G2,
     signature_slot: u64,
 ) -> bool {
+    let signature = G2Affine::from(*signature);
+    if signature.check().is_err() {
+        return false;
+    }
     let domain = signing_root::compute_domain(
         DOMAIN_SYNC_COMMITTEE,
-        network.fork_version(signature_slot),
+        network.fork_version(signature_slot.saturating_sub(1)),
         network.genesis_validators_root(),
     );
     let signing_root = signing_root::compute(attested_header.tree_hash_root(), domain);
@@ -67,7 +72,6 @@ pub async fn verify_sync_committee_signature(
     };
 
     let pub_key: G1Affine = From::from(pub_key_aggregated.0);
-    let signature: G2Affine = From::from(*signature);
     let generator_g1_negative = G1Affine::generator().neg();
 
     // pairing

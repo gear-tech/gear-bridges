@@ -6,6 +6,9 @@ use std::{
 };
 
 fn main() {
+    // LTO removes floating-point helpers rejected by Gear's WASM validator in dev builds.
+    env::set_var("CARGO_PROFILE_DEV_LTO", "fat");
+    env::set_var("CARGO_PROFILE_DEV_CODEGEN_UNITS", "1");
     sails_rs::build_wasm();
 
     if env::var("__GEAR_WASM_BUILDER_NO_BUILD").is_ok() {

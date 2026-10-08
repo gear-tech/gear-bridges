@@ -29,11 +29,16 @@ use sails_rs::{
 };
 use std::io::Read;
 
+mod gtest;
+
 const SEPOLIA_FINALITY_UPDATE_5_263_072: &[u8; 4_941] =
     include_bytes!("./chain-data/sepolia-finality-update-5_263_072.json");
 const SEPOLIA_UPDATE_640: &[u8; 57_202] = include_bytes!("./chain-data/sepolia-update-640.json");
 const SEPOLIA_BOOTSTRAP_640: &[u8; 54_328] =
     include_bytes!("./chain-data/sepolia-bootstrap-640.json");
+
+const HOODI_UPDATE_489: &[u8; 57_383] = include_bytes!("./chain-data/hoodi-update-489.json");
+const HOODI_BOOTSTRAP_489: &[u8; 54_375] = include_bytes!("./chain-data/hoodi-bootstrap-489.json");
 
 const HOLESKY_UPDATE_368: &[u8; 30_468] =
     include_bytes!("./chain-data/holesky-update-368.json.zst");
@@ -70,14 +75,10 @@ fn get_bootstrap_and_update() -> (Bootstrap, Update) {
 }
 
 fn construct_init(network: Network, update: Update, bootstrap: Bootstrap) -> Init {
-    let checkpoint_update = update.finalized_header.tree_hash_root();
-    let checkpoint_bootstrap = bootstrap.header.tree_hash_root();
+    assert!(bootstrap.header.slot <= update.finalized_header.slot);
     assert_eq!(
-        checkpoint_update,
-        checkpoint_bootstrap,
-        "checkpoint_update = {}, checkpoint_bootstrap = {}",
-        hex::encode(checkpoint_update),
-        hex::encode(checkpoint_bootstrap)
+        ethereum_common::utils::calculate_period(bootstrap.header.slot),
+        ethereum_common::utils::calculate_period(update.finalized_header.slot)
     );
 
     let sync_aggregate_encoded = update.sync_aggregate.encode();
@@ -87,6 +88,8 @@ fn construct_init(network: Network, update: Update, bootstrap: Bootstrap) -> Ini
 
     Init {
         network,
+        trusted_bootstrap_root: bootstrap.header.tree_hash_root(),
+        bootstrap_header: bootstrap.header,
         sync_committee_current_pub_keys: pub_keys,
         sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
@@ -126,6 +129,40 @@ async fn calculate_gas<T: ActionIo>(
         .calculate_handle_gas(Some(origin.0.into()), program_id, payload, 0, true)
         .await?
         .min_limit)
+}
+
+#[tokio::test]
+async fn init_hoodi_with_distinct_epoch_checkpoint_and_signed_update() -> Result<()> {
+    let BootstrapResponse { data: bootstrap } =
+        serde_json::from_slice(HOODI_BOOTSTRAP_489).unwrap();
+    let mut updates: Vec<UpdateData> = serde_json::from_slice(HOODI_UPDATE_489).unwrap();
+    let update = updates.pop().unwrap().data;
+    assert!(updates.is_empty());
+    assert_ne!(
+        bootstrap.header.tree_hash_root(),
+        update.finalized_header.tree_hash_root()
+    );
+
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "checkpoint-light-client-hoodi",
+        &[WASM_BINARY],
+    )
+    .await;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
+        GClientRemoting::new(api.clone()),
+    );
+    let init = construct_init(Network::Hoodi, update, bootstrap);
+    let gas_limit = calculate_upload_gas(&api, conn.code_ids[0], &init).await?;
+    factory
+        .init(init)
+        .with_gas_limit(gas_limit)
+        .send_recv(conn.code_ids[0], conn.salt)
+        .await
+        .unwrap();
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -316,6 +353,7 @@ async fn replay_back_and_updating() -> Result<()> {
                 .rev()
                 .skip(size_batch)
                 .map(|r| r.data.header.message.clone())
+                .rev()
                 .collect(),
         )
         .send_recv(program_id)
@@ -338,6 +376,7 @@ async fn replay_back_and_updating() -> Result<()> {
                 .rev()
                 .take(size_batch)
                 .map(|r| r.data.header.message.clone())
+                .rev()
                 .collect(),
         );
 
@@ -370,6 +409,7 @@ async fn replay_back_and_updating() -> Result<()> {
                 .rev()
                 .take(size_batch)
                 .map(|r| r.data.header.message.clone())
+                .rev()
                 .collect(),
         )
         .send_recv(program_id)
@@ -387,6 +427,7 @@ async fn replay_back_and_updating() -> Result<()> {
         .rev()
         .skip(size_batch)
         .map(|r| r.data.header.message.clone())
+        .rev()
         .collect();
     let gas_limit = calculate_gas::<replay_back_io::Process>(&api, program_id, &headers).await?;
     println!("replay_back_io::Process gas_limit = {gas_limit}");

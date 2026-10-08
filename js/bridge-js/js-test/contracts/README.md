@@ -1,168 +1,42 @@
 # MessageHandler Contract
 
-This directory contains the MessageHandler smart contract and deployment scripts for the Gear Bridges project.
+This test application uses the retained bridge queue and a paired Ping program. It has no token, custody or governance role.
 
-## Overview
+## Contract bindings
 
-The `MessageHandler` contract implements the `IMessageHandler` interface and provides functionality to handle messages from the bridge system.
+The constructor is `MessageHandler(address queue, bytes32 expectedVaraSource, address ethereumSender)`. All three identities are nonzero and immutable. `expectedVaraSource` is the predicted Ping program ID; `ethereumSender` is the authorized application sender.
 
-### Contract Features
-- Implements `IMessageHandler` interface
-- Emits `MessageHandled` events for tracking
-- Simple message handling with source tracking
+- `sendMessage(bytes32 applicationId, bytes payload)` is nonpayable and accepts only `ethereumSender`. IDs must be nonzero, payloads may contain 0–1024 arbitrary bytes, and a sent ID cannot be sent again. `MessageRequested` indexes the ID, sender and Ping destination.
+- `handleMessage(bytes32 source, bytes payload)` accepts only `queue` and the configured Ping source. The wire payload is the 32-byte application ID followed by 0–1024 raw bytes. A received ID cannot be delivered again, even through a different queue nonce. `MessageHandled` indexes the source and application ID and contains the exact suffix bytes.
+- `received(applicationId)` and `payloadOf(applicationId)` expose persisted delivery. Sent and received IDs have separate replay namespaces.
 
-## Prerequisites
+Errors are `NotQueue`, `WrongSource`, `NotSender`, `InvalidPayload`, `AlreadySent(bytes32)` and `AlreadyReceived(bytes32)`. Invalid calls revert before delivery effects.
 
-Make sure you have the following installed:
-- [Foundry](https://book.getfoundry.sh/getting-started/installation)
-- Node.js and npm/yarn (for the broader project)
+The existing `script/Deploy.s.sol:Deploy` now requires explicit `MESSAGE_QUEUE`, `EXPECTED_VARA_SOURCE` and `ETHEREUM_SENDER` constructor inputs. It prints the deployed address and does not claim to create deployment-manifest files. The retained Hoodi milestone uses its existing admission wrapper and private signed-intent journal instead of this standalone broadcast script.
 
-## Setup
+## Paired Ping ABI
 
-1. Install Foundry dependencies:
-```shell
-forge install
+Ping initialization takes the historical proxy, Ethereum emitter, Ethereum sender, Ethereum receiver and immutable `BridgeConfig`. The emitter and receiver are this MessageHandler contract. The initialization sender becomes Ping's owner. Configuration supplies the authenticated builtin, transport fee, request gas, reply deposit and timeout; initialize and receipt calls attach zero value.
+
+`Ping/SubmitReceipt(slot: u64, transaction_index: u64, receipt_rlp: Vec<u8>)` authenticates the historical proxy, decodes the entire successful receipt, and requires exactly one correctly bound `MessageRequested`. Wrong sender/destination, malformed matching logs, ambiguous deliveries and receipt/application-ID replay return a typed error without accepting a delivery. `Received` and `PayloadOf` expose the original exact payload.
+
+`Ping/SendMessage(application_id, payload)` requires the owner and exact configured transport fee. A fee mismatch produces a pre-effect runtime error reply and rolls back attached value. Ping retains the original pending request and builtin/reply identities; its reply hook accepts only an exact `EthMessageQueued` response from that builtin. `Outbound` returns `Pending` or `Queued`. Queue admission does not prove Ethereum application completion. An unresolved or failed dispatch remains reserved; reconcile the original instead of sending another application ID as a repair.
+
+`js/bridge-js/example/lib.ts` contains the generated registry, an exact full-route reply decoder and read queries supporting `.atBlock(finalizedHash).call()`. Its constructor helper prepares an unsigned upload using a supplied 32-byte salt and supplied gas limit, attaches zero value, and checks `generateProgramId(generateCodeHash(code), salt)` against the upload's IDs. It returns `PreparedPingUpload`; the caller journals and finalizes the original deployment. There is no random-salt or default constructor.
+
+## Offline qualification
+
+Run from the bridge repository root with its pinned dependencies:
+
+```sh
+cargo build --locked -p ping --release
+cargo test --locked --release -p ping --test ping -- --test-threads=1
+cargo run --locked --release -p ping --bin ping-idl-gen
+forge build --root js/bridge-js/js-test/contracts --force --no-cache
+forge test --root js/bridge-js/js-test/contracts --match-contract MessageHandlerTest -vvv
+yarn workspace @gear-js/bridge typecheck
 ```
 
-2. Build the contracts:
-```shell
-forge build
-```
+The IDL generator uses native-only Sails IDL dependencies; the deployed WASM excludes them. Rust owner tests execute the compiled Ping WASM and exercise authenticated receipts, exact bytes and replay, native-value rollback, strict builtin replies and late-original-reply reconciliation. Their counterpart builtin is a test actor, not evidence of a live bridge builtin. Foundry tests execute this contract's queue/source/sender checks, payload boundaries and both replay namespaces.
 
-3. Run tests:
-```shell
-forge test
-```
-
-## Deployment
-
-### Quick Deployment
-
-The easiest way to deploy is using the provided deployment script:
-
-```shell
-# Make the script executable
-chmod +x deploy.sh
-
-# Deploy to local anvil (starts automatically)
-./deploy.sh
-
-# Deploy to Sepolia testnet
-export PRIVATE_KEY=your_private_key_here
-./deploy.sh sepolia PRIVATE_KEY
-
-# Deploy to Holesky testnet  
-export PRIVATE_KEY=your_private_key_here
-./deploy.sh holesky PRIVATE_KEY
-```
-
-### Manual Deployment
-
-You can also deploy manually using Forge:
-
-```shell
-# Deploy to local anvil
-forge script script/DeployMessageHandler.s.sol:DeployMessageHandler \
-    --fork-url http://localhost:8545 \
-    --broadcast \
-    --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-
-# Deploy to testnet
-forge script script/DeployMessageHandler.s.sol:DeployMessageHandler \
-    --rpc-url sepolia \
-    --broadcast \
-    --private-key $PRIVATE_KEY \
-    --verify
-```
-
-### Deployment Output
-
-After successful deployment, you'll find:
-- `deployed_address.txt` - Contains the contract address
-- `deployed_contract.json` - Contains deployment metadata including address, network, and timestamp
-
-## Environment Variables
-
-For testnet deployments, make sure to set:
-
-```shell
-export PRIVATE_KEY=your_private_key_here
-export SEPOLIA_RPC_URL=your_sepolia_rpc_url
-export HOLESKY_RPC_URL=your_holesky_rpc_url
-export ETHERSCAN_API_KEY=your_etherscan_api_key
-```
-
-## Contract Verification
-
-The deployment script automatically verifies contracts on testnets. For manual verification:
-
-```shell
-forge verify-contract \
-    --chain-id 11155111 \
-    --num-of-optimizations 200 \
-    --watch \
-    --constructor-args $(cast abi-encode "constructor()") \
-    --etherscan-api-key $ETHERSCAN_API_KEY \
-    --compiler-version v0.8.33+commit.64118f21 \
-    CONTRACT_ADDRESS \
-    src/MessageHandler.sol:MessageHandler
-```
-
-## Foundry Commands
-
-### Build
-```shell
-forge build
-```
-
-### Test
-```shell
-forge test
-```
-
-### Format
-```shell
-forge fmt
-```
-
-### Gas Snapshots
-```shell
-forge snapshot
-```
-
-### Local Development (Anvil)
-```shell
-anvil
-```
-
-### Cast Utilities
-```shell
-cast <subcommand>
-```
-
-### Help
-```shell
-forge --help
-anvil --help
-cast --help
-```
-
-## Project Structure
-
-```
-contracts/
-├── script/
-│   └── DeployMessageHandler.s.sol    # Deployment script
-├── src/
-│   └── MessageHandler.sol             # Main contract
-├── deploy.sh                          # Deployment helper script
-├── deployed_address.txt              # Contract address (generated)
-├── deployed_contract.json            # Deployment metadata (generated)
-├── foundry.toml                      # Foundry configuration
-└── README.md                         # This file
-```
-
-## Documentation
-
-- [Foundry Book](https://book.getfoundry.sh/)
-- [Gear Protocol Documentation](https://wiki.gear-tech.io/)
+These checks qualify candidate code only. App deployment and delivery on the retained lane remain gated by its named token preflight and warmup PASS, followed by finalized live application/probe/restart evidence.

@@ -520,65 +520,20 @@ async fn msg_tracker_state() -> Result<()> {
             .map_err(|e| anyhow!("{e:?}"))?;
     }
 
-    let details = vft_manager_client::TxDetails {
-        vara_token_id: Default::default(),
-        sender: Default::default(),
-        amount: Default::default(),
-        receiver: Default::default(),
-        token_supply: vft_manager_client::TokenSupply::Ethereum,
-    };
-    assert!(
+    assert_eq!(
         service
-            .insert_message_info(
-                Default::default(),
-                vft_manager_client::MessageStatus::SendingMessageToBridgeBuiltin,
-                details.clone(),
-            )
+            .reconcile_source_request(Default::default(), Default::default(), Default::default())
             .send_recv(vft_manager_id)
             .await
-            .is_err(),
-        "in-flight message tracker entries must be rejected"
+            .map_err(|e| anyhow!("{e:?}"))?,
+        Err(vft_manager_client::Error::InvalidReconciliation)
     );
-
-    service
-        .insert_message_info(
-            Default::default(),
-            vft_manager_client::MessageStatus::BridgeResponseReceived(None),
-            details,
-        )
-        .send_recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    let result = service
-        .request_briding_msg_tracker_state(1, 10)
+    assert!(service
+        .request_briding_msg_tracker_state(0, 10)
         .recv(vft_manager_id)
         .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(result.is_empty());
-
-    let result = service
-        .request_briding_msg_tracker_state(0, 2)
-        .recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(result.len(), 1);
-    assert_eq!(
-        result[0],
-        (
-            Default::default(),
-            vft_manager_client::MessageInfo {
-                status: vft_manager_client::MessageStatus::BridgeResponseReceived(None),
-                details: vft_manager_client::TxDetails {
-                    vara_token_id: Default::default(),
-                    sender: Default::default(),
-                    amount: Default::default(),
-                    receiver: Default::default(),
-                    token_supply: vft_manager_client::TokenSupply::Ethereum,
-                },
-            }
-        )
-    );
+        .map_err(|e| anyhow!("{e:?}"))?
+        .is_empty());
 
     Ok(())
 }

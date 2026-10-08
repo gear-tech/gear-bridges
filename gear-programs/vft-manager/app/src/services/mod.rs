@@ -12,7 +12,9 @@ mod error;
 mod token_mapping;
 
 use error::Error;
-use request_bridging::{MessageStatus, TxDetails};
+pub use request_bridging::{
+    handle_bridge_reply, handle_source_token_reply, SourceRequestEvidence, SourceRequestOutcome,
+};
 use token_mapping::TokenMap;
 
 mod request_bridging;
@@ -33,6 +35,17 @@ pub const EMERGENCY_STOP_DURATION_BLOCKS: u32 = 57_600;
 pub enum Order {
     Direct,
     Reverse,
+}
+
+/// The on-chain outcome of an Ethereum receipt key.
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiptStatus {
+    /// No reservation or retained processed record exists.
+    Unknown,
+    /// The receipt is currently being processed.
+    Reserved,
+    /// The receipt completed and remains in bounded history.
+    Processed,
 }
 
 /// VFT Manager service.
@@ -145,6 +158,19 @@ pub enum Event {
         /// Respective Vara token Id
         token: ActorId,
     },
+    ReceiptDepositSettled {
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        deposit_count: u64,
+        operation_id: H256,
+        eth_token_id: H160,
+        vara_token_id: ActorId,
+        sender: H160,
+        receiver: ActorId,
+        amount: U256,
+        native: bool,
+    },
 }
 
 static mut STATE: Option<State> = None;
@@ -188,6 +214,7 @@ pub struct State {
     historical_proxy_address: ActorId,
     /// Is the `vft-manager` currently on pause.
     is_paused: bool,
+    native_wrapper: Option<ActorId>,
     /// Address of the new vft-manager program which the current should upgrade to.
     /// It is required to handle cases when gas exhausted during execution of `upgrade` method.
     vft_manager_new: Option<ActorId>,
@@ -266,6 +293,45 @@ impl VftManager {
         });
     }
 
+    #[export]
+    pub fn receipt_deposits(
+        &self,
+        slot: u64,
+        transaction_index: u64,
+    ) -> Vec<submit_receipt::ReceiptDepositState> {
+        submit_receipt::receipt_deposits((slot, transaction_index))
+    }
+    /// Reconcile original native payout outcomes; this never starts an economic child.
+    #[export]
+    pub async fn reconcile_receipt(
+        &mut self,
+        slot: u64,
+        transaction_index: u64,
+    ) -> Result<ReceiptStatus, Error> {
+        submit_receipt::reconcile_receipt((slot, transaction_index)).await
+    }
+
+    /// Settlement policy is explicit, and only changes at a paused boundary.
+    #[export]
+    pub fn configure_native_wrapper(&mut self, wrapper: Option<ActorId>) {
+        self.ensure_admin();
+        assert!(self.state().is_paused, "Not paused");
+        if let Some(wrapper) = wrapper {
+            assert!(!wrapper.is_zero(), "Invalid native wrapper");
+            assert_eq!(
+                self.state().token_map.get_supply_type(&wrapper),
+                Ok(TokenSupply::Gear),
+                "Native wrapper must have Gear supply"
+            );
+        }
+        self.state_mut().native_wrapper = wrapper;
+    }
+
+    #[export]
+    pub fn native_wrapper(&self) -> Option<ActorId> {
+        self.state().native_wrapper
+    }
+
     /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
     #[export]
     pub fn map_vara_to_eth_address(
@@ -293,6 +359,11 @@ impl VftManager {
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
 
+        assert_ne!(
+            self.state().native_wrapper,
+            Some(vara_token_id),
+            "Clear native wrapper configuration first"
+        );
         let (eth_token_id, supply_type) = self.state_mut().token_map.remove(vara_token_id);
 
         self.emit_event(Event::TokenMappingRemoved {
@@ -725,6 +796,12 @@ impl VftManager {
         }
     }
 
+    /// Read the current status for one Ethereum receipt key.
+    #[export]
+    pub fn receipt_status(&self, slot: u64, transaction_index: u64) -> ReceiptStatus {
+        submit_receipt::receipt_status((slot, transaction_index))
+    }
+
     #[export]
     pub async fn insert_transactions(&mut self, data: Vec<(u64, u64)>) {
         self.ensure_admin();
@@ -761,6 +838,7 @@ impl VftManager {
     /// Returns false when the collection is populated.
     #[export]
     pub fn fill_transactions(&mut self) -> bool {
+        self.ensure_admin();
         #[cfg(feature = "mocks")]
         {
             submit_receipt::fill_transactions()
@@ -770,38 +848,23 @@ impl VftManager {
         panic!("Please rebuild with enabled `mocks` feature")
     }
 
-    /// Inserts recoverable message state during a paused program migration.
-    /// An ambiguous bridge request may be changed to `BridgeResponseReceived(None)` only
-    /// after external reconciliation proves that no Ethereum message was queued. Replays
-    /// are idempotent; conflicting or still in-flight state is rejected.
+    /// Reconcile only the immutable original request and its authenticated terminal
+    /// builtin reply. Missing/ambiguous outcomes are not evidence of queue absence.
     #[export]
-    pub fn insert_message_info(
+    pub fn reconcile_source_request(
         &mut self,
-        msg_id: MessageId,
-        status: MessageStatus,
-        details: TxDetails,
-    ) {
+        request: MessageId,
+        child: MessageId,
+        request_hash: H256,
+    ) -> Result<SourceRequestOutcome, Error> {
         self.ensure_admin();
-        if !self.state().is_paused {
-            panic!("Not paused");
-        }
-        if matches!(
-            &status,
-            MessageStatus::SendingMessageToDepositTokens
-                | MessageStatus::SendingMessageToBridgeBuiltin
-                | MessageStatus::SendingMessageToReturnTokens
-        ) {
-            panic!("Cannot migrate in-flight message info");
-        }
+        assert!(self.state().is_paused, "Not paused");
+        request_bridging::reconcile_source_request(request, child, request_hash)
+    }
 
-        let tracker = request_bridging::msg_tracker_mut();
-        if let Some(existing) = tracker.message_info.get(&msg_id) {
-            if existing.status != status || existing.details != details {
-                panic!("Conflicting message info");
-            }
-            return;
-        }
-        tracker.insert_message_info(msg_id, status, details);
+    #[export]
+    pub fn source_request_evidence(&self, request: MessageId) -> Option<SourceRequestEvidence> {
+        request_bridging::source_request_evidence(request)
     }
 
     /// The method is intended for tests and is available only when the feature `mocks`
@@ -816,6 +879,7 @@ impl VftManager {
         _transaction_index: u64,
         _supply_type: TokenSupply,
     ) -> Result<(), Error> {
+        self.ensure_admin();
         #[cfg(feature = "mocks")]
         {
             use submit_receipt::token_operations;
@@ -861,6 +925,7 @@ impl VftManager {
     /// Swaps internal hash maps of the TokenMap instance.
     #[export]
     pub async fn calculate_gas_for_token_map_swap(&mut self) {
+        self.ensure_admin();
         #[cfg(feature = "mocks")]
         {
             self.state_mut()
@@ -888,6 +953,7 @@ impl VftManager {
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
                 is_paused: true,
+                native_wrapper: None,
                 vft_manager_new: None,
             });
             CONFIG = Some(config.config);

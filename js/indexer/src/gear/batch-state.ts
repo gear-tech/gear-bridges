@@ -3,7 +3,7 @@ import { Store } from '@subsquid/typeorm-store';
 import { createPairHash } from 'gear-bridge-common';
 import { In } from 'typeorm';
 
-import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer } from '../model/index.js';
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer, ReceiptRelay, ReceiptSettlement, Status } from '../model/index.js';
 import { BaseBatchState, mapKeys, mapValues, setValues } from '../common/index.js';
 import {
   getEthTokenDecimals,
@@ -14,6 +14,12 @@ import {
   getVaraTokenName,
   getVaraTokenSymbol,
 } from './rpc-queries.js';
+import type { Relayed, ReceiptDepositSettled } from './types/index.js';
+
+function sameDeposit(a: ReceiptDepositSettled, b: ReceiptDepositSettled): boolean {
+  return Object.keys(a).length === Object.keys(b).length &&
+    Object.entries(a).every(([key, value]) => String(value) === String(b[key as keyof ReceiptDepositSettled]));
+}
 
 interface TokenMetadata {
   symbol: string;
@@ -37,6 +43,8 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private _initiatedTransfers: Map<string, InitiatedTransfer>;
   private _transfersToRemove: Set<Transfer>;
   private _ethBridgeMessages: Map<string, GearEthBridgeMessage>;
+  private _receiptRelays: Map<string, Relayed> = new Map();
+  private _receiptSettlements: Map<string, ReceiptSettlement> = new Map();
 
   constructor() {
     super(NETWORK, COUNTERPART_NETWORK);
@@ -55,6 +63,8 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._upgradedPairs.clear();
     this._initiatedTransfers.clear();
     this._ethBridgeMessages.clear();
+    this._receiptRelays.clear();
+    this._receiptSettlements.clear();
   }
 
   public async new(ctx: DataHandlerContext<Store, any>) {
@@ -159,17 +169,76 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await super._saveTransfers();
   }
 
+  public recordReceiptRelay(relay: Relayed) {
+    const id = `${relay.slot}:${relay.transaction_index}`;
+    const existing = this._receiptRelays.get(id);
+    if (existing && existing.block_number !== relay.block_number) throw new Error('HOLD: conflicting authenticated receipt block');
+    this._receiptRelays.set(id, relay);
+  }
+
+  public recordReceiptSettlement(deposit: ReceiptDepositSettled, timestamp: Date, blockNumber: bigint, txHash: string) {
+    const id = `${deposit.slot}:${deposit.transaction_index}:${deposit.log_index}`;
+    const existing = this._receiptSettlements.get(id);
+    if (existing && !sameDeposit(existing.deposit, deposit)) throw new Error('HOLD: conflicting receipt deposit settlement');
+    if (!existing) this._receiptSettlements.set(id, new ReceiptSettlement({ id, deposit, timestamp, blockNumber, txHash, matched: false }));
+  }
+
+  private async _saveReceiptSettlements() {
+    for (const [id, relay] of this._receiptRelays) {
+      const existing = await this._ctx.store.findOneBy(ReceiptRelay, { id });
+      if (existing && BigInt(existing.blockNumber) !== BigInt(relay.block_number)) {
+        throw new Error('HOLD: conflicting authenticated receipt block');
+      }
+      if (!existing) await this._ctx.store.save(new ReceiptRelay({ id, blockNumber: BigInt(relay.block_number) }));
+    }
+    for (const settlement of this._receiptSettlements.values()) {
+      const existing = await this._ctx.store.findOneBy(ReceiptSettlement, { id: settlement.id });
+      if (existing && !sameDeposit(existing.deposit, settlement.deposit)) {
+        throw new Error('HOLD: conflicting receipt deposit settlement');
+      }
+      if (!existing) await this._ctx.store.save(settlement);
+    }
+    const pending = await this._ctx.store.find(ReceiptSettlement, { where: { matched: false } });
+    for (const settlement of pending) {
+      const d = settlement.deposit;
+      const relay = await this._ctx.store.findOneBy(ReceiptRelay, { id: `${d.slot}:${d.transaction_index}` });
+      if (!relay) continue;
+      const transfer = await this._ctx.store.findOneBy(Transfer, {
+        sourceNetwork: Network.Ethereum, blockNumber: relay.blockNumber,
+        sourceTransactionIndex: BigInt(d.transaction_index), sourceLogIndex: BigInt(d.log_index),
+      });
+      if (!transfer || transfer.source.toLowerCase() !== d.eth_token_id.toLowerCase() ||
+          transfer.destination.toLowerCase() !== d.vara_token_id.toLowerCase() ||
+          transfer.sender.toLowerCase() !== d.sender.toLowerCase() ||
+          transfer.receiver.toLowerCase() !== d.receiver.toLowerCase() ||
+          BigInt(transfer.amount) !== BigInt(d.amount)) continue;
+      if (transfer.receiptSlot != null && BigInt(transfer.receiptSlot) !== BigInt(d.slot)) {
+        throw new Error('HOLD: original transfer already bound to another receipt slot');
+      }
+      transfer.receiptSlot = BigInt(d.slot);
+      if (transfer.status !== Status.Completed) {
+        transfer.status = Status.Completed;
+        transfer.completedAt = settlement.timestamp;
+        transfer.completedAtBlock = settlement.blockNumber;
+        transfer.completedAtTxHash = settlement.txHash;
+      }
+      settlement.matched = true;
+      await this._ctx.store.save(transfer);
+      await this._ctx.store.save(settlement);
+    }
+  }
+
   public async save() {
     if (this._transfersToRemove.size > 0) {
       await this._ctx.store.remove(setValues(this._transfersToRemove));
     }
 
-    await Promise.all([this._saveEthBridgeMessages(), this._saveCompletedTransfers(), this._savePairs()]);
+    await this._saveReceiptSettlements();
+    await Promise.all([this._saveEthBridgeMessages(), this._savePairs()]);
     await this._processStatuses();
     await this._processPriorityRequests();
     await this._saveTransfers();
     await this._saveInitiatedTransfers();
-    await this._processCompletedTransfers();
   }
 
   public async handleRequestBridgingReply(id: string, nonce: string) {

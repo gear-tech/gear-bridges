@@ -21,12 +21,33 @@ sp-core = { workspace = true, features = ["std"] }
 sp-runtime = { workspace = true, features = ["std"] }
 tiny-keccak.workspace = true
 alloy.workspace = true
+alloy-consensus = { workspace = true, features = ["k256"] }
 clap.workspace = true
+ethereum_beacon_client.workspace = true
 ethereum-client.workspace = true
+ethereum-common = { workspace = true, features = ["std"] }
 gear-rpc-client.workspace = true
 gsdk.workspace = true
 subxt.workspace = true
 subxt-rpcs.workspace = true
 tokio.workspace = true
 futures.workspace = true
+url.workspace = true
 tempfile = "3.23.0"
+gclient.workspace = true
+sails-rs = { workspace = true, features = ["gclient"] }
+historical-proxy = { workspace = true, features = ["wasm-binary"] }
+historical-proxy-client.workspace = true
+eth-events-electra = { workspace = true, features = ["wasm-binary"] }
+eth-events-electra-client.workspace = true
+vft-manager = { workspace = true, features = ["wasm-binary"] }
+vft-manager-client.workspace = true
+vft = { workspace = true, features = ["wasm-binary"] }
+vft-client.workspace = true
+vft-vara = { workspace = true, features = ["wasm-binary"] }
+vft-vara-client.workspace = true
+gear-core.workspace = true
+relayer = { path = "../../relayer" }
+checkpoint-light-client-client.workspace = true
+bridging-payment = { workspace = true, features = ["wasm-binary"] }
+bridging-payment-client.workspace = true

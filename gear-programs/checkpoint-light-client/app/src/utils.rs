@@ -1,3 +1,4 @@
+use ark_ec::CurveGroup;
 use ark_serialize::CanonicalSerialize;
 use checkpoint_light_client_io::{SyncCommitteeKeys, G1};
 use ethereum_common::{
@@ -13,10 +14,15 @@ pub fn construct_sync_committee(
 ) -> Option<SyncCommittee> {
     let mut pub_keys = Vec::with_capacity(SYNC_COMMITTEE_SIZE);
     for pub_key in public_keys.0.iter() {
+        let pub_key = pub_key.0 .0.into_affine();
+        // The authenticated committee root binds the unique compressed point.
+        // Reject omitted-coordinate malleability before authenticating that root.
+        if !pub_key.is_on_curve() {
+            return None;
+        }
         let mut buffer = BytesFixed(FixedArray([0u8; 48]));
 
-        <G1 as CanonicalSerialize>::serialize_compressed(&pub_key.0 .0, buffer.0 .0.as_mut())
-            .ok()?;
+        pub_key.serialize_compressed(buffer.0 .0.as_mut()).ok()?;
 
         pub_keys.push(buffer);
     }

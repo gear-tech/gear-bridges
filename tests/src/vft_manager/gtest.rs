@@ -1,16 +1,18 @@
 use gtest::{Log, Program, System, WasmProgram};
-use sails_rs::{calls::*, gtest::calls::*, prelude::*};
+use sails_rs::{calls::*, futures::FutureExt, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
-    traits::*, Config, Error, InitConfig, MessageStatus, Order, TokenSupply, TxDetails,
+    traits::*, Config, Error, InitConfig, MessageStatus, Order, TokenSupply,
     VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
 };
-use vft_vara_client::{traits::VftVaraFactory, Mainnet};
+use vft_vara_client::{
+    traits::{VftAdmin as _, VftNativeExchange as _, VftVaraFactory},
+    Mainnet,
+};
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
 const BRIDGE_BUILTIN_ID: u64 = 300;
-const MALFORMED_TOKEN_ID: u64 = 400;
 
 const WRONG_GEAR_SUPPLY_VFT: u64 = 666;
 
@@ -110,6 +112,55 @@ async fn setup_for_test() -> Fixture {
     setup_for_test_with_builtin(Some(ReplyBehavior::Queued), 100).await
 }
 
+// Exercise the benchmark's real user-mailbox reply path, not a mocked manager.
+async fn benchmark_reply(
+    remoting: &GTestRemoting,
+    manager: ActorId,
+    key: (u64, u64),
+    supply: TokenSupply,
+) -> sails_rs::errors::Result<Result<(), Error>> {
+    use vft_client::{vft::io::TransferFrom, vft_admin::io::Mint};
+
+    let manual = remoting.clone().with_block_run_mode(BlockRunMode::Manual);
+    let caller = manual.actor_id();
+    let mut service = VftManagerC::new(manual.clone());
+    let pending = service
+        .calculate_gas_for_reply(key.0, key.1, supply.clone())
+        .send(manager)
+        .await?;
+    manual.run_next_block();
+
+    let (call, reply) = match supply {
+        TokenSupply::Ethereum => (Mint::encode_call(caller, U256::from(100_u32)), Vec::new()),
+        TokenSupply::Gear => {
+            let mut reply = TransferFrom::ROUTE.to_vec();
+            true.encode_to(&mut reply);
+            (
+                TransferFrom::encode_call(manager, caller, U256::from(100_u32)),
+                reply,
+            )
+        }
+    };
+    let mailbox = manual.system().get_mailbox(caller);
+    for (call, reply) in std::iter::once((call, reply)) {
+        let token_call = Log::builder()
+            .source(manager)
+            .dest(caller)
+            .payload_bytes(call);
+        if mailbox.contains(&token_call) {
+            mailbox.reply_bytes(token_call, reply, 0).unwrap();
+            // Execute the token reply hook and the woken benchmark request.
+            for _ in 0..2 {
+                manual.run_next_block();
+            }
+        }
+    }
+    pending
+        .recv()
+        .now_or_never()
+        .expect("benchmark request must produce a terminal reply")
+}
+
 async fn setup_for_test_with_builtin(
     builtin_behavior: Option<ReplyBehavior>,
     reply_timeout: u32,
@@ -173,21 +224,13 @@ async fn setup_for_test_with_builtin(
         .await
         .unwrap();
 
-    // Allocating underlying shards.
-    let mut vft_extension = vft_client::VftExtension::new(remoting.clone());
-    while vft_extension
-        .allocate_next_balances_shard()
-        .send_recv(gear_supply_vft)
-        .await
-        .expect("Failed to allocate next balances shard")
-    {}
-
-    while vft_extension
-        .allocate_next_allowances_shard()
-        .send_recv(gear_supply_vft)
-        .await
-        .expect("Failed to allocate next allowances shard")
-    {}
+    vft_client::allocate_shards(
+        remoting.clone(),
+        gear_supply_vft,
+        gtest::constants::MAX_USER_GAS_LIMIT,
+    )
+    .await
+    .unwrap();
 
     let vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
     let eth_supply_vft = VftFactoryC::new(remoting.clone())
@@ -196,20 +239,13 @@ async fn setup_for_test_with_builtin(
         .await
         .unwrap();
 
-    // Allocating underlying shards.
-    while vft_extension
-        .allocate_next_balances_shard()
-        .send_recv(eth_supply_vft)
-        .await
-        .expect("Failed to allocate next balances shard")
-    {}
-
-    while vft_extension
-        .allocate_next_allowances_shard()
-        .send_recv(eth_supply_vft)
-        .await
-        .expect("Failed to allocate next allowances shard")
-    {}
+    vft_client::allocate_shards(
+        remoting.clone(),
+        eth_supply_vft,
+        gtest::constants::MAX_USER_GAS_LIMIT,
+    )
+    .await
+    .unwrap();
 
     let mut vft = VftAdminC::new(remoting.clone());
     vft.set_minter(vft_manager_program_id)
@@ -245,6 +281,162 @@ async fn setup_for_test_with_builtin(
         gear_supply_vft,
         eth_supply_vft,
     }
+}
+
+#[tokio::test]
+async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+    let caller: ActorId = 100_000.into();
+    remoting.system().mint_to(caller, 100_000_000_000_000_000);
+    let unauthorized = remoting.clone().with_actor_id(caller);
+    let mut admin = VftManagerC::new(remoting.clone());
+    let mut outsider = VftManagerC::new(unauthorized.clone());
+
+    // Use the production constructor and a nonempty real receipt history so
+    // an empty-history panic cannot masquerade as denial of fill_transactions.
+    mint_eth_supply_tokens(
+        &remoting,
+        manager,
+        eth_supply_vft,
+        caller,
+        U256::from(7_u64),
+        0,
+    )
+    .await;
+    let mut mappings = admin.vara_to_eth_addresses().recv(manager).await.unwrap();
+    mappings.sort_unstable_by_key(|entry| entry.0);
+
+    for (index, supply) in [TokenSupply::Ethereum, TokenSupply::Gear]
+        .into_iter()
+        .enumerate()
+    {
+        let result = benchmark_reply(&unauthorized, manager, (10, index as u64), supply).await;
+        assert!(
+            matches!(
+                &result,
+                Err(sails_rs::errors::Error::Rtl(
+                    sails_rs::errors::RtlError::ReplyHasError(_, _)
+                ))
+            ),
+            "non-admin completed benchmark receipt: {result:?}"
+        );
+        assert_eq!(
+            admin
+                .receipt_status(10, index as u64)
+                .recv(manager)
+                .await
+                .unwrap(),
+            vft_manager_client::ReceiptStatus::Unknown,
+        );
+    }
+    outsider
+        .fill_transactions()
+        .send_recv(manager)
+        .await
+        .expect_err("non-admin populated processed receipt history");
+    outsider
+        .calculate_gas_for_token_map_swap()
+        .send_recv(manager)
+        .await
+        .expect_err("non-admin cleared token mappings");
+    let mut after = admin.vara_to_eth_addresses().recv(manager).await.unwrap();
+    after.sort_unstable_by_key(|entry| entry.0);
+    assert_eq!(after, mappings);
+    assert_eq!(
+        admin
+            .transactions(Order::Direct, 0, 10)
+            .recv(manager)
+            .await
+            .unwrap(),
+        vec![(0, 0)],
+    );
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, caller).await,
+        U256::from(7_u64)
+    );
+
+    // The attack must not preempt the authenticated deposit for the same key.
+    let receipt = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3_u8; 20].into(),
+        caller,
+        ERC20_TOKEN_ETH_SUPPLY,
+        U256::from(11_u64),
+    );
+    assert_eq!(
+        VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+            .submit_receipt(10, 0, receipt)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Ok(()),
+    );
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, caller).await,
+        U256::from(18_u64)
+    );
+    assert_eq!(
+        VftC::new(remoting.clone())
+            .total_supply()
+            .recv(eth_supply_vft)
+            .await
+            .unwrap(),
+        U256::from(18_u64),
+    );
+
+    // The same caller can benchmark once legitimately appointed as admin.
+    admin.set_admin(caller).send_recv(manager).await.unwrap();
+    for (index, supply) in [TokenSupply::Ethereum, TokenSupply::Gear]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(
+            benchmark_reply(&unauthorized, manager, (20, index as u64), supply)
+                .await
+                .unwrap(),
+            Ok(()),
+        );
+        assert_eq!(
+            outsider
+                .receipt_status(20, index as u64)
+                .recv(manager)
+                .await
+                .unwrap(),
+            vft_manager_client::ReceiptStatus::Processed,
+        );
+    }
+    assert!(outsider
+        .fill_transactions()
+        .with_gas_limit(gtest::constants::MAX_USER_GAS_LIMIT)
+        .send_recv(manager)
+        .await
+        .unwrap());
+    assert_eq!(
+        outsider.receipt_status(21, 0).recv(manager).await.unwrap(),
+        vft_manager_client::ReceiptStatus::Processed,
+    );
+    outsider
+        .calculate_gas_for_token_map_swap()
+        .send_recv(manager)
+        .await
+        .unwrap();
+    assert_eq!(
+        outsider
+            .vara_to_eth_addresses()
+            .recv(manager)
+            .await
+            .unwrap(),
+        Vec::new(),
+    );
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, caller).await,
+        U256::from(18_u64)
+    );
 }
 
 #[tokio::test]
@@ -317,6 +509,51 @@ async fn test_eth_supply_token() {
     )
     .await;
 
+    let manager = VftManagerC::new(remoting.clone());
+    assert_eq!(
+        manager
+            .receipt_status(0, 0)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vft_manager_client::ReceiptStatus::Processed,
+    );
+    assert_eq!(
+        manager
+            .transactions(Order::Direct, 0, 10)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vec![(0, 0)],
+    );
+    let receipt = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        [3u8; 20].into(),
+        account_id,
+        ERC20_TOKEN_ETH_SUPPLY,
+        amount,
+    );
+    assert_eq!(
+        VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+            .submit_receipt(0, 0, receipt)
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed),
+    );
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        amount
+    );
+    assert_eq!(
+        VftC::new(remoting.clone())
+            .total_supply()
+            .recv(eth_supply_vft)
+            .await
+            .unwrap(),
+        amount
+    );
+
     let vft_manager_balance = balance_of(&remoting, eth_supply_vft, vft_manager_program_id).await;
     assert!(vft_manager_balance.is_zero());
 
@@ -326,6 +563,14 @@ async fn test_eth_supply_token() {
         .await
         .unwrap();
     assert!(ok);
+    assert_eq!(
+        VftC::new(remoting.clone())
+            .allowance(account_id, vft_manager_program_id)
+            .recv(eth_supply_vft)
+            .await
+            .unwrap(),
+        amount,
+    );
 
     let mut vft_manager = VftManagerC::new(remoting.clone().with_actor_id(account_id));
     let reply = vft_manager
@@ -342,6 +587,66 @@ async fn test_eth_supply_token() {
 
     let vft_manager_balance = balance_of(&remoting, eth_supply_vft, vft_manager_program_id).await;
     assert!(vft_manager_balance.is_zero());
+}
+
+#[tokio::test]
+async fn test_storage_initialization_resumes_without_appending_shards() {
+    let system = System::new();
+    system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000_000);
+    let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
+    let code = remoting.system().submit_code(vft::WASM_BINARY);
+    let token = VftFactoryC::new(remoting.clone())
+        .new("Resume".into(), "RSM".into(), 6)
+        .send_recv(code, b"resume-storage")
+        .await
+        .unwrap();
+    let mut extension = vft_client::VftExtension::new(remoting.clone());
+    extension
+        .allocate_next_balances_shard()
+        .send_recv(token)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        vft_client::allocate_shards(
+            remoting.clone(),
+            token,
+            gtest::constants::MAX_USER_GAS_LIMIT,
+        )
+        .await
+        .unwrap();
+        assert!(!extension
+            .allocate_next_balances_shard()
+            .send_recv(token)
+            .await
+            .unwrap());
+        assert!(!extension
+            .allocate_next_allowances_shard()
+            .send_recv(token)
+            .await
+            .unwrap());
+    }
+    VftAdminC::new(remoting.clone())
+        .mint(REMOTING_ACTOR_ID.into(), 7.into())
+        .send_recv(token)
+        .await
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, token, REMOTING_ACTOR_ID.into()).await,
+        7.into()
+    );
+    assert!(VftC::new(remoting.clone())
+        .approve(HISTORICAL_PROXY_ID.into(), 3.into())
+        .send_recv(token)
+        .await
+        .unwrap());
+    assert_eq!(
+        VftC::new(remoting)
+            .allowance(REMOTING_ACTOR_ID.into(), HISTORICAL_PROXY_ID.into())
+            .recv(token)
+            .await
+            .unwrap(),
+        3.into()
+    );
 }
 
 #[tokio::test]
@@ -392,7 +697,10 @@ async fn test_submit_receipt_concurrent_replay_prevents_double_mint() {
 
     ticket_1.recv().await.unwrap().unwrap();
     let reply_2 = ticket_2.recv().await.unwrap();
-    assert_eq!(reply_2, Err(Error::AlreadyProcessed));
+    assert!(matches!(
+        reply_2,
+        Err(Error::AlreadyProcessed | Error::ReceiptLeaseActive)
+    ));
 
     let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
     assert_eq!(account_balance, amount);
@@ -456,6 +764,546 @@ async fn test_failed_mint_releases_receipt_for_retry() {
         .await
         .unwrap();
     assert_eq!(replay, Err(Error::AlreadyProcessed));
+}
+
+#[tokio::test]
+async fn test_submit_receipt_processes_every_deposit_log_and_rejects_replay() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let first = U256::from(11_u64);
+    let second = U256::from(17_u64);
+    let receipt = crate::create_receipt_rlp_with_logs(
+        ERC20_MANAGER_ADDRESS,
+        vec![
+            ([3_u8; 20].into(), account_id, ERC20_TOKEN_ETH_SUPPLY, first),
+            (
+                [4_u8; 20].into(),
+                account_id,
+                ERC20_TOKEN_ETH_SUPPLY,
+                second,
+            ),
+        ],
+    );
+    let mut manager = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
+    manager
+        .submit_receipt(4, 2, receipt.clone())
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        first + second
+    );
+    assert_eq!(
+        manager
+            .receipt_status(4, 2)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vft_manager_client::ReceiptStatus::Processed,
+    );
+    assert_eq!(
+        manager
+            .submit_receipt(4, 2, receipt)
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed),
+    );
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        first + second
+    );
+}
+
+#[tokio::test]
+async fn test_partial_receipt_retry_skips_completed_deposit_logs() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let second_vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
+    let second_vft = VftFactoryC::new(remoting.clone())
+        .new("Second token".into(), "SEC".into(), 18)
+        .send_recv(second_vft_code_id, b"receipt-second-token")
+        .await
+        .unwrap();
+    vft_client::allocate_shards(
+        remoting.clone(),
+        second_vft,
+        gtest::constants::MAX_USER_GAS_LIMIT,
+    )
+    .await
+    .unwrap();
+    let second_erc20 = H160([18; 20]);
+    VftManagerC::new(remoting.clone())
+        .map_vara_to_eth_address(second_vft, second_erc20, TokenSupply::Ethereum)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    let first_amount = U256::from(11_u64);
+    let second_amount = U256::from(17_u64);
+    let receipt = crate::create_receipt_rlp_with_logs(
+        ERC20_MANAGER_ADDRESS,
+        vec![
+            (
+                [3_u8; 20].into(),
+                account_id,
+                ERC20_TOKEN_ETH_SUPPLY,
+                first_amount,
+            ),
+            ([4_u8; 20].into(), account_id, second_erc20, second_amount),
+        ],
+    );
+    let mut manager = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
+    assert!(matches!(
+        manager
+            .submit_receipt(7, 3, receipt.clone())
+            .send_recv(vft_manager_program_id)
+            .await,
+        Ok(Err(Error::ReplyFailure(_)))
+    ));
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        first_amount
+    );
+    assert!(balance_of(&remoting, second_vft, account_id)
+        .await
+        .is_zero());
+    assert_eq!(
+        manager
+            .receipt_status(7, 3)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vft_manager_client::ReceiptStatus::Reserved,
+    );
+
+    VftAdminC::new(remoting.clone())
+        .set_minter(vft_manager_program_id)
+        .send_recv(second_vft)
+        .await
+        .unwrap();
+    manager
+        .submit_receipt(7, 3, receipt.clone())
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, eth_supply_vft, account_id).await,
+        first_amount
+    );
+    assert_eq!(
+        balance_of(&remoting, second_vft, account_id).await,
+        second_amount
+    );
+    assert_eq!(
+        manager
+            .receipt_status(7, 3)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vft_manager_client::ReceiptStatus::Processed,
+    );
+    assert_eq!(
+        manager
+            .submit_receipt(7, 3, receipt)
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed),
+    );
+}
+
+#[tokio::test]
+async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balances() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        gear_supply_vft,
+        ..
+    } = setup_for_test().await;
+    use vft_vara_client::traits::NativeEscrow as _;
+    let mut admin = VftManagerC::new(remoting.clone());
+    admin
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    admin
+        .configure_native_wrapper(Some(gear_supply_vft))
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    let mut native_admin = vft_vara_client::VftAdmin::new(remoting.clone());
+    native_admin
+        .pause()
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+    vft_vara_client::NativeEscrow::new(remoting.clone())
+        .configure_manager(vft_manager_program_id)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+    native_admin
+        .resume()
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+    admin
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    let sender: ActorId = 100_000.into();
+    let receiver: ActorId = 100_001.into();
+    let second_receiver: ActorId = 100_002.into();
+    let first_raw = 2_000_000_000_000_u128;
+    let second_raw = 3_000_000_000_000_u128;
+    let first = U256::from(first_raw);
+    let second = U256::from(second_raw);
+    let eth_amount = U256::from(17_u64);
+    remoting.system().mint_to(sender, 100_000_000_000_000);
+    remoting.system().mint_to(receiver, 1_000_000_000_000);
+    remoting
+        .system()
+        .mint_to(second_receiver, 1_000_000_000_000);
+    let initial_native = remoting.system().balance_of(receiver);
+    let initial_second_native = remoting.system().balance_of(second_receiver);
+    vft_vara_client::VftNativeExchange::new(remoting.clone().with_actor_id(sender))
+        .mint()
+        .with_value(first_raw + second_raw)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+    VftAdminC::new(remoting.clone())
+        .set_burner(vft_manager_program_id)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap();
+    assert!(VftC::new(remoting.clone().with_actor_id(sender))
+        .approve(vft_manager_program_id, first + second)
+        .send_recv(gear_supply_vft)
+        .await
+        .unwrap());
+    VftManagerC::new(remoting.clone().with_actor_id(sender))
+        .request_bridging(gear_supply_vft, first + second, ETH_TOKEN_RECEIVER)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        balance_of(&remoting, gear_supply_vft, sender).await,
+        U256::zero()
+    );
+    assert_eq!(
+        balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await,
+        first + second
+    );
+
+    let second_vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
+    let second_vft = VftFactoryC::new(remoting.clone())
+        .new("Retry token".into(), "RET".into(), 18)
+        .send_recv(second_vft_code_id, b"gear-receipt-retry-token")
+        .await
+        .unwrap();
+    vft_client::allocate_shards(
+        remoting.clone(),
+        second_vft,
+        gtest::constants::MAX_USER_GAS_LIMIT,
+    )
+    .await
+    .unwrap();
+    let second_erc20 = H160([19; 20]);
+    VftManagerC::new(remoting.clone())
+        .map_vara_to_eth_address(second_vft, second_erc20, TokenSupply::Ethereum)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    let receipt = crate::create_receipt_rlp_with_logs(
+        ERC20_MANAGER_ADDRESS,
+        vec![
+            ([3; 20].into(), receiver, ERC20_TOKEN_GEAR_SUPPLY, first),
+            ([4; 20].into(), receiver, second_erc20, eth_amount),
+            (
+                [5; 20].into(),
+                second_receiver,
+                ERC20_TOKEN_GEAR_SUPPLY,
+                second,
+            ),
+        ],
+    );
+    let mut manager = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
+    let first_return = Log::builder().source(gear_supply_vft).dest(receiver);
+    let second_return = Log::builder().source(gear_supply_vft).dest(second_receiver);
+    for attempt in 0..2 {
+        let outcome = manager
+            .submit_receipt(9, 3, receipt.clone())
+            .send_recv(vft_manager_program_id)
+            .await;
+        assert!(
+            matches!(&outcome, Ok(Err(Error::ReplyFailure(_)))),
+            "unexpected partial receipt outcome: {outcome:?}"
+        );
+        let first_mailbox = remoting.system().get_mailbox(receiver);
+        let second_mailbox = remoting.system().get_mailbox(second_receiver);
+        if attempt == 0 {
+            assert!(first_mailbox.contains(&first_return));
+            assert!(second_mailbox.contains(&second_return));
+            let states = admin
+                .receipt_deposits(9, 3)
+                .recv(vft_manager_program_id)
+                .await
+                .unwrap();
+            assert_eq!(states.len(), 3);
+            assert!(states[0].native && states[2].native);
+            assert_eq!(
+                states[1].outcome,
+                vft_manager_client::ReceiptDepositOutcome::Rejected
+            );
+            assert_eq!(
+                states[0].outcome,
+                vft_manager_client::ReceiptDepositOutcome::NativeQueued
+            );
+            assert_eq!(
+                states[2].outcome,
+                vft_manager_client::ReceiptDepositOutcome::NativeQueued
+            );
+            assert!(states[0].child.is_some() && states[2].child.is_some());
+            assert_ne!(states[0].operation_id, states[2].operation_id);
+            use ethereum_common::{hash_db::Hasher, keccak_hasher::KeccakHasher};
+            let receipt_hash = H256::from(KeccakHasher::hash(&receipt));
+            let original_id = H256::from(KeccakHasher::hash(
+                &(
+                    b"vara/native-escrow/v1",
+                    vft_manager_program_id,
+                    ActorId::from(HISTORICAL_PROXY_ID),
+                    ERC20_MANAGER_ADDRESS,
+                    9_u64,
+                    3_u64,
+                    states[0].log_index,
+                    receipt_hash,
+                )
+                    .encode(),
+            ));
+            assert_eq!(states[0].operation_id, original_id);
+            // New administrative policy must not reinterpret previously authenticated deposits.
+            admin
+                .pause()
+                .send_recv(vft_manager_program_id)
+                .await
+                .unwrap();
+            admin
+                .configure_native_wrapper(None)
+                .send_recv(vft_manager_program_id)
+                .await
+                .unwrap();
+            admin
+                .unpause()
+                .send_recv(vft_manager_program_id)
+                .await
+                .unwrap();
+            first_mailbox.claim_value(first_return.clone()).unwrap();
+            second_mailbox.claim_value(second_return.clone()).unwrap();
+        } else {
+            assert!(!first_mailbox.contains(&first_return));
+            assert!(!second_mailbox.contains(&second_return));
+        }
+        assert_eq!(
+            remoting.system().balance_of(receiver),
+            initial_native + first_raw
+        );
+        assert_eq!(
+            remoting.system().balance_of(second_receiver),
+            initial_second_native + second_raw
+        );
+        assert_eq!(
+            balance_of(&remoting, gear_supply_vft, receiver).await,
+            U256::zero()
+        );
+        assert_eq!(
+            balance_of(&remoting, gear_supply_vft, second_receiver).await,
+            U256::zero()
+        );
+        assert_eq!(
+            balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await,
+            U256::zero()
+        );
+        assert_eq!(
+            manager
+                .receipt_status(9, 3)
+                .recv(vft_manager_program_id)
+                .await
+                .unwrap(),
+            vft_manager_client::ReceiptStatus::Reserved
+        );
+    }
+
+    VftAdminC::new(remoting.clone())
+        .set_minter(vft_manager_program_id)
+        .send_recv(second_vft)
+        .await
+        .unwrap();
+    manager
+        .submit_receipt(9, 3, receipt.clone())
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!remoting
+        .system()
+        .get_mailbox(receiver)
+        .contains(&first_return));
+    assert!(!remoting
+        .system()
+        .get_mailbox(second_receiver)
+        .contains(&second_return));
+    assert_eq!(
+        remoting.system().balance_of(receiver),
+        initial_native + first_raw
+    );
+    assert_eq!(
+        remoting.system().balance_of(second_receiver),
+        initial_second_native + second_raw
+    );
+    assert_eq!(
+        balance_of(&remoting, gear_supply_vft, receiver).await,
+        U256::zero()
+    );
+    assert_eq!(
+        balance_of(&remoting, gear_supply_vft, second_receiver).await,
+        U256::zero()
+    );
+    assert_eq!(
+        balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await,
+        U256::zero()
+    );
+    assert_eq!(
+        balance_of(&remoting, second_vft, receiver).await,
+        eth_amount
+    );
+    let settled = admin
+        .receipt_deposits(9, 3)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(settled.len(), 3);
+    assert!(settled
+        .iter()
+        .all(|log| log.outcome == vft_manager_client::ReceiptDepositOutcome::Settled));
+    assert!(settled[0].native && settled[2].native);
+    assert_eq!(
+        manager
+            .receipt_status(9, 3)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        vft_manager_client::ReceiptStatus::Processed
+    );
+    assert_eq!(
+        manager
+            .submit_receipt(9, 3, receipt)
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed)
+    );
+    assert!(!remoting
+        .system()
+        .get_mailbox(receiver)
+        .contains(&first_return));
+    assert!(!remoting
+        .system()
+        .get_mailbox(second_receiver)
+        .contains(&second_return));
+    assert_eq!(
+        remoting.system().balance_of(receiver),
+        initial_native + first_raw
+    );
+    assert_eq!(
+        remoting.system().balance_of(second_receiver),
+        initial_second_native + second_raw
+    );
+    assert_eq!(
+        balance_of(&remoting, second_vft, receiver).await,
+        eth_amount
+    );
+}
+
+#[tokio::test]
+async fn test_legacy_processed_receipt_pair_blocks_all_logs() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id,
+        eth_supply_vft,
+        ..
+    } = setup_for_test().await;
+    let account_id: ActorId = 100_000.into();
+    remoting
+        .system()
+        .mint_to(account_id, 100_000_000_000_000_000);
+    let receipt = crate::create_receipt_rlp_with_logs(
+        ERC20_MANAGER_ADDRESS,
+        vec![
+            (
+                [3_u8; 20].into(),
+                account_id,
+                ERC20_TOKEN_ETH_SUPPLY,
+                U256::from(11_u64),
+            ),
+            (
+                [4_u8; 20].into(),
+                account_id,
+                ERC20_TOKEN_ETH_SUPPLY,
+                U256::from(17_u64),
+            ),
+        ],
+    );
+    let mut admin = VftManagerC::new(remoting.clone());
+    admin
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    admin
+        .insert_transactions(vec![(9, 4)])
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    admin
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+
+    let reply = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+        .submit_receipt(9, 4, receipt)
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(reply, Err(Error::AlreadyProcessed));
+    assert!(balance_of(&remoting, eth_supply_vft, account_id)
+        .await
+        .is_zero());
 }
 
 #[tokio::test]
@@ -779,6 +1627,31 @@ async fn test_bridge_timeout_is_quarantined_and_late_reply_does_not_refund() {
         .await
         .is_err());
 
+    let mut admin = VftManagerC::new(remoting.clone());
+    let evidence = admin
+        .source_request_evidence(msg_id)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(evidence.request, msg_id);
+    assert_eq!(
+        evidence.outcome,
+        vft_manager_client::SourceRequestOutcome::Pending
+    );
+    admin
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        admin
+            .reconcile_source_request(msg_id, evidence.child, evidence.request_hash)
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::InvalidReconciliation)
+    );
     let request = Log::builder().source(vft_manager_program_id);
     let mailbox = remoting.system().get_mailbox(BRIDGE_BUILTIN_ID);
     assert!(mailbox.contains(&request));
@@ -803,6 +1676,46 @@ async fn test_bridge_timeout_is_quarantined_and_late_reply_does_not_refund() {
     assert!(balance_of(&remoting, eth_supply_vft, account_id)
         .await
         .is_zero());
+    let queued = admin
+        .source_request_evidence(msg_id)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(queued.child, evidence.child);
+    assert_eq!(queued.request_hash, evidence.request_hash);
+    assert!(matches!(
+        queued.outcome,
+        vft_manager_client::SourceRequestOutcome::Queued { .. }
+    ));
+    assert_eq!(
+        admin
+            .reconcile_source_request(msg_id, MessageId::from([33; 32]), evidence.request_hash)
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        Err(Error::InvalidReconciliation)
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            admin
+                .reconcile_source_request(msg_id, evidence.child, evidence.request_hash)
+                .send_recv(vft_manager_program_id)
+                .await
+                .unwrap(),
+            Ok(queued.outcome.clone())
+        );
+    }
+    admin
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    assert!(VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .handle_request_bridging_interrupted_transfer(msg_id)
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
     assert!(mailbox
         .reply_bytes(request, queued_bridge_reply(), 0)
         .is_err());
@@ -905,6 +1818,37 @@ async fn test_definite_bridge_rejection_refunds_once() {
         .find(|(_, info)| info.details.sender == account_id && info.details.amount == amount)
         .unwrap();
     assert_eq!(info.status, MessageStatus::TokensReturnComplete(true));
+    let mut admin = VftManagerC::new(remoting.clone());
+    let evidence = admin
+        .source_request_evidence(msg_id)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        evidence.outcome,
+        vft_manager_client::SourceRequestOutcome::NotQueued
+    );
+    admin
+        .pause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            admin
+                .reconcile_source_request(msg_id, evidence.child, evidence.request_hash)
+                .send_recv(vft_manager_program_id)
+                .await
+                .unwrap(),
+            Ok(vft_manager_client::SourceRequestOutcome::NotQueued)
+        );
+    }
+    admin
+        .unpause()
+        .send_recv(vft_manager_program_id)
+        .await
+        .unwrap();
     assert!(VftManagerC::new(remoting.clone().with_actor_id(account_id))
         .handle_request_bridging_interrupted_transfer(msg_id)
         .send_recv(vft_manager_program_id)
@@ -1136,571 +2080,562 @@ async fn test_emergency_stop_observers_and_expiry() {
 }
 
 #[tokio::test]
-async fn test_message_tracker_migration_insert_is_guarded_and_idempotent() {
+async fn test_source_reconciliation_requires_original_canonical_evidence() {
     let Fixture {
         remoting,
-        vft_manager_program_id,
+        vft_manager_program_id: manager,
         ..
     } = setup_for_test().await;
-
     let mut service = VftManagerC::new(remoting.clone());
-    let msg_id = MessageId::from([99; 32]);
-    let details = tx_details(
-        ActorId::from(123),
-        ActorId::from(456),
-        U256::from(789),
-        TokenSupply::Ethereum,
-    );
-
+    let request = MessageId::from([99; 32]);
     assert!(service
-        .insert_message_info(
-            msg_id,
-            MessageStatus::TokenDepositCompleted(false),
-            details.clone(),
-        )
-        .send_recv(vft_manager_program_id)
+        .reconcile_source_request(request, request, H256::zero())
+        .send_recv(manager)
         .await
         .is_err());
-
-    assert!(service
-        .insert_transactions(vec![(1, 2)])
-        .send_recv(vft_manager_program_id)
-        .await
-        .is_err());
-
-    service
-        .pause()
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
-
-    service
-        .insert_transactions(vec![(1, 2), (1, 2)])
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
+    service.pause().send_recv(manager).await.unwrap();
     assert_eq!(
         service
-            .transactions(Order::Direct, 0, 10)
-            .recv(vft_manager_program_id)
+            .source_request_evidence(request)
+            .recv(manager)
             .await
             .unwrap(),
-        vec![(1, 2)]
+        None
     );
-
-    for _ in 0..2 {
-        service
-            .insert_message_info(
-                msg_id,
-                MessageStatus::TokenDepositCompleted(false),
-                details.clone(),
-            )
-            .send_recv(vft_manager_program_id)
-            .await
-            .unwrap();
-    }
-    assert!(service
-        .insert_message_info(
-            msg_id,
-            MessageStatus::TokenDepositCompleted(true),
-            details.clone(),
-        )
-        .send_recv(vft_manager_program_id)
-        .await
-        .is_err());
     assert_eq!(
         service
-            .request_briding_msg_tracker_state(0, 10)
-            .recv(vft_manager_program_id)
+            .reconcile_source_request(request, request, H256::zero())
+            .send_recv(manager)
             .await
             .unwrap(),
-        vec![(
-            msg_id,
-            vft_manager_client::MessageInfo {
-                status: MessageStatus::TokenDepositCompleted(false),
-                details,
-            },
-        )]
+        Err(Error::InvalidReconciliation)
     );
-}
-
-fn tx_details(
-    vara_token_id: ActorId,
-    sender: ActorId,
-    amount: U256,
-    token_supply: TokenSupply,
-) -> TxDetails {
-    TxDetails {
-        vara_token_id,
-        sender,
-        amount,
-        receiver: ETH_TOKEN_RECEIVER,
-        token_supply,
-    }
-}
-
-async fn seed_msg_info(
-    remoting: &GTestRemoting,
-    vft_manager_program_id: ActorId,
-    msg_id: MessageId,
-    status: MessageStatus,
-    details: TxDetails,
-) {
-    let mut service = VftManagerC::new(remoting.clone());
-    service
-        .pause()
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
-    service
-        .insert_message_info(msg_id, status, details)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
-    service
-        .unpause()
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn test_malformed_token_refund_reply_remains_in_flight() {
-    let Fixture {
-        remoting,
-        vft_manager_program_id,
-        ..
-    } = setup_for_test().await;
-
-    let token = Program::mock_with_id(
-        remoting.system(),
-        MALFORMED_TOKEN_ID,
-        ReplyMock(ReplyBehavior::Malformed),
-    );
-    token.send_bytes(REMOTING_ACTOR_ID, b"INIT");
-    remoting.system().run_next_block();
-
-    let account_id: ActorId = 100_000.into();
-    remoting
-        .system()
-        .mint_to(account_id, 100_000_000_000_000_000);
-    let msg_id: MessageId = [3u8; 32].into();
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::TokenDepositCompleted(true),
-        tx_details(
-            MALFORMED_TOKEN_ID.into(),
-            account_id,
-            U256::from(1),
-            TokenSupply::Gear,
-        ),
-    )
-    .await;
-
-    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
-    assert_eq!(result, Err(Error::InvalidMessageStatus));
-
-    let info = VftManagerC::new(remoting.clone())
-        .request_briding_msg_tracker_state(0, 100)
-        .recv(vft_manager_program_id)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|(id, _)| id == &msg_id)
-        .unwrap()
-        .1;
-    assert_eq!(info.status, MessageStatus::SendingMessageToReturnTokens);
-    assert!(VftManagerC::new(remoting.with_actor_id(account_id))
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
+    let stranger: ActorId = 100_003.into();
+    remoting.system().mint_to(stranger, 100_000_000_000_000);
+    assert!(VftManagerC::new(remoting.clone().with_actor_id(stranger))
+        .reconcile_source_request(request, request, H256::zero())
+        .send_recv(manager)
         .await
         .is_err());
+    assert!(service
+        .request_briding_msg_tracker_state(0, 10)
+        .recv(manager)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]
-async fn test_transactions_large_count_is_bounded_by_entries() {
+async fn test_ordinary_gear_vft_returns_without_native_burn() {
     let Fixture {
         remoting,
-        vft_manager_program_id,
+        vft_manager_program_id: manager,
         ..
     } = setup_for_test().await;
-
-    let transactions = VftManagerC::new(remoting)
-        .transactions(Order::Direct, 0, u32::MAX)
-        .recv(vft_manager_program_id)
+    let code = remoting.system().submit_code(vft::WASM_BINARY);
+    let token = VftFactoryC::new(remoting.clone())
+        .new("Ordinary Gear".into(), "GEAR".into(), 12)
+        .send_recv(code, b"ordinary-gear")
         .await
         .unwrap();
-    assert!(transactions.is_empty());
-}
-
-#[tokio::test]
-async fn test_interrupted_transfer_concurrent_reentry_eth_supply() {
-    let Fixture {
-        remoting,
-        vft_manager_program_id,
-        eth_supply_vft,
-        ..
-    } = setup_for_test().await;
-
-    let account_id: ActorId = 100_000.into();
-    remoting
-        .system()
-        .mint_to(account_id, 100_000_000_000_000_000);
-    let amount = U256::from(10_000_000_000_u64);
-    let msg_id: MessageId = [1u8; 32].into();
-
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::TokenDepositCompleted(true),
-        tx_details(eth_supply_vft, account_id, amount, TokenSupply::Ethereum),
+    vft_client::allocate_shards(
+        remoting.clone(),
+        token,
+        gtest::constants::MAX_USER_GAS_LIMIT,
     )
-    .await;
-
-    // Queue two recovery calls for the same `msg_id` into a single block. The first
-    // call commits the `SendingMessageToReturnTokens` status when it starts waiting
-    // for the VFT reply, so the second call observes the refund already in flight.
-    let remoting = remoting.with_block_run_mode(BlockRunMode::Manual);
-    let mut client_1 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
-    let mut client_2 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
-
-    let ticket1 = client_1
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send(vft_manager_program_id)
-        .await
-        .unwrap();
-    let ticket2 = client_2
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send(vft_manager_program_id)
-        .await
-        .unwrap();
-
-    for _ in 0..3 {
-        remoting.run_next_block();
-    }
-
-    ticket1.recv().await.unwrap().unwrap();
-    assert!(ticket2.recv().await.is_err());
-
-    // Exactly one refund must be executed despite the two concurrent calls.
-    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
-    assert_eq!(account_balance, amount);
-}
-
-#[tokio::test]
-async fn test_interrupted_transfer_concurrent_reentry_gear_supply() {
-    let Fixture {
-        remoting,
-        vft_manager_program_id,
-        gear_supply_vft,
-        ..
-    } = setup_for_test().await;
-
-    let account_id: ActorId = 100_000.into();
-    remoting
-        .system()
-        .mint_to(account_id, 100_000_000_000_000_000);
-    let amount = U256::from(1_000_000_000_000u128);
-    let msg_id: MessageId = [2u8; 32].into();
-
-    // Pre-fund the manager with liquidity of other users: twice the refunded amount,
-    // so a duplicated unlock has funds to drain.
+    .await
+    .unwrap();
+    let recipient: ActorId = 100_004.into();
+    remoting.system().mint_to(recipient, 1_000_000_000_000);
+    let amount = U256::from(2_000_000_000_000u128);
     VftAdminC::new(remoting.clone())
-        .mint(vft_manager_program_id, U256::from(2_000_000_000_000u128))
-        .send_recv(gear_supply_vft)
+        .mint(manager, amount)
+        .send_recv(token)
         .await
         .unwrap();
-
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::TokenDepositCompleted(true),
-        tx_details(gear_supply_vft, account_id, amount, TokenSupply::Gear),
-    )
-    .await;
-
-    let remoting = remoting.with_block_run_mode(BlockRunMode::Manual);
-    let mut client_1 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
-    let mut client_2 = VftManagerC::new(remoting.clone().with_actor_id(account_id));
-
-    let ticket1 = client_1
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send(vft_manager_program_id)
-        .await
-        .unwrap();
-    let ticket2 = client_2
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send(vft_manager_program_id)
-        .await
-        .unwrap();
-
-    for _ in 0..3 {
-        remoting.run_next_block();
-    }
-
-    ticket1.recv().await.unwrap().unwrap();
-    assert!(ticket2.recv().await.is_err());
-
-    // Exactly one unlock must be executed despite the two concurrent calls.
-    let account_balance = balance_of(&remoting, gear_supply_vft, account_id).await;
-    assert_eq!(account_balance, amount);
-    let manager_balance = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
-    assert_eq!(manager_balance, amount);
-}
-
-#[tokio::test]
-async fn test_interrupted_transfer_recovers_from_intermediate_statuses() {
-    let Fixture {
-        remoting,
-        vft_manager_program_id,
-        gear_supply_vft,
-        eth_supply_vft,
-    } = setup_for_test().await;
-
-    let account_id: ActorId = 100_000.into();
-    remoting
-        .system()
-        .mint_to(account_id, 100_000_000_000_000_000);
-
-    let mut vft_manager = VftManagerC::new(remoting.clone().with_actor_id(account_id));
-
-    // Token lock/burn is complete, but the message to the bridge built-in actor
-    // hasn't been sent.
-    let eth_amount = U256::from(10_000_000_000_u64);
-    let msg_id: MessageId = [3u8; 32].into();
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::TokenDepositCompleted(true),
-        tx_details(
-            eth_supply_vft,
-            account_id,
-            eth_amount,
-            TokenSupply::Ethereum,
-        ),
-    )
-    .await;
-
-    vft_manager
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        balance_of(&remoting, eth_supply_vft, account_id).await,
-        eth_amount
-    );
-
-    // Reconciliation confirmed that the bridge request was not queued.
-    let msg_id: MessageId = [4u8; 32].into();
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::BridgeResponseReceived(None),
-        tx_details(
-            eth_supply_vft,
-            account_id,
-            eth_amount,
-            TokenSupply::Ethereum,
-        ),
-    )
-    .await;
-
-    vft_manager
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        balance_of(&remoting, eth_supply_vft, account_id).await,
-        U256::from(20_000_000_000_u64)
-    );
-
-    // Token refund message has been sent but it has failed.
-    let gear_amount = U256::from(1_000_000_000_000u128);
-    VftAdminC::new(remoting.clone())
-        .mint(vft_manager_program_id, gear_amount)
-        .send_recv(gear_supply_vft)
-        .await
-        .unwrap();
-
-    let msg_id: MessageId = [5u8; 32].into();
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::TokensReturnComplete(false),
-        tx_details(gear_supply_vft, account_id, gear_amount, TokenSupply::Gear),
-    )
-    .await;
-
-    vft_manager
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        balance_of(&remoting, gear_supply_vft, account_id).await,
-        gear_amount
-    );
-}
-
-#[tokio::test]
-async fn test_interrupted_transfer_caller_restrictions() {
-    let Fixture {
-        remoting,
-        vft_manager_program_id,
-        eth_supply_vft,
-        ..
-    } = setup_for_test().await;
-
-    let account_id: ActorId = 100_000.into();
-    let stranger_id: ActorId = 200_000.into();
-    remoting
-        .system()
-        .mint_to(account_id, 100_000_000_000_000_000);
-    remoting
-        .system()
-        .mint_to(stranger_id, 100_000_000_000_000_000);
-
-    let amount = U256::from(10_000_000_000_u64);
-    let msg_id: MessageId = [7u8; 32].into();
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        msg_id,
-        MessageStatus::TokenDepositCompleted(true),
-        tx_details(eth_supply_vft, account_id, amount, TokenSupply::Ethereum),
-    )
-    .await;
-
-    // A third party can't trigger the recovery. The panic rolls the state back, so
-    // the message info stays intact for the legit caller.
-    let result = VftManagerC::new(remoting.clone().with_actor_id(stranger_id))
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
-        .await;
-    assert!(result.is_err());
-
-    // The admin can trigger the recovery; the refund still goes to the original sender.
+    let erc20 = H160([22; 20]);
     VftManagerC::new(remoting.clone())
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
+        .map_vara_to_eth_address(token, erc20, TokenSupply::Gear)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    let receipt = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        H160([3; 20]),
+        recipient,
+        erc20,
+        amount,
+    );
+    let native_before = remoting.system().balance_of(recipient);
+    let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
+    proxy
+        .submit_receipt(30, 2, receipt.clone())
+        .send_recv(manager)
         .await
         .unwrap()
         .unwrap();
-
-    let account_balance = balance_of(&remoting, eth_supply_vft, account_id).await;
-    assert_eq!(account_balance, amount);
+    assert_eq!(balance_of(&remoting, token, recipient).await, amount);
+    assert_eq!(balance_of(&remoting, token, manager).await, U256::zero());
+    assert_eq!(remoting.system().balance_of(recipient), native_before);
+    assert_eq!(
+        proxy
+            .submit_receipt(30, 2, receipt)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed)
+    );
 }
 
 #[tokio::test]
-async fn test_interrupted_transfer_concurrent_reentry_pool_drain() {
+async fn test_native_configuration_is_paused_and_gear_supply_only() {
     let Fixture {
         remoting,
-        vft_manager_program_id,
-        gear_supply_vft,
+        vft_manager_program_id: manager,
+        gear_supply_vft: native,
+        eth_supply_vft,
         ..
     } = setup_for_test().await;
-
-    let victim: ActorId = 100_001.into();
-    let attacker: ActorId = 100_002.into();
-    let amount = U256::from(1_000_000_000_000u128);
-
-    remoting.system().mint_to(victim, 100_000_000_000_000_000);
-    remoting.system().mint_to(attacker, 100_000_000_000_000_000);
-
-    let mut vft_admin = VftAdminC::new(remoting.clone());
-    vft_admin
-        .mint(victim, amount)
-        .send_recv(gear_supply_vft)
+    let mut service = VftManagerC::new(remoting.clone());
+    assert!(service
+        .configure_native_wrapper(Some(native))
+        .send_recv(manager)
+        .await
+        .is_err());
+    service.pause().send_recv(manager).await.unwrap();
+    assert!(service
+        .configure_native_wrapper(Some(eth_supply_vft))
+        .send_recv(manager)
+        .await
+        .is_err());
+    service
+        .configure_native_wrapper(Some(native))
+        .send_recv(manager)
         .await
         .unwrap();
-    vft_admin
-        .mint(attacker, amount)
-        .send_recv(gear_supply_vft)
+    assert_eq!(
+        service.native_wrapper().recv(manager).await.unwrap(),
+        Some(native)
+    );
+    assert!(service
+        .remove_vara_to_eth_address(native)
+        .send_recv(manager)
+        .await
+        .is_err());
+    service
+        .configure_native_wrapper(None)
+        .send_recv(manager)
         .await
         .unwrap();
+    assert_eq!(service.native_wrapper().recv(manager).await.unwrap(), None);
+}
 
-    // Both users bridge once, so the vft-manager custody pool holds 2 * amount.
-    for who in [victim, attacker] {
-        VftC::new(remoting.clone().with_actor_id(who))
-            .approve(vft_manager_program_id, amount)
-            .send_recv(gear_supply_vft)
+#[tokio::test]
+async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value() {
+    use vft_vara_client::{traits::NativeEscrow as _, PayoutStatus};
+    let Fixture {
+        remoting,
+        gear_supply_vft: native,
+        eth_supply_vft: rejects_empty_payload,
+        ..
+    } = setup_for_test().await;
+    let manager: ActorId = 100_005.into();
+    let recipient: ActorId = 100_006.into();
+    remoting.system().mint_to(manager, 100_000_000_000_000);
+    remoting.system().mint_to(recipient, 1_000_000_000_000);
+    let raw = 3_000_000_000_000u128;
+    let amount = U256::from(raw);
+    vft_vara_client::VftNativeExchange::new(remoting.clone().with_actor_id(manager))
+        .mint()
+        .with_value(raw * 2)
+        .send_recv(native)
+        .await
+        .unwrap();
+    let mut admin = vft_vara_client::VftAdmin::new(remoting.clone());
+    let mut escrow_admin = vft_vara_client::NativeEscrow::new(remoting.clone());
+    assert!(escrow_admin
+        .configure_manager(manager)
+        .send_recv(native)
+        .await
+        .is_err());
+    admin.pause().send_recv(native).await.unwrap();
+    escrow_admin
+        .configure_manager(manager)
+        .send_recv(native)
+        .await
+        .unwrap();
+    admin.set_burner(manager).send_recv(native).await.unwrap();
+    admin.resume().send_recv(native).await.unwrap();
+    let id = H256([40; 32]);
+    assert!(escrow_admin
+        .redeem_escrow(id, manager, recipient, amount)
+        .send_recv(native)
+        .await
+        .is_err());
+    let mut escrow = vft_vara_client::NativeEscrow::new(remoting.clone().with_actor_id(manager));
+    assert!(escrow
+        .redeem_escrow(id, recipient, recipient, amount)
+        .send_recv(native)
+        .await
+        .is_err());
+    let native_before = remoting.system().balance_of(recipient);
+    let queued = escrow
+        .redeem_escrow(id, manager, recipient, amount)
+        .send_recv(native)
+        .await
+        .unwrap();
+    assert_eq!(queued.status, PayoutStatus::Queued);
+    assert_eq!(balance_of(&remoting, native, manager).await, amount);
+    assert_eq!(balance_of(&remoting, native, recipient).await, U256::zero());
+    assert_eq!(remoting.system().balance_of(recipient), native_before);
+    let duplicate = escrow
+        .redeem_escrow(id, manager, recipient, amount)
+        .send_recv(native)
+        .await
+        .unwrap();
+    assert_eq!(duplicate, queued);
+    assert!(escrow
+        .redeem_escrow(id, manager, recipient, amount + U256::one())
+        .send_recv(native)
+        .await
+        .is_err());
+    let payout = Log::builder().source(native).dest(recipient);
+    let mailbox = remoting.system().get_mailbox(recipient);
+    assert!(mailbox.contains(&payout));
+    mailbox.claim_value(payout.clone()).unwrap();
+    remoting.system().run_next_block();
+    let delivered = escrow.redemption(id).recv(native).await.unwrap().unwrap();
+    assert_eq!(delivered.child, queued.child);
+    assert_eq!(delivered.status, PayoutStatus::Delivered);
+    assert_eq!(delivered.returned_value, 0);
+    assert!(mailbox.claim_value(payout).is_err());
+    assert_eq!(remoting.system().balance_of(recipient), native_before + raw);
+    assert_eq!(
+        escrow
+            .redeem_escrow(id, manager, recipient, amount)
+            .send_recv(native)
             .await
-            .unwrap();
-        VftManagerC::new(remoting.clone().with_actor_id(who))
-            .request_bridging(gear_supply_vft, amount, ETH_TOKEN_RECEIVER)
-            .send_recv(vft_manager_program_id)
+            .unwrap(),
+        delivered
+    );
+    let returned_id = H256([41; 32]);
+    escrow
+        .redeem_escrow(returned_id, manager, rejects_empty_payload, amount)
+        .send_recv(native)
+        .await
+        .unwrap();
+    remoting.system().run_next_block();
+    let returned = escrow
+        .redemption(returned_id)
+        .recv(native)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(returned.status, PayoutStatus::Returned);
+    assert_eq!(returned.returned_value, raw);
+    assert_eq!(balance_of(&remoting, native, manager).await, U256::zero());
+    assert_eq!(
+        balance_of(&remoting, native, rejects_empty_payload).await,
+        U256::zero()
+    );
+    assert_eq!(
+        escrow
+            .redeem_escrow(returned_id, manager, rejects_empty_payload, amount)
+            .send_recv(native)
+            .await
+            .unwrap(),
+        returned
+    );
+    admin.pause().send_recv(native).await.unwrap();
+    assert!(escrow_admin
+        .configure_manager(recipient)
+        .send_recv(native)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn test_native_receipt_dead_continuation_keeps_original_payout() {
+    use vft_vara_client::traits::NativeEscrow as _;
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        gear_supply_vft: native,
+        eth_supply_vft: failing_recipient,
+        ..
+    } = setup_for_test_with_builtin(Some(ReplyBehavior::Queued), 2).await;
+    let sender: ActorId = 100_008.into();
+    let recipient: ActorId = 100_009.into();
+    remoting.system().mint_to(sender, 100_000_000_000_000);
+    remoting.system().mint_to(recipient, 1_000_000_000_000);
+    let raw = 2_000_000_000_000u128;
+    let amount = U256::from(raw);
+    let mut admin = VftManagerC::new(remoting.clone());
+    admin.pause().send_recv(manager).await.unwrap();
+    admin
+        .configure_native_wrapper(Some(native))
+        .send_recv(manager)
+        .await
+        .unwrap();
+    let mut native_admin = vft_vara_client::VftAdmin::new(remoting.clone());
+    native_admin.pause().send_recv(native).await.unwrap();
+    vft_vara_client::NativeEscrow::new(remoting.clone())
+        .configure_manager(manager)
+        .send_recv(native)
+        .await
+        .unwrap();
+    native_admin
+        .set_burner(manager)
+        .send_recv(native)
+        .await
+        .unwrap();
+    native_admin.resume().send_recv(native).await.unwrap();
+    admin.unpause().send_recv(manager).await.unwrap();
+    vft_vara_client::VftNativeExchange::new(remoting.clone().with_actor_id(sender))
+        .mint()
+        .with_value(raw)
+        .send_recv(native)
+        .await
+        .unwrap();
+    VftC::new(remoting.clone().with_actor_id(sender))
+        .approve(manager, amount)
+        .send_recv(native)
+        .await
+        .unwrap();
+    VftManagerC::new(remoting.clone().with_actor_id(sender))
+        .request_bridging(native, amount, ETH_TOKEN_RECEIVER)
+        .send_recv(manager)
+        .await
+        .unwrap()
+        .unwrap();
+    let receipt = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        H160([3; 20]),
+        recipient,
+        ERC20_TOKEN_GEAR_SUPPLY,
+        amount,
+    );
+    let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
+    // Reply funding happens after send in gstd: setup failure must roll back that
+    // send, not classify it as an economic retry while an untracked child runs.
+    assert!(proxy
+        .submit_receipt(31, 1, receipt.clone())
+        .with_gas_limit(31_000_000_000)
+        .send_recv(manager)
+        .await
+        .is_err());
+    assert_eq!(
+        admin.receipt_status(31, 1).recv(manager).await.unwrap(),
+        vft_manager_client::ReceiptStatus::Unknown
+    );
+    assert_eq!(balance_of(&remoting, native, manager).await, amount);
+    use sails_rs::calls::ActionIo;
+    use vft_manager_client::vft_manager::io::SubmitReceipt;
+    let payload = SubmitReceipt::encode_call(31, 1, receipt.clone());
+    let original = remoting
+        .system()
+        .get_program(manager)
+        .unwrap()
+        .send_bytes_with_gas(
+            HISTORICAL_PROXY_ID,
+            payload,
+            gtest::constants::MAX_USER_GAS_LIMIT,
+            0,
+        );
+    // Admit only the originating manager execution, then withhold block gas
+    // until its wait has expired. The actual wrapper child remains in the queue.
+    let mut admitted = false;
+    for gas in (1..=50).map(|i| i * 1_000_000_000) {
+        let result = remoting.system().run_next_block_with_allowance(gas);
+        assert!(!result.failed.contains(&original));
+        if result.gas_burned.contains_key(&original) && !result.not_executed.contains(&original) {
+            admitted = true;
+            break;
+        }
+    }
+    assert!(admitted, "original manager dispatch was never admitted");
+    remoting.system().run_next_block_with_allowance(0);
+    remoting.system().run_next_block_with_allowance(0);
+    let resumed_block = remoting.system().run_next_block();
+    let original_reply = resumed_block
+        .log()
+        .iter()
+        .find(|entry| entry.reply_to() == Some(original))
+        .expect("expired original continuation must reply");
+    assert!(SubmitReceipt::decode_reply(original_reply.payload())
+        .unwrap()
+        .is_err());
+    let before = admin.receipt_deposits(31, 1).recv(manager).await.unwrap();
+    assert_eq!(before.len(), 1);
+    assert_eq!(
+        before[0].outcome,
+        vft_manager_client::ReceiptDepositOutcome::NativeQueued
+    );
+    let original_child = before[0]
+        .child
+        .expect("original native dispatch must be retained");
+    let operation = before[0].operation_id;
+    let wrapper = vft_vara_client::NativeEscrow::new(remoting.clone());
+    let payout = wrapper
+        .redemption(operation)
+        .recv(native)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(payout.status, vft_vara_client::PayoutStatus::Queued);
+    remoting
+        .system()
+        .run_to_block(remoting.system().block_height() + 3);
+    assert_eq!(
+        proxy
+            .submit_receipt(31, 1, receipt.clone())
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::NativeSettlementPending)
+    );
+    let resumed = admin.receipt_deposits(31, 1).recv(manager).await.unwrap();
+    assert_eq!(resumed[0].child, Some(original_child));
+    assert_eq!(
+        admin
+            .reconcile_receipt(31, 1)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Ok(vft_manager_client::ReceiptStatus::Reserved)
+    );
+    assert_eq!(
+        wrapper
+            .redemption(operation)
+            .recv(native)
             .await
             .unwrap()
-            .unwrap();
-    }
-
-    let pool = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
-    assert_eq!(pool, amount + amount);
-    assert!(balance_of(&remoting, gear_supply_vft, attacker)
-        .await
-        .is_zero());
-
-    // The attacker's request is interrupted right after the lock — the documented
-    // recovery entry point for `handle_request_bridging_interrupted_transfer`.
-    let stuck = MessageId::from([42u8; 32]);
-    seed_msg_info(
-        &remoting,
-        vft_manager_program_id,
-        stuck,
-        MessageStatus::TokenDepositCompleted(true),
-        tx_details(gear_supply_vft, attacker, amount, TokenSupply::Gear),
-    )
-    .await;
-
-    // Two recovery calls submitted as two extrinsics of the same block.
-    let manual = remoting
-        .clone()
-        .with_block_run_mode(BlockRunMode::Manual)
-        .with_actor_id(attacker);
-
-    let mut client_1 = VftManagerC::new(manual.clone());
-    let mut client_2 = VftManagerC::new(manual.clone());
-
-    let call_1 = client_1
-        .handle_request_bridging_interrupted_transfer(stuck)
-        .send(vft_manager_program_id)
+            .unwrap()
+            .child,
+        payout.child
+    );
+    assert_eq!(balance_of(&remoting, native, recipient).await, U256::zero());
+    let mailbox = remoting.system().get_mailbox(recipient);
+    let message = Log::builder().source(native).dest(recipient);
+    mailbox.claim_value(message.clone()).unwrap();
+    remoting.system().run_next_block();
+    admin.pause().send_recv(manager).await.unwrap();
+    let mut reconciler = VftManagerC::new(remoting.clone().with_actor_id(sender));
+    assert_eq!(
+        reconciler
+            .reconcile_receipt(31, 1)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Ok(vft_manager_client::ReceiptStatus::Processed)
+    );
+    assert_eq!(
+        reconciler
+            .reconcile_receipt(31, 1)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Ok(vft_manager_client::ReceiptStatus::Processed)
+    );
+    admin.unpause().send_recv(manager).await.unwrap();
+    assert_eq!(
+        admin.receipt_deposits(31, 1).recv(manager).await.unwrap()[0].outcome,
+        vft_manager_client::ReceiptDepositOutcome::Settled
+    );
+    assert!(mailbox.claim_value(message).is_err());
+    assert_eq!(
+        proxy
+            .submit_receipt(31, 1, receipt)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed)
+    );
+    // A real program rejecting the original native payout retains its returned
+    // reserve obligation and cannot be treated as a fresh economic retry.
+    vft_vara_client::VftNativeExchange::new(remoting.clone().with_actor_id(sender))
+        .mint()
+        .with_value(raw)
+        .send_recv(native)
         .await
         .unwrap();
-    let call_2 = client_2
-        .handle_request_bridging_interrupted_transfer(stuck)
-        .send(vft_manager_program_id)
+    VftC::new(remoting.clone().with_actor_id(sender))
+        .approve(manager, amount)
+        .send_recv(native)
         .await
         .unwrap();
-
-    for _ in 0..3 {
-        manual.run_next_block();
+    VftManagerC::new(remoting.clone().with_actor_id(sender))
+        .request_bridging(native, amount, ETH_TOKEN_RECEIVER)
+        .send_recv(manager)
+        .await
+        .unwrap()
+        .unwrap();
+    let failed_receipt = crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        H160([3; 20]),
+        failing_recipient,
+        ERC20_TOKEN_GEAR_SUPPLY,
+        amount,
+    );
+    assert_eq!(
+        proxy
+            .submit_receipt(32, 1, failed_receipt.clone())
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::NativeSettlementPending)
+    );
+    let failed_row = admin
+        .receipt_deposits(32, 1)
+        .recv(manager)
+        .await
+        .unwrap()
+        .remove(0);
+    let returned = wrapper
+        .redemption(failed_row.operation_id)
+        .recv(native)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(returned.status, vft_vara_client::PayoutStatus::Returned);
+    assert_eq!(returned.returned_value, raw);
+    for _ in 0..2 {
+        assert_eq!(
+            reconciler
+                .reconcile_receipt(32, 1)
+                .send_recv(manager)
+                .await
+                .unwrap(),
+            Err(Error::NativeSettlementReturned)
+        );
     }
-
-    call_1.recv().await.unwrap().unwrap();
-    assert!(call_2.recv().await.is_err());
-
-    // Exactly one refund is executed: the attacker gets their own interrupted
-    // transfer back and the victim's locked tokens stay in the custody pool.
-    let attacker_balance = balance_of(&remoting, gear_supply_vft, attacker).await;
-    assert_eq!(attacker_balance, amount);
-    let pool_after = balance_of(&remoting, gear_supply_vft, vft_manager_program_id).await;
-    assert_eq!(pool_after, amount);
+    assert_eq!(
+        admin.receipt_status(32, 1).recv(manager).await.unwrap(),
+        vft_manager_client::ReceiptStatus::Reserved
+    );
+    assert_eq!(
+        admin.receipt_deposits(32, 1).recv(manager).await.unwrap()[0].outcome,
+        vft_manager_client::ReceiptDepositOutcome::Unknown
+    );
+    assert_eq!(
+        proxy
+            .submit_receipt(32, 1, failed_receipt)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::NativeSettlementReturned)
+    );
+    assert_eq!(
+        wrapper
+            .redemption(failed_row.operation_id)
+            .recv(native)
+            .await
+            .unwrap()
+            .unwrap()
+            .child,
+        returned.child
+    );
+    assert_eq!(balance_of(&remoting, native, manager).await, U256::zero());
 }
 
 async fn balance_of(

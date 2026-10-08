@@ -7,13 +7,15 @@ import {MessageHandler} from "src/MessageHandler.sol";
 contract Deploy is Script {
     function run() external {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
+        address queue = vm.envAddress("MESSAGE_QUEUE");
+        bytes32 expectedVaraSource = vm.envBytes32("EXPECTED_VARA_SOURCE");
+        address ethereumSender = vm.envAddress("ETHEREUM_SENDER");
         vm.startBroadcast(privateKey);
 
-        MessageHandler messageHandler = new MessageHandler();
+        MessageHandler messageHandler = new MessageHandler(queue, expectedVaraSource, ethereumSender);
 
         vm.stopBroadcast();
 
         console.log("MessageHandler deployed at:", address(messageHandler));
-        console.log("Address written to: deployed_address.txt");
     }
 }

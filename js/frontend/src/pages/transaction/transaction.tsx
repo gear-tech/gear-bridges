@@ -115,6 +115,7 @@ function Transaction() {
   const { data } = useTransaction(id);
   const optimisticTxUpdate = useOptimisticTxUpdate(id);
   const getFullNetworkName = useGetFullNetworkName();
+  const { NETWORK_PRESET } = useNetworkType();
 
   if (!data || !getHistoryToken) return <TransactionSkeleton />;
 
@@ -174,14 +175,31 @@ function Transaction() {
                   <RelayTxButton.Vara
                     nonce={BigInt(nonce)}
                     blockNumber={bridgingStartedAtBlock}
-                    onReceipt={optimisticTxUpdate}
+                    onFinalized={optimisticTxUpdate}
+                    expectedEffect={{
+                      kind: 'token',
+                      managerAddress: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
+                      sourceActorId: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS,
+                      token: destinationHex,
+                      sender: sender as HexString,
+                      receiver: receiver as HexString,
+                      amount: BigInt(amount),
+                    }}
                   />
                 )
               ) : (
                 <RelayTxButton.Eth
                   txHash={txHash as HexString}
                   blockNumber={BigInt(blockNumber)}
-                  onInBlock={optimisticTxUpdate}
+                  onFinalized={optimisticTxUpdate}
+                  expectedEffect={{
+                    managerAddress: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
+                    sourceToken: sourceHex,
+                    destinationToken: destinationHex,
+                    sender: sender as HexString,
+                    receiver: receiver as HexString,
+                    amount: BigInt(amount),
+                  }}
                 />
               )}
             </div>

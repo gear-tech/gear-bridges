@@ -7,3 +7,9 @@ The program workspace includes the following packages:
 - `vft-manager-client` is the package containing the client for the program allowing to interact with it from another program, tests, or
   off-chain client.
 
+The `mocks` feature enables gas benchmarks and can be forwarded into the embedded
+WASM by a full workspace/all-targets build. It is not a security boundary. Only
+the current manager admin may call `FillTransactions`, `CalculateGasForReply`,
+and `CalculateGasForTokenMapSwap`, including as the origin of gas estimation.
+`GasCalculation` initializes a new caller-owned benchmark program; it cannot
+change an initialized manager.

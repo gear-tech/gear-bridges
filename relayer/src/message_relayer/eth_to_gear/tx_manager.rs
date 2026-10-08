@@ -886,13 +886,12 @@ pub(super) mod tests {
             match sent.try_recv().unwrap() {
                 message_sender::Request::SubmitPrepared {
                     tx_uuid,
-                    signed_submission,
-                    payload,
+                    prepared: original,
                     ..
                 } => {
                     assert_eq!(tx_uuid, uuid);
-                    assert_eq!(signed_submission, prepared);
-                    assert_eq!(payload.encode(), event.encode());
+                    assert_eq!(original.1, prepared);
+                    assert_eq!(original.0.encode(), event.encode());
                 }
                 other => panic!("continuation restart replaced the original proof: {other:?}"),
             }
@@ -1546,8 +1545,8 @@ pub(super) mod tests {
         manager.resume(&mut sender, &mut composer).await.unwrap();
         assert!(
             matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared {
-            tx_uuid, signed_submission, ..
-        }) if tx_uuid == uuids[0] && signed_submission == first_signed)
+            tx_uuid, prepared, ..
+        }) if tx_uuid == uuids[0] && prepared.1 == first_signed)
         );
         assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
         drop(manager);
@@ -1556,8 +1555,8 @@ pub(super) mod tests {
         restored.resume(&mut sender, &mut composer).await.unwrap();
         assert!(
             matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared {
-            tx_uuid, signed_submission, ..
-        }) if tx_uuid == uuids[0] && signed_submission == first_signed)
+            tx_uuid, prepared, ..
+        }) if tx_uuid == uuids[0] && prepared.1 == first_signed)
         );
         assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
         let (_paid, mut paid) = unbounded_channel();
@@ -1632,8 +1631,8 @@ pub(super) mod tests {
         .unwrap());
         assert!(
             matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared {
-            tx_uuid, signed_submission, ..
-        }) if tx_uuid == uuids[1] && signed_submission == second_signed)
+            tx_uuid, prepared, ..
+        }) if tx_uuid == uuids[1] && prepared.1 == second_signed)
         );
         assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
         drop(restored);
@@ -1642,8 +1641,8 @@ pub(super) mod tests {
         restored.resume(&mut sender, &mut composer).await.unwrap();
         assert!(
             matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared {
-            tx_uuid, signed_submission, ..
-        }) if tx_uuid == uuids[1] && signed_submission == second_signed)
+            tx_uuid, prepared, ..
+        }) if tx_uuid == uuids[1] && prepared.1 == second_signed)
         );
         assert!(
             matches!(sent.try_recv(), Err(TryRecvError::Empty)),

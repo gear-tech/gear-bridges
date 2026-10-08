@@ -634,12 +634,12 @@ mod tests {
             Request::SubmitPrepared {
                 tx_uuid,
                 tx_hash,
-                signed_submission,
+                prepared,
                 ..
             } => {
                 assert_eq!(tx_uuid, uuid);
                 assert_eq!(tx_hash, original.tx_hash);
-                assert_eq!(signed_submission, signed);
+                assert_eq!(prepared.1, signed);
             }
             other => panic!(
                 "restart requested new work rather than the original signed attempt: {other:?}"

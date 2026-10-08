@@ -31,6 +31,8 @@ For a native build, install the toolchains used by the workspace:
 
 The root README also calls out the [ring build instructions](https://github.com/gear-tech/ring/blob/main/BUILDING.md). Follow those instructions when a native build fails while compiling `ring`.
 
+The Go module pins the original ignition-verifier commit through a public mirror because the upstream repository is unavailable; the cryptographic implementation and revision are unchanged.
+
 Build the relayer from the repository root:
 
 ~~~sh
@@ -46,6 +48,27 @@ export RUST_LOG='relayer=info,prover=info,ethereum-client=info,metrics=info'
 ~~~
 
 Increase `RUST_MIN_STACK` or reduce proof worker counts when a host is memory constrained. Each configured proof thread can allocate substantial memory.
+
+### Native node regression tests
+
+Run native integration cases against a fresh, owned local node matching the CI
+image (`ghcr.io/gear-tech/node:v1.9.0`), with RPC on `127.0.0.1:9944`. Do not run
+duplicate test processes against the same node: their deterministic accounts and
+program salts can collide. Retain failures; these checks do not qualify production.
+
+~~~sh
+cargo test --locked -p tests --lib checkpoint_light_client::replay_back_and_updating -- --exact --nocapture --test-threads=1
+cargo test --locked -p tests --lib relayer::eth_to_gear::test_tx_manager -- --exact --nocapture --test-threads=1
+~~~
+
+The transaction-manager test gives the serial delivery batch and the separate
+wrong-genesis/paused-receipt scenario a fixed 120-second budget each. Both start
+after deployment and funding; no per-transaction retry resets either budget.
+These test-only bounds do not change worker or campaign deadlines.
+Replay completion checks every emitted checkpoint against
+the authenticated header fixture or the signed finalized target, including
+checkpoints staged in the initial replay batch and committed at completion.
+Replay uses 96-header batches without dropping fixture headers or increasing runtime gas limits.
 
 ## Configure `gear-eth-core`
 
@@ -183,69 +206,21 @@ On follower restart, saved finalized commitments are revalidated against their o
 
 A root publication pins the latest canonically mined BEEFY anchor before signing. Its durable intent blocks further handovers until the original root transaction is canonically mined; finality can then proceed alongside subsequent handovers. Root status `mined` is not `accepted`: acceptance requires canonical finality of both the pinned anchor and root transaction. Restart never silently reanchors a signed publication. Use an archival execution RPC for historical checkpoint and receipt verification; a pruned-state fallback is not supported.
 
-### Independent BEEFY expiry recovery
+### BEEFY expiry and existing administration
 
-Set `BEEFY_RECOVERY_WALLET` to an established independently controlled 3-of-5 wallet before fresh deployment. Verify the wallet implementation, proxy configuration, threshold, and five distinct owners independently; matching `getThreshold()` and `getOwners()` replies do not prove that an arbitrary contract is a genuine multisig. Do not substitute a publisher EOA or the local test wallet. Existing queues can install a controller once through healthy authenticated governance; this cannot retrofit recovery after that governance path has already expired.
+[MessageQueue](../ethereum/src/MessageQueue.sol) already uses UUPS: `_authorizeUpgrade` requires `DEFAULT_ADMIN_ROLE`, initially held by [GovernanceAdmin](../ethereum/src/GovernanceAdmin.sol). The existing `reinitialize()` is restricted to that role and uses `reinitializer(7)`; it grants `DEFAULT_ADMIN_ROLE` and `PAUSER_ROLE` to `0x1111111111111111111111111111111111111111` without revoking the existing admin. This is upgrade and pause authority, not a new recovery contract.
 
-The wallet calls `RecoveryController.proposeRecovery(expectedOldVerifier, candidateVerifier)` and may cancel the resulting proposal ID. After the fixed 24-hour delay, anyone may call `executeRecovery(proposalId)`. Execution requires the installed old client to be expired, the candidate to be live with a verified MMR and a strictly newer BEEFY block, and the source domain, destination chain/queue, and MMR start block to match. Keep publishing authenticated BEEFY commitments to the candidate during the delay: a candidate left idle for the entire timelock will itself expire.
+The `0x111…111` address is a source placeholder: production must replace it with the approved real Safe address and verify the deployed authority and its actual owners/policy. Tests may only impersonate it with Foundry `prank`; that is not evidence of a deployed Safe or independent control. There is no bespoke 3-of-5 threshold or timelock added by the queue.
 
-The proposal pins both verifier and client addresses and runtime code hashes; execution checks those bindings again and consumes the proposal once. Approve only the concrete reviewed verifier/client implementations, not mutable proxies or arbitrary contracts with matching getters. The controller changes only the verifier pointer: existing roots, acceptance timestamps, replay protection, custody, pause state, and challenge state remain intact. A compromised recovery threshold can authorize false history; the timelock permits detection and cancellation, not cryptographic immunity from that trust assumption.
+A BEEFY client expires after 24 hours without an authenticated source timestamp. Expiry does not remove the existing UUPS admin authority. Any repair must use that actual approved authority and reviewed implementation/calldata, preserving custody, roots, maturity, replay protection and original transaction evidence. This guide supplies no public migration initializer or automatic verifier-replacement workflow; public cutover remains subject to the [migration gates](zk-to-beefy-migration.md).
 
-Candidate validation also requires the frozen 86/86/256 signature/validator policy, 128/24 RANDAO timing and existing freshness bounds. A replacement client must have the original client runtime code hash. The wallet still approves the concrete adapter code hash: matching policy getters alone do not establish correct proof verification.
-
-#### Candidate preparation and finalized cutover
-
-Use an archival Ethereum execution RPC: activation and every restart re-read canonical finalized proposal and activation receipts, contract code, and state at those historical blocks. A pruned RPC is not a supported fallback. Keep `BEEFY_RECOVERY_WALLET` set to the independently verified wallet throughout preparation, following, and activation.
-
-1. Preserve the existing deployment manifest and actor directory. Allocate a new recovery directory and capture a fresh independently witnessed source anchor:
-
-   ~~~sh
-   beefy-relay tokens-anchor \
-     --source-rpc "$SOURCE_RPC" --witness-rpc "$WITNESS_RPC" \
-     > "$RECOVERY_DIR/anchor.json"
-   ~~~
-
-   This is read-only. The follower independently verifies the signed commitment, MMR proof, source timestamp, authority sets, genesis, and canonical block against both source nodes; a copied JSON timestamp is not authority to bootstrap a client.
-
-2. Deploy only the reviewed concrete `BeefyClient` and `VaraQueueRootVerifier`, bound to the existing destination queue and chain. Do not rerun the token-stack deployment or move custody. The client constructor arguments, in order, are the pinned source domain, destination chain ID, queue, MMR start block, `anchor.block`, `anchor.sourceTimestampMs`, and current/next validator-set tuples. Each tuple is `(set.id, set.keys.length, hex(set.root))` from the anchor, with the 32-byte root encoded as hex. The verifier constructor takes `(candidateClient, existingQueue, destinationChainId)`. Preserve the signed anchor unchanged. A new zero-MMR client must still be live; an expired zero-MMR client cannot be initialized by the follower.
-
-3. Create a schema-1 recovery plan containing:
-
-   - `queue`, `controller`, `recoveryWallet` and the currently active `expectedOldVerifier` / `expectedOldClient`;
-   - `candidateVerifier` / `candidateClient`;
-   - the unchanged `sourceDomain`, `bridgeDomain`, `destinationChainId`, and `mmrStartBlock`;
-   - `codeHashes: { oldVerifier, oldClient, candidateVerifier, candidateClient }`, containing the four deployed runtime-code hashes;
-   - `bootstrap`, containing the complete unmodified anchor JSON.
-
-   Before proposal, omit `proposalId`, `proposalNonce`, and `executeAfter`; if supplied, all three must match the finalized controller proposal. On subsequent recoveries, the expected-old pair comes from the verified active overlay, not the original manifest.
-
-4. Stop the normal actor and resume the same directory, endpoints, and signers with `tokens-follow --recovery-plan "$RECOVERY_DIR/plan.json"`, retaining its other normal arguments. Candidate mode submits authenticated commitments to the candidate only; it does not publish token roots or change `activeEthereum`. Wait for `recoveryCandidate.verification.candidateReady`: the client must be live, contain a verified nonzero MMR, and be strictly ahead of the old client. Require a healthy candidate actor and client-tagged finalized commitment evidence checked against both source nodes before wallet approval; `candidateReady` reports Ethereum eligibility, not independent bootstrap authentication.
-
-5. Have the established wallet call `proposeRecovery(expectedOldVerifier, candidateVerifier)`. Record the EVM transaction hash containing `RecoveryProposed`, the controller proposal ID/nonce, and `executeAfter`. These are not the wallet's internal proposal hash or wallet nonce. Keep the candidate follower running throughout the 24-hour delay; its finalized `pendingProposal` view must match the approved binding. The wallet may call `cancelRecovery(proposalId)` before execution.
-
-   To replace a never-activated candidate, stop the actor, finalize cancellation of any pending proposal, and reconcile every reserved/signed transaction using its original evidence. Resume with an explicitly reviewed new plan only after the controller has no finalized pending proposal. The actor archives the previous record in `recoveryCandidateHistory`, retaining old bootstrap records and commitments; it never clears an unresolved nonce, hash, or temporary publication write. It does not cancel proposals or select replacement clients automatically.
-
-6. After the delay, stop the candidate actor and reconcile outstanding intents before permissionless `executeRecovery(proposalId)`. Wait for canonical Ethereum finality. Add the exact `proposalId`, `proposalNonce`, `executeAfter`, `proposalTxHash`, and `activationTxHash` to the same plan; retain its bootstrap and static identity.
-
-   ~~~sh
-   beefy-relay tokens-recovery-activate \
-     --ethereum-rpc "$HOODI_EL_WSS" \
-     --deployment-manifest "$RUN/deployment.json" \
-     --follower-dir "$RUN/follower" \
-     --recovery-plan "$RECOVERY_DIR/plan.json"
-   ~~~
-
-   Activation verifies the exact finalized proposal and execution receipts, historical bindings, code hashes, timelock, and queue transition. It appends to schema-2 `recovery-transition.json`; the original manifest and earlier records remain unchanged. Every unresolved publisher intent blocks cutover, including unsigned prepared roots and finalized publications whose follower registration is still pending. Reconcile those records against the old client before activation; never reanchor or replace their evidence through the new client. Preserve both committed and temporary files on an interrupted write rather than deleting either.
-
-7. Restart normal `tokens-follow` without `--recovery-plan`. The follower and qualification campaign verify the complete transition history and use its active client/verifier overlay. Recovery does not reset campaign clocks, failed verdicts, root maturity, or receipt replay protection.
-
-An owned-Anvil getter-only wallet and seeded checkpoint are test fixtures, not evidence of independent 3-of-5 control or production qualification. Native deployments keep Foundry broadcasts under their run’s `foundry-broadcast/` directory instead of replacing the repository’s deployment journal. The ignored interruption test requires an initialized owned Gear bridge and retains its original transaction evidence beside the supplied source journal. Do not activate the live lane until the real wallet, archival RPC, operational prerequisites, and timed qualification are verified.
+Fresh deployments use `initializeBeefy` with the same five base arguments as `initialize` and no wallet argument. It is not an initializer for an already initialized ZK proxy. Native deployments retain Foundry broadcasts under their run’s `foundry-broadcast/` directory rather than replacing the repository deployment journal. Do not reset retained campaign clocks, failed verdicts or unresolved obligations.
 
 ## Isolated Hoodi BEEFY token qualification
 
-This lane is fresh-deployment-only. Do not attach it to, upgrade, or transfer custody from the public ZK queue, ERC20 manager, VFTs, token mappings, or nonce ledgers. Public migration remains blocked pending verified source identity, storage layout, liabilities, and an established independently controlled recovery wallet. The candidate BEEFY client expires after 24 hours without an authenticated source timestamp; fresh queues install the independent recovery controller atomically. Passing local Gear→Hoodi qualification does not authorize a public upgrade.
+This lane is fresh-deployment-only. Do not attach it to, upgrade, or transfer custody from the public ZK queue, ERC20 manager, VFTs, token mappings, or nonce ledgers. Public migration remains blocked pending verified source identity, storage layout, liabilities and the actual approved administrative authority. The candidate BEEFY client expires after 24 hours without an authenticated source timestamp; fresh queues retain existing UUPS administration. Passing local Gear→Hoodi qualification does not authorize a public upgrade.
 
-The corrected common queue retains the public root-keyed timestamp mapping at slot 12 and appends block-local timestamps at slot 16. Do not upgrade the retained Hoodi candidate whose slot 12 is block-keyed. New qualification needs a distinct corrected queue and journals; preserve the old lane, deadlines and unresolved obligations. Use `getMerkleRootTimestampForBlock(uint256)` for effective maturity and `getMerkleRootTimestamp(bytes32)` only for retained legacy values.
+The corrected common queue retains the public root-keyed timestamp mapping at slot 12 and appends the BEEFY root floor at slot 14 and block-local timestamps at slot 15. Do not upgrade the retained Hoodi candidate whose slot 12 is block-keyed. New qualification needs a distinct corrected queue and journals; preserve the old lane, deadlines and unresolved obligations. Use `getMerkleRootTimestampForBlock(uint256)` for effective maturity and `getMerkleRootTimestamp(bytes32)` only for retained legacy values.
 
 See the [BEEFY/MMR Hoodi lane architecture](internals.md#beefymmr-hoodi-lane) for source commitments, wire formats, verification boundaries and test-only deployment limits. The legacy ZK lane and its public custody remain separate.
 
@@ -387,14 +362,14 @@ Set `OPS_VENV` to a new absolute directory. `RUNS_DIR` must already exist as a p
 
 Build and qualify the selected artifacts first. `seal-artifacts.py` does not run tests or confer qualification: it requires a schema-1 verification JSON with `status: VERIFIED`, successful `cargo-tests`, `forge-tests`, `full-release-build`, and `historical-recovery` checks. Each check records `name`, actual `command`, `exitCode`, `logPath`, and `logSha256`. The record also contains `binaries` (`gear`, `beefy-relay`, `relayer`, `checkpoints-tool`, each with `path` and `sha256`), `sourceFiles` (path-to-SHA256 map), and `solidityArtifactSha256`. Retain the original logs and fingerprint all build inputs; a manually asserted status is not test evidence.
 
-`sourceFiles` must cover the copied operations tree, Foundry configuration files and every copied Solidity `out/` file, including build-info and dynamically loaded artifacts. Sealing checks destination copies against those original qualification digests, pinned Safe bytes and originally parsed verification bytes before publishing `bundle.json`. A concurrent rebuild or edit must fail sealing, not become a newly blessed bundle hash. Keep any failed output for diagnosis; it is not deployable without a completed manifest.
+`sourceFiles` must cover the copied operations tree, Foundry configuration files and every copied Solidity `out/` file, including build-info and dynamically loaded artifacts. Sealing checks destination copies against those original qualification digests and originally parsed verification bytes before publishing `bundle.json`. A concurrent rebuild or edit must fail sealing, not become a newly blessed bundle hash. Keep any failed output for diagnosis; it is not deployable without a completed manifest.
 
 Fresh simulation, checking and broadcast also require the local Foundry configuration (including qualified file absence), sole build-info and all runtime-loaded contract artifacts to match the sealed bundle. This includes the dynamically loaded WrappedVara implementation. Those hashes are part of the simulation and deployment-intent identity; an older simulation needs a fresh dry-run. Drift after a durable intent holds that original attempt for reconciliation, not another send.
 
 ~~~sh
 "$OPS_PY" tools/beefy-relay/ops/seal-artifacts.py \
   --verification "$VERIFICATION_JSON" --ethereum-project "$SOLIDITY_PROJECT" \
-  --safe-archive "$SAFE_1_4_1_ARCHIVE" --output "$BUNDLE" \
+  --output "$BUNDLE" \
   --runtime-approval "$RUNTIME_APPROVAL_JSON" \
   --runtime-approval-sha256 "$RUNTIME_APPROVAL_SHA256"
 "$OPS_PY" "$BUNDLE/ops/prepare-run.py" \
@@ -417,13 +392,13 @@ Declare dependency aliases explicitly in the root Foundry configuration: the sea
 
 The ordered setup commands are below. Each step must finish with its own canonical evidence before continuing; a process launch or a marker alone is not readiness. Funding and deployment commands spend test currency and are only for an authorized fresh deployment. The pinned Gear executable requires `key generate-node-key --chain dev`; its inspection commands do not take that selector. Keep a failed setup's original funded roles, genesis and any generated peer keys; do not rerun identity reservation or genesis generation.
 
-`setup-safe.py prepare` creates private local keys and journals without sending transactions. Its no-argument mode funds six role EOAs (0.05 deployer, 0.10 follower, 0.025 each root/paid/campaign, 0.015 Safe deployer: 0.24 Hoodi ETH total, plus gas), retaining at least 0.5 ETH in the funding wallet after maximum recorded costs. It then deploys the local Safe and sends the three-signature proof. Source initialization/governance, program preparation/configuration, token deployment, inventory provisioning, bootstrap queueing and running actors also sign or spend test funds/native value. A dry run and `--check` do not broadcast, but read the protected deployer key; default token-deployment mode broadcasts. Never treat a printed setup plan, funding balance, runtime approval JSON or guide command as authorization, and never point these commands at a public Vara source or mainnet.
+`setup-funding.py prepare` creates private local role keys and funding journals without sending transactions. Its no-argument mode funds five role EOAs (0.05 deployer, 0.10 follower, 0.025 each root/paid/campaign: 0.225 Hoodi ETH total, plus gas) and waits for canonical finality, retaining at least 0.5 ETH in the funding wallet after maximum recorded costs. It does not deploy a Safe. Source initialization/governance, program preparation/configuration, token deployment, inventory provisioning, bootstrap queueing and running actors also sign or spend test funds/native value. A dry run and `--check` do not broadcast, but read the protected deployer key; default token-deployment mode broadcasts. Never treat a printed setup plan, funding balance, runtime approval JSON or guide command as authorization, and never point these commands at a public Vara source or mainnet.
 
 ~~~sh
 export BEEFY_RUN="$NEW_RUN"
 OPS="$BUNDLE/ops"
-"$OPS_PY" "$OPS/setup-safe.py" prepare
-"$OPS_PY" "$OPS/setup-safe.py"
+"$OPS_PY" "$OPS/setup-funding.py" prepare
+"$OPS_PY" "$OPS/setup-funding.py"
 "$OPS_PY" "$OPS/source-chain/pin-source-identity.py"
 "$OPS_PY" "$OPS/source-chain/prepare-source-genesis.py"
 "$OPS_PY" "$OPS/source-chain/setup-source.py" start
@@ -460,7 +435,7 @@ Sails unit acknowledgements (including governance pause/unpause and bridge-fee p
 
 `beefy-relay tokens-snapshot` is read-only and requires explicit source/witness, Ethereum/Beacon endpoints, deployment/token-stack manifests, public Gear/EVM user identities, and an output path. It records pinned cross-chain quantities without signer inputs. It does not establish campaign readiness, ledger completeness, or permission to retire an older lane.
 
-The five local Safe owner keys demonstrate a 3-of-5 execution threshold, not five independent controllers. Keep `publicMigration: BLOCKED` and `productionQualification: NOT ESTABLISHED`. Preserve older services, keys, journals, pending identities and failed reports until their liabilities and control transactions have been reconciled separately.
+Local role keys do not establish approved production administrative authority. Keep `publicMigration: BLOCKED` and `productionQualification: NOT ESTABLISHED`. Preserve older services, keys, journals, pending identities and failed reports until their liabilities and control transactions have been reconciled separately.
 
 After fresh setup and bootstrap recording, `setup-services.py all` has written, but not loaded, campaign-bound one-shot plists. The continuously supervised actors have `KeepAlive=true`; preflight and warmup have `KeepAlive=false` and `RunAtLoad=true`, so explicit bootstrap starts each once without restart-on-exit. Only after explicit authorization and actor readiness, load the selected preflight once, then the supervised warmup observer after a terminal passed preflight. Already bound older plists remain immutable; do not patch their flags or admission digests in place:
 

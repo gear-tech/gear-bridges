@@ -9,7 +9,8 @@ use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
 use vft_manager::WASM_BINARY as WASM_VFT_MANAGER;
 use vft_manager_client::{
-    traits::*, vft_manager::events::VftManagerEvents, Config, Error, InitConfig, Order, TokenSupply,
+    traits::*, vft_manager::events::VftManagerEvents, Config, Error, InitConfig, Order,
+    ReceiptDepositOutcome, ReceiptStatus, TokenSupply,
 };
 use vft_vara::WASM_BINARY as WASM_VFT_VARA;
 
@@ -1298,9 +1299,9 @@ async fn migrate_transactions() -> Result<()> {
 #[tokio::test]
 async fn vft_burn_from() -> Result<()> {
     use vft_vara_client::{
-        traits::{Vft, VftAdmin, VftExtension, VftVaraFactory},
+        traits::{NativeEscrow, Vft, VftAdmin, VftExtension, VftVaraFactory},
         vft_2::events::Vft2Events,
-        Mainnet,
+        Mainnet, PayoutStatus,
     };
 
     let conn = connect_to_node(
@@ -1438,6 +1439,44 @@ async fn vft_burn_from() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
+    service
+        .pause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+    service
+        .configure_native_wrapper(Some(vft_id))
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+    service_vft_admin
+        .pause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .unwrap();
+    let mut escrow = vft_vara_client::NativeEscrow::new(remoting.clone());
+    escrow
+        .configure_manager(vft_manager_id)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .unwrap();
+    service_vft_admin
+        .resume()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .unwrap();
+    service
+        .unpause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
     let receipt_rlp = crate::create_receipt_rlp(
         address_erc20_manager.into(),
         address_from.into(),
@@ -1445,13 +1484,15 @@ async fn vft_burn_from() -> Result<()> {
         address_token.into(),
         amount_1,
     );
-    service
-        .submit_receipt(10, 2, receipt_rlp)
-        .with_gas_limit(gas_limit)
-        .send_recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("Failed to submit receipt: {e:?}"))?
-        .unwrap();
+    assert_eq!(
+        service
+            .submit_receipt(10, 2, receipt_rlp.clone())
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?,
+        Err(Error::NativeSettlementPending)
+    );
 
     let service_vft = vft_vara_client::Vft::new(remoting.clone());
     let balance = service_vft
@@ -1474,16 +1515,83 @@ async fn vft_burn_from() -> Result<()> {
     let (message, _interval) = messages.first().unwrap();
     assert_eq!(message.value(), u128::try_from(amount_1).unwrap());
 
+    let queued = service
+        .receipt_deposits(10, 2)
+        .recv(vft_manager_id)
+        .await
+        .unwrap();
+    assert_eq!(queued.len(), 1);
+    assert!(queued[0].native);
+    assert_eq!(queued[0].outcome, ReceiptDepositOutcome::NativeQueued);
+    let payout = escrow
+        .redemption(queued[0].operation_id)
+        .recv(vft_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(payout.status, PayoutStatus::Queued);
+    assert_eq!(message.id().into_bytes(), payout.child.into_bytes());
+    assert_eq!(
+        service
+            .receipt_status(10, 2)
+            .recv(vft_manager_id)
+            .await
+            .unwrap(),
+        ReceiptStatus::Reserved
+    );
     let (value_claimed, _block_hash) = api2.claim_value(message.id()).await?;
     assert_eq!(value_claimed, u128::try_from(amount_1).unwrap());
+    assert_eq!(
+        service
+            .reconcile_receipt(10, 2)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap(),
+        Ok(ReceiptStatus::Processed)
+    );
+    let delivered = escrow
+        .redemption(queued[0].operation_id)
+        .recv(vft_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(delivered.status, PayoutStatus::Delivered);
+    assert_eq!(delivered.child, payout.child);
+    assert_eq!(delivered.returned_value, 0);
+    assert_eq!(
+        service
+            .receipt_deposits(10, 2)
+            .recv(vft_manager_id)
+            .await
+            .unwrap()[0]
+            .outcome,
+        ReceiptDepositOutcome::Settled
+    );
+    assert_eq!(
+        service
+            .submit_receipt(10, 2, receipt_rlp)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed)
+    );
+    assert_eq!(
+        service_vft
+            .balance_of(vft_manager_id)
+            .recv(vft_id)
+            .await
+            .unwrap(),
+        amount_2
+    );
 
     let balance = api.total_balance(address_receiver).await?;
     assert!(balance > DEFAULT_BALANCE);
 
-    // attempt to transfer and unwrap tokens to the program should fail
-
+    // A rejecting program returns the original native reserve; it must not
+    // receive reminted tokens or let a replay enqueue a second payout.
     let balance_vft_native_before = api.total_balance(vft_id).await?;
-
     let mut listener = api.subscribe().await?;
     let receipt_rlp = crate::create_receipt_rlp(
         address_erc20_manager.into(),
@@ -1492,52 +1600,109 @@ async fn vft_burn_from() -> Result<()> {
         address_token.into(),
         amount_2,
     );
-    service
-        .submit_receipt(10, 3, receipt_rlp)
-        .with_gas_limit(gas_limit)
-        .send_recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("Failed to submit receipt 2: {e:?}"))?
-        .unwrap();
-
-    let balance = service_vft
-        .balance_of(vft_manager_id)
-        .recv(vft_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(balance, 0.into());
-
+    assert_eq!(
+        service
+            .submit_receipt(10, 3, receipt_rlp.clone())
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .map_err(|e| anyhow!("{e:?}"))?,
+        Err(Error::NativeSettlementPending)
+    );
+    // Observe the burn, not the old automatic re-mint on payout rejection.
     listener
         .proc(|event| match event {
-            gclient::Event::Gear(gclient::GearEvent::UserMessageSent { message, .. })
-                if message.source().into_bytes() == vft_id.into_bytes()
-                    && message.destination().into_bytes() == [0; 32] =>
+            Event::Gear(GearEvent::UserMessageSent { message, .. })
+                if message.source() == vft_id && message.destination().into_bytes() == [0; 32] =>
             {
-                if let Ok(Vft2Events::Transfer { from, to, value }) =
-                    Vft2Events::decode_event(message.payload_bytes())
-                {
-                    if from.is_zero() && to == vft_id {
+                match Vft2Events::decode_event(message.payload_bytes()) {
+                    Ok(Vft2Events::Transfer { from, to, value })
+                        if from == vft_manager_id && to.is_zero() =>
+                    {
                         assert_eq!(value, amount_2);
-                        return Some(());
+                        Some(())
                     }
+                    _ => None,
                 }
-
-                None
             }
-
             _ => None,
         })
         .await?;
-
-    let balance = service_vft
-        .balance_of(vft_id)
+    let rejected = service
+        .receipt_deposits(10, 3)
+        .recv(vft_manager_id)
+        .await
+        .unwrap();
+    assert_eq!(rejected.len(), 1);
+    let returned = escrow
+        .redemption(rejected[0].operation_id)
         .recv(vft_id)
         .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(balance, amount_2);
-
-    let balance_vft_native = api.total_balance(vft_id).await?;
-    assert_eq!(balance_vft_native, balance_vft_native_before);
+        .unwrap()
+        .unwrap();
+    assert_eq!(returned.status, PayoutStatus::Returned);
+    assert_eq!(returned.returned_value, u128::try_from(amount_2).unwrap());
+    for _ in 0..2 {
+        assert_eq!(
+            service
+                .reconcile_receipt(10, 3)
+                .with_gas_limit(gas_limit)
+                .send_recv(vft_manager_id)
+                .await
+                .unwrap(),
+            Err(Error::NativeSettlementReturned)
+        );
+    }
+    assert_eq!(
+        service
+            .submit_receipt(10, 3, receipt_rlp)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap(),
+        Err(Error::NativeSettlementReturned)
+    );
+    let retained = service
+        .receipt_deposits(10, 3)
+        .recv(vft_manager_id)
+        .await
+        .unwrap();
+    assert_eq!(retained[0].outcome, ReceiptDepositOutcome::Unknown);
+    assert_eq!(retained[0].child, rejected[0].child);
+    assert_eq!(
+        service
+            .receipt_status(10, 3)
+            .recv(vft_manager_id)
+            .await
+            .unwrap(),
+        ReceiptStatus::Reserved
+    );
+    assert_eq!(
+        escrow
+            .redemption(retained[0].operation_id)
+            .recv(vft_id)
+            .await
+            .unwrap()
+            .unwrap(),
+        returned
+    );
+    assert_eq!(
+        service_vft
+            .balance_of(vft_manager_id)
+            .recv(vft_id)
+            .await
+            .unwrap(),
+        U256::zero()
+    );
+    assert_eq!(
+        service_vft.balance_of(vft_id).recv(vft_id).await.unwrap(),
+        U256::zero()
+    );
+    assert_eq!(
+        service_vft.total_supply().recv(vft_id).await.unwrap(),
+        U256::zero()
+    );
+    assert_eq!(api.total_balance(vft_id).await?, balance_vft_native_before);
 
     Ok(())
 }
@@ -1763,117 +1928,115 @@ async fn submit_receipt_works() -> Result<()> {
     Ok(())
 }
 
-// Check whether an error in a VFT contract is propagated correctly to the sender
-// of the `submit_receipt` message.
-// Prerequisites:
-// - Deploying a vft-manager.
-// - Deploying a VFT contract with token supply type Ethereum, but not adding any roles to it.
-// Test scenario:
-// - on behalf of the historical proxy, sending `submit_receipt` message to the VFT manager,
-//   with the rlp receipt indicating a transfer of an ERC20 token with Ethereum supply
-// - the upstream VFT contract will panic attempting to mint tokens.
-// Expecting:
-// - no events are emitted
-// - the transactions list is not updated
-// - the correct error is propagated to the sender.
+// A definite VFT panic must remain retryable without settling or minting tokens.
 #[tokio::test]
 async fn error_in_vft_propagated_correctly() -> Result<()> {
-    use core::panic;
-
-    let (remoting, api, vft_manager_id, user_id, _, erc20_addr) =
-        deploy_programs(true, false, TokenSupply::Ethereum, Some(10)).await?;
-
-    let gas_limit = api.block_gas_limit().unwrap();
-
+    let (remoting, api, manager, user, token, erc20) =
+        deploy_programs(true, false, TokenSupply::Ethereum, None).await?;
+    let mut extension = vft_client::VftExtension::new(remoting.clone());
+    while extension
+        .allocate_next_balances_shard()
+        .send_recv(token)
+        .await
+        .unwrap()
+    {}
+    let gas = api.block_gas_limit().unwrap();
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
-
-    let txs = service
-        .transactions(Order::Direct, 0, 1)
-        .recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(txs.is_empty());
-
-    // Subscribe to the events listeners
-    let mut listener = api.subscribe().await.unwrap();
-    let mut another_listener = api.clone().subscribe().await.unwrap();
-
-    let erc20_manager_address = H160([1_u8; 20]);
-    let sender = H160([99_u8; 20]);
-    let receipt_rlp = crate::create_receipt_rlp(
-        erc20_manager_address,
-        sender,
-        42.into(),
-        erc20_addr,
-        U256::zero(),
+    assert_eq!(
+        service.receipt_status(0, 1).recv(manager).await.unwrap(),
+        ReceiptStatus::Unknown
     );
+    let amount = U256::from(17_u64);
+    let receipt = crate::create_receipt_rlp(H160([1; 20]), H160([99; 20]), user, erc20, amount);
+    let mut listener = api.subscribe().await?;
     let result = service
-        .submit_receipt(0, 1, receipt_rlp)
-        .with_gas_limit(gas_limit)
-        .send_recv(vft_manager_id)
+        .submit_receipt(0, 1, receipt.clone())
+        .with_gas_limit(gas)
+        .send_recv(manager)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
-
-    // Trying to listen for the `BridgingAccepted` event emitted by the VFT manager,
-    // but there isn't supposed to be one since the VFT contract finished with an error.
-    // We wait for 30 seconds before concluding that the event was not emitted.
-    let emitted = tokio::select! {
-        _ = listener.proc(|e| {
-            match e {
-                Event::Gear(GearEvent::UserMessageSent { message, .. })
-                    if message.destination().into_bytes() == [0_u8; 32]
-                        && message.source().into_bytes() == vft_manager_id.into_bytes() =>
-                {
-                    if let VftManagerEvents::BridgingAccepted {
-                        ..
-                    } = VftManagerEvents::decode_event(message.payload_bytes()).unwrap()
-                    {
-                        Some(())
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        }) => {
-            Some(())
-        },
-        _ = sleep(Duration::from_secs(30)) => {
-            None
-        }
-    };
-
-    let usr_msg = another_listener
-        .proc(|e| match e {
+    assert!(
+        matches!(result, Err(Error::ReplyFailure(_))),
+        "Result: {result:?}"
+    );
+    // Observe every manager event through the terminal reply, not a wall-clock window.
+    listener
+        .proc(|event| match event {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.destination().into_bytes() == user_id.into_bytes() =>
+                if message.source() == manager =>
             {
-                message
-                    .payload_bytes()
-                    .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE)
-                    .then_some(())
+                if message.destination().into_bytes() == [0; 32] {
+                    assert!(!matches!(
+                        VftManagerEvents::decode_event(message.payload_bytes()).unwrap(),
+                        VftManagerEvents::BridgingAccepted { .. }
+                            | VftManagerEvents::ReceiptDepositSettled { .. }
+                    ));
+                }
+                (message.destination() == user
+                    && message
+                        .payload_bytes()
+                        .starts_with(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE))
+                .then_some(())
             }
             _ => None,
         })
-        .await;
-
-    // The `BridgingAccepted` event is not expected to be emitted, but the user message is
-    // expected to be sent back to the user.
-    assert!(emitted.is_none(), "BridgingAccepted event was emitted");
-    assert!(usr_msg.is_ok(), "User message was not sent back");
-
-    let txs = service
-        .transactions(Order::Direct, 0, 1)
-        .recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(txs.is_empty());
-
-    assert!(
-        matches!(result, Err(Error::Internal { .. })),
-        "Result: {result:?}"
+        .await?;
+    assert_eq!(
+        service
+            .transactions(Order::Direct, 0, 1)
+            .recv(manager)
+            .await
+            .unwrap(),
+        vec![(0, 1)]
     );
+    assert_eq!(
+        service.receipt_status(0, 1).recv(manager).await.unwrap(),
+        ReceiptStatus::Reserved
+    );
+    let rejected = service.receipt_deposits(0, 1).recv(manager).await.unwrap();
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0].outcome, ReceiptDepositOutcome::Rejected);
+    assert!(rejected[0].child.is_some());
+    let vft = vft_client::Vft::new(remoting.clone());
+    assert_eq!(
+        vft.balance_of(user).recv(token).await.unwrap(),
+        U256::zero()
+    );
+    assert_eq!(vft.total_supply().recv(token).await.unwrap(), U256::zero());
 
+    vft_client::VftAdmin::new(remoting.clone())
+        .set_minter(manager)
+        .with_gas_limit(gas)
+        .send_recv(token)
+        .await
+        .unwrap();
+    service
+        .submit_receipt(0, 1, receipt.clone())
+        .with_gas_limit(gas)
+        .send_recv(manager)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        service.receipt_status(0, 1).recv(manager).await.unwrap(),
+        ReceiptStatus::Processed
+    );
+    let settled = service.receipt_deposits(0, 1).recv(manager).await.unwrap();
+    assert_eq!(settled[0].outcome, ReceiptDepositOutcome::Settled);
+    assert_ne!(settled[0].child, rejected[0].child);
+    assert_eq!(vft.balance_of(user).recv(token).await.unwrap(), amount);
+    assert_eq!(vft.total_supply().recv(token).await.unwrap(), amount);
+    assert_eq!(
+        service
+            .submit_receipt(0, 1, receipt)
+            .with_gas_limit(gas)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed)
+    );
+    assert_eq!(vft.balance_of(user).recv(token).await.unwrap(), amount);
+    assert_eq!(vft.total_supply().recv(token).await.unwrap(), amount);
     Ok(())
 }
 
@@ -1889,8 +2052,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
 // - waiting (as a VFT contract) for a message from the vft-manager to do `transfer_from` action
 // - replying with `false` to the vft-manager meaning that the transfer was not successful
 // Expecting:
-// - the `handle_reply` hook fails to check the reply and exits without updating the transactions
-// - the transactions are not updated
+// - the receipt is reserved with an ambiguous deposit, preventing economic replay
 // - no `BridgingAccepted` event is emitted
 #[tokio::test]
 async fn illegal_reply_in_handle_reply() -> Result<()> {
@@ -1923,7 +2085,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
 
     // Send `submit_receipt` request to Vft-manager
     let reply_ticket = service
-        .submit_receipt(0, 1, receipt_rlp)
+        .submit_receipt(0, 1, receipt_rlp.clone())
         .with_gas_limit(gas_limit / 100 * 95)
         .send(vft_manager_id)
         .await
@@ -2004,6 +2166,17 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
 
     let predicate = |e| match e {
         Event::Gear(GearEvent::UserMessageSent { message, .. })
+            if message.destination().into_bytes() == [0; 32]
+                && message.source() == vft_manager_id =>
+        {
+            assert!(!matches!(
+                VftManagerEvents::decode_event(message.payload_bytes()).unwrap(),
+                VftManagerEvents::BridgingAccepted { .. }
+                    | VftManagerEvents::ReceiptDepositSettled { .. }
+            ));
+            None
+        }
+        Event::Gear(GearEvent::UserMessageSent { message, .. })
             if message.destination().into_bytes() == user_id.into_bytes()
                 && message.source().into_bytes() == vft_manager_id.into_bytes() =>
         {
@@ -2037,18 +2210,58 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
         .await
         .unwrap();
 
-    // Successful transactions number didn't change
-    let service = vft_manager_client::VftManager::new(remoting.clone());
-    let txs = service
-        .transactions(Order::Direct, 0, 1)
+    // Successful-looking false is ambiguous: do not replay the economic child.
+    let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    assert_eq!(
+        service
+            .transactions(Order::Direct, 0, 1)
+            .recv(vft_manager_id)
+            .await
+            .unwrap(),
+        vec![(0, 1)]
+    );
+    assert_eq!(result, Err(Error::InvalidReply));
+    assert_eq!(
+        service
+            .receipt_status(0, 1)
+            .recv(vft_manager_id)
+            .await
+            .unwrap(),
+        ReceiptStatus::Reserved
+    );
+    let retained = service
+        .receipt_deposits(0, 1)
         .recv(vft_manager_id)
         .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(txs.is_empty());
-
-    assert!(
-        matches!(result, Err(Error::InvalidReply)),
-        "Result: {result:?}"
+        .unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].child, Some(token_operation_msg_id));
+    assert_eq!(retained[0].outcome, ReceiptDepositOutcome::Unknown);
+    assert_eq!(
+        service
+            .reconcile_receipt(0, 1)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap(),
+        Err(Error::InvalidReply)
+    );
+    assert_eq!(
+        service
+            .submit_receipt(0, 1, receipt_rlp)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap(),
+        Err(Error::InvalidReply)
+    );
+    assert_eq!(
+        service
+            .receipt_deposits(0, 1)
+            .recv(vft_manager_id)
+            .await
+            .unwrap(),
+        retained
     );
 
     Ok(())

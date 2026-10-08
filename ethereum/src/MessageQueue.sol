@@ -7,7 +7,8 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import {IRecoveryBeefyClient, IRecoveryRootVerifier, RecoveryController} from "src/RecoveryController.sol";
+import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
+import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
@@ -60,8 +61,7 @@ contract MessageQueue is
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
-    // Appended for layout compatibility; populated only once by governance or explicit fresh initialization.
-    address public recoveryController;
+    // Appended after the legacy storage layout (slots 0–13).
     uint256 public beefyRootMinimum;
     mapping(uint256 blockNumber => uint256 timestamp) private _blockRootTimestamps;
 
@@ -92,18 +92,16 @@ contract MessageQueue is
         _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
     }
 
-    /// @dev Fresh BEEFY deployments must pin an explicit independent 3-of-5 Safe recovery wallet.
-    function initializeWithRecovery(
+    /// @dev Fresh BEEFY deployments validate the queue binding and pin the authenticated source floor.
+    function initializeBeefy(
         IGovernance governanceAdmin_,
         IGovernance governancePauser_,
         address emergencyStopAdmin_,
         address[] memory emergencyStopObservers_,
-        IVerifier verifier_,
-        address recoveryWallet_
+        IVerifier verifier_
     ) public initializer {
         _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
-        _installRecoveryController(recoveryWallet_);
-        beefyRootMinimum = IRecoveryBeefyClient(IRecoveryRootVerifier(address(verifier_)).beefyClient()).mmrStartBlock();
+        beefyRootMinimum = _validateBeefyVerifier();
     }
 
     /**
@@ -154,24 +152,6 @@ contract MessageQueue is
      */
     function verifier() external view returns (address) {
         return address(_verifier);
-    }
-
-    function installRecoveryController(address recoveryWallet_) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _installRecoveryController(recoveryWallet_);
-    }
-
-    function activateRecoveryVerifier(address expectedOldVerifier, address candidateVerifier) external {
-        if (recoveryController == address(0) || msg.sender != recoveryController) revert NotRecoveryController();
-        if (
-            expectedOldVerifier == address(0) || address(_verifier) != expectedOldVerifier
-                || candidateVerifier == address(0) || candidateVerifier == expectedOldVerifier
-        ) revert InvalidRecoveryVerifier();
-        if (isChallengingRoot()) revert RecoveryBlockedByChallenge();
-        if (_emergencyStop) revert RecoveryBlockedByEmergencyStop();
-
-        _verifier = IVerifier(candidateVerifier);
-        _requireRecoverableVerifier();
-        emit RecoveryVerifierActivated(expectedOldVerifier, candidateVerifier);
     }
 
     /**
@@ -611,22 +591,15 @@ contract MessageQueue is
         _verifier = verifier_;
     }
 
-    function _installRecoveryController(address recoveryWallet_) private {
-        if (recoveryController != address(0)) revert RecoveryControllerAlreadyInstalled();
-        _requireRecoverableVerifier();
-        recoveryController = address(new RecoveryController(address(this), recoveryWallet_));
-        emit RecoveryControllerInstalled(recoveryController, recoveryWallet_);
-    }
-
-    function _requireRecoverableVerifier() private view {
-        if (address(_verifier).code.length == 0) revert InvalidRecoveryVerifier();
-        IRecoveryRootVerifier rootVerifier = IRecoveryRootVerifier(address(_verifier));
+    function _validateBeefyVerifier() private view returns (uint64) {
+        if (address(_verifier).code.length == 0) revert InvalidBeefyVerifier();
+        VaraQueueRootVerifier rootVerifier = VaraQueueRootVerifier(address(_verifier));
         if (rootVerifier.messageQueue() != address(this) || rootVerifier.destinationChainId() != block.chainid) {
-            revert InvalidRecoveryVerifier();
+            revert InvalidBeefyVerifier();
         }
-        address clientAddress = rootVerifier.beefyClient();
-        if (clientAddress.code.length == 0) revert InvalidRecoveryVerifier();
-        IRecoveryBeefyClient client = IRecoveryBeefyClient(clientAddress);
+        address clientAddress = address(rootVerifier.beefyClient());
+        if (clientAddress.code.length == 0) revert InvalidBeefyVerifier();
+        BeefyClient client = BeefyClient(clientAddress);
         if (
             client.sourceDomain() == bytes32(0) || client.destinationQueue() != address(this)
                 || client.destinationChainId() != block.chainid || client.mmrStartBlock() == 0
@@ -642,6 +615,7 @@ contract MessageQueue is
                             address(this)
                         )
                     )
-        ) revert InvalidRecoveryVerifier();
+        ) revert InvalidBeefyVerifier();
+        return client.mmrStartBlock();
     }
 }

@@ -29,7 +29,7 @@ The inventory investigation reported these **unreconciled observations**, not an
 
 The EL pin was mainnet block **26097933**, hash `0xad48f1b969a5c92e3b5bc70ac43e9f2efb0aa180ff07e7c6a955148b7d60074b`. Gear pins and complete timestamps/hashes are in the inventory. The finalized blocks’ own timestamps were **22 minutes 19 seconds apart** (EL 14:01:59 versus Gear 14:24:18); the query observation times were about **3 minutes 37 seconds apart**, which is a different skew. Either interval can contain real in-flight transfers, but **neither is an explanation without matching canonical transfers and per-effect accounting**. Origin-through-cutover ledgers are missing. All three residuals therefore hold migration. Do not net USDT against WETH or VARA, assume a pending amount, replenish custody, mint supply to balance the table or infer insolvency from these unmatched cuts.
 
-Current mainnet EVM observations differ from older address lists: the queue’s measured verifier is `0xb7142e82ceead0df5d0b3507240a503e99e1881e`, not the advertised older verifier; its `recoveryController()` call reverts, which is **not** a zero-address observation. The ERC20Manager still authorizes three historical VFT-manager IDs. The retired manager chain `e01… -> c97… -> 440…` and native token chain `dbf80… -> 29c42…` require their original migration exports/imports, exit destinations, custody and replay evidence. An `Exited` or `InactiveProgram` result does not extinguish a claim. The emergency admin is an observed EIP-7702 delegation designator to `0x63c0c19a282a1b52b07dd5a65b58948a07dae32b`; Safe getters revert, so independent Safe authority is not established.
+Current mainnet EVM observations differ from older address lists: the queue’s measured verifier is `0xb7142e82ceead0df5d0b3507240a503e99e1881e`, not the advertised older verifier; the historical `recoveryController()` query reverted, which is **not** a zero-address observation or a current API dependency. The ERC20Manager still authorizes three historical VFT-manager IDs. The retired manager chain `e01… -> c97… -> 440…` and native token chain `dbf80… -> 29c42…` require their original migration exports/imports, exit destinations, custody and replay evidence. An `Exited` or `InactiveProgram` result does not extinguish a claim. The emergency admin is an observed EIP-7702 delegation designator to `0x63c0c19a282a1b52b07dd5a65b58948a07dae32b`; Safe getters revert, so independent Safe authority is not established.
 
 The live source scan observed queue ID 700, next global nonce 865 and an initialized/unpaused source bridge. Of 865 `isProcessed` queries for nonce 0–864 at the EL pin, 128 were false; they are not all proven asset liabilities. An indexer supplied 137 non-completed discovery records, not an origin-complete ledger. A zero current queue/root getter does not erase older nonempty roots or redemption rights. The deployed current manager returned `Unknown call`/userspace panic for the candidate source’s new `ReceiptStatus` method; that is an ABI/query failure, **not receipt state `Unknown`**. Its 499 enumerated transaction keys do not establish reserved/processed/per-log history. Both current and still-active historical proxies/endpoints, including the measured `bdc6…` checkpoint rather than the older advertised `f0a…` checkpoint, remain in scope.
 
@@ -41,7 +41,7 @@ These are source-backed capabilities, not claims that the live proxies use this 
 
 | Owner | Existing API or behavior | Migration consequence |
 |---|---|---|
-| [MessageQueue](../ethereum/src/MessageQueue.sol) | UUPS `_authorizeUpgrade` requires `DEFAULT_ADMIN_ROLE`; that role is initialized to GovernanceAdmin. No generic verifier setter. | There is an upgrade route, but no callable ZK-to-BEEFY initializer in the current source. An audited migration release is a prerequisite, not an invented command. |
+| [MessageQueue](../ethereum/src/MessageQueue.sol) | UUPS `_authorizeUpgrade` requires `DEFAULT_ADMIN_ROLE`, initially held by GovernanceAdmin; existing `reinitialize()` (`reinitializer(7)`) adds admin/pauser authority at the placeholder `0x111…111`. No generic verifier setter. | There is an upgrade route, but no callable ZK-to-BEEFY initializer in the current source. An audited migration release is a prerequisite, not an invented command. |
 | MessageQueue | Retains `_blockNumbers`, `_merkleRootTimestamps` and global `_processedMessages[nonce]`. `processMessage` verifies an already-stored root without consulting the current verifier. | Previously registered roots can remain redeemable after a verifier cutover, with original maturity and nonce replay protection, if storage and handler bindings are preserved. |
 | MessageQueue | `pause()` stops ordinary message processing; governance-source messages bypass pause. Root submission is not paused by that flag. Active root challenge blocks even governance processing. | Pause is not a root-publication fence. Do not use `challengeRoot` as a routine cutover lock; it can disable the upgrade path. |
 | MessageQueue | User/pauser maturity is 300 seconds; admin maturity is 3600 seconds. Root progress is limited to 57600 source blocks per advance. | Preserve maturity timestamps. Pre-register governance roots and satisfy existing limits; no accelerated admin processing or fabricated empty-root bootstrap. |
@@ -49,7 +49,6 @@ These are source-backed capabilities, not claims that the live proxies use this 
 | ERC20Manager | No custody sweep, withdrawal, queue setter, old-manager approval or VFT-manager removal API. Governance can add a VFT manager or register/create a token. | A new manager cannot pull escrow with a nominal `transferFrom`. Adding a manager does not import replay state and may create a second receipt consumer. |
 | [GovernanceAdmin](../ethereum/src/GovernanceAdmin.sol) | Only its bound queue may call `handleMessage`, with the exact configured Gear governance source. Packed commands pause/unpause the three supported proxies or invoke `upgradeToAndCall`. | EVM admin is a contract, not a guessed wallet. Proposal approval must reach the real Gear source and then the authenticated queue. |
 | [GovernancePauser](../ethereum/src/GovernancePauser.sol) | Only the bound queue plus configured Gear source; pause/unpause, not upgrades. | A pause authority is not an upgrade or custody authority. |
-| [RecoveryController](../ethereum/src/RecoveryController.sol) | 24-hour recovery; validates an expired old BEEFY client and a forward candidate with identical lane identity. Installation requires an existing recoverable BEEFY verifier. | Not a ZK migration adapter. Do not claim the legacy controller exists, treat a reverting getter as absence, or bypass its timelock. |
 | [Gear VFT manager](../gear-programs/vft-manager/app/src/services/mod.rs) | Admin can pause, change mapping/proxy/manager/config, and change admin/pauser. `upgrade(newManager)` transfers manager-held balances and exits after latching the target. | This is program replacement, not storage-preserving code upgrade or automatic user/replay-state migration. It is not selected here. |
 | [Receipt processing](../gear-programs/vft-manager/app/src/services/submit_receipt/mod.rs) | Separate `Unknown`, `Reserved`, `Processed` state, per-log progress and oldest-key fence; current local source rejects an ambiguous reserved receipt. | Preserve the original consumer and all replay/progress state. `Unknown` is not permission to mint; `Reserved` is not `Processed`. Deployed older behavior must be established separately. |
 | Gear VFT manager | `transactions` merges processed and reserved keys. `insert_transactions` marks keys processed; bounded retention may trim oldest keys. | A transactions dump alone is not a safe migration export. Do not convert reservations to successes or import only a convenient suffix. |
@@ -57,7 +56,7 @@ These are source-backed capabilities, not claims that the live proxies use this 
 | [Checkpoint program](../gear-programs/checkpoint-light-client/app/src/lib.rs) | Cryptographic checkpoint/sync/replay-back updates; no admin checkpoint reset or network setter. Event-verifier checkpoint binding is initialized in its program. | Preserve old checkpoint and event-verifier programs and archive history. Fork/network changes need their own verified release; no fabricated checkpoint or network rebinding. |
 | VFT services | Existing token admin sets minter, burner, pauser and admin; manager exit does not migrate users' balances. | Keep program IDs, balances, total supplies and role owners. A role change is not proof that old receipt state has been fenced. |
 
-The queue's recovery fields were appended in the candidate source. That comment does not establish live layout compatibility. Capture the deployed implementation, compiler/OZ storage namespaces and historical layouts before proposing a release.
+The corrected candidate queue preserves genuine legacy slots 0–13, then appends the BEEFY root floor at slot 14 and block-local timestamps at slot 15, with no controller field. This source layout does not establish live layout compatibility. Capture the deployed implementation, compiler/OZ storage namespaces and historical layouts before proposing a release.
 
 ### Why not create a new queue or manager?
 
@@ -140,7 +139,7 @@ Before staging anything, record the actual chain authority graph:
 2. Source bridge admin/pauser pallet-account identities and the live runtime metadata. Mainnet's measured governance identity is a pallet account (`modl…gethb0bridge_admin…`), not evidence of a Safe or a privately signable EOA.
 3. The exact on-chain proxy/multisig/root/referendum dispatch route able to produce the required **effective Gear origin**. Record signatories, threshold, proxy type/delay, call filters, deposits and execution delay. A generic `Governance` or `NonTransfer` proxy cannot be assumed to allow `GearEthBridge` calls; inspect the actual filters and nested-call authorization.
 4. Every Gear manager admin/pauser, historical-proxy admin, VFT admin/minter/burner/pauser, fee admin and ERC20 wrapped-token owner. Retired actors require their recorded exit/migration destination and historical authority.
-5. Emergency observers/admin and any recovery wallet/controller separately. A 23-byte account delegation, failed Safe getter or a local 3-of-5 Safe is not proof of independent custody governance. Resolve delegated code/authority where applicable.
+5. Emergency observers/admin and the actual queue `DEFAULT_ADMIN_ROLE` holders separately. A 23-byte account delegation or failed Safe getter is not proof of approved Safe authority. The `reinitializer(7)` address is a source placeholder: production must use the approved real Safe; test-only `prank` does not establish on-chain authority. Resolve delegated code/authority where applicable. No bespoke threshold or timelock is added.
 
 The exact existing governance payloads are:
 
@@ -162,7 +161,7 @@ Gear manager pause is the existing `VftManager/Pause` Sails route from its real 
 
 ### Audited in-place queue release
 
-**No existing initializer signature is supplied or assumed.** `initializeWithRecovery` initializes a fresh queue; it is not a migration of an already initialized ZK proxy. `installRecoveryController` rejects a non-recoverable ZK verifier. `activateRecoveryVerifier` belongs to BEEFY recovery, not this cutover.
+**No public migration initializer signature is supplied or assumed.** `initializeBeefy` takes the same five base arguments as `initialize`, with no wallet argument, and initializes a fresh queue only; it is not a migration of an already initialized ZK proxy. Existing UUPS/`DEFAULT_ADMIN_ROLE` authority remains the upgrade route, not permission to invent cutover calldata.
 
 A separately reviewed release must provide a real ABI, reproducible implementation bytecode, code hash, compatible compiler/OZ layout and a one-time migration initializer. Its verified behavior must:
 
@@ -173,7 +172,7 @@ A separately reviewed release must provide a real ABI, reproducible implementati
 - preserve every stored root, original timestamp, genesis/max-block progress, processed nonce, role/binding, observer/challenge/emergency state and pause state; no initializer may reset mappings or replay floors;
 - reject an active challenge/emergency or incompatible bootstrap rather than bypassing it; validate the client is live with an authenticated nonzero accepted commitment;
 - keep ordinary ingress/redemption held until finalized postchecks; leave governance maturity and existing root-distance limits unchanged;
-- install a reviewed independent recovery controller only if that release explicitly supports it and the actual public recovery authority passes its own gate. No local Safe inheritance by assumption.
+- preserve and independently authenticate the existing administrative authority, including any actually executed `reinitializer(7)` role grant; do not infer production Safe authority from placeholder addresses or test impersonation.
 
 Register the release's **actual** initializer signature, argument bindings and exact calldata in the migration package. The offline tool requires old-verifier, new-verifier and legacy-boundary arguments and checks the signature exists in the supplied ABI. If the reviewed ABI expresses those preconditions differently, adapt and review the preparer against that real release; do not fabricate an initializer to satisfy its schema. No release implementation is authorized by this runbook.
 
@@ -199,10 +198,10 @@ Only a later, separately authorized operator may execute this sequence. Each gat
 - Resolve all advertised/unknown/unavailable contract/program identities, source-bytecode correspondence, full asset/fee/native custody inventory and old manager/token migrations.
 - Obtain origin-complete ledgers and original worker journals. No private journal found is a blocker, not an empty queue.
 - Reproduce current ledger/supply/residuals and cross-chain skew using matching effects. Confirm administrative history and all pending control messages.
-- Review the real migration release, storage layout, public activation/key/weight plan, deployment/recovery authority and public-network fork support. Pin candidate artifacts but do not deploy them under this request.
+- Review the real migration release, storage layout, public activation/key/weight plan, deployment/administrative authority and public-network fork support. Pin candidate artifacts but do not deploy them under this request.
 - Rehearse on a fork/archive copy of the **actual public state**, including large history, every asset, reserved/partial receipt state, retired owners, an old outstanding redemption and all stored roots/nonces. Exercise genuine proofs, failure/restart and the exact authority route. Do not replace finality/proof validity with mocked success.
 
-**Exit:** independently reviewed evidence, a real initializer ABI and deployable public activation/recovery proposal. Otherwise the migration remains BLOCKED and the existing lane is not altered by this document.
+**Exit:** independently reviewed evidence, a real initializer ABI and deployable public activation/administration proposal. Otherwise the migration remains BLOCKED and the existing lane is not altered by this document.
 
 ### G1 — freeze new asset admission while preserving recovery
 
@@ -266,7 +265,7 @@ G5 keeps ordinary user processing paused. Its checks establish structural/replay
 4. Perform separately authorized real per-asset roundtrips, receipt/nonce replay rejection, authority handovers and supervised restart under public timing/size/fees. Test native VARA and every inventoried origin separately; the four isolated test tokens do not cover them.
 5. Retain old proof availability and redemption support until every old liability is finalized closed. Do not delete a legacy program/proof store because its publisher is no longer selected.
 
-**Completion:** all old liabilities closed or continuously redeemable, all replay fences preserved, each asset's accounting explained, real public consensus/governance/recovery gates passed, and independently reviewed end-to-end evidence. This runbook currently has none of those execution approvals.
+**Completion:** all old liabilities closed or continuously redeemable, all replay fences preserved, each asset's accounting explained, real public consensus/governance/administration gates passed, and independently reviewed end-to-end evidence. This runbook currently has none of those execution approvals.
 
 ## 7. Rollback and incident boundaries
 
@@ -278,7 +277,7 @@ G5 keeps ordinary user processing paused. Its checks establish structural/replay
 | Queue upgrade finalized, before new BEEFY proof | A separately reviewed reverse migration may be considered only if layout, replay state, old proof coverage and authority remain compatible. It is not automatically safe. | Reinstalling an older implementation that cannot read the new journal/layout; changing a verifier pointer without its guarded initializer. |
 | First BEEFY root, new asset effect or irreversible program exit | HOLD and forward repair/recovery with complete original ledgers. Historical roots remain usable if safe. | Rolling back processed nonces, supplies, roots, session keys, old-program exit or finalized chain history. |
 
-Root conflict/emergency is handled by the existing authority and challenge/recovery semantics, not a plan-specific exemption. Queue pause prevents normal user releases; choose the safest authorized state for already-proven redemptions rather than leaving them stranded by an indefinite operational pause. Missing independent recovery authority means public migration stays BLOCKED, regardless of the local Safe's threshold.
+Root conflict/emergency is handled by the existing authority and challenge/recovery semantics, not a plan-specific exemption. Queue pause prevents normal user releases; choose the safest authorized state for already-proven redemptions rather than leaving them stranded by an indefinite operational pause. Missing verified approved administrative authority means public migration stays BLOCKED; neither the placeholder address nor a local test impersonation clears that gate.
 
 ## 8. Runnable read-only checks and unsigned proposal package
 
@@ -398,6 +397,6 @@ The upgrade simulation object can be used in a separately authorized pinned `eth
 
 ## 9. Deliverable versus execution
 
-This deliverable supplies a conditional, capability-grounded cutover, concrete gates, input/evidence formats, read-only checks and unsigned proposal preparation. It intentionally cannot claim present migration readiness: complete historical liabilities and retired migrations, reconciled USDT/WETH/VARA residuals, actual public authority/recovery, audited migration ABI/layout, public activation/real keys/weights and independently verified proof/finality/rehearsal evidence are still required.
+This deliverable supplies a conditional, capability-grounded cutover, concrete gates, input/evidence formats, read-only checks and unsigned proposal preparation. It intentionally cannot claim present migration readiness: complete historical liabilities and retired migrations, reconciled USDT/WETH/VARA residuals, actual public administrative authority, audited migration ABI/layout, public activation/real keys/weights and independently verified proof/finality/rehearsal evidence are still required.
 
 No public bridge state, custody, signers, worker journals, deployment manifest, source runtime, Solidity ABI or program WASM was changed by preparing this plan. Any subsequent implementation or live migration needs its own approval and must preserve all original signed identities and historical evidence.

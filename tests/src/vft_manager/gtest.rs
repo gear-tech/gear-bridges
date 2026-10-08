@@ -1091,8 +1091,8 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
             assert!(states[0].child.is_some() && states[2].child.is_some());
             assert_ne!(states[0].operation_id, states[2].operation_id);
             use ethereum_common::{hash_db::Hasher, keccak_hasher::KeccakHasher};
-            let receipt_hash = H256::from(KeccakHasher::hash(&receipt));
-            let original_id = H256::from(KeccakHasher::hash(
+            let receipt_hash = KeccakHasher::hash(&receipt);
+            let original_id = KeccakHasher::hash(
                 &(
                     b"vara/native-escrow/v1",
                     vft_manager_program_id,
@@ -1104,7 +1104,7 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
                     receipt_hash,
                 )
                     .encode(),
-            ));
+            );
             assert_eq!(states[0].operation_id, original_id);
             // New administrative policy must not reinterpret previously authenticated deposits.
             admin

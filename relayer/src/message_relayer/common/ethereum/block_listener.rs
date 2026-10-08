@@ -87,10 +87,10 @@ impl BlockListener {
                         block.header.parent_hash.0.into(),
                     )
                     .await?;
-                    next_block = number
-                        .checked_add(1)
-                        .ok_or_else(|| anyhow::anyhow!("Ethereum block number overflow"))?;
                 }
+                next_block = latest
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow::anyhow!("Ethereum block number overflow"))?;
                 self.metrics.latest_block.set(latest as i64);
             } else {
                 tokio::time::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2).await;

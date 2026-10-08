@@ -209,32 +209,6 @@ pub fn prepared_content_message_identity(
     })
 }
 
-fn content_message_calldata(
-    block_number: u32,
-    total_leaves: u32,
-    leaf_index: u32,
-    nonce: [u8; 32],
-    sender: [u8; 32],
-    receiver: [u8; 20],
-    payload: Vec<u8>,
-    proof: Vec<[u8; 32]>,
-) -> Vec<u8> {
-    use alloy::sol_types::SolCall;
-    IMessageQueue::processMessageCall {
-        blockNumber: U256::from(block_number),
-        totalLeaves: U256::from(total_leaves),
-        leafIndex: U256::from(leaf_index),
-        message: VaraMessage {
-            nonce: U256::from_be_bytes(nonce),
-            source: B256::from(sender),
-            destination: Address::from(receiver),
-            payload: Bytes::from(payload),
-        },
-        proof: proof.into_iter().map(B256::from).collect(),
-    }
-    .abi_encode()
-}
-
 // Every EthApi for the same signer and chain coordinates nonce allocation, including
 // independently constructed instances in this process. Weak entries avoid
 // retaining one lock per signer forever.
@@ -1478,6 +1452,7 @@ impl EthApi {
         use alloy::{
             consensus::{Transaction, TxEnvelope},
             eips::Decodable2718,
+            sol_types::SolCall,
         };
         prepared_content_message_identity(prepared)?;
         ensure!(
@@ -1488,19 +1463,21 @@ impl EthApi {
         );
         let mut raw = prepared.raw_transaction.as_slice();
         let transaction = TxEnvelope::decode_2718(&mut raw)?;
+        let calldata = IMessageQueue::processMessageCall {
+            blockNumber: U256::from(block_number),
+            totalLeaves: U256::from(total_leaves),
+            leafIndex: U256::from(leaf_index),
+            message: VaraMessage {
+                nonce: U256::from_be_bytes(nonce),
+                source: B256::from(sender),
+                destination: Address::from(receiver),
+                payload: Bytes::from(payload),
+            },
+            proof: proof.into_iter().map(B256::from).collect(),
+        }
+        .abi_encode();
         ensure!(
-            transaction.input().as_ref()
-                == content_message_calldata(
-                    block_number,
-                    total_leaves,
-                    leaf_index,
-                    nonce,
-                    sender,
-                    receiver,
-                    payload,
-                    proof
-                )
-                .as_slice()
+            transaction.input().as_ref() == calldata.as_slice()
                 && transaction.value() == U256::ZERO,
             "prepared transaction message, proof or value changed"
         );

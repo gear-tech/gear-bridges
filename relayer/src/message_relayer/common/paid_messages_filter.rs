@@ -219,7 +219,7 @@ mod tests {
         };
         let unseen = [9; 32];
         storage
-            .record_queued_block(10, message.block_hash, &[message.clone()])
+            .record_queued_block(10, message.block_hash, std::slice::from_ref(&message))
             .await
             .unwrap();
         storage

@@ -162,7 +162,7 @@ fn initialize<'a>(system: &'a System, data: &Value) -> Program<'a> {
     let bootstrap: BootstrapResponse = serde::Deserialize::deserialize(&data["bootstrap"]).unwrap();
     let init = construct_init(Network::Hoodi, update(data, 0), bootstrap.data);
     call::<factory_io::Init>(system, &program, init);
-    assert_progress(&system, &program, &update(data, 0).finalized_header);
+    assert_progress(system, &program, &update(data, 0).finalized_header);
     program
 }
 
@@ -185,7 +185,7 @@ fn state(system: &System, program: &Program<'_>) -> StateData {
 }
 
 fn assert_progress(system: &System, program: &Program<'_>, expected: &BlockHeader) {
-    let state = state(&system, program);
+    let state = state(system, program);
     let expected_checkpoint = (
         expected.slot,
         H256::from_slice(expected.tree_hash_root().as_ref()),

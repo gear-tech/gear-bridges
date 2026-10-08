@@ -280,15 +280,8 @@ pub fn handle_persistent_reply() {
 
 /// Decode reply received from the Burn method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
-    Burn::decode_reply(bytes)
-        .map_err(|e| Error::BurnTokensDecode(format!("{e:?}")))
-        .and_then(|_| {
-            if bytes.is_empty() {
-                Ok(true)
-            } else {
-                Err(Error::InvalidReply)
-            }
-        })
+    Burn::decode_reply(bytes).map_err(|e| Error::BurnTokensDecode(format!("{e:?}")))?;
+    bytes.is_empty().then_some(true).ok_or(Error::InvalidReply)
 }
 
 /// Decode reply received from the TransferFrom method.
@@ -306,15 +299,8 @@ fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
 
 /// Decode reply received from the Mint method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
-    Mint::decode_reply(bytes)
-        .map_err(|e| Error::MintTokensDecode(format!("{e:?}")))
-        .and_then(|_| {
-            if bytes.is_empty() {
-                Ok(true)
-            } else {
-                Err(Error::InvalidReply)
-            }
-        })
+    Mint::decode_reply(bytes).map_err(|e| Error::MintTokensDecode(format!("{e:?}")))?;
+    bytes.is_empty().then_some(true).ok_or(Error::InvalidReply)
 }
 
 /// Decode reply received from the TransferFrom method.

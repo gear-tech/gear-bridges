@@ -339,7 +339,8 @@ async fn replay_back_and_updating() -> Result<()> {
     decoder.read_to_end(&mut headers).unwrap();
 
     let headers_all: Vec<BeaconBlockHeaderResponse> = serde_json::from_slice(&headers[..]).unwrap();
-    let size_batch = 30 * SLOTS_PER_EPOCH as usize;
+    // Match the genuine committee-boundary replay test's bounded gas batches.
+    let size_batch = 3 * SLOTS_PER_EPOCH as usize;
     let mut service =
         checkpoint_light_client_client::ServiceReplayBack::new(GClientRemoting::new(api.clone()));
     let sync_aggregate_encoded = finality_update.sync_aggregate.encode();
@@ -352,6 +353,7 @@ async fn replay_back_and_updating() -> Result<()> {
                 .iter()
                 .rev()
                 .skip(size_batch)
+                .take(size_batch)
                 .map(|r| r.data.header.message.clone())
                 .rev()
                 .collect(),
@@ -389,6 +391,7 @@ async fn replay_back_and_updating() -> Result<()> {
     println!("replay_back_io::Start gas_limit = {gas_limit}");
     let result = service
         .start(sync_update, sync_aggregate_encoded.clone(), headers)
+        .with_gas_limit(gas_limit)
         .send_recv(program_id)
         .await
         .unwrap();
@@ -428,14 +431,31 @@ async fn replay_back_and_updating() -> Result<()> {
         .skip(size_batch)
         .map(|r| r.data.header.message.clone())
         .rev()
-        .collect();
-    let gas_limit = calculate_gas::<replay_back_io::Process>(&api, program_id, &headers).await?;
-    println!("replay_back_io::Process gas_limit = {gas_limit}");
-    let result = service
-        .process(headers.clone())
-        .send_recv(program_id)
-        .await
-        .unwrap();
+        .collect::<Vec<_>>();
+    let mut batches = headers.rchunks(size_batch);
+    while let Some(batch) = batches.next() {
+        let batch = batch.to_vec();
+        let gas_limit = calculate_gas::<replay_back_io::Process>(&api, program_id, &batch).await?;
+        println!("replay_back_io::Process gas_limit = {gas_limit}");
+        let result = service
+            .process(batch)
+            .with_gas_limit(gas_limit)
+            .send_recv(program_id)
+            .await
+            .unwrap();
+
+        if batches.len() == 0 {
+            assert!(
+                matches!(result, Ok(ReplayBackStatus::Finished)),
+                "result = {result:?}"
+            );
+        } else {
+            assert!(
+                matches!(result, Ok(ReplayBackStatus::InProcess)),
+                "result = {result:?}"
+            );
+        }
+    }
 
     listener
         .proc_many(
@@ -449,26 +469,33 @@ async fn replay_back_and_updating() -> Result<()> {
                             tree_hash_root,
                         } = ServiceReplayBackEvents::decode_event(message.payload_bytes()).unwrap();
 
-                        assert!(headers.iter().any(|header| {
-                            header.slot == slot && header.tree_hash_root() == tree_hash_root
-                        }));
+                        // Finished commits and re-emits checkpoints staged by Start too.
+                        assert!(
+                            headers_all.iter().any(|header| {
+                                header.data.header.message.slot == slot
+                                    && header.data.header.message.tree_hash_root() == tree_hash_root
+                            }) || (sync_update.finalized_header.slot == slot
+                                && sync_update.finalized_header.tree_hash_root() == tree_hash_root),
+                            "unexpected replay checkpoint: slot = {slot}, root = {tree_hash_root:?}"
+                        );
 
-                        Some(())
+                        Some((slot, tree_hash_root))
                     } else {
                         None
                     }
                 }
                 _ => None,
             },
-            |res| (res, true),
+            |res| {
+                let finished = res.contains(&(
+                    sync_update.finalized_header.slot,
+                    sync_update.finalized_header.tree_hash_root(),
+                ));
+                (res, finished)
+            },
         )
         .await
         .unwrap();
-
-    assert!(
-        matches!(result, Ok(ReplayBackStatus::Finished)),
-        "result = {result:?}"
-    );
 
     // updating
     let mut service =
@@ -512,6 +539,7 @@ async fn replay_back_and_updating() -> Result<()> {
         println!("process gas_limit = {gas_limit}");
         let result = service
             .process(update.clone(), sync_aggregate_encoded)
+            .with_gas_limit(gas_limit)
             .send_recv(program_id)
             .await
             .unwrap();
@@ -527,7 +555,10 @@ async fn replay_back_and_updating() -> Result<()> {
                         tree_hash_root,
                     },
                 ) = stream.next().await.expect("failed to get next event");
-                assert_eq!(actor_id, program_id);
+                // The generated listener receives this service's events from every program.
+                if actor_id != program_id {
+                    continue;
+                }
                 if slot != update.finalized_header.slot {
                     println!(
                         "slot mismatch: expected {}, got {}",

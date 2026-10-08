@@ -993,13 +993,10 @@ impl Context {
             &stack["programs"]["historicalProxy"]["id"],
             "programs.historicalProxy.id",
         )?)?;
-        let recovery_history = crate::tokens::read_recovery_history(follower_dir)?;
-        let active_ethereum =
-            crate::tokens::verify_recovery_history(ethereum_rpc, deployment, &recovery_history)
-                .await?;
-        let ethereum = Ethereum::connect_hoodi(ethereum_rpc, campaign_wallet, active_ethereum)
-            .await
-            .context("connect campaign account to Hoodi")?;
+        let ethereum =
+            Ethereum::connect_hoodi(ethereum_rpc, campaign_wallet, &deployment["ethereum"])
+                .await
+                .context("connect campaign account to Hoodi")?;
         ensure!(
             ethereum.receiver_address() == campaign_manager_address(deployment)?,
             "deployment receiver and ERC20 manager differ"
@@ -2001,7 +1998,7 @@ async fn normal_governance_pause_test(
             .context("governance deadline overflow")?,
     )?;
     let pause_id = "preflight/governance-pause";
-    signed_normal_message(ctx,api,ctx.governance_actor,journal,path,pause_id,json!({"kind":"governance-pause","manager":format!("0x{}",hex::encode(ctx.manager_id.into_bytes()))}),ctx.manager_id,vft_manager_client::vft_manager::io::Pause::encode_call(),0,deadline).await?;
+    signed_normal_message(ctx, (api, ctx.governance_actor), (journal, path), (pause_id, json!({"kind":"governance-pause","manager":format!("0x{}",hex::encode(ctx.manager_id.into_bytes()))})), (ctx.manager_id, vft_manager_client::vft_manager::io::Pause::encode_call(), 0), deadline).await?;
     let reply = normal_message_reply(
         ctx,
         ctx.governance_actor,
@@ -2030,7 +2027,7 @@ async fn normal_governance_pause_test(
         .first()
         .context("mapped pause probe token missing")?;
     let request_id = "preflight/governance-paused-request";
-    signed_normal_message(ctx,api,ctx.governance_actor,journal,path,request_id,json!({"kind":"governance-paused-request","token":token.component,"amountRaw":1,"managerFee":config.fee_incoming.to_string()}),ctx.manager_id,vft_manager_client::vft_manager::io::RequestBridging::encode_call(token.peer,GearU256::from(1u8),H160::from_slice(ctx.campaign_address.as_slice())),config.fee_incoming,deadline).await?;
+    signed_normal_message(ctx, (api, ctx.governance_actor), (journal, path), (request_id, json!({"kind":"governance-paused-request","token":token.component,"amountRaw":1,"managerFee":config.fee_incoming.to_string()})), (ctx.manager_id, vft_manager_client::vft_manager::io::RequestBridging::encode_call(token.peer,GearU256::from(1u8),H160::from_slice(ctx.campaign_address.as_slice())), config.fee_incoming), deadline).await?;
     let reply = normal_message_reply(
         ctx,
         ctx.governance_actor,
@@ -2050,7 +2047,7 @@ async fn normal_governance_pause_test(
         "mapped normal request was not rejected specifically by pause; HOLD"
     );
     let unpause_id = "preflight/governance-unpause";
-    signed_normal_message(ctx,api,ctx.governance_actor,journal,path,unpause_id,json!({"kind":"governance-unpause","originalPause":pause_id,"originalRejection":request_id}),ctx.manager_id,vft_manager_client::vft_manager::io::Unpause::encode_call(),0,deadline).await?;
+    signed_normal_message(ctx, (api, ctx.governance_actor), (journal, path), (unpause_id, json!({"kind":"governance-unpause","originalPause":pause_id,"originalRejection":request_id})), (ctx.manager_id, vft_manager_client::vft_manager::io::Unpause::encode_call(), 0), deadline).await?;
     let reply = normal_message_reply(
         ctx,
         ctx.governance_actor,
@@ -2762,15 +2759,14 @@ async fn prepare_campaign_allowances(
         if ctx.schedule.handovers == 2 {
             signed_normal_message(
                 ctx,
-                &ctx.gear_api,
-                ctx.campaign_actor,
-                journal,
-                path,
-                &action_id,
-                intent,
-                token.peer,
-                vft_client::vft::io::Approve::encode_call(ctx.manager_id, desired),
-                0,
+                (&ctx.gear_api, ctx.campaign_actor),
+                (journal, path),
+                (&action_id, intent),
+                (
+                    token.peer,
+                    vft_client::vft::io::Approve::encode_call(ctx.manager_id, desired),
+                    0,
+                ),
                 deadline,
             )
             .await?;
@@ -3115,12 +3111,9 @@ async fn normal_message_reply(
 
 async fn signed_normal_gear_call<P: gsdk::ext::subxt::tx::Payload>(
     ctx: &Context,
-    api: &gclient::GearApi,
-    actor: ActorId,
-    journal: &mut Journal,
-    path: &Path,
-    id: &str,
-    intent: Value,
+    (api, actor): (&gclient::GearApi, ActorId),
+    (journal, path): (&mut Journal, &Path),
+    (id, intent): (&str, Value),
     call: P,
     target: Option<ActorId>,
     deadline: Instant,
@@ -3338,32 +3331,21 @@ async fn signed_normal_gear_call<P: gsdk::ext::subxt::tx::Payload>(
 
 async fn signed_normal_message(
     ctx: &Context,
-    api: &gclient::GearApi,
-    actor: ActorId,
-    journal: &mut Journal,
-    path: &Path,
-    id: &str,
-    intent: Value,
-    target: ActorId,
-    payload: Vec<u8>,
-    value: u128,
+    (api, actor): (&gclient::GearApi, ActorId),
+    (journal, path): (&mut Journal, &Path),
+    (id, intent): (&str, Value),
+    (target, payload, value): (ActorId, Vec<u8>, u128),
     deadline: Instant,
 ) -> Result<Value> {
-    let call = gsdk::gear::tx().gear().send_message(
-        target.into(),
-        payload,
-        api.block_gas_limit()?,
-        value,
-        false,
-    );
+    let call =
+        gsdk::gear::tx()
+            .gear()
+            .send_message(target, payload, api.block_gas_limit()?, value, false);
     signed_normal_gear_call(
         ctx,
-        api,
-        actor,
-        journal,
-        path,
-        id,
-        intent,
+        (api, actor),
+        (journal, path),
+        (id, intent),
         call,
         Some(target),
         deadline,
@@ -3680,15 +3662,14 @@ async fn run_roundtrip(
         if ctx.schedule.handovers == 2 {
             signed_normal_message(
                 ctx,
-                &ctx.gear_api,
-                ctx.campaign_actor,
-                journal,
-                path,
-                &id,
-                intent,
-                token.peer,
-                vft_client::vft::io::Approve::encode_call(ctx.manager_id, amount_gear),
-                0,
+                (&ctx.gear_api, ctx.campaign_actor),
+                (journal, path),
+                (&id, intent),
+                (
+                    token.peer,
+                    vft_client::vft::io::Approve::encode_call(ctx.manager_id, amount_gear),
+                    0,
+                ),
                 deadline,
             )
             .await?;
@@ -3809,19 +3790,18 @@ async fn run_roundtrip(
         if ctx.schedule.handovers == 2 {
             signed_normal_message(
                 ctx,
-                &ctx.gear_api,
-                ctx.campaign_actor,
-                journal,
-                path,
-                &id,
-                intent,
-                ctx.manager_id,
-                vft_manager_client::vft_manager::io::RequestBridging::encode_call(
-                    token.peer,
-                    amount_gear,
-                    H160::from_slice(ctx.campaign_address.as_slice()),
+                (&ctx.gear_api, ctx.campaign_actor),
+                (journal, path),
+                (&id, intent),
+                (
+                    ctx.manager_id,
+                    vft_manager_client::vft_manager::io::RequestBridging::encode_call(
+                        token.peer,
+                        amount_gear,
+                        H160::from_slice(ctx.campaign_address.as_slice()),
+                    ),
+                    manager_config.fee_incoming,
                 ),
-                manager_config.fee_incoming,
                 deadline,
             )
             .await?;
@@ -3944,15 +3924,10 @@ async fn run_roundtrip(
             };
             signed_normal_message(
                 ctx,
-                &ctx.gear_api,
-                ctx.campaign_actor,
-                journal,
-                path,
-                &pay_id,
-                payload,
-                ctx.payment_id,
-                bytes,
-                fee_raw,
+                (&ctx.gear_api, ctx.campaign_actor),
+                (journal, path),
+                (&pay_id, payload),
+                (ctx.payment_id, bytes, fee_raw),
                 deadline,
             )
             .await?;
@@ -4107,8 +4082,7 @@ async fn run_roundtrip(
                     root_block,
                     scan_from,
                     deadline,
-                    &token,
-                    token_amount,
+                    (&token, token_amount),
                 )
                 .await,
             )
@@ -4685,7 +4659,8 @@ async fn find_receipt_probe_reply(
             );
             enqueue_checked = true;
         }
-        for height in next..=head {
+        let start = next;
+        for height in start..=head {
             let hash = ctx.source.api.block_number_to_hash(height).await?;
             ensure!(
                 ctx.witness.api.block_number_to_hash(height).await? == hash,
@@ -4778,7 +4753,7 @@ async fn run_preflight_receipt_probes(
             let should_send=prepare_receipt_probe(journal,path,probe,intent.clone(),&before)?;
             if ctx.schedule.handovers==2 {
                 if journal.actions[probe.action_id()].evidence["submission"]["messageId"].is_null() {
-                    let dispatch=signed_normal_message(ctx,&ctx.gear_api,ctx.campaign_actor,journal,path,&format!("{}/signed-dispatch",probe.action_id()),intent,ctx.historical_proxy_id,proxy_payload,0,deadline).await?;
+                    let dispatch=signed_normal_message(ctx, (&ctx.gear_api, ctx.campaign_actor), (journal, path), (&format!("{}/signed-dispatch",probe.action_id()), intent), (ctx.historical_proxy_id, proxy_payload, 0), deadline).await?;
                     record_probe_submission(journal,path,probe,GearHash::from_str(string(&dispatch["messageId"],"original probe message")?)?,GearHash::from_str(string(&dispatch["enqueueBlockHash"],"original probe block")?)?)?;
                 }
             }else if should_send {
@@ -5095,7 +5070,7 @@ async fn normal_inbound_reply(
         return Ok((false, false));
     };
     let outer = decode_campaign_reply::<Result<(Vec<u8>, Vec<u8>), historical_proxy_client::Error>>(
-        &reply,
+        reply,
         Redirect::ROUTE,
     )?;
     let (returned, inner) =
@@ -5143,7 +5118,7 @@ async fn normal_inbound_reply(
             ensure!(
                 matches!(
                     decode_campaign_reply::<Result<GearReceiptStatus, vft_manager_client::Error>>(
-                        &reply,
+                        reply,
                         vft_manager_client::vft_manager::io::ReconcileReceipt::ROUTE
                     )?,
                     Ok(GearReceiptStatus::Processed)
@@ -5161,9 +5136,7 @@ async fn reconcile_normal_receipt(
     journal: &mut Journal,
     path: &Path,
     id: &str,
-    slot: u64,
-    index: u64,
-    hash: GearHash,
+    (slot, index, hash): (u64, u64, GearHash),
     worker: Option<&InboundTransaction>,
     deadline: Instant,
 ) -> Result<bool> {
@@ -5352,13 +5325,10 @@ async fn reconcile_normal_receipt(
     }
     let claim = signed_normal_gear_call(
         ctx,
-        &ctx.gear_api,
-        ctx.campaign_actor,
-        journal,
-        path,
-        &claim_id,
-        claim_intent,
-        gsdk::gear::tx().gear().claim_value(redemption.child.into()),
+        (&ctx.gear_api, ctx.campaign_actor),
+        (journal, path),
+        (&claim_id, claim_intent),
+        gsdk::gear::tx().gear().claim_value(redemption.child),
         None,
         deadline,
     )
@@ -5438,7 +5408,13 @@ async fn wait_inbound_processed(
                     .chain(worker.completed.values())
                     .find(|tx| tx.tx.tx_hash.as_slice() == expected.as_slice());
                 complete &= reconcile_normal_receipt(
-                    ctx, journal, path, action_id, *slot, *index, hash, original, deadline,
+                    ctx,
+                    journal,
+                    path,
+                    action_id,
+                    (*slot, *index, hash),
+                    original,
+                    deadline,
                 )
                 .await?;
             }
@@ -6323,8 +6299,7 @@ async fn wait_release(
     source_block: u64,
     scan_from: u64,
     deadline: Instant,
-    token: &Token,
-    amount: EthU256,
+    (token, amount): (&Token, EthU256),
 ) -> Result<Value> {
     let provider = ctx.ethereum.api.raw_provider();
     let queue =
@@ -9404,10 +9379,10 @@ pub async fn write_source_launch_state(
 
     let (alice_current, alice_next) = (&alice.identity.current, &alice.identity.next);
     let (bob_current, bob_next) = (&bob.identity.current, &bob.identity.next);
-    ensure_two_authorities(&alice_current, "Alice current")?;
-    ensure_two_authorities(&alice_next, "Alice next")?;
-    ensure_two_authorities(&bob_current, "Bob current")?;
-    ensure_two_authorities(&bob_next, "Bob next")?;
+    ensure_two_authorities(alice_current, "Alice current")?;
+    ensure_two_authorities(alice_next, "Alice next")?;
+    ensure_two_authorities(bob_current, "Bob current")?;
+    ensure_two_authorities(bob_next, "Bob next")?;
     ensure!(
         alice_current == bob_current && alice_next == bob_next,
         "source nodes disagree on current or next BEEFY authorities at block {common_height}"
@@ -9434,8 +9409,8 @@ pub async fn write_source_launch_state(
         }
     });
     let authority_sets = json!({
-        "current": authority_set_json(&alice_current),
-        "next": authority_set_json(&alice_next)
+        "current": authority_set_json(alice_current),
+        "next": authority_set_json(alice_next)
     });
     let readiness = json!({
         "genesisHash": genesis_hash,
@@ -10991,6 +10966,7 @@ mod tests {
         let deployment = json!({"ethereum":{"chainId":560048}});
         let mut state = json!({
             "schemaVersion":3,"mode":"hoodi-token-follow","deployment":deployment,
+            "activeEthereum":deployment["ethereum"].clone(),
             "localRehearsal":false,"startupSequence":1,
             "followerSigner":"0x0000000000000000000000000000000000000001",
             "rootPublisherSigner":"0x0000000000000000000000000000000000000002",

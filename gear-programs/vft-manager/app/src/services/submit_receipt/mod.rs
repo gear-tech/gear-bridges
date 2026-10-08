@@ -371,7 +371,7 @@ pub async fn submit_receipt(
     }
 
     use ethereum_common::{hash_db::Hasher, keccak_hasher::KeccakHasher};
-    let receipt_hash = H256::from(KeccakHasher::hash(&receipt_rlp));
+    let receipt_hash = KeccakHasher::hash(&receipt_rlp);
     let mut input = &receipt_rlp[..];
     let receipt = ReceiptEnvelope::decode(&mut input).map_err(|_| Error::UnsupportedEthEvent)?;
     if !input.is_empty() {
@@ -436,7 +436,7 @@ pub async fn submit_receipt(
                 amount: U256::from_little_endian(event.amount.as_le_slice()),
                 supply,
                 native: service.state().native_wrapper == Some(token_id),
-                operation_id: H256::from(KeccakHasher::hash(&operation)),
+                operation_id: KeccakHasher::hash(&operation),
             });
         }
     }
@@ -546,44 +546,13 @@ pub async fn submit_receipt(
         }
         let result = match deposit.supply {
             TokenSupply::Ethereum => {
-                token_operations::mint_log(
-                    slot,
-                    transaction_index,
-                    deposit.log_index,
-                    deposit.sender,
-                    deposit.token_id,
-                    deposit.receiver,
-                    deposit.amount,
-                    service.config(),
-                )
-                .await
+                token_operations::mint_log(key, &deposit, service.config()).await
             }
             TokenSupply::Gear if deposit.native => {
-                token_operations::redeem_native_log(
-                    slot,
-                    transaction_index,
-                    deposit.log_index,
-                    deposit.sender,
-                    deposit.token_id,
-                    deposit.receiver,
-                    deposit.amount,
-                    deposit.operation_id,
-                    service.config(),
-                )
-                .await
+                token_operations::redeem_native_log(key, &deposit, service.config()).await
             }
             TokenSupply::Gear => {
-                token_operations::unlock_log(
-                    slot,
-                    transaction_index,
-                    deposit.log_index,
-                    deposit.sender,
-                    deposit.token_id,
-                    deposit.receiver,
-                    deposit.amount,
-                    service.config(),
-                )
-                .await
+                token_operations::unlock_log(key, &deposit, service.config()).await
             }
         };
         if !owns_generation(key, generation) {

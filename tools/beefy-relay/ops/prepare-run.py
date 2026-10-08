@@ -118,8 +118,8 @@ def main():
     height = int(payload["block_number"])
     require(rpc("eth_getBlockByNumber", [hex(height), False])["hash"] == payload["block_hash"]
             and height <= int(finalized["number"], 16), "Beacon/execution finalized view disagreement")
-    for name in ("hoodi/keys", "hoodi/gear-keys", "keys", "source-chain/setup", "source-chain/alice", "source-chain/bob",
-                 "supervisors", "follower", "inbound", "outbound/journal", "qualification", "multisig-artifacts"):
+    for name in ("hoodi/keys", "hoodi/gear-keys", "source-chain/setup", "source-chain/alice", "source-chain/bob",
+                 "supervisors", "follower", "inbound", "outbound/journal", "qualification"):
         (run / name).mkdir(mode=0o700, parents=True, exist_ok=True)
     save(run / "hoodi/network-gate.json", {**NETWORK, "status": "VERIFIED FOR TEST-ONLY SETUP",
          "finalizedBlock": height, "finalizedHash": payload["block_hash"], "beaconRoot": header["data"]["root"],
@@ -146,7 +146,6 @@ def main():
     for path in (run / "forge-final").rglob("*"):
         path.chmod(0o700 if path.is_dir() else 0o600)
     (run / "forge-final").chmod(0o700)
-    shutil.copyfile(checked_file("safe-contracts-1.4.1.tgz"), run / "multisig-artifacts/safe-global-safe-contracts-1.4.1.tgz")
     for directory in (run / "hoodi/gear-keys", run, run.parent):
         fd = os.open(directory, os.O_RDONLY)
         os.fsync(fd)

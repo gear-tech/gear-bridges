@@ -71,8 +71,7 @@ fn children() -> &'static mut collections::BTreeMap<MessageId, TxDetails> {
 }
 
 async fn send<Action>(
-    slot: u64,
-    transaction_index: u64,
+    (slot, transaction_index): (u64, u64),
     erc20_sender: H160,
     token_id: ActorId,
     params: &Action::Params,
@@ -241,8 +240,7 @@ pub async fn mint(
     config: &Config,
 ) -> Result<(), Error> {
     send::<Mint>(
-        slot,
-        transaction_index,
+        (slot, transaction_index),
         erc20_sender,
         token_id,
         &(receiver, amount),
@@ -253,24 +251,18 @@ pub async fn mint(
     .await
 }
 
-pub async fn mint_log(
-    slot: u64,
-    transaction_index: u64,
-    log_index: u64,
-    erc20_sender: H160,
-    token_id: ActorId,
-    receiver: ActorId,
-    amount: U256,
+pub(super) async fn mint_log(
+    key: (u64, u64),
+    deposit: &super::ReceiptDeposit,
     config: &Config,
 ) -> Result<(), Error> {
     send::<Mint>(
-        slot,
-        transaction_index,
-        erc20_sender,
-        token_id,
-        &(receiver, amount),
+        key,
+        deposit.sender,
+        deposit.token_id,
+        &(deposit.receiver, deposit.amount),
         config,
-        Some(log_index),
+        Some(deposit.log_index),
         ChildAction::Mint,
     )
     .await
@@ -293,8 +285,7 @@ pub async fn unlock(
     config: &Config,
 ) -> Result<(), Error> {
     send::<TransferFrom>(
-        slot,
-        transaction_index,
+        (slot, transaction_index),
         erc20_sender,
         token_id,
         &(Syscall::program_id(), receiver, amount),
@@ -305,24 +296,18 @@ pub async fn unlock(
     .await
 }
 
-pub async fn unlock_log(
-    slot: u64,
-    transaction_index: u64,
-    log_index: u64,
-    erc20_sender: H160,
-    token_id: ActorId,
-    receiver: ActorId,
-    amount: U256,
+pub(super) async fn unlock_log(
+    key: (u64, u64),
+    deposit: &super::ReceiptDeposit,
     config: &Config,
 ) -> Result<(), Error> {
     send::<TransferFrom>(
-        slot,
-        transaction_index,
-        erc20_sender,
-        token_id,
-        &(Syscall::program_id(), receiver, amount),
+        key,
+        deposit.sender,
+        deposit.token_id,
+        &(Syscall::program_id(), deposit.receiver, deposit.amount),
         config,
-        Some(log_index),
+        Some(deposit.log_index),
         ChildAction::Unlock,
     )
     .await
@@ -342,40 +327,38 @@ impl Reply for Redemption {
     }
 }
 
-pub async fn redeem_native_log(
-    slot: u64,
-    transaction_index: u64,
-    log_index: u64,
-    erc20_sender: H160,
-    token_id: ActorId,
-    receiver: ActorId,
-    amount: U256,
-    operation_id: H256,
+pub(super) async fn redeem_native_log(
+    key: (u64, u64),
+    deposit: &super::ReceiptDeposit,
     config: &Config,
 ) -> Result<(), Error> {
     if matches!(
-        super::deposit_status((slot, transaction_index), log_index),
+        super::deposit_status(key, deposit.log_index),
         Some(super::DepositStatus::NativeQueued)
     ) {
         reconcile_native_log(
-            (slot, transaction_index),
-            log_index,
-            erc20_sender,
-            token_id,
-            receiver,
-            amount,
-            operation_id,
+            key,
+            deposit.log_index,
+            deposit.sender,
+            deposit.token_id,
+            deposit.receiver,
+            deposit.amount,
+            deposit.operation_id,
         )
         .await
     } else {
         send::<RedeemEscrow>(
-            slot,
-            transaction_index,
-            erc20_sender,
-            token_id,
-            &(operation_id, Syscall::program_id(), receiver, amount),
+            key,
+            deposit.sender,
+            deposit.token_id,
+            &(
+                deposit.operation_id,
+                Syscall::program_id(),
+                deposit.receiver,
+                deposit.amount,
+            ),
             config,
-            Some(log_index),
+            Some(deposit.log_index),
             ChildAction::Native,
         )
         .await

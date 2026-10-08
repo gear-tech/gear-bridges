@@ -79,8 +79,7 @@ impl MessageSenderIo {
             .send(Request::SubmitPrepared {
                 tx_uuid,
                 tx_hash,
-                payload: Box::new(payload),
-                signed_submission,
+                prepared: Box::new((payload, signed_submission)),
             })
             .inspect_err(|err| log::error!("Message sender failed: {err:?}"))
             .is_ok()
@@ -109,10 +108,9 @@ pub enum Request {
         tx_uuid: Uuid,
     },
     SubmitPrepared {
-        payload: Box<EthToVaraEvent>,
+        prepared: Box<(EthToVaraEvent, SignedSubmission)>,
         tx_hash: FixedBytes<32>,
         tx_uuid: Uuid,
-        signed_submission: SignedSubmission,
     },
     ReceiptStatus {
         tx_uuid: Uuid,
@@ -554,17 +552,19 @@ impl MessageSender {
                     .is_ok(),
                 Request::SubmitPrepared {
                     tx_uuid,
-                    payload,
+                    prepared,
                     tx_hash,
-                    signed_submission,
-                } => send_reconciliation_response(
-                    responses,
-                    *tx_uuid,
-                    (payload.proof_block.block.slot, payload.transaction_index),
-                    format!("Exact signed transaction {tx_hash:?} is unresolved: {diagnostic}"),
-                    Some(self.submission_evidence(&gear_api, Some(diagnostic.clone()), None)),
-                    Some(signed_submission.clone()),
-                ),
+                } => {
+                    let (payload, signed_submission) = prepared.as_ref();
+                    send_reconciliation_response(
+                        responses,
+                        *tx_uuid,
+                        (payload.proof_block.block.slot, payload.transaction_index),
+                        format!("Exact signed transaction {tx_hash:?} is unresolved: {diagnostic}"),
+                        Some(self.submission_evidence(&gear_api, Some(diagnostic.clone()), None)),
+                        Some(signed_submission.clone()),
+                    )
+                }
                 Request::ReceiptStatus {
                     tx_uuid,
                     receipt_key,
@@ -643,10 +643,10 @@ impl MessageSender {
             }
             Request::SubmitPrepared {
                 tx_uuid,
-                payload,
+                prepared,
                 tx_hash,
-                signed_submission,
             } => {
+                let (payload, signed_submission) = prepared.as_ref();
                 let mut signed_submission = signed_submission.clone();
                 let receipt_key = (payload.proof_block.block.slot, payload.transaction_index);
                 let (status, outcome) = match self

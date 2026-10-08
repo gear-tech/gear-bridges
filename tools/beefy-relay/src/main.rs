@@ -183,17 +183,6 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
-    /// Verify a finalized, authorized recovery activation and persist its immutable client cutover.
-    TokensRecoveryActivate {
-        #[arg(long, default_value = "wss://ethereum-hoodi-rpc.publicnode.com")]
-        ethereum_rpc: String,
-        #[arg(long)]
-        deployment_manifest: PathBuf,
-        #[arg(long)]
-        follower_dir: PathBuf,
-        #[arg(long)]
-        recovery_plan: PathBuf,
-    },
     /// Authenticate every saved finalized commitment without changing actor journals or submitting transactions.
     TokensHistoryAudit {
         #[arg(long)]
@@ -231,9 +220,6 @@ enum Command {
         /// Test-only: allow loopback ws:// for a local Hoodi-fork rehearsal.
         #[arg(long)]
         local_rehearsal: bool,
-        /// Pin a candidate BEEFY recovery plan; disables root publication until finalized activation.
-        #[arg(long)]
-        recovery_plan: Option<PathBuf>,
     },
     /// Stimulate and observe the fixed four-token Hoodi qualification; the actor runs separately.
     TokensSoak {
@@ -559,20 +545,6 @@ async fn main() -> Result<()> {
             )
             .await
         }
-        Command::TokensRecoveryActivate {
-            ethereum_rpc,
-            deployment_manifest,
-            follower_dir,
-            recovery_plan,
-        } => {
-            tokens::activate_recovery_transition(
-                &ethereum_rpc,
-                &deployment_manifest,
-                &follower_dir,
-                &recovery_plan,
-            )
-            .await
-        }
         Command::TokensHistoryAudit {
             source_rpc,
             witness_rpc,
@@ -601,7 +573,6 @@ async fn main() -> Result<()> {
             output_dir,
             reconcile_once,
             local_rehearsal,
-            recovery_plan,
         } => {
             hoodi::follow_tokens(
                 &source_rpc,
@@ -613,7 +584,6 @@ async fn main() -> Result<()> {
                 &output_dir,
                 reconcile_once,
                 local_rehearsal,
-                recovery_plan.as_deref(),
             )
             .await
         }

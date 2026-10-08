@@ -9,7 +9,6 @@ import {BeefyLocal} from "script/BeefyLocal.s.sol";
 import {BeefyTokens} from "script/BeefyTokens.s.sol";
 import {DeploymentScript} from "script/Deployment.s.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
-import {RecoveryController} from "src/RecoveryController.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
@@ -21,7 +20,6 @@ import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 import {BaseConstants} from "test/BaseConstants.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
-import {RecoverySafeTestWallet} from "test/RecoverySafeMock.sol";
 
 contract DeploymentScriptTest is Test {
     function test_DeploymentBeefyLocal() public {
@@ -33,8 +31,6 @@ contract DeploymentScriptTest is Test {
         vm.chainId(31337);
         vm.warp(vm.unixTime() / 1000);
         vm.setEnv("PRIVATE_KEY", "1");
-        RecoverySafeTestWallet recoverySafe = new RecoverySafeTestWallet(3, 5);
-        vm.setEnv("BEEFY_RECOVERY_WALLET", vm.toString(address(recoverySafe)));
         bytes32 sourceDomain = bytes32(uint256(0x11));
         bytes32 currentRoot = bytes32(uint256(0x22));
         bytes32 nextRoot = bytes32(uint256(0x33));
@@ -58,8 +54,7 @@ contract DeploymentScriptTest is Test {
 
         (address client, address verifier, address queue,) = deployment.run();
         MessageQueue deployedQueue = MessageQueue(queue);
-        RecoveryController recoveryController = RecoveryController(deployedQueue.recoveryController());
-        assertEq(recoveryController.recoveryWallet(), address(recoverySafe));
+        assertEq(deployedQueue.beefyRootMinimum(), 10);
         VaraQueueRootVerifier boundVerifier = VaraQueueRootVerifier(verifier);
         BeefyClient deployedClient = BeefyClient(client);
         assertEq(address(boundVerifier.beefyClient()), client);
@@ -104,8 +99,6 @@ contract DeploymentScriptTest is Test {
             abi.encodePacked("vara/gear-eth-bridge-domain/v2", sourceDomain, bytes32(block.chainid), predictedQueue)
         );
         vm.setEnv("PRIVATE_KEY", vm.toString(privateKey));
-        RecoverySafeTestWallet recoverySafe = new RecoverySafeTestWallet(3, 5);
-        vm.setEnv("BEEFY_RECOVERY_WALLET", vm.toString(address(recoverySafe)));
         vm.setEnv("EXPECTED_DEPLOYER_NONCE", vm.toString(startingNonce));
         vm.setEnv("BEEFY_SOURCE_DOMAIN", vm.toString(sourceDomain));
         vm.setEnv("BEEFY_BRIDGE_DOMAIN", vm.toString(bridgeDomain));
@@ -130,8 +123,7 @@ contract DeploymentScriptTest is Test {
         BeefyClient client = BeefyClient(clientAddress);
         VaraQueueRootVerifier verifier = VaraQueueRootVerifier(verifierAddress);
         assertEq(queueAddress, predictedQueue);
-        RecoveryController recoveryController = RecoveryController(MessageQueue(queueAddress).recoveryController());
-        assertEq(recoveryController.recoveryWallet(), address(recoverySafe));
+        assertEq(MessageQueue(queueAddress).beefyRootMinimum(), 10);
         assertEq(address(verifier.beefyClient()), clientAddress);
         assertEq(verifier.messageQueue(), predictedQueue);
         assertEq(client.sourceDomain(), sourceDomain);
@@ -231,8 +223,7 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
             )
         );
         assertEq(queue.verifier(), address(verifier));
-        RecoveryController recoveryController = RecoveryController(queue.recoveryController());
-        assertEq(recoveryController.recoveryWallet(), vm.envAddress("BEEFY_RECOVERY_WALLET"));
+        assertEq(queue.beefyRootMinimum(), client.mmrStartBlock());
         assertEq(queue.emergencyStopAdmin(), deployer);
         address[] memory observers = queue.emergencyStopObservers();
         assertEq(observers.length, 1);
@@ -384,8 +375,6 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
     function _setBootstrapEnv() internal {
         uint256 index;
         vm.setEnv("PRIVATE_KEY", vm.toString(DEPLOYER_KEY));
-        RecoverySafeTestWallet recoverySafe = new RecoverySafeTestWallet(3, 5);
-        vm.setEnv("BEEFY_RECOVERY_WALLET", vm.toString(address(recoverySafe)));
         bytes32 sourceDomain = fixtureHash(index, "sourceDomain");
         address deployer = vm.addr(DEPLOYER_KEY);
         address predictedQueue = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 5);

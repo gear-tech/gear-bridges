@@ -161,6 +161,7 @@ pub struct Source {
 }
 
 impl Source {
+    #[cfg(test)]
     pub async fn connect(api: GearApi) -> Result<Self> {
         let subscription = Self::subscribe(&api).await?;
         let at = api.latest_finalized_block().await?;
@@ -1382,7 +1383,7 @@ async fn prepare_rotation(
     );
     let call = rotation_call(api, block_hash, stash, &beefy_key).await?;
     let signer = PairSigner::<gsdk::GearConfig, sr25519::Pair>::new(stash_pair);
-    let nonce = api.api.tx().account_nonce(&signer.account_id()).await?;
+    let nonce = api.api.tx().account_nonce(signer.account_id()).await?;
     let params = subxt::config::polkadot::PolkadotExtrinsicParamsBuilder::<gsdk::GearConfig>::new()
         .nonce(nonce)
         .build();
@@ -1436,7 +1437,7 @@ async fn rotation_call(
         .iter_mut()
         .find(|(name, _)| name == "beefy")
         .context("session bundle has no BEEFY key")?;
-    *key = Value::from_bytes(&beefy_key);
+    *key = Value::from_bytes(beefy_key);
     Ok(gsdk::ext::subxt::tx::dynamic(
         "Session",
         "set_keys",
@@ -1944,7 +1945,7 @@ fn decode_session_validators(bytes: &[u8]) -> Result<Vec<[u8; 32]>> {
 fn decode_hex_bounded(value: &str, max: usize) -> Result<Vec<u8>> {
     let value = value.strip_prefix("0x").unwrap_or(value);
     ensure!(
-        value.len() % 2 == 0 && value.len() / 2 <= max,
+        value.len().is_multiple_of(2) && value.len() / 2 <= max,
         "RPC hex exceeds body limit or has odd length"
     );
     hex::decode(value).context("decode RPC hex")
@@ -2213,9 +2214,9 @@ mod tests {
             .authority_keys
             .iter()
             .map(|key| {
-                Ok(hex::decode(key.trim_start_matches("0x"))?
+                hex::decode(key.trim_start_matches("0x"))?
                     .try_into()
-                    .map_err(|_| anyhow!("invalid fixture key"))?)
+                    .map_err(|_| anyhow!("invalid fixture key"))
             })
             .collect::<Result<_>>()?;
         let original =

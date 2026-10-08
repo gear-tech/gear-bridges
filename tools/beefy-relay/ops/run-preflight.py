@@ -385,9 +385,6 @@ def main(argv=None):
             return
         power = subprocess.check_output(['pmset', '-g', 'batt'], text=True, timeout=10)
         require("'AC Power'" in power, 'Timed bounded execution requires AC power; no campaign started')
-        recovery = json.loads((root / 'recovery-wallet.json').read_text())
-        require(recovery['testOnly'] is True and recovery['independentlyControlledRecoveryAuthority'] is False
-                and recovery['publicMigration'] == 'BLOCKED', 'Recovery must remain local/test-only and mainnet blocked')
         require(json.loads((root / 'hoodi/campaign-inventory-finalized.json').read_text())['phase'] == 'finalized', 'Inventory is not finalized')
         require(json.loads((root / 'source-chain/setup/bridge-ready.json').read_text())['phase'] == 'ready', 'Source bridge is not ready')
         require(json.loads((root / 'token-stack/token-stack.json').read_text())['configuration']['status'] == 'ready', 'Token configuration is not ready')
@@ -400,7 +397,6 @@ def main(argv=None):
         require(observed['phase'] == 'ready' and observed['identity'] == launch['identity'], 'Source identity changed')
         validate_journal(root, campaign, config, observed)
         secrets = []
-        environment['BEEFY_RECOVERY_WALLET'] = recovery['contracts']['wallet']
         for role, key in [('campaign', 'GEAR_CAMPAIGN_SURI'), ('governance', 'GEAR_GOVERNANCE_SURI'), ('rotation', 'BEEFY_ROTATION_SURI')]:
             secret = private_text(contained(root, 'hoodi/gear-keys/' + role + '.suri'))
             environment[key] = secret

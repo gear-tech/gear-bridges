@@ -18,8 +18,6 @@ contract BeefyTokens is Script, Base {
         require(block.chainid == 31337 || block.chainid == 560048, "unsupported token test chain");
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
-        address recoveryWallet = vm.envAddress("BEEFY_RECOVERY_WALLET");
-        _validateRecoveryWallet(recoveryWallet);
         bytes32 manager = vm.envBytes32("GEAR_VFT_MANAGER");
         bytes32 admin = vm.envBytes32("GEAR_GOVERNANCE_ADMIN");
         bytes32 pauser = vm.envBytes32("GEAR_GOVERNANCE_PAUSER");
@@ -100,8 +98,7 @@ contract BeefyTokens is Script, Base {
                 governancePauser: pauser,
                 emergencyStopAdmin: vm.envAddress("EMERGENCY_STOP_ADMIN"),
                 emergencyStopObservers: observers,
-                bridgingPaymentFee: fee,
-                recoveryWallet: recoveryWallet
+                bridgingPaymentFee: fee
             })
         );
         require(address(messageQueue) == predictedQueue, "deployed queue differs from prediction");

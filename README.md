@@ -38,6 +38,13 @@ not authorize production activation or migration of an existing deployment.
 For isolated local nodes and a real Hoodi bridge, use the
 [sealed deployment guide](docs/running-the-bridge.md#sealed-local-deployment-operations).
 
+Queue administration uses the existing UUPS `DEFAULT_ADMIN_ROLE` authority, not
+a separate recovery controller. The one-time `reinitialize()` (`reinitializer(7)`)
+address `0x1111111111111111111111111111111111111111` is a placeholder for an
+approved real Safe in production; test impersonation is not deployment evidence.
+See [existing administration](docs/running-the-bridge.md#beefy-expiry-and-existing-administration)
+and the [blocked public migration gates](docs/zk-to-beefy-migration.md).
+
 ### Bounded local rehearsal
 
 Build the node from the sibling Gear worktree at base commit `0b13f2c61b0e5d9844c7efd12727487a2fdb8c63`:

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Seal already-verified artifacts; never build, sign, or deploy from this command."""
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -31,7 +30,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verification", type=Path, required=True)
     parser.add_argument("--ethereum-project", type=Path, required=True)
-    parser.add_argument("--safe-archive", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--runtime-approval", type=Path, help="Independent normal-runtime artifact selection; not an RPC observation")
     parser.add_argument("--runtime-approval-sha256", help="Separately approved SHA256 of the runtime selection document")
@@ -89,10 +87,6 @@ def main():
     for relative, source in build["input"]["sources"].items():
         require(not Path(relative).is_absolute() and ".." not in Path(relative).parts, "Unsafe Solidity source path")
         require((project / relative).read_bytes() == source["content"].encode(), "Solidity source changed: " + relative)
-    safe_bytes = args.safe_archive.read_bytes()
-    integrity = base64.b64encode(hashlib.sha512(safe_bytes).digest()).decode()
-    require(integrity == "fP1jewywSwsIniM04NsqPyVRFKPMAuirC3ftA/TA4X3Zc5EnwQp/UCJUU2PL/37/z/jMo8UUaJ+pnFNWmMU7dQ==",
-            "Wrong Safe 1.4.1 archive")
     output = args.output.absolute()
     output.mkdir(mode=0o700, parents=False, exist_ok=False)
     (output / "bin").mkdir()
@@ -118,7 +112,6 @@ def main():
             "Solidity deployment artifact changed while sealing")
     require(digest(solidity / "out/build-info" / infos[0].name) == hashlib.sha256(build_bytes).hexdigest(),
             "Solidity build input changed while sealing")
-    copy_verified(args.safe_archive, output / "safe-contracts-1.4.1.tgz", hashlib.sha256(safe_bytes).hexdigest())
     copy_verified(args.verification, output / "verification.json", hashlib.sha256(verification_bytes).hexdigest())
     if approval_bytes is not None:
         copy_verified(args.runtime_approval, output / "runtime-approval.json", args.runtime_approval_sha256)

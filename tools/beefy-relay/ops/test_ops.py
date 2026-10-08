@@ -198,7 +198,6 @@ def solidity_snapshot(bundle, project):
         "MessageQueue": "src/MessageQueue.sol",
         "ERC20Manager": "src/ERC20Manager.sol",
         "WrappedVara": "src/erc20/WrappedVara.sol",
-        "RecoveryController": "src/RecoveryController.sol",
         "ERC1967Proxy": "dependencies/@openzeppelin-contracts-5.7.0/proxy/ERC1967/ERC1967Proxy.sol",
     }
     from eth_utils import keccak
@@ -322,7 +321,7 @@ def check_simulation_binding(deploy, project, files):
 
     # Only external network, credential and Forge handoffs are replaced; admission and persistence are real.
     external = {"source_inputs": lambda: inputs, "key": lambda _: ("0x" + "ee" * 32, deployer),
-                "recovery_and_chain": lambda *_: {"wallet": "0x" + "ff" * 20},
+                "funding_and_chain": lambda *_: {"finalizedHeight": 1},
                 "nonce_zero": lambda *_: None, "rpc": lambda *_: "0x", "run_forge": forge}
     with patch.dict(main.__globals__, external), patch.dict(os.environ, {"ETHERSCAN_API_KEY": "test-only"}):
         invoke("--dry-run")
@@ -369,6 +368,80 @@ def check_simulation_binding(deploy, project, files):
             config.write_bytes(original)
         rejected(invoke)
         assert json.loads(intent.read_bytes()) == recorded and handoffs == [False]
+
+
+
+def check_role_funding(funding, deploy, run):
+    from eth_utils import keccak
+    main = funding["main"]
+    amounts = funding["AMOUNTS"]
+    assert set(amounts) == {"deployer", "follower", "root", "paid", "campaign"}
+    assert sum(amounts.values()) == 225 * 10**15
+    funder = "0x" + "aa" * 20
+    addresses = {role: "0x" + f"{index:02x}" * 20 for index, role in enumerate(amounts, 1)}
+    (run / "hoodi/keys").mkdir(parents=True)
+    records, receipts, broadcasts = [], {}, []
+    canonical = {"0x0": deploy["HOODI_GENESIS"], "0x9": "receipt-block", "0xa": "funding-finality"}
+    counts = {"latest": 0, "pending": 0, "finalized": 0}
+
+    def signed(label, signer, nonce, to, value):
+        raw = bytes([nonce + 1])
+        record = {"label": label, "from": funder, "to": to, "data": "0x", "valueWei": str(value),
+                  "nonce": nonce, "maxCostWei": str(value + 21000), "signedTransaction": "0x" + raw.hex(),
+                  "txHash": "0x" + keccak(raw).hex()}
+        records.append(record)
+        return record
+
+    def rpc(method, params):
+        if method == "eth_chainId": return hex(560048)
+        if method == "eth_getBlockByNumber":
+            return {"number": "0xa", "hash": canonical["0xa"]} if params[0] == "finalized" else {"hash": canonical[params[0]]}
+        if method == "eth_getTransactionCount": return hex(counts[params[1]])
+        if method == "eth_getBalance": return hex(10**18)
+        if method == "eth_getTransactionReceipt": return receipts.get(params[0])
+        if method == "eth_getTransactionByHash": return None
+        if method == "eth_sendRawTransaction":
+            record = next(item for item in records if item["signedTransaction"] == params[0])
+            broadcasts.append(params[0])
+            receipts[record["txHash"]] = {"status": "0x1", "from": funder, "to": record["to"], "blockNumber": "0x9", "blockHash": canonical["0x9"]}
+            return record["txHash"]
+        raise AssertionError("Unexpected offline funding RPC: " + method)
+
+    def beacon(url):
+        return {"data": {"root": "beacon-root"}} if "headers" in url else {"data": {"message": {"slot": "100", "body": {"execution_payload": {"block_number": "9", "block_hash": "receipt-block"}}}}}
+
+    external = {"ADDRESS": funder, "key": lambda path: {"address": addresses[path.stem]},
+                "wallet": lambda _: {"address": funder}, "signed": signed, "rpc": rpc, "request": beacon}
+    with patch.dict(main.__globals__, external), patch.object(funding["Account"], "recover_transaction", return_value=funder):
+        with patch.object(sys, "argv", ["setup-funding.py", "prepare"]): main()
+        assert not records and not broadcasts
+        with patch.object(sys, "argv", ["setup-funding.py"]):
+            counts["pending"] = 1
+            try: main()
+            except AssertionError: pass
+            else: raise AssertionError("Pending funding nonce was admitted")
+            counts["pending"] = 0
+            main()
+            marker = run / "hoodi/funding-complete.json"
+            original = marker.read_bytes()
+            original_signed = [record["signedTransaction"] for record in json.loads((run / "funding-setup.json").read_bytes())["transactions"]]
+            main()
+            assert marker.read_bytes() == original and len(records) == len(broadcasts) == 5
+            assert [record["signedTransaction"] for record in json.loads((run / "funding-setup.json").read_bytes())["transactions"]] == original_signed
+            canonical["0xa"] = "reorged-finality"
+            try: main()
+            except AssertionError: pass
+            else: raise AssertionError("Reorged original funding marker was admitted")
+            assert marker.read_bytes() == original
+    inputs = {"funding": json.loads(original), "queue": "0x" + "bb" * 20}
+    check_chain = deploy["funding_and_chain"]
+    def chain_rpc(method, params):
+        if method == "eth_getCode": return "0x"
+        return rpc(method, params)
+    with patch.dict(check_chain.__globals__, {"rpc": chain_rpc}):
+        rejected(lambda: check_chain(inputs, addresses["deployer"]), "funding finality not canonical")
+        canonical["0xa"] = "funding-finality"
+        assert check_chain(inputs, addresses["deployer"]) == {"finalizedHeight": 10}
 
 
 
@@ -1697,6 +1770,8 @@ def check():
             module = bundle / "ops/run_context.py"
             module.write_bytes(Path(__file__).with_name("run_context.py").read_bytes())
             deployment = bundle / "ops/prepare-token-deployment.py"
+            funding_script = bundle / "ops/setup-funding.py"
+            funding_script.write_bytes(Path(__file__).with_name("setup-funding.py").read_bytes())
             deployment.write_bytes(Path(__file__).with_name("prepare-token-deployment.py").read_bytes())
             names = ("gear", "beefy-relay", "relayer", "checkpoints-tool")
             for name in names:
@@ -1739,6 +1814,7 @@ def check():
             try:
                 deploy = runpy.run_path(str(deployment))
                 check_deployment_inputs(deploy, project, bundle)
+                check_role_funding(runpy.run_path(str(funding_script)), deploy, run)
                 check_simulation_binding(deploy, project, files)
                 secret = "private-test-value"
                 child = [sys.executable, "-c", "import sys; print(sys.argv[1]); print(sys.argv[1].upper()); print('public diagnostic'); sys.exit(int(sys.argv[2]))", secret, "0"]

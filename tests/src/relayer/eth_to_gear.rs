@@ -226,51 +226,52 @@ impl Storage for TestStorage {
 
 #[tokio::test]
 async fn test_tx_manager() {
+    let _ = pretty_env_logger::formatted_timed_builder()
+        .filter_level(log::LevelFilter::Off)
+        .format_target(false)
+        .filter(Some("prover"), log::LevelFilter::Info)
+        .filter(Some("relayer"), log::LevelFilter::Debug)
+        .filter(Some("ethereum-client"), log::LevelFilter::Info)
+        .filter(Some("metrics"), log::LevelFilter::Info)
+        .format_timestamp_secs()
+        .parse_default_env()
+        .try_init();
+    let contracts = super::upload::EthContracts::new().await;
+
+    let api_provider = ApiProvider::new("ws://127.0.0.1:9944".to_owned(), 2)
+        .await
+        .unwrap();
+
+    let mut conn = api_provider.connection();
+
+    let client = conn
+        .gclient_client(&contracts.suri)
+        .expect("Failed to create GClient client");
+
+    let (proof_req_tx, proof_req_rx) = unbounded_channel();
+    let (proof_res_tx, proof_res_rx) = unbounded_channel();
+
+    let mut proof_composer_io = ProofComposerIo::new(proof_req_tx, proof_res_rx);
+
+    MockProofComposer::run(proof_req_rx, proof_res_tx).await;
+
+    let message_sender = MessageSender::new(
+        contracts.vft_manager.into_bytes().into(),
+        ("VftManager".to_owned(), "SubmitReceipt".to_owned()).encode(),
+        contracts.historical_proxy.into_bytes().into(),
+        conn.clone(),
+        contracts.suri2.clone(),
+        None,
+    );
+
+    let mut message_sender_io = message_sender.run();
+
+    let tx_manager = TransactionManager::new(Arc::new(TestStorage(BlockStorage::new())));
+
+    let (events_tx, mut events_rx) = unbounded_channel();
+
+    // Bound the delivery batch independently of deployment and the paused-receipt scenario.
     tokio::time::timeout(std::time::Duration::from_secs(120), async {
-        let _ = pretty_env_logger::formatted_timed_builder()
-            .filter_level(log::LevelFilter::Off)
-            .format_target(false)
-            .filter(Some("prover"), log::LevelFilter::Info)
-            .filter(Some("relayer"), log::LevelFilter::Debug)
-            .filter(Some("ethereum-client"), log::LevelFilter::Info)
-            .filter(Some("metrics"), log::LevelFilter::Info)
-            .format_timestamp_secs()
-            .parse_default_env()
-            .try_init();
-        let contracts = super::upload::EthContracts::new().await;
-
-        let api_provider = ApiProvider::new("ws://127.0.0.1:9944".to_owned(), 2)
-            .await
-            .unwrap();
-
-        let mut conn = api_provider.connection();
-
-        let client = conn
-            .gclient_client(&contracts.suri)
-            .expect("Failed to create GClient client");
-
-        let (proof_req_tx, proof_req_rx) = unbounded_channel();
-        let (proof_res_tx, proof_res_rx) = unbounded_channel();
-
-        let mut proof_composer_io = ProofComposerIo::new(proof_req_tx, proof_res_rx);
-
-        MockProofComposer::run(proof_req_rx, proof_res_tx).await;
-
-        let message_sender = MessageSender::new(
-            contracts.vft_manager.into_bytes().into(),
-            ("VftManager".to_owned(), "SubmitReceipt".to_owned()).encode(),
-            contracts.historical_proxy.into_bytes().into(),
-            conn.clone(),
-            contracts.suri2.clone(),
-            None,
-        );
-
-        let mut message_sender_io = message_sender.run();
-
-        let tx_manager = TransactionManager::new(Arc::new(TestStorage(BlockStorage::new())));
-
-        let (events_tx, mut events_rx) = unbounded_channel();
-
         for (_, tx_data) in TRANSACTIONS.iter().filter(|(hash, _)| **hash != TX_TO_FAIL) {
             let tx_event = TxHashWithSlot {
                 tx_hash: tx_data.tx_hash,
@@ -280,19 +281,27 @@ async fn test_tx_manager() {
             events_tx.send(tx_event).unwrap();
         }
 
-        while let Ok(true) = tx_manager
-            .process(
-                &mut events_rx,
-                &mut proof_composer_io,
-                &mut message_sender_io,
-            )
-            .await
-        {
+        loop {
+            assert!(
+                tx_manager
+                    .process(
+                        &mut events_rx,
+                        &mut proof_composer_io,
+                        &mut message_sender_io,
+                    )
+                    .await
+                    .expect("transaction manager failed while delivering receipts"),
+                "transaction manager channel closed before delivery completed"
+            );
             if tx_manager.completed.read().await.len() == TRANSACTIONS.len() - 1 {
                 break;
             }
         }
+    })
+    .await
+    .expect("native receipt delivery batch exceeded 120 seconds after deployment");
 
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
         let delivered = tx_manager
             .completed
             .read()
@@ -341,14 +350,18 @@ async fn test_tx_manager() {
             })
             .unwrap();
 
-        while let Ok(true) = tx_manager
-            .process(
-                &mut events_rx,
-                &mut proof_composer_io,
-                &mut message_sender_io,
-            )
-            .await
-        {
+        loop {
+            assert!(
+                tx_manager
+                    .process(
+                        &mut events_rx,
+                        &mut proof_composer_io,
+                        &mut message_sender_io,
+                    )
+                    .await
+                    .expect("transaction manager failed while retaining a paused receipt"),
+                "transaction manager channel closed before reconciliation evidence arrived"
+            );
             if tx_manager.transactions.read().await.values().any(|tx| {
                 tx.tx.tx_hash == TX_TO_FAIL
                     && matches!(tx.status, TxStatus::NeedsReconciliation { .. })
@@ -388,5 +401,5 @@ async fn test_tx_manager() {
         drop(events_tx);
     })
     .await
-    .expect("native relayer test exceeded 120 seconds");
+    .expect("native paused-receipt scenario exceeded 120 seconds");
 }

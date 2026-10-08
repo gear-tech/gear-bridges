@@ -40,7 +40,6 @@ def phrase(role):
 def execute(label, args, secret=None, environment=None):
     env = os.environ.copy()
     env.update(environment or {})
-    env['BEEFY_RECOVERY_WALLET'] = json.loads((ROOT/'recovery-wallet.json').read_text())['contracts']['wallet']
     result = subprocess.run([rtk,'proxy',*map(str,args)],cwd=ROOT,env=env,capture_output=True,text=True)
     stdout, stderr = result.stdout, result.stderr
     if secret:

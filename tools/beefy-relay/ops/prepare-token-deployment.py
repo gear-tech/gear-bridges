@@ -2,7 +2,6 @@
 """One attempt at a fresh, test-only Hoodi BeefyTokens deployment. No replay path."""
 
 import argparse
-import base64
 import fcntl
 import hashlib
 import json
@@ -10,10 +9,8 @@ import os
 from pathlib import Path
 import stat
 import subprocess
-import tarfile
 from urllib.request import Request, urlopen
 
-from eth_abi import decode, encode
 from eth_account import Account
 from eth_utils import keccak, to_checksum_address
 import rlp
@@ -86,12 +83,6 @@ def gear_rpc(endpoint, method, *params):
     return json.loads(answer)
 
 
-def call(address, signature, values=(), types=(), returns=("uint256",)):
-    data = "0x" + (keccak(text=signature)[:4] + encode(types, values)).hex()
-    answer = rpc("eth_call", [{"to": address, "data": data}, "finalized"])
-    return decode(returns, bytes.fromhex(answer[2:]))
-
-
 def qualified_project_file(relative):
     checked_file("ethereum/" + relative)
     expected = MANIFEST["files"]["ethereum/" + relative]
@@ -144,7 +135,6 @@ def compiled_artifact():
         "MessageQueue": "src/MessageQueue.sol",
         "ERC20Manager": "src/ERC20Manager.sol",
         "WrappedVara": "src/erc20/WrappedVara.sol",
-        "RecoveryController": "src/RecoveryController.sol",
         "ERC1967Proxy": "dependencies/@openzeppelin-contracts-5.7.0/proxy/ERC1967/ERC1967Proxy.sol",
     }.items():
         path = PROJECT / "out" / (name + ".sol") / (name + ".json")
@@ -240,52 +230,16 @@ def source_inputs():
             "inputSha256": {"networkGate": digest(network_gate_path), "sourceIdentity": digest(identity_path), "sourceLaunchState": digest(RUN / "source-chain/launch-state.json"), "rawSpec": spec["rawSpecSha256"], "tokenStack": digest(stack_path), "anchor": digest(anchor_path)}}
 
 
-def recovery_and_chain(inputs, deployer):
-    recovery_path = RUN / "recovery-wallet.json"
-    recovery = load(recovery_path)
-    require(recovery["runId"] == RUN.name and recovery["testOnly"] is True and recovery["independentlyControlledRecoveryAuthority"] is False and recovery["publicMigration"] == "BLOCKED" and recovery["productionQualification"] == "NOT ESTABLISHED", "recovery authority must remain test-only")
-    require(recovery["chainId"] == CHAIN_ID and recovery["safeVersion"] == "1.4.1" and recovery["threshold"] == 3 and len(recovery["owners"]) == 5 and recovery["twoSignatureRejection"] == "GS020", "3-of-5 Safe proof missing")
-    owners = {hex_bytes(address, 20, "Safe owner") for address in recovery["owners"]}
-    require(len(owners) == 5, "Safe owner identities are not independent keys")
-    local_owners = {hex_bytes(key(RUN / "keys" / f"safe-owner-{number}.key")[1], 20, "local owner") for number in range(1, 6)}
-    require(local_owners == owners, "five Safe owners not locally controlled in this run")
-    archive = RUN / "multisig-artifacts/safe-global-safe-contracts-1.4.1.tgz"
-    require("sha512-" + base64.b64encode(hashlib.sha512(archive.read_bytes()).digest()).decode() == recovery["packageIntegrity"], "Safe artifact integrity changed")
-    with tarfile.open(archive) as package:
-        safe_artifact = json.load(package.extractfile("package/build/artifacts/contracts/Safe.sol/Safe.json"))
-        proxy_artifact = json.load(package.extractfile("package/build/artifacts/contracts/proxies/SafeProxy.sol/SafeProxy.json"))
+def funding_and_chain(inputs, deployer):
     require(int(rpc("eth_chainId", []), 16) == CHAIN_ID and rpc("eth_getBlockByNumber", ["0x0", False])["hash"].lower() == HOODI_GENESIS, "wrong Hoodi chain/genesis")
     finalized = rpc("eth_getBlockByNumber", ["finalized", False])
     finalized_height = int(finalized["number"], 16)
-    for marker in (inputs["funding"], recovery):
-        height, recorded_hash = marker["finalizedBlock"], marker["finalizedHash"]
-        require(height <= finalized_height and rpc("eth_getBlockByNumber", [hex(height), False])["hash"].lower() == recorded_hash.lower(), "recorded funding/Safe finality not canonical")
-    wallet = recovery["contracts"]["wallet"]
-    singleton = recovery["contracts"]["Safe"]
-    hex_bytes(wallet, 20, "Safe wallet")
-    require(wallet.lower() != deployer.lower() and rpc("eth_getCode", [wallet, "finalized"]).lower() == proxy_artifact["deployedBytecode"].lower(), "Safe proxy code mismatch")
-    require(rpc("eth_getCode", [singleton, "finalized"]).lower() == safe_artifact["deployedBytecode"].lower(), "Safe singleton code mismatch")
-    require(call(wallet, "masterCopy()", returns=("address",))[0].lower() == singleton.lower() and call(wallet, "VERSION()", returns=("string",))[0] == "1.4.1", "Safe implementation mismatch")
-    require(call(wallet, "getThreshold()")[0] == 3 and call(wallet, "nonce()")[0] == 1, "Safe threshold/transaction nonce mismatch")
-    require({hex_bytes(owner, 20, "onchain owner") for owner in call(wallet, "getOwners()", returns=("address[]",))[0]} == owners, "Safe owners changed")
-    proof_hash = recovery["threeSignatureProofTransaction"]
-    receipt = rpc("eth_getTransactionReceipt", [proof_hash])
-    require(int(receipt["status"], 16) == 1 and int(receipt["blockNumber"], 16) <= finalized_height and rpc("eth_getBlockByNumber", [receipt["blockNumber"], False])["hash"].lower() == receipt["blockHash"].lower(), "three-signature proof not canonically finalized")
-    topic = "0x" + keccak(text="ExecutionSuccess(bytes32,uint256)").hex()
-    require(sum(log["address"].lower() == wallet.lower() and log["topics"][0].lower() == topic for log in receipt["logs"]) == 1, "Safe three-signature execution success missing")
-    transaction = rpc("eth_getTransactionByHash", [proof_hash])
-    require(transaction["to"].lower() == wallet.lower() and transaction["from"].lower() == inputs["roles"]["safe-deployer"].lower() and transaction["blockHash"].lower() == receipt["blockHash"].lower(), "Safe proof transaction mismatch")
-    signature = "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)"
-    data = bytes.fromhex(transaction["input"][2:])
-    require(data[:4] == keccak(text=signature)[:4], "Safe proof did not execute the expected transaction")
-    args = decode(("address", "uint256", "bytes", "uint8", "uint256", "uint256", "uint256", "address", "address", "bytes"), data[4:])
-    require(len(args[-1]) == 195, "Safe proof did not include exactly three signatures")
-    proof_digest = call(wallet, "getTransactionHash(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,uint256)", args[:9] + (0,), ("address", "uint256", "bytes", "uint8", "uint256", "uint256", "uint256", "address", "address", "uint256"), ("bytes32",))[0]
-    signers = {hex_bytes(Account._recover_hash(proof_digest, signature=args[-1][offset:offset + 65]), 20, "Safe signer") for offset in (0, 65, 130)}
-    require(len(signers) == 3 and signers <= owners, "Safe proof signatures do not belong to three distinct owners")
+    marker = inputs["funding"]
+    height, recorded_hash = marker["finalizedBlock"], marker["finalizedHash"]
+    require(height <= finalized_height and rpc("eth_getBlockByNumber", [hex(height), False])["hash"].lower() == recorded_hash.lower(), "recorded funding finality not canonical")
     require(rpc("eth_getCode", [inputs["queue"], "latest"]) == "0x", "CREATE-12 queue already contains code: reconcile deployment")
     require(int(rpc("eth_getBalance", [deployer, "latest"]), 16) > 0, "deployer unfunded")
-    return {"wallet": wallet, "recoverySha256": digest(recovery_path), "proofTransaction": proof_hash, "finalizedHeight": finalized_height}
+    return {"finalizedHeight": finalized_height}
 
 
 def nonce_zero(deployer, reservation_rpc):
@@ -332,14 +286,14 @@ def main():
         inputs = source_inputs()
         private_key, deployer = key(RUN / "hoodi/keys/deployer.key")
         require(deployer.lower() == inputs["identity"]["deployerAddress"].lower(), "reserved deployer private key changed")
-        proof = recovery_and_chain(inputs, deployer)
+        chain = funding_and_chain(inputs, deployer)
         nonce_zero(deployer, inputs["identity"]["nonce"]["rpc"])
         environment = {
             "FOUNDRY_EXTRA_OUTPUT_FILES": "[]",  # Use sealed IR sidecars; regeneration invalidates the portable cache.
             "EXPECTED_DEPLOYER_NONCE": "0", "GEAR_VFT_MANAGER": inputs["stack"]["programs"]["vftManager"]["id"],
             "GEAR_GOVERNANCE_ADMIN": inputs["gearAdmin"], "GEAR_GOVERNANCE_PAUSER": inputs["gearPauser"],
             "BEEFY_SOURCE_DOMAIN": inputs["source"], "BEEFY_BRIDGE_DOMAIN": inputs["bridge"],
-            "BEEFY_RECOVERY_WALLET": proof["wallet"], "BEEFY_MMR_START_BLOCK": str(inputs["anchor"]["mmrStartBlock"]),
+            "BEEFY_MMR_START_BLOCK": str(inputs["anchor"]["mmrStartBlock"]),
             "BEEFY_INITIAL_BLOCK": str(inputs["anchor"]["block"]),
             "BEEFY_INITIAL_SOURCE_TIMESTAMP_MS": str(inputs["anchor"]["sourceTimestampMs"]),
             "BRIDGING_PAYMENT_FEE": str(FEE_WEI), "EMERGENCY_STOP_ADMIN": deployer,
@@ -380,7 +334,7 @@ def main():
                   "deployer": deployer, "reservedNonce": 0, "queueCreateNonce": 12, "predictedQueue": inputs["queue"],
                   "sourceGenesis": inputs["genesis"], "anchorBlock": inputs["anchor"]["block"], "anchorBlockHash": inputs["anchor"]["blockHash"],
                   "environment": environment, "sourceFilesSha256": inputs["inputSha256"], "compiled": built,
-                  "recovery": proof, "command": command, "privateKeySource": "hoodi/keys/deployer.key (mode 0600, environment only)",
+                  "chain": chain, "command": command, "privateKeySource": "hoodi/keys/deployer.key (mode 0600, environment only)",
                   "rpc": RPC, "log": str(log_path), "dryRunSha256": digest(dry_run)}
         fd = os.open(intent_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as output:

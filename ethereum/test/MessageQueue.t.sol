@@ -54,8 +54,7 @@ contract MessageQueueTest is Test, Base {
         vm.store(address(messageQueue), bytes32(uint256(8)), bytes32(legacyBlock));
         vm.store(address(messageQueue), bytes32(uint256(9)), bytes32(legacyBlock));
         vm.store(address(messageQueue), _mappingSlot(bytes32(uint256(836)), 13), bytes32(uint256(1)));
-        vm.store(address(messageQueue), bytes32(uint256(14)), bytes32(uint256(0x1234)));
-        vm.store(address(messageQueue), bytes32(uint256(15)), bytes32(legacyBlock + 1));
+        vm.store(address(messageQueue), bytes32(uint256(14)), bytes32(legacyBlock + 1));
         messageQueue.submitMerkleRoot(legacyBlock + 1, root, "");
 
         assertEq(
@@ -90,13 +89,12 @@ contract MessageQueueTest is Test, Base {
         assertEq(vm.load(address(messageQueue), _mappingSlot(bytes32(legacyBlock), 11)), root);
         assertEq(uint256(vm.load(address(messageQueue), _mappingSlot(root, 12))), legacyTime);
         assertEq(uint256(vm.load(address(messageQueue), _mappingSlot(bytes32(uint256(836)), 13))), 1);
-        assertEq(messageQueue.recoveryController(), address(0x1234));
         assertEq(messageQueue.beefyRootMinimum(), legacyBlock + 1);
-        assertEq(uint256(vm.load(address(messageQueue), _mappingSlot(bytes32(legacyBlock + 1), 16))), block.timestamp);
+        assertEq(uint256(vm.load(address(messageQueue), _mappingSlot(bytes32(legacyBlock + 1), 15))), block.timestamp);
 
         vm.prank(address(governanceAdmin));
         messageQueue.pause();
-        bytes32[] memory slots = new bytes32[](17);
+        bytes32[] memory slots = new bytes32[](16);
         for (uint256 i; i < slots.length; i++) {
             slots[i] = vm.load(address(messageQueue), bytes32(i));
         }
@@ -130,7 +128,7 @@ contract MessageQueueTest is Test, Base {
         _seedLegacyRoot(100, root, timestamp);
         _seedLegacyRoot(101, root, timestamp);
         assertEq(messageQueue.getMerkleRootTimestampForBlock(101), timestamp);
-        vm.store(address(messageQueue), bytes32(uint256(15)), bytes32(uint256(101)));
+        vm.store(address(messageQueue), bytes32(uint256(14)), bytes32(uint256(101)));
         assertEq(messageQueue.getMerkleRootTimestampForBlock(100), timestamp);
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MerkleRootTimestampNotFound.selector, uint256(101)));
         messageQueue.getMerkleRootTimestampForBlock(101);
@@ -156,11 +154,11 @@ contract MessageQueueTest is Test, Base {
         _seedLegacyRoot(100, message.hash(), type(uint256).max);
         vm.expectRevert(IMessageQueue.MerkleRootDelayNotPassed.selector);
         messageQueue.processMessage(100, 1, 0, message, new bytes32[](0));
-        vm.store(address(messageQueue), _mappingSlot(bytes32(uint256(100)), 16), bytes32(block.timestamp + 1));
+        vm.store(address(messageQueue), _mappingSlot(bytes32(uint256(100)), 15), bytes32(block.timestamp + 1));
         vm.expectRevert(IMessageQueue.MerkleRootDelayNotPassed.selector);
         messageQueue.processMessage(100, 1, 0, message, new bytes32[](0));
         vm.warp(type(uint256).max);
-        vm.store(address(messageQueue), _mappingSlot(bytes32(uint256(100)), 16), bytes32(type(uint256).max - 300));
+        vm.store(address(messageQueue), _mappingSlot(bytes32(uint256(100)), 15), bytes32(type(uint256).max - 300));
         messageQueue.processMessage(100, 1, 0, message, new bytes32[](0));
         assertTrue(messageQueue.isProcessed(message.nonce));
     }
@@ -177,14 +175,14 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.getMerkleRootTimestamp(root), legacyTime);
         assertEq(messageQueue.getMerkleRootTimestampForBlock(100), legacyTime);
         assertEq(messageQueue.getMerkleRootTimestampForBlock(101), 0);
-        assertEq(vm.load(address(messageQueue), _mappingSlot(bytes32(uint256(101)), 16)), bytes32(0));
+        assertEq(vm.load(address(messageQueue), _mappingSlot(bytes32(uint256(101)), 15)), bytes32(0));
         assertEq(messageQueue.getMerkleRootTimestampForBlock(102), secondTime);
         assertTrue(messageQueue.isEmergencyStopped());
     }
 
     function test_EmptyProgressHasNoEconomicOrMaturityState() public {
         messageQueue.submitMerkleRoot(100, bytes32(uint256(22)), "");
-        vm.store(address(messageQueue), bytes32(uint256(15)), bytes32(uint256(100)));
+        vm.store(address(messageQueue), bytes32(uint256(14)), bytes32(uint256(100)));
         vm.mockCall(
             address(verifier),
             abi.encodeWithSignature("safeVerifyEmptyQueueProgress(uint256,bytes)", 101, hex"1234"),
@@ -195,7 +193,7 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.maxBlockNumber(), 101);
         assertEq(messageQueue.getMerkleRoot(101), bytes32(0));
         assertEq(messageQueue.getMerkleRootTimestampForBlock(101), 0);
-        assertEq(vm.load(address(messageQueue), _mappingSlot(bytes32(uint256(101)), 16)), bytes32(0));
+        assertEq(vm.load(address(messageQueue), _mappingSlot(bytes32(uint256(101)), 15)), bytes32(0));
         assertEq(messageQueue.getMerkleRootTimestamp(bytes32(uint256(22))), 0);
         assertFalse(messageQueue.isProcessed(101));
         vm.expectRevert(IMessageQueue.MerkleRootProgressNotForward.selector);
@@ -219,7 +217,7 @@ contract MessageQueueTest is Test, Base {
     function test_EmergencyPublisherCannotBypassFloorForwardOrBounds() public {
         messageQueue.submitMerkleRoot(100, bytes32(uint256(22)), "");
         messageQueue.submitMerkleRoot(100, bytes32(uint256(33)), "");
-        vm.store(address(messageQueue), bytes32(uint256(15)), bytes32(uint256(102)));
+        vm.store(address(messageQueue), bytes32(uint256(14)), bytes32(uint256(102)));
         vm.prank(deploymentArguments.emergencyStopObservers[0]);
         messageQueue.challengeRoot();
         vm.startPrank(deploymentArguments.emergencyStopAdmin);

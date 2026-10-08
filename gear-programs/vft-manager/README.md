@@ -13,3 +13,14 @@ the current manager admin may call `FillTransactions`, `CalculateGasForReply`,
 and `CalculateGasForTokenMapSwap`, including as the origin of gas estimation.
 `GasCalculation` initializes a new caller-owned benchmark program; it cannot
 change an initialized manager.
+
+`Transactions` includes both completed and reserved receipts; use `ReceiptStatus`
+and `ReceiptDeposits` to distinguish settlement from a retryable rejection or an
+ambiguous reply. An explicit VFT error reply is retryable for the same receipt. A
+successful transport reply containing `false` is quarantined, not redispatched.
+
+Native redemption requires configuring the manager's native wrapper and the
+wrapper's escrow manager while both are paused. A queued mailbox payout is not
+settled until the original value is claimed and its reply is reconciled. Rejected
+payouts retain their original child and returned native reserve: reconciliation
+and receipt replay must neither re-mint tokens nor enqueue a replacement payout.

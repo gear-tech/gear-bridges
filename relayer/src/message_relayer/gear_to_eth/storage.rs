@@ -631,7 +631,7 @@ impl JSONStorage {
         if roots_path.exists() {
             let roots: MerkleRoots = serde_json::from_slice(&tokio::fs::read(roots_path).await?)?;
             anyhow::ensure!(
-                roots.len() == 0,
+                roots.is_empty(),
                 "HOLD: outbound roots lack a destination lane identity"
             );
         }

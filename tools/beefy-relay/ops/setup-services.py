@@ -1446,7 +1446,7 @@ def transition(args):
                          'source-chain/bob/network-key', 'anchor.json', 'deployment.json', 'token-stack/token-stack.json',
                          'hoodi/checkpoint-deployment.json', 'hoodi/deployment-finalized.json', 'hoodi/addresses.json',
                          'hoodi/gear-addresses.json', 'hoodi/campaign-inventory.json', 'hoodi/campaign-inventory-finalized.json',
-                         'hoodi/funding-complete.json', 'recovery-wallet.json', 'supervisors/preflight-one-shot.plist',
+                         'hoodi/funding-complete.json', 'supervisors/preflight-one-shot.plist',
                          'supervisors/warmup-one-shot.plist', 'hoodi/warmup-supervisor-observer.py']
             preserved += ['hoodi/network-gate.json', 'supervisors/service-ports.json']
             preserved += [str(path.relative_to(root)) for pattern in ('hoodi/keys/*.key', 'hoodi/gear-keys/*.suri',
@@ -1771,7 +1771,6 @@ def ordinary_main(argv):
         args = arguments(name,ports)
         assert args[0] == str(artifact('beefy-relay' if name == 'follower' else 'relayer'))
         environment = os.environ.copy()
-        environment['BEEFY_RECOVERY_WALLET'] = json.loads((ROOT/'recovery-wallet.json').read_text())['contracts']['wallet']
         environment['RUST_LOG'] = 'info'
         if name in ['checkpoint','inbound']:
             environment['GEAR_SURI'] = private_text(ROOT/'hoodi/gear-keys'/(name+'.suri'))

@@ -470,14 +470,7 @@ sol! {
     #[sol(rpc)]
     interface TokenQueueBinding {
         function verifier() external view returns (address);
-        function recoveryController() external view returns (address);
         function maxBlockNumber() external view returns (uint256);
-    }
-    #[sol(rpc)]
-    interface TokenRecoveryControllerBinding {
-        function messageQueue() external view returns (address);
-        function recoveryWallet() external view returns (address);
-        function RECOVERY_DELAY() external view returns (uint256);
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -563,47 +556,6 @@ impl Ethereum {
             .join("foundry-broadcast");
 
         let endpoint = anvil.endpoint();
-        // Only this method owns a disposable 31337 Anvil; public deployments require a real wallet.
-        let test_key = format!(
-            "0x{}",
-            hex::encode(
-                anvil
-                    .keys()
-                    .get(1)
-                    .context("owned Anvil has no second test account")?
-                    .to_bytes()
-            )
-        );
-        let test_wallet = Command::new("forge")
-            .args([
-                "create",
-                "test/RecoverySafeMock.sol:RecoverySafeTestWallet",
-                "--root",
-                "ethereum",
-                "--rpc-url",
-                &endpoint,
-                "--private-key",
-                &test_key,
-                "--broadcast",
-                "--json",
-                "--constructor-args",
-                "3",
-                "5",
-            ])
-            .current_dir(&root)
-            .env("FOUNDRY_BROADCAST", &broadcast_dir)
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output()
-            .await?;
-        ensure!(
-            test_wallet.status.success(),
-            "owned-Anvil test wallet deployment failed: {} {}",
-            redact_process_output(&test_wallet.stdout, &test_key),
-            redact_process_output(&test_wallet.stderr, &test_key)
-        );
-        let test_wallet: Value = serde_json::from_slice(&test_wallet.stdout)?;
-        let recovery_wallet = manifest_address(&test_wallet, "deployedTo")?;
         let current = &checkpoint.current;
         let next = &checkpoint.next;
         let source_domain = B256::from_str(
@@ -629,7 +581,6 @@ impl Ethereum {
             .current_dir(&root)
             .env("FOUNDRY_BROADCAST", &broadcast_dir)
             .env("PRIVATE_KEY", &private_key)
-            .env("BEEFY_RECOVERY_WALLET", address_string(recovery_wallet))
             .env("BEEFY_SOURCE_DOMAIN", bytes(source_domain))
             .env("BEEFY_BRIDGE_DOMAIN", bytes(snapshot.bridge_domain))
             .env("BEEFY_MMR_START_BLOCK", mmr_start_block.to_string())
@@ -977,12 +928,12 @@ impl Ethereum {
         ensure_hoodi_network(&endpoint).await?;
         let api = EthApi::new(&endpoint, &address_string(queue_address), None, None, None)
             .await
-            .context("connect read-only recovery verifier watcher")?;
+            .context("connect read-only Hoodi verifier watcher")?;
         ensure!(
             api.raw_provider().get_chain_id().await? == HOODI_CHAIN_ID,
-            "recovery watcher is not connected to Hoodi"
+            "verifier watcher is not connected to Hoodi"
         );
-        Ok(Self {
+        let ethereum = Self {
             _anvil: None,
             api,
             client_address,
@@ -990,7 +941,9 @@ impl Ethereum {
             queue_address,
             receiver_address,
             transactions: Vec::new(),
-        })
+        };
+        verify_hoodi_manifest(&ethereum, manifest).await?;
+        Ok(ethereum)
     }
 
     pub(crate) async fn finality_genesis(&self) -> Result<B256> {
@@ -1022,16 +975,6 @@ impl Ethereum {
             .call()
             .await?;
         value.try_into().context("queue maxBlockNumber exceeds u64")
-    }
-
-    pub(crate) async fn connect_hoodi_active(
-        endpoint: &str,
-        wallet: &Path,
-        manifest: &Value,
-    ) -> Result<Self> {
-        let ethereum = Self::connect_hoodi_addresses(endpoint, wallet, manifest).await?;
-        verify_hoodi_manifest(&ethereum, manifest).await?;
-        Ok(ethereum)
     }
 
     pub async fn verify_token_bindings(&self, gear_manager: [u8; 32]) -> Result<()> {
@@ -1088,29 +1031,6 @@ impl Ethereum {
                 Value::String(format!("0x{}", hex::encode(keccak256(code.as_ref())))),
             );
         }
-        let provider = self.api.raw_provider().clone();
-        let recovery_controller = TokenQueueBinding::new(self.queue_address, provider.clone())
-            .recoveryController()
-            .call()
-            .await?;
-        ensure!(
-            recovery_controller != Address::ZERO,
-            "fresh BEEFY queue has no installed recovery controller"
-        );
-        let recovery = TokenRecoveryControllerBinding::new(recovery_controller, provider.clone());
-        let recovery_wallet = recovery.recoveryWallet().call().await?;
-        ensure!(
-            recovery.messageQueue().call().await? == self.queue_address
-                && recovery_wallet != Address::ZERO
-                && recovery.RECOVERY_DELAY().call().await? == U256::from(24 * 60 * 60u64),
-            "fresh BEEFY recovery controller/wallet binding or 24-hour delay is invalid"
-        );
-        for address in [recovery_controller, recovery_wallet] {
-            ensure!(
-                !provider.get_code_at(address).await?.is_empty(),
-                "fresh BEEFY recovery controller/wallet has no code"
-            );
-        }
         let checkpoint = self.checkpoint().await?;
         let client = BeefyClient::new(self.client_address, self.api.raw_provider().clone());
         let verifier =
@@ -1139,8 +1059,6 @@ impl Ethereum {
             "verifier": address_string(self.verifier_address),
             "queue": address_string(self.queue_address),
             "receiver": address_string(self.receiver_address),
-            "recoveryController": address_string(recovery_controller),
-            "recoveryWallet": address_string(recovery_wallet),
             "bindings": {
                 "beefyClient": address_string(verifier.beefyClient().call().await?),
                 "messageQueue": address_string(verifier.messageQueue().call().await?),
@@ -2266,29 +2184,6 @@ async fn verify_hoodi_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<
         provider.clone(),
     )
     .await?;
-    let recovery_controller = manifest_address(manifest, "recoveryController")?;
-    let recovery_wallet = manifest_address(manifest, "recoveryWallet")?;
-    ensure!(
-        TokenQueueBinding::new(ethereum.queue_address, provider.clone())
-            .recoveryController()
-            .call()
-            .await?
-            == recovery_controller,
-        "recovery controller differs from immutable deployment identity"
-    );
-    let recovery = TokenRecoveryControllerBinding::new(recovery_controller, provider.clone());
-    ensure!(
-        recovery.messageQueue().call().await? == ethereum.queue_address
-            && recovery.recoveryWallet().call().await? == recovery_wallet
-            && recovery.RECOVERY_DELAY().call().await? == U256::from(24 * 60 * 60u64),
-        "recovery wallet/controller binding or 24-hour delay differs from deployment identity"
-    );
-    for address in [recovery_controller, recovery_wallet] {
-        ensure!(
-            !provider.get_code_at(address).await?.is_empty(),
-            "pinned recovery controller/wallet has no deployed code"
-        );
-    }
     let bindings = manifest
         .get("bindings")
         .context("manifest is missing bindings")?;

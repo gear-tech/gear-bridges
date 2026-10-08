@@ -21,8 +21,6 @@ contract BeefyLocal is Script, Base {
         }
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address recoveryWallet = vm.envAddress("BEEFY_RECOVERY_WALLET");
-        _validateRecoveryWallet(recoveryWallet);
         bytes32 sourceDomain = vm.envBytes32("BEEFY_SOURCE_DOMAIN");
         require(sourceDomain != bytes32(0), "missing source domain");
         uint64 mmrStartBlock = _envUint64("BEEFY_MMR_START_BLOCK");
@@ -95,8 +93,7 @@ contract BeefyLocal is Script, Base {
                 governancePauser: BaseConstants.GOVERNANCE_PAUSER,
                 emergencyStopAdmin: BaseConstants.EMERGENCY_STOP_ADMIN,
                 emergencyStopObservers: emergencyStopObservers,
-                bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE,
-                recoveryWallet: recoveryWallet
+                bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE
             })
         );
         require(address(messageQueue) == predictedQueue, "deployed queue differs from prediction");

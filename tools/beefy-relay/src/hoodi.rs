@@ -101,6 +101,10 @@ pub(crate) fn validate_token_follower_journal(state: &Value, deployment: &Value)
         state.get("deployment") == Some(deployment),
         "token follower journal belongs to another deployment manifest"
     );
+    ensure!(
+        state["activeEthereum"] == deployment["ethereum"],
+        "follower client differs from immutable deployment manifest"
+    );
     Ok(())
 }
 
@@ -226,11 +230,11 @@ fn bootstrap_record(anchor: &CapturedCommitment, proof: &SourceProof) -> Result<
 }
 
 fn client_bootstrap(state: &Value, client: Address) -> Result<&Value> {
-    let bootstrap = if client == deployment_client(state)? {
-        &state["bootstrap"]
-    } else {
-        &state["recoveryBootstraps"][format!("{client:#x}")]
-    };
+    ensure!(
+        client == deployment_client(state)?,
+        "client differs from immutable deployment"
+    );
+    let bootstrap = &state["bootstrap"];
     ensure!(
         bootstrap.is_object(),
         "active client has no authenticated bootstrap journal"
@@ -2094,80 +2098,6 @@ async fn publish_token_roots(
     }
 }
 
-fn recovery_candidate_is_active(state: &Value) -> Result<bool> {
-    if state["recoveryCandidate"].is_null() {
-        return Ok(false);
-    }
-    let candidate: Address = state["recoveryCandidate"]["identity"]["candidateClient"]
-        .as_str()
-        .context("recovery candidate identity is missing")?
-        .parse()?;
-    let active: Address = state["activeEthereum"]["client"]
-        .as_str()
-        .context("active client identity is missing")?
-        .parse()?;
-    Ok(candidate == active)
-}
-
-pub(crate) fn recovery_candidate_identity(plan: &Value) -> Value {
-    json!({
-        "queue": plan["queue"],
-        "controller": plan["controller"],
-        "recoveryWallet": plan["recoveryWallet"],
-        "expectedOldVerifier": plan["expectedOldVerifier"],
-        "expectedOldClient": plan["expectedOldClient"],
-        "candidateVerifier": plan["candidateVerifier"],
-        "candidateClient": plan["candidateClient"],
-        "sourceDomain": plan["sourceDomain"],
-        "bridgeDomain": plan["bridgeDomain"],
-        "destinationChainId": plan["destinationChainId"],
-        "mmrStartBlock": plan["mmrStartBlock"],
-        "codeHashes": plan["codeHashes"],
-        "bootstrap": plan["bootstrap"],
-    })
-}
-
-async fn refresh_recovery_candidate(
-    output: &Path,
-    ethereum_rpc: &str,
-    deployment: &Value,
-    plan: &Value,
-    state: &mut Value,
-) -> Result<Value> {
-    let identity = recovery_candidate_identity(plan);
-    let replacing = !state["recoveryCandidate"].is_null()
-        && state["recoveryCandidate"]["identity"] != identity
-        && !recovery_candidate_is_active(state)?;
-    let verification = crate::tokens::verify_recovery_candidate(
-        ethereum_rpc,
-        deployment,
-        &state["activeEthereum"],
-        plan,
-    )
-    .await?;
-    if replacing {
-        ensure!(
-            verification["pendingProposal"].is_null(),
-            "cancel and finalize the pending proposal before replacing a recovery candidate"
-        );
-        crate::tokens::ensure_no_unresolved_recovery_intents(output)?;
-        if state["recoveryCandidateHistory"].is_null() {
-            state["recoveryCandidateHistory"] = json!([]);
-        }
-        ensure!(
-            state["recoveryCandidateHistory"].is_array(),
-            "malformed recovery candidate history"
-        );
-        let previous = state["recoveryCandidate"].take();
-        state["recoveryCandidateHistory"]
-            .as_array_mut()
-            .expect("checked candidate history")
-            .push(previous);
-    }
-    state["recoveryCandidate"] = json!({"identity":identity,"verification":verification});
-    Ok(state["recoveryCandidate"]["verification"].clone())
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn follow_tokens(
     source_rpc: &str,
@@ -2179,7 +2109,6 @@ pub async fn follow_tokens(
     output: &Path,
     reconcile_once: bool,
     local_rehearsal: bool,
-    recovery_plan_path: Option<&Path>,
 ) -> Result<()> {
     ensure!(
         crate::local_source_rpc(source_rpc) && crate::local_source_rpc(witness_rpc),
@@ -2206,17 +2135,6 @@ pub async fn follow_tokens(
         deployment["localRehearsal"] == local_rehearsal,
         "deployment rehearsal mode differs from actor mode"
     );
-    let recovery_wallet = deployment["ethereum"]["recoveryWallet"]
-        .as_str()
-        .context("deployment recovery wallet missing")?;
-    crate::tokens::require_recovery_wallet_identity(recovery_wallet)?;
-    let recovery_plan: Option<Value> = recovery_plan_path
-        .map(|path| -> Result<Value> { Ok(serde_json::from_slice(&fs::read(path)?)?) })
-        .transpose()?;
-    ensure!(
-        recovery_plan.is_none() || !local_rehearsal,
-        "candidate recovery is only permitted against the pinned real Hoodi deployment"
-    );
     let _owner = crate::tokens::lock_token_deployment(deployment_manifest)?;
     fs::create_dir_all(output)?;
     let output_directory = fs::canonicalize(output)?;
@@ -2233,51 +2151,7 @@ pub async fn follow_tokens(
             "status":"following", "commitments":[], "transactions":[], "roots":{},
             "startupSequence":0, "rootScan":null, "localRehearsal":local_rehearsal})
     };
-    let history = crate::tokens::read_recovery_history(output)?;
-    let transition = history["transitions"]
-        .as_array()
-        .context("missing recovery history")?
-        .last();
-    if let Some(transition) = transition {
-        ensure!(
-            resumed && state["localRehearsal"] == false && !state["bootstrap"].is_null(),
-            "recovery history requires the established real-Hoodi follower journal"
-        );
-        let active =
-            crate::tokens::verify_recovery_history(ethereum_rpc, &deployment, &history).await?;
-        state["activeEthereum"] = active.clone();
-        state["recoveryTransition"] = json!({
-            "activationTxHash":transition["verification"]["activationTxHash"],
-            "candidateVerifier":transition["verification"]["candidateVerifier"],
-            "proposalNonce":transition["verification"]["proposalNonce"],
-        });
-        save(output, &mut state, None)?;
-    } else {
-        ensure!(
-            state["activeEthereum"] == deployment["ethereum"],
-            "follower active client changed without finalized recovery history"
-        );
-    }
-    let candidate_verification = if let Some(plan) = recovery_plan.as_ref() {
-        ensure!(
-            resumed && !state["bootstrap"].is_null(),
-            "candidate recovery requires the original durable follower journal"
-        );
-        let verified =
-            refresh_recovery_candidate(output, ethereum_rpc, &deployment, plan, &mut state).await?;
-        save(output, &mut state, None)?;
-        Some(verified)
-    } else {
-        ensure!(
-            state["recoveryCandidate"].is_null() || recovery_candidate_is_active(&state)?,
-            "resume candidate commitments with the same recovery plan until finalized activation"
-        );
-        None
-    };
-    let selected_ethereum_manifest = candidate_verification
-        .as_ref()
-        .map(|verified| verified["activeEthereum"].clone())
-        .unwrap_or_else(|| state["activeEthereum"].clone());
+    let selected_ethereum_manifest = &deployment["ethereum"];
     ensure!(
         state["localRehearsal"] == local_rehearsal,
         "cannot change an actor between local rehearsal and live mode"
@@ -2327,16 +2201,14 @@ pub async fn follow_tokens(
         authenticated_token_anchor(&mut source, &mut witness, &deployment["anchor"]).await?;
     let anchor_block = anchor.block;
     let mut ethereum =
-        Ethereum::connect_hoodi_active(ethereum_rpc, wallet, &selected_ethereum_manifest).await?;
+        Ethereum::connect_hoodi(ethereum_rpc, wallet, selected_ethereum_manifest).await?;
     ensure!(
         decode(&deployment["manager"])?.as_slice() == ethereum.receiver_address(),
         "declared ERC20 manager differs from client receiver"
     );
-    if candidate_verification.is_none() {
-        ethereum
-            .verify_token_bindings(array(&deployment["gearManager"])?)
-            .await?;
-    }
+    ethereum
+        .verify_token_bindings(array(&deployment["gearManager"])?)
+        .await?;
     let bootstrap = bootstrap_record(&anchor, &first)?;
     ensure!(
         state["bootstrap"].is_null() || state["bootstrap"] == bootstrap,
@@ -2366,45 +2238,6 @@ pub async fn follow_tokens(
         );
         state["rootScan"] = json!({"block":cursor, "blockHash":bytes(cursor_hash.0)});
         save(output, &mut state, Some(&ethereum))?;
-    }
-    if let Some(plan) = recovery_plan
-        .as_ref()
-        .or_else(|| transition.map(|record| &record["plan"]))
-    {
-        let (candidate_anchor, candidate_proof) =
-            authenticated_token_anchor(&mut source, &mut witness, &plan["bootstrap"]).await?;
-        let checkpoint = ethereum.checkpoint().await?;
-        if checkpoint.root == [0; 32] {
-            ensure!(
-                checkpoint.block == u64::from(candidate_anchor.block)
-                    && checkpoint_matches_source(
-                        &checkpoint,
-                        [0; 32],
-                        candidate_proof.snapshot.source_timestamp_ms,
-                        &candidate_anchor.current,
-                        &candidate_anchor.next
-                    ),
-                "uninitialized candidate does not match its independently witnessed bootstrap"
-            );
-        } else {
-            ensure!(
-                checkpoint.block > u64::from(candidate_anchor.block),
-                "candidate verified checkpoint does not advance its bootstrap"
-            );
-        }
-        let bootstrap = bootstrap_record(&candidate_anchor, &candidate_proof)?;
-        let key = format!("{:#x}", ethereum.client_address);
-        ensure!(
-            state["recoveryBootstraps"].is_null() || state["recoveryBootstraps"].is_object(),
-            "malformed recovery bootstrap journal"
-        );
-        ensure!(
-            state["recoveryBootstraps"][&key].is_null()
-                || state["recoveryBootstraps"][&key] == bootstrap,
-            "candidate bootstrap changed across restart"
-        );
-        state["recoveryBootstraps"][key] = bootstrap;
-        save(output, &mut state, None)?;
     }
     let legacy_client = deployment_client(&state)?;
     if !state["submission"].is_null() {
@@ -2438,16 +2271,11 @@ pub async fn follow_tokens(
             "reconcile-once requires pending submission already accepted by Hoodi"
         );
     }
-    let candidate_mode = candidate_verification.is_some();
     phase(
         output,
         &mut state,
         Some(&ethereum),
-        if candidate_mode {
-            "following candidate recovery client; root publication disabled"
-        } else {
-            "following isolated token client"
-        },
+        "following isolated token client",
     )?;
     let result: Result<()> = async {
         tokio::time::timeout(Duration::from_secs(300), async {
@@ -2471,45 +2299,60 @@ pub async fn follow_tokens(
         )??;
         if reconcile_once {
             finish_commitment_finality(&mut source, &mut ethereum, output, &mut state).await?;
-            if !candidate_mode {
-                loop {
-                    let roots = state["roots"].as_object().context("missing root journal")?;
-                    ensure!(
-                        roots.values().all(|root| matches!(
-                            root["status"].as_str(),
-                            Some("pending" | "mined" | "accepted")
-                        )),
-                        "invalid root reconciliation status"
-                    );
-                    if roots.values().all(|root| root["status"] == "accepted") {
-                        break;
-                    }
-                    let uncovered = publish_token_roots(
-                        source_rpc,
-                        witness_rpc,
-                        ethereum_rpc,
-                        root_wallet,
-                        &mut source,
-                        &mut witness,
-                        &ethereum,
-                        deployment_manifest,
-                        output,
-                        &mut state,
-                        true,
-                    )
-                    .await?;
-                    ensure!(
-                        !uncovered,
-                        "pending root requires a newer checkpoint; resume the normal follower"
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            loop {
+                let roots = state["roots"].as_object().context("missing root journal")?;
+                ensure!(
+                    roots.values().all(|root| matches!(
+                        root["status"].as_str(),
+                        Some("pending" | "mined" | "accepted")
+                    )),
+                    "invalid root reconciliation status"
+                );
+                if roots.values().all(|root| root["status"] == "accepted") {
+                    break;
                 }
+                let uncovered = publish_token_roots(
+                    source_rpc,
+                    witness_rpc,
+                    ethereum_rpc,
+                    root_wallet,
+                    &mut source,
+                    &mut witness,
+                    &ethereum,
+                    deployment_manifest,
+                    output,
+                    &mut state,
+                    true,
+                )
+                .await?;
+                ensure!(
+                    !uncovered,
+                    "pending root requires a newer checkpoint; resume the normal follower"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
             return Ok(());
         }
         scan_token_roots(&source, &witness, output, &mut state).await?;
-        if candidate_verification.is_none() {
-            publish_token_roots(
+        publish_token_roots(
+            source_rpc,
+            witness_rpc,
+            ethereum_rpc,
+            root_wallet,
+            &mut source,
+            &mut witness,
+            &ethereum,
+            deployment_manifest,
+            output,
+            &mut state,
+            false,
+        )
+        .await?;
+
+        loop {
+            promote_finality(&mut source, &mut ethereum, output, &mut state).await?;
+            scan_token_roots(&source, &witness, output, &mut state).await?;
+            let uncovered = publish_token_roots(
                 source_rpc,
                 witness_rpc,
                 ethereum_rpc,
@@ -2523,39 +2366,6 @@ pub async fn follow_tokens(
                 false,
             )
             .await?;
-        }
-
-        loop {
-            if let Some(plan) = recovery_plan.as_ref() {
-                let refreshed =
-                    refresh_recovery_candidate(output, ethereum_rpc, &deployment, plan, &mut state)
-                        .await?;
-                ensure!(
-                    refreshed["activeEthereum"] == selected_ethereum_manifest,
-                    "candidate client identity changed while follower was running"
-                );
-                save(output, &mut state, None)?;
-            }
-            promote_finality(&mut source, &mut ethereum, output, &mut state).await?;
-            scan_token_roots(&source, &witness, output, &mut state).await?;
-            let uncovered = if candidate_mode {
-                false
-            } else {
-                publish_token_roots(
-                    source_rpc,
-                    witness_rpc,
-                    ethereum_rpc,
-                    root_wallet,
-                    &mut source,
-                    &mut witness,
-                    &ethereum,
-                    deployment_manifest,
-                    output,
-                    &mut state,
-                    false,
-                )
-                .await?
-            };
             if matches!(
                 state["follower"]["status"].as_str(),
                 Some("held-root" | "held-finality")
@@ -2563,15 +2373,14 @@ pub async fn follow_tokens(
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 continue;
             }
-            let handover_only =
-                !candidate_mode && !uncovered && state["follower"]["status"] == "healthy";
+            let handover_only = !uncovered && state["follower"]["status"] == "healthy";
             advance(
                 &mut source,
                 &mut ethereum,
                 output,
                 &mut state,
                 handover_only,
-                if candidate_mode { None } else { Some(&witness) },
+                Some(&witness),
             )
             .await?;
         }
@@ -2631,27 +2440,7 @@ mod tests {
     }
 
     #[test]
-    fn candidate_bootstrap_never_falls_back_to_the_original_client() -> Result<()> {
-        let original = Address::from([0x11; 20]);
-        let candidate = Address::from([0x22; 20]);
-        let key = format!("{candidate:#x}");
-        let mut state = json!({"deployment":{"ethereum":{"client":format!("{original:#x}")}},
-            "bootstrap":{"block":4},"recoveryBootstraps":{}});
-        assert_eq!(client_bootstrap(&state, original)?["block"], 4);
-        assert!(client_bootstrap(&state, candidate).is_err());
-        state["recoveryBootstraps"][&key] = json!({"block":128});
-        assert_eq!(client_bootstrap(&state, candidate)?["block"], 128);
-        assert!(client_bootstrap(&state, Address::from([0x33; 20])).is_err());
-        state["recoveryBootstraps"][key] = Value::Null;
-        assert!(client_bootstrap(&state, candidate).is_err());
-        let demo = json!({"mode":"hoodi-message-demo","ethereum":{"client":format!("{original:#x}")},
-            "bootstrap":{"block":8}});
-        assert_eq!(client_bootstrap(&demo, original)?["block"], 8);
-        Ok(())
-    }
-
-    #[test]
-    fn recovery_candidate_journal_cannot_reuse_old_client_submission() -> Result<()> {
+    fn journal_cannot_reuse_another_client_submission() -> Result<()> {
         let legacy = Address::from([0x11; 20]);
         let candidate = Address::from([0x22; 20]);
         let old = json!({"block": 420, "clientAddress": format!("{legacy:#x}")});
@@ -2663,6 +2452,10 @@ mod tests {
         assert!(require_submission_client(&old, candidate, legacy).is_err());
         assert!(require_submission_client(&json!({"nonce": 1}), candidate, legacy).is_err());
         assert!(journal_client(&json!({"clientAddress": 7}), legacy).is_err());
+        let state = json!({"deployment":{"ethereum":{"client":format!("{legacy:#x}")}},
+            "bootstrap":{"block":4}});
+        assert_eq!(client_bootstrap(&state, legacy)?["block"], 4);
+        assert!(client_bootstrap(&state, candidate).is_err());
         Ok(())
     }
 
@@ -2733,8 +2526,12 @@ mod tests {
             "schemaVersion": 3,
             "mode": "hoodi-token-follow",
             "deployment": deployment.clone(),
+            "activeEthereum": deployment["ethereum"].clone(),
         });
         assert!(validate_token_follower_journal(&valid, &deployment).is_ok());
+        let mut changed_client = valid.clone();
+        changed_client["activeEthereum"] = json!({"chainId": 31_337});
+        assert!(validate_token_follower_journal(&changed_client, &deployment).is_err());
 
         let old_schema = json!({
             "schemaVersion": 2,

@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use checkpoint_light_client_client::service_checkpoint_for;
+use checkpoint_light_client_client::{service_checkpoint_for, service_state};
 use gstd::{debug, msg, prelude::*};
 use hex_literal::hex;
 use primitive_types::H256;
@@ -11,6 +11,15 @@ use sails_rs::{
 
 /* associative list of slot -> (checkpoint, blockRoot) */
 static CHECKPOINTS: &[(u64, (u64, H256))] = &[
+    (
+        2_498_456,
+        (
+            2_498_464,
+            H256(hex!(
+                "b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1"
+            )),
+        ),
+    ),
     (
         4_534_630,
         (
@@ -102,6 +111,12 @@ extern "C" fn init() {}
 #[unsafe(no_mangle)]
 extern "C" fn handle() {
     let payload = msg::load_bytes().expect("unable to load payload");
+    if payload == service_state::io::Network::ROUTE {
+        let mut bytes = payload;
+        <service_state::io::Network as ActionIo>::Reply::Holesky.encode_to(&mut bytes);
+        msg::reply_bytes(bytes, 0).expect("unable to reply with fixture network");
+        return;
+    }
 
     if !payload.starts_with(GET_CHECKPOINT) {
         panic!("Unknown action: {payload:?}");

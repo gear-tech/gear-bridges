@@ -7,7 +7,6 @@ import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
-import {IRecoveryThresholdWallet} from "src/RecoveryController.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {WrappedVara} from "src/erc20/WrappedVara.sol";
@@ -31,11 +30,6 @@ contract BeefyHoodi is Script {
         }
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address recoveryWallet = vm.envAddress("BEEFY_RECOVERY_WALLET");
-        require(recoveryWallet != address(0) && recoveryWallet.code.length != 0, "missing deployed recovery Safe");
-        IRecoveryThresholdWallet recoverySafe = IRecoveryThresholdWallet(recoveryWallet);
-        address[] memory recoveryOwners = recoverySafe.getOwners();
-        require(recoverySafe.getThreshold() == 3 && recoveryOwners.length == 5, "recovery Safe must be 3-of-5");
         bytes32 sourceDomain = vm.envBytes32("BEEFY_SOURCE_DOMAIN");
         require(sourceDomain != bytes32(0), "missing source domain");
         uint64 mmrStartBlock = _envUint64("BEEFY_MMR_START_BLOCK");
@@ -105,14 +99,13 @@ contract BeefyHoodi is Script {
             Upgrades.deployUUPSProxy(
                 "MessageQueue.sol",
                 abi.encodeCall(
-                    MessageQueue.initializeWithRecovery,
+                    MessageQueue.initializeBeefy,
                     (
                         IGovernance(address(governanceAdmin)),
                         IGovernance(address(governancePauser)),
                         deployer,
                         emergencyStopObservers,
-                        verifier,
-                        recoveryWallet
+                        verifier
                     )
                 )
             )

@@ -411,7 +411,7 @@ pub fn decode_beefy_digest(bytes: &[u8]) -> Result<Option<Hash32>> {
             let len = vector_len(&mut input, MAX_VALIDATORS * 33 + 16)?;
             take(&mut input, len)?;
         }
-        4 | 5 | 6 => {
+        4..=6 => {
             take(&mut input, 4)?;
             let len = vector_len(&mut input, MAX_VALIDATORS * 33 + 16)?;
             take(&mut input, len)?;

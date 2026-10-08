@@ -108,7 +108,6 @@ jobs:
             "./api/ethereum/BridgingPayment.json"
             "./api/ethereum/BeefyClient.json"
             "./api/ethereum/VaraQueueRootVerifier.json"
-            "./api/ethereum/RecoveryController.json"
 
             "./api/gear/bridging_payment.idl"
             "./api/gear/eth_events_deneb.idl"
@@ -130,7 +129,6 @@ jobs:
             "./ethereum/out/BridgingPayment.sol/BridgingPayment.json"
             "./ethereum/out/BeefyClient.sol/BeefyClient.json"
             "./ethereum/out/VaraQueueRootVerifier.sol/VaraQueueRootVerifier.json"
-            "./ethereum/out/RecoveryController.sol/RecoveryController.json"
 
             "./target/wasm32-gear/release/bridging_payment.idl"
             "./target/wasm32-gear/release/eth_events_deneb.idl"

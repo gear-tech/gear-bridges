@@ -87,6 +87,23 @@ $ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --r
 $ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
+### Queue initialization and administration
+
+Fresh BEEFY deployments use `initializeBeefy` with the same five arguments as
+`initialize`: governance admin, governance pauser, emergency-stop admin,
+observers, and verifier. It validates the destination-bound verifier/client and
+pins the BEEFY source-block floor. Ordinary `initialize` remains the legacy path.
+Legacy storage slots 0–13 are unchanged; the source floor and per-block maturity
+timestamps occupy appended slots 14 and 15.
+
+Queue upgrades remain UUPS operations authorized by `DEFAULT_ADMIN_ROLE`.
+Upstream commit `8dbff5ca5c5eb92feec3285b56424ec33736f8cd` added the role-gated
+`reinitialize()` at version 7, granting admin and pauser roles to the unchanged
+`0x1111111111111111111111111111111111111111` placeholder. Production uses the
+actual Safe multisig address; local tests impersonate the privileged account
+with `vm.prank` or `vm.startPrank`, without implementing a Safe or a separate
+controller/timelock protocol. The existing governance-admin role is retained.
+
 ### Upgrade
 
 > [!WARNING]

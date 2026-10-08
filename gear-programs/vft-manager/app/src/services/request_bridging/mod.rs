@@ -188,10 +188,10 @@ pub async fn handle_interrupted_transfer(
 
     match token_supply {
         TokenSupply::Ethereum => {
-            token_operations::mint(vara_token_id, sender, amount, &config, msg_id).await?;
+            token_operations::mint(vara_token_id, sender, amount, config, msg_id).await?;
         }
         TokenSupply::Gear => {
-            token_operations::unlock(vara_token_id, sender, amount, &config, msg_id).await?;
+            token_operations::unlock(vara_token_id, sender, amount, config, msg_id).await?;
         }
     }
 

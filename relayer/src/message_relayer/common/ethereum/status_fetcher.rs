@@ -46,15 +46,11 @@ pub struct CompletionEvidence {
     pub token_delivery: bool,
 }
 
-pub enum Response {
-    Success(Uuid, CompletionEvidence),
-    Hold(Uuid, String),
-}
 const TX_VISIBILITY_RECHECK_DELAY: Duration = Duration::from_secs(15);
 type TxWatch = BoxFuture<'static, (TrackedRequest, Result<CompletionEvidence, String>)>;
 pub struct StatusFetcherIo {
     requests: UnboundedSender<TrackedRequest>,
-    responses: UnboundedReceiver<Response>,
+    responses: UnboundedReceiver<(Uuid, Result<CompletionEvidence, String>)>,
 }
 impl StatusFetcherIo {
     pub fn send_request(
@@ -73,7 +69,7 @@ impl StatusFetcherIo {
             })
             .is_ok()
     }
-    pub async fn recv_message(&mut self) -> Option<Response> {
+    pub async fn recv_message(&mut self) -> Option<(Uuid, Result<CompletionEvidence, String>)> {
         self.responses.recv().await
     }
 }
@@ -133,7 +129,7 @@ impl StatusFetcher {
 async fn task(
     this: StatusFetcher,
     mut requests: UnboundedReceiver<TrackedRequest>,
-    responses: UnboundedSender<Response>,
+    responses: UnboundedSender<(Uuid, Result<CompletionEvidence, String>)>,
 ) {
     let mut watches = FuturesUnordered::new();
     loop {
@@ -145,7 +141,7 @@ async fn task(
             }
             Some((request, outcome)) = watches.next(), if !watches.is_empty() => {
                 this.metrics.pending_tx_count.dec();
-                let response = match outcome {
+                match &outcome {
                     Ok(evidence) => {
                         this.metrics.total_gas_used.inc_by(evidence.receipt.gas_used);
                         let gas = evidence.receipt.gas_used;
@@ -153,14 +149,12 @@ async fn task(
                         let min = this.metrics.min_gas_used.get();
                         if min == 0 || gas < min { this.metrics.min_gas_used.set(gas); }
                         if gas > this.metrics.max_gas_used.get() { this.metrics.max_gas_used.set(gas); }
-                        Response::Success(request.tx_uuid, evidence)
                     }
-                    Err(reason) => {
+                    Err(_) => {
                         this.metrics.total_failed_txs.inc();
-                        Response::Hold(request.tx_uuid, reason)
                     }
                 };
-                if responses.send(response).is_err() { return }
+                if responses.send((request.tx_uuid, outcome)).is_err() { return }
             }
         }
     }
@@ -1174,7 +1168,7 @@ pub(crate) mod tests {
                 "anvil_setStorageAt",
                 (
                     queue,
-                    map(U256::from(43), 16),
+                    map(U256::from(43), 15),
                     B256::from(U256::from(1).to_be_bytes::<32>()),
                 ),
             )

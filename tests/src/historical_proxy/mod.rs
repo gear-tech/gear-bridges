@@ -1,11 +1,9 @@
 use crate::{connect_to_node, DEFAULT_BALANCE};
-use checkpoint_light_client_client::service_checkpoint_for::io as checkpoint_for_io;
 use eth_events_deneb_client::traits::EthEventsDenebFactory;
-use gclient::{DispatchStatus, Event, EventProcessor, GearEvent};
+use gclient::{Event, EventProcessor, GearEvent};
 use gstd::ActorId;
-use hex_literal::hex;
 use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
-use sails_rs::{calls::*, gclient::calls::*, prelude::*};
+use sails_rs::{calls::*, gclient::calls::*, Decode, Encode};
 use vft_manager_client::vft_manager;
 
 mod shared;
@@ -76,284 +74,110 @@ async fn update_admin() {
 
 #[tokio::test]
 async fn proxy() {
-    let message = shared::event();
-
+    let proof = shared::event();
     let conn = connect_to_node(
         &[DEFAULT_BALANCE],
         "historical-proxy",
-        &[historical_proxy::WASM_BINARY, eth_events_deneb::WASM_BINARY],
+        &[
+            historical_proxy::WASM_BINARY,
+            eth_events_deneb::WASM_BINARY,
+            mock_contract::WASM_BINARY,
+        ],
     )
     .await;
-
     let gas_limit = conn.gas_limit;
     let admin = conn.accounts[0].0;
     let api = conn.api.with(&conn.accounts[0].2).unwrap();
-    let salt = conn.salt;
-    println!("admin: {admin:?}");
-
-    let factory =
-        eth_events_deneb_client::EthEventsDenebFactory::new(GClientRemoting::new(api.clone()));
-    let ethereum_event_client_program_id = factory
-        .new(admin)
+    let (_, checkpoint, _) = api
+        .create_program_bytes(conn.code_ids[2], conn.salt, [], gas_limit, 0)
+        .await
+        .unwrap();
+    let remoting = GClientRemoting::new(api.clone());
+    let endpoint = eth_events_deneb_client::EthEventsDenebFactory::new(remoting.clone())
+        .new(checkpoint)
         .with_gas_limit(gas_limit)
-        .send_recv(conn.code_ids[1], salt)
+        .send_recv(conn.code_ids[1], conn.salt)
         .await
         .unwrap();
-
-    let proxy_program_id =
-        historical_proxy_client::HistoricalProxyFactory::new(GClientRemoting::new(api.clone()))
-            .new()
-            .with_gas_limit(5_500_000_000)
-            .send_recv(conn.code_ids[0], salt)
-            .await
-            .unwrap();
-
-    let mut proxy_client =
-        historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()));
-
-    proxy_client
-        .add_endpoint(
-            message.proof_block.block.slot,
-            ethereum_event_client_program_id,
-        )
-        .send_recv(proxy_program_id)
+    let proxy = historical_proxy_client::HistoricalProxyFactory::new(remoting.clone())
+        .new()
+        .with_gas_limit(gas_limit)
+        .send_recv(conn.code_ids[0], conn.salt)
         .await
         .unwrap();
-
-    let endpoint = proxy_client
-        .endpoint_for(message.proof_block.block.slot)
-        .recv(proxy_program_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(endpoint, ethereum_event_client_program_id);
-    println!("endpoint {endpoint:?}\nproxy: {proxy_program_id:?}\nadmin: {admin:?}");
-
-    let gas_limit = api.block_gas_limit().unwrap();
-    let route = ("VftManager".to_owned(), "SubmitReceipt".to_owned()).encode();
-    let mut listener = api.subscribe().await.unwrap();
-    let result = proxy_client
-        .redirect(
-            message.proof_block.block.slot,
-            message.encode(),
-            admin,
-            route.clone(),
-        )
-        .with_gas_limit(gas_limit / 100 * 95)
-        .send(proxy_program_id)
+    let mut client = historical_proxy_client::HistoricalProxy::new(remoting);
+    let slot = proof.proof_block.block.slot;
+    client
+        .add_endpoint(slot, endpoint)
+        .send_recv(proxy)
         .await
         .unwrap();
-    let message_id = listener
-        .proc(|e| match e {
-            Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.source().into_bytes()
-                    == ethereum_event_client_program_id.into_bytes()
-                    && message.destination().into_bytes() == admin.into_bytes()
-                    && message.details().is_none()
-                    && message
-                        .payload_bytes()
-                        .starts_with(checkpoint_for_io::Get::ROUTE) =>
-            {
-                let encoded = &message.payload_bytes()[checkpoint_for_io::Get::ROUTE.len()..];
-                let slot: <checkpoint_for_io::Get as ActionIo>::Params =
-                    Decode::decode(&mut &encoded[..]).ok()?;
+    assert_eq!(
+        client.endpoint_for(slot).recv(proxy).await.unwrap(),
+        Ok(endpoint)
+    );
+    let route = vft_manager::io::SubmitReceipt::ROUTE;
 
-                if slot == 2_498_456 {
-                    println!(
-                        "get checkpoint for: #{}, messageID={:?}",
-                        slot,
-                        message.id()
-                    );
-                    Some(message.id())
-                } else {
-                    None
-                }
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        // Reject a wrong receipt slot even when it selects the same endpoint.
+        for hint in [slot, slot + 1] {
+            let mut listener = api.subscribe().await.unwrap();
+            let result = client
+                .redirect(hint, proof.encode(), admin, route.to_vec())
+                .with_gas_limit(gas_limit / 100 * 95)
+                .send(proxy)
+                .await
+                .unwrap();
+            if hint != slot {
+                assert!(matches!(
+                    result.recv().await.unwrap(),
+                    Err(historical_proxy_client::ProxyError::DecodeFailure(_))
+                ));
+                listener.proc(|event| match event {
+                    Event::Gear(GearEvent::UserMessageSent { message, .. })
+                        if message.source() == proxy && message.destination() == admin => {
+                        assert!(message.details().is_some(), "wrong slot reached the consumer");
+                        Some(())
+                    }
+                    _ => None,
+                }).await.unwrap();
+                continue;
             }
-
-            _ => None,
-        })
-        .await
-        .unwrap();
-
-    let reply: <checkpoint_for_io::Get as ActionIo>::Reply = Ok((
-        2_496_464,
-        hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
-    ));
-    let payload = {
-        let mut result = checkpoint_for_io::Get::ROUTE.to_vec();
-        reply.encode_to(&mut result);
-
-        result
-    };
-
-    let mut listener = api.subscribe().await.unwrap();
-    let (message_id, _, _) = match api
-        .send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
-        .await
-    {
-        Ok(reply) => reply,
-        Err(err) => {
-            let block = api.last_block_number().await.unwrap();
-            println!("failed to send reply to {message_id:?}: {err:?}, block={block}");
-            let result = result.recv().await.unwrap().unwrap();
-            println!("{result:?}");
-            crate::panic!("{:?}", err);
+            let result = result.recv();
+            tokio::pin!(result);
+            let consumer = listener.proc(|event| match event {
+                    Event::Gear(GearEvent::UserMessageSent { message, .. })
+                        if message.source() == proxy
+                            && message.destination() == admin
+                            && message.details().is_none()
+                            && message.payload_bytes().starts_with(route) =>
+                    {
+                        let (actual_slot, index, receipt) =
+                            <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(
+                                &mut &message.payload_bytes()[route.len()..],
+                            )
+                            .unwrap();
+                        assert_eq!(actual_slot, slot);
+                        assert_eq!(index, proof.transaction_index);
+                        assert_eq!(receipt, proof.receipt_rlp);
+                        Some(message.id())
+                    }
+                    _ => None,
+                });
+            let message_id = tokio::select! {
+                returned = &mut result => panic!("proxy ended before consumer delivery: {returned:?}"),
+                message_id = consumer => message_id.unwrap(),
+            };
+            let reply: <vft_manager::io::SubmitReceipt as ActionIo>::Reply = Ok(());
+            let mut payload = route.to_vec();
+            reply.encode_to(&mut payload);
+            api.send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
+                .await
+                .unwrap();
+            let returned = result.await.unwrap().expect("proxy failed");
+            assert_eq!(returned.0, proof.receipt_rlp);
         }
-    };
-
-    println!("Checkpoint reply with ID {message_id:?}");
-
-    println!("Processed...");
-    // wait for SubmitReceipt request and reply to it
-    let predicate = |e| match e {
-        Event::Gear(GearEvent::UserMessageSent { message, .. })
-            if message.destination().into_bytes() == admin.into_bytes()
-                && message.details().is_none() =>
-        {
-            message
-                .payload_bytes()
-                .starts_with(route.as_slice())
-                .then_some((Some(message.id()), None))
-        }
-
-        Event::Gear(GearEvent::MessagesDispatched { statuses, .. }) => {
-            statuses.into_iter().find_map(|(mid, status)| {
-                (mid.into_bytes() == message_id.into_bytes())
-                    .then_some((None, Some(DispatchStatus::from(status))))
-            })
-        }
-
-        _ => None,
-    };
-
-    let mut results = listener
-        .proc_many(predicate, |pairs| {
-            let len = pairs.len();
-
-            (pairs, len > 1)
-        })
-        .await
-        .unwrap();
-    let (message_id_1, status_1) = results.pop().unwrap();
-    let (message_id_2, status_2) = results.pop().unwrap();
-
-    assert!(status_1.or(status_2).unwrap().succeed());
-
-    let message_id = message_id_1.or(message_id_2).unwrap();
-
-    println!("Submit receipt request");
-    let reply: <vft_manager::io::SubmitReceipt as ActionIo>::Reply = Ok(());
-    let payload = {
-        let mut result = route.clone();
-        reply.encode_to(&mut result);
-
-        result
-    };
-
-    api.send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
-        .await
-        .unwrap();
-
-    let result = result.recv().await.unwrap().expect("proxy failed");
-    assert_eq!(result.0, message.receipt_rlp);
-
-    // returned slot should be correct regardless the input slot
-    let slot_expected = message.proof_block.block.slot;
-    let result = proxy_client
-        .redirect(
-            // intentionally submit different slot whithin the same epoch
-            1 + slot_expected,
-            message.encode(),
-            admin,
-            route.clone(),
-        )
-        .with_gas_limit(gas_limit / 100 * 95)
-        .send(proxy_program_id)
-        .await
-        .unwrap();
-    let message_id = listener
-        .proc(|e| match e {
-            Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.source().into_bytes()
-                    == ethereum_event_client_program_id.into_bytes()
-                    && message.destination().into_bytes() == admin.into_bytes()
-                    && message.details().is_none()
-                    && message
-                        .payload_bytes()
-                        .starts_with(checkpoint_for_io::Get::ROUTE) =>
-            {
-                let encoded = &message.payload_bytes()[checkpoint_for_io::Get::ROUTE.len()..];
-                let slot: <checkpoint_for_io::Get as ActionIo>::Params =
-                    Decode::decode(&mut &encoded[..]).ok()?;
-
-                if slot == 2_498_456 {
-                    println!(
-                        "get checkpoint for: #{}, messageID={:?}",
-                        slot,
-                        message.id()
-                    );
-                    Some(message.id())
-                } else {
-                    None
-                }
-            }
-
-            _ => None,
-        })
-        .await
-        .unwrap();
-
-    let reply: <checkpoint_for_io::Get as ActionIo>::Reply = Ok((
-        2_496_464,
-        hex!("b89c6d200193f865b85a3f323b75d2b10346564a330229d8a5c695968206faf1").into(),
-    ));
-    let payload = {
-        let mut result = checkpoint_for_io::Get::ROUTE.to_vec();
-        reply.encode_to(&mut result);
-
-        result
-    };
-
-    let mut listener = api.subscribe().await.unwrap();
-    let (message_id, _, _) = match api
-        .send_reply_bytes(message_id, payload, gas_limit / 100 * 95, 0)
-        .await
-    {
-        Ok(reply) => reply,
-        Err(err) => {
-            let block = api.last_block_number().await.unwrap();
-            println!("failed to send reply to {message_id:?}: {err:?}, block={block}");
-            let result = result.recv().await.unwrap().unwrap();
-            println!("{result:?}");
-            crate::panic!("{:?}", err);
-        }
-    };
-
-    println!("Checkpoint reply with ID {message_id:?}");
-
-    listener
-        .proc(|e| match e {
-            Event::Gear(GearEvent::UserMessageSent { message, .. })
-                if message.destination().into_bytes() == admin.into_bytes()
-                    && message.details().is_none() =>
-            {
-                if message.payload_bytes().starts_with(route.as_slice()) {
-                    let slice = &message.payload_bytes()[route.len()..];
-                    let (slot, ..) = <vft_manager::io::SubmitReceipt as ActionIo>::Params::decode(
-                        &mut &slice[..],
-                    )
-                    .unwrap();
-
-                    assert_eq!(slot, slot_expected);
-
-                    Some(())
-                } else {
-                    None
-                }
-            }
-
-            _ => None,
-        })
-        .await
-        .unwrap();
+    })
+    .await
+    .expect("historical proxy delivery exceeded 120 seconds after deployment");
 }

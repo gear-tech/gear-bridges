@@ -104,7 +104,7 @@ pub async fn send_message_to_bridge_builtin(
             request: msg_id,
             child: future.waiting_reply_to,
             builtin: gear_bridge_builtin,
-            request_hash: H256::from(KeccakHasher::hash(
+            request_hash: KeccakHasher::hash(
                 &(
                     Syscall::program_id(),
                     gear_bridge_builtin,
@@ -112,7 +112,7 @@ pub async fn send_message_to_bridge_builtin(
                     &bytes,
                 )
                     .encode(),
-            )),
+            ),
             outcome: SourceRequestOutcome::Pending,
         },
     );

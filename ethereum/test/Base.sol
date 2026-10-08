@@ -16,7 +16,6 @@ import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
-import {IRecoveryThresholdWallet} from "src/RecoveryController.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
 import {VerifierTestnet} from "src/VerifierTestnet.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
@@ -59,7 +58,6 @@ struct DeploymentArguments {
     address emergencyStopAdmin;
     address[] emergencyStopObservers;
     uint256 bridgingPaymentFee;
-    address recoveryWallet;
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
@@ -139,8 +137,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 governancePauser: BaseConstants.GOVERNANCE_PAUSER,
                 emergencyStopAdmin: BaseConstants.EMERGENCY_STOP_ADMIN,
                 emergencyStopObservers: emergencyStopObservers,
-                bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE,
-                recoveryWallet: address(0)
+                bridgingPaymentFee: BaseConstants.BRIDGING_PAYMENT_FEE
             })
         );
     }
@@ -173,17 +170,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 governancePauser: vm.envBytes32("GOVERNANCE_PAUSER"),
                 emergencyStopAdmin: vm.envAddress("EMERGENCY_STOP_ADMIN"),
                 emergencyStopObservers: vm.envAddress("EMERGENCY_STOP_OBSERVERS", ","),
-                bridgingPaymentFee: vm.envUint("BRIDGING_PAYMENT_FEE"),
-                recoveryWallet: address(0)
+                bridgingPaymentFee: vm.envUint("BRIDGING_PAYMENT_FEE")
             })
         );
-    }
-
-    function _validateRecoveryWallet(address recoveryWallet) internal view {
-        require(recoveryWallet != address(0) && recoveryWallet.code.length != 0, "missing deployed recovery Safe");
-        IRecoveryThresholdWallet wallet = IRecoveryThresholdWallet(recoveryWallet);
-        address[] memory owners = wallet.getOwners();
-        require(wallet.getThreshold() == 3 && owners.length == 5, "recovery Safe must be 3-of-5");
     }
 
     /// forge-lint: disable-next-item(cyclomatic-complexity)
@@ -269,8 +258,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 governancePauser: governancePauser.governance(),
                 emergencyStopAdmin: messageQueue.emergencyStopAdmin(),
                 emergencyStopObservers: messageQueue.emergencyStopObservers(),
-                bridgingPaymentFee: bridgingPayment.fee(),
-                recoveryWallet: _deploymentArguments.recoveryWallet
+                bridgingPaymentFee: bridgingPayment.fee()
             });
 
             if (messageQueue.isChallengingRoot()) {
@@ -505,31 +493,16 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         // forge-lint: disable-next-line(todo-comment)
         // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
         if (!isFork) {
-            bytes memory queueInitialization;
-            if (deploymentArguments.recoveryWallet == address(0)) {
-                queueInitialization = abi.encodeCall(
-                    MessageQueue.initialize,
-                    (
-                        governanceAdmin,
-                        governancePauser,
-                        deploymentArguments.emergencyStopAdmin,
-                        deploymentArguments.emergencyStopObservers,
-                        verifier
-                    )
-                );
-            } else {
-                queueInitialization = abi.encodeCall(
-                    MessageQueue.initializeWithRecovery,
-                    (
-                        governanceAdmin,
-                        governancePauser,
-                        deploymentArguments.emergencyStopAdmin,
-                        deploymentArguments.emergencyStopObservers,
-                        verifier,
-                        deploymentArguments.recoveryWallet
-                    )
-                );
-            }
+            bytes memory queueInitialization = abi.encodeWithSelector(
+                expectedMessageQueueAddress == address(0)
+                    ? MessageQueue.initialize.selector
+                    : MessageQueue.initializeBeefy.selector,
+                governanceAdmin,
+                governancePauser,
+                deploymentArguments.emergencyStopAdmin,
+                deploymentArguments.emergencyStopObservers,
+                verifier
+            );
             messageQueue = MessageQueue(Upgrades.deployUUPSProxy("MessageQueue.sol", queueInitialization));
         }
         console.log("    MessageQueue:        ", address(messageQueue));

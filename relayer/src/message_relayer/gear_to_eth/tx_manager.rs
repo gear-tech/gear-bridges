@@ -869,7 +869,7 @@ impl TransactionManager {
                 };
 
                 match status {
-                    status_fetcher::Response::Success(uuid, evidence) => {
+                    (uuid, Ok(evidence)) => {
                         if self.complete_transaction(uuid, evidence).await? {
                             self.storage.save(self).await?;
                             self.ack_completed_event(uuid).await?;
@@ -881,7 +881,7 @@ impl TransactionManager {
                         }
                     }
 
-                    status_fetcher::Response::Hold(uuid, error) => {
+                    (uuid, Err(error)) => {
                         // Without the original raw bytes/account nonce, a replacement
                         // after any uncertain outcome is not safe to create automatically.
                         self.hold_active_transaction(uuid, error).await?;
@@ -1047,7 +1047,7 @@ mod tests {
             message.block_hash = H256::repeat_byte(43);
             if queued_before_request {
                 storage
-                    .record_queued_block(43, message.block_hash, &[message.clone()])
+                    .record_queued_block(43, message.block_hash, std::slice::from_ref(&message))
                     .await
                     .unwrap();
             }
@@ -1087,7 +1087,7 @@ mod tests {
                 .is_none());
             if !queued_before_request {
                 storage
-                    .record_queued_block(43, message.block_hash, &[message.clone()])
+                    .record_queued_block(43, message.block_hash, std::slice::from_ref(&message))
                     .await
                     .unwrap();
             }
@@ -1145,7 +1145,11 @@ mod tests {
                 .unwrap();
             if policy != "manual" {
                 storage
-                    .record_queued_block(message.block.0, message.block_hash, &[message.clone()])
+                    .record_queued_block(
+                        message.block.0,
+                        message.block_hash,
+                        std::slice::from_ref(&message),
+                    )
                     .await
                     .unwrap();
             }
@@ -1272,7 +1276,7 @@ mod tests {
             .record_queued_block(
                 tx.message.block.0,
                 tx.message.block_hash,
-                &[tx.message.clone()],
+                std::slice::from_ref(&tx.message),
             )
             .await
             .unwrap();

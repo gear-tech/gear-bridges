@@ -348,7 +348,7 @@ mod tests {
                 authority_set_id: AuthoritySetId(1),
             };
             storage
-                .record_queued_block(10, message.block_hash, &[message.clone()])
+                .record_queued_block(10, message.block_hash, std::slice::from_ref(&message))
                 .await
                 .unwrap();
             let first = fee_event(nonce, false);
@@ -477,7 +477,7 @@ mod tests {
                 authority_set_id: AuthoritySetId(1),
             };
             storage
-                .record_queued_block(10, first_hash, &[queued.clone()])
+                .record_queued_block(10, first_hash, std::slice::from_ref(&queued))
                 .await
                 .unwrap();
             let initial = fee_event(nonce, first_priority);
@@ -603,7 +603,7 @@ mod tests {
                 authority_set_id: AuthoritySetId(1),
             };
             storage
-                .record_queued_block(10, first_hash, &[queued.clone()])
+                .record_queued_block(10, first_hash, std::slice::from_ref(&queued))
                 .await
                 .unwrap();
             assert!(storage.pending_event_pairs().await.unwrap().is_empty());

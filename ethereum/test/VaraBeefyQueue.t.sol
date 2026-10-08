@@ -2,12 +2,12 @@
 pragma solidity ^0.8.37;
 
 import {BeefyFixtureTest} from "./BeefyInterop.t.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
-import {RecoveryController} from "src/RecoveryController.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
@@ -18,68 +18,6 @@ import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
-
-contract RecoverySafeMock {
-    uint256 private immutable _threshold;
-    uint256 private immutable _ownerCount;
-
-    constructor(uint256 threshold_, uint256 ownerCount_) {
-        _threshold = threshold_;
-        _ownerCount = ownerCount_;
-    }
-
-    function getThreshold() external view returns (uint256) {
-        return _threshold;
-    }
-
-    function getOwners() external view returns (address[] memory owners) {
-        owners = new address[](_ownerCount);
-        for (uint256 i; i < _ownerCount; i++) {
-            owners[i] = address(uint160(i + 1));
-        }
-    }
-}
-
-interface ISafe141 {
-    function VERSION() external view returns (string memory);
-    function setup(
-        address[] calldata owners,
-        uint256 threshold,
-        address to,
-        bytes calldata data,
-        address fallbackHandler,
-        address paymentToken,
-        uint256 payment,
-        address payable paymentReceiver
-    ) external;
-    function getOwners() external view returns (address[] memory);
-    function getThreshold() external view returns (uint256);
-    function nonce() external view returns (uint256);
-    function getTransactionHash(
-        address to,
-        uint256 value,
-        bytes calldata data,
-        uint8 operation,
-        uint256 safeTxGas,
-        uint256 baseGas,
-        uint256 gasPrice,
-        address gasToken,
-        address refundReceiver,
-        uint256 transactionNonce
-    ) external view returns (bytes32);
-    function execTransaction(
-        address to,
-        uint256 value,
-        bytes calldata data,
-        uint8 operation,
-        uint256 safeTxGas,
-        uint256 baseGas,
-        uint256 gasPrice,
-        address gasToken,
-        address payable refundReceiver,
-        bytes calldata signatures
-    ) external returns (bool);
-}
 
 contract VaraQueueRootVerifierTest is BeefyFixtureTest {
     BeefyClient internal client;
@@ -107,7 +45,7 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
                 new ERC1967Proxy(
                     address(implementation),
                     abi.encodeCall(
-                        MessageQueue.initialize,
+                        MessageQueue.initializeBeefy,
                         (
                             IGovernance(address(admin)),
                             IGovernance(address(pauser)),
@@ -169,13 +107,8 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         assertEq(verifier.destinationChainId(), block.chainid);
     }
 
-    function testFrozenPolicyRejectsEveryWeakerDeploymentAndRecoveryClient() public {
-        RecoverySafeMock safe = new RecoverySafeMock(3, 5);
-        vm.prank(queue.governanceAdmin());
-        queue.installRecoveryController(address(safe));
-        RecoveryController controller = RecoveryController(queue.recoveryController());
+    function testFrozenPolicyRejectsEveryWeakerDeploymentClient() public {
         BeefyClient candidate = newClient(0, block.chainid, address(queue));
-        VaraQueueRootVerifier candidateVerifier = new VaraQueueRootVerifier(candidate, address(queue), block.chainid);
         bytes4[5] memory selectors = [
             candidate.minNumRequiredSignatures.selector,
             candidate.fiatShamirRequiredSignatures.selector,
@@ -188,11 +121,52 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
             vm.mockCall(address(candidate), abi.encodeWithSelector(selectors[i]), abi.encode(weakened[i]));
             vm.expectRevert();
             new VaraQueueRootVerifier(candidate, address(queue), block.chainid);
-            vm.prank(address(safe));
-            vm.expectRevert(RecoveryController.InvalidBeefyClient.selector);
-            controller.proposeRecovery(address(verifier), address(candidateVerifier));
             vm.clearMockedCalls();
         }
+    }
+
+    function testFreshBeefyInitializerValidatesBindingFloorAndFrozenPolicy() public {
+        MessageQueue fresh = MessageQueue(address(new InitializerTestProxy(address(new MessageQueue()))));
+        IGovernance admin = IGovernance(queue.governanceAdmin());
+        IGovernance pauser = IGovernance(queue.governancePauser());
+        vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), verifier);
+        BeefyClient boundClient = newClient(0, block.chainid, address(fresh));
+        VaraQueueRootVerifier boundVerifier = new VaraQueueRootVerifier(boundClient, address(fresh), block.chainid);
+        bytes4[10] memory selectors = [
+            boundClient.minNumRequiredSignatures.selector,
+            boundClient.fiatShamirRequiredSignatures.selector,
+            boundClient.MAX_VALIDATORS.selector,
+            boundClient.randaoCommitDelay.selector,
+            boundClient.randaoCommitExpiration.selector,
+            boundClient.mmrStartBlock.selector,
+            boundClient.sourceDomain.selector,
+            boundClient.destinationChainId.selector,
+            boundClient.destinationQueue.selector,
+            boundClient.bridgeDomain.selector
+        ];
+        uint256[10] memory invalid =
+            [uint256(85), 85, 257, 1, 25, 0, 0, block.chainid + 1, uint256(uint160(address(queue))), 1];
+        for (uint256 i; i < selectors.length; i++) {
+            vm.mockCall(address(boundClient), abi.encodeWithSelector(selectors[i]), abi.encode(invalid[i]));
+            vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
+            fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
+            vm.clearMockedCalls();
+        }
+        vm.mockCall(
+            address(boundVerifier),
+            abi.encodeWithSelector(boundVerifier.destinationChainId.selector),
+            abi.encode(block.chainid + 1)
+        );
+        vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
+        vm.clearMockedCalls();
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
+        assertEq(fresh.beefyRootMinimum(), boundClient.mmrStartBlock());
+        assertEq(fresh.verifier(), address(boundVerifier));
+        assertTrue(fresh.hasRole(fresh.DEFAULT_ADMIN_ROLE(), address(admin)));
+        vm.expectRevert();
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
     }
 
     function testQueueAndChainBindings() public {
@@ -297,7 +271,9 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         );
         assertTrue(client.verifyMMRLeafProof(keccak256(leafBytes(p.leaf)), p.items, p.order));
         assertFalse(verifyAsQueue(verifier, encodeProof(p), inputs(belowStart, root)));
-        vm.expectRevert(IMessageQueue.InvalidPlonkProof.selector);
+        vm.expectRevert(
+            abi.encodeWithSelector(IMessageQueue.BlockNumberBelowMinimum.selector, belowStart, client.mmrStartBlock())
+        );
         queue.submitMerkleRoot(belowStart, root, encodeProof(p));
         assertEq(queue.genesisBlock(), 0);
         assertEq(queue.getMerkleRoot(belowStart), bytes32(0));
@@ -478,8 +454,9 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
     }
 
     function testAuthenticatedEmptyQueueProgressPreservesRootMaturityAndReplay() public {
+        uint256 floor = client.mmrStartBlock();
         vm.expectRevert(IMessageQueue.EmptyQueueNotInitialized.selector);
-        queue.submitEmptyQueueProgress(1, bytes(""));
+        queue.submitEmptyQueueProgress(floor, bytes(""));
         vm.expectRevert(IMessageQueue.InvalidMerkleRoot.selector);
         queue.submitMerkleRoot(100, bytes32(0), bytes(""));
 
@@ -559,167 +536,7 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         assertEq(queue.maxBlockNumber(), nextRootBlock);
     }
 
-    function testRecoveryControllerRequiresSafeApprovalDelayAndExpiredOldClient() public {
-        address governanceAdmin = queue.governanceAdmin();
-        RecoverySafeMock invalidSafe = new RecoverySafeMock(2, 5);
-        vm.expectRevert(RecoveryController.InvalidRecoveryWallet.selector);
-        vm.prank(governanceAdmin);
-        queue.installRecoveryController(address(invalidSafe));
-        assertEq(queue.recoveryController(), address(0));
-
-        RecoverySafeMock safe = new RecoverySafeMock(3, 5);
-        vm.prank(governanceAdmin);
-        queue.installRecoveryController(address(safe));
-        RecoveryController controller = RecoveryController(queue.recoveryController());
-        assertEq(address(controller.messageQueue()), address(queue));
-        vm.expectRevert(IMessageQueue.RecoveryControllerAlreadyInstalled.selector);
-        vm.prank(governanceAdmin);
-        queue.installRecoveryController(address(safe));
-
-        BeefyClient candidateClient = newClient(0, block.chainid, address(queue));
-        MutableRecoveryVerifierMock candidateVerifier =
-            new MutableRecoveryVerifierMock(address(candidateClient), address(queue), block.chainid);
-        uint64 bootstrapTimestampMs = uint64(vm.parseJsonUint(fixtures, ".cases[0].sourceTimestampMs"));
-        customQueueProofFor(
-            candidateClient,
-            uint32(vm.parseJsonUint(fixtures, ".cases[0].sourceBlock")),
-            102,
-            bytes32(uint256(0x102)),
-            bootstrapTimestampMs,
-            uint64(block.timestamp * 1000)
-        );
-        BeefyClient wrongDomainClient = newClient(0, bytes32(uint256(0x4444)), block.chainid, address(queue));
-        VaraQueueRootVerifier wrongDomainVerifier =
-            new VaraQueueRootVerifier(wrongDomainClient, address(queue), block.chainid);
-
-        vm.expectRevert(RecoveryController.NotRecoveryWallet.selector);
-        controller.proposeRecovery(address(verifier), address(candidateVerifier));
-        vm.prank(address(safe));
-        vm.expectRevert(RecoveryController.OldVerifierChanged.selector);
-        controller.proposeRecovery(address(0xBAD), address(candidateVerifier));
-        vm.prank(address(safe));
-        vm.expectRevert(RecoveryController.RecoveryIdentityMismatch.selector);
-        controller.proposeRecovery(address(verifier), address(wrongDomainVerifier));
-
-        VaraMessage memory message =
-            VaraMessage(702, bytes32(uint256(0x702)), address(receiver), bytes("retained root"));
-        bytes32 root = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-        QueueProof memory oldProof = customQueueProof(103, root);
-        uint32 rootBlock = oldProof.leaf.parentNumber;
-        queue.submitMerkleRoot(rootBlock, root, encodeProof(oldProof));
-        uint256 rootTimestamp = queue.getMerkleRootTimestampForBlock(rootBlock);
-        uint256 genesis = queue.genesisBlock();
-        uint256 maxBlock = queue.maxBlockNumber();
-        vm.warp(block.timestamp + queue.PROCESS_USER_MESSAGE_DELAY());
-        queue.processMessage(rootBlock, 1, 0, message, new bytes32[](0));
-        vm.prank(queue.governancePauser());
-        queue.pause();
-        assertTrue(queue.isProcessed(message.nonce));
-        assertTrue(queue.paused());
-
-        uint64 historicalTimestamp = uint64(vm.parseJsonUint(fixtures, ".cases[0].sourceTimestampMs"));
-        uint64 freshnessTimestamp = uint64(block.timestamp * 1000);
-        if (freshnessTimestamp < client.lastAuthenticatedSourceTimestampMs()) {
-            freshnessTimestamp = client.lastAuthenticatedSourceTimestampMs();
-        }
-        QueueProof memory refreshedOldClient =
-            customQueueProofFor(client, rootBlock, 104, root, historicalTimestamp, freshnessTimestamp);
-        assertEq(refreshedOldClient.anchorBlock, 104);
-        QueueProof memory candidateProof = customQueueProofFor(
-            candidateClient, rootBlock, 105, bytes32(uint256(0x105)), historicalTimestamp, freshnessTimestamp
-        );
-        assertEq(candidateProof.anchorBlock, 105);
-        assertTrue(candidateClient.isLive());
-        assertTrue(client.isLive());
-
-        vm.prank(address(safe));
-        uint256 cancelledId = controller.proposeRecovery(address(verifier), address(candidateVerifier));
-        vm.prank(address(safe));
-        controller.cancelRecovery(cancelledId);
-        vm.expectRevert(RecoveryController.InvalidProposal.selector);
-        controller.executeRecovery(cancelledId);
-
-        vm.prank(address(safe));
-        uint256 proposalId = controller.proposeRecovery(address(verifier), address(candidateVerifier));
-        RecoveryController.PendingRecovery memory pending = _pendingRecovery(controller);
-        assertEq(pending.proposalId, proposalId);
-        assertEq(pending.expectedOldVerifier, address(verifier));
-        assertEq(pending.expectedOldVerifierCodeHash, address(verifier).codehash);
-        assertEq(pending.expectedOldClient, address(client));
-        assertEq(pending.expectedOldClientCodeHash, address(client).codehash);
-        assertEq(pending.candidateVerifier, address(candidateVerifier));
-        assertEq(pending.candidateVerifierCodeHash, address(candidateVerifier).codehash);
-        assertEq(pending.candidateClient, address(candidateClient));
-        assertEq(pending.candidateClientCodeHash, address(candidateClient).codehash);
-        assertEq(pending.executeAfter, block.timestamp + controller.RECOVERY_DELAY());
-        vm.expectRevert(RecoveryController.TimelockNotElapsed.selector);
-        controller.executeRecovery(proposalId);
-        uint256 proposalTime = this._testTimestamp();
-
-        vm.warp(proposalTime + 23 hours);
-        uint64 rotationFreshness = uint64(this._testTimestamp() * 1000);
-        QueueProof memory rotatedOld =
-            customQueueProofFor(client, rootBlock, 105, root, historicalTimestamp, rotationFreshness);
-        assertEq(rotatedOld.anchorBlock, 105);
-        assertEq(client.lastAuthenticatedSourceTimestampMs(), rotationFreshness);
-        assertTrue(client.isLive());
-        QueueProof memory updatedCandidate = customQueueProofFor(
-            candidateClient, rootBlock, 106, bytes32(uint256(0x106)), historicalTimestamp, rotationFreshness
-        );
-        assertEq(updatedCandidate.anchorBlock, 106);
-        assertEq(candidateClient.latestBeefyBlock(), 106);
-
-        vm.warp(proposalTime + 24 hours);
-        assertTrue(client.isLive());
-        vm.expectRevert(RecoveryController.OldClientStillLive.selector);
-        controller.executeRecovery(proposalId);
-
-        vm.warp(proposalTime + 46 hours);
-        QueueProof memory finalCandidate = customQueueProofFor(
-            candidateClient,
-            rootBlock,
-            107,
-            bytes32(uint256(0x107)),
-            historicalTimestamp,
-            uint64(this._testTimestamp() * 1000)
-        );
-        assertEq(finalCandidate.anchorBlock, 107);
-        vm.warp(proposalTime + 47 hours + 1);
-        assertFalse(client.isLive());
-        assertTrue(candidateClient.isLive());
-        _expectRecoveryCodeChange(controller, proposalId, address(verifier));
-        _expectRecoveryCodeChange(controller, proposalId, address(client));
-        _expectRecoveryCodeChange(controller, proposalId, address(candidateVerifier));
-        _expectRecoveryCodeChange(controller, proposalId, address(candidateClient));
-        candidateVerifier.setBeefyClient(address(wrongDomainClient));
-        vm.expectRevert(RecoveryController.RecoveryCodeChanged.selector);
-        controller.executeRecovery(proposalId);
-        candidateVerifier.setBeefyClient(address(candidateClient));
-        vm.expectEmit(true, true, false, false, address(queue));
-        emit IMessageQueue.RecoveryVerifierActivated(address(verifier), address(candidateVerifier));
-        controller.executeRecovery(proposalId);
-        assertEq(queue.verifier(), address(candidateVerifier));
-        assertEq(queue.recoveryController(), address(controller));
-        assertEq(queue.genesisBlock(), genesis);
-        assertEq(queue.maxBlockNumber(), maxBlock);
-        assertEq(queue.getMerkleRoot(rootBlock), root);
-        assertEq(queue.getMerkleRootTimestampForBlock(rootBlock), rootTimestamp);
-        assertTrue(queue.isProcessed(message.nonce));
-        assertTrue(queue.paused());
-
-        vm.prank(queue.governancePauser());
-        queue.unpause();
-        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, message.nonce));
-        queue.processMessage(rootBlock, 1, 0, message, new bytes32[](0));
-    }
-
-    function testRealSafeThresholdRecoveryRetainsEscrowAndClaims() public {
-        (ISafe141 safe, uint256[5] memory keys) = _localSafe141();
-        vm.prank(queue.governanceAdmin());
-        queue.installRecoveryController(address(safe));
-        RecoveryController controller = RecoveryController(queue.recoveryController());
-        assertEq(controller.recoveryWallet(), address(safe));
-
+    function testAdminUpgradeRetainsEscrowAndClaims() public {
         CircleToken token = new CircleToken(address(this));
         IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](1);
         tokens[0] = IERC20Manager.TokenInfo(address(token), IERC20Manager.TokenType.Ethereum);
@@ -779,77 +596,33 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         vm.prank(queue.governancePauser());
         queue.pause();
 
-        BeefyClient candidateClient = newClient(0, block.chainid, address(queue));
-        VaraQueueRootVerifier candidateVerifier =
-            new VaraQueueRootVerifier(candidateClient, address(queue), block.chainid);
-        uint64 historicalTimestamp = uint64(vm.parseJsonUint(fixtures, ".cases[0].sourceTimestampMs"));
-        customQueueProofFor(
-            candidateClient,
-            rootBlock,
-            104,
-            bytes32(uint256(0x104)),
-            historicalTimestamp,
-            uint64(block.timestamp * 1000)
+        MessageQueue replacement = new MessageQueue();
+        bytes32 adminRole = queue.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), adminRole)
         );
-        bytes memory proposal =
-            abi.encodeCall(controller.proposeRecovery, (address(verifier), address(candidateVerifier)));
-        uint256[3] memory signers = [uint256(0), 1, 2];
-        bytes memory insufficient = _safeSignatures(safe, address(controller), proposal, keys, signers, 2);
-        vm.expectRevert(bytes("GS020"));
-        safe.execTransaction(
-            address(controller), 0, proposal, 0, 0, 0, 0, address(0), payable(address(0)), insufficient
+        queue.upgradeToAndCall(address(replacement), "");
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), adminRole)
         );
-        signers[2] = 1;
-        bytes memory duplicate = _safeSignatures(safe, address(controller), proposal, keys, signers, 3);
-        vm.expectRevert(bytes("GS026"));
-        safe.execTransaction(address(controller), 0, proposal, 0, 0, 0, 0, address(0), payable(address(0)), duplicate);
-        assertEq(safe.nonce(), 0);
-        assertEq(controller.proposalNonce(), 0);
+        queue.reinitialize();
 
-        signers[2] = 2;
-        assertTrue(_safeCall(safe, address(controller), proposal, keys, signers, 3));
-        uint256 cancelledId = controller.proposalNonce();
-        assertTrue(
-            _safeCall(
-                safe, address(controller), abi.encodeCall(controller.cancelRecovery, (cancelledId)), keys, signers, 3
-            )
-        );
-        vm.expectRevert(RecoveryController.InvalidProposal.selector);
-        controller.executeRecovery(cancelledId);
-
-        assertTrue(_safeCall(safe, address(controller), proposal, keys, signers, 3));
-        uint256 proposalId = controller.proposalNonce();
-        uint256 proposedAt = this._testTimestamp();
-        vm.expectRevert(RecoveryController.TimelockNotElapsed.selector);
-        controller.executeRecovery(proposalId);
-        vm.warp(proposedAt + 23 hours);
-        customQueueProofFor(client, rootBlock, 105, root, historicalTimestamp, uint64(block.timestamp * 1000));
-        customQueueProofFor(
-            candidateClient,
-            rootBlock,
-            106,
-            bytes32(uint256(0x106)),
-            historicalTimestamp,
-            uint64(block.timestamp * 1000)
-        );
-        vm.warp(proposedAt + 24 hours);
-        vm.expectRevert(RecoveryController.OldClientStillLive.selector);
-        controller.executeRecovery(proposalId);
-        vm.warp(proposedAt + 46 hours);
-        customQueueProofFor(
-            candidateClient,
-            rootBlock,
-            107,
-            bytes32(uint256(0x107)),
-            historicalTimestamp,
-            uint64(block.timestamp * 1000)
-        );
-        vm.warp(proposedAt + 47 hours + 1);
-        assertFalse(client.isLive());
-        assertTrue(candidateClient.isLive());
-        controller.executeRecovery(proposalId);
-
-        assertEq(queue.verifier(), address(candidateVerifier));
+        uint256 floor = queue.beefyRootMinimum();
+        vm.prank(queue.governanceAdmin());
+        queue.upgradeToAndCall(address(replacement), abi.encodeCall(MessageQueue.reinitialize, ()));
+        address multisig = 0x1111111111111111111111111111111111111111;
+        assertTrue(queue.hasRole(adminRole, queue.governanceAdmin()));
+        assertTrue(queue.hasRole(adminRole, multisig));
+        assertTrue(queue.hasRole(queue.PAUSER_ROLE(), multisig));
+        assertEq(queue.beefyRootMinimum(), floor);
+        assertEq(queue.verifier(), address(verifier));
+        assertEq(queue.genesisBlock(), rootBlock);
+        assertEq(queue.maxBlockNumber(), rootBlock);
+        MessageQueue nextImplementation = new MessageQueue();
+        vm.prank(multisig);
+        queue.upgradeToAndCall(address(nextImplementation), "");
+        assertEq(queue.beefyRootMinimum(), floor);
+        assertEq(queue.verifier(), address(verifier));
         assertEq(queue.getMerkleRoot(rootBlock), root);
         assertEq(queue.getMerkleRootTimestampForBlock(rootBlock), rootTimestamp);
         assertTrue(queue.isProcessed(processed.nonce));
@@ -869,110 +642,13 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         siblings[0] = firstLeaf;
         queue.processMessage(rootBlock, 2, 1, retained, siblings);
     }
-
-    function _localSafe141() internal returns (ISafe141 safe, uint256[5] memory keys) {
-        // Canonical Safe 1.4.1 singleton runtime at 0x41675C099F32341bf84BFc5382aF534df5C7461a,
-        // read from Hoodi finalized block 3719000. Only copied into this local EVM fixture.
-        bytes memory runtimeCode = vm.parseBytes(vm.readFile("test/fixtures/safe-1.4.1-runtime.hex"));
-        assertEq(keccak256(runtimeCode), 0x1fe2df852ba3299d6534ef416eefa406e56ced995bca886ab7a553e6d0c5e1c4);
-        safe = ISafe141(address(uint160(uint256(keccak256("isolated Safe 1.4.1 test wallet")))));
-        vm.etch(address(safe), runtimeCode);
-        assertEq(safe.VERSION(), "1.4.1");
-        keys = [uint256(101), 102, 103, 104, 105];
-        for (uint256 i = 1; i < keys.length; i++) {
-            uint256 key = keys[i];
-            uint256 j = i;
-            while (j > 0 && vm.addr(keys[j - 1]) > vm.addr(key)) {
-                keys[j] = keys[j - 1];
-                j--;
-            }
-            keys[j] = key;
-        }
-        address[] memory owners = new address[](5);
-        for (uint256 i; i < owners.length; i++) {
-            owners[i] = vm.addr(keys[i]);
-        }
-        safe.setup(owners, 3, address(0), "", address(0), address(0), 0, payable(address(0)));
-        assertEq(safe.getThreshold(), 3);
-        assertEq(safe.getOwners().length, 5);
-    }
-
-    function _safeCall(
-        ISafe141 safe,
-        address target,
-        bytes memory data,
-        uint256[5] memory keys,
-        uint256[3] memory signers,
-        uint256 count
-    ) internal returns (bool) {
-        bytes memory signatures = _safeSignatures(safe, target, data, keys, signers, count);
-        return safe.execTransaction(target, 0, data, 0, 0, 0, 0, address(0), payable(address(0)), signatures);
-    }
-
-    function _safeSignatures(
-        ISafe141 safe,
-        address target,
-        bytes memory data,
-        uint256[5] memory keys,
-        uint256[3] memory signers,
-        uint256 count
-    ) internal returns (bytes memory signatures) {
-        bytes32 digest = safe.getTransactionHash(target, 0, data, 0, 0, 0, 0, address(0), address(0), safe.nonce());
-        for (uint256 i; i < count; i++) {
-            (uint8 v, bytes32 r, bytes32 s) = vm.sign(keys[signers[i]], digest);
-            signatures = bytes.concat(signatures, abi.encodePacked(r, s, v));
-        }
-    }
-
-    function _pendingRecovery(RecoveryController controller)
-        internal
-        view
-        returns (RecoveryController.PendingRecovery memory pending)
-    {
-        (
-            pending.proposalId,
-            pending.expectedOldVerifier,
-            pending.candidateVerifier,
-            pending.executeAfter,
-            pending.expectedOldVerifierCodeHash,
-            pending.expectedOldClient,
-            pending.expectedOldClientCodeHash,
-            pending.candidateVerifierCodeHash,
-            pending.candidateClient,
-            pending.candidateClientCodeHash,
-            pending.exists
-        ) = controller.pendingRecovery();
-    }
-
-    function _expectRecoveryCodeChange(RecoveryController controller, uint256 proposalId, address target) internal {
-        bytes memory originalCode = target.code;
-        vm.etch(target, hex"00");
-        vm.expectRevert(RecoveryController.RecoveryCodeChanged.selector);
-        controller.executeRecovery(proposalId);
-        vm.etch(target, originalCode);
-    }
-
-    function _testTimestamp() external view returns (uint256) {
-        return block.timestamp;
-    }
 }
 
-contract MutableRecoveryVerifierMock {
-    address public beefyClient;
-    address public immutable messageQueue;
-    uint256 public immutable destinationChainId;
+/// @dev Test-only opt-in to exercise initializer rollback before successful initialization.
+contract InitializerTestProxy is ERC1967Proxy {
+    constructor(address implementation) ERC1967Proxy(implementation, "") {}
 
-    constructor(address beefyClient_, address messageQueue_, uint256 destinationChainId_) {
-        beefyClient = beefyClient_;
-        messageQueue = messageQueue_;
-        destinationChainId = destinationChainId_;
-    }
-
-    function setBeefyClient(address beefyClient_) external {
-        beefyClient = beefyClient_;
-    }
-
-    function safeVerifyProof(bytes calldata, uint256[] calldata) external pure returns (bool) {
-        return false;
+    function _unsafeAllowUninitialized() internal pure override returns (bool) {
+        return true;
     }
 }

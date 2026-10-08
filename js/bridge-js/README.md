@@ -118,7 +118,7 @@ Vara → Ethereum: original finalized queued message/nonce → historical inclus
 
 ## Contributing
 
-Keep strict TypeScript types and extend the existing SDK test owners for consumer-visible boundaries. Integration tests require the owned source/EL/Beacon/proxy fixtures and the read-only Rust `js-test` generator; missing fixtures are failed checks, not skipped qualification.
+Keep strict TypeScript types and extend the existing SDK test owners for consumer-visible boundaries. SDK consumer codec tests parse the hash-pinned canonical `api/gear/vft_manager.idl` with the SDK's declared Sails parser dependency; they do not depend on frontend build configuration. Integration tests require the owned source/EL/Beacon/proxy fixtures and the read-only Rust `js-test` generator; missing fixtures are failed checks, not skipped qualification.
 
 The full default `yarn test` gate remains enabled. Supply `INBOUND_PROOF_PROFILE_PATH` as an independently approved fixture profile together with the owned source/EL/Beacon/proxy fixture inputs; do not derive trusted pins from the endpoint being tested. CI materializes that file from `INBOUND_PROOF_PROFILE_JSON` with mode `0600` and fails closed when absent. Separately labeled `--mode unit` checks include the delayed-signing regression but do not qualify or bypass the live cases. Frontend completion is `onFinalized`; missing profiles/configuration remain visible HOLD before signing.
 

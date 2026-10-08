@@ -18,7 +18,8 @@ import * as proofMethods from '../src/eth-to-vara/proof-composer.js';
 import * as varaCodec from '../src/vara/eth-to-vara.js';
 import { blake2AsHex } from '@polkadot/util-crypto';
 import { ssz } from '@lodestar/types';
-import { SailsProgram as ManagerProgram } from '../../frontend/src/features/swap/consts/sails/vft-manager';
+import { Sails } from 'sails-js';
+import { SailsIdlParser } from 'sails-js-parser';
 import { applicationAdmission, validateRuntimeProfile, type RuntimeProfile } from '../example/app.js';
 import { readApprovedFixtureProfile } from './setup/setup.js';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,12 @@ dotenv.config();
 
 const hash = (value: number): HexString => ('0x' + value.toString(16).padStart(64, '0')) as HexString;
 const codec = (value: HexString) => ({ toHex: () => value, toString: () => value, eq: (other: unknown) => value === (typeof other === 'string' ? other : (other as { toHex(): string }).toHex()) });
+
+async function managerRegistry() {
+  const idl = fs.readFileSync(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8');
+  expect(createHash('sha256').update(idl).digest('hex')).toBe(VFT_MANAGER_IDL_SHA256);
+  return new Sails(await SailsIdlParser.new()).parseIdl(idl).registry;
+}
 
 function originalReplyFixture() {
   const proxy = hash(1), sender = hash(2), msgId = hash(3), txHash = hash(4);
@@ -364,8 +371,8 @@ describe('SDK finalized consumer and token effects', () => {
   });
 
 
-  test('recognizes only the actual typed NativeSettlementPending without relabeling it success', () => {
-    const profile = nativeProfile(), registry = new ManagerProgram({} as GearApi).registry;
+  test('recognizes only the actual typed NativeSettlementPending without relabeling it success', async () => {
+    const profile = nativeProfile(), registry = await managerRegistry();
     const contract: ConsumerReplyContract = { registry, resultType: 'Result<Null, Error>', idlSha256: VFT_MANAGER_IDL_SHA256,
       verifyEffect: async () => { throw new Error('Classifier must not verify or dispatch an effect'); },
       nativeSettlement: { expectedEffect: { managerAddress: `0x${'12'.repeat(20)}`, sourceToken: `0x${'13'.repeat(20)}`, destinationToken: hash(8), sender: `0x${'14'.repeat(20)}`, receiver: hash(9), amount: 10n },
@@ -392,7 +399,7 @@ describe('SDK finalized consumer and token effects', () => {
       eth_token_id: expected.sourceToken, token_id: expected.destinationToken, amount, outcome: 'NativeQueued', native: true, supply: 'Gear',
       operation_id: nativeOperationId(identity, BigInt(log_index)), child: hash(40 + log_index) }));
     expect(() => validateNativePendingCohort(identity, rows)).not.toThrow();
-    const registry = new ManagerProgram({} as GearApi).registry;
+    const registry = await managerRegistry();
     const tuple = registry.createType('([u8;21],[u8;32],[u8;32],H160,u64,u64,u64,H256)', [bytesToHex(new TextEncoder().encode('vara/native-escrow/v1')),
       identity.managerId, identity.proxyId, expected.managerAddress, identity.slot, identity.transactionIndex, 0, keccak256(receiptRlp)]).toU8a();
     expect(rows[0].operation_id).toBe(keccak256(tuple));
@@ -421,7 +428,7 @@ describe('SDK finalized consumer and token effects', () => {
   });
 
   test('authenticates the separately signed original ReconcileReceipt reply and exact receipt coordinates', async () => {
-    const fixture = originalReplyFixture(), profile = nativeProfile(), registry = new ManagerProgram({} as GearApi).registry;
+    const fixture = originalReplyFixture(), profile = nativeProfile(), registry = await managerRegistry();
     const requestPayload = registry.createType('(String,String,u64,u64)', ['VftManager', 'ReconcileReceipt', 100, 3]).toHex();
     fixture.state.requestPayload = requestPayload;
     fixture.state.payload = registry.createType('(String,String,Result<ReceiptStatus,Error>)', ['VftManager','ReconcileReceipt',{ ok: 'Processed' }]).toHex();

@@ -26,7 +26,7 @@ const LEGACY_BLS: ActorId = ActorId::new(hex_literal::hex!(
     "6b6e292c382945e80bf51af2ba7fe9f458dcff81ae6075c46f9095e1bbecdc37"
 ));
 const SYNTHETIC: &[u8] = include_bytes!("chain-data/synthetic-fulu-transitions.json");
-const HOODI: &[u8] = include_bytes!("chain-data/hoodi-boundary-492-493.json");
+const HOODI: &[u8] = include_bytes!("chain-data/hoodi-boundary-492-493.json.zst");
 
 // The source runtime uses the legacy BLS ID; gtest 1.10 registers its new ID only.
 // Both expose the same Request/Response SCALE indexes and ArkScale HOST_CALL types.
@@ -432,7 +432,8 @@ fn overlapping_replays_preserve_first_progress_and_immutable_normal_base() {
 #[test]
 fn genuine_hoodi_boundary_rejects_finality_without_following_committee() {
     large_stack(|| {
-        let data: Value = serde_json::from_slice(HOODI).unwrap();
+        let data: Value =
+            serde_json::from_reader(ruzstd::StreamingDecoder::new(HOODI).unwrap()).unwrap();
         let ancestors = headers(&data);
         let system = System::new();
         let program = initialize(&system, &data);

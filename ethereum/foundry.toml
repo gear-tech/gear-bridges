@@ -14,6 +14,9 @@ solc = "0.8.37"
 optimizer = true
 extra_output_files = ["irOptimized"]
 via_ir = true
+# Keep the compiler graph stable across Foundry versions: 1.8 enables dynamic
+# test linking by default, which triggers a Solc 0.8.37 assembly ICE in this suite.
+dynamic_test_linking = false
 bytecode_hash = "none"
 cbor_metadata = false
 revert_strings = "strip"

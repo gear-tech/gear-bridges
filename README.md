@@ -9,18 +9,21 @@ The isolated BEEFY path lives in `tools/beefy-relay`, `ethereum/src/beefy`, and
 an existing MessageQueue. The adapter uses the unchanged MessageQueue verifier
 interface and trusts only the configured client's latest accepted MMR anchor.
 
-The consensus sources are copied from Snowbridge commit
-`1201293e482ef052b9c3989dcf680046704fef3d`. Local deltas are limited to the exact
-Solidity pragma (0.8.34 to 0.8.37) and the existing OpenZeppelin ECDSA import
-mapping. Both interactive and Fiat-Shamir verification remain upstream code;
-this is not a claim of identical audited bytecode. Fiat-Shamir verifies the
-upstream-selected sample, while the Rust relay checks every available signature.
+The consensus sources derive from Snowbridge commit
+`1201293e482ef052b9c3989dcf680046704fef3d`. Local verification and deployment
+hardening goes beyond compiler/import changes; this is not identical audited
+upstream bytecode. Both interactive and Fiat-Shamir verification remain
+supported. Fiat-Shamir verifies the selected sample, while the Rust relay checks
+every available signature.
 
 Rust and Foundry share `ethereum/test/fixtures/beefy-interop.json`. Its synthetic
 signatures, SCALE leaves and commitments, MMR proofs, and canonical ABI envelopes
 are reproducible with the deterministic development keys in `fixtures.rs`.
-The same generator was compiled against Gear's SDK commit `298f676c` and the
-bridge's `1d1b3946`; all eight fixture cases were byte-identical.
+The initial cross-SDK comparison produced eight byte-identical fixture cases;
+that historical check does not qualify later changes or deployed artifacts.
+Recorded Hoodi committee-boundary data uses `.json.zst`, following the existing
+Holesky fixture convention. Tests decompress the original bytes offline;
+synthetic cross-language vectors remain readable JSON.
 
 ```sh
 rtk cargo test -p beefy-relay --lib
@@ -30,9 +33,10 @@ UPDATE_BEEFY_FIXTURE=1 rtk cargo test -p beefy-relay --lib fixtures
 ```
 
 The local trusted genesis checkpoint and sampling parameters are not production
-security policy. This path does not fix the existing duplicate-root maturity or
-conflicting-root behavior, define long-range freshness policy, or authorize
-production BEEFY activation.
+security policy. Queue maturity/conflict hardening and source/domain checks do
+not authorize production activation or migration of an existing deployment.
+For isolated local nodes and a real Hoodi bridge, use the
+[sealed deployment guide](docs/running-the-bridge.md#sealed-local-deployment-operations).
 
 ### Bounded local rehearsal
 

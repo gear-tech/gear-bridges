@@ -6,7 +6,7 @@
 
 ## 1. Inventory and evidence boundary
 
-The companion [deployment inventory](zk-to-beefy-inventory.json) distinguishes `mainnet` from `publicHoodi`. Select one; never combine their addresses, balances, checkpoints or nonces. Each observation records `value`, `status`, `provenance`, `observedAt` and `snapshot`:
+The historical [deployment inventory](https://github.com/gear-tech/gear-bridges/blob/9da207c3/docs/zk-to-beefy-inventory.json) is preserved separately on `beefy-migration-evidence`, not bundled with the implementation. It distinguishes `mainnet` from `publicHoodi`. Select one; never combine their addresses, balances, checkpoints or nonces. Each observation records `value`, `status`, `provenance`, `observedAt` and `snapshot`:
 
 - `measured`: the named provider answered a query at a recorded canonical finalized hash. It is not independent authentication or proof that checked-in source matches deployed bytecode.
 - `advertised`: documentation, configuration or a published address. It is not a chain observation.
@@ -288,8 +288,10 @@ Use the selected inventory's exact RPC, addresses and hash pins. Variables below
 
 ```sh
 python3 tools/zk-migration-audit.py --help
-python3 tools/zk-migration-audit.py docs/zk-to-beefy-inventory.json --deployment mainnet
-python3 tools/zk-migration-audit.py docs/zk-to-beefy-inventory.json --deployment publicHoodi
+# Set this to the separately retained inventory selected for review.
+: "${MIGRATION_INVENTORY:?Set the absolute path to the reviewed inventory JSON}"
+python3 tools/zk-migration-audit.py "$MIGRATION_INVENTORY" --deployment mainnet
+python3 tools/zk-migration-audit.py "$MIGRATION_INVENTORY" --deployment publicHoodi
 ```
 
 With no separately reviewed plan these commands intentionally return exit **2**, `manifestStatus: BLOCKED`, `executionAuthorized: false`. They do not query RPC or write state.
@@ -386,7 +388,7 @@ The `accounting` artifact has exactly one row per active asset pair, keyed by `e
 Run only after that real package exists:
 
 ```sh
-python3 tools/zk-migration-audit.py docs/zk-to-beefy-inventory.json \
+python3 tools/zk-migration-audit.py "$MIGRATION_INVENTORY" \
   --deployment mainnet --plan "$REVIEWED_PUBLIC_PLAN"
 ```
 

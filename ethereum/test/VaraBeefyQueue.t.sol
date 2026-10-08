@@ -176,9 +176,13 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         RecoveryController controller = RecoveryController(queue.recoveryController());
         BeefyClient candidate = newClient(0, block.chainid, address(queue));
         VaraQueueRootVerifier candidateVerifier = new VaraQueueRootVerifier(candidate, address(queue), block.chainid);
-        bytes4[5] memory selectors = [candidate.minNumRequiredSignatures.selector,
-            candidate.fiatShamirRequiredSignatures.selector, candidate.MAX_VALIDATORS.selector,
-            candidate.randaoCommitDelay.selector, candidate.randaoCommitExpiration.selector];
+        bytes4[5] memory selectors = [
+            candidate.minNumRequiredSignatures.selector,
+            candidate.fiatShamirRequiredSignatures.selector,
+            candidate.MAX_VALIDATORS.selector,
+            candidate.randaoCommitDelay.selector,
+            candidate.randaoCommitExpiration.selector
+        ];
         uint256[5] memory weakened = [uint256(85), 85, 257, 1, 25];
         for (uint256 i; i < selectors.length; i++) {
             vm.mockCall(address(candidate), abi.encodeWithSelector(selectors[i]), abi.encode(weakened[i]));

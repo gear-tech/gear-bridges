@@ -1,3 +1,4 @@
+// Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.37;
 
@@ -12,12 +13,12 @@ import {RecoveryController} from "src/RecoveryController.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
+import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
-import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {BaseConstants} from "test/BaseConstants.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 import {RecoverySafeTestWallet} from "test/RecoverySafeMock.sol";

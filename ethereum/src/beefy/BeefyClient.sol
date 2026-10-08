@@ -796,6 +796,7 @@ contract BeefyClient {
             seen[slot] = account;
         }
     }
+
     function createFiatShamirHash(bytes32 commitmentHash, bytes32 bitFieldHash, ValidatorSetState storage vset)
         internal
         view

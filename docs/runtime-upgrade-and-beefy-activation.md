@@ -14,6 +14,7 @@ The public custody/verifier cutover remains owned by [ZK-to-BEEFY migration](zk-
 | PR CI | [37550611143](https://github.com/gear-tech/gear/actions/runs/37550611143), attempt 1: success, 24 successful jobs and 5 skipped |
 | Actual CI workflow revision | PR merge revision `702810496fe0e04a8008909491615b01848ad707`; do not label these artifacts as exact approved-head production Wasm |
 | GitHub status observed during preparation | `OPEN`, `REVIEW_REQUIRED`, `BLOCKED`; the earlier implementation-review waiver is not release approval |
+| Latest GitHub review observation | `OPEN`, `APPROVED`, `BLOCKED` at PR head `f50b3932cb489b3907b64abfb157a9b030404a2a`, which differs from the approved source pin above; do not transpose that review or advance the deployment pin without approval |
 | Runtime version in the approved source | Mainnet `spec_name=vara`, `spec_version=20100`; `dev` changes the name to `vara-testnet` and enables different runtime configuration |
 | Supported four-key predecessor | Matching `spec_name`, `System.LastRuntimeUpgrade.spec_version=11000`, exact supported session-key storage layout |
 | Cadence | 3000-ms slots, 2400-slot/two-hour epochs; no fast-cadence change |

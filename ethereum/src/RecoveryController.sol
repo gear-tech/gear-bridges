@@ -223,9 +223,9 @@ contract RecoveryController {
         if (
             client.minNumRequiredSignatures() != 86 || client.fiatShamirRequiredSignatures() != 86
                 || client.MAX_VALIDATORS() != 256 || client.randaoCommitDelay() != 128
-                || client.randaoCommitExpiration() != 24
-                || client.sourceDomain() == bytes32(0) || client.destinationChainId() != block.chainid
-                || client.destinationQueue() != address(messageQueue) || client.mmrStartBlock() == 0
+                || client.randaoCommitExpiration() != 24 || client.sourceDomain() == bytes32(0)
+                || client.destinationChainId() != block.chainid || client.destinationQueue() != address(messageQueue)
+                || client.mmrStartBlock() == 0
                 || client.bridgeDomain()
                     != keccak256(
                         abi.encodePacked(

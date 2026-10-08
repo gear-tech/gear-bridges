@@ -5,13 +5,16 @@ Utility for generating payloads for Ethereum contracts
 ```bash
 # Fill `deployment.toml` with addresses from mainnet/testnet!
 cp deployment.example.mainnet.toml deployment.toml
+cp deployment.example.sepolia.toml deployment.toml
 cp deployment.example.hoodi.toml deployment.toml
 
 MAINNET_RPC_URL="https://ethereum-rpc.publicnode.com"
+SEPOLIA_RPC_URL="https://ethereum-sepolia-rpc.publicnode.com"
 HOODI_RPC_URL="https://ethereum-hoodi-rpc.publicnode.com"
 
 # Select one of RPCs
 RPC_URL=$MAINNET_RPC_URL
+RPC_URL=$SEPOLIA_RPC_URL
 RPC_URL=$HOODI_RPC_URL
 
 cargo run --package governance-tool --release -- --ethereum-endpoint $RPC_URL --help

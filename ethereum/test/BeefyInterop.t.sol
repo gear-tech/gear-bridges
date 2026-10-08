@@ -283,7 +283,9 @@ abstract contract BeefyFixtureTest is Test {
     function allSigners(uint256 index) internal view returns (uint256[] memory bits) {
         uint256 count = fixtureUint(index, "validatorCount");
         bits = new uint256[]((count + 255) / 256);
-        for (uint256 i; i < count; i++) bits[i / 256] |= uint256(1) << (i % 256);
+        for (uint256 i; i < count; i++) {
+            bits[i / 256] |= uint256(1) << (i % 256);
+        }
     }
 
     function validatorProof(uint256 index) internal returns (BeefyClient.ValidatorProof memory p) {
@@ -434,6 +436,7 @@ abstract contract BeefyFixtureTest is Test {
             )
         );
     }
+
     function finishUpdate(
         bool interactive,
         BeefyClient client,
@@ -1117,7 +1120,6 @@ contract BeefyInteropTest is BeefyFixtureTest {
         return selectedProofs(client, c, index, selection[0], "");
     }
 
-
     function ticketHash(BeefyClient client, BeefyClient.Commitment memory c) internal view returns (bytes32) {
         bytes32 id = keccak256(abi.encode(address(this), client.computeCommitmentHash(c)));
         (uint64 height, uint32 length, uint32 required, uint256 seed, bytes32 bits) = client.tickets(id);
@@ -1422,6 +1424,7 @@ contract BeefyInteropTest is BeefyFixtureTest {
             );
         }
     }
+
     function testCapacity256AuthenticatedHandoverBothPaths() public {
         uint256 index = caseIndex("synthetic-authorities-256");
         for (uint256 mode; mode < 2; mode++) {
@@ -1430,10 +1433,11 @@ contract BeefyInteropTest is BeefyFixtureTest {
             vm.warp(uint256(s.sourceTimestampMs) / 1000);
             uint256[] memory bits = allSigners(index);
             for (uint64 set; set < 2; set++) {
-                BeefyClient.MMRLeaf memory leaf = leafForSnapshot(s, uint32(client.latestBeefyBlock()),
-                    set + 1, 256, fixtureHash(index, "authorityRoot"));
-                BeefyClient.Commitment memory c = commitment(index, leaf.parentNumber + 1, set,
-                    keccak256(leafBytes(leaf)));
+                BeefyClient.MMRLeaf memory leaf = leafForSnapshot(
+                    s, uint32(client.latestBeefyBlock()), set + 1, 256, fixtureHash(index, "authorityRoot")
+                );
+                BeefyClient.Commitment memory c =
+                    commitment(index, leaf.parentNumber + 1, set, keccak256(leafBytes(leaf)));
                 BeefyClient.ValidatorProof[] memory proofs = prepareProofs(client, c, index, mode == 1);
                 assertEq(proofs.length, 86);
                 finishUpdate(mode == 1, client, c, bits, proofs, leaf, s, new bytes32[](0), 0);
@@ -1447,23 +1451,26 @@ contract BeefyInteropTest is BeefyFixtureTest {
             assertEq(nextCounters.data.length, 16);
         }
     }
-
 }
 
 // Real secp256k1 signatures and positional Substrate trees, including odd promoted nodes.
 contract BeefyCapacityTest is BeefyFixtureTest {
     function authorityTree(uint256 n, bool repeated) internal returns (bytes32[][] memory levels) {
         uint256 depth = 1;
-        for (uint256 width = n; width > 1; width = (width + 1) / 2) depth++;
+        for (uint256 width = n; width > 1; width = (width + 1) / 2) {
+            depth++;
+        }
         levels = new bytes32[][](depth);
         levels[0] = new bytes32[](n);
-        for (uint256 i; i < n; i++) levels[0][i] = keccak256(abi.encodePacked(vm.addr(repeated ? 1 : i + 1)));
+        for (uint256 i; i < n; i++) {
+            levels[0][i] = keccak256(abi.encodePacked(vm.addr(repeated ? 1 : i + 1)));
+        }
         for (uint256 d = 1; d < depth; d++) {
             bytes32[] memory previous = levels[d - 1];
             levels[d] = new bytes32[]((previous.length + 1) / 2);
             for (uint256 i; i < previous.length; i += 2) {
-                levels[d][i / 2] = i + 1 == previous.length
-                    ? previous[i] : keccak256(abi.encodePacked(previous[i], previous[i + 1]));
+                levels[d][i / 2] =
+                    i + 1 == previous.length ? previous[i] : keccak256(abi.encodePacked(previous[i], previous[i + 1]));
             }
         }
     }
@@ -1471,13 +1478,21 @@ contract BeefyCapacityTest is BeefyFixtureTest {
     function capacityClient(bytes32[][] memory levels) internal returns (BeefyClient client) {
         vm.warp(1_700_000_000);
         bytes32 root = levels[levels.length - 1][0];
-        client = new BeefyClient(bytes32(uint256(1)), block.chainid, address(0x1234), 100, 101,
-            uint64(block.timestamp * 1000), BeefyClient.ValidatorSet(0, uint128(levels[0].length), root),
-            BeefyClient.ValidatorSet(1, uint128(levels[0].length), root));
+        client = new BeefyClient(
+            bytes32(uint256(1)),
+            block.chainid,
+            address(0x1234),
+            100,
+            101,
+            uint64(block.timestamp * 1000),
+            BeefyClient.ValidatorSet(0, uint128(levels[0].length), root),
+            BeefyClient.ValidatorSet(1, uint128(levels[0].length), root)
+        );
     }
 
     function capacityProof(bytes32[][] memory levels, uint256 index, bytes32 digest, bool repeated)
-        internal returns (BeefyClient.ValidatorProof memory p)
+        internal
+        returns (BeefyClient.ValidatorProof memory p)
     {
         p.index = index;
         p.account = vm.addr(repeated ? 1 : index + 1);
@@ -1498,13 +1513,16 @@ contract BeefyCapacityTest is BeefyFixtureTest {
     }
 
     function capacityWitness(BeefyClient client, bytes32[][] memory levels, uint64 set)
-        internal view returns (BeefyClient.Commitment memory c, BeefyClient.MMRLeaf memory leaf,
-            VaraBridgeMetadata.Snapshot memory s)
+        internal
+        view
+        returns (BeefyClient.Commitment memory c, BeefyClient.MMRLeaf memory leaf, VaraBridgeMetadata.Snapshot memory s)
     {
-        s = VaraBridgeMetadata.Snapshot(2, client.bridgeDomain(), uint64(block.timestamp * 1000), true, 0,
-            bytes32(uint256(42)));
-        leaf = leafForSnapshot(s, uint32(client.latestBeefyBlock()), set + 1, uint32(levels[0].length),
-            levels[levels.length - 1][0]);
+        s = VaraBridgeMetadata.Snapshot(
+            2, client.bridgeDomain(), uint64(block.timestamp * 1000), true, 0, bytes32(uint256(42))
+        );
+        leaf = leafForSnapshot(
+            s, uint32(client.latestBeefyBlock()), set + 1, uint32(levels[0].length), levels[levels.length - 1][0]
+        );
         c.blockNumber = leaf.parentNumber + 1;
         c.validatorSetID = set;
         c.payload = new BeefyClient.PayloadItem[](1);
@@ -1513,14 +1531,20 @@ contract BeefyCapacityTest is BeefyFixtureTest {
 
     function capacityBits(BeefyClient client, uint256 n, uint256 signers) internal view returns (uint256[] memory) {
         uint256[] memory positions = new uint256[](signers);
-        for (uint256 i; i < signers; i++) positions[i] = i;
+        for (uint256 i; i < signers; i++) {
+            positions[i] = i;
+        }
         return client.createInitialBitfield(positions, n);
     }
 
-    function capacityProofs(BeefyClient client, bytes32[][] memory levels, BeefyClient.Commitment memory c,
-        uint256[] memory bits, bool interactive, bool repeated)
-        internal returns (BeefyClient.ValidatorProof[] memory proofs)
-    {
+    function capacityProofs(
+        BeefyClient client,
+        bytes32[][] memory levels,
+        BeefyClient.Commitment memory c,
+        uint256[] memory bits,
+        bool interactive,
+        bool repeated
+    ) internal returns (BeefyClient.ValidatorProof[] memory proofs) {
         bytes32 digest = client.computeCommitmentHash(c);
         uint256[] memory selected;
         if (interactive) {
@@ -1529,15 +1553,20 @@ contract BeefyCapacityTest is BeefyFixtureTest {
             vm.prevrandao(bytes32(uint256(1)));
             client.commitPrevRandao(digest);
             selected = client.createFinalBitfield(digest, bits);
-        } else selected = client.createFiatShamirFinalBitfield(c, bits);
+        } else {
+            selected = client.createFiatShamirFinalBitfield(c, bits);
+        }
         uint256 n = levels[0].length;
         uint256 count;
-        for (uint256 i; i < n; i++) if ((selected[0] & (uint256(1) << i)) != 0) count++;
+        for (uint256 i; i < n; i++) {
+            if ((selected[0] & (uint256(1) << i)) != 0) count++;
+        }
         proofs = new BeefyClient.ValidatorProof[](count);
         count = 0;
         for (uint256 i; i < n; i++) {
-            if ((selected[0] & (uint256(1) << i)) != 0)
+            if ((selected[0] & (uint256(1) << i)) != 0) {
                 proofs[count++] = capacityProof(levels, i, digest, repeated);
+            }
         }
     }
 
@@ -1547,8 +1576,11 @@ contract BeefyCapacityTest is BeefyFixtureTest {
             bytes32[][] memory levels = authorityTree(sizes[size], false);
             for (uint256 mode; mode < 2; mode++) {
                 BeefyClient client = capacityClient(levels);
-                (BeefyClient.Commitment memory c, BeefyClient.MMRLeaf memory leaf,
-                    VaraBridgeMetadata.Snapshot memory s) = capacityWitness(client, levels, 0);
+                (
+                    BeefyClient.Commitment memory c,
+                    BeefyClient.MMRLeaf memory leaf,
+                    VaraBridgeMetadata.Snapshot memory s
+                ) = capacityWitness(client, levels, 0);
                 uint256[] memory bits = capacityBits(client, sizes[size], sizes[size] - (sizes[size] - 1) / 3);
                 BeefyClient.ValidatorProof[] memory proofs = capacityProofs(client, levels, c, bits, mode == 1, false);
                 assertEq(proofs.length, sizes[size] <= 3 ? sizes[size] : sizes[size] / 3 + 1);
@@ -1573,8 +1605,9 @@ contract BeefyCapacityTest is BeefyFixtureTest {
         (,,, Uint16Array memory counters) = client.currentValidatorSet();
         assertEq(counters.length, 256);
         assertEq(counters.data.length, 16);
-        for (uint256 i; i < positions.length; i++)
+        for (uint256 i; i < positions.length; i++) {
             assertEq((counters.data[positions[i] / 16] >> (16 * (positions[i] % 16))) & 0xffff, 1);
+        }
         assertEq(client.minNumRequiredSignatures(), 86);
         assertEq(client.fiatShamirRequiredSignatures(), 86);
         assertEq(client.MAX_VALIDATORS(), 256);
@@ -1590,8 +1623,8 @@ contract BeefyCapacityTest is BeefyFixtureTest {
             assertEq(quorum, n == 256 ? 171 : 40);
             bytes32[][] memory levels = authorityTree(n, false);
             BeefyClient client = capacityClient(levels);
-            (BeefyClient.Commitment memory c, BeefyClient.MMRLeaf memory leaf,
-                VaraBridgeMetadata.Snapshot memory s) = capacityWitness(client, levels, 0);
+            (BeefyClient.Commitment memory c, BeefyClient.MMRLeaf memory leaf, VaraBridgeMetadata.Snapshot memory s) =
+                capacityWitness(client, levels, 0);
             uint256[] memory bits = capacityBits(client, n, quorum - 1);
             BeefyClient.ValidatorProof memory initial = capacityProof(levels, 0, client.computeCommitmentHash(c), false);
             vm.expectRevert(BeefyClient.InvalidBitfield.selector);
@@ -1602,17 +1635,22 @@ contract BeefyCapacityTest is BeefyFixtureTest {
             client.submitFiatShamir(c, bits, new BeefyClient.ValidatorProof[](0), leaf, s, new bytes32[](0), 0);
             for (uint256 mutation; mutation < 3; mutation++) {
                 bits = capacityBits(client, n, n);
-                if (mutation == 0 && n < 256) bits[0] |= uint256(1) << n;
-                else if (mutation == 1) bits = new uint256[](0);
-                else {
+                if (mutation == 0 && n < 256) {
+                    bits[0] |= uint256(1) << n;
+                } else if (mutation == 1) {
+                    bits = new uint256[](0);
+                } else {
                     uint256[] memory longBits = new uint256[](2);
                     longBits[0] = bits[0];
                     longBits[1] = 1;
                     bits = longBits;
                 }
-                vm.expectRevert(); client.createFiatShamirFinalBitfield(c, bits);
-                vm.expectRevert(); client.submitInitial(c, bits, initial);
-                vm.expectRevert(); client.submitFiatShamir(c, bits, new BeefyClient.ValidatorProof[](0), leaf, s, new bytes32[](0), 0);
+                vm.expectRevert();
+                client.createFiatShamirFinalBitfield(c, bits);
+                vm.expectRevert();
+                client.submitInitial(c, bits, initial);
+                vm.expectRevert();
+                client.submitFiatShamir(c, bits, new BeefyClient.ValidatorProof[](0), leaf, s, new bytes32[](0), 0);
             }
             bits = capacityBits(client, n, quorum);
             for (uint256 mode; mode < 2; mode++) {
@@ -1623,11 +1661,15 @@ contract BeefyCapacityTest is BeefyFixtureTest {
                 finishUpdate(mode == 1, client, c, bits, proofs, leaf, s, new bytes32[](0), 0);
             }
             uint256[] memory positions = new uint256[](2);
-            positions[0] = n - 1; positions[1] = n - 1;
-            vm.expectRevert(); client.createInitialBitfield(positions, n);
+            positions[0] = n - 1;
+            positions[1] = n - 1;
+            vm.expectRevert();
+            client.createInitialBitfield(positions, n);
             positions[1] = n;
-            vm.expectRevert(); client.createInitialBitfield(positions, n);
-            vm.expectRevert(); client.createInitialBitfield(new uint256[](0), 257);
+            vm.expectRevert();
+            client.createInitialBitfield(positions, n);
+            vm.expectRevert();
+            client.createInitialBitfield(new uint256[](0), 257);
             assertEq(client.latestMMRRoot(), bytes32(0));
         }
     }
@@ -1636,8 +1678,8 @@ contract BeefyCapacityTest is BeefyFixtureTest {
         bytes32[][] memory levels = authorityTree(4, true);
         for (uint256 mode; mode < 2; mode++) {
             BeefyClient client = capacityClient(levels);
-            (BeefyClient.Commitment memory c, BeefyClient.MMRLeaf memory leaf,
-                VaraBridgeMetadata.Snapshot memory s) = capacityWitness(client, levels, 0);
+            (BeefyClient.Commitment memory c, BeefyClient.MMRLeaf memory leaf, VaraBridgeMetadata.Snapshot memory s) =
+                capacityWitness(client, levels, 0);
             uint256[] memory bits = capacityBits(client, 4, 4);
             BeefyClient.ValidatorProof[] memory proofs = capacityProofs(client, levels, c, bits, mode == 1, true);
             assertNotEq(proofs[0].index, proofs[1].index);

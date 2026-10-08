@@ -58,6 +58,8 @@ $ anvil
 $ cp .env.example .env
 # fork testing on mainnet
 $ cp .env.example.mainnet .env
+# fork testing on sepolia
+$ cp .env.example.sepolia .env
 # fork testing on hoodi
 $ cp .env.example.hoodi .env
 
@@ -65,6 +67,7 @@ $ source .env
 
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
@@ -75,10 +78,12 @@ $ source .env
 
 $ forge script script/relayers/ProcessMessage.s.sol:ProcessMessageScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/relayers/ProcessMessage.s.sol:ProcessMessageScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/relayers/ProcessMessage.s.sol:ProcessMessageScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/relayers/ProcessMessage.s.sol:ProcessMessageScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
 $ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/relayers/SubmitMerkleRoot.s.sol:SubmitMerkleRootScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 
@@ -93,26 +98,32 @@ $ source .env
 
 $ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/ERC20Manager.s.sol:ERC20ManagerScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
 $ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
 $ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
 $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
+$ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 ```
 

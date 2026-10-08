@@ -1,3 +1,4 @@
+// Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.37;
 
@@ -33,6 +34,13 @@ import {NewImplementationMock} from "src/mocks/NewImplementationMock.sol";
 import {VerifierMock} from "src/mocks/VerifierMock.sol";
 import {BaseConstants} from "test/BaseConstants.sol";
 
+import {IERC1967} from "@openzeppelin/contracts/interfaces/IERC1967.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
+import {ERC20ManagerPacker, TransferMessage} from "src/libraries/packing/ERC20ManagerPacker.sol";
+import {GovernancePacker, UpgradeProxyMessage} from "src/libraries/packing/GovernancePacker.sol";
+
 struct Overrides {
     address circleToken;
     address tetherToken;
@@ -55,6 +63,12 @@ struct DeploymentArguments {
 }
 
 abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+    using Hasher for VaraMessage;
+
+    using GovernancePacker for UpgradeProxyMessage;
+
+    using ERC20ManagerPacker for TransferMessage;
+
     uint256 public messageNonce;
     uint256 public currentBlockNumber = 1;
 
@@ -268,6 +282,60 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
             // forge-lint: disable-next-line(todo-comment)
             // TODO: all manipulations with the forked contracts should be done here
+
+            address newImplementation1 = address(new MessageQueue());
+
+            VaraMessage memory message1 = VaraMessage({
+                nonce: type(uint256).max,
+                source: governanceAdmin.governance(),
+                destination: address(governanceAdmin),
+                payload: UpgradeProxyMessage({
+                    proxy: address(messageQueue),
+                    newImplementation: newImplementation1,
+                    data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
+                }).pack()
+            });
+            console.logBytes(message1.payload);
+            assertEq(messageQueue.isProcessed(message1.nonce), false);
+
+            bytes32 messageHash = message1.hash();
+            // assertEq(messageHash, 0x...);
+
+            uint256 blockNumber = currentBlockNumber++;
+            bytes32 merkleRoot = messageHash;
+            bytes memory proof1 = "";
+
+            vm.expectEmit(address(messageQueue));
+            emit IMessageQueue.MerkleRoot(blockNumber, merkleRoot);
+
+            messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
+
+            vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
+
+            uint256 totalLeaves = 1;
+            uint256 leafIndex = 0;
+            bytes32[] memory proof2 = new bytes32[](0);
+
+            messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message1, proof2);
+            assertEq(
+                address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+                address(newImplementation1)
+            );
+
+            // test after upgrade
+
+            address multiSigWallet = 0x1111111111111111111111111111111111111111;
+            address newImplementation2 = address(new MessageQueue());
+
+            vm.startPrank(multiSigWallet);
+
+            vm.expectEmit(address(messageQueue));
+            // forge-lint: disable-next-item(reentrancy-events)
+            emit IERC1967.Upgraded(address(newImplementation2));
+
+            messageQueue.upgradeToAndCall(newImplementation2, new bytes(0));
+
+            vm.stopPrank();
         }
 
         console.log("Deployment arguments:");

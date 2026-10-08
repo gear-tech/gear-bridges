@@ -1,3 +1,4 @@
+// Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.37;
 
@@ -108,7 +109,12 @@ contract MessageQueue is
     /**
      * @custom:oz-upgrades-validate-as-initializer
      */
-    // function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {}
+    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {
+        address multiSigWallet = 0x1111111111111111111111111111111111111111;
+
+        _grantRole(DEFAULT_ADMIN_ROLE, multiSigWallet);
+        _grantRole(PAUSER_ROLE, multiSigWallet);
+    }
 
     /**
      * @dev Returns governance admin address.

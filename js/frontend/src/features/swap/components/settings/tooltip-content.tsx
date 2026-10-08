@@ -14,11 +14,12 @@ function PriorityTooltipContent() {
 
       <ul className={styles.list}>
         <li>
-          <span className={styles.bold}>Common</span> - standard speed (~1 hour) with a lower fee.
+          <span className={styles.bold}>Fast</span> - recommended accelerated processing (~20 minutes) with a higher
+          fee.
         </li>
 
         <li>
-          <span className={styles.bold}>Fast</span> - accelerated processing (~20 minutes) with a higher fee.
+          <span className={styles.bold}>Common</span> - standard speed (~1 hour) with a lower fee.
         </li>
       </ul>
     </>
@@ -34,17 +35,17 @@ function ClaimTypeTooltipContent() {
 
       <ul className={styles.list}>
         <li>
-          <span className={styles.bold}>Manual</span> - after the transfer is completed, you need to manually claim your
-          tokens from the{' '}
-          <Link to={`${ROUTE.TRANSACTIONS}?owner=true&status=${Status.AwaitingPayment}`} className={styles.link}>
-            Transactions
-          </Link>{' '}
-          page.
+          <span className={styles.bold}>Automatic</span> - recommended. Tokens are delivered to your wallet
+          automatically for an additional fee.
         </li>
 
         <li>
-          <span className={styles.bold}>Automatic</span> - tokens are delivered to your wallet automatically, for an
-          additional fee.
+          <span className={styles.bold}>Manual</span> - advanced. After the transfer is completed, you need to claim
+          your tokens from the{' '}
+          <Link to={`${ROUTE.TRANSACTIONS}?owner=true&status=${Status.AwaitingPayment}`} className={styles.link}>
+            Transactions
+          </Link>{' '}
+          page and pay gas with the destination network&apos;s native token.
         </li>
       </ul>
     </>

@@ -56,7 +56,8 @@ abstract contract BeefyFixtureTest is Test {
     }
 
     function caseIndex(string memory name) internal view returns (uint256) {
-        for (uint256 i; i < caseCount(); i++) {
+        uint256 count = caseCount();
+        for (uint256 i; i < count; i++) {
             if (keccak256(bytes(vm.parseJsonString(fixtures, fixturePath(i, "name")))) == keccak256(bytes(name))) {
                 return i;
             }

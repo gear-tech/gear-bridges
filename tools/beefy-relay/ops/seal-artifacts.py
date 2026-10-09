@@ -122,7 +122,7 @@ def main():
             files[str(path.relative_to(output))] = digest(path)
     manifest = {"schemaVersion": 1, "testOnly": True, "files": files,
                 "binaries": {name: "bin/" + name for name in binaries},
-                "solidity": {"scriptSha256": files["ethereum/script/BeefyTokens.s.sol"],
+                "solidity": {"compilerProjectRoot": str(project), "scriptSha256": files["ethereum/script/BeefyTokens.s.sol"],
                              "artifactSha256": files["ethereum/out/BeefyTokens.s.sol/BeefyTokens.json"]}}
     if profile is not None:
         manifest["runtimeProfile"] = profile

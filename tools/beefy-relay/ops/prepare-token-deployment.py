@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import stat
 import subprocess
 from urllib.request import Request, urlopen
@@ -22,6 +23,7 @@ CHAIN_ID = 560048
 HOODI_GENESIS = "0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b"
 SCRIPT_SHA256 = MANIFEST["solidity"]["scriptSha256"]
 ARTIFACT_SHA256 = MANIFEST["solidity"]["artifactSha256"]
+relocated_compiler_cache = runpy.run_path(str(Path(__file__).with_name("prepare-run.py")))["relocated_compiler_cache"]
 FEE_WEI = 1_000_000_000_000
 ZERO = "0x" + "00" * 20
 
@@ -84,12 +86,16 @@ def gear_rpc(endpoint, method, *params):
 
 
 def qualified_project_file(relative):
-    checked_file("ethereum/" + relative)
-    expected = MANIFEST["files"]["ethereum/" + relative]
+    sealed = checked_file("ethereum/" + relative)
     path = PROJECT / relative
-    require(path.is_file() and not path.is_symlink() and digest(path) == expected,
-            "Qualified Solidity project file changed or missing: " + relative)
-    return expected
+    require(path.is_file() and not path.is_symlink(), "Qualified Solidity project file missing: " + relative)
+    if relative == "cache/solidity-files-cache.json":
+        expected = relocated_compiler_cache(load(sealed), MANIFEST["solidity"]["compilerProjectRoot"], PROJECT)
+        require(load(path) == expected, "Qualified compiler cache changed beyond relocation")
+    else:
+        require(digest(path) == MANIFEST["files"]["ethereum/" + relative],
+                "Qualified Solidity project file changed: " + relative)
+    return digest(path)
 
 
 def compiled_artifact():
@@ -289,7 +295,8 @@ def main():
         chain = funding_and_chain(inputs, deployer)
         nonce_zero(deployer, inputs["identity"]["nonce"]["rpc"])
         environment = {
-            "FOUNDRY_EXTRA_OUTPUT_FILES": "[]",  # Use sealed IR sidecars; regeneration invalidates the portable cache.
+            "FOUNDRY_EXTRA_OUTPUT_FILES": "[]",
+            "FOUNDRY_EXTRA_OUTPUT": '["storageLayout","irOptimized"]',  # Preserve sealed compiler outputs without regenerating sidecars.
             "EXPECTED_DEPLOYER_NONCE": "0", "GEAR_VFT_MANAGER": inputs["stack"]["programs"]["vftManager"]["id"],
             "GEAR_GOVERNANCE_ADMIN": inputs["gearAdmin"], "GEAR_GOVERNANCE_PAUSER": inputs["gearPauser"],
             "BEEFY_SOURCE_DOMAIN": inputs["source"], "BEEFY_BRIDGE_DOMAIN": inputs["bridge"],

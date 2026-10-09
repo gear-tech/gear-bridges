@@ -226,8 +226,12 @@ def solidity_snapshot(bundle, project):
     (solidity / "foundry.toml").write_text('[profile.default]\nsrc = "src"\nout = "out"\n')
     (solidity / "remappings.txt").write_text("fixture/=src/\n")
     (solidity / "cache").mkdir()
-    (solidity / "cache/solidity-files-cache.json").write_text(json.dumps({"builds": ["fixture"]}))
+    (solidity / "cache/solidity-files-cache.json").write_text(json.dumps(
+        {"builds": ["fixture"], "remappings": ["fixture/=" + str(solidity / "src") + "/"]}))
     shutil.copytree(solidity, project)
+    relocate = runpy.run_path(str(Path(__file__).with_name("prepare-run.py")))["relocated_compiler_cache"]
+    cache = project / "cache/solidity-files-cache.json"
+    cache.write_text(json.dumps(relocate(json.loads(cache.read_text()), solidity, project)))
 
 
 def check_deployment_inputs(deploy, project, bundle):
@@ -251,6 +255,22 @@ def check_deployment_inputs(deploy, project, bundle):
         changes += [(name + " changed", path, path.read_bytes() + b"# unqualified settings\n"),
                     (name + " missing", path, None), (name + " symlink", path, bundle / "ethereum" / name)]
     cache = project / "cache/solidity-files-cache.json"
+    original_cache = json.loads((bundle / "ethereum/cache/solidity-files-cache.json").read_text())
+    alias = project.parent / "project-alias"
+    alias.symlink_to(project, target_is_directory=True)
+    assert deploy["relocated_compiler_cache"](original_cache, bundle / "ethereum", alias) == json.loads(cache.read_text())
+    changes.append(("unrelocated compiler cache", cache, json.dumps(original_cache).encode()))
+    redirected = json.loads(cache.read_text())
+    redirected["remappings"] = ["fixture/=/outside/src/"]
+    changes.append(("redirected compiler remapping", cache, json.dumps(redirected).encode()))
+    for target in ("/outside/src/", "relative/src/", str(bundle / "ethereum/../outside")):
+        try:
+            deploy["relocated_compiler_cache"]({**original_cache, "remappings": ["fixture/=" + target]},
+                                                bundle / "ethereum", project)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Unsafe cache remapping accepted: " + target)
     changes += [("redirected compiler cache", cache, json.dumps({"builds": ["unqualified"]}).encode()),
                 ("missing compiler cache", cache, None),
                 ("symlinked compiler cache", cache, bundle / "ethereum/cache/solidity-files-cache.json")]
@@ -1773,6 +1793,7 @@ def check():
             funding_script = bundle / "ops/setup-funding.py"
             funding_script.write_bytes(Path(__file__).with_name("setup-funding.py").read_bytes())
             deployment.write_bytes(Path(__file__).with_name("prepare-token-deployment.py").read_bytes())
+            (bundle / "ops/prepare-run.py").write_bytes(Path(__file__).with_name("prepare-run.py").read_bytes())
             names = ("gear", "beefy-relay", "relayer", "checkpoints-tool")
             for name in names:
                 # Artifact bytes exercise identity checks; these files are never executed.
@@ -1783,7 +1804,8 @@ def check():
                      for path in bundle.rglob("*") if path.is_file()}
             manifest = bundle / "bundle.json"
             manifest.write_text(json.dumps({"schemaVersion": 1, "testOnly": True, "files": files,
-                                           "solidity": {"scriptSha256": files["ethereum/script/BeefyTokens.s.sol"],
+                                           "solidity": {"compilerProjectRoot": str(bundle / "ethereum"),
+                                                        "scriptSha256": files["ethereum/script/BeefyTokens.s.sol"],
                                                         "artifactSha256": files["ethereum/out/BeefyTokens.s.sol/BeefyTokens.json"]},
                                            "binaries": {name: "bin/" + name for name in names}}))
             config = {"schemaVersion": 1, "runId": "run", "testOnly": True,

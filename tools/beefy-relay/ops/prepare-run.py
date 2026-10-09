@@ -14,6 +14,19 @@ import uuid
 
 from substrateinterface import Keypair
 
+def relocated_compiler_cache(cache, source_root, project):
+    """Relocate only Foundry's absolute remapping targets, preserving every other field."""
+    project = project.resolve()
+    result = {**cache, "remappings": []}
+    for mapping in cache["remappings"]:
+        alias, separator, target = mapping.partition("=")
+        if not separator or not Path(target).is_absolute() or ".." in Path(target).parts:
+            raise ValueError("Invalid sealed compiler remapping")
+        relative = Path(target).relative_to(source_root)
+        result["remappings"].append(alias + "=" + str(project / relative) + ("/" if target.endswith("/") else ""))
+    return result
+
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -146,6 +159,9 @@ def main():
     for path in (run / "forge-final").rglob("*"):
         path.chmod(0o700 if path.is_dir() else 0o600)
     (run / "forge-final").chmod(0o700)
+    cache = run / "forge-final/cache/solidity-files-cache.json"
+    save(cache, relocated_compiler_cache(json.loads(cache.read_text()),
+         MANIFEST["solidity"]["compilerProjectRoot"], run / "forge-final"))
     for directory in (run / "hoodi/gear-keys", run, run.parent):
         fd = os.open(directory, os.O_RDONLY)
         os.fsync(fd)

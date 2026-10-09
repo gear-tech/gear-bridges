@@ -387,6 +387,8 @@ Build and qualify the selected artifacts first. `seal-artifacts.py` does not run
 
 Keep `dynamic_test_linking = false` for the qualified Solidity graph. Foundry otherwise adds memory-only `foundry-pp/DeployHelper*.sol` inputs that cannot pass the standalone sealer's original-source authentication. This does not disable Solidity optimization or the memory-safe assembly annotations.
 
+Foundry 1.8.5 caches absolute remapping targets. The sealed manifest records `compilerProjectRoot`; preparation relocates only those cache targets into `forge-final`, and deployment verifies every remaining cache field against the original. Keep the sealed `storageLayout` and `irOptimized` compiler outputs while disabling IR sidecar regeneration during script execution. Dropping `irOptimized` from the compiler output selection or retaining the old absolute targets triggers recompilation and ambiguous OpenZeppelin build-info. Preserve a failed simulation and its artifacts; do not delete build-info to bypass the gate or modify an existing deployment intent.
+
 Fresh simulation, checking and broadcast also require the local Foundry configuration (including qualified file absence), sole build-info and all runtime-loaded contract artifacts to match the sealed bundle. This includes the dynamically loaded WrappedVara implementation. Those hashes are part of the simulation and deployment-intent identity; an older simulation needs a fresh dry-run. Drift after a durable intent holds that original attempt for reconciliation, not another send.
 
 ~~~sh

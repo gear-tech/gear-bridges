@@ -94,7 +94,7 @@ export function applicationAdmission(root: string, run: Run, bundle: { files: Re
     const filename = path.join(root, relative); noSymlinks(filename);
     check(sha256(fs.readFileSync(filename)) === hash, 'HOLD: original normal admission record changed');
   }
-  const launch = load<{ phase: string; identity: Record<string, unknown>; readiness: { genesisHash: Hex; commonFinalized: { hash: Hex } };
+  const launch = load<{ phase: string; identity: Record<string, unknown>; readiness: { genesisHash: Hex };
     pinned: { sourceIdentity: Record<string, unknown> } }>(path.join(root, 'source-chain/launch-state.json'));
   check(launch.phase === 'ready' && canonical(launch.identity.runtimeProfile) === canonical(runtime) &&
     launch.readiness.genesisHash === core.anchor.sourceGenesis && launch.pinned.sourceIdentity.genesisHash === core.anchor.sourceGenesis &&
@@ -114,7 +114,7 @@ export function applicationAdmission(root: string, run: Run, bundle: { files: Re
   const profile = immutableInboundProfile({ ...serialized, ethereumChainId: BigInt(serialized.ethereumChainId), beaconGenesisTime: BigInt(serialized.beaconGenesisTime),
     forks: serialized.forks.map(fork => ({ ...fork, epoch: BigInt(fork.epoch) })) });
   check(profile.ethereumChainId === BigInt(run.network.chainId) && profile.ethereumGenesisHash === run.network.genesisHash &&
-    profile.sourceGenesisHash === core.anchor.sourceGenesis && profile.sourceBlockHash === launch.readiness.commonFinalized.hash &&
+    profile.sourceGenesisHash === core.anchor.sourceGenesis &&
     profile.sourceRuntimeCodeHash.slice(2) === runtime.runtimeCodeBlake2b256.replace(/^0x/, '') && profile.beaconGenesisValidatorsRoot === HOODI_BEACON.genesisValidatorsRoot &&
     profile.beaconGenesisTime === 1742213400n && profile.checkpoint.network === 'Hoodi' && profile.historicalProxyId === stack.programs.historicalProxy.id &&
     profile.checkpoint.programId === stack.checkpoint && profile.endpoint.programId === stack.programs.ethEventsElectra.id && profile.consumer.programId === core.gearManager &&
@@ -478,6 +478,10 @@ async function connect(direction: Direction, flags: Flags): Promise<Context> {
   try {
     witness = await GearApi.create({ providerAddress: run.source.bobRpc, noInitWarn: true });
     check(gear.genesisHash.toHex() === core.anchor.sourceGenesis && witness.genesisHash.toHex() === core.anchor.sourceGenesis && core.anchor.sourceGenesis === stack.sourceGenesis, 'source genesis mismatch');
+    if (approvedProfile) {
+      const header = await gear.rpc.chain.getHeader(approvedProfile.sourceBlockHash);
+      await assertSourcePin(gear, witness, { number: header.number.toString(), hash: approvedProfile.sourceBlockHash });
+    }
     const genesisResponse = await fetch(run.network.beaconHttp + '/eth/v1/beacon/genesis', { signal: AbortSignal.timeout(20_000) });
     check(genesisResponse.ok, 'Beacon transport unavailable');
     const beaconGenesis = await genesisResponse.json() as { data: { genesis_time: string; genesis_validators_root: Hex } };
@@ -685,9 +689,6 @@ async function deploymentPreparation(ctx: Context, deadline: string): Promise<Pr
       [approved.consumer.programId, approved.consumer.codeId], ...(approved.nativeWrapper ? [[approved.nativeWrapper.programId, approved.nativeWrapper.codeId]] : [])]) {
       check(await programCodeId(ctx.gear, pin, id as Hex) === expected, 'HOLD: normal actor differs from independently approved CodeId');
     }
-    const approvedHeader = await ctx.gear.rpc.chain.getHeader(approved.sourceBlockHash);
-    check(approvedHeader.number.toBigInt() <= BigInt(pin.number) &&
-      (await ctx.gear.blocks.getBlockHash(approvedHeader.number.toBigInt())).toHex() === approved.sourceBlockHash, 'HOLD: approved source pin is not canonical finalized history');
   }
   const endpoint = { programId: ctx.stack.programs.ethEventsElectra.id, codeId: programCodeIds[ctx.stack.programs.ethEventsElectra.id], idlSha256: sha256(fs.readFileSync(path.join(ctx.artifacts, 'eth_events_electra.idl'))) };
   const prep: Preparation = { schemaVersion: 1, testOnly: true, runId: ctx.run.runId, campaignName: CAMPAIGN, intentId: ctx.flags.intentId, deadlineAtMs: deadline,

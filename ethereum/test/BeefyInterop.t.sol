@@ -193,7 +193,9 @@ abstract contract BeefyFixtureTest is Test {
         uint256 source = fixtureUint(index, "sourceBlock");
         uint256 start = fixtureUint(index, "mmrStartBlock");
         uint256 timestamp = fixtureUint(index, "sourceTimestampMs");
-        if (timestamp == 0 || source < start) return uint64(timestamp);
+        if (timestamp == 0 || source < start) {
+            return uint64(timestamp);
+        }
         uint256 delta = (source - start) * 3_000;
         require(timestamp >= delta, "invalid fixture timestamp");
         return uint64(timestamp - delta);
@@ -1108,7 +1110,9 @@ contract BeefyInteropTest is BeefyFixtureTest {
         internal
         returns (BeefyClient.ValidatorProof[] memory)
     {
-        if (!interactive) return signedProofs(client, c, index, "");
+        if (!interactive) {
+            return signedProofs(client, c, index, "");
+        }
         bytes32 digest = client.computeCommitmentHash(c);
         BeefyClient.ValidatorProof memory initial = validatorProof(index, 0);
         (initial.v, initial.r, initial.s) = vm.sign(1, digest);

@@ -13,7 +13,9 @@ import {WrappedVara} from "src/erc20/WrappedVara.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 
-/// @dev Isolated, message-only BEEFY deployment for Hoodi.
+/**
+ * @dev Isolated, message-only BEEFY deployment for Hoodi.
+ */
 contract BeefyHoodi is Script {
     uint256 internal constant HOODI_CHAIN_ID = 560048;
 

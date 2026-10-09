@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
-pragma solidity 0.8.37;
+pragma solidity ^0.8.37;
 
 import {VaraBridgeMetadata} from "./VaraBridgeMetadata.sol";
 import {Bitfield} from "./utils/Bitfield.sol";
@@ -648,7 +648,9 @@ contract BeefyClient {
     }
 
     function createTicketID(address account, bytes32 commitmentHash) internal pure returns (bytes32 value) {
-        assembly {
+        // forge-lint: disable-next-item(inline-assembly)
+        assembly ("memory-safe") {
+            /* reviewed: ... */
             mstore(0x00, account)
             mstore(0x20, commitmentHash)
             value := keccak256(0x0, 0x40)
@@ -787,10 +789,14 @@ contract BeefyClient {
         address[] memory seen = new address[](capacity);
         for (uint256 i; i < proofs.length; i++) {
             address account = proofs[i].account;
-            if (account == address(0)) revert InvalidValidatorProof();
+            if (account == address(0)) {
+                revert InvalidValidatorProof();
+            }
             uint256 slot = uint256(keccak256(abi.encodePacked(account))) & (capacity - 1);
             while (seen[slot] != address(0)) {
-                if (seen[slot] == account) revert InvalidValidatorProof();
+                if (seen[slot] == account) {
+                    revert InvalidValidatorProof();
+                }
                 slot = (slot + 1) & (capacity - 1);
             }
             seen[slot] = account;
@@ -840,13 +846,21 @@ contract BeefyClient {
         bool found;
         for (uint256 i = 0; i < commitment.payload.length; i++) {
             if (commitment.payload[i].payloadID != MMR_ROOT_ID) continue;
-            if (found) revert InvalidCommitment();
+            if (found) {
+                revert InvalidCommitment();
+            }
             found = true;
-            if (commitment.payload[i].data.length != 32) revert InvalidMMRRootLength();
+            if (commitment.payload[i].data.length != 32) {
+                revert InvalidMMRRootLength();
+            }
             root = bytes32(commitment.payload[i].data);
         }
-        if (!found) revert CommitmentNotRelevant();
-        if (root == bytes32(0)) revert InvalidCommitment();
+        if (!found) {
+            revert CommitmentNotRelevant();
+        }
+        if (root == bytes32(0)) {
+            revert InvalidCommitment();
+        }
     }
 
     function encodeCommitment(Commitment calldata commitment) internal pure returns (bytes memory) {

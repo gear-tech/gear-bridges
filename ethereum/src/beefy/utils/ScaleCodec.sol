@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
-pragma solidity 0.8.37;
+pragma solidity ^0.8.37;
 
 library ScaleCodec {
     error UnsupportedCompactEncoding();
@@ -179,7 +179,6 @@ library ScaleCodec {
         uint128 current = value;
         uint8 i = 0;
         while (current != 0) {
-            // forge-lint: disable-next-line(unsafe-typecast)
             buf[i] = bytes1(uint8(current & 0xFF));
             current >>= 8;
             unchecked {

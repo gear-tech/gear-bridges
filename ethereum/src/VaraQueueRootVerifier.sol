@@ -35,7 +35,9 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
     }
 
     function safeVerifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
-        if (msg.sender != messageQueue || block.chainid != destinationChainId) return false;
+        if (msg.sender != messageQueue || block.chainid != destinationChainId) {
+            return false;
+        }
         try this.verifyProof(proof, publicInputs) returns (bool valid) {
             return valid;
         } catch {
@@ -44,7 +46,9 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
     }
 
     function safeVerifyEmptyQueueProgress(uint256 sourceBlock, bytes calldata proof) external view returns (bool) {
-        if (msg.sender != messageQueue || block.chainid != destinationChainId) return false;
+        if (msg.sender != messageQueue || block.chainid != destinationChainId) {
+            return false;
+        }
         try this.verifyEmptyQueueProgress(sourceBlock, proof) returns (bool valid) {
             return valid;
         } catch {
@@ -53,12 +57,16 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
     }
 
     function verifyEmptyQueueProgress(uint256 sourceBlock, bytes calldata proof) external view returns (bool) {
-        if (msg.sender != address(this) || sourceBlock > type(uint32).max) return false;
+        if (msg.sender != address(this) || sourceBlock > type(uint32).max) {
+            return false;
+        }
         return _verifyProof(proof, 0, sourceBlock << 96, true);
     }
 
     function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
-        if (msg.sender != address(this) || publicInputs.length != 2) return false;
+        if (msg.sender != address(this) || publicInputs.length != 2) {
+            return false;
+        }
         return _verifyProof(proof, publicInputs[0], publicInputs[1], false);
     }
 
@@ -67,8 +75,12 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
         view
         returns (bool)
     {
-        if (input0 >> 192 != 0 || input1 >> 192 != 0 || uint96(input1) != 0) return false;
-        if (proof.length < 576 || proof.length > 576 + 32 * 256 || (proof.length - 576) % 32 != 0) return false;
+        if (input0 >> 192 != 0 || input1 >> 192 != 0 || uint96(input1) != 0) {
+            return false;
+        }
+        if (proof.length < 576 || proof.length > 576 + 32 * 256 || (proof.length - 576) % 32 != 0) {
+            return false;
+        }
 
         (
             uint8 proofVersion,
@@ -86,8 +98,12 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
             proof,
             (uint8, uint8, bool, bytes32, uint64, uint64, uint64, bytes32, BeefyClient.MMRLeaf, bytes32[], uint256)
         );
-        if (items.length > 256 || (items.length < 256 && proofOrder >> items.length != 0)) return false;
-        if (proof.length != 576 + 32 * items.length) return false;
+        if (items.length > 256 || (items.length < 256 && proofOrder >> items.length != 0)) {
+            return false;
+        }
+        if (proof.length != 576 + 32 * items.length) {
+            return false;
+        }
         if (
             keccak256(proof)
                 != keccak256(
@@ -105,27 +121,45 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
                         proofOrder
                     )
                 )
-        ) return false;
+        ) {
+            return false;
+        }
 
-        if (!beefyClient.isLive()) return false;
+        if (!beefyClient.isLive()) {
+            return false;
+        }
         bytes32 acceptedRoot = beefyClient.latestMMRRoot();
         uint64 acceptedBlock = beefyClient.latestBeefyBlock();
-        if (acceptedRoot == bytes32(0) || acceptedBlock == 0) return false;
+        if (acceptedRoot == bytes32(0) || acceptedBlock == 0) {
+            return false;
+        }
 
         bytes32 root = bytes32((input0 << 64) | (input1 >> 128));
         uint32 sourceBlock = uint32(input1 >> 96);
-        if ((emptyProgress ? root != bytes32(0) : root == bytes32(0)) || !initialized) return false;
+        if ((emptyProgress ? root != bytes32(0) : root == bytes32(0)) || !initialized) {
+            return false;
+        }
         VaraBridgeMetadata.Snapshot memory snapshot =
             _snapshot(bridgeDomain, sourceTimestampMs, initialized, queueId, root);
         if (
             proofVersion != 2 || bridgeVersion != 2 || bridgeDomain != beefyClient.bridgeDomain()
                 || bridgeDomain != _bridgeDomain(beefyClient.sourceDomain(), destinationChainId, messageQueue)
                 || snapshot.queueRoot != root
-        ) return false;
-        if (leaf.version != 0 || leaf.parentNumber != sourceBlock) return false;
-        if (uint64(sourceBlock) < beefyClient.mmrStartBlock() || sourceBlock >= anchorBlock) return false;
-        if (anchorBlock != acceptedBlock || anchorRoot != acceptedRoot || anchorRoot == bytes32(0)) return false;
-        if (VaraBridgeMetadata.hash(snapshot) != leaf.parachainHeadsRoot) return false;
+        ) {
+            return false;
+        }
+        if (leaf.version != 0 || leaf.parentNumber != sourceBlock) {
+            return false;
+        }
+        if (uint64(sourceBlock) < beefyClient.mmrStartBlock() || sourceBlock >= anchorBlock) {
+            return false;
+        }
+        if (anchorBlock != acceptedBlock || anchorRoot != acceptedRoot || anchorRoot == bytes32(0)) {
+            return false;
+        }
+        if (VaraBridgeMetadata.hash(snapshot) != leaf.parachainHeadsRoot) {
+            return false;
+        }
 
         bytes32 leafHash = keccak256(
             bytes.concat(

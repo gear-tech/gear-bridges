@@ -61,7 +61,7 @@ contract MessageQueue is
     mapping(uint256 blockNumber => bytes32 merkleRoot) private _blockNumbers;
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
-    // Appended after the legacy storage layout (slots 0–13).
+
     uint256 public beefyRootMinimum;
     mapping(uint256 blockNumber => uint256 timestamp) private _blockRootTimestamps;
 
@@ -92,7 +92,17 @@ contract MessageQueue is
         _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
     }
 
-    /// @dev Fresh BEEFY deployments validate the queue binding and pin the authenticated source floor.
+    /**
+     * @dev Initializes the MessageQueue contract with the Verifier address.
+     *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
+     *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
+     * @dev Fresh BEEFY deployments validate the MessageQueue binding and pin the authenticated source floor.
+     * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
+     * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
+     * @param emergencyStopAdmin_ The address of EOA that will control `submitMerkleRoot` and `processMessage`
+     *                            in case of an emergency stop.
+     * @param verifier_ The address of the Verifier contract that will verify merkle roots.
+     */
     function initializeBeefy(
         IGovernance governanceAdmin_,
         IGovernance governancePauser_,
@@ -335,7 +345,9 @@ contract MessageQueue is
      * @dev Reverts if block number is too far from max block number with `BlockNumberTooFar` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
-        if (merkleRoot == bytes32(0)) revert InvalidMerkleRoot();
+        if (merkleRoot == bytes32(0)) {
+            revert InvalidMerkleRoot();
+        }
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
 
         if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
@@ -412,38 +424,60 @@ contract MessageQueue is
 
     function _effectiveRootTimestamp(uint256 blockNumber) private view returns (uint256 timestamp) {
         bytes32 root = _blockNumbers[blockNumber];
-        if (root == bytes32(0)) return 0;
+        if (root == bytes32(0)) {
+            return 0;
+        }
         timestamp = _blockRootTimestamps[blockNumber];
         if (timestamp == 0 && (beefyRootMinimum == 0 || blockNumber < beefyRootMinimum)) {
             timestamp = _merkleRootTimestamps[root];
         }
-        if (timestamp == 0) revert MerkleRootTimestampNotFound(blockNumber);
+        if (timestamp == 0) {
+            revert MerkleRootTimestampNotFound(blockNumber);
+        }
     }
 
     function _checkSubmissionBlock(uint256 sourceBlock, bool registered, bool emptyProgress) private view {
-        if (sourceBlock > type(uint32).max) revert BlockNumberOverflow(sourceBlock);
-        if (sourceBlock == 0) revert InvalidSourceBlock();
-        if (sourceBlock < beefyRootMinimum) revert BlockNumberBelowMinimum(sourceBlock, beefyRootMinimum);
+        if (sourceBlock > type(uint32).max) {
+            revert BlockNumberOverflow(sourceBlock);
+        }
+        if (sourceBlock == 0) {
+            revert InvalidSourceBlock();
+        }
+        if (sourceBlock < beefyRootMinimum) {
+            revert BlockNumberBelowMinimum(sourceBlock, beefyRootMinimum);
+        }
         if (_genesisBlock == 0) {
-            if (emptyProgress) revert EmptyQueueNotInitialized();
+            if (emptyProgress) {
+                revert EmptyQueueNotInitialized();
+            }
             return;
         }
-        if (sourceBlock < _genesisBlock) revert BlockNumberBeforeGenesis(sourceBlock, _genesisBlock);
+        if (sourceBlock < _genesisBlock) {
+            revert BlockNumberBeforeGenesis(sourceBlock, _genesisBlock);
+        }
         // Registered roots remain challengeable; no publisher can backfill new roots behind the frontier.
         if (!registered && sourceBlock <= _maxBlockNumber) {
-            if (emptyProgress) revert EmptyQueueProgressNotForward();
+            if (emptyProgress) {
+                revert EmptyQueueProgressNotForward();
+            }
             revert MerkleRootProgressNotForward();
         }
         uint256 maxAllowedBlockNumber = _maxBlockNumber + MAX_BLOCK_DISTANCE;
-        if (sourceBlock > maxAllowedBlockNumber) revert BlockNumberTooFar(sourceBlock, maxAllowedBlockNumber);
+        if (sourceBlock > maxAllowedBlockNumber) {
+            revert BlockNumberTooFar(sourceBlock, maxAllowedBlockNumber);
+        }
     }
 
     /// @dev Move the authenticated empty queue height without creating a root or changing any maturity timestamp.
     function submitEmptyQueueProgress(uint256 sourceBlock, bytes calldata authenticatedSnapshotProof) external {
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
 
-        if (isChallengingRoot() && !isFromEmergencyStopAdmin) revert ChallengeRoot();
-        if (_emergencyStop && !isFromEmergencyStopAdmin) revert EmergencyStop();
+        if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
+            revert ChallengeRoot();
+        }
+        if (_emergencyStop && !isFromEmergencyStopAdmin) {
+            revert EmergencyStop();
+        }
         _checkSubmissionBlock(sourceBlock, false, true);
 
         bool valid;
@@ -453,7 +487,9 @@ contract MessageQueue is
         ) {
             valid = verified;
         } catch {}
-        if (!valid) revert InvalidEmptyQueueProgressProof();
+        if (!valid) {
+            revert InvalidEmptyQueueProgressProof();
+        }
 
         _maxBlockNumber = sourceBlock;
         emit EmptyQueueProgress(sourceBlock);
@@ -592,13 +628,17 @@ contract MessageQueue is
     }
 
     function _validateBeefyVerifier() private view returns (uint64) {
-        if (address(_verifier).code.length == 0) revert InvalidBeefyVerifier();
+        if (address(_verifier).code.length == 0) {
+            revert InvalidBeefyVerifier();
+        }
         VaraQueueRootVerifier rootVerifier = VaraQueueRootVerifier(address(_verifier));
         if (rootVerifier.messageQueue() != address(this) || rootVerifier.destinationChainId() != block.chainid) {
             revert InvalidBeefyVerifier();
         }
         address clientAddress = address(rootVerifier.beefyClient());
-        if (clientAddress.code.length == 0) revert InvalidBeefyVerifier();
+        if (clientAddress.code.length == 0) {
+            revert InvalidBeefyVerifier();
+        }
         BeefyClient client = BeefyClient(clientAddress);
         if (
             client.sourceDomain() == bytes32(0) || client.destinationQueue() != address(this)
@@ -615,7 +655,9 @@ contract MessageQueue is
                             address(this)
                         )
                     )
-        ) revert InvalidBeefyVerifier();
+        ) {
+            revert InvalidBeefyVerifier();
+        }
         return client.mmrStartBlock();
     }
 }

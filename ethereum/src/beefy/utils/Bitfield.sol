@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
-pragma solidity 0.8.37;
+pragma solidity ^0.8.37;
 
 import {Bits} from "./Bits.sol";
 
@@ -81,7 +81,9 @@ library Bitfield {
         bitfield = new uint256[](containerLength(length));
 
         for (uint256 i = 0; i < bitsToSet.length; i++) {
-            if (bitsToSet[i] >= length || isSet(bitfield, bitsToSet[i])) revert InvalidBitfieldIndex();
+            if (bitsToSet[i] >= length || isSet(bitfield, bitsToSet[i])) {
+                revert InvalidBitfieldIndex();
+            }
             set(bitfield, bitsToSet[i]);
         }
 
@@ -193,7 +195,9 @@ library Bitfield {
             return 0;
         }
 
-        assembly {
+        // forge-lint: disable-next-item(inline-assembly)
+        assembly ("memory-safe") {
+            /* reviewed: ... */
             mstore(0x00, seed)
             mstore(0x20, iteration)
             index := mod(keccak256(0x00, 0x40), length)

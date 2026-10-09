@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
-pragma solidity 0.8.37;
+pragma solidity ^0.8.37;
 
 library MMRProof {
     error ProofSizeExceeded();
@@ -34,7 +34,9 @@ library MMRProof {
     }
 
     function hashPairs(bytes32 x, bytes32 y, uint256 order) internal pure returns (bytes32 value) {
-        assembly {
+        // forge-lint: disable-next-item(inline-assembly)
+        assembly ("memory-safe") {
+            /* reviewed: ... */
             switch order
             case 0 {
                 mstore(0x00, x)

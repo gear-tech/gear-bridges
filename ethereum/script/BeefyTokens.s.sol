@@ -7,7 +7,9 @@ import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {Base, DeploymentArguments, Overrides} from "test/Base.sol";
 
-/// @dev Fresh, queue-bound token bridge. Never points at the message-only deployment.
+/**
+ * @dev Fresh, queue-bound token bridge. Never points at the message-only deployment.
+ */
 contract BeefyTokens is Script, Base {
     BeefyClient internal beefyClient;
 
@@ -122,7 +124,9 @@ contract BeefyTokens is Script, Base {
         override
         returns (IVerifier)
     {
-        if (isScript) return new VaraQueueRootVerifier(beefyClient, queue, chainId);
+        if (isScript) {
+            return new VaraQueueRootVerifier(beefyClient, queue, chainId);
+        }
         return super._deployVerifier(isTest, isScript, chainId, queue);
     }
 }

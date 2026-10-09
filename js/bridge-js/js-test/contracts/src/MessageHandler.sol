@@ -35,20 +35,36 @@ contract MessageHandler is IMessageHandler {
     }
 
     function sendMessage(bytes32 applicationId, bytes calldata payload) external {
-        if (msg.sender != ethereumSender) revert NotSender();
-        if (applicationId == bytes32(0) || payload.length > 1024) revert InvalidPayload();
-        if (_sent[applicationId]) revert AlreadySent(applicationId);
+        if (msg.sender != ethereumSender) {
+            revert NotSender();
+        }
+        if (applicationId == bytes32(0) || payload.length > 1024) {
+            revert InvalidPayload();
+        }
+        if (_sent[applicationId]) {
+            revert AlreadySent(applicationId);
+        }
         _sent[applicationId] = true;
         emit MessageRequested(applicationId, msg.sender, expectedVaraSource, payload);
     }
 
     function handleMessage(bytes32 source, bytes calldata payload) external {
-        if (msg.sender != queue) revert NotQueue();
-        if (source != expectedVaraSource) revert WrongSource();
-        if (payload.length < 32 || payload.length > 1056) revert InvalidPayload();
+        if (msg.sender != queue) {
+            revert NotQueue();
+        }
+        if (source != expectedVaraSource) {
+            revert WrongSource();
+        }
+        if (payload.length < 32 || payload.length > 1056) {
+            revert InvalidPayload();
+        }
         bytes32 applicationId = bytes32(payload[:32]);
-        if (applicationId == bytes32(0)) revert InvalidPayload();
-        if (_received[applicationId]) revert AlreadyReceived(applicationId);
+        if (applicationId == bytes32(0)) {
+            revert InvalidPayload();
+        }
+        if (_received[applicationId]) {
+            revert AlreadyReceived(applicationId);
+        }
         _received[applicationId] = true;
         _payloads[applicationId] = payload[32:];
         emit MessageHandled(source, applicationId, payload[32:]);

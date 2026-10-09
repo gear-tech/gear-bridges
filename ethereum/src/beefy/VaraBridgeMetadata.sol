@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity 0.8.37;
+pragma solidity ^0.8.37;
 
 import {ScaleCodec} from "./utils/ScaleCodec.sol";
 

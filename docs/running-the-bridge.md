@@ -383,6 +383,8 @@ Build and qualify the selected artifacts first. `seal-artifacts.py` does not run
 
 `sourceFiles` must cover the copied operations tree, Foundry configuration files and every copied Solidity `out/` file, including build-info and dynamically loaded artifacts. Sealing checks destination copies against those original qualification digests and originally parsed verification bytes before publishing `bundle.json`. A concurrent rebuild or edit must fail sealing, not become a newly blessed bundle hash. Keep any failed output for diagnosis; it is not deployable without a completed manifest.
 
+Keep `dynamic_test_linking = false` for the qualified Solidity graph. Foundry otherwise adds memory-only `foundry-pp/DeployHelper*.sol` inputs that cannot pass the standalone sealer's original-source authentication. This does not disable Solidity optimization or the memory-safe assembly annotations.
+
 Fresh simulation, checking and broadcast also require the local Foundry configuration (including qualified file absence), sole build-info and all runtime-loaded contract artifacts to match the sealed bundle. This includes the dynamically loaded WrappedVara implementation. Those hashes are part of the simulation and deployment-intent identity; an older simulation needs a fresh dry-run. Drift after a durable intent holds that original attempt for reconciliation, not another send.
 
 ~~~sh

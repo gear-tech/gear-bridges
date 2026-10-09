@@ -12,6 +12,8 @@ solc = "0.8.37"
 optimizer = true
 extra_output_files = ["irOptimized"]
 via_ir = true
+# Sealed deployments require physical sources, not memory-only foundry-pp helpers.
+dynamic_test_linking = false
 bytecode_hash = "none"
 cbor_metadata = false
 revert_strings = "strip"

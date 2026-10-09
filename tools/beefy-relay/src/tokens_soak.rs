@@ -3588,6 +3588,10 @@ async fn run_roundtrip(
     };
     let amount_evm = EthU256::from(amount);
     let amount_gear = GearU256::from(amount);
+    // Start independent Gear-origin exports before waiting for Ethereum-origin locks.
+    // Actors advance both lanes; signing and journal updates remain serialized.
+    let gear_outbound =
+        submit_outbound_leg(ctx, journal, path, window, fee_mode, amount, true, deadline).await?;
     let mut inbound = run_inbound_leg(
         ctx,
         journal,
@@ -3604,9 +3608,12 @@ async fn run_roundtrip(
         ctx.snapshot_at(Some(&saved)).await?
     } else {
         ensure!(
-            !ctx.tokens.iter().any(|token| journal
-                .actions
-                .contains_key(&format!("{window}/{}-gear-burn", token.symbol))),
+            !ctx.tokens
+                .iter()
+                .filter(|token| !token.gear_origin)
+                .any(|token| journal
+                    .actions
+                    .contains_key(&format!("{window}/{}-gear-burn", token.symbol))),
             "burn intent exists without original mint checkpoint; HOLD"
         );
         ctx.snapshot().await?
@@ -3617,15 +3624,139 @@ async fn run_roundtrip(
         record_action_milestone(journal, id, "mintDeltaObservedAtMs", mint_observed_at)?;
     }
     record_balance_checkpoint(journal, path, window, "afterMint", &after_mint)?;
+
+    settle_outbound_leg(
+        ctx,
+        journal,
+        path,
+        &gear_outbound,
+        amount,
+        base.evm_height,
+        deadline,
+    )
+    .await?;
+    if ctx.schedule.handovers == 2 {
+        let after_export =
+            if let Some(saved) = journal.windows[window]["stages"].get("afterGearExport") {
+                ctx.snapshot_at(Some(&SnapshotSet::from_json(saved)?))
+                    .await?
+            } else {
+                ensure!(
+                    !ctx.tokens
+                        .iter()
+                        .filter(|token| token.gear_origin)
+                        .any(|token| journal
+                            .actions
+                            .contains_key(&format!("{window}/{}-evm-lock", token.symbol))),
+                    "Gear return intent lacks original export checkpoint; HOLD"
+                );
+                ctx.snapshot().await?
+            };
+        verify_gear_export_delta(&base, &after_export, &ctx.tokens, amount)?;
+        verify_mint_delta(&base, &after_export, &ctx.tokens, amount_evm, amount_gear)?;
+        record_balance_checkpoint(journal, path, window, "afterGearExport", &after_export)?;
+    }
+    // All first-leg balances are stable during both live rejection probes.
     if window == "preflight-normal" {
         run_preflight_receipt_probes(ctx, journal, path, deadline).await?;
     }
+    let ethereum_outbound = submit_outbound_leg(
+        ctx, journal, path, window, fee_mode, amount, false, deadline,
+    )
+    .await?;
+    // Return Gear-origin assets while the Ethereum-origin releases finalize independently.
+    if ctx.schedule.handovers == 2 {
+        inbound.extend(
+            run_inbound_leg(ctx, journal, path, window, amount, false, true, deadline).await?,
+        );
+        let returned_at = now_ms()?;
+        for (id, _, _) in inbound.iter().filter(|(id, _, _)| {
+            ctx.tokens.iter().any(|token| {
+                token.gear_origin && id == &format!("{window}/{}-evm-lock", token.symbol)
+            })
+        }) {
+            record_action_milestone(journal, id, "mintDeltaObservedAtMs", returned_at)?;
+        }
+    }
+    settle_outbound_leg(
+        ctx,
+        journal,
+        path,
+        &ethereum_outbound,
+        amount,
+        base.evm_height,
+        deadline,
+    )
+    .await?;
+    let final_state = if let Some(saved) = journal.windows[window]["stages"].get("finalizedReturn")
+    {
+        let saved = SnapshotSet::from_json(saved)?;
+        ctx.snapshot_at(Some(&saved)).await?
+    } else {
+        ctx.snapshot().await?
+    };
+    verify_settlement_delta(&base, &final_state, &ctx.tokens, amount)?;
+    record_balance_checkpoint(journal, path, window, "finalizedReturn", &final_state)?;
+    wait_inbound_processed(ctx, journal, path, &inbound, deadline).await?;
+    let record = journal
+        .windows
+        .get_mut(window)
+        .context("window journal missing")?;
+    record["assets"] = json!(ctx
+        .tokens
+        .iter()
+        .map(|token| {
+            let lock = journal
+                .actions
+                .get(&format!("{window}/{}-evm-lock", token.symbol));
+            let burn = journal
+                .actions
+                .get(&format!("{window}/{}-gear-burn", token.symbol));
+            let paid = journal
+                .actions
+                .get(&format!("{window}/{}-paid", token.symbol));
+            (
+                token.symbol,
+                json!({"status":"passed","amountRaw":token.raw_amount(amount).expect("validated raw amount"),"origin":if token.gear_origin {"Gear"}else{"Ethereum"},"native":token.native_amount.is_some(),
+            "lock":lock.map(|x|x.evidence.clone()).unwrap_or(Value::Null),
+            "burn":burn.map(|x|x.evidence.clone()).unwrap_or(Value::Null),
+            "paid":paid.map(|x|x.evidence.clone()).unwrap_or(Value::Null)}),
+            )
+        })
+        .collect::<BTreeMap<_, _>>());
+    record["completedAtMs"] = json!(now_ms()?);
+    save_journal(path, journal)?;
+    Ok(())
+}
 
+#[allow(clippy::too_many_arguments)]
+async fn submit_outbound_leg(
+    ctx: &Context,
+    journal: &mut Journal,
+    path: &Path,
+    window: &str,
+    fee_mode: FeeMode,
+    amount: u64,
+    gear_origin: bool,
+    deadline: Instant,
+) -> Result<Vec<(String, Token, OutboundRequest)>> {
+    if !ctx
+        .tokens
+        .iter()
+        .any(|token| token.gear_origin == gear_origin)
+    {
+        return Ok(Vec::new());
+    }
+    let amount_gear = GearU256::from(amount);
     let finalized_gear = ctx.source.api.latest_finalized_block().await?;
     let finalized_gear_number = ctx.source.api.block_hash_to_number(finalized_gear).await?;
     let mut vft = Vft::new(ctx.remoting.clone());
     let mut approval_actions = Vec::new();
-    for token in &ctx.tokens {
+    for token in ctx
+        .tokens
+        .iter()
+        .filter(|token| token.gear_origin == gear_origin)
+    {
         let amount_gear = GearU256::from(token.raw_amount(amount)?);
         if journal
             .actions
@@ -3768,7 +3899,11 @@ async fn run_roundtrip(
     let manager_config = manager.get_config().recv(ctx.manager_id).await?;
     let request_gas = ctx.gear_api.block_gas_limit()?;
     let mut request_actions = Vec::new();
-    for token in &ctx.tokens {
+    for token in ctx
+        .tokens
+        .iter()
+        .filter(|token| token.gear_origin == gear_origin)
+    {
         let amount_gear = GearU256::from(token.raw_amount(amount)?);
         let id = format!("{window}/{}-gear-burn", token.symbol);
         let start = match journal.actions.get(&id) {
@@ -4002,9 +4137,21 @@ async fn run_roundtrip(
     }
     save_journal(path, journal)?;
 
+    Ok(outbound)
+}
+
+async fn settle_outbound_leg(
+    ctx: &Context,
+    journal: &mut Journal,
+    path: &Path,
+    outbound: &[(String, Token, OutboundRequest)],
+    amount: u64,
+    scan_from: u64,
+    deadline: Instant,
+) -> Result<()> {
     let mut roots =
         BTreeMap::<(u32, [u8; 32]), (QueueRoot, Vec<(String, String, OutboundRequest)>)>::new();
-    for (id, token, request) in &outbound {
+    for (id, token, request) in outbound {
         let root = find_covering_root(ctx, request, deadline).await?;
         roots
             .entry((root.source_block, root.root))
@@ -4023,7 +4170,7 @@ async fn run_roundtrip(
     while let Some((root, messages, result)) = root_futures.next().await {
         let mut actor_evidence = result?;
         // A recovered registration may be observed after its release already finalized.
-        actor_evidence["ethScanStartBlock"] = json!(base.evm_height);
+        actor_evidence["ethScanStartBlock"] = json!(scan_from);
         let root_id = format!("{}:{}", root.source_block, hex::encode(root.root));
         for (action_id, symbol, request) in messages {
             let mut evidence = actor_evidence.clone();
@@ -4054,7 +4201,7 @@ async fn run_roundtrip(
     }
 
     let mut release_futures = FuturesUnordered::new();
-    for (id, token, request) in &outbound {
+    for (id, token, request) in outbound {
         let action = &journal.actions[id];
         let publication = action
             .evidence
@@ -4142,75 +4289,6 @@ async fn run_roundtrip(
             .status = "released".into();
         save_journal(path, journal)?;
     }
-    if ctx.schedule.handovers == 2 {
-        let after_export =
-            if let Some(saved) = journal.windows[window]["stages"].get("afterGearExport") {
-                ctx.snapshot_at(Some(&SnapshotSet::from_json(saved)?))
-                    .await?
-            } else {
-                ensure!(
-                    !ctx.tokens
-                        .iter()
-                        .filter(|token| token.gear_origin)
-                        .any(|token| journal
-                            .actions
-                            .contains_key(&format!("{window}/{}-evm-lock", token.symbol))),
-                    "Gear return intent lacks original export checkpoint; HOLD"
-                );
-                ctx.snapshot().await?
-            };
-        verify_gear_export_delta(&base, &after_export, &ctx.tokens, amount)?;
-        record_balance_checkpoint(journal, path, window, "afterGearExport", &after_export)?;
-        inbound.extend(
-            run_inbound_leg(ctx, journal, path, window, amount, false, true, deadline).await?,
-        );
-        let returned_at = now_ms()?;
-        for (id, _, _) in inbound.iter().filter(|(id, _, _)| {
-            ctx.tokens.iter().any(|token| {
-                token.gear_origin && id == &format!("{window}/{}-evm-lock", token.symbol)
-            })
-        }) {
-            record_action_milestone(journal, id, "mintDeltaObservedAtMs", returned_at)?;
-        }
-    }
-    let final_state = if let Some(saved) = journal.windows[window]["stages"].get("finalizedReturn")
-    {
-        let saved = SnapshotSet::from_json(saved)?;
-        ctx.snapshot_at(Some(&saved)).await?
-    } else {
-        ctx.snapshot().await?
-    };
-    verify_settlement_delta(&base, &final_state, &ctx.tokens, amount)?;
-    record_balance_checkpoint(journal, path, window, "finalizedReturn", &final_state)?;
-    wait_inbound_processed(ctx, journal, path, &inbound, deadline).await?;
-    let record = journal
-        .windows
-        .get_mut(window)
-        .context("window journal missing")?;
-    record["assets"] = json!(ctx
-        .tokens
-        .iter()
-        .map(|token| {
-            let lock = journal
-                .actions
-                .get(&format!("{window}/{}-evm-lock", token.symbol));
-            let burn = journal
-                .actions
-                .get(&format!("{window}/{}-gear-burn", token.symbol));
-            let paid = journal
-                .actions
-                .get(&format!("{window}/{}-paid", token.symbol));
-            (
-                token.symbol,
-                json!({"status":"passed","amountRaw":token.raw_amount(amount).expect("validated raw amount"),"origin":if token.gear_origin {"Gear"}else{"Ethereum"},"native":token.native_amount.is_some(),
-            "lock":lock.map(|x|x.evidence.clone()).unwrap_or(Value::Null),
-            "burn":burn.map(|x|x.evidence.clone()).unwrap_or(Value::Null),
-            "paid":paid.map(|x|x.evidence.clone()).unwrap_or(Value::Null)}),
-            )
-        })
-        .collect::<BTreeMap<_, _>>());
-    record["completedAtMs"] = json!(now_ms()?);
-    save_journal(path, journal)?;
     Ok(())
 }
 
@@ -4284,14 +4362,18 @@ fn ensure_preflight_probe_boundary(journal: &Journal) -> Result<()> {
             .windows
             .get("preflight-normal")
             .is_some_and(|window| window["status"] == "passed")
-        || journal
-            .actions
-            .keys()
-            .any(|id| id.starts_with("preflight-normal/") && id.ends_with("-gear-burn"))
+        || journal.actions.keys().any(|id| {
+            id.strip_prefix("preflight-normal/")
+                .and_then(|id| {
+                    id.strip_suffix("-gear-burn")
+                        .or_else(|| id.strip_suffix("-vft-allowance"))
+                })
+                .is_some_and(|symbol| ["USDC", "USDT", "WETH", "WBTC"].contains(&symbol))
+        })
     {
         ensure!(
             receipt_probes_completed(journal)?,
-            "normal preflight has no pre-burn live receipt probes; HOLD"
+            "Ethereum-origin approval or burn lacks live receipt probes; HOLD"
         );
     }
     Ok(())
@@ -8376,7 +8458,7 @@ fn verify_mint_delta(
     evm_amount: EthU256,
     gear_amount: GearU256,
 ) -> Result<()> {
-    for token in tokens {
+    for token in tokens.iter().filter(|token| !token.gear_origin) {
         let before = base
             .assets
             .get(token.symbol)
@@ -8385,13 +8467,6 @@ fn verify_mint_delta(
             .assets
             .get(token.symbol)
             .context("mint asset missing")?;
-        if token.gear_origin {
-            ensure!(
-                before == minted,
-                "Gear-origin inventory changed before its first Gear-to-Ethereum leg; HOLD"
-            );
-            continue;
-        }
         ensure!(
             before.evm_user.checked_sub(evm_amount) == Some(minted.evm_user),
             "{} EVM user balance did not fall by exact lock amount",
@@ -8427,7 +8502,7 @@ fn verify_gear_export_delta(
     tokens: &[Token],
     amount: u64,
 ) -> Result<()> {
-    for token in tokens {
+    for token in tokens.iter().filter(|token| token.gear_origin) {
         let before = base
             .assets
             .get(token.symbol)
@@ -8436,13 +8511,6 @@ fn verify_gear_export_delta(
             .assets
             .get(token.symbol)
             .context("export asset missing")?;
-        if !token.gear_origin {
-            ensure!(
-                before == exported,
-                "Ethereum-origin roundtrip changed its original baseline"
-            );
-            continue;
-        }
         let raw = token.raw_amount(amount)?;
         ensure!(
             before.evm_user.checked_add(EthU256::from(raw)) == Some(exported.evm_user)
@@ -9939,6 +10007,22 @@ mod tests {
             state.gear_user -= GearU256::from(raw);
             state.gear_escrow = Some(GearU256::from(raw));
         }
+        // Opposite-origin first legs can settle while the other lane is still in flight.
+        for token in tokens.iter().filter(|token| !token.gear_origin) {
+            let state = exported.assets.get_mut(token.symbol).unwrap();
+            state.evm_user -= EthU256::from(1);
+            state.evm_escrow += EthU256::from(1);
+            state.gear_user += GearU256::from(1);
+            state.gear_supply += GearU256::from(1);
+        }
+        verify_mint_delta(
+            &baseline,
+            &exported,
+            &tokens,
+            EthU256::from(1),
+            GearU256::from(1),
+        )?;
+        assert!(verify_settlement_delta(&baseline, &exported, &tokens, 1).is_err());
         verify_gear_export_delta(&baseline, &exported, &tokens, 1)?;
         let mut wrong = SnapshotSet::from_json(&exported.to_json())?;
         wrong.assets.get_mut("WTVARA").unwrap().gear_supply -= GearU256::from(1);
@@ -10366,6 +10450,25 @@ mod tests {
                 "{state}: missing live receipt probes must HOLD before campaign operations"
             );
         }
+        let directory = tempfile::tempdir().unwrap();
+        let mut overlapping = test_journal();
+        let path = directory.path().join("campaign.json");
+        prepare_gear_action(
+            &mut overlapping,
+            &path,
+            "preflight-normal/GOT-gear-burn",
+            json!({"kind":"vft-manager-request"}),
+        )
+        .unwrap();
+        assert!(ensure_preflight_probe_boundary(&overlapping).is_ok());
+        prepare_gear_action(
+            &mut overlapping,
+            &path,
+            "preflight-normal/USDT-vft-allowance",
+            json!({"kind":"vft-approve"}),
+        )
+        .unwrap();
+        assert!(ensure_preflight_probe_boundary(&overlapping).is_err());
         let tokens: Vec<_> = ["USDC", "USDT", "WETH", "WBTC"]
             .into_iter()
             .map(|symbol| Token {

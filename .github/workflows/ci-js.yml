@@ -86,6 +86,9 @@ jobs:
       - name: 'Install dependencies'
         run: yarn workspaces focus @gear-js/bridge gear-bridges
 
+      - name: Read-only RPC gateway boundary checks
+        run: node tools/beefy-relay/ops/test_readonly_rpc_gateway.mjs
+
       - name: 'Build @gear-js/bridge lib'
         run: yarn build:bridge-js
 

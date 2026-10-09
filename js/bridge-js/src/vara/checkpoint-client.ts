@@ -1,4 +1,4 @@
-import { GearApi, BaseGearProgram } from '@gear-js/api';
+import { GearApi } from '@gear-js/api';
 import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
 import { H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 import { StatusCb } from '../util';
@@ -31,11 +31,10 @@ export class CheckpointClient {
   public readonly serviceCheckpointFor: ServiceCheckpointFor;
   public readonly serviceSyncUpdate: ServiceSyncUpdate;
   public readonly serviceState: ServiceState;
-  private _program: BaseGearProgram;
 
   constructor(
     public api: GearApi,
-    programId: `0x${string}`,
+    private readonly _programId: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
@@ -48,7 +47,6 @@ export class CheckpointClient {
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
-    this._program = new BaseGearProgram(programId, api);
 
     this.serviceCheckpointFor = new ServiceCheckpointFor(this);
     this.serviceState = new ServiceState(this);
@@ -56,8 +54,7 @@ export class CheckpointClient {
   }
 
   public get programId(): `0x${string}` {
-    if (!this._program) throw new Error(`Program ID is not set`);
-    return this._program.id;
+    return this._programId;
   }
 }
 

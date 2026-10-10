@@ -566,7 +566,7 @@ impl TransactionManager {
                 .initial_response
                 .get_or_insert_with(|| evidence.clone());
         }
-        if let Some(signed) = signed_submission.clone() {
+        if let Some(signed) = signed_submission {
             tx.receipt
                 .as_mut()
                 .expect("receipt was validated above")
@@ -635,21 +635,12 @@ impl TransactionManager {
                 self.transactions_timestamp.write().await.remove(&tx_uuid);
             }
             MessageStatus::Failure(message) => {
-                if let Some(signed) = tx
-                    .receipt
-                    .as_mut()
-                    .expect("receipt was validated above")
-                    .signed_submission
-                    .take()
-                {
-                    tx.receipt
-                        .as_mut()
-                        .expect("receipt was validated above")
-                        .submission_attempts
-                        .push(SubmissionAttempt {
-                            signed_submission: signed,
-                            response: submission,
-                        });
+                let receipt = tx.receipt.as_mut().expect("receipt was validated above");
+                if let Some(signed) = receipt.signed_submission.take() {
+                    receipt.submission_attempts.push(SubmissionAttempt {
+                        signed_submission: signed,
+                        response: submission,
+                    });
                 }
                 tx.status = TxStatus::Failed {
                     diagnostic: message.clone(),

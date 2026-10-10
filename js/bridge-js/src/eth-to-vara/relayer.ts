@@ -321,8 +321,7 @@ export function validateFinalizedNativeReconciliationReply(params: FinalizedNati
 
 async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVaraReplyParams, reconciliationRegistry?: TypeRegistry): Promise<RelayResult> {
   const { gearApi: api, historicalProxyId, sender, msgId, blockHash, txHash, requestPayload, deadline } = params;
-  const proxy = new HistoricalProxyClient(api, historicalProxyId);
-  const registry = reconciliationRegistry ?? proxy.registry;
+  const registry = reconciliationRegistry ?? new HistoricalProxyClient(api, historicalProxyId).registry;
   const service = reconciliationRegistry ? 'VftManager' : 'HistoricalProxy', method = reconciliationRegistry ? 'ReconcileReceipt' : 'Redirect';
   const request = registry.createType(reconciliationRegistry ? '(String, String, u64, u64)' : '(String, String, u64, Vec<u8>, [u8;32], Vec<u8>)', requestPayload);
   if (request.toHex() !== requestPayload.toLowerCase() || request[0].toString() !== service || request[1].toString() !== method) {
@@ -331,7 +330,6 @@ async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVar
   const originalBlock = await api.blocks.get(blockHash);
   let next = originalBlock.block.header.number.toBigInt();
   let previousHash: HexString | undefined;
-  let requestAuthenticated = false;
 
   return new Promise<RelayResult>((resolve, reject) => {
     let finished = false;
@@ -358,7 +356,7 @@ async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVar
           throw new Error('Finalized source history changed or has a gap');
         }
         const events = await api.blocks.getEvents(hash);
-        if (!requestAuthenticated) {
+        if (previousHash === undefined) {
           if (hash !== blockHash.toLowerCase()) throw new Error('Original request inclusion is not canonical finalized history');
           const extrinsics = originalBlock.block.extrinsics;
           const indexes = extrinsics.flatMap((tx, index) => tx.hash.toHex() === txHash.toLowerCase() ? [index] : []);
@@ -381,7 +379,6 @@ async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVar
               !queuedEvent.data[2].eq(historicalProxyId)) {
             throw new Error('Original MessageQueued sender or proxy mismatch');
           }
-          requestAuthenticated = true;
         }
         const replies = events.flatMap(({ event }) => {
           if (!api.events.gear.UserMessageSent.is(event)) return [];

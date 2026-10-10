@@ -4,24 +4,8 @@ use sails_rs::{calls::ActionIo, prelude::*};
 use vft_client::{vft::io::TransferFrom, vft_admin::io::Mint};
 use vft_vara_client::{
     native_escrow::io::{RedeemEscrow, Redemption as GetRedemption},
-    PayoutStatus, Redemption,
+    PayoutStatus,
 };
-
-trait Reply {
-    fn check(&self) -> Result<(), Error>;
-}
-
-impl Reply for () {
-    fn check(&self) -> Result<(), Error> {
-        Ok(())
-    }
-}
-
-impl Reply for bool {
-    fn check(&self) -> Result<(), Error> {
-        self.then_some(()).ok_or(Error::InvalidReply)
-    }
-}
 
 trait Params {
     fn receiver(&self) -> ActorId;
@@ -81,7 +65,6 @@ async fn send<Action>(
 ) -> Result<(), Error>
 where
     Action: ActionIo,
-    Action::Reply: Reply,
     Action::Params: Params,
 {
     let payload = Action::encode_call(params);
@@ -140,7 +123,7 @@ where
     awaited.map(|_| ()).and_then(|_| {
         let key = (slot, transaction_index);
         match super::reply_statuses_mut().remove(&key) {
-            Some(status) => status.clone(),
+            Some(status) => status,
             None => unreachable!("Status always set if a VFT invocation was successful"),
         }
     })
@@ -169,8 +152,10 @@ pub fn handle_persistent_reply() {
         }
         let bytes = msg::load_bytes().map_err(|e| Error::GasForReplyTooLow(format!("{e:?}")))?;
         match data.action {
-            ChildAction::Mint => decode_complete::<Mint>(&bytes)?.check(),
-            ChildAction::Unlock => decode_complete::<TransferFrom>(&bytes)?.check(),
+            ChildAction::Mint => decode_complete::<Mint>(&bytes),
+            ChildAction::Unlock => decode_complete::<TransferFrom>(&bytes)?
+                .then_some(())
+                .ok_or(Error::InvalidReply),
             ChildAction::Native => {
                 let r = decode_complete::<RedeemEscrow>(&bytes)?;
                 if (r.from, r.to, r.amount) != (Syscall::program_id(), data.receiver, data.amount) {
@@ -321,11 +306,6 @@ impl Params for (H256, ActorId, ActorId, U256) {
         self.3
     }
 }
-impl Reply for Redemption {
-    fn check(&self) -> Result<(), Error> {
-        Err(Error::NativeSettlementPending)
-    }
-}
 
 pub(super) async fn redeem_native_log(
     key: (u64, u64),
@@ -457,6 +437,7 @@ fn emit_event(to: ActorId, from: H160, amount: U256, token: ActorId) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vft_vara_client::Redemption;
 
     #[test]
     fn complete_reply_decoding_preserves_unit_wire_and_rejects_trailing_native_state() {

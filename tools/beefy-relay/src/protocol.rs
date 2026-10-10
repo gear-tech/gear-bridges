@@ -846,12 +846,6 @@ fn abi_word(value: u64) -> Hash32 {
     word
 }
 
-fn abi_word_u32(value: u32) -> Hash32 {
-    let mut word = [0; 32];
-    word[28..].copy_from_slice(&value.to_be_bytes());
-    word
-}
-
 pub fn encode_queue_proof(
     snapshot: &QueueSnapshot,
     anchor_block: u64,
@@ -882,10 +876,10 @@ pub fn encode_queue_proof(
     out.extend_from_slice(&abi_word(anchor_block));
     out.extend_from_slice(&anchor_root);
     out.extend_from_slice(&abi_word(raw_leaf[0] as u64));
-    out.extend_from_slice(&abi_word_u32(leaf.parent_number_and_hash.0));
+    out.extend_from_slice(&abi_word(u64::from(leaf.parent_number_and_hash.0)));
     out.extend_from_slice(&leaf.parent_number_and_hash.1);
     out.extend_from_slice(&abi_word(leaf.beefy_next_authority_set.id));
-    out.extend_from_slice(&abi_word_u32(leaf.beefy_next_authority_set.len));
+    out.extend_from_slice(&abi_word(u64::from(leaf.beefy_next_authority_set.len)));
     out.extend_from_slice(&leaf.beefy_next_authority_set.keyset_commitment);
     out.extend_from_slice(&leaf.leaf_extra);
     out.extend_from_slice(&abi_word(17 * 32));

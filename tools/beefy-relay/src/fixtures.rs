@@ -299,7 +299,8 @@ fn build_signed_commitment(
         block_number: block,
         validator_set_id: 0,
     };
-    let digest = keccak256(&commitment.encode());
+    let commitment_bytes = commitment.encode();
+    let digest = keccak256(&commitment_bytes);
     let signatures: Vec<Option<sp_consensus_beefy::ecdsa_crypto::Signature>> = (1
         ..=validator_count)
         .map(|value| {
@@ -318,13 +319,8 @@ fn build_signed_commitment(
         commitment,
         signatures,
     };
-    let commitment_bytes = signed.commitment.encode();
     let versioned = VersionedFinalityProof::V1(signed).encode();
-    (
-        versioned,
-        commitment_bytes.clone(),
-        keccak256(&commitment_bytes),
-    )
+    (versioned, commitment_bytes, digest)
 }
 
 fn make_case(

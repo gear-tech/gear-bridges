@@ -827,10 +827,6 @@ pub async fn run(
                 journal.status != "passed",
                 "campaign is already terminally qualified"
             );
-            ensure!(
-                journal.status != "failed" || journal.t0_ms.is_some(),
-                "failed campaign cannot create a T0"
-            );
             run_campaign(&mut context, &mut journal, &journal_path).await
         }
     }
@@ -2746,7 +2742,7 @@ async fn prepare_campaign_allowances(
 
     let finalized_gear = ctx.source.api.latest_finalized_block().await?;
     let mut vft = Vft::new(ctx.remoting.clone());
-    let mut pending = Vec::new();
+    let mut all_approved = true;
     for token in &ctx.tokens {
         let allowance = vft
             .allowance(ctx.campaign_actor, ctx.manager_id)
@@ -2787,7 +2783,6 @@ async fn prepare_campaign_allowances(
                 decode_campaign_reply::<bool>(&reply, vft_client::vft::io::Approve::ROUTE)?,
                 "VFT approval rejected; HOLD"
             );
-            pending.push((token.symbol, true));
             continue;
         }
         if !prepare_gear_action(journal, path, &action_id, intent)? {
@@ -2797,13 +2792,9 @@ async fn prepare_campaign_allowances(
             .approve(ctx.manager_id, desired)
             .send_recv(token.peer)
             .await?;
-        pending.push((token.symbol, approved));
+        all_approved &= approved;
     }
-    let approvals: Vec<bool> = pending.into_iter().map(|(_, approved)| approved).collect();
-    ensure!(
-        approvals.into_iter().all(|approved| approved),
-        "Gear VFT allowance approval returned false"
-    );
+    ensure!(all_approved, "Gear VFT allowance approval returned false");
     let finalized_gear = ctx.source.api.latest_finalized_block().await?;
     for token in &ctx.tokens {
         let allowance = vft
@@ -3470,12 +3461,7 @@ async fn run_inbound_leg(
         .await?;
         lock_hashes.push((id, hash));
     }
-    let lock_action_hashes: Vec<_> = lock_hashes
-        .iter()
-        .map(|(id, hash)| (id.clone(), *hash))
-        .collect();
-    let lock_receipts =
-        wait_finalized_actions(ctx, journal, path, &lock_action_hashes, deadline).await?;
+    let lock_receipts = wait_finalized_actions(ctx, journal, path, &lock_hashes, deadline).await?;
     // Ordered approvals are audited after lock finality, not on its Beacon-proof critical path.
     wait_finalized_actions(ctx, journal, path, &lock_actions, deadline).await?;
     ensure_beacon_through_receipts(ctx, &lock_receipts, deadline).await?;
@@ -3773,10 +3759,6 @@ async fn submit_outbound_leg(
             .recv(token.peer)
             .await?;
         let id = format!("{window}/{}-vft-allowance", token.symbol);
-        let burn_id = format!("{window}/{}-gear-burn", token.symbol);
-        if journal.actions.contains_key(&burn_id) {
-            continue;
-        }
         let intent = json!({"kind":"vft-approve","peer":token.component,"amountRaw":token.raw_amount(amount)?});
         if allowance >= amount_gear {
             if let Some(action) = journal.actions.get_mut(&id) {

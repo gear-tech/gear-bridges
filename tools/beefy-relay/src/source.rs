@@ -359,10 +359,6 @@ impl Source {
             self.scanned_hash = self.api.block_number_to_hash(self.scanned_through).await?.0;
         }
         self.scan_path = Some(path.to_owned());
-        self.save_scan_journal()
-    }
-
-    fn save_scan_journal(&self) -> Result<()> {
         self.persist_scan_journal(None)
     }
 
@@ -509,15 +505,14 @@ impl Source {
             self.scanned_through = block;
             self.scanned_hash = hash.0;
             if self.pending.range(..=block).next().is_some() {
-                self.save_scan_journal()?;
+                self.persist_scan_journal(None)?;
                 return Ok(());
             }
             if block % 32 == 0 {
-                self.save_scan_journal()?;
+                self.persist_scan_journal(None)?;
             }
         }
-        self.save_scan_journal()?;
-        Ok(())
+        self.persist_scan_journal(None)
     }
     async fn queue_justification(&mut self, bytes: Vec<u8>) -> Result<()> {
         let signed =
@@ -770,7 +765,7 @@ impl Source {
             .checked_sub(self.mmr_start_block)
             .context("MMR source index underflow")?;
         ensure!(
-            proof.leaf_indices == vec![expected_index],
+            proof.leaf_indices == [expected_index],
             "MMR proof leaf index is not the source insertion"
         );
         ensure!(

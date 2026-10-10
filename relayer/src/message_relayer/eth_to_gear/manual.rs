@@ -23,10 +23,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use subxt::{
-    config::{substrate::BlakeTwo256, Hasher},
-    utils::AccountId32,
-};
+use subxt::utils::AccountId32;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 #[allow(clippy::too_many_arguments)]
@@ -242,8 +239,7 @@ async fn restore_manager(
                         && signed.receipt_key == receipt.receipt_key
                         && signed.payload_hash.parse::<H256>().ok() == Some(payload_hash)
                         && !signed.raw_extrinsic.is_empty()
-                        && signed.extrinsic_hash.parse::<H256>().ok()
-                            == Some(H256::from(BlakeTwo256.hash(&signed.raw_extrinsic).0)),
+                        && signed.raw_hash_matches(),
                     "HOLD: original manual signed submission identity or exact bytes changed"
                 );
             }
@@ -296,6 +292,7 @@ mod tests {
     use sails_rs::{calls::ActionIo, Encode};
     use serde::Deserialize;
     use std::io::Read;
+    use subxt::config::{substrate::BlakeTwo256, Hasher};
 
     fn original_receipt() -> (TxHashWithSlot, eth_events_electra_client::EthToVaraEvent) {
         use alloy_rlp::Encodable;

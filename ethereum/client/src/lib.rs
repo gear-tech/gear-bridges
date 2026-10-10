@@ -158,7 +158,6 @@ pub struct ContentMessageSubmissionError {
 pub struct SubmissionGuard {
     _guard: OwnedMutexGuard<()>,
     sender: Address,
-    lock: Arc<Mutex<()>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -695,7 +694,7 @@ async fn walk_ancestors(
     let mut ready = BTreeMap::new();
     let mut next_request = number;
     let mut local = VecDeque::new();
-    let mut chunk = Vec::with_capacity(512);
+    let mut chunk = Vec::with_capacity(archive.map_or(0, |_| 512));
     while number > target && started.elapsed() < MAX_PROOF_DURATION {
         if local.is_empty() {
             if let Some(archive) = archive {
@@ -765,14 +764,14 @@ async fn walk_ancestors(
             };
             let Some(block) = block else { break };
             // Persist chunks as work is authenticated, including unfinished gaps.
-            chunk.push(block.header.inner.clone());
-            if chunk.len() == 512 {
-                if let Some(archive) = archive {
+            if let Some(archive) = archive {
+                chunk.push(block.header.inner.clone());
+                if chunk.len() == 512 {
                     archive
                         .save(&chunk)
                         .map_err(|_| Error::FinalizedAncestryPending)?;
+                    chunk.clear();
                 }
-                chunk.clear();
             }
             block.header.inner
         };
@@ -1331,7 +1330,6 @@ impl EthApi {
         SubmissionGuard {
             _guard: self.submission_lock.clone().lock_owned().await,
             sender: self.public_key,
-            lock: self.submission_lock.clone(),
         }
     }
 
@@ -1386,7 +1384,9 @@ impl EthApi {
         proof: Vec<[u8; 32]>,
     ) -> Result<PreparedContentMessage, Error> {
         use alloy::eips::Encodable2718;
-        if guard.sender != self.public_key || !Arc::ptr_eq(&guard.lock, &self.submission_lock) {
+        if guard.sender != self.public_key
+            || !Arc::ptr_eq(OwnedMutexGuard::mutex(&guard._guard), &self.submission_lock)
+        {
             return Err(Error::InvalidPreparedTransaction(
                 "submission guard belongs to another account".into(),
             ));
@@ -1490,7 +1490,7 @@ impl EthApi {
         prepared: &PreparedContentMessage,
     ) -> Result<TxHash, Error> {
         if guard.sender != self.public_key
-            || !Arc::ptr_eq(&guard.lock, &self.submission_lock)
+            || !Arc::ptr_eq(OwnedMutexGuard::mutex(&guard._guard), &self.submission_lock)
             || prepared.sender != self.public_key
             || prepared.contract != Address::from(self.message_queue_address().0)
             || self.raw_provider().get_chain_id().await? != prepared.chain_id

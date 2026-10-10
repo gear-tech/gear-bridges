@@ -772,7 +772,6 @@ async fn promote_finality(
         .collect::<Vec<Result<_>>>()
         .await
     };
-    let mut changed = false;
     let mut last_finalized = None;
     for result in pending {
         let Some((index, block, hash, anchor, finalized, reincluded)) = result? else {
@@ -812,13 +811,10 @@ async fn promote_finality(
         entry["finalizedBlock"] = json!(finalized.finalized_block_number);
         entry["finalizedHash"] = json!(bytes(finalized_hash));
         last_finalized = Some(entry["block"].clone());
-        changed = true;
     }
     if let Some(block) = last_finalized {
         state["follower"]["lastSuccessfulUpdate"] = block.clone();
         state["follower"]["lastFinalizedUpdate"] = block;
-    }
-    if changed {
         save(output, state, Some(ethereum))?;
     }
     Ok(())

@@ -465,11 +465,6 @@ pub async fn submit_receipt(
                 .generation
                 .checked_add(1)
                 .ok_or(Error::ReceiptLeaseActive)?;
-            deposits = progress
-                .deposits
-                .iter()
-                .map(|p| p.deposit.clone())
-                .collect();
             let progress = receipt_progress_mut().get_mut(&key).unwrap();
             progress.generation = generation;
             progress.lease_until = lease_until;
@@ -511,7 +506,7 @@ pub async fn submit_receipt(
 
     let mut retryable_error = None;
     let mut ambiguous_error = None;
-    for deposit in deposits.iter().cloned() {
+    for deposit in &deposits {
         if !owns_generation(key, generation) {
             return Err(Error::ReceiptLeaseActive);
         }
@@ -546,14 +541,12 @@ pub async fn submit_receipt(
         }
         let result = match deposit.supply {
             TokenSupply::Ethereum => {
-                token_operations::mint_log(key, &deposit, service.config()).await
+                token_operations::mint_log(key, deposit, service.config()).await
             }
             TokenSupply::Gear if deposit.native => {
-                token_operations::redeem_native_log(key, &deposit, service.config()).await
+                token_operations::redeem_native_log(key, deposit, service.config()).await
             }
-            TokenSupply::Gear => {
-                token_operations::unlock_log(key, &deposit, service.config()).await
-            }
+            TokenSupply::Gear => token_operations::unlock_log(key, deposit, service.config()).await,
         };
         if !owns_generation(key, generation) {
             return Err(Error::ReceiptLeaseActive);
@@ -571,11 +564,7 @@ pub async fn submit_receipt(
                 Some(DepositStatus::NativeQueued) => {
                     ambiguous_error.get_or_insert(error.clone());
                 }
-                Some(DepositStatus::InFlight) => {
-                    ambiguous_error.get_or_insert(error.clone());
-                    set_deposit_status(key, deposit.log_index, DepositStatus::Ambiguous(error));
-                }
-                Some(DepositStatus::Pending) | None => {
+                Some(DepositStatus::InFlight | DepositStatus::Pending) | None => {
                     ambiguous_error.get_or_insert(error.clone());
                     set_deposit_status(key, deposit.log_index, DepositStatus::Ambiguous(error));
                 }
@@ -583,11 +572,7 @@ pub async fn submit_receipt(
         }
     }
 
-    if let Some(error) = ambiguous_error {
-        release_receipt_lease(key, generation);
-        return Err(error);
-    }
-    if let Some(error) = retryable_error {
+    if let Some(error) = ambiguous_error.or(retryable_error) {
         release_receipt_lease(key, generation);
         return Err(error);
     }

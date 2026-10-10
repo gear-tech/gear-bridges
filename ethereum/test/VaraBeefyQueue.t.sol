@@ -357,9 +357,6 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         p.items[0] = freshnessLeafHash;
         p.order = 0;
         BeefyClient.Commitment memory c = commitment(uint32(anchorBlock), 0, p.anchorRoot);
-        for (uint256 i; i < c.payload.length; i++) {
-            if (c.payload[i].payloadID == bytes2("mh")) c.payload[i].data = abi.encodePacked(p.anchorRoot);
-        }
         bytes32[] memory freshnessProof = new bytes32[](1);
         freshnessProof[0] = historicalLeafHash;
         targetClient.submitFiatShamir(

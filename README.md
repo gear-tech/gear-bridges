@@ -19,8 +19,7 @@ every available signature.
 Rust and Foundry share `ethereum/test/fixtures/beefy-interop.json`. Its synthetic
 signatures, SCALE leaves and commitments, MMR proofs, and canonical ABI envelopes
 are reproducible with the deterministic development keys in `fixtures.rs`.
-The initial cross-SDK comparison produced eight byte-identical fixture cases;
-that historical check does not qualify later changes or deployed artifacts.
+Fixture agreement alone does not qualify code changes or deployed artifacts.
 Recorded Hoodi committee-boundary data uses `.json.zst`, following the existing
 Holesky fixture convention. Tests decompress the original bytes offline;
 synthetic cross-language vectors remain readable JSON.
@@ -37,6 +36,11 @@ security policy. Queue maturity/conflict hardening and source/domain checks do
 not authorize production activation or migration of an existing deployment.
 For isolated local nodes and a real Hoodi bridge, use the
 [sealed deployment guide](docs/running-the-bridge.md#sealed-local-deployment-operations).
+
+The BEEFY scripts share bootstrap and verifier selection in `ethereum/test/Base.sol`;
+its `deployBridge()` also owns governance and queue deployment. `BeefyHoodi` selects
+the message-only profile (queue at the starting deployer nonce + 5), while
+`BeefyLocal` and `BeefyTokens` retain token deployment (queue at nonce + 12).
 
 Queue administration uses the existing UUPS `DEFAULT_ADMIN_ROLE` authority, not
 a separate recovery controller. The one-time `reinitialize()` (`reinitializer(7)`)

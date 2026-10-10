@@ -244,7 +244,7 @@ pub fn handle_persistent_reply() {
                 .and_then(|bytes| {
                     match msg_info.details.token_supply {
                         TokenSupply::Ethereum => decode_burn_reply(bytes),
-                        TokenSupply::Gear => decode_lock_reply(bytes),
+                        TokenSupply::Gear => decode_transfer_from_reply(bytes),
                     }
                     .ok()
                 })
@@ -262,7 +262,7 @@ pub fn handle_persistent_reply() {
                 .and_then(|bytes| {
                     match msg_info.details.token_supply {
                         TokenSupply::Ethereum => decode_mint_reply(bytes),
-                        TokenSupply::Gear => decode_unlock_reply(bytes),
+                        TokenSupply::Gear => decode_transfer_from_reply(bytes),
                     }
                     .ok()
                 })
@@ -285,7 +285,7 @@ fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
 }
 
 /// Decode reply received from the TransferFrom method.
-fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
+fn decode_transfer_from_reply(bytes: &[u8]) -> Result<bool, Error> {
     TransferFrom::decode_reply(bytes)
         .map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
         .and_then(|reply| {
@@ -301,17 +301,4 @@ fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
     Mint::decode_reply(bytes).map_err(|e| Error::MintTokensDecode(format!("{e:?}")))?;
     bytes.is_empty().then_some(true).ok_or(Error::InvalidReply)
-}
-
-/// Decode reply received from the TransferFrom method.
-fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
-    TransferFrom::decode_reply(bytes)
-        .map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
-        .and_then(|reply| {
-            if bytes.len() == TransferFrom::ROUTE.len() + reply.encoded_size() {
-                Ok(reply)
-            } else {
-                Err(Error::InvalidReply)
-            }
-        })
 }

@@ -201,10 +201,6 @@ abstract contract BeefyFixtureTest is Test {
         return uint64(timestamp - delta);
     }
 
-    function newClient() internal returns (BeefyClient) {
-        return newClient(0);
-    }
-
     function newClient(uint256 index) internal returns (BeefyClient) {
         return newClient(
             index,
@@ -291,10 +287,6 @@ abstract contract BeefyFixtureTest is Test {
         }
     }
 
-    function validatorProof(uint256 index) internal returns (BeefyClient.ValidatorProof memory p) {
-        return validatorProof(0, index);
-    }
-
     function validatorProof(uint256 caseNumber, uint256 index) internal returns (BeefyClient.ValidatorProof memory p) {
         address[] memory addresses = vm.parseJsonAddressArray(fixtures, fixturePath(caseNumber, "authorityAddresses"));
         p.index = index;
@@ -302,15 +294,6 @@ abstract contract BeefyFixtureTest is Test {
         p.proof = vm.parseJsonBytes32Array(
             fixtures, fixturePath(caseNumber, string.concat("authorityProofs[", vm.toString(index), "]"))
         );
-    }
-
-    function selectedProofs(
-        BeefyClient client,
-        BeefyClient.Commitment memory c,
-        uint256 selected,
-        bytes memory signedBytes
-    ) internal returns (BeefyClient.ValidatorProof[] memory proofs) {
-        return selectedProofs(client, c, 0, selected, signedBytes);
     }
 
     function selectedProofs(

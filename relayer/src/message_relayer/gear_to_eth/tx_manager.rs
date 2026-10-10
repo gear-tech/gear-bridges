@@ -92,12 +92,13 @@ impl Transaction {
             "HOLD: outbound message identity changed for {}",
             self.uuid
         );
-        if matches!(
+        let unsigned = matches!(
             &self.status,
             TxStatus::WaitForMerkleRoot
                 | TxStatus::FetchMerkleRoot(_)
                 | TxStatus::PrepareMessage(..)
-        ) {
+        );
+        if unsigned {
             anyhow::ensure!(
                 self.ethereum_tx_attempts.is_empty() && self.ethereum_tx_hash.is_none(),
                 "HOLD: outbound unsigned state discarded a prior transaction identity"
@@ -106,12 +107,7 @@ impl Transaction {
         if let Some(signed) = &self.ethereum_submission {
             prepared_content_message_identity(signed)?;
             anyhow::ensure!(
-                !matches!(
-                    &self.status,
-                    TxStatus::WaitForMerkleRoot
-                        | TxStatus::FetchMerkleRoot(_)
-                        | TxStatus::PrepareMessage(..)
-                ),
+                !unsigned,
                 "HOLD: signed outbound submission has an unsigned status"
             );
             if let TxStatus::WaitConfirmations(hash) = &self.status {
@@ -149,7 +145,7 @@ pub enum TxStatus {
 
 enum ExistingTransaction {
     Completed,
-    Active(Box<Transaction>),
+    Active(TxStatus),
 }
 
 impl_metered_service!(
@@ -259,11 +255,8 @@ impl TransactionManager {
             .expect("active transaction was checked");
         drop(active);
 
-        let attempted_hash = match &tx.status {
-            TxStatus::WaitConfirmations(hash) => Some(*hash),
-            _ => None,
-        };
-        if let Some(hash) = attempted_hash {
+        if let TxStatus::WaitConfirmations(hash) = &tx.status {
+            let hash = *hash;
             tx.remember_attempt(hash);
         }
         tx.status = TxStatus::Completed;
@@ -318,7 +311,7 @@ impl TransactionManager {
                 "HOLD: source message conflicts with active nonce {}",
                 hex::encode(nonce)
             );
-            return Ok(Some(ExistingTransaction::Active(Box::new(tx.clone()))));
+            return Ok(Some(ExistingTransaction::Active(tx.status.clone())));
         }
         Ok(None)
     }
@@ -331,11 +324,11 @@ impl TransactionManager {
                 self.storage.ack_event_pair(nonce).await?;
                 return Ok(None);
             }
-            Some(ExistingTransaction::Active(tx)) => {
+            Some(ExistingTransaction::Active(status)) => {
                 log::info!(
                     "Skipping active outbound nonce {} in status {:?}",
                     hex::encode(nonce),
-                    tx.status
+                    status
                 );
                 return Ok(None);
             }

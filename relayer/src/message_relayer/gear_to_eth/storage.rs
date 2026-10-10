@@ -399,14 +399,10 @@ pub trait Storage: Send + Sync {
         anyhow::bail!("Outbound nonce ownership is unavailable for this storage")
     }
     async fn bind_event_chain(&self, _genesis_hash: H256, _start_block: u32) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn event_start_block(&self) -> anyhow::Result<Option<u32>> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn record_queued_block(
         &self,
@@ -414,9 +410,7 @@ pub trait Storage: Send + Sync {
         _hash: H256,
         _messages: &[MessageInBlock],
     ) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn record_paid_block(
         &self,
@@ -424,46 +418,32 @@ pub trait Storage: Send + Sync {
         _hash: H256,
         _nonces: &[[u8; 32]],
     ) -> anyhow::Result<Vec<[u8; 32]>> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn event_cursor(
         &self,
         _stream: GearEventStream,
     ) -> anyhow::Result<Option<GearEventCursor>> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn queued_observations(&self) -> anyhow::Result<Vec<MessageInBlock>> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn paid_observations(&self) -> anyhow::Result<Vec<PaidObservation>> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn pending_event_pairs(&self) -> anyhow::Result<Vec<PendingEventPair>> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn ack_event_pair(&self, _nonce: [u8; 32]) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
     async fn replay_from_block(
         &self,
         _configured_start: u32,
         _stream: GearEventStream,
     ) -> anyhow::Result<u32> {
-        Err(anyhow::anyhow!(
-            "Gear event journal is unavailable for this storage"
-        ))
+        anyhow::bail!("Gear event journal is unavailable for this storage")
     }
 }
 

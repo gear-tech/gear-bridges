@@ -71,11 +71,7 @@ impl BlockListener {
         // Leave room for one full Gear era while slow consumers finish their work.
         const CAPACITY: usize = 14_400;
         let (tx, _) = broadcast::channel(CAPACITY);
-        let receivers = (0..RECEIVER_COUNT)
-            .map(|_| tx.subscribe())
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("expected Vec of correct length");
+        let receivers = std::array::from_fn(|_| tx.subscribe());
         let sender = tx.clone();
 
         tokio::task::spawn(async move {
@@ -237,10 +233,6 @@ impl BlockListener {
             },
         )
         .await?;
-        if from_block > latest {
-            return Ok(true);
-        }
-
         self.replay_range(tx, from_block, latest, last_finalized_block_number, reason)
             .await
     }

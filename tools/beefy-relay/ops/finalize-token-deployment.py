@@ -4,9 +4,7 @@ import fcntl
 import json
 import os
 import subprocess
-import sys
 import time
-from pathlib import Path
 from eth_utils import keccak
 
 import run_context as f
@@ -60,7 +58,6 @@ if not marker.exists():
             associations[nonce] = {'hash':h,'contract':record['contractName'],'originalRowNonce':int(original_row['transaction']['nonce'],16)}
             assert receipt['transactionHash'].lower() == actual['hash'].lower() == h.lower()
             assert actual['from'].lower() == receipt['from'].lower() == owner.lower()
-            assert int(actual['nonce'],16) == int(expected['nonce'],16)
             assert (actual['to'] or '').lower() == (expected['to'] or '').lower() == (receipt['to'] or '').lower()
             assert actual['input'].lower() == expected['input'].lower() and int(actual['value'],16) == int(expected['value'],16)
             assert f.rpc('eth_getBlockByNumber',[receipt['blockNumber'],False])['hash'] == receipt['blockHash'] == actual['blockHash'], 'Noncanonical deployment receipt'

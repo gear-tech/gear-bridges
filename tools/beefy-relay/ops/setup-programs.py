@@ -8,7 +8,6 @@ import secrets
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 from run_context import RUN as ROOT, OPS, BIN, CONFIG, request, save, private_text
 
@@ -30,11 +29,6 @@ network = json.loads((ROOT/'hoodi/network-gate.json').read_text())
 roles = json.loads((ROOT/'hoodi/gear-addresses.json').read_text())['roles']
 rtk = shutil.which('rtk')
 assert rtk
-
-
-def phrase(role):
-    path = ROOT/'hoodi/gear-keys'/(role+'.suri')
-    return private_text(path)
 
 
 def execute(label, args, secret=None, environment=None):
@@ -64,7 +58,7 @@ if stage == 'prepare':
         assert not intent.exists() and not intent.with_suffix('.tmp').exists(), 'Checkpoint intent already exists: reconcile the original operation before any retry'
         salt = secrets.token_hex(32)
         save(intent,{'sourceGenesis':genesis,'sourceRpc':source,'account':roles['checkpoint'],'salt':salt,'status':'intent-recorded','testOnly':True,**trust})
-        key = phrase('checkpoint')
+        key = private_text(ROOT/'hoodi/gear-keys/checkpoint.suri')
         output = execute('checkpoint-deployment',[BIN/'checkpoints-tool','--gear-endpoint',source,'--ethereum-beacon-rpc',network['beaconHttp'],'--ethereum-beacon-rpc-timeout','60','--salt',salt,'--trusted-bootstrap-root',trust['trustedBootstrapRoot'],'--trusted-genesis-validators-root',trust['beaconGenesisValidatorsRoot']],key,{'GEAR_SURI':key})
         program = re.search(r'program_id = (0x[0-9a-fA-F]{64})',output)
         code = re.search(r'Using code_id = (0x[0-9a-fA-F]{64})',output)

@@ -543,15 +543,7 @@ pub async fn prepare(
         "historical proxy endpoint differs from the intended verifier"
     );
 
-    let config = Config {
-        gas_for_token_ops: 10_000_000_000,
-        gas_for_reply_deposit: 10_000_000_000,
-        gas_to_send_request_to_builtin: 10_000_000_000,
-        gas_for_swap_token_maps: 1_500_000_000,
-        reply_timeout: 100,
-        fee_bridge: 0,
-        fee_incoming: 1_000_000_000_000,
-    };
+    let config = expected_config();
     let manager_code = code(&api, vft_manager::WASM_BINARY).await?;
     let (manager, new, salt) = intent(output, &mut state, "vftManager", vft_manager::WASM_BINARY)?;
     if new {
@@ -3856,29 +3848,20 @@ pub(crate) async fn publish_root_locked(
         "proof": proof_record,
         "queueProof": format!("0x{}", hex::encode(&encoded)),
     });
-    let mut intent = prior.clone().unwrap_or_else(|| {
-        json!({
-            "schemaVersion": 3,
-            "sourceBlock": block,
-            "root": root_text,
-            "kind": kind,
-            "localRehearsal": immutable_intent["localRehearsal"],
-            "sourceIdentity": immutable_intent["sourceIdentity"].clone(),
-            "acceptedAnchorTx": accepted_anchor_tx,
-            "acceptedAnchorClient": active_client,
-            "acceptedCheckpoint": immutable_intent["acceptedCheckpoint"].clone(),
-            "sender": publisher_address,
-            "proof": proof_record,
-            "queueProof": format!("0x{}", hex::encode(&encoded)),
-            "nonce": null,
-            "txHash": null,
-            "rawTransaction": null,
-            "status": "prepared",
-        })
-    });
-    if let Some(saved) = prior.as_ref() {
-        ensure_immutable_publication(saved, &immutable_intent)?;
-    }
+    let mut intent = match prior {
+        Some(saved) => {
+            ensure_immutable_publication(&saved, &immutable_intent)?;
+            saved
+        }
+        None => {
+            let mut intent = immutable_intent;
+            intent["nonce"] = Value::Null;
+            intent["txHash"] = Value::Null;
+            intent["rawTransaction"] = Value::Null;
+            intent["status"] = json!("prepared");
+            intent
+        }
+    };
     ensure!(
         intent.get("nonce").is_some()
             && intent.get("txHash").is_some()
@@ -4006,10 +3989,7 @@ pub(crate) async fn publish_root_locked(
         ensure_saved_nonce_available(saved_nonce, latest, pending)?;
         let request = if kind == "emptyProgress" {
             ethereum_client::abi::IMessageQueue::new(ethereum.queue_address, provider.clone())
-                .submitEmptyQueueProgress(
-                    alloy::primitives::U256::from(block),
-                    encoded.clone().into(),
-                )
+                .submitEmptyQueueProgress(alloy::primitives::U256::from(block), encoded.into())
                 .nonce(saved_nonce)
                 .into_transaction_request()
         } else {
@@ -4017,7 +3997,7 @@ pub(crate) async fn publish_root_locked(
                 .submitMerkleRoot(
                     alloy::primitives::U256::from(block),
                     B256::from(root),
-                    encoded.clone().into(),
+                    encoded.into(),
                 )
                 .nonce(saved_nonce)
                 .into_transaction_request()
@@ -4075,8 +4055,6 @@ pub(crate) async fn publish_root_locked(
                 }
             }
         }
-    }
-    if mined.is_none() {
         intent["status"] =
             json!("broadcast outcome pending; reconcile the saved signed transaction");
         persist_root_intent(output, &intent)?;

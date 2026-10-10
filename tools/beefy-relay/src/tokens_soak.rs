@@ -2437,10 +2437,13 @@ async fn run_warmup_inner(
     )
     .await?;
 
-    let baseline = SnapshotSet::from_json(&journal.windows["preflight-priority"]["baseline"])?;
-    ctx.snapshot_at(Some(&baseline)).await?;
     let before_sampling = ctx.snapshot().await?;
-    verify_roundtrip_delta(&baseline, &before_sampling, &ctx.tokens)?;
+    let baseline = verify_warmup_baseline(
+        &journal.windows["preflight-priority"],
+        &before_sampling,
+        &ctx.tokens,
+    )?;
+    ctx.snapshot_at(Some(&baseline)).await?;
     journal.warmup.evidence["baseline"] = baseline.to_json();
     journal.warmup.evidence["beforeSampling"] = before_sampling.to_json();
 
@@ -8566,6 +8569,16 @@ fn verify_settlement_delta(
     Ok(())
 }
 
+fn verify_warmup_baseline(
+    priority_window: &Value,
+    current: &SnapshotSet,
+    tokens: &[Token],
+) -> Result<SnapshotSet> {
+    let baseline = SnapshotSet::from_json(&priority_window["stages"]["finalizedReturn"])?;
+    verify_roundtrip_delta(&baseline, current, tokens)?;
+    Ok(baseline)
+}
+
 fn verify_roundtrip_delta(base: &SnapshotSet, after: &SnapshotSet, tokens: &[Token]) -> Result<()> {
     for token in tokens {
         ensure!(
@@ -10032,6 +10045,12 @@ mod tests {
         state.gear_user -= GearU256::from(1000000000000u64);
         state.gear_supply -= GearU256::from(1000000000000u64);
         verify_settlement_delta(&baseline, &returned, &tokens, 1)?;
+        let priority_window = json!({
+            "baseline": baseline.to_json(),
+            "stages": {"finalizedReturn": returned.to_json()},
+        });
+        verify_warmup_baseline(&priority_window, &returned, &tokens)?;
+        assert!(verify_warmup_baseline(&priority_window, &baseline, &tokens).is_err());
         assert!(
             verify_settlement_delta(&baseline, &baseline, &tokens, 1).is_err(),
             "queued native value cannot become settled by retaining wrapped tokens"
@@ -10041,6 +10060,7 @@ mod tests {
             verify_settlement_delta(&baseline, &returned, &tokens, 1).is_err(),
             "ordinary escrow return must not burn by symbol"
         );
+        assert!(verify_warmup_baseline(&priority_window, &returned, &tokens).is_err());
         let route = vft_client::vft::io::Approve::ROUTE;
         let payload = [route, true.encode().as_slice()].concat();
         assert!(decode_campaign_reply::<bool>(&payload, route)?);
@@ -11641,6 +11661,28 @@ mod tests {
             fs::remove_file(directory.path().join(fragment))?;
         }
         assert!(outbound_save_complete(directory.path())?);
+        Ok(())
+    }
+    #[test]
+    #[ignore = "read-only live finalized snapshot smoke"]
+    fn live_warmup_settlement_snapshot_smoke() -> Result<()> {
+        let journal: Value = serde_json::from_slice(&fs::read(std::env::var("BEEFY_SMOKE_JOURNAL")?)?)?;
+        let snapshot: Value = serde_json::from_slice(&fs::read(std::env::var("BEEFY_SMOKE_SNAPSHOT")?)?)?;
+        assert_eq!(journal["warmup"]["status"], "failed");
+        let current = SnapshotSet::from_json(&snapshot)?;
+        let window = &journal["windows"]["preflight-priority"];
+        let tokens: Vec<_> = ["GOT", "USDC", "USDT", "WBTC", "WETH", "WTVARA"]
+            .into_iter()
+            .map(|symbol| Token {
+                symbol, component: symbol, address: Address::ZERO, peer: ActorId::zero(),
+                gear_origin: matches!(symbol, "GOT" | "WTVARA"),
+                native_amount: (symbol == "WTVARA").then_some(1000000000000), escrow: None,
+            })
+            .collect();
+        let old = SnapshotSet::from_json(&window["baseline"])?;
+        assert!(verify_roundtrip_delta(&old, &current, &tokens).is_err());
+        let settled = verify_warmup_baseline(window, &current, &tokens)?;
+        assert_eq!(settled.assets, current.assets);
         Ok(())
     }
 }

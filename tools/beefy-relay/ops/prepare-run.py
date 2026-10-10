@@ -160,8 +160,13 @@ def main():
         path.chmod(0o700 if path.is_dir() else 0o600)
     (run / "forge-final").chmod(0o700)
     cache = run / "forge-final/cache/solidity-files-cache.json"
-    save(cache, relocated_compiler_cache(json.loads(cache.read_text()),
-         MANIFEST["solidity"]["compilerProjectRoot"], run / "forge-final"))
+    # Foundry rewrites compact JSON even when compilation is skipped.
+    with cache.open("w") as stream:
+        json.dump(relocated_compiler_cache(json.loads((bundle / "ethereum/cache/solidity-files-cache.json").read_text()),
+                  MANIFEST["solidity"]["compilerProjectRoot"], run / "forge-final"),
+                  stream, ensure_ascii=False, separators=(",", ":"))
+        stream.flush()
+        os.fsync(stream.fileno())
     for directory in (run / "hoodi/gear-keys", run, run.parent):
         fd = os.open(directory, os.O_RDONLY)
         os.fsync(fd)

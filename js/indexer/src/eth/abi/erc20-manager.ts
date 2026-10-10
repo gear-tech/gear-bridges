@@ -9,6 +9,9 @@ const ABI_JSON = JSON.parse(fs.readFileSync(`${config.apiPath}/IERC20Manager.jso
 export const abi = new ethers.Interface(ABI_JSON.abi);
 
 export const events = {
+  Bridged: new LogEvent<
+    [from: string, to: string, token: string, amount: bigint]
+  >(abi, abi.getEvent('Bridged')!.topicHash),
   BridgingRequested: new LogEvent<
     [from: string, to: string, token: string, amount: bigint] & {
       from: string;

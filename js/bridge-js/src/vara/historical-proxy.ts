@@ -1,4 +1,4 @@
-import { GearApi, BaseGearProgram } from '@gear-js/api';
+import { GearApi } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import {
   TransactionBuilder,
@@ -29,16 +29,17 @@ export type ProxyError =
   /**
    * `eth-events-*` returned error.
    */
-  | { EthereumEventClient: Error };
+  | { EthereumEventClient: 'DecodeReceiptEnvelopeFailure' | 'FailedEthTransaction' | 'SendFailure' |
+      'ReplyFailure' | 'HandleResultDecodeFailure' | 'MissingCheckpoint' | 'InvalidBlockProof' |
+      'TrieDbFailure' | 'InvalidReceiptProof' | 'UnsupportedFork' };
 
 export class HistoricalProxyClient {
   public readonly registry: TypeRegistry;
   public readonly historicalProxy: HistoricalProxy;
-  private _program: BaseGearProgram;
 
   constructor(
     public api: GearApi,
-    programId: `0x${string}`,
+    private readonly _programId: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       ProxyError: {
@@ -61,6 +62,7 @@ export class HistoricalProxyClient {
           'InvalidBlockProof',
           'TrieDbFailure',
           'InvalidReceiptProof',
+          'UnsupportedFork',
         ],
       },
     };
@@ -68,14 +70,12 @@ export class HistoricalProxyClient {
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
-    this._program = new BaseGearProgram(programId, api);
 
     this.historicalProxy = new HistoricalProxy(this);
   }
 
   public get programId(): `0x${string}` {
-    if (!this._program) throw new Error(`Program ID is not set`);
-    return this._program.id;
+    return this._programId;
   }
 }
 

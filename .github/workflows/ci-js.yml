@@ -33,6 +33,17 @@ jobs:
               - 'js/indexer/**'
             common:
               - 'js/common/**'
+              - 'api/**'
+              - 'tools/beefy-relay/ops/**'
+              - 'tools/beefy-relay/src/source.rs'
+              - 'tools/beefy-relay/src/tokens.rs'
+              - 'tools/beefy-relay/src/tokens_soak.rs'
+              - 'package.json'
+              - 'yarn.lock'
+              - 'lerna.json'
+              - '.yarnrc.yml'
+              - '.yarn/**'
+              - '.github/workflows/ci-js.yml'
             bridge_js:
               - 'js/bridge-js/**'
 
@@ -40,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: bridge-js-test
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.bridge_js_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
 
     steps:
       - name: Checkout
@@ -75,8 +86,32 @@ jobs:
       - name: 'Install dependencies'
         run: yarn workspaces focus @gear-js/bridge gear-bridges
 
+      - name: Read-only RPC gateway boundary checks
+        run: node tools/beefy-relay/ops/test_readonly_rpc_gateway.mjs
+
       - name: 'Build @gear-js/bridge lib'
         run: yarn build:bridge-js
+
+      - name: Typecheck SDK and examples
+        run: |
+          yarn workspace @gear-js/bridge typecheck
+          yarn workspace @gear-js/bridge build:examples
+      - name: Offline SDK protocol checks (not live qualification)
+        run: yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts --mode unit
+
+      - name: Load independently approved inbound fixture profile
+        env:
+          INBOUND_PROOF_PROFILE_JSON: ${{ secrets.INBOUND_PROOF_PROFILE_JSON }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path').join(process.env.RUNNER_TEMP, 'inbound-proof-profile.json');
+          const profile = process.env.INBOUND_PROOF_PROFILE_JSON;
+          if (!profile) throw new Error('Missing independently approved INBOUND_PROOF_PROFILE_JSON');
+          JSON.parse(profile);
+          fs.writeFileSync(path, profile, { mode: 0o600, flag: 'wx' });
+          fs.appendFileSync(process.env.GITHUB_ENV, `INBOUND_PROOF_PROFILE_PATH=${path}\n`);
+          NODE
 
       - name: 'Build test packages'
         run: cargo build -p js-test --release
@@ -98,7 +133,7 @@ jobs:
   build-indexer:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' || needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -115,13 +150,16 @@ jobs:
       - name: Build
         run: yarn build:indexer
 
+      - name: Check finalized receipt and settlement behavior
+        run: yarn workspace indexer test
+
       - name: 'Lint'
         run: yarn lint:indexer
 
   build-frontend:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' || needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -137,3 +175,6 @@ jobs:
 
       - name: Build
         run: yarn build:frontend
+
+      - name: Typecheck frontend against shared SDK
+        run: PATH="$PWD/node_modules/.bin:$PATH" yarn workspace frontend exec tsc -p tsconfig.app.json --noEmit

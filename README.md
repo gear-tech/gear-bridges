@@ -2,6 +2,90 @@
 
 Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge facilitating the transfer of assets between Ethereum and Gear-based blockchains, such as the [Vara network](https://vara.network/).
 
+## Local BEEFY interoperability
+
+The isolated BEEFY path lives in `tools/beefy-relay`, `ethereum/src/beefy`, and
+`VaraQueueRootVerifier.sol`. It does not replace the production prover or upgrade
+an existing MessageQueue. The adapter uses the unchanged MessageQueue verifier
+interface and trusts only the configured client's latest accepted MMR anchor.
+
+The consensus sources derive from Snowbridge commit
+`1201293e482ef052b9c3989dcf680046704fef3d`. Local verification and deployment
+hardening goes beyond compiler/import changes; this is not identical audited
+upstream bytecode. Both interactive and Fiat-Shamir verification remain
+supported. Fiat-Shamir verifies the selected sample, while the Rust relay checks
+every available signature.
+
+Rust and Foundry share `ethereum/test/fixtures/beefy-interop.json`. Its synthetic
+signatures, SCALE leaves and commitments, MMR proofs, and canonical ABI envelopes
+are reproducible with the deterministic development keys in `fixtures.rs`.
+The initial cross-SDK comparison produced eight byte-identical fixture cases;
+that historical check does not qualify later changes or deployed artifacts.
+Recorded Hoodi committee-boundary data uses `.json.zst`, following the existing
+Holesky fixture convention. Tests decompress the original bytes offline;
+synthetic cross-language vectors remain readable JSON.
+
+```sh
+rtk cargo test -p beefy-relay --lib
+rtk forge test --root ethereum --match-path 'test/*Beefy*.t.sol' -vvv
+# Deliberately regenerate the shared fixture after a protocol change:
+UPDATE_BEEFY_FIXTURE=1 rtk cargo test -p beefy-relay --lib fixtures
+```
+
+The local trusted genesis checkpoint and sampling parameters are not production
+security policy. Queue maturity/conflict hardening and source/domain checks do
+not authorize production activation or migration of an existing deployment.
+For isolated local nodes and a real Hoodi bridge, use the
+[sealed deployment guide](docs/running-the-bridge.md#sealed-local-deployment-operations).
+
+Queue administration uses the existing UUPS `DEFAULT_ADMIN_ROLE` authority, not
+a separate recovery controller. The one-time `reinitialize()` (`reinitializer(7)`)
+address `0x1111111111111111111111111111111111111111` is a placeholder for an
+approved real Safe in production; test impersonation is not deployment evidence.
+See [existing administration](docs/running-the-bridge.md#beefy-expiry-and-existing-administration)
+and the [blocked public migration gates](docs/zk-to-beefy-migration.md).
+
+### Bounded local rehearsal
+
+Build the node from the sibling Gear worktree at base commit `0b13f2c61b0e5d9844c7efd12727487a2fdb8c63`:
+
+```sh
+rtk cargo build -p gear-cli --release --features fast-runtime --target-dir target/beefy-e2e
+```
+
+`fast-runtime` accepts only explicit dev/local chain IDs. It uses eight-slot
+epochs and a one-block BEEFY minimum interval; the normal interval remains eight.
+The slot duration stays 3000 ms. The one-block local interval is necessary to fit
+both real rotations, messages and the stale-anchor step inside the unchanged
+120-second cap. It is not a production timing change.
+
+Install Foundry's Soldeer dependencies with `rtk forge soldeer install` from
+`ethereum/`. With `forge` and `anvil` on PATH, run from this bridge worktree:
+
+```sh
+rtk forge build --root ethereum --force
+rtk cargo build -p beefy-relay --release
+rtk target/release/beefy-relay rehearse \
+  --gear-node "$PWD/../gear-beefy-e2e/target/beefy-e2e/release/gear" \
+  --output-dir /tmp/vara-beefy-e2e-new
+```
+
+The output directory must not exist. Preparation deploys fresh local contracts
+before the timer starts. The command owns Anvil and two indexed archive Gear
+authorities, funds Alice's stash, rotates its actual session key twice and sends
+two Charlie messages. Only Anvil's clock advances for queue maturity. Message
+proofs are captured before a natural queue clear and used only after the source
+block is finalized on the same chain. The retained second message must survive
+the clear, an obsolete anchor must fail, and its regenerated proof must deliver.
+
+The command writes `manifest.json`, `commitments.jsonl`, `messages.json`,
+`transactions.json` and process logs on success or failure. These retain binary
+and runtime hashes, accepted signed commitments, authority transitions, proofs,
+receipts, checked delivery events and rejection outcomes. Development node data
+and rotated private keys live in a temporary directory outside the evidence;
+owned processes and that directory are cleaned up on exit. No remote endpoint,
+production key or prover fallback is accepted.
+
 ## Security
 
 [Ethernal](https://ethernal.tech/) team have performed partial [audit](audits/ethernal.pdf) of the code, which covered the following scope for the commit [d42251c](https://github.com/gear-tech/gear-bridges/commit/d42251c3c9d94309a7855d6d774c6054a139a674):

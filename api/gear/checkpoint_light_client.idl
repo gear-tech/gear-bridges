@@ -1,10 +1,12 @@
 type Init = struct {
   network: Network,
+  bootstrap_header: BlockHeader,
   sync_committee_current_pub_keys: FixedArrayForArrOf96U8,
   sync_committee_current_aggregate_pubkey: BytesFixed,
   sync_committee_current_branch: vec [u8, 32],
   update: Update,
   sync_aggregate_encoded: vec u8,
+  trusted_bootstrap_root: h256,
 };
 
 type Network = enum {
@@ -12,6 +14,15 @@ type Network = enum {
   Sepolia,
   Holesky,
   Hoodi,
+};
+
+/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#beaconblockheader).
+type BlockHeader = struct {
+  slot: u64,
+  proposer_index: u64,
+  parent_root: h256,
+  state_root: h256,
+  body_root: h256,
 };
 
 /// A homogenous collection of a fixed number of values.
@@ -43,15 +54,6 @@ type Update = struct {
   sync_committee_next_pub_keys: opt FixedArrayForArrOf96U8,
   sync_committee_next_branch: opt vec [u8, 32],
   finality_branch: vec [u8, 32],
-};
-
-/// According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#beaconblockheader).
-type BlockHeader = struct {
-  slot: u64,
-  proposer_index: u64,
-  parent_root: h256,
-  state_root: h256,
-  body_root: h256,
 };
 
 
@@ -86,6 +88,12 @@ type Error = enum {
     replay_back: opt ReplayBack,
     checkpoint: struct { u64, h256 },
   },
+  StateChanged,
+  InvalidBootstrapRoot,
+  UnsupportedBootstrapPeriod,
+  InvalidBootstrapProof,
+  InvalidBootstrapUpdate,
+  InvalidHeaders,
 };
 
 /// The struct contains slots of the finalized and the last checked headers.
@@ -129,6 +137,7 @@ service ServiceReplayBack {
 
 service ServiceState {
   query Get : (order: Order, index_start: u32, count: u32) -> StateData;
+  query Network : () -> Network;
 };
 
 service ServiceSyncUpdate {

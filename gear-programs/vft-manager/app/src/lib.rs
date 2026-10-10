@@ -40,6 +40,14 @@ impl Program {
         panic!("Please rebuild with enabled `mocks` feature")
     }
 
+    #[allow(dead_code)]
+    #[handle_reply]
+    fn handle_reply(&self) {
+        services::submit_receipt::token_operations::handle_persistent_reply();
+        services::handle_bridge_reply();
+        services::handle_source_token_reply();
+    }
+
     pub fn vft_manager(&self) -> VftManager {
         VftManager::new()
     }

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result as AnyResult};
+use anyhow::{anyhow, ensure, Context, Result as AnyResult};
 use checkpoint_light_client::WASM_BINARY;
 use checkpoint_light_client_client::{checkpoint_light_client_factory, traits::*};
 use checkpoint_light_client_io::{
@@ -37,8 +37,15 @@ struct Cli {
     #[clap(flatten)]
     beacon: BeaconConnectionArgs,
 
-    /// Specify the checkpoint slot for bootstrapping. If it is None then the header from
-    /// the latest finality update is used to get the slot.
+    /// Independently approved, recent weak-subjectivity Beacon block root (32-byte hex).
+    #[arg(long, env = "TRUSTED_BOOTSTRAP_ROOT")]
+    trusted_bootstrap_root: String,
+
+    /// Independently pinned network genesis validators root (32-byte hex).
+    #[arg(long, env = "TRUSTED_GENESIS_VALIDATORS_ROOT")]
+    trusted_genesis_validators_root: String,
+
+    /// Optional assertion of the trusted bootstrap sync-committee period by slot.
     #[arg(long, env = "SLOT_CHECKPOINT")]
     slot_checkpoint: Option<u64>,
 
@@ -63,47 +70,60 @@ async fn main() -> AnyResult<()> {
     )
     .await?;
 
+    let trusted_genesis: [u8; 32] =
+        hex::decode(cli.trusted_genesis_validators_root.trim_start_matches("0x"))?
+            .try_into()
+            .map_err(|_| anyhow!("trusted genesis validators root must be 32 bytes"))?;
+    let trusted_bootstrap: [u8; 32] =
+        hex::decode(cli.trusted_bootstrap_root.trim_start_matches("0x"))?
+            .try_into()
+            .map_err(|_| anyhow!("trusted bootstrap root must be 32 bytes"))?;
+    let network = Network::from_genesis_validators_root(trusted_genesis)
+        .ok_or_else(|| anyhow!("unsupported trusted Ethereum network"))?;
     let genesis = beacon_client.get_genesis().await?;
-
-    let network =
-        Network::from_genesis_validators_root(genesis.data.genesis_validators_root[..].try_into()?)
-            .ok_or_else(|| {
-                anyhow!(
-                    "Failed to determine network from genesis validators root: {}",
-                    hex::encode(genesis.data.genesis_validators_root)
-                )
-            })?;
-
+    ensure!(
+        genesis.data.genesis_validators_root == trusted_genesis
+            && genesis.data.genesis_time == network.genesis_time(),
+        "Beacon provider network/genesis mismatch"
+    );
     println!("Using Ethereum network: '{network:?}'");
-
-    let slot = match cli.slot_checkpoint {
-        Some(slot) => slot,
-        None => {
-            let update = beacon_client.get_finality_update().await?;
-
-            update.finalized_header.slot
-        }
-    };
+    let checkpoint_hex = hex::encode(trusted_bootstrap);
+    let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
+    ensure!(
+        bootstrap.header.tree_hash_root().0 == trusted_bootstrap,
+        "bootstrap header differs from independently trusted root"
+    );
+    let slot = bootstrap.header.slot;
+    if let Some(expected_slot) = cli.slot_checkpoint {
+        ensure!(
+            eth_utils::calculate_period(expected_slot) == eth_utils::calculate_period(slot),
+            "bootstrap period differs from requested trusted period"
+        );
+    }
     let current_period = eth_utils::calculate_period(slot);
     let mut updates = beacon_client.get_updates(current_period, 1).await?;
-
-    println!("finality_update slot = {slot}, period = {current_period}");
 
     let update = match updates.pop() {
         Some(update) if updates.is_empty() => update.data,
         _ => unreachable!("Requested single update"),
     };
-
-    let checkpoint = update.finalized_header.tree_hash_root();
-    let checkpoint_hex = hex::encode(checkpoint);
-
     println!(
-        "checkpoint slot = {}, hash = {}",
-        update.finalized_header.slot, checkpoint_hex
+        "finality_update slot = {}, period = {current_period}",
+        update.finalized_header.slot
     );
 
-    let bootstrap = beacon_client.get_bootstrap(&checkpoint_hex).await?;
-    println!("bootstrap slot = {}", bootstrap.header.slot);
+    ensure!(
+        bootstrap.header.slot <= update.finalized_header.slot
+            && eth_utils::calculate_period(bootstrap.header.slot)
+                == eth_utils::calculate_period(update.finalized_header.slot),
+        "bootstrap must precede update in its sync committee period"
+    );
+    println!(
+        "checkpoint slot = {}, hash = {}",
+        update.finalized_header.slot,
+        hex::encode(update.finalized_header.tree_hash_root().0)
+    );
+    println!("bootstrap slot = {slot}, hash = {checkpoint_hex}");
 
     let signature = <G2 as ark_serialize::CanonicalDeserialize>::deserialize_compressed(
         &update.sync_aggregate.sync_committee_signature.0 .0[..],
@@ -116,6 +136,8 @@ async fn main() -> AnyResult<()> {
 
     let init = Init {
         network,
+        trusted_bootstrap_root: trusted_bootstrap.into(),
+        bootstrap_header: bootstrap.header,
         sync_committee_current_pub_keys: pub_keys,
         sync_committee_current_aggregate_pubkey: bootstrap.current_sync_committee.aggregate_pubkey,
         sync_committee_current_branch: bootstrap
@@ -140,14 +162,6 @@ async fn main() -> AnyResult<()> {
         .build()
         .await?;
 
-    let code_id = api
-        .upload_code(WASM_BINARY)
-        .await
-        .map(|(code_id, _)| code_id)
-        .unwrap_or_else(|_| CodeId::generate(WASM_BINARY));
-
-    println!("Using code_id = {code_id:?}");
-
     let gas_limit = {
         let payload = {
             let mut result = checkpoint_light_client_factory::io::Init::ROUTE.to_vec();
@@ -157,9 +171,18 @@ async fn main() -> AnyResult<()> {
         };
 
         api.calculate_upload_gas(None, WASM_BINARY.to_vec(), payload, 0, true)
-            .await?
+            .await
+            .context("calculate checkpoint initialization gas")?
             .min_limit
     };
+    let code_id = api
+        .upload_code(WASM_BINARY)
+        .await
+        .map(|(code_id, _)| code_id)
+        .unwrap_or_else(|_| CodeId::generate(WASM_BINARY));
+
+    println!("Using code_id = {code_id:?}");
+
     let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
         GClientRemoting::new(api.clone()),
     );
@@ -183,4 +206,27 @@ async fn main() -> AnyResult<()> {
     println!("program_id = {program_id:?}");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn independent_bootstrap_and_genesis_pins_are_required_cli_inputs() {
+        let beacon = [
+            "checkpoints-tool",
+            "--ethereum-beacon-rpc",
+            "http://127.0.0.1:5052",
+        ];
+        let root = "11".repeat(32);
+        assert!(Cli::try_parse_from(beacon).is_err());
+        let mut bootstrap_only = beacon.to_vec();
+        bootstrap_only.extend(["--trusted-bootstrap-root", root.as_str()]);
+        assert!(Cli::try_parse_from(bootstrap_only.clone()).is_err());
+        bootstrap_only.extend(["--trusted-genesis-validators-root", root.as_str()]);
+        let parsed = Cli::try_parse_from(bootstrap_only).unwrap();
+        assert_eq!(parsed.trusted_bootstrap_root, root);
+        assert_eq!(parsed.trusted_genesis_validators_root, root);
+    }
 }

@@ -356,9 +356,13 @@ pub struct EthGearTokensArgs {
     #[arg(long = "storage-path", env = "ETH_GEAR_TX_STORAGE_PATH")]
     pub storage_path: String,
 
-    /// Storage path for Ethereum blocks.
+    /// Dedicated durable Ethereum discovery journal; never share between lanes.
     #[arg(long = "ethereum-blocks", env = "ETHEREUM_BLOCKS")]
-    pub ethereum_blocks: Option<String>,
+    pub ethereum_blocks: String,
+
+    /// Immutable first Ethereum block to scan, normally the manager/payment deployment block.
+    #[arg(long, env)]
+    pub ethereum_start_block: u64,
 }
 
 #[derive(Subcommand)]
@@ -395,6 +399,10 @@ pub struct GearEthManualArgs {
     #[arg(long = "message-block", short = 'b')]
     pub block: u32,
 
+    /// Private durable directory for this one source message; reuse it on restart.
+    #[arg(long)]
+    pub storage: PathBuf,
+
     /// Ethereum block number to start listening for merkle roots from. If not specified equals to the latest finalized block
     #[arg(long = "from-eth-block")]
     pub from_eth_block: Option<u64>,
@@ -417,6 +425,10 @@ pub struct EthGearManualArgs {
     /// Transaction hash of the target message
     #[arg(long, short = 't')]
     pub tx_hash: String,
+
+    /// Private durable directory for this one original Ethereum transaction; reuse it on restart.
+    #[arg(long)]
+    pub storage: PathBuf,
 
     /// ProgramId of the checkpoint-light-client program
     #[arg(long = "checkpoint-light-client")]

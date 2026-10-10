@@ -38,6 +38,9 @@ pub fn is_valid_merkle_branch(
     index: u32,
     root: &[u8; 32],
 ) -> bool {
+    if branch.len() != depth as usize || depth > u32::BITS {
+        return false;
+    }
     let mut value = leaf;
 
     let mut hasher = RingContext::new(&RingSHA256);
@@ -176,4 +179,31 @@ pub mod electra {
     pub const INDEX_NEXT_SYNC_COMMITTEE: u32 = 23;
     pub const DEPTH_FINALITY: u32 = 7;
     pub const INDEX_FINALITY: u32 = 41;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merkle_branch_requires_exact_depth() {
+        let leaf = [1; 32];
+        let sibling = [2; 32];
+        let mut hasher = RingContext::new(&RingSHA256);
+        hasher.update(&leaf);
+        hasher.update(&sibling);
+        let root: [u8; 32] = hasher.finish().as_ref().try_into().unwrap();
+        assert!(is_valid_merkle_branch(leaf, &[sibling], 1, 0, &root));
+        assert!(!is_valid_merkle_branch(leaf, &[], 1, 0, &root));
+        assert!(!is_valid_merkle_branch(
+            leaf,
+            &[sibling, [3; 32]],
+            1,
+            0,
+            &root
+        ));
+        assert!(is_valid_merkle_branch(leaf, &[], 0, 0, &leaf));
+        assert!(!is_valid_merkle_branch(leaf, &[sibling], 0, 0, &leaf));
+        assert!(!is_valid_merkle_branch(leaf, &[[0; 32]; 33], 33, 0, &root));
+    }
 }

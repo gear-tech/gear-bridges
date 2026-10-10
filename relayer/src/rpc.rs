@@ -564,4 +564,42 @@ mod tests {
         assert_eq!(err, "reconnect unavailable");
         assert_eq!(reconnect_calls.load(Ordering::SeqCst), 1);
     }
+    #[tokio::test]
+    async fn bounded_retry_budget_is_fresh_for_each_operation() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        for _ in 0..2 {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let observed = calls.clone();
+            let mut api = 0u32;
+            let result = retry(
+                &mut api,
+                "independent operation",
+                RetryPolicy {
+                    base_delay: Duration::ZERO,
+                    max_delay: Duration::ZERO,
+                },
+                Some(1),
+                move |_| {
+                    let attempt = calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        if attempt == 0 {
+                            Err("disconnected")
+                        } else {
+                            Ok(17)
+                        }
+                    }
+                },
+                |api| async move { Ok(api + 1) },
+                |_| RetryDecision::Retry,
+            )
+            .await
+            .unwrap();
+            assert_eq!(result, 17);
+            assert_eq!(observed.load(Ordering::SeqCst), 2);
+        }
+    }
 }

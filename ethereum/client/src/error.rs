@@ -25,6 +25,12 @@ pub enum Error {
     ErrorFetchingTransactionReceipt,
     #[error("Error fetching block")]
     ErrorFetchingBlock,
+    #[error("Finalized ancestry is not yet verified")]
+    FinalizedAncestryPending,
+    #[error("Authenticated finalized ancestry conflicts with the original witnessed branch")]
+    FinalizedAncestryConflict,
+    #[error("Invalid prepared signed transaction: {0}")]
+    InvalidPreparedTransaction(String),
     #[error("Failed to build reqwest client")]
     FailedToBuildClient(alloy::transports::http::reqwest::Error),
     #[error("MessageQueue error: {0:x?}")]

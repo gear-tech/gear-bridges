@@ -1,3 +1,4 @@
+use anyhow::Context;
 use ethereum_client::TxHash;
 use gear_rpc_client::{
     dto::{Message, RawBlockInclusionProof},
@@ -115,14 +116,14 @@ pub struct GSdkArgs {
 pub struct GearBlock {
     pub header: Header,
     pub events: Vec<gsdk::Event>,
-    pub grandpa_justification: GrandpaJustification<GearHeader>,
+    pub grandpa_justification: Option<GrandpaJustification<GearHeader>>,
 }
 
 impl GearBlock {
     pub fn new(
         header: Header,
         events: Vec<gsdk::Event>,
-        grandpa_justification: GrandpaJustification<GearHeader>,
+        grandpa_justification: Option<GrandpaJustification<GearHeader>>,
     ) -> Self {
         Self {
             header,
@@ -166,10 +167,18 @@ impl GearBlock {
         block: Block<GearConfig, OnlineClient<GearConfig>>,
     ) -> anyhow::Result<Self> {
         let justification = api.get_justification(block.hash()).await?;
+        let mut finalized = Self::from_finalized_block(api, block).await?;
+        finalized.grandpa_justification = Some(justification);
+        Ok(finalized)
+    }
+
+    pub async fn from_finalized_block(
+        api: &GearApi,
+        block: Block<GearConfig, OnlineClient<GearConfig>>,
+    ) -> anyhow::Result<Self> {
         let header = block.header().clone();
         let events = api.get_events_at(Some(block.hash())).await?;
-
-        Ok(Self::new(header, events, justification))
+        Ok(Self::new(header, events, None))
     }
 
     pub async fn from_justification(
@@ -187,12 +196,16 @@ impl GearBlock {
         let header = block.header().clone();
         let events = api.get_events_at(Some(block.hash())).await?;
 
-        Ok(Self::new(header, events, justification))
+        Ok(Self::new(header, events, Some(justification)))
     }
 
-    /// Produce a raw block inclusion proof from the block's grandpa justification.
+    /// Produce a raw block inclusion proof from a real GRANDPA justification.
     pub async fn inclusion_proof(&self, api: &GearApi) -> anyhow::Result<RawBlockInclusionProof> {
-        api.fetch_raw_block_inclusion_proof(self.hash(), Some(self.grandpa_justification.clone()))
+        let justification = self
+            .grandpa_justification
+            .clone()
+            .context("Merkle-root proof requires a GRANDPA justification")?;
+        api.fetch_raw_block_inclusion_proof(self.hash(), Some(justification))
             .await
     }
 }

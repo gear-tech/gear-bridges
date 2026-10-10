@@ -65,7 +65,7 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.3
+          version: v1.8.5
 
       - name: Install dependencies
         run: forge soldeer install
@@ -106,11 +106,15 @@ jobs:
             "./api/ethereum/ERC20Manager.json"
             "./api/ethereum/MessageQueue.json"
             "./api/ethereum/BridgingPayment.json"
+            "./api/ethereum/BeefyClient.json"
+            "./api/ethereum/VaraQueueRootVerifier.json"
 
             "./api/gear/bridging_payment.idl"
             "./api/gear/eth_events_deneb.idl"
             "./api/gear/eth_events_electra.idl"
             "./api/gear/vft_manager.idl"
+            "./api/gear/vft.idl"
+            "./api/gear/vft_vara.idl"
             "./api/gear/historical_proxy.idl"
             "./api/gear/checkpoint_light_client.idl"
           )
@@ -123,11 +127,15 @@ jobs:
             "./ethereum/out/ERC20Manager.sol/ERC20Manager.json"
             "./ethereum/out/MessageQueue.sol/MessageQueue.json"
             "./ethereum/out/BridgingPayment.sol/BridgingPayment.json"
+            "./ethereum/out/BeefyClient.sol/BeefyClient.json"
+            "./ethereum/out/VaraQueueRootVerifier.sol/VaraQueueRootVerifier.json"
 
             "./target/wasm32-gear/release/bridging_payment.idl"
             "./target/wasm32-gear/release/eth_events_deneb.idl"
             "./target/wasm32-gear/release/eth_events_electra.idl"
             "./target/wasm32-gear/release/vft_manager.idl"
+            "./target/wasm32-gear/release/vft.idl"
+            "./target/wasm32-gear/release/vft_vara.idl"
             "./target/wasm32-gear/release/historical_proxy.idl"
             "./target/wasm32-gear/release/checkpoint_light_client.idl"
           )
@@ -166,7 +174,7 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.3
+          version: v1.8.5
 
       - name: Install dependencies
         run: forge soldeer install
@@ -192,7 +200,7 @@ jobs:
         working-directory: ./ethereum
 
       - name: Run clippy
-        run: cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
+        run: cargo clippy --release --all-targets -- -D warnings
 
       - name: Run rustfmt
         run: cargo fmt -- --check
@@ -225,7 +233,7 @@ jobs:
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.3
+          version: v1.8.5
 
       - name: Install dependencies
         run: forge soldeer install
@@ -270,7 +278,7 @@ jobs:
       - name: Run solidity tests
         run: |
           cd ethereum
-          forge test --force
+          forge test --force --threads 1
 
       - name: Stop Gear node container (if any)
         continue-on-error: true

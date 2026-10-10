@@ -1,6 +1,6 @@
 pub mod utils;
 
-use super::*;
+use super::{merkle_root_extractor::RootCursorStorage, *};
 use crate::{common::BASE_RETRY_DELAY, message_relayer::common::AuthoritySetId};
 use ethereum_client::EthApi;
 use primitive_types::H256;
@@ -9,7 +9,7 @@ use sails_rs::ActorId;
 use std::sync::Arc;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
-    RwLock,
+    oneshot, RwLock,
 };
 use utils::{Added, MerkleRoots, Messages};
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -43,6 +43,30 @@ pub enum Response {
         tx_uuid: Uuid,
         merkle_root: RelayedMerkleRoot,
     },
+}
+pub struct RootUpdate {
+    pub root: RelayedMerkleRoot,
+    acknowledgement: Option<oneshot::Sender<anyhow::Result<()>>>,
+}
+
+impl RootUpdate {
+    pub fn untracked(root: RelayedMerkleRoot) -> Self {
+        Self {
+            root,
+            acknowledgement: None,
+        }
+    }
+
+    pub fn tracked(root: RelayedMerkleRoot) -> (Self, oneshot::Receiver<anyhow::Result<()>>) {
+        let (sender, receiver) = oneshot::channel();
+        (
+            Self {
+                root,
+                acknowledgement: Some(sender),
+            },
+            receiver,
+        )
+    }
 }
 
 pub struct AccumulatorIo {
@@ -89,7 +113,8 @@ pub struct Accumulator {
     metrics: Metrics,
     messages: Messages,
     merkle_roots: Arc<RwLock<MerkleRoots>>,
-    receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
+    receiver_roots: UnboundedReceiver<RootUpdate>,
+    root_storage: Arc<dyn RootCursorStorage>,
     governance_admin: ActorId,
     governance_pauser: ActorId,
     eth_api: EthApi,
@@ -112,8 +137,9 @@ impl_metered_service! {
 
 impl Accumulator {
     pub fn new(
-        receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
+        receiver_roots: UnboundedReceiver<RootUpdate>,
         merkle_roots: Arc<RwLock<MerkleRoots>>,
+        root_storage: Arc<dyn RootCursorStorage>,
         governance_admin: ActorId,
         governance_pauser: ActorId,
         eth_api: EthApi,
@@ -123,6 +149,7 @@ impl Accumulator {
             messages: Messages::new(10_000),
             merkle_roots,
             receiver_roots,
+            root_storage,
             governance_admin,
             governance_pauser,
             eth_api,
@@ -247,17 +274,21 @@ async fn run_inner(
                 }
             }
 
-            merkle_root = this.receiver_roots.recv() => {
-                let Some(merkle_root) = merkle_root else {
+            update = this.receiver_roots.recv() => {
+                let Some(update) = update else {
                     log::info!("Channel with merkle roots closed. Exiting");
                     return Ok(());
                 };
+                let RootUpdate { root: merkle_root, acknowledgement } = update;
 
-                let mut merkle_roots = this.merkle_roots.write().await;
-                match merkle_roots.add(merkle_root) {
-                    Ok(Added::Ok | Added::Overwritten(_)) => {}
+                let added = this.merkle_roots.write().await.add(merkle_root);
+                let roots = this.merkle_roots.read().await;
+                this.root_storage.save_merkle_roots(&roots).await?;
 
-                    Ok(Added::Removed(merkle_root_old)) => {
+                match added {
+                    Ok(Added::Ok) => {}
+
+                    Ok(Added::Removed(merkle_root_old)) if roots.find(merkle_root_old.authority_set_id, merkle_root_old.block, u64::MAX, 0).is_none() => {
                         log::warn!("Removing merkle root = {merkle_root_old:?}");
                         let messages = this.messages.drain_all(&merkle_root_old);
                         for message in messages {
@@ -270,12 +301,14 @@ async fn run_inner(
                             })?;
                         }
                     }
+                    Ok(Added::Removed(_)) => {}
 
-                    Err(_i) => {
-                        // There is already a corresponding merkle root at the position.
+                    Err(_) => {
+                        let _ = acknowledgement.map(|acknowledgement| acknowledgement.send(Ok(())));
                         continue;
                     }
                 }
+                drop(roots);
 
                 log::trace!("Drain messages for merkle root = {merkle_root:?}, current timestamp = {last_timestamp}");
                 for message in this.messages.drain(&merkle_root, last_timestamp, &message_delay) {
@@ -286,6 +319,7 @@ async fn run_inner(
                         merkle_root,
                     })?;
                 }
+                let _ = acknowledgement.map(|acknowledgement| acknowledgement.send(Ok(())));
             }
         }
 

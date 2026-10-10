@@ -26,3 +26,17 @@ export interface RequestBridgingArgs {
   readonly amount: string;
   readonly receiver: string;
 }
+
+export interface ReceiptDepositSettled {
+  readonly slot: string;
+  readonly transaction_index: string;
+  readonly log_index: string;
+  readonly deposit_count: string;
+  readonly operation_id: string;
+  readonly eth_token_id: string;
+  readonly vara_token_id: string;
+  readonly sender: string;
+  readonly receiver: string;
+  readonly amount: string;
+  readonly native: boolean;
+}

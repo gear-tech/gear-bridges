@@ -5,6 +5,7 @@ use ethereum_common::{
     beacon::Block,
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
+use sails_rs::prelude::*;
 use serde::Deserialize;
 
 pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =

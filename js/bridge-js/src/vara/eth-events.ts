@@ -1,24 +1,21 @@
-import { GearApi, BaseGearProgram } from '@gear-js/api';
+import { GearApi } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
 import { ActorId, QueryBuilder } from 'sails-js';
 
 export class EthEventsClient {
   public readonly registry: TypeRegistry;
   public readonly ethereumEventClient: EthereumEventClient;
-  private _program: BaseGearProgram;
 
   constructor(
     public api: GearApi,
-    programId: `0x${string}`,
+    private readonly _programId: `0x${string}`,
   ) {
-    this._program = new BaseGearProgram(programId, api);
     this.registry = new TypeRegistry();
     this.ethereumEventClient = new EthereumEventClient(this);
   }
 
   public get programId(): `0x${string}` {
-    if (!this._program) throw new Error(`Program ID is not set`);
-    return this._program.id;
+    return this._programId;
   }
 }
 

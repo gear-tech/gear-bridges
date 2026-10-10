@@ -22,6 +22,10 @@ pub trait UnprocessedBlocksStorage: Send + Sync {
     /// Note that you have to choose whether to return `first_block` or `last_block` based on the relayer type.
     /// If both are `Some` then `first_block` will be preferred as a starting point for re-fetching. If both of them
     /// are `None` then there will be no re-fetching of blocks from RPC.
+    fn requires_finality_proof(&self) -> bool {
+        true
+    }
+
     async fn unprocessed_blocks(&self) -> UnprocessedBlocks;
     /// Adds a block to the storage. Implementer of the trait
     /// is responsible for processing the block later on.
@@ -37,6 +41,10 @@ pub struct NoStorage;
 
 #[async_trait::async_trait]
 impl UnprocessedBlocksStorage for NoStorage {
+    fn requires_finality_proof(&self) -> bool {
+        false
+    }
+
     async fn unprocessed_blocks(&self) -> UnprocessedBlocks {
         UnprocessedBlocks {
             blocks: vec![],

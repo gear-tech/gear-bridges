@@ -6,28 +6,6 @@ import { VaraMessage, Proof } from './types.js';
 export class GearClient {
   constructor(private _api: GearApi) {}
 
-  public async getAuthoritySetIdByBlockNumber(bn: bigint): Promise<bigint> {
-    const [blockHash, prevBlockHash] = await Promise.all([
-      this._api.blocks.getBlockHash(Number(bn)),
-      this._api.blocks.getBlockHash(Number(bn) - 1),
-    ]);
-
-    const [apiAt, prevApiAt] = await Promise.all([
-      this._api.at(blockHash.toHex()),
-      this._api.at(prevBlockHash.toHex()),
-    ]);
-    const [setId, prevSetId] = await Promise.all([
-      apiAt.query.grandpa.currentSetId(),
-      prevApiAt.query.grandpa.currentSetId(),
-    ]);
-
-    if (prevSetId !== setId) {
-      return prevSetId.toBigInt();
-    } else {
-      return setId.toBigInt();
-    }
-  }
-
   public async fetchMerkleProof(blockNumber: number, messageHash: HexString): Promise<Proof> {
     const blockHash = await this._api.blocks.getBlockHash(blockNumber);
     const proof = await this._api.ethBridge.merkleProof(messageHash, blockHash);
@@ -41,17 +19,20 @@ export class GearClient {
   }
 
   public async findMessageQueuedEvent(blockNumber: number, nonce: bigint): Promise<VaraMessage | null> {
-    const msg = await this._api.ethBridge.events.findGearEthBridgeMessageByNonce({ nonce, fromBlock: blockNumber });
-
-    if (!msg) {
-      return null;
-    }
-
+    const blockHash = await this._api.blocks.getBlockHash(blockNumber);
+    const events = await this._api.blocks.getEvents(blockHash.toHex());
+    const messages = events
+      .filter(({ event }) => event.section === 'gearEthBridge' && event.method === 'MessageQueued')
+      .map(({ event }) => event.data[0] as unknown as import('./types.js').EthBridgeMessage)
+      .filter((message) => message.nonce.toBigInt() === nonce);
+    if (messages.length === 0) return null;
+    if (messages.length !== 1) throw new Error('Ambiguous source MessageQueued evidence');
+    const [message] = messages;
     return {
-      nonce: msg.nonce,
-      source: hexToU8a(msg.source),
-      destination: hexToU8a(msg.destination),
-      payload: hexToU8a(msg.payload),
+      nonce: message.nonce.toBigInt(),
+      source: hexToU8a(message.source.toHex()),
+      destination: hexToU8a(message.destination.toHex()),
+      payload: message.payload.toU8a(true),
     };
   }
 }

@@ -48,6 +48,18 @@ interface IMessageQueue is IPausable {
      * @dev The plonk proof is invalid.
      */
     error InvalidPlonkProof();
+    /**
+     * @dev A zero root cannot be registered as a message root.
+     */
+    error InvalidMerkleRoot();
+
+    /**
+     * @dev Empty-queue progress requires an initialized queue and a strictly newer source block.
+     */
+    error EmptyQueueNotInitialized();
+    error EmptyQueueProgressNotForward();
+    error InvalidEmptyQueueProgressProof();
+    error InvalidBeefyVerifier();
 
     /**
      * @dev Message nonce is already processed.
@@ -63,6 +75,10 @@ interface IMessageQueue is IPausable {
      * @dev Merkle root delay is not passed.
      */
     error MerkleRootDelayNotPassed();
+    error MerkleRootTimestampNotFound(uint256 blockNumber);
+    error InvalidSourceBlock();
+    error BlockNumberBelowMinimum(uint256 blockNumber, uint256 minimum);
+    error MerkleRootProgressNotForward();
 
     /**
      * @dev Merkle proof is invalid.
@@ -124,6 +140,8 @@ interface IMessageQueue is IPausable {
      * @dev Emitted when block number and merkle root are stored.
      */
     event MerkleRoot(uint256 blockNumber, bytes32 merkleRoot);
+    /// @dev A verified empty source snapshot advanced height without registering a root.
+    event EmptyQueueProgress(uint256 indexed sourceBlock);
 
     /**
      * @dev Emitted when message processing is allowed during emergency stop.
@@ -278,6 +296,10 @@ interface IMessageQueue is IPausable {
      * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external;
+    /**
+     * @dev Advance height using an authenticated initialized zero-root snapshot; does not store root/timestamp.
+     */
+    function submitEmptyQueueProgress(uint256 sourceBlock, bytes calldata authenticatedSnapshotProof) external;
 
     /**
      * @dev Returns merkle root for specified block number.
@@ -287,13 +309,14 @@ interface IMessageQueue is IPausable {
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32);
 
-    /**
-     * @dev Returns timestamp when merkle root was set.
-     *      Returns `0` if merkle root was not provided for specified block number.
-     * @param merkleRoot Target merkle root.
-     * @return timestamp Timestamp when merkle root was set.
-     */
+    /// @dev Retained legacy root-keyed timestamp; new registrations do not write this mapping.
     function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256);
+
+    /// @dev Returns effective block maturity, zero for absent roots, and rejects missing applicable timestamps.
+    function getMerkleRootTimestampForBlock(uint256 blockNumber) external view returns (uint256);
+
+    /// @dev Permanent publication floor; historical message redemption remains available.
+    function beefyRootMinimum() external view returns (uint256);
 
     /**
      * @dev Verifies and processes message originated from Vara Network.

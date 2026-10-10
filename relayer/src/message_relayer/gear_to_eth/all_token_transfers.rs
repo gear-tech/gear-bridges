@@ -7,12 +7,16 @@ use crate::message_relayer::{
         gear::{
             block_listener::BlockListener as GearBlockListener,
             merkle_proof_fetcher::MerkleProofFetcher,
-            message_queued_event_extractor::MessageQueuedEventExtractor,
+            message_queued_event_extractor::{bind_event_storage, MessageQueuedEventExtractor},
         },
         MessageInBlock,
     },
-    gear_to_eth::{storage::JSONStorage, tx_manager::TransactionManager},
+    gear_to_eth::{
+        storage::{GearEventStream, JSONStorage, OutboundLaneIdentity, Storage},
+        tx_manager::TransactionManager,
+    },
 };
+use alloy::providers::Provider;
 use ethereum_client::EthApi;
 use gear_common::api_provider::ApiProviderConnection;
 use sails_rs::ActorId;
@@ -52,24 +56,47 @@ impl Relayer {
     pub async fn new(
         eth_api: EthApi,
 
-        api_provider: ApiProviderConnection,
+        mut api_provider: ApiProviderConnection,
+        from_block: Option<u32>,
         confirmations_merkle_root: u64,
 
         confirmations_status: u64,
 
         storage_path: impl AsRef<Path>,
 
-        governance_admin: ActorId,
-        governance_pauser: ActorId,
+        governance: (ActorId, ActorId),
     ) -> anyhow::Result<Self> {
+        let (governance_admin, governance_pauser) = governance;
+        let storage_path = storage_path.as_ref();
+        let destination_genesis = ethereum_client::get_block(eth_api.raw_provider(), 0)
+            .await?
+            .header
+            .hash;
         let storage = Arc::new(JSONStorage::new(storage_path));
+        storage
+            .bind_outbound_lane(OutboundLaneIdentity {
+                destination_chain_id: eth_api.raw_provider().get_chain_id().await?,
+                destination_genesis_hash: destination_genesis.0.into(),
+                message_queue_address: eth_api.message_queue_address(),
+                bridging_payment_address: None,
+                fee_exempt_sources: Default::default(),
+                sender_address: eth_api.sender_address(),
+            })
+            .await?;
+        let event_start_block =
+            bind_event_storage(&mut api_provider, storage.as_ref(), from_block).await?;
+        let replay_start_block = storage
+            .replay_from_block(event_start_block, GearEventStream::Queued)
+            .await?;
         let tx_manager = TransactionManager::new(storage.clone());
-        if let Err(e) = tx_manager.load_from_storage().await {
-            log::warn!("Failed to load transaction manager state: {e}");
-        }
+        tx_manager.load_from_storage().await?;
+        eth_api
+            .enable_finality_archive(&storage_path.join("ethereum-finality"), destination_genesis)
+            .await?;
+        tx_manager.verify_completed(&eth_api).await?;
 
-        let gear_block_listener = GearBlockListener::new(api_provider.clone(), storage.clone());
-
+        let gear_block_listener = GearBlockListener::new(api_provider.clone(), storage.clone())
+            .start_from(Some(replay_start_block));
         let (message_queued_sender, message_queued_receiver) = mpsc::unbounded_channel();
         let listener_message_queued = MessageQueuedEventExtractor::new(
             api_provider.clone(),
@@ -83,11 +110,13 @@ impl Relayer {
             api_provider.clone(),
             confirmations_merkle_root,
             roots_sender,
+            storage.clone(),
         );
 
         let accumulator = Accumulator::new(
             roots_receiver,
             tx_manager.merkle_roots.clone(),
+            storage.clone(),
             governance_admin,
             governance_pauser,
             eth_api.clone(),

@@ -13,6 +13,18 @@ use super::{
     msg_tracker::{msg_tracker_mut, MessageStatus, MessageTracker},
 };
 
+#[derive(Clone)]
+struct TokenChild {
+    request: MessageId,
+    token: ActorId,
+    status: MessageStatus,
+    terminal: bool,
+}
+static mut TOKEN_CHILDREN: Option<collections::BTreeMap<MessageId, TokenChild>> = None;
+fn children() -> &'static mut collections::BTreeMap<MessageId, TokenChild> {
+    unsafe { gstd::static_mut!(TOKEN_CHILDREN).get_or_insert_with(collections::BTreeMap::new) }
+}
+
 /// Burn `amount` tokens from the `sender` address.
 ///
 /// It will send `Burn` call to the corresponding `VFT` program and
@@ -78,8 +90,6 @@ pub async fn mint(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    let msg_tracker = msg_tracker_mut();
-
     let bytes: Vec<u8> = Mint::encode_call(receiver, amount);
     send_message_with_gas_for_reply(
         token_id,
@@ -91,7 +101,7 @@ pub async fn mint(
     )
     .await?;
 
-    fetch_withdraw_result(&*msg_tracker, &msg_id)
+    fetch_withdraw_result(&*msg_tracker_mut(), &msg_id)
 }
 
 /// Transfer `amount` tokens from the current program address to the `receiver` address,
@@ -106,8 +116,6 @@ pub async fn unlock(
     config: &Config,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    let msg_tracker = msg_tracker_mut();
-
     let sender = Syscall::program_id();
     let bytes: Vec<u8> = TransferFrom::encode_call(sender, receiver, amount);
 
@@ -121,14 +129,14 @@ pub async fn unlock(
     )
     .await?;
 
-    fetch_withdraw_result(&*msg_tracker, &msg_id)
+    fetch_withdraw_result(&*msg_tracker_mut(), &msg_id)
 }
 
 /// Fetch result of the message sent to deposit tokens into this program.
 ///
 /// It will look for the specified [MessageId] in the [MessageTracker] and return result
 /// based on this message state. The state should be present in the [MessageTracker] according
-/// to the [handle_reply_hook] logic.
+/// to the [handle_persistent_reply] logic.
 fn fetch_deposit_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Result<(), Error> {
     if let Some(info) = msg_tracker.message_info.get(msg_id) {
         match info.status {
@@ -145,7 +153,7 @@ fn fetch_deposit_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Res
 ///
 /// It will look for the specified [MessageId] in the [MessageTracker] and return result
 /// based on this message state. The state should be present in the [MessageTracker] according
-/// to the [handle_reply_hook] logic.
+/// to the [handle_persistent_reply] logic.
 fn fetch_withdraw_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Result<(), Error> {
     if let Some(info) = msg_tracker.message_info.get(msg_id) {
         match info.status {
@@ -161,7 +169,7 @@ fn fetch_withdraw_result(msg_tracker: &MessageTracker, msg_id: &MessageId) -> Re
 /// Configure parameters for message sending and send message
 /// asyncronously waiting for the reply.
 ///
-/// It will set reply hook to the [handle_reply_hook] and
+/// It will set reply hook to the [handle_persistent_reply] and
 /// timeout to the `reply_timeout`.
 async fn send_message_with_gas_for_reply(
     destination: ActorId,
@@ -171,12 +179,28 @@ async fn send_message_with_gas_for_reply(
     reply_timeout: u32,
     msg_id: MessageId,
 ) -> Result<(), Error> {
-    gstd::msg::send_bytes_with_gas_for_reply(destination, message, gas_to_send, 0, gas_deposit)
-        .map_err(|e| Error::SendFailure(format!("{e:?}")))?
+    let status = msg_tracker_mut()
+        .get_message_info(&msg_id)
+        .ok_or(Error::MessageNotFound)?
+        .status
+        .clone();
+    let future =
+        gstd::msg::send_bytes_with_gas_for_reply(destination, message, gas_to_send, 0, gas_deposit)
+            .expect("Dispatch/reply funding failed: roll back the entire child dispatch");
+    children().insert(
+        future.waiting_reply_to,
+        TokenChild {
+            request: msg_id,
+            token: destination,
+            status,
+            terminal: false,
+        },
+    );
+    future
         .up_to(Some(reply_timeout))
-        .map_err(|e| Error::ReplyTimeout(format!("{e:?}")))?
-        .handle_reply(move || handle_reply_hook(msg_id))
-        .map_err(|e| Error::ReplyHook(format!("{e:?}")))?
+        .expect("Cannot install child timeout: roll back dispatch")
+        .handle_reply(handle_persistent_reply)
+        .expect("Cannot install child reply hook: roll back dispatch")
         .await
         .map_err(|e| Error::ReplyFailure(format!("{e:?}")))?;
 
@@ -186,12 +210,21 @@ async fn send_message_with_gas_for_reply(
 /// Handle reply received from `VFT` program.
 ///
 /// It will drive [MessageTracker] state machine further.
-fn handle_reply_hook(msg_id: MessageId) {
-    let msg_tracker = msg_tracker_mut();
-
-    let msg_info = msg_tracker
-        .get_message_info(&msg_id)
-        .expect("Unexpected: msg info does not exist");
+pub fn handle_persistent_reply() {
+    let Ok(child) = msg::reply_to() else { return };
+    let Some(record) = children().get(&child).cloned() else {
+        return;
+    };
+    if record.terminal || record.token != msg::source() {
+        return;
+    }
+    let msg_id = record.request;
+    let Some(msg_info) = msg_tracker_mut().get_message_info(&msg_id).cloned() else {
+        return;
+    };
+    if msg_info.status != record.status {
+        return;
+    }
     // Only an explicit error reply proves that the token operation failed.
     // Unreadable or malformed success replies are ambiguous and must leave the
     // current in-flight state unchanged.
@@ -218,7 +251,8 @@ fn handle_reply_hook(msg_id: MessageId) {
                 .or_else(|| definite_failure.then_some(false));
 
             if let Some(reply) = reply {
-                msg_tracker
+                children().get_mut(&child).unwrap().terminal = true;
+                msg_tracker_mut()
                     .update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
             }
         }
@@ -235,7 +269,8 @@ fn handle_reply_hook(msg_id: MessageId) {
                 .or_else(|| definite_failure.then_some(false));
 
             if let Some(reply) = reply {
-                msg_tracker
+                children().get_mut(&child).unwrap().terminal = true;
+                msg_tracker_mut()
                     .update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
             }
         }
@@ -245,24 +280,38 @@ fn handle_reply_hook(msg_id: MessageId) {
 
 /// Decode reply received from the Burn method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
-    Burn::decode_reply(bytes)
-        .map_err(|e| Error::BurnTokensDecode(format!("{e:?}")))
-        .map(|_| true)
+    Burn::decode_reply(bytes).map_err(|e| Error::BurnTokensDecode(format!("{e:?}")))?;
+    bytes.is_empty().then_some(true).ok_or(Error::InvalidReply)
 }
 
 /// Decode reply received from the TransferFrom method.
 fn decode_lock_reply(bytes: &[u8]) -> Result<bool, Error> {
-    TransferFrom::decode_reply(bytes).map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
+    TransferFrom::decode_reply(bytes)
+        .map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
+        .and_then(|reply| {
+            if bytes.len() == TransferFrom::ROUTE.len() + reply.encoded_size() {
+                Ok(reply)
+            } else {
+                Err(Error::InvalidReply)
+            }
+        })
 }
 
 /// Decode reply received from the Mint method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
-    Mint::decode_reply(bytes)
-        .map_err(|e| Error::MintTokensDecode(format!("{e:?}")))
-        .map(|_| true)
+    Mint::decode_reply(bytes).map_err(|e| Error::MintTokensDecode(format!("{e:?}")))?;
+    bytes.is_empty().then_some(true).ok_or(Error::InvalidReply)
 }
 
 /// Decode reply received from the TransferFrom method.
 fn decode_unlock_reply(bytes: &[u8]) -> Result<bool, Error> {
-    TransferFrom::decode_reply(bytes).map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
+    TransferFrom::decode_reply(bytes)
+        .map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
+        .and_then(|reply| {
+            if bytes.len() == TransferFrom::ROUTE.len() + reply.encoded_size() {
+                Ok(reply)
+            } else {
+                Err(Error::InvalidReply)
+            }
+        })
 }

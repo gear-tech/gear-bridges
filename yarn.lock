@@ -1031,6 +1031,8 @@ __metadata:
     "@gear-js/api": "npm:0.44.1"
     "@lodestar/types": "npm:1.33.0"
     "@polkadot/api": "npm:16.4.6"
+    "@swc/cli": "npm:^0.7.8"
+    "@swc/core": "npm:^1.13.5"
     "@vitest/coverage-v8": "npm:3.2.4"
     dotenv: "npm:17.2.2"
     sails-js: "npm:0.5.0"

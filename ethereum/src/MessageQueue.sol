@@ -7,10 +7,13 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
+import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
+import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {BinaryMerkleTree} from "src/libraries/BinaryMerkleTree.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
@@ -59,6 +62,9 @@ contract MessageQueue is
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
+    uint256 public beefyRootMinimum;
+    mapping(uint256 blockNumber => uint256 timestamp) private _blockRootTimestamps;
+
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
      */
@@ -83,27 +89,29 @@ contract MessageQueue is
         address[] memory emergencyStopObservers_,
         IVerifier verifier_
     ) public initializer {
-        __AccessControl_init();
-        __Pausable_init();
+        _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
+    }
 
-        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin_));
-
-        _grantRole(PAUSER_ROLE, address(governanceAdmin_));
-        _grantRole(PAUSER_ROLE, address(governancePauser_));
-
-        if (emergencyStopAdmin_ == address(0)) {
-            revert InvalidEmergencyStopAdmin();
-        }
-
-        _governanceAdmin = governanceAdmin_;
-        _governancePauser = governancePauser_;
-        _emergencyStopAdmin = emergencyStopAdmin_;
-
-        for (uint256 i = 0; i < emergencyStopObservers_.length; i++) {
-            _emergencyStopObservers.add(emergencyStopObservers_[i]);
-        }
-
-        _verifier = verifier_;
+    /**
+     * @dev Initializes the MessageQueue contract with the Verifier address.
+     *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
+     *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
+     * @dev Fresh BEEFY deployments validate the MessageQueue binding and pin the authenticated source floor.
+     * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
+     * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
+     * @param emergencyStopAdmin_ The address of EOA that will control `submitMerkleRoot` and `processMessage`
+     *                            in case of an emergency stop.
+     * @param verifier_ The address of the Verifier contract that will verify merkle roots.
+     */
+    function initializeBeefy(
+        IGovernance governanceAdmin_,
+        IGovernance governancePauser_,
+        address emergencyStopAdmin_,
+        address[] memory emergencyStopObservers_,
+        IVerifier verifier_
+    ) public initializer {
+        _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
+        beefyRootMinimum = _validateBeefyVerifier();
     }
 
     /**
@@ -162,7 +170,8 @@ contract MessageQueue is
      */
     function isChallengingRoot() public view returns (bool) {
         // forge-lint: disable-next-item(block-timestamp)
-        return block.timestamp < _challengingRootTimestamp + CHALLENGE_ROOT_DELAY;
+        return block.timestamp < _challengingRootTimestamp
+            || block.timestamp - _challengingRootTimestamp < CHALLENGE_ROOT_DELAY;
     }
 
     /**
@@ -336,6 +345,9 @@ contract MessageQueue is
      * @dev Reverts if block number is too far from max block number with `BlockNumberTooFar` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
+        if (merkleRoot == bytes32(0)) {
+            revert InvalidMerkleRoot();
+        }
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
 
         if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
@@ -346,22 +358,8 @@ contract MessageQueue is
             revert EmergencyStop();
         }
 
-        if (_genesisBlock == 0) {
-            _genesisBlock = blockNumber;
-            _maxBlockNumber = blockNumber;
-        } else {
-            if (blockNumber < _genesisBlock) {
-                revert BlockNumberBeforeGenesis(blockNumber, _genesisBlock);
-            }
-
-            if (blockNumber > _maxBlockNumber + MAX_BLOCK_DISTANCE) {
-                revert BlockNumberTooFar(blockNumber, _maxBlockNumber + MAX_BLOCK_DISTANCE);
-            }
-        }
-
-        if (blockNumber > type(uint32).max) {
-            revert BlockNumberOverflow(blockNumber);
-        }
+        bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
+        _checkSubmissionBlock(blockNumber, previousMerkleRoot != bytes32(0), false);
 
         uint256[] memory publicInputs = new uint256[](2);
         publicInputs[0] = uint256(merkleRoot) >> 64;
@@ -372,11 +370,10 @@ contract MessageQueue is
             revert InvalidPlonkProof();
         }
 
-        bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
         if (previousMerkleRoot != 0) {
             if (previousMerkleRoot != merkleRoot) {
                 delete _blockNumbers[blockNumber];
-                delete _merkleRootTimestamps[previousMerkleRoot];
+                delete _blockRootTimestamps[blockNumber];
 
                 if (!_emergencyStop) {
                     _emergencyStop = true;
@@ -394,7 +391,8 @@ contract MessageQueue is
             }
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
-            _merkleRootTimestamps[merkleRoot] = block.timestamp;
+            _blockRootTimestamps[blockNumber] = block.timestamp;
+            if (_genesisBlock == 0) _genesisBlock = blockNumber;
 
             if (blockNumber > _maxBlockNumber) {
                 _maxBlockNumber = blockNumber;
@@ -414,14 +412,87 @@ contract MessageQueue is
         return _blockNumbers[blockNumber];
     }
 
-    /**
-     * @dev Returns timestamp when merkle root was set.
-     *      Returns `0` if merkle root was not provided for specified block number.
-     * @param merkleRoot Target merkle root.
-     * @return timestamp Timestamp when merkle root was set.
-     */
+    /// @dev Retained legacy root-keyed history. New registrations never write this mapping.
     function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256) {
         return _merkleRootTimestamps[merkleRoot];
+    }
+
+    /// @dev Effective maturity for a registered block; absent roots return zero.
+    function getMerkleRootTimestampForBlock(uint256 blockNumber) external view returns (uint256) {
+        return _effectiveRootTimestamp(blockNumber);
+    }
+
+    function _effectiveRootTimestamp(uint256 blockNumber) private view returns (uint256 timestamp) {
+        bytes32 root = _blockNumbers[blockNumber];
+        if (root == bytes32(0)) {
+            return 0;
+        }
+        timestamp = _blockRootTimestamps[blockNumber];
+        if (timestamp == 0 && (beefyRootMinimum == 0 || blockNumber < beefyRootMinimum)) {
+            timestamp = _merkleRootTimestamps[root];
+        }
+        if (timestamp == 0) {
+            revert MerkleRootTimestampNotFound(blockNumber);
+        }
+    }
+
+    function _checkSubmissionBlock(uint256 sourceBlock, bool registered, bool emptyProgress) private view {
+        if (sourceBlock > type(uint32).max) {
+            revert BlockNumberOverflow(sourceBlock);
+        }
+        if (sourceBlock == 0) {
+            revert InvalidSourceBlock();
+        }
+        if (sourceBlock < beefyRootMinimum) {
+            revert BlockNumberBelowMinimum(sourceBlock, beefyRootMinimum);
+        }
+        if (_genesisBlock == 0) {
+            if (emptyProgress) {
+                revert EmptyQueueNotInitialized();
+            }
+            return;
+        }
+        if (sourceBlock < _genesisBlock) {
+            revert BlockNumberBeforeGenesis(sourceBlock, _genesisBlock);
+        }
+        // Registered roots remain challengeable; no publisher can backfill new roots behind the frontier.
+        if (!registered && sourceBlock <= _maxBlockNumber) {
+            if (emptyProgress) {
+                revert EmptyQueueProgressNotForward();
+            }
+            revert MerkleRootProgressNotForward();
+        }
+        uint256 maxAllowedBlockNumber = _maxBlockNumber + MAX_BLOCK_DISTANCE;
+        if (sourceBlock > maxAllowedBlockNumber) {
+            revert BlockNumberTooFar(sourceBlock, maxAllowedBlockNumber);
+        }
+    }
+
+    /// @dev Move the authenticated empty queue height without creating a root or changing any maturity timestamp.
+    function submitEmptyQueueProgress(uint256 sourceBlock, bytes calldata authenticatedSnapshotProof) external {
+        bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
+
+        if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
+            revert ChallengeRoot();
+        }
+        if (_emergencyStop && !isFromEmergencyStopAdmin) {
+            revert EmergencyStop();
+        }
+        _checkSubmissionBlock(sourceBlock, false, true);
+
+        bool valid;
+        try IQueueProgressVerifier(address(_verifier))
+            .safeVerifyEmptyQueueProgress(sourceBlock, authenticatedSnapshotProof) returns (
+            bool verified
+        ) {
+            valid = verified;
+        } catch {}
+        if (!valid) {
+            revert InvalidEmptyQueueProgressProof();
+        }
+
+        _maxBlockNumber = sourceBlock;
+        emit EmptyQueueProgress(sourceBlock);
     }
 
     /**
@@ -498,9 +569,9 @@ contract MessageQueue is
             messageDelay = PROCESS_USER_MESSAGE_DELAY;
         }
 
-        uint256 timestamp = _merkleRootTimestamps[merkleRoot];
+        uint256 timestamp = _effectiveRootTimestamp(blockNumber);
         // forge-lint: disable-next-item(block-timestamp)
-        if (block.timestamp < timestamp + messageDelay) {
+        if (block.timestamp < timestamp || block.timestamp - timestamp < messageDelay) {
             revert MerkleRootDelayNotPassed();
         }
 
@@ -524,5 +595,69 @@ contract MessageQueue is
      */
     function isProcessed(uint256 messageNonce) external view returns (bool) {
         return _processedMessages[messageNonce];
+    }
+
+    function _initialize(
+        IGovernance governanceAdmin_,
+        IGovernance governancePauser_,
+        address emergencyStopAdmin_,
+        address[] memory emergencyStopObservers_,
+        IVerifier verifier_
+    ) private {
+        __AccessControl_init();
+        __Pausable_init();
+
+        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin_));
+
+        _grantRole(PAUSER_ROLE, address(governanceAdmin_));
+        _grantRole(PAUSER_ROLE, address(governancePauser_));
+
+        if (emergencyStopAdmin_ == address(0)) {
+            revert InvalidEmergencyStopAdmin();
+        }
+
+        _governanceAdmin = governanceAdmin_;
+        _governancePauser = governancePauser_;
+        _emergencyStopAdmin = emergencyStopAdmin_;
+
+        for (uint256 i = 0; i < emergencyStopObservers_.length; i++) {
+            _emergencyStopObservers.add(emergencyStopObservers_[i]);
+        }
+
+        _verifier = verifier_;
+    }
+
+    function _validateBeefyVerifier() private view returns (uint64) {
+        if (address(_verifier).code.length == 0) {
+            revert InvalidBeefyVerifier();
+        }
+        VaraQueueRootVerifier rootVerifier = VaraQueueRootVerifier(address(_verifier));
+        if (rootVerifier.messageQueue() != address(this) || rootVerifier.destinationChainId() != block.chainid) {
+            revert InvalidBeefyVerifier();
+        }
+        address clientAddress = address(rootVerifier.beefyClient());
+        if (clientAddress.code.length == 0) {
+            revert InvalidBeefyVerifier();
+        }
+        BeefyClient client = BeefyClient(clientAddress);
+        if (
+            client.sourceDomain() == bytes32(0) || client.destinationQueue() != address(this)
+                || client.destinationChainId() != block.chainid || client.mmrStartBlock() == 0
+                || client.minNumRequiredSignatures() != 86 || client.fiatShamirRequiredSignatures() != 86
+                || client.MAX_VALIDATORS() != 256 || client.randaoCommitDelay() != 128
+                || client.randaoCommitExpiration() != 24
+                || client.bridgeDomain()
+                    != keccak256(
+                        abi.encodePacked(
+                            "vara/gear-eth-bridge-domain/v2",
+                            client.sourceDomain(),
+                            bytes32(block.chainid),
+                            address(this)
+                        )
+                    )
+        ) {
+            revert InvalidBeefyVerifier();
+        }
+        return client.mmrStartBlock();
     }
 }

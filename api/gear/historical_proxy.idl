@@ -22,6 +22,7 @@ type Error = enum {
   InvalidBlockProof,
   TrieDbFailure,
   InvalidReceiptProof,
+  UnsupportedFork,
 };
 
 constructor {
@@ -62,8 +63,8 @@ service HistoricalProxy {
   query Endpoints : () -> vec struct { u64, actor_id };
 
   events {
-    /// Tx receipt is checked to be valid and successfully sent to the
-    /// underlying program.
+    /// Receipt proof accepted and consumer reply returned. This is transport
+    /// evidence, not proof that the app-owned reply reports application success.
     Relayed: struct {
       /// Ethereum slot containing target transaction.
       slot: u64,

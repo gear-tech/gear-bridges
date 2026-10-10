@@ -2,16 +2,21 @@
 src = "src"
 out = "out"
 libs = ["dependencies"]
+# Keep fresh checkouts and sealed snapshots on the same explicit aliases.
+auto_detect_remappings = false
 remappings = [
-    "forge-std/=dependencies/forge-std-1.16.2/src/",
+    "forge-std/=dependencies/forge-std-1.17.0/src/",
     "@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.7.0/",
     "@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.7.0/",
+    "openzeppelin-foundry-upgrades/=dependencies/openzeppelin-foundry-upgrades-0.4.2/src/",
 ]
 evm_version = "osaka"
 solc = "0.8.37"
 optimizer = true
 extra_output_files = ["irOptimized"]
 via_ir = true
+# Sealed deployments require physical sources, not memory-only foundry-pp helpers.
+dynamic_test_linking = false
 bytecode_hash = "none"
 cbor_metadata = false
 revert_strings = "strip"
@@ -26,9 +31,14 @@ ignored_warnings_from = [
     "dependencies/@openzeppelin-contracts-5.7.0/utils/structs/EnumerableMap.sol",
     "dependencies/@openzeppelin-contracts-5.7.0/utils/structs/EnumerableSet.sol",
 ]
+# Required for BEEFY consensus:
+fs_permissions = [
+    { access = "read", path = "out/" },
+    { access = "read", path = "test/fixtures/" },
+]
 
 [dependencies]
-forge-std = "1.16.2"
+forge-std = "1.17.0"
 "@openzeppelin-contracts" = "5.7.0"
 "@openzeppelin-contracts-upgradeable" = "5.7.0"
 openzeppelin-foundry-upgrades = "0.4.2"

@@ -1,0 +1,944 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
+pragma solidity ^0.8.37;
+
+import {VaraBridgeMetadata} from "./VaraBridgeMetadata.sol";
+import {Bitfield} from "./utils/Bitfield.sol";
+import {MMRProof} from "./utils/MMRProof.sol";
+import {Math} from "./utils/Math.sol";
+import {ScaleCodec} from "./utils/ScaleCodec.sol";
+import {SubstrateMerkleProof} from "./utils/SubstrateMerkleProof.sol";
+import {Uint16Array, createUint16Array} from "./utils/Uint16Array.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
+/**
+ * @title BeefyClient
+ * @dev This is a client for verifying BEEFY commitments from the Polkadot network.
+ * it contains two ways to verify BEEFY commitments from a Substrate-based chain,
+ * one through an interactive protocol, and one through Fiat-Shamir transformation.
+ *
+ * The interactive protocol is defined in https://eprint.iacr.org/2025/057.pdf. Higher level documentation
+ * is available at https://docs.snowbridge.network/architecture/verification/polkadot.
+ *
+ * To submit new commitments, relayers must call the following methods sequentially:
+ * 1. submitInitial: Initializes the session for interactive submission and waits for the Randao delay period
+ * 2. commitPrevRandao: Commit to a random seed for generating a validator subsampling
+ * 3. createFinalBitfield: Generate the validator subsampling
+ * 4. submitFinal: Complete submission after providing the request validator signatures
+ *
+ *
+ * The non-interactive protocol eliminates the need for interaction by applying Fiat-Shamir transform.
+ * It is defined in Section 6 of https://eprint.iacr.org/2025/057.pdf, with higher-level documentation
+ * available at https://hackmd.io/8Jd7V74iSSeeHOIG76REWw
+ *
+ * To submit new commitments using the Fiat-Shamir approach, relayers call the following methods sequentially:
+ * 1. createFiatShamirFinalBitfield: Generate the validator subsampling using Fiat-Shamir
+ * 2. submitFiatShamir: Complete submission after providing the request validator signatures
+ */
+contract BeefyClient {
+    using Math for uint16;
+    using Math for uint256;
+
+    /* Events */
+
+    /**
+     * @dev Emitted when the MMR root is updated
+     * @param mmrRoot the updated MMR root
+     * @param blockNumber the beefy block number of the updated MMR root
+     */
+    event NewMMRRoot(bytes32 mmrRoot, uint64 blockNumber);
+
+    /**
+     * @dev Emitted when a new ticket has been created
+     * @param relayer The relayer who created the ticket
+     * @param blockNumber the parent block number of the candidate MMR root
+     */
+    event NewTicket(address relayer, uint64 blockNumber);
+
+    /**
+     * @dev Interactive session has expired
+     */
+    event TicketExpired();
+
+    /* Types */
+
+    /**
+     * @dev The Commitment, with its payload, is the core thing we are trying to verify with
+     * this contract. It contains an MMR root that commits to the polkadot history, including
+     * past blocks and parachain blocks and can be used to verify both polkadot and parachain blocks.
+     */
+    struct Commitment {
+        // Relay chain block number
+        uint32 blockNumber;
+        // ID of the validator set that signed the commitment
+        uint64 validatorSetID;
+        // The payload of the new commitment in beefy justifications (in
+        // our case, this is a new MMR root for all past polkadot blocks)
+        PayloadItem[] payload;
+    }
+
+    /**
+     * @dev Each PayloadItem is a piece of data signed by validators at a particular block.
+     */
+    struct PayloadItem {
+        // An ID that references a description of the data in the payload item.
+        // Known payload ids can be found [upstream](https://github.com/paritytech/substrate/blob/fe1f8ba1c4f23931ae89c1ada35efb3d908b50f5/primitives/consensus/beefy/src/payload.rs#L27).
+        bytes2 payloadID;
+        // The contents of the payload item
+        bytes data;
+    }
+
+    /**
+     * @dev The ValidatorProof is a proof used to verify a commitment signature
+     */
+    struct ValidatorProof {
+        // The parity bit to specify the intended solution
+        uint8 v;
+        // The x component on the secp256k1 curve
+        bytes32 r;
+        // The challenge solution
+        bytes32 s;
+        // Leaf index of the validator address in the merkle tree
+        uint256 index;
+        // Validator address
+        address account;
+        // Merkle proof for the validator
+        bytes32[] proof;
+    }
+
+    /**
+     * @dev A ticket tracks working state for the interactive submission of new commitments
+     */
+    struct Ticket {
+        // The block number this ticket was issued
+        uint64 blockNumber;
+        // Length of the validator set that signed the commitment
+        uint32 validatorSetLen;
+        // The number of signatures required
+        uint32 numRequiredSignatures;
+        // The PREVRANDAO seed selected for this ticket session
+        uint256 prevRandao;
+        // Hash of a bitfield claiming which validators have signed
+        bytes32 bitfieldHash;
+    }
+
+    /// @dev The MMRLeaf describes the leaf structure of the MMR
+    struct MMRLeaf {
+        // Version of the leaf type
+        uint8 version;
+        // Parent number of the block this leaf describes
+        uint32 parentNumber;
+        // Parent hash of the block this leaf describes
+        bytes32 parentHash;
+        // Validator set id that will be part of consensus for the next block
+        uint64 nextAuthoritySetID;
+        // Length of that validator set
+        uint32 nextAuthoritySetLen;
+        // Merkle root of all public keys in that validator set
+        bytes32 nextAuthoritySetRoot;
+        // Merkle root of all parachain headers in this block
+        bytes32 parachainHeadsRoot;
+    }
+
+    /**
+     * @dev The ValidatorSet describes a BEEFY validator set
+     */
+    struct ValidatorSet {
+        // Identifier for the set
+        uint128 id;
+        // Number of validators in the set
+        uint128 length;
+        // Merkle root of BEEFY validator addresses
+        bytes32 root;
+    }
+
+    /**
+     * @dev The ValidatorSetState describes a BEEFY validator set along with signature usage counters
+     */
+    struct ValidatorSetState {
+        // Identifier for the set
+        uint128 id;
+        // Number of validators in the set
+        uint128 length;
+        // Merkle root of BEEFY validator addresses
+        bytes32 root;
+        // Number of times a validator signature has been used
+        Uint16Array usageCounters;
+    }
+
+    /* State */
+
+    /// @dev The latest verified MMR root. Bootstrap keeps this zero until a signed update.
+    bytes32 public latestMMRRoot;
+
+    /// @dev The block number in the relay chain in which the latest MMR root was emitted.
+    uint64 public latestBeefyBlock;
+
+    /// @dev Immutable source and destination identity and MMR history start.
+    bytes32 public immutable sourceDomain;
+    bytes32 public immutable bridgeDomain;
+    uint256 public immutable destinationChainId;
+    address public immutable destinationQueue;
+    uint64 public immutable mmrStartBlock;
+
+    /// @dev Source timestamp authenticated by the latest accepted commitment.
+    uint64 public lastAuthenticatedSourceTimestampMs;
+
+    /// @dev State of the current validator set
+    ValidatorSetState public currentValidatorSet;
+
+    /// @dev State of the next validator set
+    ValidatorSetState public nextValidatorSet;
+
+    /// @dev Pending tickets for commitment submission
+    mapping(bytes32 ticketID => Ticket) public tickets;
+
+    /* Constants */
+
+    /**
+     * @dev Fiat-Shamir domain separator ID
+     */
+    bytes public constant FIAT_SHAMIR_DOMAIN_ID = bytes("SNOWBRIDGE-FIAT-SHAMIR-V1");
+
+    /**
+     * @dev Beefy payload id for MMR Root payload items:
+     * https://github.com/paritytech/substrate/blob/fe1f8ba1c4f23931ae89c1ada35efb3d908b50f5/primitives/consensus/beefy/src/payload.rs#L33
+     */
+    // forge-lint: disable-next-line(unsafe-typecast)
+    bytes2 public constant MMR_ROOT_ID = bytes2("mh");
+
+    uint256 public constant randaoCommitDelay = 128;
+    uint256 public constant randaoCommitExpiration = 24;
+    uint256 public constant minNumRequiredSignatures = 86;
+    uint256 public constant fiatShamirRequiredSignatures = 86;
+    uint256 public constant MAX_VALIDATORS = 256;
+    uint256 public constant MAX_SOURCE_AGE_MS = 86_400_000;
+    uint256 public constant MAX_FUTURE_SOURCE_SKEW_MS = 120_000;
+
+    /* Errors */
+    error InvalidBitfield();
+    error InvalidBitfieldLength();
+    error InvalidBootstrap();
+    error InvalidCommitment();
+    error InvalidMMRLeaf();
+    error InvalidMMRLeafProof();
+    error InvalidMMRRootLength();
+    error InvalidSignature();
+    error InvalidSourceTimestamp();
+    error InvalidTicket();
+    error InvalidValidatorProof();
+    error InvalidValidatorProofLength();
+    error InvalidValidatorSet();
+    error ClientExpired();
+    error CommitmentNotRelevant();
+    error PrevRandaoAlreadyCaptured();
+    error PrevRandaoNotCaptured();
+    error StaleCommitment();
+    error WaitPeriodNotOver();
+
+    constructor(
+        bytes32 sourceDomain_,
+        uint256 destinationChainId_,
+        address destinationQueue_,
+        uint64 mmrStartBlock_,
+        uint64 initialBeefyBlock_,
+        uint64 initialSourceTimestampMs_,
+        ValidatorSet memory initialValidatorSet_,
+        ValidatorSet memory nextValidatorSet_
+    ) {
+        uint256 nowMs = block.timestamp * 1000;
+        if (
+            sourceDomain_ == bytes32(0) || destinationChainId_ == 0 || destinationChainId_ != block.chainid
+                || destinationQueue_ == address(0) || mmrStartBlock_ == 0 || initialBeefyBlock_ <= mmrStartBlock_
+                || initialBeefyBlock_ > type(uint32).max || initialSourceTimestampMs_ == 0
+                || uint256(initialSourceTimestampMs_) > nowMs + MAX_FUTURE_SOURCE_SKEW_MS
+                || nowMs > uint256(initialSourceTimestampMs_) + MAX_SOURCE_AGE_MS
+        ) {
+            revert InvalidBootstrap();
+        }
+        _validateValidatorSet(initialValidatorSet_);
+        _validateValidatorSet(nextValidatorSet_);
+        if (initialValidatorSet_.id >= type(uint64).max || nextValidatorSet_.id != initialValidatorSet_.id + 1) {
+            revert InvalidValidatorSet();
+        }
+
+        sourceDomain = sourceDomain_;
+        destinationChainId = destinationChainId_;
+        destinationQueue = destinationQueue_;
+        bridgeDomain = keccak256(
+            abi.encodePacked(
+                "vara/gear-eth-bridge-domain/v2", sourceDomain_, bytes32(destinationChainId_), destinationQueue_
+            )
+        );
+        mmrStartBlock = mmrStartBlock_;
+        latestBeefyBlock = initialBeefyBlock_;
+        lastAuthenticatedSourceTimestampMs = initialSourceTimestampMs_;
+
+        currentValidatorSet.id = initialValidatorSet_.id;
+        currentValidatorSet.length = initialValidatorSet_.length;
+        currentValidatorSet.root = initialValidatorSet_.root;
+        currentValidatorSet.usageCounters = createUint16Array(currentValidatorSet.length);
+        nextValidatorSet.id = nextValidatorSet_.id;
+        nextValidatorSet.length = nextValidatorSet_.length;
+        nextValidatorSet.root = nextValidatorSet_.root;
+        nextValidatorSet.usageCounters = createUint16Array(nextValidatorSet.length);
+    }
+
+    /* External Functions */
+
+    function isLive() external view returns (bool) {
+        return block.timestamp * 1000 <= uint256(lastAuthenticatedSourceTimestampMs) + MAX_SOURCE_AGE_MS;
+    }
+
+    /**
+     * @dev Begin submission of commitment
+     * @param commitment contains the commitment signed by the validators
+     * @param bitfield a bitfield claiming which validators have signed the commitment
+     * @param proof a proof that a single validator from currentValidatorSet has signed the commitment
+     */
+    function submitInitial(Commitment calldata commitment, uint256[] calldata bitfield, ValidatorProof calldata proof)
+        external
+    {
+        _requireLive();
+        if (commitment.blockNumber <= latestBeefyBlock) {
+            revert StaleCommitment();
+        }
+
+        ValidatorSetState storage vset = currentValidatorSet;
+        uint16 signatureUsageCount;
+        if (commitment.validatorSetID == currentValidatorSet.id) {
+            signatureUsageCount = currentValidatorSet.usageCounters.get(proof.index);
+            currentValidatorSet.usageCounters.set(proof.index, signatureUsageCount.saturatingAdd(1));
+        } else if (commitment.validatorSetID == nextValidatorSet.id) {
+            signatureUsageCount = nextValidatorSet.usageCounters.get(proof.index);
+            nextValidatorSet.usageCounters.set(proof.index, signatureUsageCount.saturatingAdd(1));
+            vset = nextValidatorSet;
+        } else {
+            revert InvalidCommitment();
+        }
+
+        // Check if merkle proof is valid based on the validatorSetRoot and if proof is included in bitfield
+        if (!isValidatorInSet(vset, proof.account, proof.index, proof.proof) || !Bitfield.isSet(bitfield, proof.index))
+        {
+            revert InvalidValidatorProof();
+        }
+
+        // Check if validatorSignature is correct, ie. check if it matches
+        // the signature of senderPublicKey on the commitmentHash
+        bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
+        if (ECDSA.recover(commitmentHash, proof.v, proof.r, proof.s) != proof.account) {
+            revert InvalidSignature();
+        }
+
+        // For the initial submission, the supplied bitfield should claim that more than
+        // two thirds of the validator set have sign the commitment
+        if (
+            bitfield.length != Bitfield.containerLength(vset.length)
+                || Bitfield.countSetBits(bitfield, vset.length) < computeQuorum(vset.length)
+        ) {
+            revert InvalidBitfield();
+        }
+
+        // Validate that all padding bits (beyond vset.length) are zero
+        // This ensures the bitfield was created by createInitialBitfield or equivalent
+        Bitfield.validatePadding(bitfield, vset.length);
+
+        tickets[createTicketID(msg.sender, commitmentHash)] = Ticket({
+            blockNumber: uint64(block.number),
+            validatorSetLen: uint32(vset.length),
+            numRequiredSignatures: uint32(
+                computeNumRequiredSignatures(vset.length, signatureUsageCount, minNumRequiredSignatures)
+            ),
+            prevRandao: 0,
+            bitfieldHash: keccak256(abi.encodePacked(bitfield))
+        });
+
+        emit NewTicket(msg.sender, commitment.blockNumber);
+    }
+
+    /**
+     * @dev Capture PREVRANDAO
+     * @param commitmentHash contains the commitmentHash signed by the validators
+     */
+    function commitPrevRandao(bytes32 commitmentHash) external {
+        bytes32 ticketID = createTicketID(msg.sender, commitmentHash);
+        Ticket storage ticket = tickets[ticketID];
+
+        if (ticket.blockNumber == 0) {
+            revert InvalidTicket();
+        }
+
+        if (ticket.prevRandao != 0) {
+            revert PrevRandaoAlreadyCaptured();
+        }
+
+        // relayer must wait `randaoCommitDelay` blocks
+        if (block.number < ticket.blockNumber + randaoCommitDelay) {
+            revert WaitPeriodNotOver();
+        }
+
+        // relayer can capture within `randaoCommitExpiration` blocks
+        if (block.number > ticket.blockNumber + randaoCommitDelay + randaoCommitExpiration) {
+            delete tickets[ticketID];
+            emit TicketExpired();
+            return;
+        }
+
+        // Post-merge, the difficulty opcode now returns PREVRANDAO
+        ticket.prevRandao = block.prevrandao;
+    }
+
+    /**
+     * @dev Submit a commitment and leaf for final verification
+     * @param commitment contains the full commitment that was used for the commitmentHash
+     * @param bitfield claiming which validators have signed the commitment
+     * @param proofs a struct containing the data needed to verify all validator signatures
+     * @param leaf an MMR leaf provable using the MMR root in the commitment payload
+     * @param leafProof an MMR leaf proof
+     * @param leafProofOrder a bitfield describing the order of each item (left vs right)
+     */
+    function submitFinal(
+        Commitment calldata commitment,
+        uint256[] calldata bitfield,
+        ValidatorProof[] calldata proofs,
+        MMRLeaf calldata leaf,
+        VaraBridgeMetadata.Snapshot calldata snapshot,
+        bytes32[] calldata leafProof,
+        uint256 leafProofOrder
+    ) external {
+        _requireLive();
+        bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
+        bytes32 ticketID = createTicketID(msg.sender, commitmentHash);
+        validateTicket(ticketID, commitment, bitfield);
+
+        bool is_next_session = false;
+        ValidatorSetState storage vset = currentValidatorSet;
+        if (commitment.validatorSetID == nextValidatorSet.id) {
+            is_next_session = true;
+            vset = nextValidatorSet;
+        } else if (commitment.validatorSetID != currentValidatorSet.id) {
+            revert InvalidCommitment();
+        }
+
+        Bitfield.validatePadding(bitfield, vset.length);
+        verifyCommitment(commitmentHash, ticketID, bitfield, vset, proofs);
+
+        bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
+        _validateAuthenticatedLeaf(commitment, newMMRRoot, leaf, snapshot, leafProof, leafProofOrder);
+
+        if (is_next_session) {
+            if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
+                revert InvalidMMRLeaf();
+            }
+            currentValidatorSet = nextValidatorSet;
+            nextValidatorSet.id = leaf.nextAuthoritySetID;
+            nextValidatorSet.length = leaf.nextAuthoritySetLen;
+            nextValidatorSet.root = leaf.nextAuthoritySetRoot;
+            nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
+        }
+
+        latestMMRRoot = newMMRRoot;
+        latestBeefyBlock = commitment.blockNumber;
+        lastAuthenticatedSourceTimestampMs = snapshot.sourceTimestampMs;
+        delete tickets[ticketID];
+
+        emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
+    }
+
+    /**
+     * @dev Verify that the supplied MMR leaf is included in the latest verified MMR root.
+     * @param leafHash contains the merkle leaf to be verified
+     * @param proof contains simplified mmr proof
+     * @param proofOrder a bitfield describing the order of each item (left vs right)
+     */
+    function verifyMMRLeafProof(bytes32 leafHash, bytes32[] calldata proof, uint256 proofOrder)
+        external
+        view
+        returns (bool)
+    {
+        return MMRProof.verifyLeafProof(latestMMRRoot, leafHash, proof, proofOrder);
+    }
+
+    /**
+     * @dev Helper to create an initial validator bitfield.
+     * @param bitsToSet contains indexes of all signed validators, should be deduplicated
+     * @param length of validator set
+     */
+    function createInitialBitfield(uint256[] calldata bitsToSet, uint256 length)
+        external
+        pure
+        returns (uint256[] memory)
+    {
+        if (length == 0 || length > MAX_VALIDATORS || length < bitsToSet.length) {
+            revert InvalidBitfieldLength();
+        }
+        return Bitfield.createBitfield(bitsToSet, length);
+    }
+
+    /**
+     * @dev Compute the hash of a commitment
+     * @param commitment the commitment to hash
+     */
+    function computeCommitmentHash(Commitment calldata commitment) external pure returns (bytes32) {
+        return keccak256(encodeCommitment(commitment));
+    }
+
+    /**
+     * @dev Helper to create a final bitfield, with subsampled validator selections
+     * @param commitmentHash contains the commitmentHash signed by the validators
+     * @param bitfield claiming which validators have signed the commitment
+     */
+    function createFinalBitfield(bytes32 commitmentHash, uint256[] calldata bitfield)
+        external
+        view
+        returns (uint256[] memory)
+    {
+        Ticket storage ticket = tickets[createTicketID(msg.sender, commitmentHash)];
+        if (ticket.bitfieldHash != keccak256(abi.encodePacked(bitfield))) {
+            revert InvalidBitfield();
+        }
+        return Bitfield.subsample(ticket.prevRandao, bitfield, ticket.validatorSetLen, ticket.numRequiredSignatures);
+    }
+
+    /**
+     * @dev Helper to create a final bitfield with subsampled validator selections using the Fiat-Shamir approach
+     * @param commitment contains the full commitment that was used for the commitmentHash
+     * @param bitfield claiming which validators have signed the commitment
+     */
+    function createFiatShamirFinalBitfield(Commitment calldata commitment, uint256[] calldata bitfield)
+        external
+        view
+        returns (uint256[] memory)
+    {
+        ValidatorSetState storage vset = currentValidatorSet;
+        if (commitment.validatorSetID == nextValidatorSet.id) {
+            vset = nextValidatorSet;
+        } else if (commitment.validatorSetID != currentValidatorSet.id) {
+            revert InvalidCommitment();
+        }
+
+        if (
+            bitfield.length != Bitfield.containerLength(vset.length)
+                || Bitfield.countSetBits(bitfield, vset.length) < computeQuorum(vset.length)
+        ) {
+            revert InvalidBitfield();
+        }
+
+        Bitfield.validatePadding(bitfield, vset.length);
+        bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
+
+        return fiatShamirFinalBitfield(commitmentHash, bitfield, vset);
+    }
+
+    /**
+     * @dev Submit a commitment and leaf using the Fiat-Shamir approach
+     * @param commitment contains the full commitment that was used for the commitmentHash
+     * @param bitfield claiming which validators have signed the commitment
+     * @param proofs a struct containing the data needed to verify all validator signatures
+     * @param leaf an MMR leaf provable using the MMR root in the commitment payload
+     * @param leafProof an MMR leaf proof
+     * @param leafProofOrder a bitfield describing the order of each item (left vs right)
+     */
+    function submitFiatShamir(
+        Commitment calldata commitment,
+        uint256[] calldata bitfield,
+        ValidatorProof[] calldata proofs,
+        MMRLeaf calldata leaf,
+        VaraBridgeMetadata.Snapshot calldata snapshot,
+        bytes32[] calldata leafProof,
+        uint256 leafProofOrder
+    ) external {
+        _requireLive();
+        if (commitment.blockNumber <= latestBeefyBlock) {
+            revert StaleCommitment();
+        }
+
+        bool is_next_session = false;
+        ValidatorSetState storage vset = currentValidatorSet;
+        if (commitment.validatorSetID == nextValidatorSet.id) {
+            is_next_session = true;
+            vset = nextValidatorSet;
+        } else if (commitment.validatorSetID != currentValidatorSet.id) {
+            revert InvalidCommitment();
+        }
+
+        if (
+            bitfield.length != Bitfield.containerLength(vset.length)
+                || Bitfield.countSetBits(bitfield, vset.length) < computeQuorum(vset.length)
+        ) {
+            revert InvalidBitfield();
+        }
+        Bitfield.validatePadding(bitfield, vset.length);
+
+        bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
+        bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
+        verifyFiatShamirCommitment(commitmentHash, bitfield, vset, proofs);
+        _validateAuthenticatedLeaf(commitment, newMMRRoot, leaf, snapshot, leafProof, leafProofOrder);
+
+        if (is_next_session) {
+            if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
+                revert InvalidMMRLeaf();
+            }
+            currentValidatorSet = nextValidatorSet;
+            nextValidatorSet.id = leaf.nextAuthoritySetID;
+            nextValidatorSet.length = leaf.nextAuthoritySetLen;
+            nextValidatorSet.root = leaf.nextAuthoritySetRoot;
+            nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
+        }
+
+        latestMMRRoot = newMMRRoot;
+        latestBeefyBlock = commitment.blockNumber;
+        lastAuthenticatedSourceTimestampMs = snapshot.sourceTimestampMs;
+
+        emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
+    }
+
+    /* Internal Functions */
+
+    function _validateValidatorSet(ValidatorSet memory validatorSet) internal pure {
+        if (
+            validatorSet.length == 0 || validatorSet.length > MAX_VALIDATORS || validatorSet.root == bytes32(0)
+                || validatorSet.id > type(uint64).max
+        ) {
+            revert InvalidValidatorSet();
+        }
+    }
+
+    function _requireLive() internal view {
+        if (block.timestamp * 1000 > uint256(lastAuthenticatedSourceTimestampMs) + MAX_SOURCE_AGE_MS) {
+            revert ClientExpired();
+        }
+    }
+
+    function _validateAuthenticatedLeaf(
+        Commitment calldata commitment,
+        bytes32 newMMRRoot,
+        MMRLeaf calldata leaf,
+        VaraBridgeMetadata.Snapshot calldata snapshot,
+        bytes32[] calldata leafProof,
+        uint256 leafProofOrder
+    ) internal view {
+        if (
+            newMMRRoot == bytes32(0) || leaf.version != 0 || commitment.blockNumber == 0
+                || leaf.parentNumber != commitment.blockNumber - 1
+        ) {
+            revert InvalidMMRLeaf();
+        }
+        if (
+            leaf.nextAuthoritySetLen == 0 || leaf.nextAuthoritySetLen > MAX_VALIDATORS
+                || leaf.nextAuthoritySetRoot == bytes32(0)
+        ) {
+            revert InvalidValidatorSet();
+        }
+        if (snapshot.bridgeDomain != bridgeDomain) {
+            revert InvalidSourceTimestamp();
+        }
+        if (
+            snapshot.sourceTimestampMs < lastAuthenticatedSourceTimestampMs
+                || uint256(snapshot.sourceTimestampMs) > block.timestamp * 1000 + MAX_FUTURE_SOURCE_SKEW_MS
+        ) {
+            revert InvalidSourceTimestamp();
+        }
+        if (VaraBridgeMetadata.hash(snapshot) != leaf.parachainHeadsRoot) {
+            revert InvalidMMRLeaf();
+        }
+        if (!MMRProof.verifyLeafProof(newMMRRoot, keccak256(encodeMMRLeaf(leaf)), leafProof, leafProofOrder)) {
+            revert InvalidMMRLeafProof();
+        }
+    }
+
+    function createTicketID(address account, bytes32 commitmentHash) internal pure returns (bytes32 value) {
+        // forge-lint: disable-next-item(inline-assembly)
+        assembly ("memory-safe") {
+            /* reviewed: ... */
+            mstore(0x00, account)
+            mstore(0x20, commitmentHash)
+            value := keccak256(0x0, 0x40)
+        }
+    }
+
+    /**
+     * @dev Calculates the number of required signatures for `submitFinal`.
+     * @param validatorSetLen The length of the validator set
+     * @param signatureUsageCount A counter of the number of times the validator signature was previously used in a call to `submitInitial` within the session.
+     * @param minRequiredSignatures The minimum amount of signatures to verify
+     */
+    // For more details on the calculation, read the following:
+    // 1. https://docs.snowbridge.network/architecture/verification/polkadot#signature-sampling
+    // 2. https://hackmd.io/9OedC7icR5m-in_moUZ_WQ
+    function computeNumRequiredSignatures(
+        uint256 validatorSetLen,
+        uint256 signatureUsageCount,
+        uint256 minRequiredSignatures
+    ) internal pure returns (uint256) {
+        // Start with the minimum number of signatures.
+        uint256 numRequiredSignatures = minRequiredSignatures;
+        // Add signatures based on the number of validators in the validator set.
+        numRequiredSignatures += Math.log2(validatorSetLen, Math.Rounding.Ceil);
+        // Add signatures based on the signature usage count.
+        numRequiredSignatures += 1 + (2 * Math.log2(signatureUsageCount, Math.Rounding.Ceil));
+        // Tiny sets authenticate native quorum; larger sets retain the sampling cap.
+        return Math.min(numRequiredSignatures, computeMaxRequiredSignatures(validatorSetLen));
+    }
+
+    /**
+     * @dev Calculates 2/3 majority required for quorum for a given number of validators.
+     * @param numValidators The number of validators in the validator set.
+     */
+    function computeQuorum(uint256 numValidators) internal pure returns (uint256) {
+        return numValidators - (numValidators - 1) / 3;
+    }
+
+    /**
+     * @dev Authenticate native quorum for tiny sets; larger sets retain the 1/3 + 1 sampling cap.
+     * @param numValidators The number of validators in the validator set.
+     */
+    function computeMaxRequiredSignatures(uint256 numValidators) internal pure returns (uint256) {
+        return numValidators <= 3 ? computeQuorum(numValidators) : numValidators / 3 + 1;
+    }
+
+    /**
+     * @dev Verify commitment using the supplied signature proofs
+     */
+    function verifyCommitment(
+        bytes32 commitmentHash,
+        bytes32 ticketID,
+        uint256[] calldata bitfield,
+        ValidatorSetState storage vset,
+        ValidatorProof[] calldata proofs
+    ) internal view {
+        Ticket storage ticket = tickets[ticketID];
+        // Verify that enough signature proofs have been supplied
+        uint256 numRequiredSignatures = ticket.numRequiredSignatures;
+        if (proofs.length != numRequiredSignatures) {
+            revert InvalidValidatorProofLength();
+        }
+
+        // Generate final bitfield indicating which validators need to be included in the proofs.
+        uint256[] memory finalbitfield =
+            Bitfield.subsample(ticket.prevRandao, bitfield, vset.length, numRequiredSignatures);
+
+        _requireDistinctAccounts(proofs);
+        for (uint256 i = 0; i < proofs.length; i++) {
+            ValidatorProof calldata proof = proofs[i];
+
+            // Check that validator is actually in a validator set
+            if (!isValidatorInSet(vset, proof.account, proof.index, proof.proof)) {
+                revert InvalidValidatorProof();
+            }
+
+            // Check that validator is in bitfield
+            if (!Bitfield.isSet(finalbitfield, proof.index)) {
+                revert InvalidValidatorProof();
+            }
+
+            // Check that validator signed the commitment
+            if (ECDSA.recover(commitmentHash, proof.v, proof.r, proof.s) != proof.account) {
+                revert InvalidSignature();
+            }
+
+            // Ensure no validator can appear more than once in bitfield
+            Bitfield.unset(finalbitfield, proof.index);
+        }
+    }
+
+    /**
+     * @dev Verify commitment with the sampled signatures using the Fiat-Shamir hash
+     */
+    function verifyFiatShamirCommitment(
+        bytes32 commitmentHash,
+        uint256[] calldata bitfield,
+        ValidatorSetState storage vset,
+        ValidatorProof[] calldata proofs
+    ) internal view {
+        uint256 requiredSignatures = Math.min(fiatShamirRequiredSignatures, computeMaxRequiredSignatures(vset.length));
+        if (proofs.length != requiredSignatures) {
+            revert InvalidValidatorProofLength();
+        }
+
+        uint256[] memory finalbitfield = fiatShamirFinalBitfield(commitmentHash, bitfield, vset);
+        _requireDistinctAccounts(proofs);
+
+        for (uint256 i = 0; i < proofs.length; i++) {
+            ValidatorProof calldata proof = proofs[i];
+
+            // Check that validator is in bitfield
+            if (!Bitfield.isSet(finalbitfield, proof.index)) {
+                revert InvalidValidatorProof();
+            }
+
+            // Check that validator is actually in a validator set
+            if (!isValidatorInSet(vset, proof.account, proof.index, proof.proof)) {
+                revert InvalidValidatorProof();
+            }
+
+            // Check that validator signed the commitment
+            if (ECDSA.recover(commitmentHash, proof.v, proof.r, proof.s) != proof.account) {
+                revert InvalidSignature();
+            }
+
+            // Ensure no validator can appear more than once in bitfield
+            Bitfield.unset(finalbitfield, proof.index);
+        }
+    }
+
+    // Reject repeated EVM keys even if an authenticated root contains them at different positions.
+    function _requireDistinctAccounts(ValidatorProof[] calldata proofs) private pure {
+        uint256 capacity = 1;
+        while (capacity < proofs.length * 2) capacity <<= 1;
+        address[] memory seen = new address[](capacity);
+        for (uint256 i; i < proofs.length; i++) {
+            address account = proofs[i].account;
+            if (account == address(0)) {
+                revert InvalidValidatorProof();
+            }
+            uint256 slot = uint256(keccak256(abi.encodePacked(account))) & (capacity - 1);
+            while (seen[slot] != address(0)) {
+                if (seen[slot] == account) {
+                    revert InvalidValidatorProof();
+                }
+                slot = (slot + 1) & (capacity - 1);
+            }
+            seen[slot] = account;
+        }
+    }
+
+    function createFiatShamirHash(bytes32 commitmentHash, bytes32 bitFieldHash, ValidatorSetState storage vset)
+        internal
+        view
+        returns (bytes32)
+    {
+        return sha256(
+            bytes.concat(
+                FIAT_SHAMIR_DOMAIN_ID,
+                sha256(
+                    bytes.concat(
+                        commitmentHash,
+                        bitFieldHash,
+                        vset.root,
+                        bytes32(uint256(vset.id)),
+                        bytes32(uint256(vset.length))
+                    )
+                )
+            )
+        );
+    }
+
+    /**
+     * @dev Helper to create a final bitfield with subsampled validator selections using the Fiat-Shamir approach
+     * @param commitmentHash the hash of the full commitment that was used for the commitmentHash
+     * @param bitfield claiming which validators have signed the commitment
+     * @param vset the validator set state
+     */
+    function fiatShamirFinalBitfield(
+        bytes32 commitmentHash,
+        uint256[] calldata bitfield,
+        ValidatorSetState storage vset
+    ) internal view returns (uint256[] memory) {
+        bytes32 bitFieldHash = keccak256(abi.encodePacked(bitfield));
+        bytes32 fiatShamirHash = createFiatShamirHash(commitmentHash, bitFieldHash, vset);
+        uint256 requiredSignatures = Math.min(fiatShamirRequiredSignatures, computeMaxRequiredSignatures(vset.length));
+        return Bitfield.subsample(uint256(fiatShamirHash), bitfield, vset.length, requiredSignatures);
+    }
+
+    // Ensure that the commitment provides exactly one nonzero 32-byte MMR root.
+    function ensureProvidesMMRRoot(Commitment calldata commitment) internal pure returns (bytes32 root) {
+        bool found;
+        for (uint256 i = 0; i < commitment.payload.length; i++) {
+            if (commitment.payload[i].payloadID != MMR_ROOT_ID) continue;
+            if (found) {
+                revert InvalidCommitment();
+            }
+            found = true;
+            if (commitment.payload[i].data.length != 32) {
+                revert InvalidMMRRootLength();
+            }
+            root = bytes32(commitment.payload[i].data);
+        }
+        if (!found) {
+            revert CommitmentNotRelevant();
+        }
+        if (root == bytes32(0)) {
+            revert InvalidCommitment();
+        }
+    }
+
+    function encodeCommitment(Commitment calldata commitment) internal pure returns (bytes memory) {
+        return bytes.concat(
+            encodeCommitmentPayload(commitment.payload),
+            ScaleCodec.encodeU32(commitment.blockNumber),
+            ScaleCodec.encodeU64(commitment.validatorSetID)
+        );
+    }
+
+    function encodeCommitmentPayload(PayloadItem[] calldata items) internal pure returns (bytes memory) {
+        bytes memory payload = ScaleCodec.checkedEncodeCompactU32(items.length);
+        for (uint256 i = 0; i < items.length; i++) {
+            payload = bytes.concat(
+                payload, items[i].payloadID, ScaleCodec.checkedEncodeCompactU32(items[i].data.length), items[i].data
+            );
+        }
+
+        return payload;
+    }
+
+    function encodeMMRLeaf(MMRLeaf calldata leaf) internal pure returns (bytes memory) {
+        return bytes.concat(
+            ScaleCodec.encodeU8(leaf.version),
+            ScaleCodec.encodeU32(leaf.parentNumber),
+            leaf.parentHash,
+            ScaleCodec.encodeU64(leaf.nextAuthoritySetID),
+            ScaleCodec.encodeU32(leaf.nextAuthoritySetLen),
+            leaf.nextAuthoritySetRoot,
+            leaf.parachainHeadsRoot
+        );
+    }
+
+    /**
+     * @dev Checks if a validators address is a member of the merkle tree
+     * @param vset The validator set
+     * @param account The address of the validator to check for inclusion in `vset`.
+     * @param index The leaf index of the account in the merkle tree of validator set addresses.
+     * @param proof Merkle proof required for validation of the address
+     * @return true if the validator is in the set
+     */
+    function isValidatorInSet(ValidatorSetState storage vset, address account, uint256 index, bytes32[] calldata proof)
+        internal
+        view
+        returns (bool)
+    {
+        bytes32 hashedLeaf = keccak256(abi.encodePacked(account));
+        return SubstrateMerkleProof.verify(vset.root, hashedLeaf, index, vset.length, proof);
+    }
+
+    /**
+     * @dev Basic validation of a ticket for submitFinal
+     */
+    function validateTicket(bytes32 ticketID, Commitment calldata commitment, uint256[] calldata bitfield)
+        internal
+        view
+    {
+        Ticket storage ticket = tickets[ticketID];
+
+        if (ticket.blockNumber == 0) {
+            // submitInitial hasn't been called yet
+            revert InvalidTicket();
+        }
+
+        if (ticket.prevRandao == 0) {
+            // commitPrevRandao hasn't been called yet
+            revert PrevRandaoNotCaptured();
+        }
+
+        if (commitment.blockNumber <= latestBeefyBlock) {
+            // ticket is obsolete
+            revert StaleCommitment();
+        }
+
+        if (ticket.bitfieldHash != keccak256(abi.encodePacked(bitfield))) {
+            // The provided claims bitfield isn't the same one that was
+            // passed to submitInitial
+            revert InvalidBitfield();
+        }
+    }
+}

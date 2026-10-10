@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import type { InboundTokenEffect, OutboundEffect } from '@gear-js/bridge';
 import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
@@ -6,6 +7,7 @@ import { useAppKit } from '@reown/appkit/react';
 import { captureException } from '@sentry/react';
 
 import { Tooltip } from '@/components';
+import { useNetworkType } from '@/context/network-type';
 import { useAccountsConnection, useModal } from '@/hooks';
 import { getErrorMessage, isUndefined, logger } from '@/utils';
 
@@ -14,7 +16,8 @@ import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRela
 type VaraProps = {
   nonce: bigint;
   blockNumber: string;
-  onReceipt: () => void;
+  onFinalized: () => void;
+  expectedEffect: OutboundEffect;
 };
 
 function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
@@ -24,7 +27,7 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
   const alert = useAlert();
 
   const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
-  const { mutate, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
+  const { mutate, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber), props.expectedEffect);
 
   const handleClick = async () => {
     if (!isEthAccount) return openEthModal();
@@ -32,9 +35,9 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
     const alertId = alert.loading('Relaying Vara transaction...');
     const onLog = (message: string) => alert.update(alertId, message);
 
-    const onReceipt = () => {
-      props.onReceipt();
-      alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+    const onFinalized = () => {
+      props.onFinalized();
+      alert.update(alertId, 'Original token transfer finalized on Ethereum', DEFAULT_SUCCESS_OPTIONS);
     };
 
     const onError = (error: Error) => {
@@ -43,7 +46,7 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
       captureException(error, { tags: { feature: 'manual-tx-relay' } });
     };
 
-    mutate({ onLog, onReceipt, onError });
+    mutate({ onLog, onFinalized, onError });
   };
 
   const renderTooltipText = () => {
@@ -85,17 +88,20 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
 type EthProps = {
   blockNumber: bigint;
   txHash: HexString;
-  onInBlock: () => void;
+  onFinalized: () => void;
+  expectedEffect: InboundTokenEffect;
 };
 
 function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
+  const { NETWORK_PRESET } = useNetworkType();
+  const hold = NETWORK_PRESET.INBOUND_PROOF_PROFILE.hold;
   const { isAnyAccount, isVaraAccount } = useAccountsConnection();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
   const alert = useAlert();
 
   const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
-  const { mutate, isPending } = useRelayEthTx(txHash);
+  const { mutate, isPending } = useRelayEthTx(txHash, props.expectedEffect);
 
   const handleClick = () => {
     if (!isVaraAccount) return openSubstrateModal();
@@ -104,9 +110,9 @@ function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
 
     const onLog = (message: string) => alert.update(alertId, message);
 
-    const onInBlock = () => {
-      alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
-      props.onInBlock();
+    const onFinalized = () => {
+      alert.update(alertId, 'Original consumer and token effect finalized on Vara', DEFAULT_SUCCESS_OPTIONS);
+      props.onFinalized();
     };
 
     const onError = (error: Error) => {
@@ -114,10 +120,11 @@ function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
       alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
     };
 
-    mutate({ onLog, onInBlock, onError });
+    mutate({ onLog, onFinalized, onError });
   };
 
   const renderTooltipText = () => {
+    if (hold) return <p role="status">{hold} This claim remains pending.</p>;
     if (!isAvailable)
       return (
         <>
@@ -145,8 +152,8 @@ function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
             text="Claim Manually"
             size="x-small"
             onClick={handleClick}
-            isLoading={isPending || isUndefined(isAvailable)}
-            disabled={!isAvailable}
+            isLoading={!hold && (isPending || isUndefined(isAvailable))}
+            disabled={Boolean(hold) || !isAvailable}
             block
           />
         </span>

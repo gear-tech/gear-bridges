@@ -27,6 +27,7 @@ dotenv.workspace = true
 eth-events-electra-client.workspace = true
 historical-proxy-client.workspace = true
 vft-manager-client.workspace = true
+vft-vara-client.workspace = true
 ethereum_beacon_client.workspace = true
 ethereum-common.workspace = true
 futures.workspace = true
@@ -72,3 +73,4 @@ cgo_oligami.workspace = true
 hex-literal.workspace = true
 ruzstd.workspace = true
 sp-core = { workspace = true, features = ["std"] }
+tokio-tungstenite = { version = "=0.26.2", default-features = false, features = ["handshake"] }

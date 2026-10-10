@@ -2,7 +2,6 @@ use crate::{
     hex_utils,
     message_relayer::common::{web_request::EthTransaction, EthereumSlotNumber, TxHashWithSlot},
 };
-use alloy::{network::TransactionResponse, providers::Provider};
 use anyhow::Context;
 use ethereum_client::PollingEthApi;
 use ethereum_common::SECONDS_PER_SLOT;
@@ -68,12 +67,11 @@ async fn run_inner(this: &mut TransactionDataExtractor) -> anyhow::Result<()> {
             .0
             .into();
 
-        let tx = this
+        let block_number = this
             .eth_api
-            .get_transaction_by_hash(tx_hash)
+            .get_transaction_block_number(tx_hash)
             .await?
             .context("Transaction not found")?;
-        let block_number = tx.block_number().context("Block number is None")?;
         let block_timestamp = this.eth_api.get_block(block_number).await?.header.timestamp;
         let slot_number = EthereumSlotNumber(
             block_timestamp.saturating_sub(this.genesis_time) / SECONDS_PER_SLOT,

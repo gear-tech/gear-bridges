@@ -349,12 +349,28 @@ describe('SDK finalized consumer and token effects', () => {
       const preservedFiles = { 'source-chain/launch-state.json': store(path.join(root, 'source-chain/launch-state.json'), { phase: 'ready', identity,
         readiness: { genesisHash: approved.sourceGenesisHash, commonFinalized: { hash: hash(998) } }, pinned: { sourceIdentity: { ...core.anchor, genesisHash: approved.sourceGenesisHash } } }),
         'deployment.json': store(path.join(root, 'deployment.json'), core), 'token-stack/token-stack.json': store(path.join(root, 'token-stack/token-stack.json'), stack) };
-      store(path.join(root, 'supervisors/normal-campaign-admission.json'), { schemaVersion: 1, testOnly: true, runId, campaignName, bundleSha256: run.bundle.sha256, runtimeProfile: runtime, automaticRerun: false, launched: false, preservedFiles });
+      const binding = { schemaVersion: 1, testOnly: true, runId, campaignName, bundleSha256: run.bundle.sha256, runtimeProfile: runtime, automaticRerun: false, launched: false, preservedFiles };
+      store(path.join(root, 'supervisors/normal-campaign-admission.json'), binding);
       const build = { schemaVersion: 1, testOnly: true, runId, campaignName, files: { 'inbound-proof-profile.json': store(path.join(artifacts, 'inbound-proof-profile.json'), approved),
         'vft_manager.idl': approved.consumer.idlSha256, 'checkpoint_light_client.idl': approved.checkpoint.idlSha256, 'eth_events_electra.idl': approved.endpoint.idlSha256, 'historical_proxy.idl': approved.historicalProxyIdlSha256 } };
-      const bundle = { runtimeProfile: runtime, files: { 'bin/gear': runtime.gearBinarySha256, 'runtime-approval.json': runtime.approvalSha256 } }, qualification = { runtimeProfile: runtime };
+      const bundle = { runtimeProfile: runtime, files: { 'bin/gear': runtime.gearBinarySha256, 'runtime-approval.json': runtime.approvalSha256 } }, qualification = { campaignName, runtimeProfile: runtime };
       expect(applicationAdmission(root, run, bundle, qualification, artifacts, build, core, stack, campaignName).sourceBlockHash).toBe(approved.sourceBlockHash);
       expect(readApprovedFixtureProfile(path.join(artifacts, 'inbound-proof-profile.json'), approved.historicalProxyId).sourceGenesisHash).toBe(hash(999));
+      if (!fast) {
+        const retryName = campaignName + '-retry', parentRecord = 'campaigns/' + campaignName + '/campaign-state.json';
+        const failedParent = { status: 'failed_before_t0', t0Ms: null, preflight: { status: 'failed' }, warmup: { status: 'pending' }, actions: {} };
+        const retryPath = path.join(root, 'qualification', retryName, 'admission.json');
+        store(retryPath, { ...binding, campaignName: retryName, predecessorCampaign: campaignName, preservedFiles: { ...preservedFiles,
+          'supervisors/normal-campaign-admission.json': digest(fs.readFileSync(path.join(root, 'supervisors/normal-campaign-admission.json'))),
+          [parentRecord]: store(path.join(root, parentRecord), failedParent) } });
+        fs.chmodSync(retryPath, 0o400);
+        expect(applicationAdmission(root, run, bundle, qualification, artifacts, { ...build, campaignName: retryName }, core, stack, retryName).sourceBlockHash).toBe(approved.sourceBlockHash);
+        for (const changed of [{ ...failedParent, status: 'warmup_passed' }, { ...failedParent, observedAt: 1 },
+          { ...failedParent, actions: { 'preflight-normal/USDC-evm-lock': { status: 'submitted' } } }]) {
+          store(path.join(root, parentRecord), changed);
+          expect(() => applicationAdmission(root, run, bundle, qualification, artifacts, { ...build, campaignName: retryName }, core, stack, retryName)).toThrow();
+        }
+      }
       expect(() => readApprovedFixtureProfile(path.join(artifacts, 'inbound-proof-profile.json'), hash(555))).toThrow();
       for (const change of [{ runtimeCommit: 'f961bed815dd4ab0802703620605ea3b3659ac60' }, { slotDurationMs: 400 }, { runtimePullRequest: 5644 },
         { warmupDurationMs: fast ? 18000000 : 3600000 }, { epochDurationBlocks: fast ? 2400 : 64 }, { requiredAuthorityHandovers: 1 },

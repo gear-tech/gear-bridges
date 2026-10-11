@@ -72,10 +72,11 @@ export function validateRuntimeProfile(profile: RuntimeProfile, gearBinarySha256
   check(profile.gearBinarySha256.replace(/^0x/, '') === gearBinarySha256?.replace(/^0x/, ''), 'HOLD: selected source binary differs from independent approval');
 }
 export function applicationAdmission(root: string, run: Run, bundle: { files: Record<string, string>; runtimeProfile?: RuntimeProfile },
-  qualification: { runtimeProfile?: RuntimeProfile }, artifacts: string, build: BuildManifest, core: Core, stack: Stack, campaignName: string): InboundProofProfile {
+  qualification: { campaignName?: string; runtimeProfile?: RuntimeProfile }, artifacts: string, build: BuildManifest, core: Core, stack: Stack, campaignName: string): InboundProofProfile {
   const runtime = run.runtimeProfile!;
   validateRuntimeProfile(runtime, bundle.files['bin/gear']);
-  check(new RegExp('^hoodi-' + (runtime.name === 'fast-runtime-hoodi' ? 'fast' : 'normal') + '-runtime-[a-z0-9][a-z0-9-]{0,42}$').test(campaignName),
+  const campaignPattern = new RegExp('^hoodi-' + (runtime.name === 'fast-runtime-hoodi' ? 'fast' : 'normal') + '-runtime-[a-z0-9][a-z0-9-]{0,42}$');
+  check(campaignPattern.test(campaignName) && campaignPattern.test(qualification.campaignName ?? campaignName),
     'HOLD: campaign name does not match runtime qualification');
   check(canonical(runtime) === canonical(bundle.runtimeProfile) && canonical(runtime) === canonical(qualification.runtimeProfile), 'HOLD: normal profile differs across sealed owners');
   const approvalPath = path.join(run.bundle.path, 'runtime-approval.json'); noSymlinks(approvalPath);
@@ -83,11 +84,28 @@ export function applicationAdmission(root: string, run: Run, bundle: { files: Re
   const { approvalSha256, ...approvedRuntime } = runtime;
   check(sha256(approvalBytes) === approvalSha256.replace(/^0x/, '') && bundle.files['runtime-approval.json'] === sha256(approvalBytes) &&
     approval.status === 'APPROVED_FOR_TEST_IMPLEMENTATION' && canonical(approval.runtimeProfile) === canonical(approvedRuntime), 'HOLD: independently supplied runtime approval changed');
-  const binding = load<{ schemaVersion: number; testOnly: boolean; runId: string; campaignName: string; bundleSha256: string;
-    runtimeProfile: RuntimeProfile; automaticRerun: boolean; launched: boolean; preservedFiles: Record<string, string> }>(path.join(root, 'supervisors/normal-campaign-admission.json'));
-  check(binding.schemaVersion === 1 && binding.testOnly === true && binding.runId === run.runId && binding.campaignName === campaignName &&
+  let binding = load<{ schemaVersion: number; testOnly: boolean; runId: string; campaignName: string; bundleSha256: string;
+    runtimeProfile: RuntimeProfile; automaticRerun: boolean; launched?: boolean; preservedFiles: Record<string, string> }>(path.join(root, 'supervisors/normal-campaign-admission.json'));
+  check(binding.schemaVersion === 1 && binding.testOnly === true && binding.runId === run.runId && binding.campaignName === (qualification.campaignName ?? campaignName) &&
     binding.bundleSha256 === run.bundle.sha256 && canonical(binding.runtimeProfile) === canonical(runtime) && binding.automaticRerun === false && binding.launched === false,
     'HOLD: selected normal campaign admission changed');
+  if (binding.campaignName !== campaignName) {
+    const filename = path.join(root, 'qualification', campaignName, 'admission.json'); noSymlinks(filename);
+    const stat = fs.statSync(filename);
+    check(stat.isFile() && !(stat.mode & 0o222), 'HOLD: fresh campaign admission is not immutable');
+    const fresh = load<typeof binding & { predecessorCampaign: string }>(filename);
+    const parentRecord = 'campaigns/' + binding.campaignName + '/campaign-state.json';
+    check(fresh.schemaVersion === 1 && fresh.testOnly === true && fresh.runId === run.runId && fresh.campaignName === campaignName &&
+      fresh.bundleSha256 === run.bundle.sha256 && canonical(fresh.runtimeProfile) === canonical(runtime) && fresh.automaticRerun === false &&
+      fresh.predecessorCampaign === binding.campaignName && fresh.preservedFiles[parentRecord] &&
+      fresh.preservedFiles['supervisors/normal-campaign-admission.json'] === sha256(fs.readFileSync(path.join(root, 'supervisors/normal-campaign-admission.json'))) &&
+      Object.entries(binding.preservedFiles).every(([file, hash]) => fresh.preservedFiles[file] === hash), 'HOLD: fresh campaign does not preserve its parent admission');
+    const parent = load<{ status: string; t0Ms: number | null; preflight: { status: string }; warmup: { status: string }; actions: Record<string, { status: string }> }>(path.join(root, parentRecord));
+    check(parent.status === 'failed_before_t0' && parent.t0Ms === null && parent.preflight.status === 'failed' && parent.warmup.status === 'pending' &&
+      Object.entries(parent.actions).every(([key, action]) => /^preflight\/governance-(pause|paused-request|unpause)$/.test(key) && action.status === 'finalized'),
+      'HOLD: fresh campaign requires a terminal parent without asset transfers or pending actions');
+    binding = fresh;
+  }
   for (const required of ['source-chain/launch-state.json', 'deployment.json', 'token-stack/token-stack.json']) check(binding.preservedFiles[required], 'HOLD: normal admission lacks original identity records');
   for (const [relative, hash] of Object.entries(binding.preservedFiles)) {
     check(relative && !path.isAbsolute(relative) && relative.split('/').every(part => part !== '.' && part !== '..'), 'HOLD: normal admission record escapes owner');
@@ -415,7 +433,7 @@ async function connect(direction: Direction, flags: Flags): Promise<Context> {
   check(sha256(fs.readFileSync(bundlePath)) === run.bundle.sha256, 'selected bundle manifest changed');
   const qualificationPath = path.join(run.bundle.path, 'verification.json');
   const qualification = load<{ campaignName: string; runtimeProfile?: RuntimeProfile; applicationArtifacts?: { path: string; manifestSha256: string } }>(qualificationPath);
-  check(qualification.campaignName === CAMPAIGN, 'selected campaign differs from sealed verification');
+  check(normal || qualification.campaignName === CAMPAIGN, 'selected campaign differs from sealed verification');
   check(sha256(fs.readFileSync(qualificationPath)) === bundle.files['verification.json'], 'selected application qualification changed');
   let application = qualification.applicationArtifacts;
   if (normal) {

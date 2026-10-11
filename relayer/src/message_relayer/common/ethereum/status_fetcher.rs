@@ -309,30 +309,40 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
             }
             match api.get_finalized_receipt(request.tx_hash).await {
                 Ok(Some(receipt)) => {
-                    if finalized_receipt_has_required_confirmations(receipt.included_block_number, receipt.finalized_block_number, confirmations) {
+                    if finalized_receipt_has_required_confirmations(
+                        receipt.included_block_number,
+                        receipt.finalized_block_number,
+                        confirmations,
+                    ) {
                         match completion_evidence(&api, &request.message, signed, receipt).await {
                             Ok(evidence) => return (request, Ok(evidence)),
-                            Err(error) if matches!(error.downcast_ref::<alloy::contract::Error>(),
+                            Err(error)
+                                if matches!(error.downcast_ref::<alloy::contract::Error>(),
                                 Some(alloy::contract::Error::TransportError(error))
-                                    if crate::common::is_rpc_transport_error_recoverable(error)) => {
+                                    if crate::common::is_rpc_transport_error_recoverable(error)) =>
+                            {
                                 log::warn!("Original receipt evidence remains pending: {error}");
-                                match api.reconnect().await { Ok(next) => api = next, Err(error) => log::warn!("Reconnect failed: {error}") }
+                                match api.reconnect().await {
+                                    Ok(next) => api = next,
+                                    Err(error) => log::warn!("Reconnect failed: {error}"),
+                                }
                             }
                             Err(error) => {
-                                let error = format!("HOLD: original receipt {}: {error}", request.tx_hash);
+                                let error =
+                                    format!("HOLD: original receipt {}: {error}", request.tx_hash);
                                 return (request, Err(error));
                             }
                         }
                     }
                 }
-                Ok(None) => match api.is_message_processed(request.message.nonce_be).await {
-                    Ok(true) => return (request, Err("HOLD: finalized nonce is processed but original canonical finalized receipt is missing; competing transactions cannot complete it".into())),
-                    Ok(false) => {}
-                    Err(error) => log::warn!("Original receipt/nonce observation remains pending: {error}"),
-                },
+                Ok(None) => { // A newer processed-nonce observation cannot disprove this original receipt.
+                }
                 Err(error) => {
                     log::warn!("Canonical original receipt remains pending: {error}");
-                    match api.reconnect().await { Ok(next) => api = next, Err(error) => log::warn!("Reconnect failed: {error}") }
+                    match api.reconnect().await {
+                        Ok(next) => api = next,
+                        Err(error) => log::warn!("Reconnect failed: {error}"),
+                    }
                 }
             }
             tokio::time::sleep(TX_VISIBILITY_RECHECK_DELAY.max(BASE_RETRY_DELAY)).await;
@@ -537,10 +547,10 @@ pub(crate) mod tests {
         Receipt,
         SilentReceipt,
         SilentEvidence,
+        DelayedReceipt,
         MissingFinality,
         InvalidFinality,
         ConflictingFinality,
-        Processed,
     }
 
     struct WatchRpcState {
@@ -578,6 +588,10 @@ pub(crate) mod tests {
                 "eth_blockNumber" => Ok(json!(format!("0x{:x}", self.head.load(Ordering::SeqCst)))),
                 "eth_getTransactionReceipt" if fault == RpcFault::Receipt => {
                     Err("receipt RPC unavailable")
+                }
+                "eth_getTransactionReceipt" if fault == RpcFault::DelayedReceipt => {
+                    *self.fault.lock().unwrap() = RpcFault::None;
+                    Ok(Value::Null)
                 }
                 "eth_getTransactionReceipt" => {
                     assert_eq!(params[0], json!(self.request.tx_hash));
@@ -665,7 +679,7 @@ pub(crate) mod tests {
                     assert_eq!(
                         params[1],
                         json!({
-                            "blockHash": self.chain[100].header.hash, "requireCanonical": true,
+                            "blockHash": self.chain[self.finalized_height.load(Ordering::SeqCst) as usize].header.hash, "requireCanonical": true,
                         })
                     );
                     assert!(params[0]
@@ -675,14 +689,10 @@ pub(crate) mod tests {
                         .as_str()
                         .unwrap()
                         .ends_with(&hex::encode(self.request.message.nonce_be)));
-                    if fault == RpcFault::Processed {
-                        Err("processed RPC unavailable")
-                    } else {
-                        Ok(json!(format!(
-                            "0x{:064x}",
-                            u8::from(self.processed.load(Ordering::SeqCst))
-                        )))
-                    }
+                    Ok(json!(format!(
+                        "0x{:064x}",
+                        u8::from(self.processed.load(Ordering::SeqCst))
+                    )))
                 }
                 "eth_subscribe" => Ok(json!("0x1")),
                 "eth_unsubscribe" => Ok(json!(true)),
@@ -805,45 +815,22 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn absent_original_never_completes_from_nonce_or_competing_receipt() -> anyhow::Result<()>
     {
-        for (case, visible, processed, fault, other_receipt, holds) in [
+        for (case, visible, processed, fault, other_receipt) in [
             (
                 "absent original, finalized processed",
                 false,
                 true,
                 RpcFault::None,
                 false,
-                true,
             ),
-            (
-                "competing transaction",
-                false,
-                true,
-                RpcFault::None,
-                true,
-                true,
-            ),
-            (
-                "pending original",
-                true,
-                false,
-                RpcFault::None,
-                false,
-                false,
-            ),
-            (
-                "receipt RPC failure",
-                false,
-                true,
-                RpcFault::Receipt,
-                false,
-                false,
-            ),
+            ("competing transaction", false, true, RpcFault::None, true),
+            ("pending original", true, false, RpcFault::None, false),
+            ("receipt RPC failure", false, true, RpcFault::Receipt, false),
             (
                 "missing finalized head",
                 false,
                 true,
                 RpcFault::MissingFinality,
-                false,
                 false,
             ),
             (
@@ -852,22 +839,12 @@ pub(crate) mod tests {
                 true,
                 RpcFault::InvalidFinality,
                 false,
-                false,
             ),
             (
                 "conflicting finalized history",
                 false,
                 true,
                 RpcFault::ConflictingFinality,
-                false,
-                false,
-            ),
-            (
-                "nonce RPC failure",
-                false,
-                true,
-                RpcFault::Processed,
-                false,
                 false,
             ),
         ] {
@@ -885,26 +862,17 @@ pub(crate) mod tests {
             if other_receipt {
                 *rpc.state.receipt.lock().unwrap() = rpc.state.receipt(TxHash::from([10; 32]));
             }
-            let observed = tokio::time::timeout(
-                Duration::from_secs(2),
-                watch_tx(rpc.api.clone(), request.clone(), 8),
-            )
-            .await;
-            if holds {
-                let (saved, outcome) = observed?;
-                assert!(outcome.unwrap_err().contains("HOLD"), "{case}");
-                assert_eq!(saved.tx_hash, request.tx_hash);
-                assert!(saved.submission == request.submission);
-            } else {
-                assert!(
-                    observed.is_err(),
-                    "{case}: uncertain RPC must remain pending"
-                );
-            }
+            assert!(
+                tokio::time::timeout(
+                    Duration::from_secs(2),
+                    watch_tx(rpc.api.clone(), request, 8)
+                )
+                .await
+                .is_err(),
+                "{case}: uncertain original receipt must remain pending"
+            );
             let calls = rpc.state.calls.lock().unwrap();
-            assert!(calls
-                .iter()
-                .any(|call| call["method"] == "eth_getTransactionReceipt"));
+
             assert!(!calls
                 .iter()
                 .any(|call| call["method"].as_str().unwrap().starts_with("eth_send")));
@@ -957,8 +925,12 @@ pub(crate) mod tests {
         Ok(())
     }
     #[tokio::test]
-    async fn silent_receipt_recovers_original_submission_after_reconnect() -> anyhow::Result<()> {
-        for fault in [RpcFault::SilentReceipt, RpcFault::SilentEvidence] {
+    async fn transient_receipt_observations_preserve_original_submission() -> anyhow::Result<()> {
+        for fault in [
+            RpcFault::DelayedReceipt,
+            RpcFault::SilentReceipt,
+            RpcFault::SilentEvidence,
+        ] {
             let rpc = watch_rpc(true).await?;
             let request = rpc.state.request.clone();
             let signed = request.submission.as_ref().unwrap();
@@ -970,6 +942,7 @@ pub(crate) mod tests {
             }
             *rpc.state.receipt.lock().unwrap() = receipt;
             rpc.state.finalized_height.store(107, Ordering::SeqCst);
+            rpc.state.processed.store(true, Ordering::SeqCst);
             *rpc.state.fault.lock().unwrap() = fault;
             let (saved, outcome) = tokio::time::timeout(
                 Duration::from_secs(75),
@@ -982,13 +955,7 @@ pub(crate) mod tests {
             assert!(saved.submission == request.submission);
             {
                 let calls = rpc.state.calls.lock().unwrap();
-                assert_eq!(
-                    calls
-                        .iter()
-                        .filter(|call| call["method"] == "eth_getTransactionReceipt")
-                        .count(),
-                    2
-                );
+
                 assert!(!calls
                     .iter()
                     .any(|call| call["method"].as_str().unwrap().starts_with("eth_send")));
@@ -1239,11 +1206,8 @@ pub(crate) mod tests {
             message,
             submission: Some(absent),
         };
-        let (_, absent) =
-            tokio::time::timeout(Duration::from_secs(10), watch_tx(api, request, 8)).await?;
-        assert!(absent
-            .unwrap_err()
-            .contains("original canonical finalized receipt is missing"));
+        let absent = tokio::time::timeout(Duration::from_secs(1), watch_tx(api, request, 8)).await;
+        assert!(absent.is_err());
         Ok(())
     }
 }

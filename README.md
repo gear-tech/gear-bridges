@@ -41,6 +41,8 @@ The BEEFY scripts share bootstrap and verifier selection in `ethereum/test/Base.
 its `deployBridge()` also owns governance and queue deployment. `BeefyHoodi` selects
 the message-only profile (queue at the starting deployer nonce + 5), while
 `BeefyLocal` and `BeefyTokens` retain token deployment (queue at nonce + 12).
+After Solidity test or script changes, regenerate the compiler artifacts listed in
+the CI API-file check: AST identifiers can change even when ABI and bytecode do not.
 
 Queue administration uses the existing UUPS `DEFAULT_ADMIN_ROLE` authority, not
 a separate recovery controller. The one-time `reinitialize()` (`reinitializer(7)`)

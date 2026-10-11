@@ -2466,15 +2466,20 @@ async fn run_warmup_inner(
         clock.check()?;
         let sample_deadline = warmup_sample_deadline(clock.monotonic, minute, Instant::now())?;
         timeout_at(sample_deadline.into(), async {
-            let workers = loop {
-                let mut observation = ctx.worker_readiness(&BTreeMap::new()).await?;
-                observation["observedAtMs"] = json!(now_ms()?);
-                journal.warmup.evidence["latestWorkerObservation"] = observation.clone();
-                save_journal(path, journal)?;
-                if observation["ready"] == true { break observation; }
-                sleep_until(sample_deadline.min(Instant::now() + Duration::from_secs(3)).into()).await;
-            };
-            let (service_state, checkpoint, mined) = coherent_follower_observation(ctx, sample_deadline).await?;
+            let (workers, (service_state, checkpoint, mined)) = tokio::try_join!(
+                async {
+                    let workers = loop {
+                        let mut observation = ctx.worker_readiness(&BTreeMap::new()).await?;
+                        observation["observedAtMs"] = json!(now_ms()?);
+                        journal.warmup.evidence["latestWorkerObservation"] = observation.clone();
+                        save_journal(path, journal)?;
+                        if observation["ready"] == true { break observation; }
+                        sleep_until(sample_deadline.min(Instant::now() + Duration::from_secs(3)).into()).await;
+                    };
+                    Ok::<_, anyhow::Error>(workers)
+                },
+                coherent_follower_observation(ctx, sample_deadline),
+            )?;
             let source_hash = ctx.source.api.latest_finalized_block().await?;
             let source_height = ctx.source.api.block_hash_to_number(source_hash).await?;
             let witness_height = ctx.witness.api.block_hash_to_number(

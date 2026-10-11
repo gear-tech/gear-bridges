@@ -172,7 +172,7 @@ def app_artifact(root, name, direction, bundle, verification_sha256, *, qualific
     verification_bytes = (bundle / 'verification.json').read_bytes()
     require(hashlib.sha256(verification_bytes).hexdigest() == verification_sha256, 'Selected application qualification changed')
     selected = json.loads(verification_bytes)
-    require(campaign_name(selected) == name, 'Application campaign differs from component qualification')
+    component_campaign = campaign_name(selected)
     if selected.get('runtimeProfile') is not None:
         require('applicationArtifacts' not in selected, 'Profiled application artifacts must be qualified after deployment')
         if qualification is None:
@@ -181,7 +181,7 @@ def app_artifact(root, name, direction, bundle, verification_sha256, *, qualific
             qualification = json.loads(path.read_bytes())
         require(qualification.get('schemaVersion') == 1 and qualification.get('testOnly') is True
                 and qualification.get('status') == 'VERIFIED' and qualification.get('runId') == root.name
-                and qualification.get('campaignName') == name and qualification.get('runtimeProfile') == selected['runtimeProfile']
+                and campaign_name(qualification) == name and qualification.get('runtimeProfile') == selected['runtimeProfile']
                 and qualification.get('componentBundleSha256') == hashlib.sha256((bundle / 'bundle.json').read_bytes()).hexdigest()
                 and qualification.get('componentVerificationSha256') == verification_sha256,
                 'Post-deployment application qualification differs from the original lane')
@@ -196,6 +196,7 @@ def app_artifact(root, name, direction, bundle, verification_sha256, *, qualific
                     'Immutable application check evidence changed')
         binding = qualification['applicationArtifacts']
     else:
+        require(component_campaign == name, 'Application campaign differs from component qualification')
         require(qualification is None, 'Retained application qualification remains sealed')
         binding = selected['applicationArtifacts']
     requested = Path(binding['path'])

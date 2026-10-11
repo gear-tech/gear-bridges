@@ -83,7 +83,7 @@ def check_profiled_application_qualification():
             if path.is_dir(): path.chmod(0o500)
         artifacts.chmod(0o500)
         verification = bundle / 'verification.json'
-        verification.write_text(json.dumps({'campaignName': campaign, 'runtimeProfile': profile}))
+        verification.write_text(json.dumps({'campaignName': campaign + '-components', 'runtimeProfile': profile}))
         verification_sha = hashlib.sha256(verification.read_bytes()).hexdigest()
         (bundle / 'bundle.json').write_text(json.dumps({'files': {'verification.json': verification_sha}}))
         checks = []

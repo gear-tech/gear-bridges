@@ -573,14 +573,15 @@ function originalIntent(ctx: Context, flags = ctx.flags): Journal | undefined {
   }
   return new Journal(filename, intent, true);
 }
-function credentials(ctx: Context) {
+export function credentials(ctx: Pick<Context, 'root' | 'flags'>) {
   check(ctx.flags.mode !== 'verify', 'verify never opens signers');
   check(process.env.ETH_CAMPAIGN_KEY_FILE === path.join(ctx.root, 'hoodi/keys/campaign.key') && process.env.GEAR_CAMPAIGN_SURI_FILE === path.join(ctx.root, 'hoodi/gear-keys/campaign.suri'), 'only retained idle campaign signers are authorized');
-  const ethereum = privateKeyToAccount(privateBytes(process.env.ETH_CAMPAIGN_KEY_FILE!).toString().trim() as Hex);
+  const wallet = JSON.parse(privateBytes(process.env.ETH_CAMPAIGN_KEY_FILE!).toString()) as { address: string; private_key: Hex };
+  const ethereum = privateKeyToAccount(wallet.private_key);
   const gear = new Keyring({ type: 'sr25519', ss58Format: 137 }).createFromUri(privateBytes(process.env.GEAR_CAMPAIGN_SURI_FILE!).toString().trim());
   const evmAddress = load<{ roles: { campaign: string } }>(path.join(ctx.root, 'hoodi/addresses.json')).roles.campaign;
   const gearAddress = load<{ roles: { campaign: { publicKey: string } } }>(path.join(ctx.root, 'hoodi/gear-addresses.json')).roles.campaign.publicKey;
-  check(ethereum.address.toLowerCase() === evmAddress.toLowerCase() && bytesToHex(gear.publicKey) === gearAddress, 'campaign signer identity mismatch');
+  check(ethereum.address.toLowerCase() === wallet.address.toLowerCase() && ethereum.address.toLowerCase() === evmAddress.toLowerCase() && bytesToHex(gear.publicKey) === gearAddress, 'campaign signer identity mismatch');
   return { ethereum, gear };
 }
 async function signEthereum(ctx: Context, calldata: Hex, destination: Address | null, route: string, deadline: string, value = 0n, flags = ctx.flags, result?: RelayEvidence): Promise<Journal> {

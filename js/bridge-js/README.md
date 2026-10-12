@@ -87,6 +87,8 @@ This helper reports root availability only. Availability does not prove the orig
 
 These SDK-only examples do not authorize a new lane or any mainnet operation. The selected Python admission wrapper permits app writes only after the named token preflight and full warmup pass. It supplies the retained campaign credential **file paths**, holds the inherited deployment-wide lock, and executes hash-pinned compiled Node artifacts from the directory authenticated by the selected core bundle qualification beneath `$BEEFY_RUN/app-messages/`. Corrected recovery artifacts use `artifacts-recovery-1/`; the original `artifacts/` tree remains immutable historical evidence. Do not invoke mutable source examples directly for live writes.
 
+The retained Ethereum campaign file uses the native JSON wallet format (`address` and `private_key`), not a raw hex string. The SDK verifies its derived address against both the wallet and the campaign role record; the Gear SURI remains plain text. Both secret files must be regular mode-0600 files.
+
 With `OPS` bound to the bundle selected in `$BEEFY_RUN/run.json`:
 
 ```sh

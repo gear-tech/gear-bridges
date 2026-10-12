@@ -16,17 +16,38 @@ import { HistoricalProxy } from '../src/vara/historical-proxy.js';
 import * as beaconMethods from '../src/ethereum/beacon-client.js';
 import * as proofMethods from '../src/eth-to-vara/proof-composer.js';
 import * as varaCodec from '../src/vara/eth-to-vara.js';
-import { blake2AsHex } from '@polkadot/util-crypto';
+import { blake2AsHex, cryptoWaitReady } from '@polkadot/util-crypto';
 import { ssz } from '@lodestar/types';
 import { Sails } from 'sails-js';
 import { SailsIdlParser } from 'sails-js-parser';
-import { applicationAdmission, validateRuntimeProfile, type RuntimeProfile } from '../example/app.js';
+import { applicationAdmission, validateRuntimeProfile, credentials, type RuntimeProfile } from '../example/app.js';
 import { readApprovedFixtureProfile } from './setup/setup.js';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 
 dotenv.config();
+
+test('SDK reads the retained JSON campaign wallet and rejects a mismatched wallet address', async () => {
+  await cryptoWaitReady();
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(tmpdir()), 'sdk-wallet-'));
+  const ethereum = '0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf';
+  const gear = '0xd43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d';
+  const wallet = path.join(root, 'hoodi/keys/campaign.key'), suri = path.join(root, 'hoodi/gear-keys/campaign.suri');
+  const ctx = { root, flags: { mode: 'deploy' as const, intentId: 'wallet', resume: false } };
+  try {
+    fs.mkdirSync(path.dirname(wallet), { recursive: true }); fs.mkdirSync(path.dirname(suri), { recursive: true });
+    fs.writeFileSync(wallet, JSON.stringify({ address: ethereum, private_key: hash(1) }), { mode: 0o600 });
+    fs.writeFileSync(suri, '//Alice', { mode: 0o600 });
+    fs.writeFileSync(path.join(root, 'hoodi/addresses.json'), JSON.stringify({ roles: { campaign: ethereum } }));
+    fs.writeFileSync(path.join(root, 'hoodi/gear-addresses.json'), JSON.stringify({ roles: { campaign: { publicKey: gear } } }));
+    vi.stubEnv('ETH_CAMPAIGN_KEY_FILE', wallet); vi.stubEnv('GEAR_CAMPAIGN_SURI_FILE', suri);
+    const accounts = credentials(ctx);
+    expect(accounts.ethereum.address).toBe(ethereum); expect(bytesToHex(accounts.gear.publicKey)).toBe(gear);
+    fs.writeFileSync(wallet, JSON.stringify({ address: '0x' + '00'.repeat(20), private_key: hash(1) }));
+    expect(() => credentials(ctx)).toThrow('campaign signer identity mismatch');
+  } finally { vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 const hash = (value: number): HexString => ('0x' + value.toString(16).padStart(64, '0')) as HexString;
 const codec = (value: HexString) => ({ toHex: () => value, toString: () => value, eq: (other: unknown) => value === (typeof other === 'string' ? other : (other as { toHex(): string }).toHex()) });

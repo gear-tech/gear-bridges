@@ -26,7 +26,6 @@ mod sync_update;
 
 const SIZE_CHANNEL: usize = 100_000;
 const COUNT_FAILURE: usize = 3;
-const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 
 struct SyncUpdate {
     sync_update: SyncCommitteeUpdate,

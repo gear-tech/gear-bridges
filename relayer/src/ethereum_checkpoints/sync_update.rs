@@ -7,7 +7,7 @@ pub fn spawn_receiver(beacon_client: BeaconClient, sender: Sender<SyncUpdate>) {
     tokio::spawn(receive_updates(
         beacon_client,
         sender,
-        Duration::from_secs(DELAY_SECS_UPDATE_REQUEST),
+        Duration::from_secs(ethereum_common::SECONDS_PER_SLOT),
     ));
 }
 

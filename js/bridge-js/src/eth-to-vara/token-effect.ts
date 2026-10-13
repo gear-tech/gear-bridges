@@ -21,8 +21,8 @@ export interface SettledReceiptDeposit {
   outcome: string;
 }
 
-export const VFT_MANAGER_IDL_SHA256 = 'ceb2235140a76a6fb289c0673e4b4f17a2907acc50103f570218c333b527d683';
-export const NATIVE_WRAPPER_IDL_SHA256 = 'eb23027b40bae7325943d6dd5ba419f99a084aa281681003ac4d8330bc770f3e';
+export const VFT_MANAGER_IDL_SHA256 = 'dd3fd53597a7225b3a5cfdf57ca2b60f3b6d0aaef846de8eaca3e247354d6e9e';
+export const NATIVE_WRAPPER_IDL_SHA256 = '43a04afd82b782b4a4e238cf95bf556e73a39866f2defbb11ad3fafd98cab8f2';
 
 export interface NativeReceiptDeposit extends SettledReceiptDeposit {
   supply: 'Gear' | 'Ethereum'; native: boolean; operation_id: HexString; child: HexString | null;

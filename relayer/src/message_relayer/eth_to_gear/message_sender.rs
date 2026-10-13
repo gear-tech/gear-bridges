@@ -5,11 +5,7 @@ use gclient::GearApi;
 use gear_common::{api_provider::ApiProviderConnection, UNITS};
 use gsdk::{
     ext::subxt::{config::polkadot::PolkadotExtrinsicParamsBuilder, tx::SubmittableTransaction},
-    gear::{
-        self, gear::Event as GearEvent, runtime_types::gear_common::event::MessageEntry,
-        system::Event as SystemEvent, Event as RuntimeEvent,
-    },
-    AsGear,
+    gear::{self, runtime_types::gear_common::event::MessageEntry},
 };
 use historical_proxy_client::historical_proxy::io::Redirect;
 use primitive_types::{H160, H256};
@@ -74,12 +70,14 @@ impl MessageSenderIo {
         tx_hash: FixedBytes<32>,
         payload: EthToVaraEvent,
         signed_submission: SignedSubmission,
+        settlement_pin: Option<FinalizedReceiptObservation>,
     ) -> bool {
         self.requests_channel
             .send(Request::SubmitPrepared {
                 tx_uuid,
                 tx_hash,
                 prepared: Box::new((payload, signed_submission)),
+                settlement_pin,
             })
             .inspect_err(|err| log::error!("Message sender failed: {err:?}"))
             .is_ok()
@@ -109,6 +107,7 @@ pub enum Request {
     },
     SubmitPrepared {
         prepared: Box<(EthToVaraEvent, SignedSubmission)>,
+        settlement_pin: Option<FinalizedReceiptObservation>,
         tx_hash: FixedBytes<32>,
         tx_uuid: Uuid,
     },
@@ -150,10 +149,16 @@ pub struct SignedSubmission {
     pub finalized_reply: Option<FinalizedReplyEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_reconciliation: Option<Box<SignedSubmission>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native_reconciliation_attempts: Vec<SignedSubmission>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalized_nonce_consumed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finalized_reply_error: Option<String>,
 }
 
 impl SignedSubmission {
-    pub(super) fn same_request(&self, other: &Self) -> bool {
+    pub fn same_request(&self, other: &Self) -> bool {
         self.chain_genesis_hash == other.chain_genesis_hash
             && self.manager == other.manager
             && self.historical_proxy == other.historical_proxy
@@ -167,12 +172,19 @@ impl SignedSubmission {
             && self.prepared_finalized_hash == other.prepared_finalized_hash
     }
 
-    pub(super) fn validate_native_reconciliation(&self) -> anyhow::Result<()> {
-        if let Some(continuation) = &self.native_reconciliation {
-            let call = ReconcileReceipt::encode_call(self.receipt_key.0, self.receipt_key.1);
+    pub fn validate_native_reconciliation(&self) -> anyhow::Result<()> {
+        let call = ReconcileReceipt::encode_call(self.receipt_key.0, self.receipt_key.1);
+        let mut nonce = self.nonce;
+        for (index, continuation) in self
+            .native_reconciliation_attempts
+            .iter()
+            .chain(self.native_reconciliation.as_deref())
+            .enumerate()
+        {
             anyhow::ensure!(
                 self.has_finalized_dispatch_reply()
                     && continuation.native_reconciliation.is_none()
+                    && continuation.native_reconciliation_attempts.is_empty()
                     && self.finalized_reply.as_ref().is_some_and(|reply| reply
                         .observation
                         .finalized_block_number
@@ -184,14 +196,94 @@ impl SignedSubmission {
                     && continuation.receipt_key == self.receipt_key
                     && continuation.payload_hash
                         == format!("{:#x}", alloy_primitives::keccak256(&call))
-                    && continuation.nonce > self.nonce
+                    && continuation.nonce > nonce
                     && !continuation.raw_extrinsic.is_empty()
                     && continuation.raw_hash_matches(),
                 "HOLD: original native reconciliation identity or exact signed bytes changed"
             );
+            if index < self.native_reconciliation_attempts.len() {
+                anyhow::ensure!(
+                    continuation.has_terminal_reconciliation(),
+                    "HOLD: archived reconciliation lacks definite canonical terminal evidence"
+                );
+            }
+            nonce = continuation.nonce;
         }
         Ok(())
     }
+
+    pub fn has_terminal_reconciliation(&self) -> bool {
+        (self.inclusion_block_number.is_none()
+            && self.message_id.is_none()
+            && self.finalized_dispatch_error.is_none()
+            && self.finalized_reply.is_none()
+            && self
+                .finalized_nonce_consumed
+                .is_some_and(|nonce| nonce > self.nonce)
+            && self.scanned_finalized_number >= self.prepared_finalized_number)
+            || (self.inclusion_block_number.is_some()
+                && self.inclusion_block_hash.is_some()
+                && self.message_id.is_none()
+                && self.finalized_dispatch_error.is_some()
+                && self.finalized_reply.is_none())
+            || (self
+                .inclusion_block_number
+                .zip(
+                    self.finalized_reply
+                        .as_ref()
+                        .and_then(|reply| reply.observation.finalized_block_number),
+                )
+                .is_some_and(|(included, replied)| replied >= included)
+                && self.inclusion_block_hash.is_some()
+                && self.message_id.is_some()
+                && self.finalized_dispatch_error.is_none())
+    }
+
+    pub fn preserves_reconciliation(&self, previous: &Self) -> bool {
+        self.native_reconciliation_attempts
+            .starts_with(&previous.native_reconciliation_attempts)
+            && previous
+                .native_reconciliation
+                .as_deref()
+                .is_none_or(|original| {
+                    self.native_reconciliation
+                        .as_deref()
+                        .filter(|current| original.same_request(current))
+                        .or_else(|| {
+                            self.native_reconciliation_attempts
+                                .get(previous.native_reconciliation_attempts.len())
+                        })
+                        .is_some_and(|current| {
+                            original.same_request(current)
+                                && original.inclusion_block_number.is_none_or(|number| {
+                                    current.inclusion_block_number == Some(number)
+                                })
+                                && original.inclusion_block_hash.as_ref().is_none_or(|hash| {
+                                    current.inclusion_block_hash.as_ref() == Some(hash)
+                                })
+                                && original
+                                    .message_id
+                                    .as_ref()
+                                    .is_none_or(|id| current.message_id.as_ref() == Some(id))
+                                && original
+                                    .finalized_dispatch_error
+                                    .as_ref()
+                                    .is_none_or(|error| {
+                                        current.finalized_dispatch_error.as_ref() == Some(error)
+                                    })
+                                && original.finalized_reply.as_ref().is_none_or(|reply| {
+                                    current.finalized_reply.as_ref() == Some(reply)
+                                })
+                                && original.finalized_reply_error.as_ref().is_none_or(|error| {
+                                    current.finalized_reply_error.as_ref() == Some(error)
+                                })
+                                && original.finalized_nonce_consumed.is_none_or(|nonce| {
+                                    current.finalized_nonce_consumed == Some(nonce)
+                                })
+                        })
+                })
+    }
+
     pub(super) fn has_finalized_dispatch_reply(&self) -> bool {
         self.inclusion_block_number
             .zip(
@@ -203,10 +295,48 @@ impl SignedSubmission {
             && self.inclusion_block_hash.is_some()
             && self.message_id.is_some()
             && self.finalized_dispatch_error.is_none()
+            && self.finalized_reply_error.is_none()
             && self.finalized_reply.as_ref().is_some_and(|reply| {
                 !reply.payload.is_empty() && !reply.observation.finalized_block_hash.is_empty()
             })
     }
+    pub(super) fn validate_settlement_order(
+        &self,
+        pin: &FinalizedReceiptObservation,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.has_finalized_dispatch_reply(),
+            "HOLD: saved completion lacks original finalized proof reply"
+        );
+        let number = pin
+            .finalized_block_number
+            .ok_or_else(|| anyhow::anyhow!("HOLD: saved settlement has no height"))?;
+        for original in std::iter::once(self).chain(self.native_reconciliation.as_deref()) {
+            anyhow::ensure!(
+                original.has_finalized_dispatch_reply()
+                    && original
+                        .finalized_reply
+                        .as_ref()
+                        .and_then(|reply| reply.observation.finalized_block_number)
+                        .is_some_and(|reply| number >= reply),
+                "HOLD: saved settlement pin predates an original finalized reply"
+            );
+        }
+        for archived in &self.native_reconciliation_attempts {
+            let terminal = archived
+                .finalized_reply
+                .as_ref()
+                .and_then(|reply| reply.observation.finalized_block_number)
+                .or(archived.inclusion_block_number)
+                .unwrap_or(archived.scanned_finalized_number);
+            anyhow::ensure!(
+                number >= terminal,
+                "HOLD: saved settlement predates an archived terminal continuation"
+            );
+        }
+        Ok(())
+    }
+
     pub(super) fn raw_hash_matches(&self) -> bool {
         use subxt::config::{substrate::BlakeTwo256, Hasher};
         H256::from_str(&self.extrinsic_hash).ok()
@@ -263,7 +393,7 @@ pub struct Response {
     pub signed_submission: Option<SignedSubmission>,
 }
 
-pub(super) fn now_ms() -> u64 {
+pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock must be after the Unix epoch")
@@ -462,6 +592,20 @@ fn validate_deposit_evidence(
     Ok(())
 }
 
+fn validate_settlement_pin(
+    pin: &FinalizedReceiptObservation,
+    finalized: u32,
+    canonical_hash: H256,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        pin.finalized_block_number
+            .is_some_and(|number| number <= finalized)
+            && H256::from_str(&pin.finalized_block_hash).ok() == Some(canonical_hash),
+        "HOLD: historical settlement pin is not canonical finalized history"
+    );
+    Ok(())
+}
+
 fn native_payout_delivered(
     row: &vft_manager_client::ReceiptDepositState,
     manager: H256,
@@ -484,6 +628,8 @@ pub struct MessageSender {
     ethereum_manager_address: Option<H160>,
 
     metrics: Metrics,
+    // The actual detached worker owns the signer fence until its last original call exits.
+    _signer_ownership: Option<std::fs::File>,
 }
 
 impl MeteredService for MessageSender {
@@ -510,7 +656,13 @@ impl MessageSender {
             suri,
 
             metrics: Metrics::new(),
+            _signer_ownership: None,
         }
+    }
+
+    pub fn with_signer_ownership(mut self, ownership: std::fs::File) -> Self {
+        self._signer_ownership = Some(ownership);
+        self
     }
 
     pub fn run(self) -> MessageSenderIo {
@@ -554,6 +706,7 @@ impl MessageSender {
                     tx_uuid,
                     prepared,
                     tx_hash,
+                    ..
                 } => {
                     let (payload, signed_submission) = prepared.as_ref();
                     send_reconciliation_response(
@@ -645,12 +798,18 @@ impl MessageSender {
                 tx_uuid,
                 prepared,
                 tx_hash,
+                settlement_pin,
             } => {
                 let (payload, signed_submission) = prepared.as_ref();
                 let mut signed_submission = signed_submission.clone();
                 let receipt_key = (payload.proof_block.block.slot, payload.transaction_index);
                 let (status, outcome) = match self
-                    .reconcile_signed_submission(gear_api, payload, &mut signed_submission)
+                    .reconcile_signed_submission(
+                        gear_api,
+                        payload,
+                        &mut signed_submission,
+                        settlement_pin.as_ref(),
+                    )
                     .await
                 {
                     Ok(outcome) => outcome,
@@ -701,11 +860,17 @@ impl MessageSender {
         }
     }
 
-    async fn prepare_submission(
+    pub async fn prepare_submission(
         &self,
         gear_api: &GearApi,
         payload: &EthToVaraEvent,
     ) -> anyhow::Result<SignedSubmission> {
+        super::cutover::ensure_receipt_domain(
+            gear_api,
+            self.receiver_address,
+            payload.proof_block.block.slot,
+        )
+        .await?;
         let proof = payload.encode();
         let payload_hash = format!("{:#x}", alloy_primitives::keccak256(&proof));
         let call_payload = Redirect::encode_call(
@@ -724,7 +889,7 @@ impl MessageSender {
         .await
     }
 
-    async fn prepare_call(
+    pub async fn prepare_call(
         &self,
         gear_api: &GearApi,
         receipt_key: (u64, u64),
@@ -733,13 +898,7 @@ impl MessageSender {
         payload_hash: String,
     ) -> anyhow::Result<SignedSubmission> {
         let chain = self.api_provider.client();
-        let (suri, password) = self
-            .suri
-            .split_once(':')
-            .map_or((&self.suri[..], None), |(suri, password)| {
-                (suri, Some(password))
-            });
-        let signer = chain.api.clone().signer(suri, password)?;
+        let signer: gsdk::signer::Signer = gear_api.clone().into();
         anyhow::ensure!(
             signer.account_id().to_string() == gear_api.account_id().to_string(),
             "GSDK and GClient derived different submission accounts"
@@ -784,14 +943,38 @@ impl MessageSender {
             finalized_dispatch_error: None,
             finalized_reply: None,
             native_reconciliation: None,
+            native_reconciliation_attempts: Vec::new(),
+            finalized_nonce_consumed: None,
+            finalized_reply_error: None,
         })
     }
 
-    async fn reconcile_signed_submission(
+    /// Requalify sealed original evidence without signing, broadcasting, or mutating a journal.
+    /// The caller must bind the signed sender and runtime to the independently approved seal.
+    pub async fn verify_saved_completion(
+        &self,
+        gear_api: &GearApi,
+        payload: &EthToVaraEvent,
+        signed: &SignedSubmission,
+        pin: &FinalizedReceiptObservation,
+    ) -> anyhow::Result<()> {
+        let mut original = signed.clone();
+        let (status, _) = self
+            .reconcile_signed_submission(gear_api, payload, &mut original, Some(pin))
+            .await?;
+        anyhow::ensure!(
+            matches!(status, MessageStatus::Success { .. }),
+            "HOLD: original historical completion could not be fully authenticated: {status:?}"
+        );
+        Ok(())
+    }
+
+    pub async fn reconcile_signed_submission(
         &self,
         gear_api: &GearApi,
         payload: &EthToVaraEvent,
         signed: &mut SignedSubmission,
+        settlement_pin: Option<&FinalizedReceiptObservation>,
     ) -> anyhow::Result<(MessageStatus, Option<Result<Vec<u8>, String>>)> {
         signed.validate_native_reconciliation()?;
         let receipt_key = (payload.proof_block.block.slot, payload.transaction_index);
@@ -803,7 +986,7 @@ impl MessageSender {
         anyhow::ensure!(
             signed.manager == format!("{:#x}", self.receiver_address)
                 && signed.historical_proxy == format!("{:#x}", self.historical_proxy_address)
-                && signed.sender == gear_api.account_id().to_string()
+                && (settlement_pin.is_some() || signed.sender == gear_api.account_id().to_string())
                 && signed.receipt_key == receipt_key
                 && signed.payload_hash
                     == format!("{:#x}", alloy_primitives::keccak256(payload.encode())),
@@ -814,6 +997,9 @@ impl MessageSender {
             "Stored signed transaction bytes do not match their recorded hash"
         );
 
+        for archived in &signed.native_reconciliation_attempts {
+            self.authenticate_archived_continuation(archived).await?;
+        }
         let original_call = Redirect::encode_call(
             receipt_key.0,
             payload.encode(),
@@ -824,6 +1010,10 @@ impl MessageSender {
             .find_signed_extrinsic(signed, self.historical_proxy_address, &original_call)
             .await?
         {
+            anyhow::ensure!(
+                settlement_pin.is_none(),
+                "HOLD: saved completion has no original finalized proof inclusion"
+            );
             let scanned_hash = H256::from_str(&signed.scanned_finalized_hash)?;
             let account = chain
                 .api
@@ -853,6 +1043,10 @@ impl MessageSender {
         }
         if signed.message_id.is_none() {
             if let Some(error) = &signed.finalized_dispatch_error {
+                anyhow::ensure!(
+                    settlement_pin.is_none(),
+                    "HOLD: saved completion original proof failed before message dispatch"
+                );
                 return Ok((
                     MessageStatus::RetryableNoop {
                         receipt_key,
@@ -946,26 +1140,58 @@ impl MessageSender {
         };
         let status = match decode_complete_reply::<SubmitReceipt>(&receiver_reply) {
             Ok(Ok(())) | Ok(Err(vft_manager_client::Error::NativeSettlementPending)) => {
-                let (status, native_ready) = self.settlement_status(gear_api, payload).await?;
+                let (status, native_ready) = self
+                    .settlement_status(gear_api, payload, settlement_pin)
+                    .await?;
                 if let Some(continuation) = signed.native_reconciliation.as_mut() {
                     anyhow::ensure!(native_ready,
                         "Original native payout or sibling deposits no longer authorize reconciliation");
-                    self.reconcile_native_continuation(
-                        gear_api,
-                        receipt_key,
-                        signed.nonce,
-                        continuation,
-                    )
-                    .await?;
-                    self.settlement_status(gear_api, payload).await?.0
+                    let completed = self
+                        .reconcile_native_continuation(
+                            gear_api,
+                            receipt_key,
+                            signed.nonce,
+                            continuation,
+                            settlement_pin.is_some(),
+                        )
+                        .await?;
+                    if completed {
+                        self.settlement_status(gear_api, payload, settlement_pin)
+                            .await?
+                            .0
+                    } else {
+                        anyhow::ensure!(
+                            settlement_pin.is_none(),
+                            "HOLD: saved completion has a failed original continuation"
+                        );
+                        let archived = *signed
+                            .native_reconciliation
+                            .take()
+                            .expect("continuation was present");
+                        anyhow::ensure!(
+                            archived.has_terminal_reconciliation(),
+                            "HOLD: unknown continuation outcome"
+                        );
+                        signed.native_reconciliation_attempts.push(archived);
+                        // Persist terminal bytes/evidence before signing the next read-only attempt.
+                        MessageStatus::Prepared
+                    }
                 } else if native_ready && !matches!(status, MessageStatus::Success { .. }) {
+                    anyhow::ensure!(
+                        settlement_pin.is_none(),
+                        "HOLD: historical completion cannot create a continuation"
+                    );
                     let call = ReconcileReceipt::encode_call(receipt_key.0, receipt_key.1);
                     let hash = format!("{:#x}", alloy_primitives::keccak256(&call));
                     let continuation = self
                         .prepare_call(gear_api, receipt_key, self.receiver_address, call, hash)
                         .await?;
                     anyhow::ensure!(
-                        continuation.nonce > signed.nonce,
+                        continuation.nonce
+                            > signed
+                                .native_reconciliation_attempts
+                                .last()
+                                .map_or(signed.nonce, |attempt| attempt.nonce),
                         "Native reconciliation nonce must follow the original finalized proof"
                     );
                     signed.native_reconciliation = Some(Box::new(continuation));
@@ -995,6 +1221,7 @@ impl MessageSender {
             receipt_observation: Some(observation),
         } = &status
         {
+            signed.validate_settlement_order(observation)?;
             let minimum = signed
                 .finalized_reply
                 .as_ref()
@@ -1015,6 +1242,18 @@ impl MessageSender {
                 "Settlement pin predates an original finalized request/reply; HOLD"
             );
         }
+        let status = if settlement_pin.is_some() && !matches!(status, MessageStatus::Success { .. })
+        {
+            MessageStatus::NeedsReconciliation {
+                receipt_key,
+                diagnostic: format!(
+                    "HOLD: saved completion failed original historical qualification: {status:?}"
+                ),
+                receipt_observation: settlement_pin.cloned(),
+            }
+        } else {
+            status
+        };
         Ok((status, Some(Ok(receiver_reply))))
     }
 
@@ -1024,15 +1263,17 @@ impl MessageSender {
         receipt_key: (u64, u64),
         original_nonce: u64,
         signed: &mut SignedSubmission,
-    ) -> anyhow::Result<()> {
+        read_only: bool,
+    ) -> anyhow::Result<bool> {
         let chain = self.api_provider.client();
         let call = ReconcileReceipt::encode_call(receipt_key.0, receipt_key.1);
         anyhow::ensure!(
             signed.native_reconciliation.is_none()
+                && signed.native_reconciliation_attempts.is_empty()
                 && signed.chain_genesis_hash == format!("{:#x}", chain.api.genesis_hash())
                 && signed.manager == format!("{:#x}", self.receiver_address)
                 && signed.historical_proxy == format!("{:#x}", self.historical_proxy_address)
-                && signed.sender == gear_api.account_id().to_string()
+                && (read_only || signed.sender == gear_api.account_id().to_string())
                 && signed.receipt_key == receipt_key
                 && signed.payload_hash == format!("{:#x}", alloy_primitives::keccak256(&call))
                 && signed.nonce > original_nonce,
@@ -1053,8 +1294,14 @@ impl MessageSender {
                     Some(H256::from_str(&signed.scanned_finalized_hash)?),
                 )
                 .await?;
-            anyhow::ensure!(u64::from(account.nonce) <= signed.nonce,
-                "Original reconciliation nonce was consumed without its canonical finalized transaction; HOLD exact bytes");
+            if u64::from(account.nonce) > signed.nonce {
+                signed.finalized_nonce_consumed = Some(u64::from(account.nonce));
+                return Ok(false);
+            }
+            anyhow::ensure!(
+                !read_only,
+                "HOLD: historical continuation is absent; no redispatch permitted"
+            );
             let transaction = SubmittableTransaction::from_bytes(
                 chain.api.deref().clone(),
                 signed.raw_extrinsic.clone(),
@@ -1067,10 +1314,9 @@ impl MessageSender {
             self.find_signed_extrinsic(signed, self.receiver_address, &call)
                 .await?;
         }
-        anyhow::ensure!(
-            signed.finalized_dispatch_error.is_none(),
-            "Original non-economic reconciliation dispatch failed; HOLD exact transaction"
-        );
+        if signed.message_id.is_none() && signed.finalized_dispatch_error.is_some() {
+            return Ok(false);
+        }
         let id = signed
             .message_id
             .as_deref()
@@ -1085,20 +1331,18 @@ impl MessageSender {
             .ok_or_else(|| {
                 anyhow::anyhow!("Original reconciliation has no finalized manager reply yet")
             })?;
-        anyhow::ensure!(
-            matches!(
-                decode_complete_reply::<ReconcileReceipt>(&reply)?,
-                Ok(vft_manager_client::ReceiptStatus::Processed)
-            ),
-            "Original reconciliation did not finalize every original receipt deposit"
-        );
-        Ok(())
+        Ok(signed.finalized_reply_error.is_none()
+            && matches!(
+                decode_complete_reply::<ReconcileReceipt>(&reply),
+                Ok(Ok(vft_manager_client::ReceiptStatus::Processed))
+            ))
     }
 
-    async fn settlement_status(
+    pub async fn settlement_status(
         &self,
         gear_api: &GearApi,
         payload: &EthToVaraEvent,
+        query_pin: Option<&FinalizedReceiptObservation>,
     ) -> anyhow::Result<(MessageStatus, bool)> {
         use vft_manager_client::{ReceiptDepositOutcome, ReceiptStatus};
         use vft_vara_client::traits::NativeEscrow as _;
@@ -1107,10 +1351,27 @@ impl MessageSender {
             "Unsupported consumer identity/IDL: token completion requires SubmitReceipt"
         );
         let chain = self.api_provider.client();
-        let hash = chain.latest_finalized_block().await?;
-        let observation = FinalizedReceiptObservation {
-            finalized_block_number: Some(chain.block_hash_to_number(hash).await?),
-            finalized_block_hash: format!("{hash:#x}"),
+        let latest = chain.latest_finalized_block().await?;
+        let finalized_number = chain.block_hash_to_number(latest).await?;
+        let (hash, observation) = if let Some(pin) = query_pin {
+            let number = pin
+                .finalized_block_number
+                .ok_or_else(|| anyhow::anyhow!("HOLD: historical settlement has no height"))?;
+            let hash = H256::from_str(&pin.finalized_block_hash)?;
+            validate_settlement_pin(
+                pin,
+                finalized_number,
+                chain.block_number_to_hash(number).await?,
+            )?;
+            (hash, pin.clone())
+        } else {
+            (
+                latest,
+                FinalizedReceiptObservation {
+                    finalized_block_number: Some(finalized_number),
+                    finalized_block_hash: format!("{latest:#x}"),
+                },
+            )
         };
         let key = (payload.proof_block.block.slot, payload.transaction_index);
         let gas = gear_api.block_gas_limit()?;
@@ -1137,6 +1398,18 @@ impl MessageSender {
                 .is_none_or(|expected| expected.0 == ethereum_manager.0),
             "Consumer Ethereum manager differs from the immutable source deployment"
         );
+        let _config = manager
+            .get_config()
+            .with_gas_limit(gas)
+            .at_block(hash.0.into())
+            .recv(self.receiver_address.0.into())
+            .await?;
+        let native_wrapper = manager
+            .native_wrapper()
+            .with_gas_limit(gas)
+            .at_block(hash.0.into())
+            .recv(self.receiver_address.0.into())
+            .await?;
         let deposits = manager
             .receipt_deposits(key.0, key.1)
             .with_gas_limit(gas)
@@ -1168,6 +1441,10 @@ impl MessageSender {
         let mut has_native = false;
         for row in &deposits {
             anyhow::ensure!(
+                row.native == (native_wrapper == Some(row.token_id)),
+                "Original native wrapper policy differs from receipt economic evidence"
+            );
+            anyhow::ensure!(
                 mappings
                     .iter()
                     .any(|(token, eth, supply)| *token == row.token_id
@@ -1197,6 +1474,17 @@ impl MessageSender {
                 effects_delivered &= matches!(row.outcome, ReceiptDepositOutcome::Settled);
             }
         }
+        validate_settlement_pin(
+            &observation,
+            finalized_number,
+            chain
+                .block_number_to_hash(
+                    observation
+                        .finalized_block_number
+                        .expect("settlement pin has height"),
+                )
+                .await?,
+        )?;
         let native_ready = has_native
             && effects_delivered
             && matches!(status, ReceiptStatus::Reserved | ReceiptStatus::Processed);
@@ -1216,13 +1504,106 @@ impl MessageSender {
         ))
     }
 
-    async fn find_signed_extrinsic(
+    pub(super) async fn authenticate_archived_continuation(
+        &self,
+        archived: &SignedSubmission,
+    ) -> anyhow::Result<()> {
+        let chain = self.api_provider.client();
+        let call = ReconcileReceipt::encode_call(archived.receipt_key.0, archived.receipt_key.1);
+        let mut observed = archived.clone();
+        // An absence archive is qualified by the entire original interval, not its saved cursor alone.
+        if archived.inclusion_block_number.is_none() {
+            observed.scanned_finalized_number = archived.prepared_finalized_number;
+            observed.scanned_finalized_hash = archived.prepared_finalized_hash.clone();
+        }
+        let included = self
+            .find_signed_extrinsic(&mut observed, self.receiver_address, &call)
+            .await?;
+        if let Some(nonce) = archived.finalized_nonce_consumed {
+            let hash = H256::from_str(&archived.scanned_finalized_hash)?;
+            let latest = chain
+                .block_hash_to_number(chain.latest_finalized_block().await?)
+                .await?;
+            validate_settlement_pin(
+                &FinalizedReceiptObservation {
+                    finalized_block_number: Some(archived.scanned_finalized_number),
+                    finalized_block_hash: archived.scanned_finalized_hash.clone(),
+                },
+                latest,
+                chain
+                    .block_number_to_hash(archived.scanned_finalized_number)
+                    .await?,
+            )?;
+            anyhow::ensure!(
+                !included
+                    && u64::from(chain.api.info_at(&archived.sender, Some(hash)).await?.nonce)
+                        == nonce
+                    && nonce > archived.nonce,
+                "HOLD: archived finalized absence/consumed nonce changed"
+            );
+        } else {
+            anyhow::ensure!(
+                included
+                    && observed.inclusion_block_number == archived.inclusion_block_number
+                    && observed.inclusion_block_hash == archived.inclusion_block_hash
+                    && observed.message_id == archived.message_id
+                    && observed.finalized_dispatch_error == archived.finalized_dispatch_error,
+                "HOLD: archived original dispatch changed"
+            );
+            if let Some(id) = archived.message_id.as_deref() {
+                self.find_finalized_reply(
+                    &mut observed,
+                    H256::from_str(id)?,
+                    self.receiver_address,
+                )
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("HOLD: archived original reply unavailable"))?;
+                anyhow::ensure!(
+                    observed.finalized_reply == archived.finalized_reply
+                        && observed.finalized_reply_error == archived.finalized_reply_error,
+                    "HOLD: archived original terminal reply changed"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn find_signed_extrinsic(
         &self,
         signed: &mut SignedSubmission,
         expected_destination: H256,
         expected_payload: &[u8],
     ) -> anyhow::Result<bool> {
         let chain = self.api_provider.client();
+        anyhow::ensure!(
+            signed.raw_hash_matches(),
+            "HOLD: original raw extrinsic hash changed"
+        );
+        let decoded = subxt::ext::subxt_core::blocks::Extrinsics::<gsdk::GearConfig>::decode_from(
+            vec![signed.raw_extrinsic.clone()],
+            chain.api.metadata(),
+        )?;
+        let extrinsic = decoded
+            .iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("HOLD: missing signed envelope"))?;
+        let sender = signed.sender.parse::<subxt::utils::AccountId32>()?;
+        let mut address = [0; 33];
+        address[1..].copy_from_slice(&sender.0);
+        let call = extrinsic
+            .as_extrinsic::<gear::gear::calls::types::SendMessage>()?
+            .ok_or_else(|| anyhow::anyhow!("HOLD: raw original is not Gear.send_message"))?;
+        anyhow::ensure!(
+            extrinsic.address_bytes() == Some(address.as_slice())
+                && extrinsic
+                    .transaction_extensions()
+                    .and_then(|extensions| extensions.nonce())
+                    == Some(signed.nonce)
+                && call.destination.as_ref() == expected_destination.as_bytes()
+                && call.payload == expected_payload
+                && call.value == 0,
+            "HOLD: raw signed sender/nonce/destination/payload differs from original identity"
+        );
         let prepared_hash = H256::from_str(&signed.prepared_finalized_hash)?;
         anyhow::ensure!(
             chain
@@ -1277,35 +1658,48 @@ impl MessageSender {
                     "Original finalized extrinsic dispatch differs from the original receipt/proxy/consumer");
                 let mut message_id = None;
                 let mut dispatch_error = None;
+                let mut dispatch_success = false;
                 for event in extrinsic.events().await?.iter() {
-                    match event?.as_gear()? {
-                        RuntimeEvent::Gear(GearEvent::MessageQueued {
-                            id,
-                            source,
-                            destination,
-                            entry: MessageEntry::Handle,
-                        }) => {
-                            anyhow::ensure!(source == sender
-                                && destination.as_ref() == expected_destination.as_bytes()
-                                && message_id.is_none(),
-                                "Original queued message source/destination is not the original signer/proxy");
-                            message_id = Some(id.to_string());
-                        }
-                        RuntimeEvent::System(SystemEvent::ExtrinsicFailed {
-                            dispatch_error: error,
-                            ..
-                        }) => {
-                            dispatch_error = Some(format!("{error:?}"));
-                        }
-                        _ => {}
+                    let event = event?;
+                    if let Some(queued) = event.as_event::<gear::gear::events::MessageQueued>()? {
+                        anyhow::ensure!(queued.source == sender
+                            && queued.destination.as_ref() == expected_destination.as_bytes()
+                            && matches!(queued.entry, MessageEntry::Handle)
+                            && message_id.is_none(),
+                            "Original queued message source/destination is not the original signer/proxy");
+                        message_id = Some(queued.id.to_string());
+                    }
+                    if let Some(error) = gear_rpc_client::extrinsic_failure(&event)? {
+                        anyhow::ensure!(
+                            dispatch_error.is_none(),
+                            "Duplicate original dispatch failure"
+                        );
+                        dispatch_error = Some(error);
+                    }
+                    if event.pallet_name() == "System" && event.variant_name() == "ExtrinsicSuccess"
+                    {
+                        anyhow::ensure!(!dispatch_success, "Duplicate original dispatch success");
+                        dispatch_success = true;
                     }
                 }
+                anyhow::ensure!(
+                    dispatch_success != dispatch_error.is_some()
+                        && dispatch_success == message_id.is_some(),
+                    "Original finalized dispatch has missing or conflicting success/failure/queued evidence"
+                );
                 anyhow::ensure!(
                     signed
                         .message_id
                         .as_ref()
                         .is_none_or(|id| Some(id) == message_id.as_ref()),
                     "Original signed message identity changed"
+                );
+                anyhow::ensure!(
+                    signed
+                        .finalized_dispatch_error
+                        .as_ref()
+                        .is_none_or(|previous| Some(previous) == dispatch_error.as_ref()),
+                    "Original finalized dispatch failure changed"
                 );
                 signed.inclusion_block_number = Some(number);
                 signed.inclusion_block_hash = Some(format!("{block_hash:#x}"));
@@ -1325,7 +1719,7 @@ impl MessageSender {
         Ok(false)
     }
 
-    async fn find_finalized_reply(
+    pub async fn find_finalized_reply(
         &self,
         signed: &mut SignedSubmission,
         message_id: H256,
@@ -1366,10 +1760,9 @@ impl MessageSender {
         };
         for number in start..=end {
             let block_hash = chain.block_number_to_hash(number).await?;
-            let block = chain.api.blocks().at(block_hash).await?;
-            for event in block.events().await?.iter() {
-                let RuntimeEvent::Gear(GearEvent::UserMessageSent { message, .. }) =
-                    event?.as_gear()?
+            for event in chain.metadata_events_at(block_hash).await?.iter() {
+                let Some(gear::gear::events::UserMessageSent { message, .. }) =
+                    event?.as_event::<gear::gear::events::UserMessageSent>()?
                 else {
                     continue;
                 };
@@ -1385,12 +1778,8 @@ impl MessageSender {
                     anyhow::ensure!(message.source().as_ref() == expected_source.as_bytes()
                         && message.destination().as_ref() == sender.0,
                         "Original reply source/destination differs from its authenticated actor and signer");
-                    if !details.to_reply_code().is_success() {
-                        anyhow::bail!(
-                            "Finalized Gear reply for {message_id} has a failure code: {}",
-                            hex::encode(message.payload_bytes())
-                        );
-                    }
+                    let reply_error = (!details.to_reply_code().is_success())
+                        .then(|| format!("{:?}", details.to_reply_code()));
                     let evidence = FinalizedReplyEvidence {
                         payload: message.payload_bytes().to_vec(),
                         observation: FinalizedReceiptObservation {
@@ -1405,7 +1794,21 @@ impl MessageSender {
                             .is_none_or(|previous| previous == &evidence),
                         "Original finalized reply bytes or identity changed"
                     );
+                    anyhow::ensure!(
+                        signed
+                            .finalized_reply_error
+                            .as_ref()
+                            .is_none_or(|previous| Some(previous) == reply_error.as_ref()),
+                        "HOLD: original reply code changed"
+                    );
                     signed.finalized_reply = Some(evidence.clone());
+                    signed.finalized_reply_error = reply_error;
+                    if expected_source != self.receiver_address {
+                        anyhow::ensure!(
+                            signed.finalized_reply_error.is_none(),
+                            "HOLD: original proof reply has a failure code"
+                        );
+                    }
                     return Ok(Some((evidence.payload, evidence.observation)));
                 }
             }
@@ -1542,6 +1945,250 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
     use vft_manager_client::ReceiptStatus;
 
+    #[tokio::test]
+    #[ignore = "requires retained native token-stack originals and read-only loopback RPC"]
+    async fn native_archived_original_dispatch_and_reply() -> anyhow::Result<()> {
+        use gear_common::api_provider::ApiProvider;
+        let rpc = std::env::var("GEAR_ORIGINAL_RPC")?;
+        anyhow::ensure!(
+            url::Url::parse(&rpc)?.host_str() == Some("127.0.0.1"),
+            "Loopback RPC required"
+        );
+        let provider = ApiProvider::new(rpc, 0).await?;
+        let connection = provider.connection();
+        let chain = connection.client();
+        anyhow::ensure!(
+            format!("{:#x}", chain.api.genesis_hash())
+                == "0xa12f631344f61644239b70f9ab53e4842e540d8b0c1e7adb9570c06a62c3af3f",
+            "Native source genesis differs"
+        );
+        let original_hash =
+            H256::from_str("0x92ebd056cf9f953ba87d066bc617b33c83d4922dead25f9f0c0068a7b1ddd855")?;
+        assert_eq!(chain.block_number_to_hash(813).await?, original_hash);
+        assert!(
+            chain
+                .block_hash_to_number(chain.latest_finalized_block().await?)
+                .await?
+                >= 813
+        );
+        let stack: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(std::env::var("GEAR_ORIGINAL_STACK")?)?)?;
+        let actions = stack["configuration"]["actions"].as_object().unwrap();
+        let constructor = &actions["constructor.historicalProxy"]["messages"][0];
+        let block = chain.api.blocks().at(original_hash).await?;
+        let originals = block.extrinsics().await?;
+        let original = originals
+            .iter()
+            .find(|tx| {
+                format!("{:#x}", tx.hash())
+                    == "0x6c2f34f324ae9d980cf11fd26e9e31b39f0012145a5e4ccf33c3c1edc2728d22"
+            })
+            .unwrap();
+        assert_eq!(
+            original.bytes(),
+            hex::decode(
+                constructor["submission"]["rawExtrinsic"]
+                    .as_str()
+                    .unwrap()
+                    .trim_start_matches("0x")
+            )?
+        );
+        let mut queued = None;
+        for event in original.events().await?.iter() {
+            let event = event?;
+            assert!(gear_rpc_client::extrinsic_failure(&event)?.is_none());
+            if let Some(message) = event.as_event::<gear::gear::events::MessageQueued>()? {
+                assert!(matches!(message.entry, MessageEntry::Init));
+                assert_eq!(
+                    format!("{:#x}", H256::from(message.destination.into_bytes())),
+                    constructor["target"].as_str().unwrap()
+                );
+                queued = Some(message.id);
+            }
+        }
+        let constructor_id = queued.unwrap();
+        let mut constructor_reply = false;
+        let mut constructor_dispatched = false;
+        for event in chain.metadata_events_at(original_hash).await?.iter() {
+            let event = event?;
+            if let Some(dispatched) = event.as_event::<gear::gear::events::MessagesDispatched>()? {
+                for (id, status) in dispatched.statuses {
+                    if id == constructor_id {
+                        assert!(matches!(
+                            status,
+                            gear::runtime_types::gear_common::event::DispatchStatus::Success
+                        ));
+                        constructor_dispatched = true;
+                    }
+                }
+            }
+            if let Some(sent) = event.as_event::<gear::gear::events::UserMessageSent>()? {
+                if let Some(details) = sent.message.details() {
+                    if details.to_message_id() == constructor_id {
+                        assert_eq!(
+                            format!("{:#x}", H256::from(sent.message.source().into_bytes())),
+                            constructor["target"].as_str().unwrap()
+                        );
+                        assert!(details.to_reply_code().is_success());
+                        assert_eq!(
+                            sent.message.payload_bytes(),
+                            hex::decode(
+                                constructor["replyEvidence"]["payload"]
+                                    .as_str()
+                                    .unwrap()
+                                    .trim_start_matches("0x")
+                            )?
+                        );
+                        constructor_reply = true;
+                    }
+                }
+            }
+        }
+        assert!(constructor_dispatched && constructor_reply);
+        let record = actions
+            .values()
+            .flat_map(|action| action["messages"].as_array().into_iter().flatten())
+            .find(|message| message["entry"] == "Handle" && message["replyEvidence"].is_object())
+            .unwrap();
+        let submission = &record["submission"];
+        let target = H256::from_str(record["target"].as_str().unwrap())?;
+        let raw = hex::decode(
+            submission["rawExtrinsic"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x"),
+        )?;
+        let sender_bytes = hex::decode(
+            submission["sender"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x"),
+        )?;
+        let sender_account =
+            subxt::utils::AccountId32::from(<[u8; 32]>::try_from(sender_bytes).unwrap());
+        let prepared_number = submission["scanFromNumber"].as_u64().unwrap() as u32;
+        let prepared_hash = submission["scanFromHash"].as_str().unwrap().to_owned();
+        let mut signed = SignedSubmission {
+            chain_genesis_hash: submission["sourceGenesis"].as_str().unwrap().into(),
+            manager: format!("{target:#x}"),
+            historical_proxy: format!("{target:#x}"),
+            sender: sender_account.to_string(),
+            receipt_key: (0, 0),
+            payload_hash: String::new(),
+            nonce: submission["nonce"].as_u64().unwrap(),
+            extrinsic_hash: submission["extrinsicHash"].as_str().unwrap().into(),
+            raw_extrinsic: raw,
+            prepared_finalized_number: prepared_number,
+            prepared_finalized_hash: prepared_hash.clone(),
+            scanned_finalized_number: prepared_number,
+            scanned_finalized_hash: prepared_hash.clone(),
+            reply_scanned_finalized_number: prepared_number,
+            reply_scanned_finalized_hash: prepared_hash,
+            inclusion_block_number: Some(
+                record["inclusionEvidence"]["blockNumber"].as_u64().unwrap() as u32,
+            ),
+            inclusion_block_hash: Some(
+                record["inclusionEvidence"]["blockHash"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
+            ),
+            message_id: None,
+            finalized_dispatch_error: None,
+            finalized_reply: None,
+            native_reconciliation: None,
+            native_reconciliation_attempts: vec![],
+            finalized_nonce_consumed: None,
+            finalized_reply_error: None,
+        };
+        let reader = MessageSender::new(target, vec![], target, connection, "//Alice".into(), None);
+        let payload = hex::decode(record["payload"].as_str().unwrap().trim_start_matches("0x"))?;
+        assert!(
+            reader
+                .find_signed_extrinsic(&mut signed, target, &payload)
+                .await?
+        );
+        let message_id = H256::from_str(signed.message_id.as_deref().unwrap())?;
+        let reply = reader
+            .find_finalized_reply(&mut signed, message_id, target)
+            .await?
+            .unwrap();
+        assert_eq!(
+            reply.0,
+            hex::decode(
+                record["replyEvidence"]["payload"]
+                    .as_str()
+                    .unwrap()
+                    .trim_start_matches("0x")
+            )?
+        );
+        let saved = signed.clone();
+        assert!(
+            reader
+                .find_signed_extrinsic(&mut signed, target, &payload)
+                .await?
+        );
+        assert_eq!(
+            reader
+                .find_finalized_reply(&mut signed, message_id, target)
+                .await?
+                .unwrap(),
+            reply
+        );
+        assert_eq!(signed, saved);
+        assert!(reader
+            .find_signed_extrinsic(&mut signed.clone(), target, &[0xff])
+            .await
+            .is_err());
+        assert!(reader
+            .find_finalized_reply(&mut signed.clone(), message_id, H256::zero())
+            .await
+            .is_err());
+        let mut changed = signed.clone();
+        changed.raw_extrinsic.push(0);
+        assert!(reader
+            .find_signed_extrinsic(&mut changed, target, &payload)
+            .await
+            .is_err());
+        let mut changed = signed.clone();
+        changed.inclusion_block_hash = Some(format!("{:#x}", H256::zero()));
+        assert!(reader
+            .find_signed_extrinsic(&mut changed, target, &payload)
+            .await
+            .is_err());
+        let mut changed = signed.clone();
+        changed
+            .finalized_reply
+            .as_mut()
+            .unwrap()
+            .observation
+            .finalized_block_hash = format!("{:#x}", H256::zero());
+        assert!(reader
+            .find_finalized_reply(&mut changed, message_id, target)
+            .await
+            .is_err());
+        println!("Native original block813 constructor and Handle {} inclusion {:?} reply {:?} requalified without signing",
+            signed.extrinsic_hash, signed.inclusion_block_number, reply.1);
+        Ok(())
+    }
+
+    #[test]
+    fn historical_pin_requires_canonical_finalized_hash_and_original_order() {
+        let hash = H256::repeat_byte(20);
+        let pin = FinalizedReceiptObservation {
+            finalized_block_number: Some(20),
+            finalized_block_hash: format!("{hash:#x}"),
+        };
+        assert!(validate_settlement_pin(&pin, 74, hash).is_ok());
+        assert!(validate_settlement_pin(&pin, 19, hash).is_err());
+        assert!(validate_settlement_pin(&pin, 74, H256::repeat_byte(21)).is_err());
+        let missing = FinalizedReceiptObservation {
+            finalized_block_number: None,
+            finalized_block_hash: pin.finalized_block_hash,
+        };
+        assert!(validate_settlement_pin(&missing, 74, hash).is_err());
+    }
+
     #[test]
     fn reply_frames_require_exact_routes_and_complete_consumption() {
         let inner: <SubmitReceipt as ActionIo>::Reply = Ok(());
@@ -1643,6 +2290,10 @@ mod tests {
             .collect();
         assert!(
             validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, &rows).is_ok()
+        );
+        // The retained hash-20 rows qualify; evicted latest rows must never substitute for them.
+        assert!(
+            validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, &[]).is_err()
         );
         assert!(validate_deposit_evidence(
             &bytes,

@@ -31,6 +31,7 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
   const initArchiveApi = useInitArchiveApi();
 
   const relay = async ({ onLog, onFinalized, onError }: Params) => {
+    const deadline = Date.now() + 44 * 60 * 1000;
     let archiveApi: GearApi | undefined;
 
     try {
@@ -117,6 +118,8 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
         signer: account.decodedAddress,
         signerOptions: { signer: account.signer },
         statusCb: onLog,
+        wait: true,
+        deadline,
       });
 
       onFinalized();

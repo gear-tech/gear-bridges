@@ -7,4 +7,5 @@ console.log(`Erc20Manager address: ${config.erc20Manager}`);
 console.log(`BridgingPayment address: ${config.bridgingPayment}`);
 console.log(`MessageQueue address: ${config.msgQ}`);
 
-processor.run(new TypeormDatabase({ supportHotBlocks: true, stateSchema: 'eth_processor' }), handleBatch);
+// Do not switch from the conservative cold-ingestion buffer to unfinalized hot heads.
+processor.run(new TypeormDatabase({ supportHotBlocks: false, stateSchema: 'eth_processor' }), handleBatch);

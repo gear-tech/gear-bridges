@@ -3,8 +3,10 @@ import { getEnv } from '../common/index.js';
 let apiPath = getEnv('ETH_API_PATH', './api/ethereum');
 
 apiPath = apiPath.endsWith('/') ? apiPath.slice(0, -1) : apiPath;
+const rpcOnly = getEnv('ETH_RPC_ONLY', 'false') === 'true';
 
 export const config = {
+  rpcOnly,
   archiveUrl: getEnv('ETH_ARCHIVE_URL', 'https://v2.archive.subsquid.io/network/ethereum-holesky'),
   rpcUrl: getEnv('ETH_RPC_URL'),
   rateLimit: Number(getEnv('ETH_RATE_LIMIT', '10')),
@@ -13,5 +15,5 @@ export const config = {
   bridgingPayment: getEnv('ETH_BRIDGING_PAYMENT').toLowerCase(),
   fromBlock: Number(getEnv('ETH_FROM_BLOCK', '2636000')),
   apiPath,
-  apiKey: getEnv('ETH_SQUID_API_KEY'),
+  apiKey: rpcOnly ? undefined : getEnv('ETH_SQUID_API_KEY'),
 };

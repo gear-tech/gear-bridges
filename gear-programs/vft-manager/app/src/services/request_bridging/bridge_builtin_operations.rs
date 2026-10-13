@@ -58,6 +58,10 @@ pub struct SourceRequestEvidence {
     pub request_hash: H256,
     pub outcome: SourceRequestOutcome,
 }
+static mut PENDING_SOURCE_REQUEST_COUNT: u64 = 0;
+pub(super) fn is_quiescent() -> bool {
+    unsafe { PENDING_SOURCE_REQUEST_COUNT == 0 }
+}
 static mut SOURCE_CHILDREN: Option<collections::BTreeMap<MessageId, MessageId>> = None;
 fn children() -> &'static mut collections::BTreeMap<MessageId, MessageId> {
     unsafe { gstd::static_mut!(SOURCE_CHILDREN).get_or_insert_with(collections::BTreeMap::new) }
@@ -97,6 +101,11 @@ pub async fn send_message_to_bridge_builtin(
     )
     .expect("Dispatch/reply funding failed: roll back the entire child dispatch");
     use ethereum_common::{hash_db::Hasher, keccak_hasher::KeccakHasher};
+    unsafe {
+        PENDING_SOURCE_REQUEST_COUNT = PENDING_SOURCE_REQUEST_COUNT
+            .checked_add(1)
+            .expect("Pending source count overflow");
+    }
     children().insert(future.waiting_reply_to, msg_id);
     requests().insert(
         msg_id,
@@ -170,6 +179,13 @@ pub fn handle_persistent_reply() {
         _ => return,
     };
     requests().get_mut(&request).unwrap().outcome = outcome.clone();
+    unsafe {
+        PENDING_SOURCE_REQUEST_COUNT = PENDING_SOURCE_REQUEST_COUNT
+            .checked_sub(1)
+            .expect("Pending source count underflow");
+    }
+    // Immutable evidence retains the original child; later replies cannot advance it.
+    children().remove(&child);
     if msg_tracker_mut()
         .get_message_info(&request)
         .is_some_and(|r| r.status == MessageStatus::SendingMessageToBridgeBuiltin)

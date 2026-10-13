@@ -1,31 +1,27 @@
 use crate::message_relayer::{
     common::{
         ethereum::{
-            accumulator::{Accumulator, RootUpdate},
-            message_sender::MessageSender,
-            status_fetcher::StatusFetcher,
+            accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
+            message_sender::MessageSender, status_fetcher::StatusFetcher,
         },
         gear::{
             merkle_proof_fetcher::MerkleProofFetcher,
             message_queued_event_extractor::bind_event_storage,
         },
-        message_hash, AuthoritySetId, GearBlockNumber, MessageInBlock, RelayedMerkleRoot,
+        message_hash, AuthoritySetId, GearBlockNumber, MessageInBlock,
     },
     gear_to_eth::{
         storage::{GearEventStream, JSONStorage, OutboundLaneIdentity, Storage},
-        tx_manager::{Transaction, TransactionManager},
+        tx_manager::{Transaction, TransactionManager, TxStatus},
     },
 };
 use alloy::providers::Provider;
 use ethereum_client::EthApi;
 use gear_common::api_provider::ApiProviderConnection;
-use gear_rpc_client::GearApi;
 use primitive_types::U256;
 use sails_rs::ActorId;
-use std::{cmp, path::Path, sync::Arc};
-use tokio::sync::mpsc::{self, UnboundedSender};
-
-const COUNT_BATCH: u64 = 500;
+use std::{path::Path, sync::Arc};
+use tokio::sync::mpsc;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
@@ -125,30 +121,19 @@ pub async fn relay(
         }
     }
 
-    let block_latest = eth_api.verified_finalized_view().await?.block_number();
-    let block_range = crate::common::create_range(from_eth_block, block_latest);
-    let mut block_from = block_range.from;
-    let (merkle_roots_sender, merkle_roots_receiver) = mpsc::unbounded_channel();
-
-    while block_from <= block_range.to {
-        let block_to = block_from + COUNT_BATCH;
-        let block_to = cmp::min(block_to, block_range.to);
-
-        if fetch_merkle_roots_in_range(
-            &eth_api,
-            &gear_api,
-            block_from,
-            block_to,
-            &merkle_roots_sender,
-            &message_in_block,
-        )
-        .await
-        {
-            break;
-        }
-
-        block_from = block_to + 1;
+    if from_eth_block.is_some() {
+        log::info!("Manual root qualification replays full finalized history; --from-eth-block is not a trust anchor");
     }
+    let (merkle_roots_sender, merkle_roots_receiver) = mpsc::unbounded_channel();
+    let mut root_extractor = MerkleRootExtractor::new(
+        eth_api.clone(),
+        api_provider.clone(),
+        confirmations,
+        merkle_roots_sender,
+        storage.clone(),
+    );
+    *tx_manager.merkle_roots.write().await = root_extractor.qualify().await?;
+    tx_manager.requalify_unsigned_roots(&eth_api).await?;
 
     tx_manager.update_storage().await?;
 
@@ -158,12 +143,12 @@ pub async fn relay(
     let accumulator = Accumulator::new(
         merkle_roots_receiver,
         tx_manager.merkle_roots.clone(),
-        storage.clone(),
         governance_admin,
         governance_pauser,
         eth_api.clone(),
     );
     let mut accumulator_io = accumulator.spawn();
+    root_extractor.spawn();
     let mut proof_fetcher_io = MerkleProofFetcher::new(api_provider).spawn();
 
     let mut message_sender_io = message_sender.spawn();
@@ -204,10 +189,20 @@ pub async fn relay(
             );
             return Ok(());
         }
-        anyhow::ensure!(
-            tx_manager.failed.read().await.is_empty(),
-            "HOLD: manual relay failed; preserve original journal"
-        );
+        for tx in tx_manager.transactions.read().await.values() {
+            match &tx.status {
+                TxStatus::Failed { diagnostic } => {
+                    anyhow::bail!("FAILED: original outbound {:?}: {diagnostic}; preserve journal; no automatic replacement", tx.ethereum_submission.as_ref().map(|signed| signed.hash));
+                }
+                TxStatus::NeedsReconciliation { diagnostic } => {
+                    anyhow::bail!(
+                        "HOLD: original outbound {:?}: {diagnostic}; reconcile before retry",
+                        tx.ethereum_submission.as_ref().map(|signed| signed.hash)
+                    );
+                }
+                _ => {}
+            }
+        }
         anyhow::ensure!(running, "Manual relay handlers stopped before completion");
     }
 }
@@ -221,68 +216,6 @@ fn ensure_manual_target(tx: &Transaction, target: &MessageInBlock) -> anyhow::Re
         "HOLD: manual journal belongs to another source message"
     );
     Ok(())
-}
-
-async fn fetch_merkle_roots_in_range(
-    eth_api: &EthApi,
-    gear_api: &GearApi,
-    block_from: u64,
-    block_to: u64,
-    merkle_roots_sender: &UnboundedSender<RootUpdate>,
-    message_in_block: &MessageInBlock,
-) -> bool {
-    log::info!("Fetch merkle roots in the Ethereum blocks range [{block_from}; {block_to}]",);
-
-    let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(block_from, block_to)
-        .await
-        .expect("Unable to fetch merkle roots");
-
-    for (merkle_root, block_number_eth) in merkle_roots
-        .into_iter()
-        .filter_map(|(merkle_root, block)| block.map(|block| (merkle_root, block)))
-    {
-        let block_hash = gear_api
-            .block_number_to_hash(merkle_root.block_number as u32)
-            .await
-            .expect("Unable to get hash for the block number");
-
-        let authority_set_id = AuthoritySetId(
-            gear_api
-                .signed_by_authority_set_id(block_hash)
-                .await
-                .expect("Unable to get AuthoritySetId"),
-        );
-
-        let timestamp = eth_api
-            .get_block_timestamp(block_number_eth)
-            .await
-            .expect("failed to get Ethereum block timestamp");
-
-        log::info!(
-            "Found merkle root for gear block #{} and era #{}",
-            merkle_root.block_number,
-            authority_set_id
-        );
-
-        merkle_roots_sender
-            .send(RootUpdate::untracked(RelayedMerkleRoot {
-                block: GearBlockNumber(merkle_root.block_number as u32),
-                block_hash,
-                authority_set_id,
-                merkle_root: merkle_root.merkle_root,
-                timestamp,
-            }))
-            .expect("Unable to send RelayedMerkleRoot");
-
-        if authority_set_id == message_in_block.authority_set_id
-            && merkle_root.block_number >= message_in_block.block.0.into()
-        {
-            return true;
-        }
-    }
-
-    false
 }
 
 #[cfg(test)]

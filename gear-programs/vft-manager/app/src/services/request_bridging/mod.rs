@@ -25,6 +25,21 @@ pub fn seed() {
     msg_tracker::init();
 }
 
+pub(super) fn is_quiescent() -> bool {
+    // Pending builtin evidence always retains its original tracker entry.
+    // Only these states fence every continuation from another economic child.
+    bridge_builtin_operations::is_quiescent()
+        && token_operations::is_quiescent()
+        && msg_tracker_ref().message_info.values().all(|info| {
+            matches!(
+                info.status,
+                MessageStatus::TokenDepositCompleted(false)
+                    | MessageStatus::BridgeResponseReceived(Some(_))
+                    | MessageStatus::TokensReturnComplete(true)
+            )
+        })
+}
+
 /// Lock/burn `vft` tokens (specific operation depends on the token supply type) and send
 /// request to the bridge built-in actor. Tokens are refunded only when the bridge built-in
 /// actor definitively rejects the request. Ambiguous outcomes remain quarantined in the
@@ -55,6 +70,7 @@ pub async fn request_bridging(
         token_supply: supply_type,
     };
 
+    service.state_mut().has_economic_activity = true;
     msg_tracker_mut().insert_message_info(
         msg_id,
         MessageStatus::SendingMessageToDepositTokens,

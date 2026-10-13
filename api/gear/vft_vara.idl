@@ -75,11 +75,11 @@ service Vft2 {
 };
 
 service VftAdmin {
+  Exit : (inheritor: actor_id) -> null;
   AppendAllowancesShard : (capacity: u32) -> null;
   AppendBalancesShard : (capacity: u32) -> null;
   ApproveFrom : (owner: actor_id, spender: actor_id, value: u256) -> bool;
   Burn : (from: actor_id, value: u256) -> null;
-  Exit : (inheritor: actor_id) -> null;
   Mint : (to: actor_id, value: u256) -> null;
   MintList : (list: vec struct { actor_id, u256 }) -> null;
   Pause : () -> null;
@@ -158,6 +158,7 @@ service NativeEscrow {
   /// payout reply; a user mailbox entry is still an outstanding native obligation.
   RedeemEscrow : (operation_id: h256, from: actor_id, to: actor_id, amount: u256) -> Redemption;
   query Manager : () -> opt actor_id;
+  query OutstandingRedemptions : () -> u64;
   query Redemption : (operation_id: h256) -> opt Redemption;
 };
 

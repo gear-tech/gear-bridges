@@ -5,6 +5,13 @@ import { StatusCb } from '../util';
 
 export type CheckpointError = 'OutDated' | 'NotPresent';
 
+export type Network =
+    | { Mainnet: null }
+    | { Sepolia: null }
+    | { Holesky: null }
+    | { Hoodi: null }
+    | { LocalFixture: { genesis_time: number | string | bigint; genesis_validators_root: H256 } };
+
 export type Order = 'Direct' | 'Reverse';
 
 export interface ReplayBack {
@@ -40,7 +47,7 @@ export class CheckpointClient {
       CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
       ReplayBack: { finalized_header: 'u64', last_header: 'u64' },
       Order: { _enum: ['Direct', 'Reverse'] },
-      Network: { _enum: ['Mainnet', 'Sepolia', 'Holesky', 'Hoodi'] },
+      Network: {"_enum":{"Mainnet":"Null","Sepolia":"Null","Holesky":"Null","Hoodi":"Null","LocalFixture":{"genesis_time":"u64","genesis_validators_root":"H256"}}},
       StateData: { checkpoints: 'Vec<(u64, H256)>', replay_back: 'Option<ReplayBack>' },
     };
 
@@ -134,7 +141,7 @@ export class ServiceSyncUpdate {
 
 export class ServiceState {
   constructor(private _program: CheckpointClient) {}
-  public network(): QueryBuilder<'Mainnet' | 'Sepolia' | 'Holesky' | 'Hoodi'> {
+  public network(): QueryBuilder<Network> {
     return new QueryBuilder(this._program.api, this._program.registry, this._program.programId,
       'ServiceState', 'Network', null, null, 'Network');
   }

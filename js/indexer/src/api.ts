@@ -53,7 +53,7 @@ async function main() {
 
   const port = process.env.GQL_PORT || 4350;
 
-  server.listen({ host: '0.0.0.0', port }, () => {
+  server.listen({ host: process.env.GQL_HOST || '0.0.0.0', port }, () => {
     const address = server.address()!;
     if (typeof address !== 'string') {
       const href = `http://${address.address}:${address.port}${options.graphiqlRoute || '/graphiql'}`;

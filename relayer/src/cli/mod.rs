@@ -363,6 +363,14 @@ pub struct EthGearTokensArgs {
     /// Immutable first Ethereum block to scan, normally the manager/payment deployment block.
     #[arg(long, env)]
     pub ethereum_start_block: u64,
+
+    /// Immutable predecessor seal for a replacement inbound deployment.
+    #[arg(long, requires = "successor_manager_code_id")]
+    pub cutover_seal: Option<PathBuf>,
+
+    /// Independently approved replacement CodeId (never inferred from the live receiver).
+    #[arg(long, requires = "cutover_seal")]
+    pub successor_manager_code_id: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -429,6 +437,12 @@ pub struct EthGearManualArgs {
     /// Private durable directory for this one original Ethereum transaction; reuse it on restart.
     #[arg(long)]
     pub storage: PathBuf,
+
+    /// Immutable predecessor seal required when manually relaying to a successor.
+    #[arg(long, requires = "successor_manager_code_id")]
+    pub cutover_seal: Option<PathBuf>,
+    #[arg(long, requires = "cutover_seal")]
+    pub successor_manager_code_id: Option<String>,
 
     /// ProgramId of the checkpoint-light-client program
     #[arg(long = "checkpoint-light-client")]

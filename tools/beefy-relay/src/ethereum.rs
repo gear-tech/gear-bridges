@@ -1,41 +1,32 @@
+#[cfg(test)]
+use alloy::node_bindings::Anvil;
 use alloy::{
     consensus::{transaction::SignerRecoverable, Transaction as _, TxEnvelope},
     eips::{Decodable2718, Encodable2718},
-    node_bindings::{Anvil, AnvilInstance},
+    node_bindings::AnvilInstance,
     primitives::{Address, Bytes, FixedBytes, B256, U256},
     providers::{Provider, WalletProvider},
     rpc::types::{BlockId, BlockNumberOrTag},
     signers::local::PrivateKeySigner,
     sol,
 };
-use anyhow::{bail, ensure, Context, Result};
-use ethereum_client::{
-    abi::IMessageQueue::IMessageQueueErrors, transaction_identity, Error as EthereumClientError,
-    EthApi, PollingEthApi, TransactionIdentity,
-};
-use gear_rpc_client::dto::{MerkleProof, Message};
+use anyhow::{ensure, Context, Result};
+use ethereum_client::{transaction_identity, EthApi, PollingEthApi, TransactionIdentity};
 use parity_scale_codec::{Decode, Encode};
 use serde_json::{json, Value};
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::{Path, PathBuf},
-    process::Stdio,
-    str::FromStr,
-    time::Duration,
-};
-use tokio::{
-    process::Command,
-    time::{sleep, timeout, Instant},
-};
+use std::{collections::BTreeSet, fs, path::Path, str::FromStr, time::Duration};
+#[cfg(test)]
+use std::{path::PathBuf, process::Stdio};
+#[cfg(test)]
+use tokio::process::Command;
+use tokio::time::{sleep, timeout, Instant};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use crate::source::CapturedCommitment;
-use beefy_relay::{
-    authority_proof, keccak256, Hash32, QueueSnapshot, RuntimeLeaf, SimplifiedMmrProof,
-    SNAPSHOT_VERSION,
+use crate::{
+    authority_proof, keccak256, source::CapturedCommitment, Hash32, QueueSnapshot, RuntimeLeaf,
+    SimplifiedMmrProof, SNAPSHOT_VERSION,
 };
 
 fn bytes(bytes: impl AsRef<[u8]>) -> String {
@@ -98,9 +89,8 @@ async fn await_original_commitment(
                 ensure!(
                     receipt.transaction_hash == signed.hash
                         && receipt.from == signed.from
-                        && receipt.to == signed.to
-                        && receipt.status(),
-                    "commitment receipt identity or status differs from signed intent"
+                        && receipt.to == signed.to,
+                    "commitment receipt identity differs from signed intent"
                 );
                 let block = receipt.block_number.context("commitment receipt block missing")?;
                 let hash = receipt.block_hash.context("commitment receipt inclusion hash missing")?;
@@ -156,7 +146,7 @@ pub(crate) fn validate_recorded_commitment_transaction(
     );
     let call = BeefyClient::submitFiatShamirCall::abi_decode(signed.input())
         .context("original transaction is not the saved Fiat-Shamir submission; HOLD")?;
-    let original = beefy_relay::decode_versioned_finality_proof(source_raw)?;
+    let original = crate::decode_versioned_finality_proof(source_raw)?;
     let expected = BeefyClient::Commitment {
         blockNumber: original.commitment.block_number,
         validatorSetID: original.commitment.validator_set_id,
@@ -173,10 +163,10 @@ pub(crate) fn validate_recorded_commitment_transaction(
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordedReceiptProof {
     genesis: B256,
-    header: alloy::consensus::Header,
-    index: u64,
-    raw_transaction: Vec<u8>,
-    receipt: alloy::consensus::ReceiptEnvelope,
+    pub(crate) header: alloy::consensus::Header,
+    pub(crate) index: u64,
+    pub(crate) raw_transaction: Vec<u8>,
+    pub(crate) receipt: alloy::consensus::ReceiptEnvelope,
     transaction_proof: Vec<Vec<u8>>,
     receipt_proof: Vec<Vec<u8>>,
 }
@@ -257,6 +247,33 @@ fn transaction_proof(
 }
 
 impl RecordedReceiptProof {
+    pub(crate) fn verify_inclusion(
+        &self,
+        view: &ethereum_client::FinalizedView,
+        hash: B256,
+    ) -> Result<()> {
+        ensure!(
+            self.genesis == view.genesis_hash()
+                && view.contains(self.header.number, self.header.hash_slow()),
+            "receipt proof is not bound to authenticated finalized history; HOLD"
+        );
+        ensure!(
+            B256::from(keccak256(&self.raw_transaction)) == hash,
+            "receipt proof transaction hash changed; HOLD"
+        );
+        verify_indexed_value(
+            self.header.transactions_root,
+            self.index,
+            &self.raw_transaction,
+            &self.transaction_proof,
+        )?;
+        verify_indexed_value(
+            self.header.receipts_root,
+            self.index,
+            &self.receipt.encoded_2718(),
+            &self.receipt_proof,
+        )
+    }
     fn verify(
         &self,
         view: &ethereum_client::FinalizedView,
@@ -304,6 +321,113 @@ impl RecordedReceiptProof {
         );
         Ok(())
     }
+}
+
+/// Authenticate arbitrary signed transaction and receipt bytes; policy belongs to the caller.
+pub(crate) async fn authenticate_transaction_receipt(
+    ethereum: &Ethereum,
+    view: &ethereum_client::FinalizedView,
+    block_number: u64,
+    block_hash: B256,
+    hash: B256,
+    directory: &Path,
+) -> Result<RecordedReceiptProof> {
+    fs::create_dir_all(directory)?;
+    let path = directory.join(format!("{hash:x}.json"));
+    if let Ok(saved) = fs::read(&path) {
+        let proof: RecordedReceiptProof = serde_json::from_slice(&saved)?;
+        ensure!(
+            proof.header.number == block_number && proof.header.hash_slow() == block_hash,
+            "saved receipt inclusion changed; HOLD"
+        );
+        proof.verify_inclusion(view, hash)?;
+        return Ok(proof);
+    }
+    ensure!(
+        view.contains(block_number, block_hash),
+        "receipt block is not authenticated; HOLD"
+    );
+    let (block, receipts) = tokio::try_join!(
+        async {
+            ethereum
+                .api
+                .raw_provider()
+                .get_block_by_hash(block_hash)
+                .full()
+                .await?
+                .context("full inclusion block unavailable; HOLD")
+        },
+        async {
+            ethereum
+                .api
+                .raw_provider()
+                .get_block_receipts(BlockId::hash_canonical(block_hash))
+                .await?
+                .context("inclusion receipts unavailable; HOLD")
+        },
+    )?;
+    ensure!(
+        block.header.number == block_number
+            && block.header.hash == block_hash
+            && block.header.inner.hash_slow() == block_hash,
+        "inclusion header changed; HOLD"
+    );
+    let transactions = block
+        .transactions
+        .try_into_transactions()
+        .map_err(|_| anyhow::anyhow!("full transactions missing; HOLD"))?
+        .into_iter()
+        .map(|tx| tx.into_inner())
+        .collect::<Vec<_>>();
+    ensure!(
+        receipts.len() == transactions.len(),
+        "incomplete receipt set; HOLD"
+    );
+    let mut envelopes = Vec::with_capacity(receipts.len());
+    for (index, receipt) in receipts.into_iter().enumerate() {
+        ensure!(
+            receipt.transaction_index == Some(index as u64)
+                && receipt.block_number == Some(block_number)
+                && receipt.block_hash == Some(block_hash)
+                && receipt.transaction_hash
+                    == B256::from(keccak256(&transactions[index].encoded_2718())),
+            "receipt coordinates changed; HOLD"
+        );
+        envelopes.push((index as u64, receipt.into_primitives_receipt().inner));
+    }
+    ensure!(
+        alloy::consensus::proofs::calculate_receipt_root(
+            &envelopes
+                .iter()
+                .map(|(_, receipt)| receipt)
+                .collect::<Vec<_>>()
+        ) == block.header.receipts_root,
+        "receipt trie differs from authenticated header; HOLD"
+    );
+    let index = transactions
+        .iter()
+        .position(|tx| B256::from(keccak256(&tx.encoded_2718())) == hash)
+        .context("signed transaction absent from inclusion; HOLD")? as u64;
+    let receipt = ethereum_common::utils::generate_merkle_proof(index, &envelopes)?;
+    let proof = RecordedReceiptProof {
+        genesis: view.genesis_hash(),
+        header: block.header.inner.clone(),
+        index,
+        raw_transaction: transactions[index as usize].encoded_2718(),
+        receipt: receipt.receipt,
+        receipt_proof: receipt.proof,
+        transaction_proof: transaction_proof(&transactions, index, block.header.transactions_root)?,
+    };
+    proof.verify_inclusion(view, hash)?;
+    let temporary = path.with_extension("json.tmp");
+    use std::io::Write;
+    let mut file = std::io::BufWriter::new(fs::File::create(&temporary)?);
+    serde_json::to_writer(&mut file, &proof)?;
+    file.flush()?;
+    file.get_ref().sync_all()?;
+    fs::rename(temporary, path)?;
+    fs::File::open(directory)?.sync_all()?;
+    Ok(proof)
 }
 
 /// Fetch a block once for every distinct original inclusion, then retain compact
@@ -443,9 +567,120 @@ pub(crate) async fn authenticate_recorded_receipts(
 }
 
 const HOODI_CHAIN_ID: u64 = 560_048;
-pub(crate) const HOODI_GENESIS_BLOCK: &str =
-    "0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b";
+const HOODI_GENESIS_BLOCK: B256 = alloy::primitives::b256!("bbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b");
+const MAINNET_GENESIS_BLOCK: B256 = alloy::primitives::b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 const HOODI_DEFAULT_RPC: &str = "wss://ethereum-hoodi-rpc.publicnode.com";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PublicEthereumNetwork { Hoodi, Mainnet }
+
+impl PublicEthereumNetwork {
+    fn chain_id(self) -> u64 {
+        match self { Self::Hoodi => HOODI_CHAIN_ID, Self::Mainnet => 1 }
+    }
+
+    fn genesis(self) -> B256 {
+        match self { Self::Hoodi => HOODI_GENESIS_BLOCK, Self::Mainnet => MAINNET_GENESIS_BLOCK }
+    }
+
+    pub(crate) fn deployment_mode(self) -> &'static str {
+        match self { Self::Hoodi => "hoodi-token-stack", Self::Mainnet => "mainnet-token-stack" }
+    }
+
+    pub(crate) fn follower_mode(self) -> &'static str {
+        match self { Self::Hoodi => "hoodi-token-follow", Self::Mainnet => "mainnet-token-follow" }
+    }
+}
+
+/// Independent offline EL/Beacon genesis approval, never inferred from an RPC.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OwnedFixtureNetwork {
+    pub schema_version: u32,
+    pub ethereum_chain_id: u64,
+    pub ethereum_genesis_hash: B256,
+    pub beacon_genesis_validators_root: B256,
+    pub beacon_genesis_time: u64,
+}
+
+impl OwnedFixtureNetwork {
+    pub fn read(path: &Path) -> Result<Self> {
+        let network: Self = serde_json::from_slice(&fs::read(path)?)?;
+        network.validate()?;
+        Ok(network)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        ensure!(self.schema_version == 1 && self.ethereum_chain_id == 31_337,
+            "owned fixture requires schema 1 and Ethereum chain 31337; HOLD");
+        ensure!(self.ethereum_genesis_hash != B256::ZERO
+            && self.beacon_genesis_validators_root != B256::ZERO
+            && self.beacon_genesis_time > 0, "owned fixture genesis approval is incomplete; HOLD");
+        Ok(())
+    }
+
+    pub fn validate_endpoints(&self, source: &str, witness: &str, ethereum: &str) -> Result<()> {
+        self.validate()?;
+        ensure!(source != witness, "owned fixture requires independent source/witness endpoints");
+        for endpoint in [source, witness, ethereum] {
+            self.validate_endpoint(endpoint)?;
+        }
+        Ok(())
+    }
+
+    fn validate_endpoint(&self, endpoint: &str) -> Result<()> {
+        self.validate()?;
+        ensure!(crate::local_source_rpc(endpoint)
+            && matches!(url::Url::parse(endpoint)?.host(), Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))),
+            "owned fixture endpoints must be numeric loopback websocket authorities; HOLD");
+        Ok(())
+    }
+
+    pub fn validate_manifest(&self, deployment: &Value) -> Result<()> {
+        self.validate()?;
+        let persisted: Self = serde_json::from_value(deployment["ownedFixtureNetwork"].clone())
+            .context("owned fixture approval missing from deployment; HOLD")?;
+        ensure!(persisted == *self && deployment["localRehearsal"] == false
+            && manifest_u64(&deployment["ethereum"], "chainId")? == self.ethereum_chain_id,
+            "owned fixture approval differs from immutable deployment; HOLD");
+        Ok(())
+    }
+}
+
+pub fn approved_fixture_network(
+    path: Option<&Path>, deployment: &Value, source: &str, witness: &str, ethereum: &str,
+    public_network: PublicEthereumNetwork,
+) -> Result<Option<OwnedFixtureNetwork>> {
+    let network = path.map(OwnedFixtureNetwork::read).transpose()?;
+    validate_fixture_approval(network.as_ref(), deployment, source, witness, ethereum, public_network)?;
+    Ok(network)
+}
+
+pub(crate) fn validate_fixture_approval(
+    network: Option<&OwnedFixtureNetwork>, deployment: &Value,
+    source: &str, witness: &str, ethereum: &str,
+    public_network: PublicEthereumNetwork,
+) -> Result<()> {
+    if public_network == PublicEthereumNetwork::Mainnet {
+        ensure!(network.is_none() && deployment["localRehearsal"] == false,
+            "mainnet cannot use an owned fixture or local rehearsal; HOLD");
+        ensure!(deployment["mode"] == public_network.deployment_mode(),
+            "mainnet requires an independently reviewed mainnet-token-stack manifest; HOLD");
+        ensure!(ethereum.starts_with("https://") || ethereum.starts_with("wss://"),
+            "mainnet requires HTTPS or WSS; HOLD");
+    }
+    if let Some(network) = network {
+        network.validate_endpoints(source, witness, ethereum)?;
+        network.validate_manifest(deployment)?;
+    } else {
+        ensure!(deployment.get("ownedFixtureNetwork").is_none(),
+            "owned fixture requires explicit --owned-fixture-network approval on every attachment; HOLD");
+        ensure!(manifest_u64(&deployment["ethereum"], "chainId")? == public_network.chain_id(),
+            "deployment differs from explicitly selected public network; HOLD");
+    }
+    Ok(())
+}
+
 sol!(
     #![sol(rpc, extra_derives(Debug))]
     #[allow(clippy::too_many_arguments)]
@@ -471,6 +706,7 @@ sol! {
     interface TokenQueueBinding {
         function verifier() external view returns (address);
         function maxBlockNumber() external view returns (uint256);
+        function beefyRootMinimum() external view returns (uint256);
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -488,6 +724,8 @@ pub struct DestinationCheckpoint {
 
 pub struct Ethereum {
     _anvil: Option<AnvilInstance>,
+    pub(crate) owned_fixture_network: Option<OwnedFixtureNetwork>,
+    pub(crate) public_network: PublicEthereumNetwork,
     pub api: EthApi,
     pub client_address: Address,
     pub verifier_address: Address,
@@ -497,6 +735,7 @@ pub struct Ethereum {
 }
 
 impl Ethereum {
+    #[cfg(test)]
     pub async fn prepare(
         output: &Path,
         checkpoint: &CapturedCommitment,
@@ -659,6 +898,8 @@ impl Ethereum {
 
         let ethereum = Self {
             _anvil: Some(anvil),
+            owned_fixture_network: None,
+            public_network: PublicEthereumNetwork::Hoodi,
             api,
             client_address,
             verifier_address,
@@ -705,262 +946,263 @@ impl Ethereum {
         Ok(ethereum)
     }
 
-    pub async fn prepare_hoodi(
-        output: &Path,
-        checkpoint: &CapturedCommitment,
-        snapshot: &QueueSnapshot,
-        mmr_start_block: u64,
-        endpoint: &str,
-        wallet: &Path,
+    pub async fn connect(
+        endpoint: &str, wallet: &Path, manifest: &Value, fixture: Option<&OwnedFixtureNetwork>,
+        public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
-        let initial_block = u64::from(checkpoint.block);
-        ensure!(
-            mmr_start_block > 0 && initial_block > mmr_start_block,
-            "bootstrap BEEFY checkpoint must be after MMR history start"
-        );
-        ensure!(
-            checkpoint.finalized_height >= checkpoint.block,
-            "bootstrap checkpoint is not finalized"
-        );
-        ensure!(
-            checkpoint.validated.mmr_root != [0; 32],
-            "bootstrap BEEFY checkpoint has a zero MMR root"
-        );
-        ensure!(
-            snapshot.bridge_domain != [0; 32] && snapshot.source_timestamp_ms != 0,
-            "bootstrap metadata has no source identity or timestamp"
-        );
-        ensure!(
-            !checkpoint.current.keys.is_empty()
-                && checkpoint.current.keys.len() <= 256
-                && !checkpoint.next.keys.is_empty()
-                && checkpoint.next.keys.len() <= 256
-                && checkpoint.current.id.checked_add(1) == Some(checkpoint.next.id),
-            "bootstrap authority sets are invalid"
-        );
-        let timestamp = snapshot.source_timestamp_ms / 1_000;
-        ensure!(
-            timestamp > 0,
-            "bootstrap source timestamp is before Unix epoch"
-        );
-
-        let (_wallet_address, private_key) = read_hoodi_wallet(wallet)?;
-        let endpoint = hoodi_ws_endpoint(endpoint)?;
-        ensure_hoodi_network(&endpoint).await?;
-
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let current = &checkpoint.current;
-        let next = &checkpoint.next;
-        let source_domain = B256::from_str(
-            &std::env::var("BEEFY_SOURCE_DOMAIN").context("BEEFY_SOURCE_DOMAIN required")?,
-        )?
-        .0;
-        let forge = Command::new("forge")
-            .args([
-                "script",
-                "ethereum/script/BeefyHoodi.s.sol:BeefyHoodi",
-                "--force",
-                "--root",
-                "ethereum",
-                "--rpc-url",
-                &endpoint,
-                "--broadcast",
-                "--slow",
-                "--sig",
-                "run()",
-            ])
-            .current_dir(&root)
-            .env("PRIVATE_KEY", &private_key)
-            .env("BEEFY_SOURCE_DOMAIN", bytes(source_domain))
-            .env("BEEFY_BRIDGE_DOMAIN", bytes(snapshot.bridge_domain))
-            .env("BEEFY_MMR_START_BLOCK", mmr_start_block.to_string())
-            .env("BEEFY_INITIAL_BLOCK", initial_block.to_string())
-            .env(
-                "BEEFY_INITIAL_SOURCE_TIMESTAMP_MS",
-                snapshot.source_timestamp_ms.to_string(),
-            )
-            .env("BEEFY_CURRENT_ID", current.id.to_string())
-            .env("BEEFY_CURRENT_LENGTH", current.keys.len().to_string())
-            .env("BEEFY_CURRENT_ROOT", bytes(current.root))
-            .env("BEEFY_NEXT_ID", next.id.to_string())
-            .env("BEEFY_NEXT_LENGTH", next.keys.len().to_string())
-            .env("BEEFY_NEXT_ROOT", bytes(next.root))
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output()
-            .await
-            .context("run BeefyHoodi Foundry deployment")?;
-        ensure!(
-            forge.status.success(),
-            "BeefyHoodi deployment failed with status {} (forge output withheld)",
-            forge.status
-        );
-
-        let broadcast = root.join("ethereum/broadcast/BeefyHoodi.s.sol/560048/run-latest.json");
-        ensure!(
-            broadcast.is_file(),
-            "Foundry Hoodi deployment broadcast is missing"
-        );
-        let broadcast_bytes =
-            fs::read(&broadcast).context("read Foundry Hoodi deployment broadcast")?;
-        if output.is_dir() {
-            fs::write(output.join("ethereum-broadcast.json"), &broadcast_bytes)
-                .context("copy Foundry Hoodi deployment broadcast")?;
-        }
-        let deployment: Value = serde_json::from_slice(&broadcast_bytes)
-            .context("decode Foundry Hoodi deployment broadcast")?;
-        let returns = deployment.get("returns").unwrap_or(&deployment);
-        let client_address =
-            return_address(returns, "clientAddress").context("read BeefyClient named return")?;
-        let verifier_address = return_address(returns, "verifierAddress")
-            .context("read VaraQueueRootVerifier named return")?;
-        let queue_address =
-            return_address(returns, "queueAddress").context("read MessageQueue named return")?;
-        let receiver_address = return_address(returns, "receiverAddress")
-            .context("read MessageHandlerMock named return")?;
-
-        let api = EthApi::new(
-            &endpoint,
-            &address_string(queue_address),
-            Some(&private_key),
-            None,
-            None,
-        )
-        .await
-        .context("connect Ethereum client to Hoodi")?;
-        let transactions = deployment_transactions(&deployment)?;
-        for address in [
-            client_address,
-            verifier_address,
-            queue_address,
-            receiver_address,
-        ] {
-            let code = api
-                .raw_provider()
-                .get_code_at(address)
-                .await
-                .context("read deployed Hoodi bytecode")?;
-            ensure!(
-                !code.is_empty(),
-                "Hoodi deployment returned an address without code"
-            );
-        }
-
-        let ethereum = Self {
-            _anvil: None,
-            api,
-            client_address,
-            verifier_address,
-            queue_address,
-            receiver_address,
-            transactions,
-        };
-        verify_hoodi_bootstrap(&ethereum, checkpoint, snapshot, mmr_start_block).await?;
+        let ethereum = Self::connect_addresses(endpoint, Some(wallet), manifest, fixture, public_network).await?;
+        verify_manifest(&ethereum, manifest).await?;
         Ok(ethereum)
     }
 
-    pub async fn connect_hoodi(endpoint: &str, wallet: &Path, manifest: &Value) -> Result<Self> {
-        let ethereum = Self::connect_hoodi_addresses(endpoint, wallet, manifest).await?;
-        verify_hoodi_manifest(&ethereum, manifest).await?;
-        Ok(ethereum)
-    }
-    /// Read the live deployment before pinning its immutable addresses and bytecode hashes.
-    pub async fn token_manifest(endpoint: &str, wallet: &Path, addresses: &Value) -> Result<Value> {
-        let ethereum = Self::connect_hoodi_addresses(endpoint, wallet, addresses).await?;
+    /// Read the deployment only after independently approved network authentication.
+    pub async fn token_manifest(
+        endpoint: &str, wallet: &Path, addresses: &Value, fixture: Option<&OwnedFixtureNetwork>,
+    ) -> Result<Value> {
+        let ethereum = Self::connect_addresses(endpoint, Some(wallet), addresses, fixture, PublicEthereumNetwork::Hoodi).await?;
         verify_secure_policy(ethereum.client_address, ethereum.api.raw_provider().clone()).await?;
         verify_bindings(
-            ethereum.verifier_address,
-            ethereum.client_address,
-            ethereum.queue_address,
-            HOODI_CHAIN_ID,
-            ethereum.api.raw_provider().clone(),
-        )
-        .await?;
+            ethereum.verifier_address, ethereum.client_address, ethereum.queue_address,
+            ethereum.expected_chain_id(), ethereum.api.raw_provider().clone(),
+        ).await?;
         let manifest = ethereum.manifest().await?;
-        verify_hoodi_manifest(&ethereum, &manifest).await?;
+        verify_manifest(&ethereum, &manifest).await?;
         Ok(manifest)
     }
-    async fn connect_hoodi_addresses(
-        endpoint: &str,
-        wallet: &Path,
-        addresses: &Value,
+
+    async fn connect_addresses(
+        endpoint: &str, wallet: Option<&Path>, manifest: &Value, fixture: Option<&OwnedFixtureNetwork>,
+        public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
-        ensure!(
-            manifest_u64(addresses, "chainId")? == HOODI_CHAIN_ID,
-            "Hoodi manifest chain id is not 560048"
-        );
-        let client_address = manifest_address(addresses, "client")?;
-        let verifier_address = manifest_address(addresses, "verifier")?;
-        let queue_address = manifest_address(addresses, "queue")?;
-        let receiver_address = manifest_address(addresses, "receiver")?;
-        let endpoint = hoodi_ws_endpoint(endpoint)?;
-        ensure_hoodi_network(&endpoint).await?;
-        let (_wallet_address, private_key) = read_hoodi_wallet(wallet)?;
-        let api = EthApi::new(
-            &endpoint,
-            &address_string(queue_address),
-            Some(&private_key),
-            None,
-            None,
-        )
-        .await
-        .context("connect Ethereum client to Hoodi")?;
-        Ok(Self {
-            _anvil: None,
-            api,
-            client_address,
-            verifier_address,
-            queue_address,
-            receiver_address,
-            transactions: Vec::new(),
-        })
-    }
-    pub(crate) async fn connect_hoodi_readonly(endpoint: &str, manifest: &Value) -> Result<Self> {
-        ensure!(
-            manifest_u64(manifest, "chainId")? == HOODI_CHAIN_ID,
-            "not a Hoodi deployment"
-        );
+        ensure!(fixture.is_none() || public_network == PublicEthereumNetwork::Hoodi,
+            "mainnet cannot use an owned fixture; HOLD");
+        ensure!(public_network != PublicEthereumNetwork::Mainnet
+            || endpoint.starts_with("https://") || endpoint.starts_with("wss://"),
+            "mainnet requires HTTPS or WSS; HOLD");
+        let chain_id = fixture.map_or(public_network.chain_id(), |network| network.ethereum_chain_id);
+        ensure!(manifest_u64(manifest, "chainId")? == chain_id, "deployment chain id differs from approved network; HOLD");
+        if let Some(network) = fixture {
+            network.validate_endpoint(endpoint)?;
+        }
         let client_address = manifest_address(manifest, "client")?;
         let verifier_address = manifest_address(manifest, "verifier")?;
         let queue_address = manifest_address(manifest, "queue")?;
         let receiver_address = manifest_address(manifest, "receiver")?;
-        let endpoint = hoodi_ws_endpoint(endpoint)?;
-        ensure_hoodi_network(&endpoint).await?;
-        let api = EthApi::new(&endpoint, &address_string(queue_address), None, None, None)
-            .await
-            .context("connect read-only Hoodi verifier watcher")?;
-        ensure!(
-            api.raw_provider().get_chain_id().await? == HOODI_CHAIN_ID,
-            "verifier watcher is not connected to Hoodi"
-        );
-        let ethereum = Self {
+        let endpoint = hoodi_rpc_endpoint(endpoint)?;
+        if let Some(network) = fixture {
+            ensure_ethereum_network(&endpoint, network.ethereum_chain_id, network.ethereum_genesis_hash).await?;
+        } else {
+            ensure_ethereum_network(&endpoint, public_network.chain_id(), public_network.genesis()).await?;
+        }
+        let private_key = wallet.map(read_hoodi_wallet).transpose()?.map(|(_, key)| key);
+        let api = EthApi::new(&endpoint, &address_string(queue_address), private_key.as_deref(), None, None)
+            .await.context("connect Ethereum deployment")?;
+        Ok(Self {
             _anvil: None,
-            api,
-            client_address,
-            verifier_address,
-            queue_address,
-            receiver_address,
+            owned_fixture_network: fixture.cloned(),
+            public_network,
+            api, client_address, verifier_address, queue_address, receiver_address,
             transactions: Vec::new(),
-        };
-        verify_hoodi_manifest(&ethereum, manifest).await?;
+        })
+    }
+
+    pub(crate) async fn connect_readonly(
+        endpoint: &str, manifest: &Value, fixture: Option<&OwnedFixtureNetwork>,
+        public_network: PublicEthereumNetwork,
+    ) -> Result<Self> {
+        let ethereum = Self::connect_addresses(endpoint, None, manifest, fixture, public_network).await?;
+        verify_manifest(&ethereum, manifest).await?;
         Ok(ethereum)
     }
 
+    fn expected_chain_id(&self) -> u64 {
+        self.owned_fixture_network.as_ref().map_or(self.public_network.chain_id(), |network| network.ethereum_chain_id)
+    }
+
     pub(crate) async fn finality_genesis(&self) -> Result<B256> {
-        if self._anvil.is_none() {
-            return Ok(HOODI_GENESIS_BLOCK.parse()?);
+        if let Some(network) = &self.owned_fixture_network {
+            return Ok(network.ethereum_genesis_hash);
         }
-        let genesis = self
+        // The synthetic Anvil rehearsal exists only inside the pre-existing unit fixtures.
+        #[cfg(test)]
+        if self._anvil.is_some() {
+            let genesis = self.api.raw_provider().get_block_by_number(0u64.into()).await?
+                .context("owned rehearsal genesis is missing")?;
+            ensure!(genesis.header.number == 0 && genesis.header.inner.hash_slow() == genesis.header.hash,
+                "owned rehearsal genesis is not canonical RLP; HOLD");
+            return Ok(genesis.header.hash);
+        }
+        Ok(self.public_network.genesis())
+    }
+
+    pub(crate) async fn queue_root_minimum(&self) -> Result<u64> {
+        Ok(
+            TokenQueueBinding::new(self.queue_address, self.api.raw_provider().clone())
+                .beefyRootMinimum()
+                .call()
+                .await?
+                .try_into()?,
+        )
+    }
+
+    /// Recover immutable constructor evidence, not the advancing latest checkpoint.
+    pub(crate) async fn authenticate_bootstrap(
+        &self,
+        directory: &Path,
+        saved: &Value,
+        deployment_transaction: Option<B256>,
+    ) -> Result<(DestinationCheckpoint, Value)> {
+        use alloy::sol_types::SolValue;
+        if saved.is_object() {
+            ensure!(
+                deployment_transaction.is_none_or(|hint|
+                    saved["txHash"].as_str().and_then(|hash| hash.parse::<B256>().ok()) == Some(hint)),
+                "client deployment transaction hint conflicts with saved bootstrap; HOLD"
+            );
+        }
+        let mut view = self
             .api
-            .raw_provider()
-            .get_block_by_number(0u64.into())
-            .await?
-            .context("owned rehearsal genesis is missing")?;
+            .verified_finalized_view_with_archive(
+                &directory.join("headers"),
+                self.finality_genesis().await?,
+            )
+            .await?;
+        let (number, hash, transaction_hash) = if saved.is_object() {
+            (
+                manifest_u64(saved, "block")?,
+                manifest_b256(saved, "blockHash")?,
+                manifest_b256(saved, "txHash")?,
+            )
+        } else if let Some(transaction_hash) = deployment_transaction {
+            // Receipt JSON is only a locator. The finalized header and both tries authenticate it below.
+            let receipt = self.api.raw_provider().get_transaction_receipt(transaction_hash).await?
+                .context("client deployment transaction receipt unavailable; HOLD")?;
+            ensure!(receipt.transaction_hash == transaction_hash,
+                "client deployment locator transaction changed; HOLD");
+            (
+                receipt.block_number.context("client deployment locator block unavailable; HOLD")?,
+                receipt.block_hash.context("client deployment locator hash unavailable; HOLD")?,
+                transaction_hash,
+            )
+        } else {
+            // Code existence only locates a candidate; the constructor is authenticated below.
+            let mut low = 0;
+            let mut high = view.block_number();
+            while low < high {
+                let middle = low + (high - low) / 2;
+                let block = self
+                    .api
+                    .raw_provider()
+                    .get_block_by_number(BlockNumberOrTag::Number(middle))
+                    .await?
+                    .context("deployment search header unavailable; HOLD")?;
+                let code = self
+                    .api
+                    .raw_provider()
+                    .get_code_at(self.client_address)
+                    .block_id(BlockId::hash_canonical(block.header.hash))
+                    .await?;
+                if code.is_empty() {
+                    low = middle + 1;
+                } else {
+                    high = middle;
+                }
+            }
+            let block = self
+                .api
+                .raw_provider()
+                .get_block_by_number(BlockNumberOrTag::Number(low))
+                .full()
+                .await?
+                .context("deployment full block unavailable; HOLD")?;
+            let transactions = block
+                .transactions
+                .try_into_transactions()
+                .map_err(|_| anyhow::anyhow!("deployment transactions missing; HOLD"))?;
+            let mut deployment = None;
+            for transaction in transactions {
+                let signed = transaction.into_inner();
+                if signed.to().is_none()
+                    && signed.recover_signer()?.create(signed.nonce()) == self.client_address
+                {
+                    ensure!(
+                        deployment
+                            .replace(B256::from(keccak256(&signed.encoded_2718())))
+                            .is_none(),
+                        "multiple client constructors; HOLD"
+                    );
+                }
+            }
+            (
+                low,
+                block.header.hash,
+                deployment.context("client creation transaction unavailable; HOLD")?,
+            )
+        };
+        view.verify_blocks(
+            self.api.raw_provider(),
+            &std::collections::BTreeMap::from([(number, hash)]),
+        )
+        .await?;
+        let proof = authenticate_transaction_receipt(
+            self,
+            &view,
+            number,
+            hash,
+            transaction_hash,
+            &directory.join("receipts"),
+        )
+        .await?;
+        let mut encoded = proof.raw_transaction.as_slice();
+        let signed = TxEnvelope::decode_2718(&mut encoded)?;
         ensure!(
-            genesis.header.number == 0 && genesis.header.inner.hash_slow() == genesis.header.hash,
-            "owned rehearsal genesis is not canonical RLP; HOLD"
+            encoded.is_empty()
+                && signed.to().is_none()
+                && signed.chain_id() == Some(self.api.raw_provider().get_chain_id().await?)
+                && signed.recover_signer()?.create(signed.nonce()) == self.client_address
+                && proof.receipt.status(),
+            "client creation signed identity changed; HOLD"
         );
-        Ok(genesis.header.hash)
+        let input = signed.input().as_ref();
+        let code = BeefyClient::BYTECODE.as_ref();
+        ensure!(
+            input.starts_with(code),
+            "client constructor does not match approved implementation; HOLD"
+        );
+        type Constructor = (
+            B256,
+            U256,
+            Address,
+            u64,
+            u64,
+            u64,
+            (u128, u128, B256),
+            (u128, u128, B256),
+        );
+        let (source_domain, chain, queue, start, block, timestamp, current, next) =
+            Constructor::abi_decode(&input[code.len()..])?;
+        let client = BeefyClient::new(self.client_address, self.api.raw_provider().clone());
+        ensure!(
+            source_domain == client.sourceDomain().call().await?
+                && chain == U256::from(self.api.raw_provider().get_chain_id().await?)
+                && queue == self.queue_address
+                && start == client.mmrStartBlock().call().await?,
+            "immutable constructor deployment domain changed; HOLD"
+        );
+        Ok((
+            DestinationCheckpoint {
+                block,
+                root: [0; 32],
+                source_timestamp_ms: timestamp,
+                current_id: current.0.try_into()?,
+                current_len: current.1.try_into()?,
+                current_root: current.2.into(),
+                next_id: next.0.try_into()?,
+                next_len: next.1.try_into()?,
+                next_root: next.2.into(),
+            },
+            json!({"block":number,"blockHash":bytes(hash),"txHash":bytes(transaction_hash)}),
+        ))
     }
 
     pub(crate) async fn queue_max_block_number(&self) -> Result<u64> {
@@ -1007,6 +1249,7 @@ impl Ethereum {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn receiver_address(&self) -> [u8; 20] {
         self.receiver_address.into()
     }
@@ -1105,7 +1348,7 @@ impl Ethereum {
         }
     }
 
-    async fn checkpoint_at(&self, block: BlockId) -> Result<DestinationCheckpoint> {
+    pub(crate) async fn checkpoint_at(&self, block: BlockId) -> Result<DestinationCheckpoint> {
         let client = BeefyClient::new(self.client_address, self.api.raw_provider().clone());
         let current = client
             .currentValidatorSet()
@@ -1155,6 +1398,7 @@ impl Ethereum {
         anchor: &CapturedCommitment,
         snapshot: &QueueSnapshot,
     ) -> Result<(u64, B256)> {
+        use alloy::sol_types::{SolCall, SolValue};
         let receipt = self
             .api
             .raw_provider()
@@ -1174,6 +1418,32 @@ impl Ethereum {
             .block_hash
             .context("accepted receipt has no block hash")?;
         wait_canonical_receipt(self.api.raw_provider(), number, hash).await?;
+        let signed = self
+            .api
+            .raw_provider()
+            .get_transaction_by_hash(tx_hash)
+            .await?
+            .context("accepted signed transaction unavailable; HOLD")?
+            .into_inner();
+        let raw = signed.encoded_2718();
+        let identity =
+            signed_transaction_identity(&raw, tx_hash, signed.nonce(), self.client_address)?;
+        ensure!(
+            signed.chain_id() == Some(self.api.raw_provider().get_chain_id().await?)
+                && identity.from == receipt.from,
+            "accepted signed transaction changed sender or chain; HOLD"
+        );
+        validate_recorded_commitment_transaction(&raw, &anchor.raw)?;
+        let call = BeefyClient::submitFiatShamirCall::abi_decode(signed.input())?;
+        ensure!(
+            call.snapshot.abi_encode() == to_sol_snapshot(snapshot).abi_encode()
+                && call.leaf.parentNumber.checked_add(1) == Some(anchor.block)
+                && call.leaf.nextAuthoritySetID == anchor.next.id
+                && call.leaf.nextAuthoritySetLen == anchor.next.keys.len() as u32
+                && call.leaf.nextAuthoritySetRoot == B256::from(anchor.next.root)
+                && call.leaf.parachainHeadsRoot == B256::from(snapshot.hash()),
+            "accepted signed freshness or authority transition changed; HOLD"
+        );
         let event = B256::from(keccak256(b"NewMMRRoot(bytes32,uint64)"));
         ensure!(
             receipt.as_ref().logs().iter().any(|log| {
@@ -1194,6 +1464,15 @@ impl Ethereum {
         } else {
             self.checkpoint_at(BlockId::hash(hash)).await?
         };
+        ensure!(
+            checkpoint.block >= u64::from(anchor.block),
+            "accepted checkpoint regressed behind original source block; HOLD"
+        );
+        // Several permissionless updates may share one Ethereum block. Their exact
+        // signed calldata and original receipt effects, not end-of-block state, own each outcome.
+        if checkpoint.block > u64::from(anchor.block) {
+            return Ok((number, hash));
+        }
         ensure!(
             checkpoint.block == u64::from(anchor.block)
                 && checkpoint.root == anchor.validated.mmr_root
@@ -1367,6 +1646,12 @@ impl Ethereum {
             .encoded_2718();
         transaction["rawTransaction"] = json!(bytes(&raw));
         transaction["txHash"] = json!(bytes(keccak256(&raw)));
+        transaction["sender"] = json!(format!("{sender:#x}"));
+        transaction["chainId"] = json!(filled
+            .as_envelope()
+            .context("signed commitment envelope missing")?
+            .chain_id());
+        transaction["clientAddress"] = json!(format!("{:#x}", self.client_address));
         journal(&transaction, None)?;
         let receipt = self.resume_commitment(&transaction).await?;
         journal(&transaction, Some(&receipt))?;
@@ -1374,7 +1659,8 @@ impl Ethereum {
             receipt.status(),
             "Fiat-Shamir commitment transaction reverted"
         );
-        self.record_receipt("submitFiatShamir", &receipt, None);
+        self.transactions
+            .push(receipt_value("submitFiatShamir", &receipt, None));
 
         let receipt_block = receipt
             .block_hash
@@ -1432,473 +1718,27 @@ impl Ethereum {
             .context("saved commitment nonce missing")?;
         let provider = self.api.raw_provider();
         let signed = signed_transaction_identity(&raw, hash, nonce, self.client_address)?;
+        let mut encoded = raw.as_slice();
+        ensure!(
+            TxEnvelope::decode_2718(&mut encoded)?.chain_id()
+                == Some(provider.get_chain_id().await?),
+            "saved commitment belongs to another Ethereum chain; HOLD"
+        );
         ensure!(
             signed.from == provider.default_signer_address(),
             "saved commitment signer differs from follower wallet"
         );
         await_original_commitment(provider, signed, &raw).await
     }
-
-    async fn mined_receipt(&self, hash: B256) -> Result<alloy::rpc::types::TransactionReceipt> {
-        loop {
-            if let Some(receipt) = self
-                .api
-                .raw_provider()
-                .get_transaction_receipt(hash)
-                .await?
-            {
-                return Ok(receipt);
-            }
-            sleep(Duration::from_secs(2)).await;
-        }
-    }
-
-    pub async fn register(&mut self, source: u32, root: Hash32, encoded: Vec<u8>) -> Result<()> {
-        let pending = self
-            .api
-            .provide_merkle_root(source, root, encoded)
-            .await
-            .context("submit authenticated queue root")?;
-        let receipt = self.mined_receipt(*pending.tx_hash()).await?;
-        ensure!(receipt.status(), "queue-root transaction reverted");
-        self.record_receipt("submitMerkleRoot", &receipt, None);
-        ensure!(
-            self.api
-                .read_chainhead_merkle_root(source)
-                .await?
-                .is_some_and(|value| value == root),
-            "queue root was not stored after receipt"
-        );
-        Ok(())
-    }
-
-    pub async fn reject_registration(
-        &self,
-        source: u32,
-        root: Hash32,
-        encoded: Vec<u8>,
-    ) -> Result<()> {
-        let before = self.api.read_chainhead_merkle_root(source).await?;
-        let error = self
-            .api
-            .provide_merkle_root(source, root, encoded)
-            .await
-            .err()
-            .context("malformed queue-root registration unexpectedly estimated")?;
-        match error {
-            EthereumClientError::MessageQueue(IMessageQueueErrors::InvalidPlonkProof(_)) => {}
-            other => {
-                bail!("malformed queue-root registration returned unexpected error: {other:?}")
-            }
-        }
-        ensure!(
-            self.api.read_chainhead_merkle_root(source).await? == before,
-            "rejected queue-root registration changed state"
-        );
-        Ok(())
-    }
-
-    pub async fn deliver(
-        &mut self,
-        source: u32,
-        message: &Message,
-        inclusion: &MerkleProof,
-    ) -> Result<()> {
-        ensure!(
-            message.destination == self.receiver_address(),
-            "message destination is not the deployed receiver"
-        );
-        let guard = self.api.reserve_submission().await;
-        let (tx_hash, account_nonce) = self
-            .api
-            .provide_content_message(
-                &guard,
-                source,
-                u32::try_from(inclusion.num_leaves).context("message leaf count overflows u32")?,
-                u32::try_from(inclusion.leaf_index).context("message leaf index overflows u32")?,
-                message.nonce_be,
-                message.source,
-                message.destination,
-                message.payload.clone(),
-                inclusion.proof.clone(),
-                None,
-            )
-            .await
-            .map_err(|error| anyhow::anyhow!("submit message: {error:?}"))?;
-        drop(guard);
-        let receipt = self.mined_receipt(tx_hash).await?;
-        ensure!(receipt.status(), "message transaction reverted");
-        self.record_receipt("processMessage", &receipt, Some(account_nonce));
-        ensure!(
-            self.is_processed(message.nonce_be).await?,
-            "message receipt did not mark nonce processed"
-        );
-        self.assert_message_processed(&receipt, source, message)?;
-        self.assert_message_handled(&receipt, message)?;
-        if let Some(transaction) = self.transactions.last_mut() {
-            transaction["checkedEvents"] = json!(["MessageProcessed", "MessageHandled"]);
-        }
-        Ok(())
-    }
-
-    pub async fn reject_early(
-        &self,
-        source: u32,
-        message: &Message,
-        inclusion: &MerkleProof,
-    ) -> Result<()> {
-        self.expect_message_error(source, message, inclusion, false, false)
-            .await
-    }
-
-    pub async fn reject_replay(
-        &self,
-        source: u32,
-        message: &Message,
-        inclusion: &MerkleProof,
-    ) -> Result<()> {
-        self.expect_message_error(source, message, inclusion, true, true)
-            .await
-    }
-
-    pub async fn advance_time(&self) -> Result<()> {
-        ensure!(
-            self._anvil.is_some(),
-            "advance_time is only available on Anvil"
-        );
-        let provider = self.api.raw_provider();
-        let _: Value = provider
-            .raw_request("evm_increaseTime".into(), (300u64,))
-            .await
-            .context("advance Anvil time")?;
-        let _: Value = provider
-            .raw_request("evm_mine".into(), ())
-            .await
-            .context("mine Anvil maturity block")?;
-        Ok(())
-    }
-
-    pub async fn wait_maturity(&self, source: u32) -> Result<()> {
-        let queue = ethereum_client::abi::IMessageQueue::new(
-            self.queue_address,
-            self.api.raw_provider().clone(),
-        );
-        let root = queue
-            .getMerkleRoot(U256::from(source))
-            .call()
-            .await
-            .context("read queue root for maturity")?;
-        ensure!(root != B256::ZERO, "queue root is not registered");
-        let root_timestamp = u64::try_from(
-            queue
-                .getMerkleRootTimestampForBlock(U256::from(source))
-                .call()
-                .await
-                .context("read queue root timestamp")?,
-        )
-        .context("queue root timestamp overflows u64")?;
-        ensure!(root_timestamp != 0, "queue root has no on-chain timestamp");
-        let delay = u64::try_from(
-            queue
-                .PROCESS_USER_MESSAGE_DELAY()
-                .call()
-                .await
-                .context("read queue user message delay")?,
-        )
-        .context("queue user message delay overflows u64")?;
-        let ready_at = root_timestamp
-            .checked_add(delay)
-            .context("queue maturity timestamp overflows")?;
-        loop {
-            let latest = self
-                .api
-                .raw_provider()
-                .get_block_by_number(BlockNumberOrTag::Latest)
-                .await
-                .context("read latest Ethereum block for maturity")?
-                .context("latest Ethereum block is missing")?;
-            if latest.header.timestamp >= ready_at {
-                return Ok(());
-            }
-            sleep(Duration::from_secs(12)).await;
-        }
-    }
-
-    pub async fn wait_finalized(&self) -> Result<()> {
-        let target_block = self
-            .api
-            .raw_provider()
-            .get_block_by_number(BlockNumberOrTag::Latest)
-            .await
-            .context("pin latest Ethereum block for finality")?
-            .context("latest Ethereum block is missing")?;
-        let target = target_block.header.number;
-        let target_hash = target_block.header.hash;
-        loop {
-            let finalized = self
-                .api
-                .finalized_block_number()
-                .await
-                .context("read finalized Ethereum block")?;
-            if finalized < target {
-                sleep(Duration::from_secs(12)).await;
-                continue;
-            }
-            let finalized_block = self
-                .api
-                .raw_provider()
-                .get_block_by_number(BlockNumberOrTag::Number(finalized))
-                .await
-                .context("read canonical finalized Ethereum block")?
-                .context("finalized Ethereum block is missing")?;
-            ensure!(
-                finalized_block.header.number == finalized,
-                "finalized Ethereum block number mismatch"
-            );
-            let canonical_target = self
-                .api
-                .raw_provider()
-                .get_block_by_number(BlockNumberOrTag::Number(target))
-                .await
-                .context("re-read finalized target Ethereum block")?
-                .context("finalized target Ethereum block is missing")?;
-            ensure!(
-                canonical_target.header.hash == target_hash,
-                "pinned Ethereum finality target changed canonical hash"
-            );
-            self.verify_recorded_receipts(finalized).await?;
-            let checkpoint = self
-                .checkpoint()
-                .await
-                .context("reconcile current destination checkpoint after finality")?;
-            ensure!(
-                checkpoint.block > 0
-                    && checkpoint.current_len > 0
-                    && checkpoint.next_len > 0
-                    && checkpoint.current_id.checked_add(1) == Some(checkpoint.next_id),
-                "current destination checkpoint is invalid"
-            );
-            return Ok(());
-        }
-    }
-
-    async fn verify_recorded_receipts(&self, finalized: u64) -> Result<()> {
-        for transaction in &self.transactions {
-            let hash = transaction
-                .get("txHash")
-                .and_then(Value::as_str)
-                .context("recorded Ethereum transaction has no hash")?;
-            let hash = B256::from_str(hash).context("decode recorded Ethereum transaction hash")?;
-            let receipt = self
-                .api
-                .raw_provider()
-                .get_transaction_receipt(hash)
-                .await
-                .with_context(|| format!("read recorded Ethereum receipt {hash:?}"))?
-                .with_context(|| format!("recorded Ethereum transaction {hash:?} is not mined"))?;
-            ensure!(receipt.status(), "recorded Ethereum transaction reverted");
-            let block_number = receipt
-                .block_number
-                .context("mined Ethereum receipt has no block number")?;
-            let block_hash = receipt
-                .block_hash
-                .context("mined Ethereum receipt has no block hash")?;
-            ensure!(
-                block_number <= finalized,
-                "recorded Ethereum receipt is newer than finalized head"
-            );
-            let canonical = self
-                .api
-                .raw_provider()
-                .get_block_by_number(BlockNumberOrTag::Number(block_number))
-                .await
-                .context("read canonical Ethereum receipt block")?
-                .context("canonical Ethereum receipt block is missing")?;
-            ensure!(
-                canonical.header.hash == block_hash,
-                "recorded Ethereum receipt is not canonical"
-            );
-        }
-        Ok(())
-    }
-
-    pub async fn is_processed(&self, nonce: Hash32) -> Result<bool> {
-        ethereum_client::abi::IMessageQueue::new(
-            self.queue_address,
-            self.api.raw_provider().clone(),
-        )
-        .isProcessed(U256::from_be_bytes(nonce))
-        .call()
-        .await
-        .context("read receipt-time Anvil processed state")
-    }
-
-    async fn expect_message_error(
-        &self,
-        source: u32,
-        message: &Message,
-        inclusion: &MerkleProof,
-        processed: bool,
-        replay: bool,
-    ) -> Result<()> {
-        ensure!(
-            self.is_processed(message.nonce_be).await? == processed,
-            "unexpected message processed state before rejected submission"
-        );
-        let guard = self.api.reserve_submission().await;
-        let result = self
-            .api
-            .provide_content_message(
-                &guard,
-                source,
-                u32::try_from(inclusion.num_leaves).context("message leaf count overflows u32")?,
-                u32::try_from(inclusion.leaf_index).context("message leaf index overflows u32")?,
-                message.nonce_be,
-                message.source,
-                message.destination,
-                message.payload.clone(),
-                inclusion.proof.clone(),
-                None,
-            )
-            .await;
-        drop(guard);
-        let error = result
-            .err()
-            .context("rejected message unexpectedly estimated")?;
-        match error.error {
-            ethereum_client::Error::MessageQueue(IMessageQueueErrors::MessageAlreadyProcessed(
-                _,
-            )) if replay => {}
-            ethereum_client::Error::MessageQueue(
-                IMessageQueueErrors::MerkleRootDelayNotPassed(_),
-            ) if !replay => {}
-            other => bail!("rejected message returned unexpected error: {other:?}"),
-        }
-        ensure!(
-            self.is_processed(message.nonce_be).await? == processed,
-            "rejected message changed processed state"
-        );
-        Ok(())
-    }
-
-    fn record_receipt(
-        &mut self,
-        label: &str,
-        receipt: &alloy::rpc::types::TransactionReceipt,
-        account_nonce: Option<u64>,
-    ) {
-        self.transactions
-            .push(receipt_value(label, receipt, account_nonce));
-    }
-
-    fn assert_message_processed(
-        &self,
-        receipt: &alloy::rpc::types::TransactionReceipt,
-        source: u32,
-        message: &Message,
-    ) -> Result<()> {
-        let signature = B256::from(keccak256(
-            b"MessageProcessed(uint256,bytes32,uint256,address)",
-        ));
-        let expected_hash = B256::from(crate::message_hash(message));
-        let expected_nonce = U256::from_be_slice(&message.nonce_be);
-        for log in receipt.as_ref().logs() {
-            if log.address() != self.queue_address || log.topic0() != Some(&signature) {
-                continue;
-            }
-            ensure!(
-                log.topics().len() == 1,
-                "MessageProcessed log has unexpected topics"
-            );
-            let data = log.data().data.as_ref();
-            ensure!(
-                data.len() == 128,
-                "MessageProcessed data is not canonical ABI"
-            );
-            let block_number = U256::from_be_slice(&data[..32]);
-            let message_hash = B256::from_slice(&data[32..64]);
-            let message_nonce = U256::from_be_slice(&data[64..96]);
-            let message_destination = Address::from_slice(&data[108..128]);
-            ensure!(
-                block_number == U256::from(source),
-                "MessageProcessed block number mismatch"
-            );
-            ensure!(
-                message_hash == expected_hash,
-                "MessageProcessed hash mismatch"
-            );
-            ensure!(
-                message_nonce == expected_nonce,
-                "MessageProcessed nonce mismatch"
-            );
-            ensure!(
-                message_destination == message.destination,
-                "MessageProcessed destination mismatch"
-            );
-            return Ok(());
-        }
-        bail!("receipt did not contain exact MessageProcessed event")
-    }
-    fn assert_message_handled(
-        &self,
-        receipt: &alloy::rpc::types::TransactionReceipt,
-        message: &Message,
-    ) -> Result<()> {
-        let signature = B256::from(keccak256(b"MessageHandled(bytes32,bytes)"));
-        for log in receipt.as_ref().logs() {
-            if log.address() != self.receiver_address || log.topic0() != Some(&signature) {
-                continue;
-            }
-            let topics = log.topics();
-            ensure!(
-                topics.len() == 2,
-                "MessageHandled log has unexpected topics"
-            );
-            ensure!(
-                topics[1].as_slice() == message.source,
-                "MessageHandled source mismatch"
-            );
-            let data = log.data().data.as_ref();
-            ensure!(
-                data.len() >= 64,
-                "MessageHandled payload encoding is truncated"
-            );
-            let offset = U256::from_be_slice(&data[..32]);
-            ensure!(
-                offset == U256::from(32u64),
-                "MessageHandled payload offset is noncanonical"
-            );
-            let length = usize::try_from(U256::from_be_slice(&data[32..64]))
-                .context("MessageHandled payload length overflows usize")?;
-            ensure!(
-                data.len() >= 64 + length,
-                "MessageHandled payload is truncated"
-            );
-            ensure!(
-                data[64..64 + length] == message.payload,
-                "MessageHandled payload mismatch"
-            );
-            return Ok(());
-        }
-        bail!("receipt did not contain exact MessageHandled event")
-    }
 }
 
-fn hoodi_ws_endpoint(endpoint: &str) -> Result<String> {
-    let endpoint = if endpoint.is_empty() {
-        HOODI_DEFAULT_RPC.to_owned()
-    } else if let Some(rest) = endpoint.strip_prefix("https://") {
-        format!("wss://{rest}")
-    } else if let Some(rest) = endpoint.strip_prefix("http://") {
-        format!("ws://{rest}")
-    } else {
-        endpoint.to_owned()
-    };
+fn hoodi_rpc_endpoint(endpoint: &str) -> Result<String> {
+    let endpoint = if endpoint.is_empty() { HOODI_DEFAULT_RPC } else { endpoint };
     ensure!(
-        endpoint.starts_with("ws://") || endpoint.starts_with("wss://"),
-        "Hoodi Ethereum endpoint must use ws:// or wss://"
+        matches!(url::Url::parse(endpoint)?.scheme(), "http" | "https" | "ws" | "wss"),
+        "Hoodi Ethereum endpoint must use HTTP(S) or WS(S)"
     );
-    Ok(endpoint)
+    Ok(endpoint.to_owned())
 }
 
 fn read_hoodi_wallet(path: &Path) -> Result<(Address, String)> {
@@ -1966,24 +1806,19 @@ pub(crate) async fn wait_canonical_receipt(
     .context("HOLD: original receipt block header remains unavailable after 120 seconds")?
 }
 
-async fn ensure_hoodi_network(endpoint: &str) -> Result<()> {
-    let provider = PollingEthApi::new(endpoint)
-        .await
-        .context("connect to Hoodi Ethereum endpoint")?;
-    ensure!(
-        provider.get_chain_id().await? == HOODI_CHAIN_ID,
-        "Hoodi Ethereum endpoint has unexpected chain id"
-    );
-    let genesis = provider
-        .get_block_by_number(BlockNumberOrTag::Number(0))
-        .await
-        .context("read Hoodi genesis block")?
-        .context("Hoodi genesis block is missing")?;
-    let expected = B256::from_str(HOODI_GENESIS_BLOCK).expect("valid Hoodi genesis constant");
-    ensure!(
-        genesis.header.hash == expected,
-        "Hoodi Ethereum endpoint has unexpected genesis block"
-    );
+
+async fn ensure_ethereum_network(endpoint: &str, chain_id: u64, expected_genesis: B256) -> Result<()> {
+    let provider = PollingEthApi::new(endpoint).await.context("connect approved Ethereum endpoint")?;
+    verify_ethereum_network(&*provider, chain_id, expected_genesis).await
+}
+
+async fn verify_ethereum_network(provider: &impl Provider, chain_id: u64, expected_genesis: B256) -> Result<()> {
+    ensure!(provider.get_chain_id().await? == chain_id, "Ethereum endpoint has unexpected chain id; HOLD");
+    let genesis = provider.get_block_by_number(BlockNumberOrTag::Number(0)).await?
+        .context("Ethereum genesis block is missing")?;
+    ensure!(genesis.header.number == 0 && genesis.header.hash == expected_genesis
+        && genesis.header.inner.hash_slow() == expected_genesis,
+        "Ethereum endpoint has unexpected or noncanonical genesis block; HOLD");
     Ok(())
 }
 
@@ -2062,7 +1897,7 @@ where
     let verifier = VaraQueueRootVerifier::new(verifier_address, provider.clone());
     let client = BeefyClient::new(client_address, provider);
     let source_domain = client.sourceDomain().call().await?;
-    let expected_domain = beefy_relay::bridge_domain(
+    let expected_domain = crate::bridge_domain(
         source_domain.0,
         chain_id,
         queue_address
@@ -2085,53 +1920,11 @@ where
     Ok(())
 }
 
-async fn verify_hoodi_bootstrap(
-    ethereum: &Ethereum,
-    checkpoint: &CapturedCommitment,
-    snapshot: &QueueSnapshot,
-    mmr_start_block: u64,
-) -> Result<()> {
-    let deployed = ethereum.checkpoint().await?;
-    ensure!(
-        deployed.block == u64::from(checkpoint.block) && deployed.root == [0; 32],
-        "Hoodi bootstrap client did not preserve initial block and zero accepted root"
-    );
-    ensure!(
-        deployed.source_timestamp_ms == snapshot.source_timestamp_ms,
-        "Hoodi bootstrap source timestamp was not authenticated"
-    );
-    ensure!(
-        deployed.current_id == checkpoint.current.id
-            && deployed.current_len == checkpoint.current.keys.len() as u64
-            && deployed.current_root == checkpoint.current.root
-            && deployed.next_id == checkpoint.next.id
-            && deployed.next_len == checkpoint.next.keys.len() as u64
-            && deployed.next_root == checkpoint.next.root,
-        "Hoodi deployment authority checkpoint does not match trusted source checkpoint"
-    );
-    let provider = ethereum.api.raw_provider().clone();
-    let client = BeefyClient::new(ethereum.client_address, provider.clone());
-    ensure!(
-        client.bridgeDomain().call().await? == B256::from(snapshot.bridge_domain)
-            && client.mmrStartBlock().call().await? == mmr_start_block,
-        "Hoodi deployed source identity does not match bootstrap"
-    );
-    verify_secure_policy(ethereum.client_address, provider.clone()).await?;
-    verify_bindings(
-        ethereum.verifier_address,
-        ethereum.client_address,
-        ethereum.queue_address,
-        HOODI_CHAIN_ID,
-        provider,
-    )
-    .await
-}
-
-async fn verify_hoodi_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<()> {
+async fn verify_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<()> {
     let provider = ethereum.api.raw_provider().clone();
     ensure!(
-        provider.get_chain_id().await? == HOODI_CHAIN_ID,
-        "connected Ethereum endpoint has unexpected Hoodi chain id"
+        provider.get_chain_id().await? == ethereum.expected_chain_id(),
+        "connected Ethereum endpoint has unexpected approved chain id"
     );
     let bridge_domain = manifest_b256(manifest, "bridgeDomain")?;
     let source_domain = manifest_b256(manifest, "sourceDomain")?;
@@ -2180,7 +1973,7 @@ async fn verify_hoodi_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<
         ethereum.verifier_address,
         ethereum.client_address,
         ethereum.queue_address,
-        HOODI_CHAIN_ID,
+        ethereum.expected_chain_id(),
         provider.clone(),
     )
     .await?;
@@ -2231,17 +2024,6 @@ async fn verify_hoodi_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<
     Ok(())
 }
 
-fn redact_process_output(bytes: &[u8], private_key: &str) -> String {
-    let mut output = String::from_utf8_lossy(bytes).into_owned();
-    output = output.replace(private_key, "<redacted>");
-    if let Some(raw) = private_key
-        .strip_prefix("0x")
-        .or_else(|| private_key.strip_prefix("0X"))
-    {
-        output = output.replace(raw, "<redacted>");
-    }
-    output
-}
 fn address_string(address: Address) -> String {
     format!("0x{}", hex::encode(address.as_slice()))
 }
@@ -2253,10 +2035,12 @@ fn parse_address(value: &Value) -> Option<Address> {
     value.get("value").and_then(parse_address)
 }
 
+#[cfg(test)]
 fn return_address(returns: &Value, name: &str) -> Option<Address> {
     returns.as_object()?.get(name).and_then(parse_address)
 }
 
+#[cfg(test)]
 fn deployment_transactions(deployment: &Value) -> Result<Vec<Value>> {
     let receipts = deployment
         .get("receipts")
@@ -2370,6 +2154,18 @@ fn to_sol_leaf(leaf: &RuntimeLeaf) -> Result<BeefyClient::MMRLeaf> {
     })
 }
 #[cfg(test)]
+fn redact_process_output(bytes: &[u8], private_key: &str) -> String {
+    let mut output = String::from_utf8_lossy(bytes).into_owned();
+    output = output.replace(private_key, "<redacted>");
+    if let Some(raw) = private_key
+        .strip_prefix("0x")
+        .or_else(|| private_key.strip_prefix("0X"))
+    {
+        output = output.replace(raw, "<redacted>");
+    }
+    output
+}
+#[cfg(test)]
 mod tests {
     use super::*;
     use alloy::{
@@ -2377,6 +2173,205 @@ mod tests {
         network::TxSigner,
         primitives::TxKind,
     };
+
+    #[tokio::test]
+    async fn bootstrap_deployment_hint_authenticates_creation_and_restart() -> Result<()> {
+        use alloy::{network::TransactionBuilder, rpc::types::TransactionRequest, sol_types::SolValue};
+        let anvil = Anvil::new().host("127.0.0.1").port(0u16).chain_id(31_337)
+            .arg("--slots-in-an-epoch").arg("1")
+            .arg("--timestamp").arg("1700000000").try_spawn()?;
+        let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
+        let queue = Address::from([3; 20]);
+        let api = EthApi::new(&anvil.ws_endpoint(), &address_string(queue), Some(&key), None, None).await?;
+        let provider = api.raw_provider().clone();
+        let arguments = (B256::from([1; 32]), U256::from(31_337), queue, 1u64, 2u64,
+            1_700_000_000_000u64, (7u128, 1u128, B256::from([4; 32])),
+            (8u128, 1u128, B256::from([5; 32]))).abi_encode();
+        let input = [BeefyClient::BYTECODE.as_ref(), arguments.as_slice()].concat();
+        let receipt = provider.send_transaction(TransactionRequest::default()
+            .with_deploy_code(input).with_gas_limit(6_000_000)).await?.get_receipt().await?;
+        assert!(receipt.status());
+        let wrong = provider.send_transaction(TransactionRequest::default()
+            .with_to(queue).with_gas_limit(21_000)).await?.get_receipt().await?;
+        provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
+        let ethereum = Ethereum { _anvil: Some(anvil), owned_fixture_network: None, api,
+            public_network: PublicEthereumNetwork::Hoodi,
+            client_address: receipt.contract_address.context("missing created client")?,
+            verifier_address: Address::ZERO, queue_address: queue, receiver_address: Address::ZERO,
+            transactions: Vec::new() };
+        let directory = tempfile::tempdir()?;
+        let (checkpoint, pin) = ethereum.authenticate_bootstrap(directory.path(), &Value::Null,
+            Some(receipt.transaction_hash)).await?;
+        assert_eq!(checkpoint.block, 2);
+        assert_eq!(checkpoint.source_timestamp_ms, 1_700_000_000_000);
+        assert_eq!(pin, json!({"block":receipt.block_number, "blockHash":receipt.block_hash,
+            "txHash":receipt.transaction_hash}));
+        for hint in [None, Some(receipt.transaction_hash)] {
+            let (restored, restored_pin) = ethereum.authenticate_bootstrap(directory.path(), &pin, hint).await?;
+            assert_eq!(restored, checkpoint);
+            assert_eq!(restored_pin, pin);
+        }
+        let missing = ethereum.authenticate_bootstrap(directory.path(), &Value::Null, Some(B256::ZERO)).await.unwrap_err();
+        assert!(missing.to_string().contains("receipt unavailable"), "{missing:#}");
+        let unrelated = ethereum.authenticate_bootstrap(directory.path(), &Value::Null,
+            Some(wrong.transaction_hash)).await.unwrap_err();
+        assert!(unrelated.to_string().contains("signed identity"), "{unrelated:#}");
+        let conflicting = ethereum.authenticate_bootstrap(directory.path(), &pin,
+            Some(wrong.transaction_hash)).await.unwrap_err();
+        assert!(conflicting.to_string().contains("conflicts with saved bootstrap"), "{conflicting:#}");
+        let mut changed = pin.clone();
+        changed["blockHash"] = json!(B256::from([9; 32]));
+        assert!(ethereum.authenticate_bootstrap(directory.path(), &changed,
+            Some(receipt.transaction_hash)).await.is_err());
+        changed = pin.clone();
+        changed["block"] = json!(receipt.block_number.unwrap() + 1);
+        assert!(ethereum.authenticate_bootstrap(directory.path(), &changed, None).await.is_err());
+        // Archive discovery remains available without a locator and cannot change the pin.
+        let (discovered, discovered_pin) = ethereum.authenticate_bootstrap(directory.path(), &Value::Null, None).await?;
+        assert_eq!(discovered, checkpoint);
+        assert_eq!(discovered_pin, pin);
+        assert!(ethereum.transactions.is_empty(), "bootstrap reads must not sign or populate submissions");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "read-only original deployment and independently compiled bytecode comparison"]
+    async fn actual_client_creation_matches_compiled_approved_bytecode() -> Result<()> {
+        let evidence: Value = serde_json::from_slice(&fs::read(std::env::var("BEEFY_TEST_CLIENT_DEPLOYMENT_EVIDENCE")?)?)?;
+        let original = evidence["originals"].as_array().context("missing originals")?.iter()
+            .find(|entry| entry["contractName"] == "BeefyClient").context("missing client creation")?;
+        let hash = manifest_b256(original, "hash")?;
+        let raw = hex::decode(original["raw"].as_str().context("missing signed original")?.trim_start_matches("0x"))?;
+        ensure!(B256::from(keccak256(&raw)) == hash, "original raw hash changed");
+        let mut encoded = raw.as_slice();
+        let signed = TxEnvelope::decode_2718(&mut encoded)?;
+        ensure!(encoded.is_empty() && signed.to().is_none()
+            && signed.recover_signer()?.create(signed.nonce()) == manifest_address(original, "contractAddress")?,
+            "original CREATE identity changed");
+        let endpoint = std::env::var("BEEFY_TEST_HOODI_RPC")?;
+        let api = PollingEthApi::new(&endpoint).await?;
+        let observed = api.get_transaction_by_hash(hash).await?.context("creation unavailable")?.into_inner();
+        ensure!(observed.encoded_2718() == raw, "live creation differs from saved signed original");
+        let code = BeefyClient::BYTECODE.as_ref();
+        ensure!(observed.input().starts_with(code), "actual creation does not match compiled approved BYTECODE");
+        let artifact: Value = serde_json::from_slice(&fs::read(std::env::var("BEEFY_TEST_CLIENT_ARTIFACT")?)?)?;
+        let artifact_code = hex::decode(artifact["bytecode"]["object"].as_str().context("missing artifact bytecode")?.trim_start_matches("0x"))?;
+        ensure!(artifact_code == code, "coherent deployment artifact differs from compiled approval");
+        println!("creation={hash:#x} approved_bytes={} constructor_bytes={} approved_keccak={:#x}",
+            code.len(), observed.input().len() - code.len(), B256::from(keccak256(code)));
+        Ok(())
+    }
+
+    #[test]
+    fn owned_fixture_descriptor_refuses_missing_approval_and_rebinding() -> Result<()> {
+        let network = OwnedFixtureNetwork { schema_version: 1, ethereum_chain_id: 31_337,
+            ethereum_genesis_hash: B256::from([1; 32]),
+            beacon_genesis_validators_root: B256::from([2; 32]), beacon_genesis_time: 1_700_000_000 };
+        let encoded = serde_json::to_value(&network)?;
+        assert_eq!(serde_json::from_value::<OwnedFixtureNetwork>(encoded.clone())?, network);
+        let mut unknown = encoded.clone();
+        unknown["trustLiveRpc"] = json!(true);
+        assert!(serde_json::from_value::<OwnedFixtureNetwork>(unknown).is_err());
+        let mut malformed = encoded.clone();
+        malformed["ethereumGenesisHash"] = json!("0x01");
+        assert!(serde_json::from_value::<OwnedFixtureNetwork>(malformed).is_err());
+        for field in ["schemaVersion", "ethereumChainId", "ethereumGenesisHash", "beaconGenesisValidatorsRoot", "beaconGenesisTime"] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<OwnedFixtureNetwork>(missing).is_err());
+        }
+        let deployment = json!({"localRehearsal":false, "ethereum":{"chainId":31337}, "ownedFixtureNetwork":encoded});
+        let endpoints = ("ws://127.0.0.1:9944", "ws://127.0.0.1:9945", "ws://127.0.0.1:8546");
+        validate_fixture_approval(Some(&network), &deployment, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Hoodi)?;
+        assert!(validate_fixture_approval(None, &deployment, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Hoodi).is_err());
+        assert!(validate_fixture_approval(Some(&network), &deployment, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Mainnet).is_err());
+        for endpoint in ["ws://localhost:8546", "wss://ethereum-hoodi-rpc.publicnode.com", "ws://192.168.1.1:8546", "ws://127.0.0.1:8546/path", "ws://user@127.0.0.1:8546"] {
+            assert!(network.validate_endpoints(endpoints.0, endpoints.1, endpoint).is_err());
+        }
+        for field in ["ethereumGenesisHash", "beaconGenesisValidatorsRoot", "beaconGenesisTime"] {
+            let mut changed = deployment.clone();
+            changed["ownedFixtureNetwork"][field] = if field == "beaconGenesisTime" { json!(1_700_000_001) } else { json!(B256::from([3;32])) };
+            assert!(network.validate_manifest(&changed).is_err());
+        }
+        let mut rehearsal = deployment.clone();
+        rehearsal["localRehearsal"] = json!(true);
+        assert!(network.validate_manifest(&rehearsal).is_err());
+        for field in ["schemaVersion", "ethereumChainId", "ethereumGenesisHash", "beaconGenesisValidatorsRoot", "beaconGenesisTime"] {
+            let mut invalid = serde_json::to_value(&network)?;
+            invalid[field] = if field.ends_with("Hash") || field.ends_with("Root") { json!(B256::ZERO) } else { json!(0) };
+            assert!(serde_json::from_value::<OwnedFixtureNetwork>(invalid)?.validate().is_err());
+        }
+        let hoodi = json!({"ethereum":{"chainId":HOODI_CHAIN_ID}});
+        validate_fixture_approval(None, &hoodi, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Hoodi)?;
+        assert!(network.validate_manifest(&hoodi).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn mainnet_admission_requires_explicit_matching_public_identity() -> Result<()> {
+        use PublicEthereumNetwork::{Hoodi, Mainnet};
+        let mainnet = json!({"mode":"mainnet-token-stack", "localRehearsal":false, "ethereum":{"chainId":1}});
+        let check = |deployment: &Value, network, endpoint| validate_fixture_approval(
+            None, deployment, "wss://source.example", "wss://witness.example", endpoint, network);
+        check(&mainnet, Mainnet, "https://ethereum.example")?;
+        assert!(check(&mainnet, Hoodi, "https://ethereum.example").is_err());
+        for endpoint in ["http://ethereum.example", "ws://127.0.0.1:8546", ""] {
+            assert!(check(&mainnet, Mainnet, endpoint).is_err());
+        }
+        for (pointer, value) in [("/mode", json!("hoodi-token-stack")),
+            ("/localRehearsal", json!(true)), ("/ethereum/chainId", json!(560048)),
+            ("/ethereum/chainId", json!(31337))] {
+            let mut changed = mainnet.clone();
+            *changed.pointer_mut(pointer).unwrap() = value;
+            assert!(check(&changed, Mainnet, "https://ethereum.example").is_err());
+        }
+        let mut fixture = mainnet;
+        fixture["ownedFixtureNetwork"] = json!({});
+        assert!(check(&fixture, Mainnet, "https://ethereum.example").is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicit read-only Ethereum mainnet endpoint; no signer or deployment"]
+    async fn qualify_mainnet_execution_finality_read_only() -> Result<()> {
+        let endpoint = std::env::var("BEEFY_TEST_MAINNET_RPC")?;
+        let network = PublicEthereumNetwork::Mainnet;
+        ensure_ethereum_network(&endpoint, network.chain_id(), network.genesis()).await?;
+        ensure!(ensure_ethereum_network(&endpoint, HOODI_CHAIN_ID, HOODI_GENESIS_BLOCK).await.is_err(),
+            "mainnet endpoint was admitted as Hoodi");
+        let api = EthApi::new(&endpoint, &address_string(Address::ZERO), None, None, None).await?;
+        let directory = tempfile::tempdir()?;
+        let view = api.verified_finalized_view_with_archive(directory.path(), network.genesis()).await?;
+        let header = api.raw_provider().get_block_by_hash(view.block_hash()).await?
+            .context("finalized mainnet header missing")?;
+        ensure!(header.header.number == view.block_number()
+            && header.header.inner.hash_slow() == view.block_hash(), "mainnet finalized identity changed");
+        println!("chain={} genesis={:#x} finalized={} hash={:#x}",
+            network.chain_id(), network.genesis(), view.block_number(), view.block_hash());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn owned_fixture_and_default_hoodi_require_exact_network_identity() -> Result<()> {
+        use alloy::{providers::ProviderBuilder, transports::mock::Asserter};
+        let mut block: alloy::rpc::types::Block = Default::default();
+        block.header.hash = block.header.inner.hash_slow();
+        for expected_chain in [1, HOODI_CHAIN_ID, 31_337] {
+            for (observed_chain, expected_genesis, accepted) in [
+                (expected_chain, block.header.hash, true),
+                (expected_chain + 1, block.header.hash, false),
+                (expected_chain, B256::from([9; 32]), false),
+            ] {
+                let asserter = Asserter::new();
+                let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+                asserter.push_success(&format!("0x{observed_chain:x}"));
+                asserter.push_success(&block);
+                assert_eq!(verify_ethereum_network(&provider, expected_chain, expected_genesis).await.is_ok(), accepted);
+            }
+        }
+        assert!(Ethereum::connect_readonly("ws://127.0.0.1:1", &json!({"chainId":31337}), None, PublicEthereumNetwork::Hoodi).await.is_err());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn missing_receipt_header_waits_without_accepting_a_changed_inclusion() -> Result<()> {

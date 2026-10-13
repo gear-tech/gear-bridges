@@ -104,7 +104,7 @@ export class PingClient {
     const saltBytes = u8aToU8a(salt);
     if (saltBytes.length !== 32) throw new Error('Ping requires its recorded 32-byte salt');
     const codeId = generateCodeHash(code);
-    const programId = generateProgramId(codeId, saltBytes);
+    const programId = generateProgramId(codeId, u8aToHex(saltBytes));
     const initPayload = this.registry.createType(
       '(String, [u8;32], H160, H160, H160, BridgeConfig)',
       ['New', historical_proxy, ethereum_emitter, ethereum_sender, ethereum_receiver, bridge_config],

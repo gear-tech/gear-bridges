@@ -196,8 +196,9 @@ contract MessageQueueTest is Test, Base {
         assertEq(vm.load(address(messageQueue), _mappingSlot(bytes32(uint256(101)), 15)), bytes32(0));
         assertEq(messageQueue.getMerkleRootTimestamp(bytes32(uint256(22))), 0);
         assertFalse(messageQueue.isProcessed(101));
-        vm.expectRevert(IMessageQueue.MerkleRootProgressNotForward.selector);
         messageQueue.submitMerkleRoot(101, bytes32(uint256(33)), "");
+        assertEq(messageQueue.getMerkleRoot(101), bytes32(uint256(33)));
+        assertEq(messageQueue.getMerkleRootTimestampForBlock(101), block.timestamp);
         vm.expectRevert(IMessageQueue.EmptyQueueProgressNotForward.selector);
         messageQueue.submitEmptyQueueProgress(101, hex"1234");
     }
@@ -245,8 +246,8 @@ contract MessageQueueTest is Test, Base {
             abi.encode(true)
         );
         messageQueue.submitEmptyQueueProgress(104, hex"1234");
-        vm.expectRevert(IMessageQueue.MerkleRootProgressNotForward.selector);
         messageQueue.submitMerkleRoot(103, bytes32(uint256(44)), "");
+        assertEq(messageQueue.getMerkleRoot(103), bytes32(uint256(44)));
         vm.expectRevert(IMessageQueue.EmptyQueueProgressNotForward.selector);
         messageQueue.submitEmptyQueueProgress(103, "");
         vm.stopPrank();
@@ -1214,9 +1215,6 @@ contract MessageQueueTest is Test, Base {
 
         bytes32 messageHash = message.hash();
         merkleRoot = messageHash;
-        vm.expectRevert(IMessageQueue.MerkleRootProgressNotForward.selector);
-        messageQueue.submitMerkleRoot(blockNumber, merkleRoot, proof1);
-        blockNumber = messageQueue.maxBlockNumber() + 1;
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)

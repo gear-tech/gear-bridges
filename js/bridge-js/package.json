@@ -7,7 +7,9 @@
   "license": "GPL-3.0",
   "type": "module",
   "files": [
-    "lib"
+    "lib/esm",
+    "lib/cjs",
+    "lib/types"
   ],
   "repository": {
     "type": "git",
@@ -26,12 +28,13 @@
   "scripts": {
     "clean": "npx rimraf lib",
     "test": "npx vitest run",
-    "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:types",
+    "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run build:types && npm run test:package",
     "build:esm": "npx swc ./src -d lib/esm --strip-leading-paths",
-    "build:cjs": "npx swc ./src -d lib/cjs -C module.type=commonjs --out-file-extension cjs --strip-leading-paths",
+    "build:cjs": "esbuild src/index.ts --bundle --platform=node --format=cjs --target=es2020 --external:@gear-js/api --external:@polkadot/api --external:sails-js --external:viem --outfile=lib/cjs/index.cjs",
+    "test:package": "node test/test_package_entry.mjs",
     "build:types": "npx tsc -p tsconfig.types.json",
     "typecheck": "npx tsc -p tsconfig.json --noEmit",
-    "build:examples": "swc src -d lib/demo/src --strip-leading-paths && swc example -d lib/demo/example --strip-leading-paths",
+    "build:examples": "npx rimraf lib/demo && swc src -d lib/demo/src --strip-leading-paths && swc example -d lib/demo/example --strip-leading-paths",
     "example:vara-to-eth": "node lib/demo/example/vara-to-eth.js",
     "example:eth-to-vara": "node lib/demo/example/eth-to-vara.js"
   },
@@ -55,6 +58,7 @@
     "@swc/core": "^1.13.5",
     "@vitest/coverage-v8": "3.2.4",
     "dotenv": "17.2.2",
+    "esbuild": "^0.25.0",
     "sails-js": "0.5.0",
     "sails-js-cli": "0.5.0",
     "sails-js-parser": "0.5.0",

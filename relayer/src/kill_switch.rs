@@ -269,7 +269,13 @@ impl KillSwitchRelayer {
                 .inc_by(events.len() as u64);
         }
 
-        for (event, _block_number_eth) in events {
+        for observation in events {
+            // The kill switch deliberately inspects hot events, but a removed log
+            // is no longer a publication and must never trigger a challenge.
+            if observation.removed {
+                continue;
+            }
+            let event = observation.entry;
             if !self.compare_merkle_roots(&event).await? {
                 // Okay, we have a mismatch,
                 // that means for some reason the proof with incorrect merkle root was submitted to relayer MQ contract.

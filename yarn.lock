@@ -1035,6 +1035,7 @@ __metadata:
     "@swc/core": "npm:^1.13.5"
     "@vitest/coverage-v8": "npm:3.2.4"
     dotenv: "npm:17.2.2"
+    esbuild: "npm:^0.25.0"
     sails-js: "npm:0.5.0"
     sails-js-cli: "npm:0.5.0"
     sails-js-parser: "npm:0.5.0"

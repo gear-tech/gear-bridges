@@ -8,18 +8,20 @@ import { blake2AsHex } from '@polkadot/util-crypto';
 import { QueryBuilder } from 'sails-js';
 import { CheckpointClient, EthEventsClient, HistoricalProxyClient, StateData } from '../../src/vara/index.js';
 import { createBeaconClient } from '../../src/ethereum/index.js';
-import { immutableInboundProfile, InboundProofProfile } from '../../src/eth-to-vara/proof-composer.js';
+import { parseInboundProofProfile, checkpointNetworkMatches, validateOwnedFixtureNetwork, validateLocalFixtureBeaconSpec, InboundProofProfile } from '../../src/eth-to-vara/proof-composer.js';
 import type { Bytes } from '@polkadot/types';
 
 dotenv.config();
 const PATH_TO_BIN = path.resolve(process.env.CARGO_TARGET_DIR ?? '../../target', 'release/js-test');
 
-export function readApprovedFixtureProfile(filename: string, historicalProxyId: string): InboundProofProfile {
-  const supplied = JSON.parse(fs.readFileSync(filename, 'utf8')) as Omit<InboundProofProfile, 'ethereumChainId' | 'beaconGenesisTime' | 'forks'> & {
-    ethereumChainId: string; beaconGenesisTime: string; forks: { name: string; epoch: string; version: HexString }[] };
-  const approved = immutableInboundProfile({ ...supplied, ethereumChainId: BigInt(supplied.ethereumChainId), beaconGenesisTime: BigInt(supplied.beaconGenesisTime),
-    forks: supplied.forks.map(fork => ({ ...fork, epoch: BigInt(fork.epoch) })) });
-  if (historicalProxyId !== approved.historicalProxyId || approved.ethereumChainId !== 560048n || approved.checkpoint.network !== 'Hoodi' ||
+export function readApprovedFixtureProfile(filename: string, historicalProxyId: string, descriptorPath = process.env.OWNED_FIXTURE_NETWORK_PATH): InboundProofProfile {
+  const approved = parseInboundProofProfile(fs.readFileSync(filename, 'utf8'));
+  if (historicalProxyId !== approved.historicalProxyId) throw new Error('HOLD: independently approved fixture proxy differs');
+  if (typeof approved.checkpoint.network !== 'string') {
+    if (!descriptorPath) throw new Error('HOLD: LocalFixture requires independently supplied OWNED_FIXTURE_NETWORK_PATH');
+    validateOwnedFixtureNetwork(approved, JSON.parse(fs.readFileSync(descriptorPath, 'utf8')),
+      [process.env.VARA_WS_RPC!, process.env.ETH_RPC_URL!, process.env.BEACON_RPC_URL!]);
+  } else if (approved.ethereumChainId !== 560048n || approved.checkpoint.network !== 'Hoodi' ||
       approved.ethereumGenesisHash !== '0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b' ||
       approved.beaconGenesisValidatorsRoot !== '0x212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f') {
     throw new Error('HOLD: independently approved owned Hoodi fixture/profile is required');
@@ -50,12 +52,13 @@ const getFixture = async (approved: InboundProofProfile) => {
     const ethEvents = new EthEventsClient(gearApi, approved.endpoint.programId);
     if (await ethEvents.ethereumEventClient.checkpointLightClientAddress().atBlock(pin).call() !== approved.checkpoint.programId) throw new Error('HOLD: fixture checkpoint differs from approval');
     const checkpoint = new CheckpointClient(gearApi, approved.checkpoint.programId);
-    if (await checkpoint.serviceState.network().atBlock(pin).call() !== approved.checkpoint.network) throw new Error('HOLD: checkpoint immutable network differs from approval');
+    if (!checkpointNetworkMatches(await checkpoint.serviceState.network().atBlock(pin).call(), approved.checkpoint.network)) throw new Error('HOLD: checkpoint immutable network differs from approval');
     const state = await new QueryBuilder<StateData>(gearApi, checkpoint.registry, approved.checkpoint.programId,
       'ServiceState', 'Get', ['Reverse', 0, 1], '(Order, u32, u32)', 'StateData').atBlock(pin).call();
     if (state.replay_back || state.checkpoints.length !== 1) throw new Error('Fixture checkpoint has no applied terminal state');
     const beacon = await createBeaconClient(process.env.BEACON_RPC_URL!);
     const spec = await beacon.getSpec();
+    validateLocalFixtureBeaconSpec(approved, spec);
     if (beacon.genesisBlock.genesis_validators_root !== approved.beaconGenesisValidatorsRoot || BigInt(beacon.genesisBlock.genesis_time) !== approved.beaconGenesisTime ||
         approved.forks.some(fork => BigInt(fork.name === 'phase0' ? '0' : spec[fork.name.toUpperCase() + '_FORK_EPOCH']) !== fork.epoch ||
           spec[fork.name === 'phase0' ? 'GENESIS_FORK_VERSION' : fork.name.toUpperCase() + '_FORK_VERSION'] !== fork.version)) {

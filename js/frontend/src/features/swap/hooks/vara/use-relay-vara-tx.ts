@@ -22,6 +22,7 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint, expectedEffect: Outb
   const initArchiveApi = useInitArchiveApi();
 
   const relay = async ({ onLog, onFinalized, onError }: Params) => {
+    const deadline = Date.now() + 44 * 60 * 1000;
     let archiveApi: GearApi | undefined;
 
     try {
@@ -33,7 +34,7 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint, expectedEffect: Outb
       const walletClient = await getWalletClient(config);
       archiveApi = await initArchiveApi();
 
-      const { error, success } = await relayVaraToEth({
+      const { error, success, transactionHash } = await relayVaraToEth({
         nonce,
         blockNumber,
         ethereumPublicClient: publicClient,
@@ -43,10 +44,14 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint, expectedEffect: Outb
         messageQueueAddress: NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
         expectedEffect,
         statusCb: onLog,
+        wait: true,
+        deadline,
       });
 
-      if (error) throw new Error(error);
-      if (!success) throw new Error('Failed to relay Vara transaction');
+      if (!success)
+        throw new Error(
+          `HOLD: ${transactionHash !== '0x' ? `original Ethereum transaction ${transactionHash}; ` : ''}${error ?? 'Original delivery is unproven'}. Reconcile before retrying.`,
+        );
 
       onFinalized();
     } catch (error) {

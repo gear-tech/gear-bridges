@@ -1,5 +1,5 @@
 use super::*;
-use checkpoint_light_client_client::{traits::ServiceSyncUpdate as _, ServiceSyncUpdate};
+use checkpoint_light_client_client::service_sync_update::io::Process;
 use ethereum_beacon_client::{utils, BeaconClient};
 use std::ops::ControlFlow::{self, *};
 
@@ -97,20 +97,15 @@ async fn receive(
 }
 
 pub async fn try_to_apply(
-    remoting: &GClientRemoting,
+    gear_api: &GearApi,
     program_id: [u8; 32],
     sync_update: SyncCommitteeUpdate,
     sync_aggregate_encoded: Vec<u8>,
     gas_limit: u64,
 ) -> AnyResult<Result<(), Error>> {
-    let mut service = ServiceSyncUpdate::new(remoting.clone());
-
-    service
-        .process(sync_update, sync_aggregate_encoded)
-        .with_gas_limit(gas_limit)
-        .send_recv(program_id.into())
-        .await
-        .map_err(|e| anyhow!("Failed to apply sync committee: {e:?}"))
+    let payload = Process::encode_call(sync_update, sync_aggregate_encoded);
+    let reply = send_checkpoint_message(gear_api, program_id, payload, gas_limit).await?;
+    Process::decode_reply(reply).map_err(|e| anyhow!("Failed to decode original sync committee reply: {e:?}"))
 }
 
 #[cfg(test)]

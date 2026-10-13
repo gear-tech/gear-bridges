@@ -139,6 +139,16 @@ contract DeploymentScriptTest is Test {
         assertEq(ordinary.balanceOf(address(this)), 7);
     }
 
+    function test_DeploymentBeefyLocalAtNonzeroNonce() public {
+        vm.setNonce(vm.addr(1), 17);
+        test_DeploymentBeefyLocal();
+    }
+
+    function test_DeploymentBeefyTokensAtNonzeroNonce() public {
+        vm.setNonce(vm.addr(1), 23);
+        test_DeploymentBeefyTokensQueueDomainDryRun();
+    }
+
     function test_DeploymentMainnet() public {
         vm.chainId(1);
         vm.warp(vm.unixTime() / 1000);
@@ -239,6 +249,25 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
         vm.prank(deployer);
         queue.disableChallengeRoot();
         assertFalse(queue.isChallengingRoot());
+    }
+
+    function test_HoodiQueuePredictionAtNonzeroNonce() public {
+        address deployer = vm.addr(DEPLOYER_KEY);
+        vm.setNonce(deployer, 31);
+        address expectedQueue = vm.computeCreateAddress(deployer, 31 + 5);
+        (BeefyClient client,, MessageQueue queue,) = _deploy();
+        assertEq(address(queue), expectedQueue);
+        assertEq(client.destinationQueue(), expectedQueue);
+    }
+
+    function test_HoodiRejectsMismatchedConfiguredDomain() public {
+        vm.chainId(560048);
+        _setBootstrapEnv();
+        vm.setEnv("BEEFY_BRIDGE_DOMAIN", vm.toString(bytes32(uint256(1))));
+        vm.warp(uint256(bootstrapTimestamp(0)) / 1000);
+        BeefyHoodi deployment = new BeefyHoodi();
+        vm.expectRevert();
+        deployment.run();
     }
 
     function test_HoodiRejectsUnauthorizedInitializationAndRoles() public {

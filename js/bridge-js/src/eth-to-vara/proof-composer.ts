@@ -22,6 +22,19 @@ import {
 import { StatusCb, withOriginalDeadline } from '../util.js';
 import { NATIVE_WRAPPER_IDL_SHA256 } from './token-effect.js';
 
+export type CheckpointNetwork = 'Mainnet' | 'Sepolia' | 'Holesky' | 'Hoodi' | Readonly<{
+  localFixture: Readonly<{ genesis_time: bigint; genesis_validators_root: HexString }>;
+}>;
+
+export interface OwnedFixtureNetwork {
+  schemaVersion: 1;
+  ethereumChainId: 31337;
+  ethereumGenesisHash: HexString;
+  beaconGenesisValidatorsRoot: HexString;
+  beaconGenesisTime: number;
+}
+
+
 export interface InboundProofProfile {
   readonly ethereumChainId: bigint;
   readonly ethereumGenesisHash: HexString;
@@ -35,7 +48,7 @@ export interface InboundProofProfile {
   readonly historicalProxyCodeId: HexString;
   readonly historicalProxyIdlSha256: string;
   readonly endpoint: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string; framing: 'electra' }>;
-  readonly checkpoint: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string; network: 'Mainnet' | 'Sepolia' | 'Holesky' | 'Hoodi' }>;
+  readonly checkpoint: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string; network: CheckpointNetwork }>;
   readonly consumer: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string; service: string; method: string }>;
   readonly nativeWrapper?: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string }>;
   readonly forks: readonly Readonly<{ name: string; epoch: bigint; version: HexString }>[];
@@ -56,13 +69,29 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
       typeof copy.consumer?.service !== 'string' || !copy.consumer.service || typeof copy.consumer?.method !== 'string' || !copy.consumer.method ||
       !Array.isArray(copy.forks) || !copy.forks.length || copy.forks.some(fork => typeof fork.name !== 'string' ||
         typeof fork.epoch !== 'bigint' || fork.epoch < 0n || !/^0x[0-9a-fA-F]{8}$/.test(fork.version)) ||
-      !['Mainnet', 'Sepolia', 'Holesky', 'Hoodi'].includes(copy.checkpoint.network)) {
+      (typeof copy.checkpoint.network === 'string' ? !['Mainnet', 'Sepolia', 'Holesky', 'Hoodi'].includes(copy.checkpoint.network) :
+        !copy.checkpoint.network || Object.keys(copy.checkpoint.network).length !== 1 || !('localFixture' in copy.checkpoint.network))) {
     throw new Error('HOLD: incomplete or unknown inbound deployment profile');
   }
   if (copy.endpoint.framing !== 'electra' || copy.endpoint.idlSha256 !== ELECTRA_IDL_SHA256 ||
-      copy.checkpoint.idlSha256 !== CHECKPOINT_IDL_SHA256 || copy.historicalProxyIdlSha256 !== PROXY_IDL_SHA256 ||
+      (copy.checkpoint.idlSha256 !== CHECKPOINT_IDL_SHA256 &&
+        !(typeof copy.checkpoint.network === 'string' && copy.checkpoint.idlSha256 === LEGACY_PUBLIC_CHECKPOINT_IDL_SHA256)) ||
+      copy.historicalProxyIdlSha256 !== PROXY_IDL_SHA256 ||
       (copy.nativeWrapper && copy.nativeWrapper.idlSha256 !== NATIVE_WRAPPER_IDL_SHA256)) {
     throw new Error('HOLD: unqualified deployed inbound IDL or proof framing');
+  }
+  if (typeof copy.checkpoint.network !== 'string') {
+    const fixture = copy.checkpoint.network.localFixture;
+    const names = ['phase0', 'altair', 'bellatrix', 'capella', 'deneb', 'electra', 'fulu'];
+    if (!fixture || Object.keys(fixture).length !== 2 || typeof fixture.genesis_time !== 'bigint' ||
+        fixture.genesis_time !== copy.beaconGenesisTime || fixture.genesis_time > BigInt(Number.MAX_SAFE_INTEGER) ||
+        typeof fixture.genesis_validators_root !== 'string' || fixture.genesis_validators_root.toLowerCase() !== copy.beaconGenesisValidatorsRoot.toLowerCase() ||
+        copy.ethereumChainId !== 31337n || copy.forks.length !== names.length ||
+        copy.forks.some((fork, index) => fork.name !== names[index] || fork.epoch !== (fork.name === 'fulu' ? 18446744073709551615n : 0n)) ||
+        copy.forks[5].version.toLowerCase() !== '0x60003137') {
+      throw new Error('HOLD: LocalFixture identity or fixed Electra fork schedule differs from approval');
+    }
+    Object.freeze(fixture); Object.freeze(copy.checkpoint.network);
   }
   Object.freeze(copy.endpoint); Object.freeze(copy.checkpoint); Object.freeze(copy.consumer);
   if (copy.nativeWrapper) Object.freeze(copy.nativeWrapper);
@@ -70,8 +99,80 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
   return Object.freeze(copy);
 }
 
+/** Parse caller-approved JSON, including the nested Sails fixture identity. */
+export function parseInboundProofProfile(value: string): InboundProofProfile {
+  const supplied = JSON.parse(value);
+  const network = supplied.checkpoint?.network;
+  return immutableInboundProfile({ ...supplied, ethereumChainId: BigInt(supplied.ethereumChainId),
+    beaconGenesisTime: BigInt(supplied.beaconGenesisTime),
+    checkpoint: { ...supplied.checkpoint, network: typeof network === 'string' ? network :
+      { ...network, localFixture: { ...network?.localFixture, genesis_time: BigInt(network?.localFixture?.genesis_time) } } },
+    forks: supplied.forks.map((fork: { epoch: string }) => ({ ...fork, epoch: BigInt(fork.epoch) })) });
+}
+
+/** Public enums decode as strings (old IDL) or null-valued objects (new IDL). */
+export function checkpointNetworkMatches(observed: unknown, approved: CheckpointNetwork): boolean {
+  if (typeof approved === 'string') {
+    return observed === approved || (!!observed && typeof observed === 'object' && Object.keys(observed).length === 1 &&
+      (observed as Record<string, unknown>)[approved.toLowerCase()] === null);
+  }
+  if (!observed || typeof observed !== 'object' || Object.keys(observed).length !== 1 || !('localFixture' in observed)) return false;
+  const fixture = observed.localFixture as { genesis_time?: unknown; genesis_validators_root?: unknown } | null;
+  if (!fixture || Object.keys(fixture).length !== 2 ||
+      !['number', 'string', 'bigint'].includes(typeof fixture.genesis_time) ||
+      (typeof fixture.genesis_time === 'number' && !Number.isSafeInteger(fixture.genesis_time)) ||
+      typeof fixture.genesis_validators_root !== 'string') return false;
+  try {
+    return BigInt(fixture.genesis_time as string | number | bigint) === approved.localFixture.genesis_time &&
+      fixture.genesis_validators_root.toLowerCase() === approved.localFixture.genesis_validators_root.toLowerCase();
+  } catch { return false; }
+}
+
+/** Validate offline chain approval without requiring an inbound consumer profile. */
+export function immutableOwnedFixtureNetwork(descriptor: OwnedFixtureNetwork, transports: readonly string[]): Readonly<OwnedFixtureNetwork> {
+  if (!descriptor || Object.keys(descriptor).sort().join(',') !== 'beaconGenesisTime,beaconGenesisValidatorsRoot,ethereumChainId,ethereumGenesisHash,schemaVersion' ||
+      descriptor.schemaVersion !== 1 || descriptor.ethereumChainId !== 31337 ||
+      [descriptor.ethereumGenesisHash, descriptor.beaconGenesisValidatorsRoot].some(hash => typeof hash !== 'string' ||
+        !/^0x[0-9a-fA-F]{64}$/.test(hash) || BigInt(hash) === 0n) ||
+      !Number.isSafeInteger(descriptor.beaconGenesisTime) || descriptor.beaconGenesisTime <= 0 || !transports.length) {
+    throw new Error('HOLD: independently supplied owned-fixture-network is malformed');
+  }
+  for (const transport of transports) {
+    const url = new URL(transport);
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol) ||
+        !['127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password) {
+      throw new Error('HOLD: LocalFixture transports must use numeric loopback addresses');
+    }
+  }
+  return Object.freeze(structuredClone(descriptor));
+}
+
+/** Offline profile and chain approval must match; live RPC is never approval. */
+export function validateOwnedFixtureNetwork(profile: InboundProofProfile, descriptor: OwnedFixtureNetwork, transports: readonly string[]): void {
+  profile = immutableInboundProfile(profile);
+  descriptor = immutableOwnedFixtureNetwork(descriptor, transports);
+  if (typeof profile.checkpoint.network === 'string' || profile.ethereumChainId !== BigInt(descriptor.ethereumChainId) ||
+      descriptor.ethereumGenesisHash.toLowerCase() !== profile.ethereumGenesisHash.toLowerCase() ||
+      descriptor.beaconGenesisValidatorsRoot.toLowerCase() !== profile.beaconGenesisValidatorsRoot.toLowerCase() ||
+      BigInt(descriptor.beaconGenesisTime) !== profile.beaconGenesisTime) {
+    throw new Error('HOLD: independently supplied owned-fixture-network differs from approved profile');
+  }
+}
+
+export function validateLocalFixtureBeaconSpec(profile: InboundProofProfile, spec: Record<string, string>): void {
+  if (typeof profile.checkpoint.network === 'string') return;
+  if (spec.PRESET_BASE !== 'mainnet' || spec.SECONDS_PER_SLOT !== '12' || spec.SLOTS_PER_EPOCH !== '32' ||
+      spec.EPOCHS_PER_SYNC_COMMITTEE_PERIOD !== '256' || spec.SYNC_COMMITTEE_SIZE !== '512' ||
+      spec.DENEB_FORK_EPOCH !== '0' || spec.ELECTRA_FORK_EPOCH !== '0' ||
+      spec.ELECTRA_FORK_VERSION?.toLowerCase() !== '0x60003137' || spec.FULU_FORK_EPOCH !== '18446744073709551615') {
+    throw new Error('HOLD: LocalFixture requires the standard mainnet preset and fixed Electra-at-genesis schedule');
+  }
+}
+
+
 const ELECTRA_IDL_SHA256 = '70cc917357c2a589063f1efca80b2da0390f3c12c58eecb0b9367228c4bce1b0';
-const CHECKPOINT_IDL_SHA256 = '2e5d5576576bdbbf8bfe7c3a9f83f48be400e602bf47d906d5ab3a7ff1f28b4f';
+const CHECKPOINT_IDL_SHA256 = '65c15d4eccb2a19a8ad240b82738a6335b0e9efd9a054340856f665addaca7e5';
+const LEGACY_PUBLIC_CHECKPOINT_IDL_SHA256 = '2e5d5576576bdbbf8bfe7c3a9f83f48be400e602bf47d906d5ab3a7ff1f28b4f';
 const PROXY_IDL_SHA256 = '4bde230e4759abfedd44070790b3a579d7f75aadff14266e0f1a287f61942bc7';
 
 const BytesFixed96 = new ByteVectorType(96);
@@ -118,6 +219,8 @@ export async function composeProof(
   const originalHeight = sourceHeader.number.toBigInt();
   let observedHash = profile.sourceBlockHash;
   let observedHeight = originalHeight;
+  let previousHash = observedHash;
+  let previousHeight = observedHeight;
   const authenticateSource = async (pin: HexString) => {
     const header = pin === profile.sourceBlockHash ? sourceHeader : await read(() => api.rpc.chain.getHeader(pin));
     const height = header.number.toBigInt();
@@ -129,13 +232,17 @@ export async function composeProof(
     const currentCanonical = height === originalHeight ? originalCanonical : await read(() => api.blocks.getBlockHash(height));
     const observedCanonical = observedHeight === originalHeight ? originalCanonical : observedHeight === height ? currentCanonical :
       await read(() => api.blocks.getBlockHash(observedHeight));
-    if (!originalCanonical.eq(profile.sourceBlockHash) || !currentCanonical.eq(pin) || !observedCanonical.eq(observedHash)) {
+    const previousCanonical = previousHeight === originalHeight ? originalCanonical : previousHeight === observedHeight ? observedCanonical :
+      await read(() => api.blocks.getBlockHash(previousHeight));
+    if (!originalCanonical.eq(profile.sourceBlockHash) || !currentCanonical.eq(pin) || !observedCanonical.eq(observedHash) ||
+        !previousCanonical.eq(previousHash)) {
       throw new Error('Original or observed finalized inbound source history changed');
     }
     const runtimeCode = await read(() => api.rpc.state.getStorage<Bytes>(':code', pin));
     if (!runtimeCode || runtimeCode.isEmpty || blake2AsHex(runtimeCode.toU8a(true), 256) !== profile.sourceRuntimeCodeHash.toLowerCase()) {
       throw new Error('Inbound proof source runtime identity mismatch');
     }
+    if (pin !== observedHash) { previousHash = observedHash; previousHeight = observedHeight; }
     observedHash = pin;
     observedHeight = height;
   };
@@ -170,7 +277,7 @@ export async function composeProof(
     ...(profile.nativeWrapper ? [[profile.nativeWrapper.programId, profile.nativeWrapper.codeId] as const] : []),
   ] as const;
   const authenticateBindings = async (pin: HexString) => {
-    if (await read(() => checkpoint.serviceState.network().atBlock(pin).call()) !== profile.checkpoint.network) {
+    if (!checkpointNetworkMatches(await read(() => checkpoint.serviceState.network().atBlock(pin).call()), profile.checkpoint.network)) {
       throw new Error('Checkpoint immutable network differs from approved inbound profile');
     }
     const endpoint = await read(() => historicalProxyClient.historicalProxy.endpointFor(slot).atBlock(pin).call());
@@ -213,6 +320,8 @@ export async function composeProof(
     throw new Error('Beacon execution payload does not authenticate the original execution receipt block');
   }
   await authenticateSource(observedHash);
+  await authenticateBindings(observedHash);
+  await authenticateSource(observedHash);
   return { proofBlock, proof, transactionIndex: receipt.transactionIndex, receiptRlp };
 }
 
@@ -227,6 +336,7 @@ async function buildInclusionProof(
   const read = <T>(operation: () => Promise<T>) => withOriginalDeadline(deadline, operation);
   const beaconBlock = await read(() => beaconClient.getBlock(slot));
   const spec = await read(() => beaconClient.getSpec());
+  validateLocalFixtureBeaconSpec(profile, spec);
   const epoch = BigInt(slot) / 32n;
   let selected: InboundProofProfile['forks'][number] | undefined;
   let previousEpoch = -1n;

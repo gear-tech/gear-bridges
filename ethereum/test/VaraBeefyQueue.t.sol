@@ -4,6 +4,8 @@ pragma solidity ^0.8.37;
 import {BeefyFixtureTest} from "./BeefyInterop.t.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {GovernancePauser} from "src/GovernancePauser.sol";
@@ -17,7 +19,10 @@ import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
+import {VerifierMock} from "src/mocks/VerifierMock.sol";
 
 contract VaraQueueRootVerifierTest is BeefyFixtureTest {
     BeefyClient internal client;
@@ -364,6 +369,76 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         );
     }
 
+    function testHistoricalBackfillHasIndependentMaturity() public {
+        _historicalBackfill(false);
+    }
+
+    function testIdenticalHistoricalBackfillHasIndependentMaturity() public {
+        _historicalBackfill(true);
+    }
+
+    function _historicalBackfill(bool identical) private {
+        assertEq(queue.beefyRootMinimum(), 100);
+        VaraMessage memory message = VaraMessage(710, bytes32(uint256(77)), address(receiver), bytes("backfill"));
+        bytes32 root = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
+        uint64 timestamp = uint64(vm.getBlockTimestamp() * 1000);
+        bytes32 firstRoot = identical ? root : bytes32(uint256(0x1234));
+        QueueProof memory first = customQueueProofFor(client, 102, 103, firstRoot, timestamp, timestamp);
+        queue.submitMerkleRoot(102, firstRoot, encodeProof(first));
+        uint256 firstTime = vm.getBlockTimestamp();
+        vm.warp(firstTime + queue.PROCESS_USER_MESSAGE_DELAY());
+        QueueProof memory historical =
+            customQueueProofFor(client, 100, 104, root, timestamp, uint64(vm.getBlockTimestamp() * 1000));
+        queue.submitMerkleRoot(100, root, encodeProof(historical));
+        assertEq(queue.genesisBlock(), 102);
+        assertEq(queue.maxBlockNumber(), 102);
+        assertEq(queue.getMerkleRootTimestampForBlock(102), firstTime);
+        uint256 registered = vm.getBlockTimestamp();
+        assertEq(queue.getMerkleRootTimestampForBlock(100), registered);
+        vm.expectRevert(IMessageQueue.MerkleRootDelayNotPassed.selector);
+        queue.processMessage(100, 1, 0, message, new bytes32[](0));
+        vm.warp(registered + queue.PROCESS_USER_MESSAGE_DELAY() - 1);
+        vm.expectRevert(IMessageQueue.MerkleRootDelayNotPassed.selector);
+        queue.processMessage(100, 1, 0, message, new bytes32[](0));
+        vm.warp(registered + queue.PROCESS_USER_MESSAGE_DELAY());
+        queue.processMessage(100, 1, 0, message, new bytes32[](0));
+        assertTrue(queue.isProcessed(message.nonce));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, message.nonce));
+        queue.processMessage(identical ? 102 : 100, 1, 0, message, new bytes32[](0));
+    }
+
+    function testBackfillAfterEmptyProgressAndForwardBoundary() public {
+        bytes32 root = bytes32(uint256(0x712));
+        uint64 timestamp = uint64(block.timestamp * 1000);
+        QueueProof memory initial = customQueueProofFor(client, 100, 103, root, timestamp, timestamp);
+        queue.submitMerkleRoot(100, root, encodeProof(initial));
+        vm.expectRevert(
+            abi.encodeWithSelector(IMessageQueue.BlockNumberBelowMinimum.selector, uint256(99), uint256(100))
+        );
+        queue.submitMerkleRoot(99, root, "");
+        vm.expectRevert(
+            abi.encodeWithSelector(IMessageQueue.BlockNumberTooFar.selector, uint256(57701), uint256(57700))
+        );
+        queue.submitMerkleRoot(57701, root, "");
+        uint256 saved = vm.snapshotState();
+        QueueProof memory boundary = customQueueProofFor(client, 57700, 57701, root, timestamp, timestamp);
+        queue.submitMerkleRoot(57700, root, encodeProof(boundary));
+        assertEq(queue.maxBlockNumber(), 57700);
+        assertTrue(vm.revertToState(saved));
+        QueueProof memory progress = customQueueProofFor(client, 104, 105, bytes32(0), timestamp, timestamp);
+        queue.submitEmptyQueueProgress(104, encodeProof(progress));
+        QueueProof memory backfill = customQueueProofFor(client, 103, 106, root, timestamp, timestamp);
+        queue.submitMerkleRoot(103, root, encodeProof(backfill));
+        assertEq(queue.genesisBlock(), 100);
+        assertEq(queue.maxBlockNumber(), 104);
+        assertEq(queue.getMerkleRoot(103), root);
+        assertEq(queue.getMerkleRoot(104), bytes32(0));
+        vm.expectRevert(IMessageQueue.EmptyQueueProgressNotForward.selector);
+        queue.submitEmptyQueueProgress(104, encodeProof(progress));
+        vm.expectRevert(IMessageQueue.EmptyQueueProgressNotForward.selector);
+        queue.submitEmptyQueueProgress(103, encodeProof(backfill));
+    }
+
     function testHistoricalQueueTimestampAllowedUnderLiveAnchor() public {
         uint64 baseTimestamp = uint64(vm.parseJsonUint(fixtures, ".cases[0].sourceTimestampMs"));
         uint64 historicalTimestamp = baseTimestamp - 86_401_000;
@@ -599,24 +674,18 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), adminRole)
         );
         queue.upgradeToAndCall(address(replacement), "");
-        vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), adminRole)
-        );
-        queue.reinitialize();
 
         uint256 floor = queue.beefyRootMinimum();
         vm.prank(queue.governanceAdmin());
-        queue.upgradeToAndCall(address(replacement), abi.encodeCall(MessageQueue.reinitialize, ()));
-        address multisig = 0x1111111111111111111111111111111111111111;
+        queue.upgradeToAndCall(address(replacement), "");
         assertTrue(queue.hasRole(adminRole, queue.governanceAdmin()));
-        assertTrue(queue.hasRole(adminRole, multisig));
-        assertTrue(queue.hasRole(queue.PAUSER_ROLE(), multisig));
+        assertFalse(queue.hasRole(adminRole, address(this)));
         assertEq(queue.beefyRootMinimum(), floor);
         assertEq(queue.verifier(), address(verifier));
         assertEq(queue.genesisBlock(), rootBlock);
         assertEq(queue.maxBlockNumber(), rootBlock);
         MessageQueue nextImplementation = new MessageQueue();
-        vm.prank(multisig);
+        vm.prank(queue.governanceAdmin());
         queue.upgradeToAndCall(address(nextImplementation), "");
         assertEq(queue.beefyRootMinimum(), floor);
         assertEq(queue.verifier(), address(verifier));
@@ -638,6 +707,251 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, retained.nonce));
         siblings[0] = firstLeaf;
         queue.processMessage(rootBlock, 2, 1, retained, siblings);
+    }
+
+    function legacyQueue(string memory artifact, uint256 height) internal returns (MessageQueue legacy) {
+        address implementation = vm.parseJsonAddress(artifact, ".implementation");
+        bytes memory code = vm.parseJsonBytes(artifact, ".deployedBytecode");
+        assertEq(keccak256(code), vm.parseJsonBytes32(artifact, ".codeHash"));
+        vm.etch(implementation, code);
+        legacy = MessageQueue(
+            address(
+                new ERC1967Proxy(
+                    implementation,
+                    abi.encodeCall(
+                        MessageQueue.initialize,
+                        (
+                            IGovernance(queue.governanceAdmin()),
+                            IGovernance(queue.governancePauser()),
+                            address(this),
+                            new address[](0),
+                            IVerifier(address(new VerifierMock(true)))
+                        )
+                    )
+                )
+            )
+        );
+        vm.prank(legacy.governanceAdmin());
+        (bool ok,) = address(legacy).call(abi.encodeWithSignature("reinitialize()"));
+        assertTrue(ok);
+        assertTrue(legacy.isProcessed(836));
+        VaraMessage memory message = VaraMessage(835, bytes32(uint256(77)), address(receiver), hex"abcd");
+        legacy.submitMerkleRoot(height, Hasher.hash(message), "");
+    }
+
+    // Fixture authorities exercise contract migration, not a production BEEFY bootstrap.
+    function migrationVerifier(MessageQueue target) internal returns (VaraQueueRootVerifier next) {
+        uint64 start = uint64(fixtureUint(0, "mmrStartBlock"));
+        bytes32 authorityRoot = fixtureHash(0, "authorityRoot");
+        uint128 count = uint128(fixtureUint(0, "validatorCount"));
+        BeefyClient nextClient = new BeefyClient(
+            fixtureHash(0, "sourceDomain"),
+            block.chainid,
+            address(target),
+            start,
+            start + 1,
+            uint64(block.timestamp * 1000),
+            BeefyClient.ValidatorSet(0, count, authorityRoot),
+            BeefyClient.ValidatorSet(1, count, authorityRoot)
+        );
+        next = new VaraQueueRootVerifier(nextClient, address(target), block.chainid);
+    }
+
+    function migrateLegacy(MessageQueue legacy, VaraQueueRootVerifier next, uint256 floor, bytes32 initializableSlot)
+        internal
+    {
+        address implementation = address(new MessageQueue());
+        bytes memory data = abi.encodeCall(
+            MessageQueue.migrateToBeefy,
+            (IVerifier(legacy.verifier()), IVerifier(address(next)), legacy.maxBlockNumber(), floor)
+        );
+        address admin = legacy.governanceAdmin();
+        vm.record();
+        vm.prank(admin);
+        legacy.upgradeToAndCall(implementation, data);
+        (, bytes32[] memory writes) = vm.accesses(address(legacy));
+        for (uint256 i; i < writes.length; ++i) {
+            assertTrue(
+                writes[i] == ERC1967Utils.IMPLEMENTATION_SLOT || writes[i] == initializableSlot
+                    || writes[i] == bytes32(uint256(5)) || writes[i] == bytes32(uint256(14)),
+                "migration overwrote legacy state"
+            );
+        }
+        assertTrue(legacy.paused());
+        assertEq(legacy.verifier(), address(next));
+        assertEq(legacy.beefyRootMinimum(), floor);
+        assertTrue(legacy.hasRole(legacy.DEFAULT_ADMIN_ROLE(), admin));
+    }
+
+    function testLegacyMigrationPreservesClaimsAndAdmitsBeefyRoots() public {
+        string memory artifact = vm.readFile("test/fixtures/mainnet-legacy-queue.json");
+        MessageQueue legacy = legacyQueue(artifact, 120);
+        VaraMessage memory oldMessage = VaraMessage(835, bytes32(uint256(77)), address(receiver), hex"abcd");
+        VaraMessage memory newMessage = VaraMessage(837, oldMessage.source, address(receiver), hex"1234");
+        bytes32 oldRoot = Hasher.hash(oldMessage);
+        uint256 timestamp = block.timestamp;
+        VaraQueueRootVerifier next = migrationVerifier(legacy);
+        QueueProof memory proof = customQueueProofFor(
+            next.beefyClient(), 121, 123, Hasher.hash(newMessage), uint64(timestamp * 1000), uint64(timestamp * 1000)
+        );
+        vm.prank(legacy.governancePauser());
+        legacy.pause();
+        migrateLegacy(legacy, next, 121, vm.parseJsonBytes32(artifact, ".initializableSlot"));
+        assertEq(legacy.genesisBlock(), 120);
+        assertEq(legacy.maxBlockNumber(), 120);
+        assertEq(legacy.getMerkleRoot(120), oldRoot);
+        assertEq(legacy.getMerkleRootTimestampForBlock(120), timestamp);
+        assertTrue(legacy.isProcessed(836));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.BlockNumberBelowMinimum.selector, 120, 121));
+        legacy.submitMerkleRoot(120, oldRoot, "");
+        legacy.submitMerkleRoot(121, Hasher.hash(newMessage), encodeProof(proof));
+        vm.warp(timestamp + legacy.PROCESS_USER_MESSAGE_DELAY());
+        vm.prank(legacy.governancePauser());
+        legacy.unpause();
+        legacy.processMessage(120, 1, 0, oldMessage, new bytes32[](0));
+        legacy.processMessage(121, 1, 0, newMessage, new bytes32[](0));
+        assertTrue(legacy.isProcessed(835));
+        assertTrue(legacy.isProcessed(837));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, 835));
+        legacy.processMessage(120, 1, 0, oldMessage, new bytes32[](0));
+    }
+
+    function testLegacyMigrationRejectsUnsafeCutoversAtomically() public {
+        string memory artifact = vm.readFile("test/fixtures/mainnet-legacy-queue.json");
+        MessageQueue legacy = legacyQueue(artifact, 90);
+        VaraQueueRootVerifier next = migrationVerifier(legacy);
+        address admin = legacy.governanceAdmin();
+        address implementation = address(new MessageQueue());
+        IVerifier oldVerifier = IVerifier(legacy.verifier());
+        bytes memory validData = abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 90, 100));
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), bytes32(0))
+        );
+        legacy.upgradeToAndCall(implementation, validData);
+        vm.expectRevert(bytes4(keccak256("ExpectedPause()")));
+        vm.prank(admin);
+        legacy.upgradeToAndCall(implementation, validData);
+        vm.prank(legacy.governancePauser());
+        legacy.pause();
+        // A bootstrap without any authenticated root must not disable the legacy verifier.
+        vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
+        vm.prank(admin);
+        legacy.upgradeToAndCall(implementation, validData);
+        customQueueProofFor(
+            next.beefyClient(),
+            100,
+            103,
+            bytes32(uint256(1)),
+            uint64(block.timestamp * 1000),
+            uint64(block.timestamp * 1000)
+        );
+        uint256[5] memory invalidFloors =
+            [uint256(90), 99, 103, 90 + legacy.MAX_BLOCK_DISTANCE() + 1, uint256(type(uint32).max) + 1];
+        for (uint256 i; i < invalidFloors.length; ++i) {
+            bytes memory data = abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 90, invalidFloors[i]));
+            vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
+            vm.prank(admin);
+            legacy.upgradeToAndCall(implementation, data);
+        }
+        bytes memory staleData = abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 91, 100));
+        vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
+        vm.prank(admin);
+        legacy.upgradeToAndCall(implementation, staleData);
+        staleData = abi.encodeCall(MessageQueue.migrateToBeefy, (IVerifier(address(1)), next, 90, 100));
+        vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
+        vm.prank(admin);
+        legacy.upgradeToAndCall(implementation, staleData);
+        vm.warp(block.timestamp + next.beefyClient().MAX_SOURCE_AGE_MS() / 1000 + 1);
+        vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
+        vm.prank(admin);
+        legacy.upgradeToAndCall(implementation, validData);
+        assertEq(
+            address(uint160(uint256(vm.load(address(legacy), ERC1967Utils.IMPLEMENTATION_SLOT)))),
+            vm.parseJsonAddress(artifact, ".implementation")
+        );
+        assertEq(legacy.verifier(), address(oldVerifier));
+        assertEq(vm.load(address(legacy), bytes32(uint256(14))), bytes32(0));
+        assertEq(uint64(uint256(vm.load(address(legacy), vm.parseJsonBytes32(artifact, ".initializableSlot")))), 6);
+        assertTrue(legacy.isProcessed(836));
+    }
+
+    function testMainnetForkMigrationPreservesCustodyAndRedeemsLegacyClaim() public {
+        string memory rpc = vm.envOr("MAINNET_MIGRATION_RPC_URL", string(""));
+        if (bytes(rpc).length == 0) {
+            vm.skip(true);
+            return;
+        }
+        string memory artifact = vm.readFile("test/fixtures/mainnet-legacy-queue.json");
+        uint256 height = vm.parseJsonUint(artifact, ".ethereumBlock");
+        vm.createSelectFork(rpc, height);
+        assertEq(block.chainid, 1);
+        vm.roll(height + 1);
+        assertEq(blockhash(height), vm.parseJsonBytes32(artifact, ".ethereumBlockHash"));
+        vm.roll(height);
+        MessageQueue legacy = MessageQueue(vm.parseJsonAddress(artifact, ".queue"));
+        address oldImplementation =
+            address(uint160(uint256(vm.load(address(legacy), ERC1967Utils.IMPLEMENTATION_SLOT))));
+        assertEq(oldImplementation.codehash, vm.parseJsonBytes32(artifact, ".codeHash"));
+        bytes32 initSlot = vm.parseJsonBytes32(artifact, ".initializableSlot");
+        assertEq(uint64(uint256(vm.load(address(legacy), initSlot))), 6);
+        VaraMessage memory claim = VaraMessage(
+            vm.parseJsonUint(artifact, ".claims.pending21.nonce"),
+            vm.parseJsonBytes32(artifact, ".claims.pending21.source"),
+            vm.parseJsonAddress(artifact, ".claims.pending21.destination"),
+            vm.parseJsonBytes(artifact, ".claims.pending21.payload")
+        );
+        uint256 sourceBlock = vm.parseJsonUint(artifact, ".claims.pending21.sourceBlock");
+        bytes32 root = vm.parseJsonBytes32(artifact, ".claims.pending21.root");
+        assertEq(legacy.getMerkleRoot(sourceBlock), root);
+        assertFalse(legacy.isProcessed(claim.nonce));
+        assertTrue(legacy.isProcessed(864));
+        assertTrue(legacy.isProcessed(836));
+        uint256 legacyTimestamp = uint256(vm.load(address(legacy), keccak256(abi.encode(root, uint256(12)))));
+        uint256 maxBlock = legacy.maxBlockNumber();
+        uint256 genesis = legacy.genesisBlock();
+        address[] memory tokens = ERC20Manager(claim.destination).tokens();
+        uint256[] memory custody = new uint256[](tokens.length);
+        uint256[] memory supplies = new uint256[](tokens.length);
+        for (uint256 i; i < tokens.length; ++i) {
+            custody[i] = IERC20(tokens[i]).balanceOf(claim.destination);
+            supplies[i] = IERC20(tokens[i]).totalSupply();
+        }
+        VaraQueueRootVerifier next = migrationVerifier(legacy);
+        customQueueProofFor(
+            next.beefyClient(),
+            uint32(maxBlock + 1),
+            uint64(maxBlock + 3),
+            bytes32(uint256(1)),
+            uint64(block.timestamp * 1000),
+            uint64(block.timestamp * 1000)
+        );
+        // Local authority impersonation only; no source governance proof or public transaction.
+        vm.prank(legacy.governancePauser());
+        legacy.pause();
+        migrateLegacy(legacy, next, maxBlock + 1, initSlot);
+        assertEq(legacy.genesisBlock(), genesis);
+        assertEq(legacy.maxBlockNumber(), maxBlock);
+        assertEq(legacy.getMerkleRoot(sourceBlock), root);
+        assertEq(legacy.getMerkleRootTimestampForBlock(sourceBlock), legacyTimestamp);
+        assertTrue(legacy.isProcessed(864));
+        assertTrue(legacy.isProcessed(836));
+        for (uint256 i; i < tokens.length; ++i) {
+            assertEq(IERC20(tokens[i]).balanceOf(claim.destination), custody[i]);
+            assertEq(IERC20(tokens[i]).totalSupply(), supplies[i]);
+        }
+        IERC20 token = IERC20(vm.parseJsonAddress(artifact, ".claims.pending21.token"));
+        address recipient = vm.parseJsonAddress(artifact, ".claims.pending21.recipient");
+        uint256 amount = vm.parseUint(vm.parseJsonString(artifact, ".claims.pending21.amount"));
+        uint256 recipientBefore = token.balanceOf(recipient);
+        uint256 supplyBefore = token.totalSupply();
+        vm.prank(legacy.governancePauser());
+        legacy.unpause();
+        legacy.processMessage(sourceBlock, 1, 0, claim, new bytes32[](0));
+        assertEq(token.balanceOf(recipient), recipientBefore + amount);
+        assertEq(token.totalSupply(), supplyBefore + amount);
+        assertTrue(legacy.isProcessed(claim.nonce));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, claim.nonce));
+        legacy.processMessage(sourceBlock, 1, 0, claim, new bytes32[](0));
     }
 }
 

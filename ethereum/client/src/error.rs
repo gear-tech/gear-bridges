@@ -17,6 +17,8 @@ pub enum Error {
     ErrorSendingTransaction(alloy::contract::Error),
     #[error("Error querying event: {0}")]
     ErrorQueryingEvent(alloy::contract::Error),
+    #[error("Invalid merkle root observation: {0}")]
+    InvalidMerkleRootObservation(String),
     #[error("Error waiting transaction receipt")]
     ErrorWaitingTransactionReceipt,
     #[error("Error fetching transaction")]

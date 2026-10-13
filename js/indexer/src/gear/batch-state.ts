@@ -1,7 +1,7 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
 import { Store } from '@subsquid/typeorm-store';
 import { createPairHash } from 'gear-bridge-common';
-import { In } from 'typeorm';
+import { In, MoreThan } from 'typeorm';
 
 import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer, ReceiptRelay, ReceiptSettlement, Status } from '../model/index.js';
 import { BaseBatchState, mapKeys, mapValues, setValues } from '../common/index.js';
@@ -45,6 +45,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private _ethBridgeMessages: Map<string, GearEthBridgeMessage>;
   private _receiptRelays: Map<string, Relayed> = new Map();
   private _receiptSettlements: Map<string, ReceiptSettlement> = new Map();
+  private _receiptSettlementCursor?: string;
 
   constructor() {
     super(NETWORK, COUNTERPART_NETWORK);
@@ -184,29 +185,73 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   private async _saveReceiptSettlements() {
-    for (const [id, relay] of this._receiptRelays) {
-      const existing = await this._ctx.store.findOneBy(ReceiptRelay, { id });
-      if (existing && BigInt(existing.blockNumber) !== BigInt(relay.block_number)) {
-        throw new Error('HOLD: conflicting authenticated receipt block');
+    const batchSize = 1000;
+    const relays = [...this._receiptRelays.entries()];
+    for (let offset = 0; offset < relays.length; offset += batchSize) {
+      const batch = relays.slice(offset, offset + batchSize);
+      const existing = new Map((await this._ctx.store.find(ReceiptRelay, {
+        where: { id: In(batch.map(([id]) => id)) },
+      })).map((row) => [row.id, row]));
+      const added: ReceiptRelay[] = [];
+      for (const [id, relay] of batch) {
+        const row = existing.get(id);
+        if (row && BigInt(row.blockNumber) !== BigInt(relay.block_number)) {
+          throw new Error('HOLD: conflicting authenticated receipt block');
+        }
+        if (!row) added.push(new ReceiptRelay({ id, blockNumber: BigInt(relay.block_number) }));
       }
-      if (!existing) await this._ctx.store.save(new ReceiptRelay({ id, blockNumber: BigInt(relay.block_number) }));
+      if (added.length) await this._ctx.store.save(added);
     }
-    for (const settlement of this._receiptSettlements.values()) {
-      const existing = await this._ctx.store.findOneBy(ReceiptSettlement, { id: settlement.id });
-      if (existing && !sameDeposit(existing.deposit, settlement.deposit)) {
-        throw new Error('HOLD: conflicting receipt deposit settlement');
+    const settlements = mapValues(this._receiptSettlements);
+    for (let offset = 0; offset < settlements.length; offset += batchSize) {
+      const batch = settlements.slice(offset, offset + batchSize);
+      const existing = new Map((await this._ctx.store.find(ReceiptSettlement, {
+        where: { id: In(batch.map(({ id }) => id)) },
+      })).map((row) => [row.id, row]));
+      const added: ReceiptSettlement[] = [];
+      for (const settlement of batch) {
+        const row = existing.get(settlement.id);
+        if (row && !sameDeposit(row.deposit, settlement.deposit)) {
+          throw new Error('HOLD: conflicting receipt deposit settlement');
+        }
+        if (!row) added.push(settlement);
       }
-      if (!existing) await this._ctx.store.save(settlement);
+      if (added.length) await this._ctx.store.save(added);
     }
-    const pending = await this._ctx.store.find(ReceiptSettlement, { where: { matched: false } });
+    // ponytail: one bounded keyset page per batch; cycle pending rows so late arrivals still match.
+    const loadPending = () => this._ctx.store.find(ReceiptSettlement, {
+      where: { matched: false, ...(this._receiptSettlementCursor ? { id: MoreThan(this._receiptSettlementCursor) } : {}) },
+      order: { id: 'ASC' }, take: batchSize,
+    });
+    let pending = await loadPending();
+    if (!pending.length && this._receiptSettlementCursor) {
+      this._receiptSettlementCursor = undefined;
+      pending = await loadPending();
+    }
+    if (!pending.length) return;
+    const receiptIds = [...new Set(pending.map(({ deposit: d }) => d.slot + ':' + d.transaction_index))];
+    const authenticated = new Map((await this._ctx.store.find(ReceiptRelay, {
+      where: { id: In(receiptIds) },
+    })).map((row) => [row.id, row]));
+    const tuples = pending.flatMap(({ deposit: d }) => {
+      const relay = authenticated.get(d.slot + ':' + d.transaction_index);
+      return relay ? [{ sourceNetwork: Network.Ethereum, blockNumber: relay.blockNumber,
+        sourceTransactionIndex: BigInt(d.transaction_index), sourceLogIndex: BigInt(d.log_index) }] : [];
+    });
+    const transfers = tuples.length ? await this._ctx.store.find(Transfer, { where: tuples }) : [];
+    const byTuple = new Map<string, Transfer>();
+    for (const transfer of transfers) {
+      const tuple = transfer.blockNumber + ':' + transfer.sourceTransactionIndex + ':' + transfer.sourceLogIndex;
+      if (byTuple.has(tuple)) throw new Error('HOLD: ambiguous original receipt transfer tuple');
+      byTuple.set(tuple, transfer);
+    }
+    const changedTransfers = new Map<string, Transfer>();
+    const matched: ReceiptSettlement[] = [];
     for (const settlement of pending) {
       const d = settlement.deposit;
-      const relay = await this._ctx.store.findOneBy(ReceiptRelay, { id: `${d.slot}:${d.transaction_index}` });
+      const relay = authenticated.get(d.slot + ':' + d.transaction_index);
       if (!relay) continue;
-      const transfer = await this._ctx.store.findOneBy(Transfer, {
-        sourceNetwork: Network.Ethereum, blockNumber: relay.blockNumber,
-        sourceTransactionIndex: BigInt(d.transaction_index), sourceLogIndex: BigInt(d.log_index),
-      });
+      const transfer = byTuple.get(relay.blockNumber + ':' + BigInt(d.transaction_index) + ':' + BigInt(d.log_index));
       if (!transfer || transfer.source.toLowerCase() !== d.eth_token_id.toLowerCase() ||
           transfer.destination.toLowerCase() !== d.vara_token_id.toLowerCase() ||
           transfer.sender.toLowerCase() !== d.sender.toLowerCase() ||
@@ -223,9 +268,12 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
         transfer.completedAtTxHash = settlement.txHash;
       }
       settlement.matched = true;
-      await this._ctx.store.save(transfer);
-      await this._ctx.store.save(settlement);
+      changedTransfers.set(transfer.id, transfer);
+      matched.push(settlement);
     }
+    if (changedTransfers.size) await this._ctx.store.save(mapValues(changedTransfers));
+    if (matched.length) await this._ctx.store.save(matched);
+    this._receiptSettlementCursor = pending[pending.length - 1].id;
   }
 
   public async save() {

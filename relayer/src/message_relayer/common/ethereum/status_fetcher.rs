@@ -5,7 +5,8 @@ use alloy::{
 };
 use ethereum_client::{
     abi::{IERC20Manager, IMessageQueue},
-    EthApi, FinalizedTransactionReceipt, PreparedContentMessage, TxHash,
+    EthApi, FinalizedSubmissionSnapshot, FinalizedTransactionReceipt, PreparedContentMessage,
+    TxHash,
 };
 use futures::{future::BoxFuture, stream::FuturesUnordered, StreamExt};
 use gear_rpc_client::dto::Message;
@@ -14,7 +15,10 @@ use prometheus::{
     IntCounter, IntGauge,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{
+    collections::{BTreeMap, HashSet},
+    time::Duration,
+};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
@@ -46,11 +50,31 @@ pub struct CompletionEvidence {
     pub token_delivery: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FinalizedFailureEvidence {
+    pub receipt: alloy::rpc::types::TransactionReceipt,
+    pub included_block_number: u64,
+    pub included_block_hash: B256,
+    pub finalized_block_number: u64,
+    pub finalized_block_hash: B256,
+}
+
+#[derive(Clone, Debug)]
+pub enum SubmissionOutcome {
+    Completed(CompletionEvidence),
+    FinalizedRevert(FinalizedFailureEvidence),
+    NeedsReconciliation {
+        diagnostic: String,
+        nonce_disposition: Option<FinalizedSubmissionSnapshot>,
+    },
+}
+
 const TX_VISIBILITY_RECHECK_DELAY: Duration = Duration::from_secs(15);
-type TxWatch = BoxFuture<'static, (TrackedRequest, Result<CompletionEvidence, String>)>;
+type TxWatch = BoxFuture<'static, (TrackedRequest, SubmissionOutcome)>;
 pub struct StatusFetcherIo {
     requests: UnboundedSender<TrackedRequest>,
-    responses: UnboundedReceiver<(Uuid, Result<CompletionEvidence, String>)>,
+    responses: UnboundedReceiver<(Uuid, SubmissionOutcome)>,
 }
 impl StatusFetcherIo {
     pub fn send_request(
@@ -69,7 +93,7 @@ impl StatusFetcherIo {
             })
             .is_ok()
     }
-    pub async fn recv_message(&mut self) -> Option<(Uuid, Result<CompletionEvidence, String>)> {
+    pub async fn recv_message(&mut self) -> Option<(Uuid, SubmissionOutcome)> {
         self.responses.recv().await
     }
 }
@@ -129,20 +153,24 @@ impl StatusFetcher {
 async fn task(
     this: StatusFetcher,
     mut requests: UnboundedReceiver<TrackedRequest>,
-    responses: UnboundedSender<(Uuid, Result<CompletionEvidence, String>)>,
+    responses: UnboundedSender<(Uuid, SubmissionOutcome)>,
 ) {
     let mut watches = FuturesUnordered::new();
+    let mut registered = HashSet::new();
+    let mut failed_originals = HashSet::new();
     loop {
         tokio::select! {
             request = requests.recv() => {
                 let Some(request) = request else { return };
+                // Restored originals and duplicate registration share one read-only watch.
+                if !registered.insert((request.tx_uuid, request.tx_hash)) { continue }
                 this.metrics.pending_tx_count.inc();
                 watches.push(watch_tx(this.eth_api.clone(), request, this.confirmations));
             }
             Some((request, outcome)) = watches.next(), if !watches.is_empty() => {
                 this.metrics.pending_tx_count.dec();
                 match &outcome {
-                    Ok(evidence) => {
+                    SubmissionOutcome::Completed(evidence) => {
                         this.metrics.total_gas_used.inc_by(evidence.receipt.gas_used);
                         let gas = evidence.receipt.gas_used;
                         this.metrics.last_gas_used.set(gas);
@@ -150,8 +178,12 @@ async fn task(
                         if min == 0 || gas < min { this.metrics.min_gas_used.set(gas); }
                         if gas > this.metrics.max_gas_used.get() { this.metrics.max_gas_used.set(gas); }
                     }
-                    Err(_) => {
-                        this.metrics.total_failed_txs.inc();
+                    SubmissionOutcome::FinalizedRevert(_) => {
+                        if failed_originals.insert(request.tx_hash) { this.metrics.total_failed_txs.inc(); }
+                    }
+                    SubmissionOutcome::NeedsReconciliation { .. } => {
+                        // Holds are operations with unresolved effects, never failed transactions.
+                        registered.remove(&(request.tx_uuid, request.tx_hash));
                     }
                 };
                 if responses.send((request.tx_uuid, outcome)).is_err() { return }
@@ -160,11 +192,10 @@ async fn task(
     }
 }
 
-pub fn validate_completion(
+fn original_call(
     message: &Message,
     signed: &PreparedContentMessage,
-    evidence: &CompletionEvidence,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<IMessageQueue::processMessageCall> {
     use alloy::{
         consensus::{Transaction, TxEnvelope},
         eips::Decodable2718,
@@ -174,12 +205,30 @@ pub fn validate_completion(
     let envelope = TxEnvelope::decode_2718(&mut raw)?;
     let call = IMessageQueue::processMessageCall::abi_decode_validate(envelope.input())?;
     anyhow::ensure!(
-        call.message.nonce == U256::from_be_bytes(message.nonce_be)
+        envelope.value() == U256::ZERO
+            && envelope.input().as_ref() == call.abi_encode().as_slice()
+            && call.message.nonce == U256::from_be_bytes(message.nonce_be)
             && call.message.source == B256::from(message.source)
             && call.message.destination == Address::from(message.destination)
             && call.message.payload.as_ref() == message.payload.as_slice(),
         "HOLD: signed original message differs from source identity"
     );
+    Ok(call)
+}
+
+pub fn validate_original_submission(
+    message: &Message,
+    signed: &PreparedContentMessage,
+) -> anyhow::Result<()> {
+    original_call(message, signed).map(|_| ())
+}
+
+pub fn validate_completion(
+    message: &Message,
+    signed: &PreparedContentMessage,
+    evidence: &CompletionEvidence,
+) -> anyhow::Result<()> {
+    let call = original_call(message, signed)?;
     let receipt = &evidence.receipt;
     anyhow::ensure!(
         receipt.transaction_hash == signed.hash
@@ -248,6 +297,61 @@ pub fn validate_completion(
     Ok(())
 }
 
+pub fn validate_failure(
+    message: &Message,
+    signed: &PreparedContentMessage,
+    evidence: &FinalizedFailureEvidence,
+) -> anyhow::Result<()> {
+    validate_original_submission(message, signed)?;
+    let receipt = &evidence.receipt;
+    anyhow::ensure!(
+        receipt.transaction_hash == signed.hash
+            && receipt.from == signed.sender
+            && receipt.to == Some(signed.contract)
+            && !receipt.status()
+            && receipt.inner.logs().is_empty()
+            && receipt.transaction_index.is_some()
+            && receipt.block_number == Some(evidence.included_block_number)
+            && receipt.block_hash == Some(evidence.included_block_hash)
+            && evidence.included_block_hash != B256::ZERO
+            && evidence.finalized_block_hash != B256::ZERO
+            && evidence.finalized_block_number >= evidence.included_block_number
+            && (evidence.finalized_block_number != evidence.included_block_number
+                || evidence.finalized_block_hash == evidence.included_block_hash),
+        "HOLD: reverted original receipt differs from signed identity or finalized inclusion"
+    );
+    Ok(())
+}
+
+pub async fn failure_evidence(
+    api: &EthApi,
+    message: &Message,
+    signed: &PreparedContentMessage,
+    finalized: FinalizedTransactionReceipt,
+) -> anyhow::Result<FinalizedFailureEvidence> {
+    let evidence = FinalizedFailureEvidence {
+        receipt: finalized.receipt,
+        included_block_number: finalized.included_block_number,
+        included_block_hash: finalized.included_block_hash,
+        finalized_block_number: finalized.finalized_block_number,
+        finalized_block_hash: finalized.finalized_block_hash,
+    };
+    validate_failure(message, signed, &evidence)?;
+    let mut view = api.verified_finalized_view().await?;
+    view.verify_blocks(
+        api.raw_provider(),
+        &BTreeMap::from([
+            (evidence.included_block_number, evidence.included_block_hash),
+            (
+                evidence.finalized_block_number,
+                evidence.finalized_block_hash,
+            ),
+        ]),
+    )
+    .await?;
+    Ok(evidence)
+}
+
 pub async fn completion_evidence(
     api: &EthApi,
     message: &Message,
@@ -292,21 +396,41 @@ fn finalized_receipt_has_required_confirmations(included: u64, head: u64, requir
 }
 fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxWatch {
     Box::pin(async move {
+        let hold = |diagnostic: String| SubmissionOutcome::NeedsReconciliation {
+            diagnostic,
+            nonce_disposition: None,
+        };
+        let Some(signed) = request.submission.as_ref() else {
+            return (
+                request,
+                hold("HOLD: original signed transaction bytes/nonce are missing".into()),
+            );
+        };
+        let identity = original_call(&request.message, signed).and_then(|call| {
+            anyhow::ensure!(
+                signed.hash == request.tx_hash,
+                "HOLD: original hash differs from watcher identity"
+            );
+            api.validate_prepared_content_message(
+                signed,
+                call.blockNumber.try_into()?,
+                call.totalLeaves.try_into()?,
+                call.leafIndex.try_into()?,
+                request.message.nonce_be,
+                request.message.source,
+                request.message.destination,
+                request.message.payload.clone(),
+                call.proof.into_iter().map(|hash| hash.0).collect(),
+            )
+        });
+        if let Err(error) = identity {
+            return (request, hold(error.to_string()));
+        }
         loop {
-            let Some(signed) = request.submission.as_ref() else {
-                return (
-                    request,
-                    Err("HOLD: original signed transaction bytes/nonce are missing".into()),
-                );
-            };
-            if signed.hash != request.tx_hash
-                || signed.contract.as_slice() != api.message_queue_address().as_bytes()
-            {
-                return (
-                    request,
-                    Err("HOLD: original transaction differs from watcher/queue identity".into()),
-                );
-            }
+            let signed = request
+                .submission
+                .as_ref()
+                .expect("original validated above");
             match api.get_finalized_receipt(request.tx_hash).await {
                 Ok(Some(receipt)) => {
                     if finalized_receipt_has_required_confirmations(
@@ -314,13 +438,18 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
                         receipt.finalized_block_number,
                         confirmations,
                     ) {
-                        match completion_evidence(&api, &request.message, signed, receipt).await {
-                            Ok(evidence) => return (request, Ok(evidence)),
-                            Err(error)
-                                if matches!(error.downcast_ref::<alloy::contract::Error>(),
-                                Some(alloy::contract::Error::TransportError(error))
-                                    if crate::common::is_rpc_transport_error_recoverable(error)) =>
-                            {
+                        let result = if receipt.receipt.status() {
+                            completion_evidence(&api, &request.message, signed, receipt)
+                                .await
+                                .map(SubmissionOutcome::Completed)
+                        } else {
+                            failure_evidence(&api, &request.message, signed, receipt)
+                                .await
+                                .map(SubmissionOutcome::FinalizedRevert)
+                        };
+                        match result {
+                            Ok(outcome) => return (request, outcome),
+                            Err(error) if evidence_error_is_retryable(&error) => {
                                 log::warn!("Original receipt evidence remains pending: {error}");
                                 match api.reconnect().await {
                                     Ok(next) => api = next,
@@ -328,14 +457,49 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
                                 }
                             }
                             Err(error) => {
-                                let error =
+                                let diagnostic =
                                     format!("HOLD: original receipt {}: {error}", request.tx_hash);
-                                return (request, Err(error));
+                                return (request, hold(diagnostic));
                             }
                         }
                     }
                 }
-                Ok(None) => { // A newer processed-nonce observation cannot disprove this original receipt.
+                Ok(None) => {
+                    // Another caller's processed bit never proves this original's effects.
+                    match api
+                        .get_finalized_submission_snapshot(signed.nonce, request.message.nonce_be)
+                        .await
+                    {
+                        Ok(Some(snapshot)) if snapshot.pinned_nonce_consumed => {
+                            match api
+                                .verify_finalized_submission_snapshot(
+                                    signed.nonce,
+                                    request.message.nonce_be,
+                                    &snapshot,
+                                )
+                                .await
+                            {
+                                Ok(()) => {
+                                    // The nonce read can race original inclusion; qualify its receipt again first.
+                                    match api.get_finalized_receipt(request.tx_hash).await {
+                                        Ok(None) => return (request, SubmissionOutcome::NeedsReconciliation {
+                                            diagnostic: "HOLD: original receipt absent with authenticated finalized consumed nonce".into(),
+                                            nonce_disposition: Some(snapshot),
+                                        }),
+                                        Ok(Some(_)) => continue,
+                                        Err(error) => log::warn!("Original receipt recheck remains pending: {error}"),
+                                    }
+                                }
+                                Err(error) => log::warn!(
+                                    "Original nonce disposition remains pending: {error}"
+                                ),
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            log::warn!("Original nonce disposition remains pending: {error}")
+                        }
+                    }
                 }
                 Err(error) => {
                     log::warn!("Canonical original receipt remains pending: {error}");
@@ -348,6 +512,24 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
             tokio::time::sleep(TX_VISIBILITY_RECHECK_DELAY.max(BASE_RETRY_DELAY)).await;
         }
     })
+}
+
+fn evidence_error_is_retryable(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<ethereum_client::Error>(),
+        Some(
+            ethereum_client::Error::FinalizedAncestryPending
+                | ethereum_client::Error::FinalizedAncestryConflict
+                | ethereum_client::Error::ErrorFetchingBlock
+        )
+    ) || matches!(error.downcast_ref::<ethereum_client::Error>(),
+            Some(ethereum_client::Error::ErrorInHTTPTransport(error))
+                if crate::common::is_rpc_transport_error_recoverable(error))
+        || matches!(error.downcast_ref::<alloy::contract::Error>(),
+            Some(alloy::contract::Error::TransportError(error))
+                if crate::common::is_rpc_transport_error_recoverable(error))
+        || matches!(error.downcast_ref::<alloy::transports::TransportError>(),
+            Some(error) if crate::common::is_rpc_transport_error_recoverable(error))
 }
 
 #[cfg(test)]
@@ -559,6 +741,7 @@ pub(crate) mod tests {
         fork: Block,
         original_visible: bool,
         processed: AtomicBool,
+        account_nonce: AtomicU64,
         head: AtomicU64,
         finalized_height: AtomicU64,
         receipt: Mutex<Value>,
@@ -574,7 +757,7 @@ pub(crate) mod tests {
                 "transactionHash": hash, "transactionIndex": "0x0",
                 "blockHash": self.chain[100].header.hash, "blockNumber": "0x64",
                 "gasUsed": "0x5208", "effectiveGasPrice": "0x1",
-                "from": Address::from([1; 20]), "to": Address::from([2; 20]),
+                "from": self.request.submission.as_ref().unwrap().sender, "to": Address::from([2; 20]),
                 "contractAddress": null,
             })
         }
@@ -596,6 +779,21 @@ pub(crate) mod tests {
                 "eth_getTransactionReceipt" => {
                     assert_eq!(params[0], json!(self.request.tx_hash));
                     Ok(self.receipt.lock().unwrap().clone())
+                }
+                "eth_getTransactionCount" => {
+                    assert_eq!(
+                        params[0],
+                        json!(self.request.submission.as_ref().unwrap().sender)
+                    );
+                    assert_eq!(params[1]["requireCanonical"], json!(true));
+                    assert!(self
+                        .chain
+                        .iter()
+                        .any(|block| json!(block.header.hash) == params[1]["blockHash"]));
+                    Ok(json!(format!(
+                        "0x{:x}",
+                        self.account_nonce.load(Ordering::SeqCst)
+                    )))
                 }
                 "eth_getTransactionByHash" => Ok(if self.original_visible {
                     json!({
@@ -676,12 +874,11 @@ pub(crate) mod tests {
                         return json!({"jsonrpc":"2.0", "id":request["id"], "result":format!("0x{:064x}", 1)});
                     }
                     assert_eq!(params[0]["to"], json!(Address::from([2; 20])));
-                    assert_eq!(
-                        params[1],
-                        json!({
-                            "blockHash": self.chain[self.finalized_height.load(Ordering::SeqCst) as usize].header.hash, "requireCanonical": true,
-                        })
-                    );
+                    assert_eq!(params[1]["requireCanonical"], json!(true));
+                    assert!(self
+                        .chain
+                        .iter()
+                        .any(|block| json!(block.header.hash) == params[1]["blockHash"]));
                     assert!(params[0]
                         .get("input")
                         .or_else(|| params[0].get("data"))
@@ -705,11 +902,14 @@ pub(crate) mod tests {
             }
         }
     }
+    // Each fixture invents a network; keep concurrent fixtures within the shared ancestry cache bound.
+    static WATCH_RPC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     struct WatchRpc {
         api: EthApi,
         state: Arc<WatchRpcState>,
         server: tokio::task::JoinHandle<()>,
+        _network: tokio::sync::MutexGuard<'static, ()>,
     }
 
     impl Drop for WatchRpc {
@@ -719,6 +919,7 @@ pub(crate) mod tests {
     }
 
     async fn watch_rpc(original_visible: bool) -> anyhow::Result<WatchRpc> {
+        let network = WATCH_RPC_LOCK.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let url = format!("ws://{}", listener.local_addr()?);
         let message = Message {
@@ -755,6 +956,7 @@ pub(crate) mod tests {
             fork,
             original_visible,
             processed: AtomicBool::new(false),
+            account_nonce: AtomicU64::new(1),
             head: AtomicU64::new(107),
             finalized_height: AtomicU64::new(100),
             receipt: Mutex::new(Value::Null),
@@ -797,7 +999,7 @@ pub(crate) mod tests {
         let api = match EthApi::new(
             &url,
             &format!("{:#x}", Address::from([2; 20])),
-            None,
+            Some(&format!("0x{}", "07".repeat(32))),
             None,
             None,
         )
@@ -809,7 +1011,19 @@ pub(crate) mod tests {
                 return Err(error.into());
             }
         };
-        Ok(WatchRpc { api, state, server })
+        Ok(WatchRpc {
+            api,
+            state,
+            server,
+            _network: network,
+        })
+    }
+
+    fn expect_completed(outcome: SubmissionOutcome) -> anyhow::Result<CompletionEvidence> {
+        match outcome {
+            SubmissionOutcome::Completed(evidence) => Ok(evidence),
+            other => anyhow::bail!("expected original completion, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -913,13 +1127,11 @@ pub(crate) mod tests {
             )
             .await?;
             if valid {
-                assert!(
-                    outcome
-                        .map_err(|error| anyhow::anyhow!(error))?
-                        .token_delivery
-                );
+                assert!(expect_completed(outcome)?.token_delivery);
             } else {
-                assert!(outcome.unwrap_err().contains("lacks exactly one"));
+                assert!(matches!(outcome, SubmissionOutcome::NeedsReconciliation {
+                    diagnostic, nonce_disposition: None,
+                } if diagnostic.contains("lacks exactly one")));
             }
         }
         Ok(())
@@ -949,7 +1161,7 @@ pub(crate) mod tests {
                 watch_tx(rpc.api.clone(), request.clone(), 8),
             )
             .await?;
-            let completion = outcome.map_err(|error| anyhow::anyhow!(error))?;
+            let completion = expect_completed(outcome)?;
             assert_eq!(completion.receipt.transaction_hash, request.tx_hash);
             assert!(completion.token_delivery);
             assert!(saved.submission == request.submission);
@@ -968,6 +1180,343 @@ pub(crate) mod tests {
                 ))
             ));
         }
+        Ok(())
+    }
+
+    fn set_finalized_revert(rpc: &WatchRpc) {
+        let mut receipt = rpc.state.receipt(rpc.state.request.tx_hash);
+        receipt["status"] = json!("0x0");
+        *rpc.state.receipt.lock().unwrap() = receipt;
+        rpc.state.finalized_height.store(107, Ordering::SeqCst);
+        rpc.state.account_nonce.store(2, Ordering::SeqCst);
+        rpc.state.processed.store(true, Ordering::SeqCst);
+    }
+
+    #[tokio::test]
+    async fn finalized_original_revert_retains_strict_evidence_and_competitor_is_not_success(
+    ) -> anyhow::Result<()> {
+        let rpc = watch_rpc(false).await?;
+        set_finalized_revert(&rpc);
+        let request = rpc.state.request.clone();
+        let signed = request.submission.as_ref().unwrap();
+        let (_, outcome) = tokio::time::timeout(
+            Duration::from_secs(2),
+            watch_tx(rpc.api.clone(), request.clone(), 8),
+        )
+        .await?;
+        let SubmissionOutcome::FinalizedRevert(failure) = outcome else {
+            anyhow::bail!("expected finalized original revert")
+        };
+        assert_eq!(failure.receipt.transaction_hash, signed.hash);
+        assert_eq!(
+            failure.included_block_hash,
+            rpc.state.chain[100].header.hash
+        );
+        assert_eq!(
+            failure.finalized_block_hash,
+            rpc.state.chain[107].header.hash
+        );
+        let restored: FinalizedFailureEvidence =
+            serde_json::from_slice(&serde_json::to_vec(&failure)?)?;
+        validate_failure(&request.message, signed, &restored)?;
+        let (_, restarted) = tokio::time::timeout(
+            Duration::from_secs(2),
+            watch_tx(rpc.api.clone(), request.clone(), 8),
+        )
+        .await?;
+        assert!(
+            matches!(restarted, SubmissionOutcome::FinalizedRevert(evidence) if evidence.receipt.transaction_hash == signed.hash)
+        );
+        for case in [
+            "success",
+            "competing",
+            "sender",
+            "destination",
+            "height",
+            "hash",
+            "missing-index",
+            "unfinalized",
+            "same-height-fork",
+            "logs",
+        ] {
+            let mut value = serde_json::to_value(&failure)?;
+            match case {
+                "success" => value["receipt"]["status"] = json!("0x1"),
+                "competing" => value["receipt"]["transactionHash"] = json!(B256::ZERO),
+                "sender" => value["receipt"]["from"] = json!(Address::ZERO),
+                "destination" => value["receipt"]["to"] = json!(Address::ZERO),
+                "height" => value["included_block_number"] = json!(99),
+                "hash" => value["included_block_hash"] = json!(B256::ZERO),
+                "missing-index" => value["receipt"]["transactionIndex"] = Value::Null,
+                "unfinalized" => value["finalized_block_number"] = json!(99),
+                "same-height-fork" => value["finalized_block_number"] = json!(100),
+                "logs" => {
+                    value["receipt"]["logs"] =
+                        serde_json::to_value(evidence(&request.message, signed, true).receipt)?
+                            ["logs"]
+                            .clone()
+                }
+                _ => unreachable!(),
+            }
+            let invalid: FinalizedFailureEvidence = serde_json::from_value(value)?;
+            assert!(
+                validate_failure(&request.message, signed, &invalid).is_err(),
+                "{case}"
+            );
+        }
+        for field in [
+            "receipt",
+            "included_block_number",
+            "included_block_hash",
+            "finalized_block_number",
+            "finalized_block_hash",
+        ] {
+            let mut value = serde_json::to_value(&failure)?;
+            value.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<FinalizedFailureEvidence>(value).is_err(),
+                "missing {field}"
+            );
+        }
+        let mut value = serde_json::to_value(&failure)?;
+        value["unexpected"] = json!(true);
+        assert!(serde_json::from_value::<FinalizedFailureEvidence>(value).is_err());
+        let noncanonical = FinalizedTransactionReceipt {
+            receipt: failure.receipt.clone(),
+            included_block_number: failure.included_block_number,
+            included_block_hash: failure.included_block_hash,
+            finalized_block_number: 107,
+            finalized_block_hash: B256::from([22; 32]),
+        };
+        assert!(
+            failure_evidence(&rpc.api, &request.message, signed, noncanonical)
+                .await
+                .is_err()
+        );
+        assert!(!rpc
+            .state
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call["method"].as_str().unwrap().starts_with("eth_send")));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn consumed_nonce_absence_is_held_not_original_failure_or_completion(
+    ) -> anyhow::Result<()> {
+        for processed in [false, true] {
+            let rpc = watch_rpc(false).await?;
+            rpc.state.account_nonce.store(2, Ordering::SeqCst);
+            rpc.state.processed.store(processed, Ordering::SeqCst);
+            let request = rpc.state.request.clone();
+            let (_, outcome) = tokio::time::timeout(
+                Duration::from_secs(2),
+                watch_tx(rpc.api.clone(), request.clone(), 8),
+            )
+            .await?;
+            let SubmissionOutcome::NeedsReconciliation {
+                diagnostic,
+                nonce_disposition: Some(snapshot),
+            } = outcome
+            else {
+                anyhow::bail!("expected authenticated consumed-nonce hold");
+            };
+            assert!(diagnostic.contains("consumed nonce"));
+            assert!(snapshot.pinned_nonce_consumed);
+            assert_eq!(snapshot.message_processed, processed);
+            assert_eq!(snapshot.block_hash, rpc.state.chain[100].header.hash);
+            assert!(request.submission == rpc.state.request.submission);
+            let calls = rpc.state.calls.lock().unwrap();
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|call| call["method"] == "eth_getTransactionReceipt")
+                    .count(),
+                2
+            );
+            assert!(!calls
+                .iter()
+                .any(|call| call["method"].as_str().unwrap().starts_with("eth_send")));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn saved_nonce_disposition_reauthenticates_original_pin_and_both_state_bits(
+    ) -> anyhow::Result<()> {
+        let rpc = watch_rpc(false).await?;
+        rpc.state.account_nonce.store(2, Ordering::SeqCst);
+        rpc.state.processed.store(true, Ordering::SeqCst);
+        let saved = rpc
+            .api
+            .get_finalized_submission_snapshot(1, rpc.state.request.message.nonce_be)
+            .await?
+            .unwrap();
+        let saved: FinalizedSubmissionSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&saved)?)?;
+        rpc.state.finalized_height.store(107, Ordering::SeqCst);
+        rpc.api
+            .verify_finalized_submission_snapshot(1, rpc.state.request.message.nonce_be, &saved)
+            .await?;
+        for (consumed, processed) in [(false, true), (true, false)] {
+            let changed = FinalizedSubmissionSnapshot {
+                pinned_nonce_consumed: consumed,
+                message_processed: processed,
+                ..saved
+            };
+            assert!(rpc
+                .api
+                .verify_finalized_submission_snapshot(
+                    1,
+                    rpc.state.request.message.nonce_be,
+                    &changed
+                )
+                .await
+                .is_err());
+        }
+        let wrong_pin = FinalizedSubmissionSnapshot {
+            block_hash: B256::from([22; 32]),
+            ..saved
+        };
+        assert!(rpc
+            .api
+            .verify_finalized_submission_snapshot(1, rpc.state.request.message.nonce_be, &wrong_pin)
+            .await
+            .is_err());
+        *rpc.state.fault.lock().unwrap() = RpcFault::MissingFinality;
+        assert!(rpc
+            .api
+            .verify_finalized_submission_snapshot(1, rpc.state.request.message.nonce_be, &saved)
+            .await
+            .is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn signed_original_payload_is_validated_before_every_outcome() -> anyhow::Result<()> {
+        let rpc = watch_rpc(false).await?;
+        set_finalized_revert(&rpc);
+        let mut request = rpc.state.request.clone();
+        request.message.payload[0] ^= 1;
+        let (_, outcome) = watch_tx(rpc.api.clone(), request, 8).await;
+        assert!(matches!(
+            outcome,
+            SubmissionOutcome::NeedsReconciliation {
+                nonce_disposition: None,
+                ..
+            }
+        ));
+        assert!(!rpc
+            .state
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call["method"] == "eth_getTransactionReceipt"
+                || call["method"] == "eth_getTransactionCount"));
+        let request = &rpc.state.request;
+        let signed = request.submission.as_ref().unwrap();
+        let mut wrong = request.message.clone();
+        wrong.nonce_be[0] ^= 1;
+        assert!(
+            validate_completion(&wrong, signed, &evidence(&request.message, signed, true)).is_err()
+        );
+        let finalized = rpc
+            .api
+            .get_finalized_receipt(request.tx_hash)
+            .await?
+            .unwrap();
+        assert!(failure_evidence(&rpc.api, &wrong, signed, finalized)
+            .await
+            .is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn status_accounting_counts_finalized_failure_once_and_never_holds() -> anyhow::Result<()>
+    {
+        let rpc = watch_rpc(false).await?;
+        set_finalized_revert(&rpc);
+        let fetcher = StatusFetcher::new(rpc.api.clone(), 8);
+        let failed = fetcher.metrics.total_failed_txs.clone();
+        let pending = fetcher.metrics.pending_tx_count.clone();
+        let mut io = fetcher.spawn();
+        let request = rpc.state.request.clone();
+        for _ in 0..2 {
+            assert!(io.send_request(
+                request.tx_uuid,
+                request.tx_hash,
+                request.message.clone(),
+                request.submission.clone()
+            ));
+        }
+        let (_, outcome) = tokio::time::timeout(Duration::from_secs(2), io.recv_message())
+            .await?
+            .unwrap();
+        assert!(matches!(outcome, SubmissionOutcome::FinalizedRevert(_)));
+        assert_eq!(failed.get(), 1);
+        assert_eq!(pending.get(), 0);
+        let mut invalid = request.message.clone();
+        invalid.payload[0] ^= 1;
+        assert!(io.send_request(
+            Uuid::new_v4(),
+            request.tx_hash,
+            invalid,
+            request.submission.clone()
+        ));
+        let (_, outcome) = tokio::time::timeout(Duration::from_secs(2), io.recv_message())
+            .await?
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            SubmissionOutcome::NeedsReconciliation { .. }
+        ));
+        assert_eq!(failed.get(), 1);
+        assert_eq!(pending.get(), 0);
+        *rpc.state.receipt.lock().unwrap() = Value::Null;
+        assert!(io.send_request(
+            Uuid::new_v4(),
+            request.tx_hash,
+            request.message.clone(),
+            request.submission.clone()
+        ));
+        let (_, outcome) = tokio::time::timeout(Duration::from_secs(2), io.recv_message())
+            .await?
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            SubmissionOutcome::NeedsReconciliation {
+                nonce_disposition: Some(_),
+                ..
+            }
+        ));
+        assert_eq!(failed.get(), 1);
+        set_finalized_revert(&rpc);
+        assert!(io.send_request(
+            Uuid::new_v4(),
+            request.tx_hash,
+            request.message.clone(),
+            request.submission.clone()
+        ));
+        let (_, outcome) = tokio::time::timeout(Duration::from_secs(2), io.recv_message())
+            .await?
+            .unwrap();
+        assert!(matches!(outcome, SubmissionOutcome::FinalizedRevert(_)));
+        assert_eq!(failed.get(), 1);
+        assert!(io.send_request(
+            request.tx_uuid,
+            request.tx_hash,
+            request.message,
+            request.submission
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), io.recv_message())
+                .await
+                .is_err()
+        );
+        assert_eq!(failed.get(), 1);
         Ok(())
     }
 
@@ -1160,7 +1709,7 @@ pub(crate) mod tests {
             watch_tx(api.clone(), request.clone(), 8),
         )
         .await?;
-        let evidence = outcome.map_err(|error| anyhow::anyhow!(error))?;
+        let evidence = expect_completed(outcome)?;
         assert!(!evidence.token_delivery);
         let restored: CompletionEvidence = serde_json::from_slice(&serde_json::to_vec(&evidence)?)?;
         validate_completion(&message, &signed, &restored)?;
@@ -1168,10 +1717,7 @@ pub(crate) mod tests {
             tokio::time::timeout(Duration::from_secs(10), watch_tx(api.clone(), request, 8))
                 .await?;
         assert_eq!(
-            restarted
-                .map_err(|error| anyhow::anyhow!(error))?
-                .receipt
-                .transaction_hash,
+            expect_completed(restarted)?.receipt.transaction_hash,
             signed.hash
         );
         alloy::sol! { #[sol(rpc)] interface HandlerView { function received(bytes32 applicationId) external view returns (bool); } }
@@ -1198,7 +1744,7 @@ pub(crate) mod tests {
         let (_, replay) =
             tokio::time::timeout(Duration::from_secs(10), watch_tx(api.clone(), request, 8))
                 .await?;
-        assert!(replay.unwrap_err().contains("reverted"));
+        assert!(matches!(replay, SubmissionOutcome::FinalizedRevert(_)));
         let absent = signed_message_with_nonce(&message, 3).await;
         let request = TrackedRequest {
             tx_uuid: Uuid::new_v4(),

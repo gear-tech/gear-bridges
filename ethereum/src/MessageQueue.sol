@@ -111,17 +111,39 @@ contract MessageQueue is
         IVerifier verifier_
     ) public initializer {
         _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
-        beefyRootMinimum = _validateBeefyVerifier();
+        (, uint64 mmrStartBlock) = _validateBeefyVerifier();
+        beefyRootMinimum = mmrStartBlock;
     }
 
-    /**
-     * @custom:oz-upgrades-validate-as-initializer
-     */
-    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {
-        address multiSigWallet = 0x1111111111111111111111111111111111111111;
+    /// @dev Atomically switch a paused legacy proxy without resetting custody, roles, roots or replay state.
+    function migrateToBeefy(
+        IVerifier expectedLegacyVerifier,
+        IVerifier beefyVerifier,
+        uint256 expectedLegacyMaxBlock,
+        uint256 firstBeefyBlock
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(8) {
+        _requirePaused();
+        if (
+            beefyRootMinimum != 0 || _genesisBlock == 0 || address(_verifier) != address(expectedLegacyVerifier)
+                || _maxBlockNumber != expectedLegacyMaxBlock
+        ) {
+            revert InvalidBeefyMigration();
+        }
 
-        _grantRole(DEFAULT_ADMIN_ROLE, multiSigWallet);
-        _grantRole(PAUSER_ROLE, multiSigWallet);
+        _verifier = beefyVerifier;
+        (BeefyClient client, uint64 mmrStartBlock) = _validateBeefyVerifier();
+        if (
+            firstBeefyBlock <= expectedLegacyMaxBlock || firstBeefyBlock > type(uint32).max
+                || firstBeefyBlock < mmrStartBlock || firstBeefyBlock > expectedLegacyMaxBlock + MAX_BLOCK_DISTANCE
+                || !client.isLive() || client.latestMMRRoot() == bytes32(0)
+                || client.latestBeefyBlock() <= firstBeefyBlock
+        ) {
+            revert InvalidBeefyMigration();
+        }
+        beefyRootMinimum = firstBeefyBlock;
+        emit MigratedToBeefy(
+            address(expectedLegacyVerifier), address(beefyVerifier), expectedLegacyMaxBlock, firstBeefyBlock
+        );
     }
 
     /**
@@ -341,7 +363,7 @@ contract MessageQueue is
      * @dev Reverts if challenging root status is enabled and caller is not emergency stop admin with `ChallengeRoot` error.
      * @dev Reverts if emergency stop status is set and caller is not emergency stop admin with `EmergencyStop` error.
      * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
-     * @dev Reverts if block number is before genesis block with `BlockNumberBeforeGenesis` error.
+     * @dev In legacy mode, rejects blocks before genesis with `BlockNumberBeforeGenesis`.
      * @dev Reverts if block number is too far from max block number with `BlockNumberTooFar` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
@@ -359,7 +381,7 @@ contract MessageQueue is
         }
 
         bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
-        _checkSubmissionBlock(blockNumber, previousMerkleRoot != bytes32(0), false);
+        _checkSubmissionBlock(blockNumber, false);
 
         uint256[] memory publicInputs = new uint256[](2);
         publicInputs[0] = uint256(merkleRoot) >> 64;
@@ -436,7 +458,7 @@ contract MessageQueue is
         }
     }
 
-    function _checkSubmissionBlock(uint256 sourceBlock, bool registered, bool emptyProgress) private view {
+    function _checkSubmissionBlock(uint256 sourceBlock, bool emptyProgress) private view {
         if (sourceBlock > type(uint32).max) {
             revert BlockNumberOverflow(sourceBlock);
         }
@@ -452,15 +474,11 @@ contract MessageQueue is
             }
             return;
         }
-        if (sourceBlock < _genesisBlock) {
+        if (beefyRootMinimum == 0 && sourceBlock < _genesisBlock) {
             revert BlockNumberBeforeGenesis(sourceBlock, _genesisBlock);
         }
-        // Registered roots remain challengeable; no publisher can backfill new roots behind the frontier.
-        if (!registered && sourceBlock <= _maxBlockNumber) {
-            if (emptyProgress) {
-                revert EmptyQueueProgressNotForward();
-            }
-            revert MerkleRootProgressNotForward();
+        if (emptyProgress && sourceBlock <= _maxBlockNumber) {
+            revert EmptyQueueProgressNotForward();
         }
         uint256 maxAllowedBlockNumber = _maxBlockNumber + MAX_BLOCK_DISTANCE;
         if (sourceBlock > maxAllowedBlockNumber) {
@@ -478,7 +496,7 @@ contract MessageQueue is
         if (_emergencyStop && !isFromEmergencyStopAdmin) {
             revert EmergencyStop();
         }
-        _checkSubmissionBlock(sourceBlock, false, true);
+        _checkSubmissionBlock(sourceBlock, true);
 
         bool valid;
         try IQueueProgressVerifier(address(_verifier))
@@ -627,7 +645,7 @@ contract MessageQueue is
         _verifier = verifier_;
     }
 
-    function _validateBeefyVerifier() private view returns (uint64) {
+    function _validateBeefyVerifier() private view returns (BeefyClient, uint64) {
         if (address(_verifier).code.length == 0) {
             revert InvalidBeefyVerifier();
         }
@@ -640,9 +658,10 @@ contract MessageQueue is
             revert InvalidBeefyVerifier();
         }
         BeefyClient client = BeefyClient(clientAddress);
+        uint64 mmrStartBlock = client.mmrStartBlock();
         if (
             client.sourceDomain() == bytes32(0) || client.destinationQueue() != address(this)
-                || client.destinationChainId() != block.chainid || client.mmrStartBlock() == 0
+                || client.destinationChainId() != block.chainid || mmrStartBlock == 0
                 || client.minNumRequiredSignatures() != 86 || client.fiatShamirRequiredSignatures() != 86
                 || client.MAX_VALIDATORS() != 256 || client.randaoCommitDelay() != 128
                 || client.randaoCommitExpiration() != 24
@@ -658,6 +677,6 @@ contract MessageQueue is
         ) {
             revert InvalidBeefyVerifier();
         }
-        return client.mmrStartBlock();
+        return (client, mmrStartBlock);
     }
 }

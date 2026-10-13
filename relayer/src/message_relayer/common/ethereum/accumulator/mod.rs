@@ -1,7 +1,10 @@
 pub mod utils;
 
-use super::{merkle_root_extractor::RootCursorStorage, *};
-use crate::{common::BASE_RETRY_DELAY, message_relayer::common::AuthoritySetId};
+use super::*;
+use crate::{
+    common::BASE_RETRY_DELAY,
+    message_relayer::common::{AuthoritySetId, QualifiedMerkleRoot},
+};
 use ethereum_client::EthApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
@@ -11,7 +14,7 @@ use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
     oneshot, RwLock,
 };
-use utils::{Added, MerkleRoots, Messages};
+use utils::{Added, MerkleRoots, Messages, RootAddError};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 
@@ -45,19 +48,19 @@ pub enum Response {
     },
 }
 pub struct RootUpdate {
-    pub root: RelayedMerkleRoot,
+    pub root: QualifiedMerkleRoot,
     acknowledgement: Option<oneshot::Sender<anyhow::Result<()>>>,
 }
 
 impl RootUpdate {
-    pub fn untracked(root: RelayedMerkleRoot) -> Self {
+    pub fn untracked(root: QualifiedMerkleRoot) -> Self {
         Self {
             root,
             acknowledgement: None,
         }
     }
 
-    pub fn tracked(root: RelayedMerkleRoot) -> (Self, oneshot::Receiver<anyhow::Result<()>>) {
+    pub fn tracked(root: QualifiedMerkleRoot) -> (Self, oneshot::Receiver<anyhow::Result<()>>) {
         let (sender, receiver) = oneshot::channel();
         (
             Self {
@@ -114,7 +117,6 @@ pub struct Accumulator {
     messages: Messages,
     merkle_roots: Arc<RwLock<MerkleRoots>>,
     receiver_roots: UnboundedReceiver<RootUpdate>,
-    root_storage: Arc<dyn RootCursorStorage>,
     governance_admin: ActorId,
     governance_pauser: ActorId,
     eth_api: EthApi,
@@ -139,7 +141,6 @@ impl Accumulator {
     pub fn new(
         receiver_roots: UnboundedReceiver<RootUpdate>,
         merkle_roots: Arc<RwLock<MerkleRoots>>,
-        root_storage: Arc<dyn RootCursorStorage>,
         governance_admin: ActorId,
         governance_pauser: ActorId,
         eth_api: EthApi,
@@ -149,7 +150,6 @@ impl Accumulator {
             messages: Messages::new(10_000),
             merkle_roots,
             receiver_roots,
-            root_storage,
             governance_admin,
             governance_pauser,
             eth_api,
@@ -283,7 +283,6 @@ async fn run_inner(
 
                 let added = this.merkle_roots.write().await.add(merkle_root);
                 let roots = this.merkle_roots.read().await;
-                this.root_storage.save_merkle_roots(&roots).await?;
 
                 match added {
                     Ok(Added::Ok) => {}
@@ -303,7 +302,11 @@ async fn run_inner(
                     }
                     Ok(Added::Removed(_)) => {}
 
-                    Err(_) => {
+                    Err(RootAddError::Conflict) => {
+                        let _ = acknowledgement.map(|ack| ack.send(Err(anyhow::anyhow!("Conflicting finalized root provenance; HOLD"))));
+                        anyhow::bail!("Conflicting finalized root provenance; HOLD");
+                    }
+                    Err(RootAddError::Unchanged(_)) => {
                         let _ = acknowledgement.map(|acknowledgement| acknowledgement.send(Ok(())));
                         continue;
                     }
@@ -316,7 +319,7 @@ async fn run_inner(
                         authority_set_id: message.authority_set_id,
                         block: message.block,
                         tx_uuid: message.tx_uuid,
-                        merkle_root,
+                        merkle_root: merkle_root.root,
                     })?;
                 }
                 let _ = acknowledgement.map(|acknowledgement| acknowledgement.send(Ok(())));

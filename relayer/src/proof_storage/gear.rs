@@ -7,10 +7,13 @@ use std::{
     },
 };
 
-use gclient::{Event as RuntimeEvent, GearApi, GearEvent};
+use gclient::GearApi;
 use gear_core::ids::{ActorId, MessageId};
 use gear_rpc_client::GearApi as WrappedGearApi;
-use gsdk::gear::runtime_types::gear_common::event::DispatchStatus;
+use gsdk::gear::{
+    self,
+    runtime_types::gear_common::event::{DispatchStatus, MessageEntry},
+};
 use parity_scale_codec::Encode;
 use primitive_types::H256;
 use prometheus::Gauge;
@@ -170,7 +173,7 @@ impl GearProofStorage {
                 Err(err) => {
                     log::error!("Failed to upload proof storage program: {err}");
                 }
-                Ok(Some(program)) => {
+                Ok(program) => {
                     let config = UploadedProgramInfo {
                         address: H256(program.into_bytes()),
                     };
@@ -183,7 +186,6 @@ impl GearProofStorage {
                     let _ = self.program.set(program);
                     break;
                 }
-                Ok(None) => {}
             }
         }
 
@@ -193,7 +195,7 @@ impl GearProofStorage {
     async fn try_upload_program(
         &self,
         payload: &gear_proof_storage::InitMessage,
-    ) -> Result<Option<ActorId>, ProofStorageError> {
+    ) -> Result<ActorId, ProofStorageError> {
         let gas = self
             .gear_api
             .calculate_upload_gas(
@@ -210,16 +212,27 @@ impl GearProofStorage {
         let mut salt = [0; 32];
         rand::thread_rng().fill_bytes(&mut salt);
 
-        let res = self
-            .gear_api
-            .upload_program(gear_proof_storage::WASM_BINARY, &salt, &payload, gas, 0)
-            .await;
-
-        match res {
-            Ok((_, program, _)) => Ok(Some(program)),
-            Err(gclient::Error::ProgramAlreadyExists(_)) => Ok(None),
-            Err(err) => Err(ProofStorageError::InnerError(err.into())),
-        }
+        let signer: gsdk::signer::Signer = self.gear_api.clone().into();
+        let tx = signer
+            .process(gear::tx().gear().upload_program(
+                gear_proof_storage::WASM_BINARY.to_vec(),
+                salt.to_vec(),
+                payload.encode(),
+                gas,
+                0,
+                false,
+            ))
+            .await
+            .map_err(Into::<anyhow::Error>::into)?;
+        let (_, program) = queued_message(
+            &tx.fetch_events()
+                .await
+                .map_err(Into::<anyhow::Error>::into)?,
+            signer.account_id().as_ref(),
+            MessageEntry::Init,
+            None,
+        )?;
+        Ok(program)
     }
 
     async fn get_circuit_data_inner(&self) -> Result<CircuitData, ProofStorageError> {
@@ -461,11 +474,11 @@ async fn message_sender_inner(
         let mut message_dispatched_events = HashMap::new();
         for block in latest_processed + 1..=latest_finalized {
             let block = wrapped_gear_api.block_number_to_hash(block).await?;
-            let events = gear_api.events_at(block).await?;
-
-            for event in events {
-                if let RuntimeEvent::Gear(GearEvent::MessagesDispatched { statuses, .. }) = event {
-                    for (msg_id, status) in statuses {
+            for event in wrapped_gear_api.metadata_events_at(block).await?.iter() {
+                if let Some(dispatched) =
+                    event?.as_event::<gear::gear::events::MessagesDispatched>()?
+                {
+                    for (msg_id, status) in dispatched.statuses {
                         let msg_id = MessageId::new(msg_id.into_bytes());
                         message_dispatched_events.insert(msg_id, status);
                     }
@@ -530,7 +543,53 @@ async fn submit_message(
         .await?
         .min_limit;
 
-    Ok(gear_api
-        .send_message(message.destination, &message.payload, gas, 0)
-        .await?)
+    let signer: gsdk::signer::Signer = gear_api.clone().into();
+    let tx = signer
+        .process(gear::tx().gear().send_message(
+            message.destination,
+            message.payload.encode(),
+            gas,
+            0,
+            false,
+        ))
+        .await?;
+    let (id, _) = queued_message(
+        &tx.fetch_events().await?,
+        signer.account_id().as_ref(),
+        MessageEntry::Handle,
+        Some(message.destination),
+    )?;
+    Ok((id, tx.block_hash()))
+}
+
+fn queued_message(
+    events: &subxt::blocks::ExtrinsicEvents<gsdk::GearConfig>,
+    source: &[u8],
+    entry: MessageEntry,
+    destination: Option<ActorId>,
+) -> anyhow::Result<(MessageId, ActorId)> {
+    let mut queued = None;
+    let mut success = false;
+    for event in events.iter() {
+        let event = event?;
+        if let Some(error) = gear_rpc_client::extrinsic_failure(&event)? {
+            anyhow::bail!("Finalized proof-storage dispatch failed: {error}");
+        }
+        if event.pallet_name() == "System" && event.variant_name() == "ExtrinsicSuccess" {
+            anyhow::ensure!(!success, "Duplicate proof-storage dispatch success");
+            success = true;
+        }
+        if let Some(message) = event.as_event::<gear::gear::events::MessageQueued>()? {
+            anyhow::ensure!(
+                queued.is_none()
+                    && message.source.0.as_slice() == source
+                    && message.entry == entry
+                    && destination.is_none_or(|expected| message.destination == expected),
+                "Finalized proof-storage queued identity differs from submitted call"
+            );
+            queued = Some((message.id, message.destination));
+        }
+    }
+    anyhow::ensure!(success, "Missing finalized proof-storage dispatch success");
+    queued.ok_or_else(|| anyhow::anyhow!("Missing finalized proof-storage queued message"))
 }

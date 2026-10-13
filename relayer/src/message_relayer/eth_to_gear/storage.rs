@@ -1,4 +1,7 @@
-use super::tx_manager::{Transaction, TransactionManager, TxStatus};
+use super::{
+    cutover::{self, PredecessorCutover},
+    tx_manager::{Transaction, TransactionManager, TxStatus},
+};
 use crate::message_relayer::common::{EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot};
 use anyhow::Context;
 use async_trait::async_trait;
@@ -153,24 +156,30 @@ impl BlockStorage {
     pub async fn save(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
         let _save_guard = self.save_lock.lock().await;
         let path = path.as_ref();
+        cutover::reject_sealed(path)?;
         let blocks_new = path.join("blocks.json.new");
         let blocks_old = path.join("blocks.json");
-        let mut blocks_file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&blocks_new)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to open or create blocks file in storage path: '{}'",
-                    path.display()
-                )
-            })?;
-        // just keep 100 processed blocks in JSON storage for now...
+        anyhow::ensure!(
+            !blocks_new.exists(),
+            "HOLD: interrupted inbound block snapshot"
+        );
         self.prune().await;
         let blocks = self.blocks.read().await;
-        let blocks_json = serde_json::to_string::<BTreeMap<EthereumSlotNumber, Block>>(&*blocks)?;
+        let value = serde_json::to_value(&*blocks)?;
+        match tokio::fs::read(&blocks_old).await {
+            Ok(previous) if serde_json::from_slice::<serde_json::Value>(&previous)? == value => {
+                return Ok(())
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let blocks_json = serde_json::to_string(&value)?;
+        let mut blocks_file = tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&blocks_new)
+            .await?;
         blocks_file
             .write_all(blocks_json.as_bytes())
             .await
@@ -276,10 +285,13 @@ pub struct JSONStorage {
     block_storage: BlockStorage,
     runtime_identity: RwLock<Option<InboundRuntimeIdentity>>,
     manual_identity: RwLock<Option<ManualInboundIdentity>>,
+    predecessor_cutover: RwLock<Option<PredecessorCutover>>,
     save_lock: Mutex<()>,
+    _journal_ownership: Option<std::sync::Arc<cutover::JournalOwnership>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InboundRuntimeIdentity {
     pub ethereum_chain_id: u64,
     pub ethereum_genesis_hash: H256,
@@ -305,6 +317,8 @@ pub(super) struct ManualInboundIdentity {
 #[derive(Serialize, Deserialize)]
 struct StoredState {
     schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    predecessor_cutover: Option<PredecessorCutover>,
     #[serde(default)]
     runtime_identity: Option<InboundRuntimeIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -315,8 +329,8 @@ struct StoredState {
 }
 
 const STATE_FILE: &str = "state.json";
-// Schema5 has original-proof identity; schema6 adds its separately signed native reconciliation.
-const STATE_SCHEMA_VERSION: u32 = 6;
+// Schemas5/6 retain original lanes; schema7 additionally binds successor lanes to an immutable seal.
+const STATE_SCHEMA_VERSION: u32 = 7;
 
 impl JSONStorage {
     pub fn new(path: impl AsRef<Path>) -> Self {
@@ -325,15 +339,49 @@ impl JSONStorage {
             block_storage: BlockStorage::new(),
             runtime_identity: RwLock::new(None),
             manual_identity: RwLock::new(None),
+            predecessor_cutover: RwLock::new(None),
             save_lock: Mutex::new(()),
+            _journal_ownership: None,
         }
+    }
+
+    pub fn with_journal_ownership(
+        mut self,
+        ownership: std::sync::Arc<cutover::JournalOwnership>,
+    ) -> Self {
+        self._journal_ownership = Some(ownership);
+        self
     }
 
     pub async fn bind_runtime_identity(
         &self,
         identity: InboundRuntimeIdentity,
     ) -> anyhow::Result<()> {
-        self.bind_identity(identity, None).await
+        self.bind_identity(identity, None, None).await
+    }
+
+    pub async fn bind_successor_identity(
+        &self,
+        identity: InboundRuntimeIdentity,
+        predecessor: PredecessorCutover,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            predecessor.manifest_digest != H256::zero()
+                && predecessor.predecessor_identity.vft_manager_address
+                    != identity.vft_manager_address,
+            "HOLD: invalid successor predecessor binding"
+        );
+        self.bind_identity(identity, None, Some(predecessor)).await
+    }
+
+    pub(super) async fn bind_manual_successor_identity(
+        &self,
+        identity: InboundRuntimeIdentity,
+        manual: ManualInboundIdentity,
+        predecessor: PredecessorCutover,
+    ) -> anyhow::Result<()> {
+        self.bind_identity(identity, Some(manual), Some(predecessor))
+            .await
     }
 
     pub(super) async fn bind_manual_identity(
@@ -341,20 +389,34 @@ impl JSONStorage {
         identity: InboundRuntimeIdentity,
         manual: ManualInboundIdentity,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            manual.tx_hash != TxHash::ZERO
-                && manual.ethereum_block_hash != H256::zero()
-                && !manual.receiver_route.is_empty(),
-            "HOLD: incomplete manual inbound target/route identity"
-        );
-        self.bind_identity(identity, Some(manual)).await
+        let predecessor = self.predecessor_cutover.read().await.clone();
+        self.bind_identity(identity, Some(manual), predecessor)
+            .await
     }
 
     async fn bind_identity(
         &self,
         identity: InboundRuntimeIdentity,
         manual: Option<ManualInboundIdentity>,
+        predecessor: Option<PredecessorCutover>,
     ) -> anyhow::Result<()> {
+        cutover::reject_sealed(&self.path)?;
+        if let Some(manual) = &manual {
+            anyhow::ensure!(
+                manual.tx_hash != TxHash::ZERO
+                    && manual.ethereum_block_hash != H256::zero()
+                    && !manual.receiver_route.is_empty(),
+                "HOLD: incomplete manual inbound target/route identity"
+            );
+        }
+        if let Some(predecessor) = &predecessor {
+            anyhow::ensure!(
+                predecessor.manifest_digest != H256::zero()
+                    && predecessor.predecessor_identity.vft_manager_address
+                        != identity.vft_manager_address,
+                "HOLD: invalid successor predecessor binding"
+            );
+        }
         anyhow::ensure!(
             identity.ethereum_chain_id != 0
                 && identity.ethereum_genesis_hash != H256::zero()
@@ -396,6 +458,8 @@ impl JSONStorage {
             self.path.display()
         );
         if let Some(mut state) = existing {
+            anyhow::ensure!(state.predecessor_cutover.as_ref() == predecessor.as_ref(),
+                "HOLD: inbound predecessor seal changed or successor journal opened as an original lane");
             anyhow::ensure!(
                 state.manual_identity == manual,
                 "HOLD: manual inbound target/route changed or journal belongs to another relay mode"
@@ -415,7 +479,7 @@ impl JSONStorage {
                     "HOLD: inbound journal history lacks an immutable runtime identity"
                 );
                 state.runtime_identity = Some(identity.clone());
-                self.write_state(&state).await?;
+                self.write_state(serde_json::to_value(&state)?).await?;
             }
         } else {
             self.reject_legacy_journal().await?;
@@ -424,18 +488,20 @@ impl JSONStorage {
                 "HOLD: inbound block snapshot survived without transaction state/identity"
             );
             self.block_storage.save(&self.path).await?;
-            self.write_state(&StoredState {
+            self.write_state(serde_json::to_value(StoredState {
                 schema_version: STATE_SCHEMA_VERSION,
+                predecessor_cutover: predecessor.clone(),
                 runtime_identity: Some(identity.clone()),
                 manual_identity: manual.clone(),
                 transactions: BTreeMap::new(),
                 completed: BTreeMap::new(),
                 failed: BTreeMap::new(),
-            })
+            })?)
             .await?;
         }
         *self.runtime_identity.write().await = Some(identity);
         *self.manual_identity.write().await = manual;
+        *self.predecessor_cutover.write().await = predecessor;
         Ok(())
     }
 
@@ -475,15 +541,22 @@ impl JSONStorage {
         }
     }
 
-    async fn write_state(&self, state: &StoredState) -> anyhow::Result<()> {
+    async fn write_state(&self, mut value: serde_json::Value) -> anyhow::Result<()> {
+        cutover::reject_sealed(&self.path)?;
         let state_new = self.path.join(format!("{STATE_FILE}.new"));
         let state_old = self.path.join(STATE_FILE);
-        let mut value = serde_json::to_value(state)?;
+        anyhow::ensure!(
+            !state_new.exists(),
+            "HOLD: interrupted inbound state snapshot"
+        );
         if state_old.exists() {
             let previous: serde_json::Value =
                 serde_json::from_slice(&tokio::fs::read(&state_old).await?)?;
-            let known =
-                serde_json::to_value(serde_json::from_value::<StoredState>(previous.clone())?)?;
+            let known = serde_json::to_value(StoredState::deserialize(&previous)?)?;
+            // Preserve the original bytes (including unknown fields) when known records are unchanged.
+            if known == value {
+                return Ok(());
+            }
             Self::preserve_unknown_json(&mut value, &known, &previous);
             // Transaction IDs survive movement between pending/completed maps.
             for section in ["transactions", "completed"] {
@@ -579,17 +652,22 @@ impl JSONStorage {
                 )
             })?;
         anyhow::ensure!(
-            matches!(schema_version, 5 | 6),
+            matches!(schema_version, 5 | 6 | 7),
             "Incompatible transaction journal schema in '{}': found {schema_version}, expected {STATE_SCHEMA_VERSION}",
             self.path.display()
         );
         let mut state: StoredState =
             serde_json::from_value(value).context("Failed to deserialize transaction journal")?;
+        anyhow::ensure!(
+            schema_version == 7 || state.predecessor_cutover.is_none(),
+            "HOLD: original schema5/6 journal cannot be relabeled as a successor"
+        );
         state.schema_version = STATE_SCHEMA_VERSION;
         Ok(Some(state))
     }
 
     async fn load_state(&self, tx_manager: &TransactionManager) -> anyhow::Result<bool> {
+        cutover::reject_sealed(&self.path)?;
         let Some(state) = self.read_state().await? else {
             return Ok(false);
         };
@@ -600,10 +678,24 @@ impl JSONStorage {
         );
         drop(expected);
         anyhow::ensure!(
+            state.predecessor_cutover.as_ref() == self.predecessor_cutover.read().await.as_ref(),
+            "HOLD: inbound predecessor binding changed before journal replay"
+        );
+        anyhow::ensure!(
             state.manual_identity.as_ref() == self.manual_identity.read().await.as_ref(),
             "HOLD: manual inbound target/route missing or changed before journal replay"
         );
         for (uuid, tx) in state.transactions.iter().chain(state.completed.iter()) {
+            if let Some(receipt) = &tx.receipt {
+                for signed in receipt.signed_submission.iter().chain(
+                    receipt
+                        .submission_attempts
+                        .iter()
+                        .map(|attempt| &attempt.signed_submission),
+                ) {
+                    signed.validate_native_reconciliation()?;
+                }
+            }
             anyhow::ensure!(
                 *uuid == tx.uuid,
                 "HOLD: persisted inbound transaction key {uuid} does not match its UUID {}",
@@ -658,6 +750,15 @@ impl JSONStorage {
                 }
             }
             if matches!(tx.status, TxStatus::Completed) {
+                tx.saved_settlement_observation = Some(
+                    tx.saved_settlement_observation
+                        .take()
+                        .or_else(|| tx.receipt_observation.clone())
+                        .unwrap_or(super::message_sender::FinalizedReceiptObservation {
+                            finalized_block_number: None,
+                            finalized_block_hash: String::new(),
+                        }),
+                );
                 let diagnostic = "Saved completion requires original finalized dispatch/reply and per-log settlement reconciliation".to_owned();
                 tx.status = TxStatus::NeedsReconciliation {
                     diagnostic: diagnostic.clone(),
@@ -671,6 +772,15 @@ impl JSONStorage {
                 tx.receipt.is_some(),
                 "Completed transaction {} has no original receipt evidence",
                 tx.uuid
+            );
+            tx.saved_settlement_observation = Some(
+                tx.saved_settlement_observation
+                    .take()
+                    .or_else(|| tx.receipt_observation.clone())
+                    .unwrap_or(super::message_sender::FinalizedReceiptObservation {
+                        finalized_block_number: None,
+                        finalized_block_hash: String::new(),
+                    }),
             );
             // Earlier completions could be Processed-only. Requalify the exact
             // original dispatch/reply/effects without resetting discovery or bytes.
@@ -767,6 +877,7 @@ impl Storage for JSONStorage {
     }
 
     async fn save(&self, tx_manager: &TransactionManager) -> anyhow::Result<()> {
+        cutover::reject_sealed(&self.path)?;
         let _guard = self.save_lock.lock().await;
         let identity =
             self.runtime_identity.read().await.clone().ok_or_else(|| {
@@ -779,25 +890,36 @@ impl Storage for JSONStorage {
             "HOLD: incomplete or missing inbound transaction/block journal"
         );
 
-        let transactions = tx_manager.transactions.read().await.clone();
-        let completed = tx_manager.completed.read().await.clone();
-        let failed = tx_manager.failed.read().await.clone();
-
-        self.write_state(&StoredState {
-            schema_version: STATE_SCHEMA_VERSION,
-            runtime_identity: Some(identity),
-            manual_identity: self.manual_identity.read().await.clone(),
-            transactions,
-            completed,
-            failed,
-        })
-        .await?;
+        // Borrow the maps: cloning signed receipts and completed history is unnecessary.
+        let transactions = tx_manager.transactions.read().await;
+        let completed = tx_manager.completed.read().await;
+        let failed = tx_manager.failed.read().await;
+        let mut state = serde_json::json!({
+            "schema_version": STATE_SCHEMA_VERSION,
+            "predecessor_cutover": self.predecessor_cutover.read().await.clone(),
+            "runtime_identity": identity,
+            "manual_identity": self.manual_identity.read().await.clone(),
+            "transactions": &*transactions,
+            "completed": &*completed,
+            "failed": &*failed,
+        });
+        for field in ["manual_identity", "predecessor_cutover"] {
+            if state[field].is_null() {
+                state
+                    .as_object_mut()
+                    .expect("state is an object")
+                    .remove(field);
+            }
+        }
+        drop((transactions, completed, failed));
+        self.write_state(state).await?;
 
         self.block_storage.save(&self.path).await?;
         Ok(())
     }
 
     async fn load(&self, tx_manager: &TransactionManager) -> anyhow::Result<()> {
+        cutover::reject_sealed(&self.path)?;
         if !self.path.exists() {
             return Ok(());
         }
@@ -954,6 +1076,36 @@ mod tests {
         )
         .await
         .unwrap();
+        use std::os::unix::fs::MetadataExt;
+        let unchanged_bytes = tokio::fs::read(path.join(STATE_FILE)).await.unwrap();
+        let unchanged_inode = tokio::fs::metadata(path.join(STATE_FILE))
+            .await
+            .unwrap()
+            .ino();
+        let blocks_inode = tokio::fs::metadata(path.join("blocks.json"))
+            .await
+            .unwrap()
+            .ino();
+        storage.save(&manager).await.unwrap();
+        assert_eq!(
+            tokio::fs::read(path.join(STATE_FILE)).await.unwrap(),
+            unchanged_bytes
+        );
+        assert_eq!(
+            tokio::fs::metadata(path.join(STATE_FILE))
+                .await
+                .unwrap()
+                .ino(),
+            unchanged_inode,
+            "unchanged records must preserve original bytes and unknown fields without replacement"
+        );
+        assert_eq!(
+            tokio::fs::metadata(path.join("blocks.json"))
+                .await
+                .unwrap()
+                .ino(),
+            blocks_inode
+        );
         let latest_diagnostic = "Unknown at finalized block 74 (0xabce)";
         let latest_observation =
             crate::message_relayer::eth_to_gear::message_sender::FinalizedReceiptObservation {

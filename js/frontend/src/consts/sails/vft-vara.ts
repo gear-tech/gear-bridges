@@ -357,6 +357,21 @@ export class Vft2 {
 export class VftAdmin {
   constructor(private _program: SailsProgram) {}
 
+  public exit(inheritor: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftAdmin',
+      'Exit',
+      inheritor,
+      '[u8;32]',
+      'Null',
+      this._program.programId,
+    );
+  }
+
   public appendAllowancesShard(capacity: number): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -412,21 +427,6 @@ export class VftAdmin {
       'Burn',
       [$from, value],
       '([u8;32], U256)',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  public exit(inheritor: ActorId): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'VftAdmin',
-      'Exit',
-      inheritor,
-      '[u8;32]',
       'Null',
       this._program.programId,
     );
@@ -1144,6 +1144,19 @@ export class NativeEscrow {
     );
   }
 
+  public outstandingRedemptions(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'OutstandingRedemptions',
+      null,
+      null,
+      'u64',
+    );
+  }
+
   public redemption(operation_id: H256): QueryBuilder<Redemption | null> {
     return new QueryBuilder<Redemption | null>(
       this._program.api,
@@ -1157,24 +1170,23 @@ export class NativeEscrow {
     );
   }
 }
+/**
+ * Specifies the network for deployment of VFT-VARA
+*/
+export type Mainnet = "Yes" | "No";
 
+export interface Redemption {
+  from: ActorId;
+  to: ActorId;
+  amount: number | string | bigint;
+  child: MessageId;
+  status: PayoutStatus;
   /**
-   * Specifies the network for deployment of VFT-VARA
+   * Native value actually returned by the original payout child.
   */
-  export type Mainnet = "Yes" | "No";
+  returned_value: number | string | bigint;
+}
 
-  export interface Redemption {
-    from: ActorId;
-    to: ActorId;
-    amount: number | string | bigint;
-    child: MessageId;
-    status: PayoutStatus;
-    /**
-     * Native value actually returned by the original payout child.
-    */
-    returned_value: number | string | bigint;
-  }
+export type PayoutStatus = "Queued" | "Delivered" | "Returned" | "Ambiguous";
 
-  export type PayoutStatus = "Queued" | "Delivered" | "Returned" | "Ambiguous";
-
-export const IDL_SHA256 = 'eb23027b40bae7325943d6dd5ba419f99a084aa281681003ac4d8330bc770f3e';
+export const IDL_SHA256 = '43a04afd82b782b4a4e238cf95bf556e73a39866f2defbb11ad3fafd98cab8f2';

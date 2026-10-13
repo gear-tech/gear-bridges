@@ -5,7 +5,6 @@ use api_provider::ApiProviderConnection;
 use gclient::Result;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft_client::traits::*;
-use vft_manager_client::{traits::*, Order};
 
 // The constant is intentionally duplicated since vara-runtime is too heavy dependency.
 pub const UNITS: u128 = 1_000_000_000_000;
@@ -118,43 +117,4 @@ async fn mint(
     }
 
     Ok(())
-}
-
-pub async fn migrate_transactions(
-    gas_limit: u64,
-    size_batch: u32,
-    remoting: GClientRemoting,
-    vft_manager: ActorId,
-    remoting_new: GClientRemoting,
-    vft_manager_new: ActorId,
-) -> Result<()> {
-    let service = vft_manager_client::VftManager::new(remoting);
-    let mut service_new = vft_manager_client::VftManager::new(remoting_new);
-    let mut cursor = 0;
-    loop {
-        let transactions = service
-            .transactions(Order::Direct, cursor, size_batch)
-            .with_gas_limit(gas_limit)
-            .recv(vft_manager)
-            .await
-            .map_err(|e| anyhow!("{e:?}"))?;
-        let len = transactions.len();
-
-        log::debug!("migrate_transactions: read {len} item(s) from {cursor}");
-
-        cursor += size_batch;
-
-        service_new
-            .insert_transactions(transactions)
-            .with_gas_limit(gas_limit)
-            .send_recv(vft_manager_new)
-            .await
-            .map_err(|e| anyhow!("{e:?}"))?;
-
-        log::debug!("migrate_transactions: successfully send {len} item(s)");
-
-        if (len as u32) < size_batch {
-            break Ok(());
-        }
-    }
 }

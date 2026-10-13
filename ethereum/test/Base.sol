@@ -93,6 +93,11 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     bool internal messageOnlyBridge;
     bool internal includeOrdinaryGearToken;
 
+    // CREATEs before the queue proxy: both governance contracts, verifier, queue implementation.
+    uint256 internal constant GOVERNANCE_TO_QUEUE_PROXY_CREATES = 4;
+    // Token profiles add five tokens and the WrappedVara implementation/proxy before governance.
+    uint256 internal constant TOKEN_PROFILE_CREATES = 7;
+
     ERC20Manager public erc20Manager;
 
     BridgingPayment public bridgingPayment;
@@ -282,9 +287,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 source: governanceAdmin.governance(),
                 destination: address(governanceAdmin),
                 payload: UpgradeProxyMessage({
-                    proxy: address(messageQueue),
-                    newImplementation: newImplementation1,
-                    data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
+                    proxy: address(messageQueue), newImplementation: newImplementation1, data: ""
                 }).pack()
             });
             console.logBytes(message1.payload);
@@ -449,8 +452,9 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridge governance:");
 
         uint256 queueDeployerNonce = vm.getNonce(deploymentArguments.deployerAddress);
-        address messageQueueAddress =
-            vm.computeCreateAddress(deploymentArguments.deployerAddress, queueDeployerNonce + 4);
+        address messageQueueAddress = vm.computeCreateAddress(
+            deploymentArguments.deployerAddress, queueDeployerNonce + GOVERNANCE_TO_QUEUE_PROXY_CREATES
+        );
         if (expectedMessageQueueAddress != address(0)) {
             require(
                 deploymentArguments.overrides.circleToken == BaseConstants.ZERO_ADDRESS
@@ -611,6 +615,13 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         } else if (isScript) {
             vm.stopBroadcast();
         }
+    }
+
+    function _predictBeefyMessageQueue(address deployer) internal view returns (address) {
+        // The client is deployed first; ordinary Gear tokens reuse the same token CREATE slots.
+        uint256 createsBeforeQueue = 1 + GOVERNANCE_TO_QUEUE_PROXY_CREATES;
+        if (!messageOnlyBridge) createsBeforeQueue += TOKEN_PROFILE_CREATES;
+        return vm.computeCreateAddress(deployer, vm.getNonce(deployer) + createsBeforeQueue);
     }
 
     function _deployBeefyClient(uint256 privateKey, address predictedQueue) internal {

@@ -26,8 +26,8 @@ contract BeefyTokens is Script, Base {
             startingNonce == _envUint64("EXPECTED_DEPLOYER_NONCE"),
             "deployer nonce changed; reconcile partial broadcast"
         );
-        address predictedQueue = vm.computeCreateAddress(deployer, startingNonce + 12);
         includeOrdinaryGearToken = true;
+        address predictedQueue = _predictBeefyMessageQueue(deployer);
         uint256 fee = vm.envUint("BRIDGING_PAYMENT_FEE");
         require(fee > 0, "missing payment fee");
         _deployBeefyClient(privateKey, predictedQueue);

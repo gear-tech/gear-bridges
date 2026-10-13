@@ -18,11 +18,14 @@ struct TokenChild {
     request: MessageId,
     token: ActorId,
     status: MessageStatus,
-    terminal: bool,
 }
 static mut TOKEN_CHILDREN: Option<collections::BTreeMap<MessageId, TokenChild>> = None;
 fn children() -> &'static mut collections::BTreeMap<MessageId, TokenChild> {
     unsafe { gstd::static_mut!(TOKEN_CHILDREN).get_or_insert_with(collections::BTreeMap::new) }
+}
+
+pub(super) fn is_quiescent() -> bool {
+    children().is_empty()
 }
 
 /// Burn `amount` tokens from the `sender` address.
@@ -193,7 +196,6 @@ async fn send_message_with_gas_for_reply(
             request: msg_id,
             token: destination,
             status,
-            terminal: false,
         },
     );
     future
@@ -215,7 +217,7 @@ pub fn handle_persistent_reply() {
     let Some(record) = children().get(&child).cloned() else {
         return;
     };
-    if record.terminal || record.token != msg::source() {
+    if record.token != msg::source() {
         return;
     }
     let msg_id = record.request;
@@ -251,7 +253,7 @@ pub fn handle_persistent_reply() {
                 .or_else(|| definite_failure.then_some(false));
 
             if let Some(reply) = reply {
-                children().get_mut(&child).unwrap().terminal = true;
+                children().remove(&child);
                 msg_tracker_mut()
                     .update_message_status(msg_id, MessageStatus::TokenDepositCompleted(reply));
             }
@@ -269,7 +271,7 @@ pub fn handle_persistent_reply() {
                 .or_else(|| definite_failure.then_some(false));
 
             if let Some(reply) = reply {
-                children().get_mut(&child).unwrap().terminal = true;
+                children().remove(&child);
                 msg_tracker_mut()
                     .update_message_status(msg_id, MessageStatus::TokensReturnComplete(reply));
             }

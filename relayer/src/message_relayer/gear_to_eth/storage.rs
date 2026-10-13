@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::message_relayer::{
     common::{
-        ethereum::{accumulator::utils::MerkleRoots, merkle_root_extractor::RootCursorStorage},
+        ethereum::merkle_root_extractor::{EthereumRootState, RootCursorStorage},
         gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
         GearBlock, GearBlockNumber, MessageInBlock,
     },
@@ -170,12 +170,16 @@ fn decode_transaction_journal(contents: &str) -> anyhow::Result<Transaction> {
         object.insert("journal_version".into(), serde_json::json!(2));
         object.insert("legacy_evidence".into(), original);
     }
-    let tx: Transaction = serde_json::from_value(value)?;
+    let mut tx: Transaction = serde_json::from_value(value)?;
     anyhow::ensure!(
         !legacy || !matches!(&tx.status, super::tx_manager::TxStatus::PrepareMessage(..)),
         "HOLD: unversioned outbound journal claims an unsigned handoff guarantee"
     );
     tx.validate_journal()?;
+    // Validate legacy completion semantics before migrating; never alter signatures or evidence.
+    if matches!(tx.journal_version, 2 | 3) {
+        tx.journal_version = 4;
+    }
     Ok(tx)
 }
 
@@ -327,24 +331,27 @@ impl BlockStorage {
 
         let blocks_new = path.join("blocks.json.new");
         let blocks_old = path.join("blocks.json");
-
+        anyhow::ensure!(
+            !blocks_new.exists(),
+            "HOLD: interrupted outbound block snapshot"
+        );
+        self.prune().await;
+        let blocks = self.blocks.read().await;
+        let value = serde_json::to_value(&*blocks)?;
+        match tokio::fs::read(&blocks_old).await {
+            Ok(previous) if serde_json::from_slice::<serde_json::Value>(&previous)? == value => {
+                return Ok(())
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let blocks_json = serde_json::to_string(&value)?;
         let mut blocks_file = tokio::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&blocks_new)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to open or create blocks file in storage path: '{}'",
-                    path.display()
-                )
-            })?;
-
-        self.prune().await;
-
-        let blocks = self.blocks.read().await;
-        let blocks_json = serde_json::to_string::<BTreeMap<GearBlockNumber, Block>>(&*blocks)?;
-
+            .await?;
         blocks_file
             .write_all(blocks_json.as_bytes())
             .await
@@ -393,6 +400,9 @@ pub trait Storage: Send + Sync {
     async fn load(&self, tx_manager: &TransactionManager) -> anyhow::Result<()>;
     async fn save_blocks(&self) -> anyhow::Result<()>;
     async fn message_is_eligible(&self, _message: &MessageInBlock) -> anyhow::Result<bool> {
+        anyhow::bail!("Gear event admission is unavailable for this storage")
+    }
+    async fn eligible_messages(&self) -> anyhow::Result<Vec<MessageInBlock>> {
         anyhow::bail!("Gear event admission is unavailable for this storage")
     }
     async fn outbound_nonce_owned(&self, _nonce: [u8; 32]) -> anyhow::Result<bool> {
@@ -519,13 +529,11 @@ impl Storage for NoStorage {
 #[cfg(test)]
 #[async_trait::async_trait]
 impl RootCursorStorage for NoStorage {
-    async fn load_eth_cursor(&self) -> anyhow::Result<Option<u64>> {
+    async fn load_root_state(&self) -> anyhow::Result<Option<EthereumRootState>> {
         Ok(None)
     }
-    async fn save_eth_cursor(&self, _block: u64) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn save_merkle_roots(&self, _roots: &MerkleRoots) -> anyhow::Result<()> {
+    async fn save_root_state(&self, state: &EthereumRootState) -> anyhow::Result<()> {
+        state.validate()?;
         Ok(())
     }
 }
@@ -604,12 +612,14 @@ impl JSONStorage {
             );
         }
         anyhow::ensure!(
-            !self.path.join("ethereum_root_cursor").exists(),
+            !self.path.join("ethereum_root_cursor").exists()
+                && !self.path.join("ethereum_roots.json").exists(),
             "HOLD: outbound root cursor lacks a destination lane identity"
         );
         let roots_path = self.path.join("merkle_roots");
         if roots_path.exists() {
-            let roots: MerkleRoots = serde_json::from_slice(&tokio::fs::read(roots_path).await?)?;
+            let roots: Vec<crate::message_relayer::common::RelayedMerkleRoot> =
+                serde_json::from_slice(&tokio::fs::read(roots_path).await?)?;
             anyhow::ensure!(
                 roots.is_empty(),
                 "HOLD: outbound roots lack a destination lane identity"
@@ -637,7 +647,20 @@ impl JSONStorage {
         tokio::fs::create_dir_all(&temporary_directory).await?;
         let path = self.path.join(name);
         let temporary_path = temporary_directory.join(format!("{name}.new"));
-        let contents = serde_json::to_vec(value)?;
+        anyhow::ensure!(
+            !temporary_path.exists(),
+            "HOLD: interrupted atomic journal write for {name}"
+        );
+        let current = serde_json::to_value(value)?;
+        match tokio::fs::read(&path).await {
+            Ok(previous) if serde_json::from_slice::<serde_json::Value>(&previous)? == current => {
+                return Ok(())
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let contents = serde_json::to_vec(&current)?;
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -965,6 +988,32 @@ impl JSONStorage {
         Ok(())
     }
 
+    async fn nonce_owned_in_state(
+        &self,
+        state: &GearEventState,
+        nonce: [u8; 32],
+        uuid: Option<Uuid>,
+    ) -> anyhow::Result<bool> {
+        if self.completed_nonce_locked(state, nonce).await?.is_some() {
+            return Ok(true);
+        }
+        let Some(uuid) = uuid else {
+            return Ok(false);
+        };
+        let contents = tokio::fs::read_to_string(self.path.join(uuid.to_string()))
+            .await
+            .context("HOLD: active outbound nonce is missing its original UUID journal")?;
+        let tx = decode_transaction_journal(&contents)?;
+        anyhow::ensure!(
+            tx.uuid == uuid && tx.message.message.nonce_be == nonce,
+            "HOLD: active outbound nonce ownership changed"
+        );
+        if !Self::is_manual_event_state(state) {
+            Self::retained_first_fee(state, &tx.message)?;
+        }
+        Ok(true)
+    }
+
     async fn validate_submission_lane(&self, tx: &Transaction) -> anyhow::Result<()> {
         let Some(signed) = &tx.ethereum_submission else {
             return Ok(());
@@ -1065,10 +1114,6 @@ impl Storage for JSONStorage {
         let failed = tx_manager.failed.read().await;
         self.write_atomic_json("failed", &*failed).await?;
 
-        let _guard = self.merkle_roots_lock.lock().await;
-        let merkle = tx_manager.merkle_roots.read().await;
-        self.write_atomic_json("merkle_roots", &*merkle).await?;
-
         self.block_storage.save(&self.path).await?;
         self.write_atomic_json(
             "transaction_status.json",
@@ -1144,15 +1189,8 @@ impl Storage for JSONStorage {
                     // Loaded before scanning transaction files.
                     continue;
                 } else if entry.file_name().to_str() == Some("merkle_roots") {
-                    let contents = tokio::fs::read_to_string(entry.path())
-                        .await
-                        .context("Failed to read 'merkle_roots' file")?;
-                    let merkle_roots: MerkleRoots = serde_json::from_str(&contents)
-                        .context("Failed to parse 'merkle_roots'")?;
-                    for i in 0..merkle_roots.len() {
-                        let root = merkle_roots.get(i).expect("Root should exist");
-                        let _ = tx_manager.merkle_roots.write().await.add(*root);
-                    }
+                    // Legacy evidence is never a runtime root source. The extractor replays it.
+                    continue;
                 } else if entry.file_name().to_str() == Some("blocks.json") {
                     let contents =
                         tokio::fs::read_to_string(entry.path())
@@ -1192,7 +1230,12 @@ impl Storage for JSONStorage {
                         .ok_or_else(|| anyhow::anyhow!("HOLD: missing completed nonce evidence"))?;
                 } else if matches!(
                     entry.file_name().to_str(),
-                    Some("ethereum_root_cursor" | "gear_events.json" | "transaction_status.json")
+                    Some(
+                        "ethereum_root_cursor"
+                            | "ethereum_roots.json"
+                            | "gear_events.json"
+                            | "transaction_status.json"
+                    )
                 ) {
                     continue;
                 } else {
@@ -1244,6 +1287,31 @@ impl Storage for JSONStorage {
         self.block_storage.save(&self.path).await
     }
 
+    async fn eligible_messages(&self) -> anyhow::Result<Vec<MessageInBlock>> {
+        let _guard = self.event_state_lock.lock().await;
+        let state = self.load_event_state_locked().await?;
+        let start = state
+            .start_block
+            .ok_or_else(|| anyhow::anyhow!("HOLD: Gear event journal has no start block"))?;
+        ensure_event_bound(&state, start)?;
+        let lane = state.lane_identity.as_ref().expect("event lane is bound");
+        let mut eligible = Vec::new();
+        for (key, message) in &state.queued {
+            if lane.requires_first_fee(&message.message.source) && !state.paid.contains_key(key) {
+                continue;
+            }
+            let nonce = message.message.nonce_be;
+            let uuid = self.known_active_nonces.read().await.get(&nonce).copied();
+            let owned = uuid.is_some() || self.known_completed_nonces.read().await.contains(&nonce);
+            if owned && self.nonce_owned_in_state(&state, nonce, uuid).await? {
+                continue;
+            }
+            Self::retained_first_fee(&state, message)?;
+            eligible.push(message.clone());
+        }
+        Ok(eligible)
+    }
+
     async fn message_is_eligible(&self, message: &MessageInBlock) -> anyhow::Result<bool> {
         let _guard = self.event_state_lock.lock().await;
         let state = self.load_event_state_locked().await?;
@@ -1283,24 +1351,7 @@ impl Storage for JSONStorage {
             return Ok(false);
         }
         let state = self.load_event_state_locked().await?;
-        if self.completed_nonce_locked(&state, nonce).await?.is_some() {
-            return Ok(true);
-        }
-        let Some(uuid) = uuid else {
-            return Ok(false);
-        };
-        let contents = tokio::fs::read_to_string(self.path.join(uuid.to_string()))
-            .await
-            .context("HOLD: active outbound nonce is missing its original UUID journal")?;
-        let tx = decode_transaction_journal(&contents)?;
-        anyhow::ensure!(
-            tx.uuid == uuid && tx.message.message.nonce_be == nonce,
-            "HOLD: active outbound nonce ownership changed"
-        );
-        if !Self::is_manual_event_state(&state) {
-            Self::retained_first_fee(&state, &tx.message)?;
-        }
-        Ok(true)
+        self.nonce_owned_in_state(&state, nonce, uuid).await
     }
 
     async fn bind_event_chain(&self, genesis_hash: H256, start_block: u32) -> anyhow::Result<()> {
@@ -1504,27 +1555,67 @@ impl Storage for JSONStorage {
         Ok(cursor.map_or(start, |cursor| cursor.block.saturating_add(1)))
     }
 }
+fn validate_root_lane(
+    state: &EthereumRootState,
+    lane: &OutboundLaneIdentity,
+) -> anyhow::Result<()> {
+    if let Some(birth) = &state.queue_deployment {
+        anyhow::ensure!(
+            birth.chain_id == lane.destination_chain_id
+                && birth.genesis_hash.as_slice() == lane.destination_genesis_hash.as_bytes()
+                && birth.queue.as_slice() == lane.message_queue_address.as_bytes(),
+            "HOLD: authenticated queue birth differs from persisted outbound lane"
+        );
+    }
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl RootCursorStorage for JSONStorage {
-    async fn load_eth_cursor(&self) -> anyhow::Result<Option<u64>> {
-        let path = self.path.join("ethereum_root_cursor");
-        match tokio::fs::read_to_string(path).await {
-            Ok(contents) => Ok(Some(
-                serde_json::from_str(&contents).context("Invalid Ethereum root cursor")?,
-            )),
+    async fn load_root_state(&self) -> anyhow::Result<Option<EthereumRootState>> {
+        let _guard = self.merkle_roots_lock.lock().await;
+        self.check_incomplete_writes().await?;
+        let events = self.load_event_state_locked().await?;
+        anyhow::ensure!(
+            events.lane_identity.is_some(),
+            "HOLD: root state lacks a destination lane identity"
+        );
+        match tokio::fs::read_to_string(self.path.join("ethereum_roots.json")).await {
+            Ok(contents) => {
+                let state: EthereumRootState = serde_json::from_str(&contents)
+                    .context("HOLD: invalid unified Ethereum root state")?;
+                state.validate()?;
+                validate_root_lane(&state, events.lane_identity.as_ref().expect("checked lane"))?;
+                Ok(Some(state))
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.into()),
         }
     }
 
-    async fn save_eth_cursor(&self, block: u64) -> anyhow::Result<()> {
+    async fn save_root_state(&self, state: &EthereumRootState) -> anyhow::Result<()> {
         let _guard = self.merkle_roots_lock.lock().await;
-        self.write_atomic_json("ethereum_root_cursor", &block).await
-    }
-
-    async fn save_merkle_roots(&self, roots: &MerkleRoots) -> anyhow::Result<()> {
-        let _guard = self.merkle_roots_lock.lock().await;
-        self.write_atomic_json("merkle_roots", roots).await
+        state.validate()?;
+        let events = self.load_event_state_locked().await?;
+        anyhow::ensure!(
+            events.lane_identity.is_some(),
+            "HOLD: root state lacks a destination lane identity"
+        );
+        validate_root_lane(state, events.lane_identity.as_ref().expect("checked lane"))?;
+        match tokio::fs::read(self.path.join("ethereum_roots.json")).await {
+            Ok(bytes) => {
+                let previous: EthereumRootState =
+                    serde_json::from_slice(&bytes).context("HOLD: invalid previous root state")?;
+                previous.validate_successor(state)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::ensure!(state.phase == crate::message_relayer::common::ethereum::merkle_root_extractor::EthereumRootPhase::Rebuilding
+                    && state.cursor.is_none() && state.roots.is_empty(),
+                    "HOLD: initial root state must begin a full empty replay");
+            }
+            Err(error) => return Err(error.into()),
+        }
+        self.write_atomic_json("ethereum_roots.json", state).await
     }
 }
 
@@ -1534,6 +1625,14 @@ pub(crate) mod tests {
     use crate::message_relayer::common::{AuthoritySetId, GearBlockNumber, MessageInBlock};
     use std::sync::Arc;
 
+    fn root_state(target: u64) -> EthereumRootState {
+        EthereumRootState::rebuilding(
+            crate::message_relayer::common::ethereum::merkle_root_extractor::EthereumRootCursor {
+                block_number: target,
+                block_hash: alloy::primitives::B256::repeat_byte(0x41),
+            },
+        )
+    }
     fn msg_in_block(block: u32, nonce: u64) -> MessageInBlock {
         let nonce_be = U256::from(nonce).to_big_endian();
 
@@ -1616,6 +1715,79 @@ pub(crate) mod tests {
             .await
             .unwrap();
         (storage, message, paid)
+    }
+
+    #[tokio::test]
+    async fn changed_active_records_reuse_unchanged_completed_evidence_and_keep_crash_markers() {
+        use std::os::unix::fs::MetadataExt;
+        let path = std::env::temp_dir().join(format!("gear-unchanged-journal-{}", Uuid::new_v4()));
+        let (storage, message, _) = paired_storage(&path).await;
+        let manager = TransactionManager::new(storage.clone());
+        let completed = completed_tx(message.clone()).await;
+        let completed_path = path.join(completed.uuid.to_string());
+        manager.add_transaction(completed).await;
+        manager.update_storage().await.unwrap();
+        storage
+            .ack_event_pair(message.message.nonce_be)
+            .await
+            .unwrap();
+        let original = tokio::fs::read(&completed_path).await.unwrap();
+        let inode = tokio::fs::metadata(&completed_path).await.unwrap().ino();
+        let mut next = msg_in_block(11, 8);
+        next.block_hash = H256::repeat_byte(11);
+        storage
+            .record_queued_block(11, next.block_hash, &[next.clone()])
+            .await
+            .unwrap();
+        storage
+            .record_paid_block(12, H256::repeat_byte(12), &[next.message.nonce_be])
+            .await
+            .unwrap();
+        let active = Transaction::new(next, TxStatus::WaitForMerkleRoot);
+        let active_uuid = active.uuid;
+        manager.add_transaction(active).await;
+        manager.update_storage().await.unwrap();
+        assert_eq!(tokio::fs::read(&completed_path).await.unwrap(), original);
+        assert_eq!(
+            tokio::fs::metadata(&completed_path).await.unwrap().ino(),
+            inode,
+            "changing an active row must not replace completed original evidence"
+        );
+        let active_path = path.join(active_uuid.to_string());
+        let active_inode = tokio::fs::metadata(&active_path).await.unwrap().ino();
+        manager
+            .transactions
+            .write()
+            .await
+            .get_mut(&active_uuid)
+            .unwrap()
+            .status = TxStatus::Failed {
+            diagnostic: "before broadcast".into(),
+        };
+        manager
+            .fail_transaction(active_uuid, "before broadcast".into())
+            .await;
+        manager.update_storage().await.unwrap();
+        assert_ne!(
+            tokio::fs::metadata(&active_path).await.unwrap().ino(),
+            active_inode
+        );
+        assert_eq!(
+            tokio::fs::metadata(&completed_path).await.unwrap().ino(),
+            inode
+        );
+        let temporary = path.join(".state").join(format!("{active_uuid}.new"));
+        tokio::fs::write(&temporary, b"{interrupted").await.unwrap();
+        assert!(
+            manager.update_storage().await.is_err(),
+            "unchanged elision cannot hide an interrupted write"
+        );
+        assert!(temporary.exists() && path.join(".state/save.pending").exists());
+        assert_eq!(
+            tokio::fs::metadata(&completed_path).await.unwrap().ino(),
+            inode
+        );
+        tokio::fs::remove_dir_all(path).await.unwrap();
     }
 
     #[tokio::test]
@@ -2173,11 +2345,7 @@ pub(crate) mod tests {
             );
             let restored_storage = Arc::new(JSONStorage::new(&path));
             let recovered = TransactionManager::new(restored_storage.clone());
-            let result = recovered.load_from_storage().await;
-            match status {
-                TxStatus::WaitForMerkleRoot => result.unwrap(),
-                _ => assert!(result.unwrap_err().to_string().contains("HOLD")),
-            }
+            recovered.load_from_storage().await.unwrap();
             assert_eq!(recovered.transactions.read().await[&uuid].message, message);
             assert!(restored_storage
                 .outbound_nonce_owned(first_paid.nonce)
@@ -2346,10 +2514,10 @@ pub(crate) mod tests {
         restored.update_storage().await.unwrap();
         let upgraded: serde_json::Value =
             serde_json::from_slice(&tokio::fs::read(&journal).await.unwrap()).unwrap();
-        assert_eq!(upgraded["journal_version"], 2);
+        assert_eq!(upgraded["journal_version"], 4);
         assert_eq!(upgraded["legacy_evidence"], original);
         for corrupt in [
-            serde_json::json!({"journal_version": 4}),
+            serde_json::json!({"journal_version": 5}),
             serde_json::json!({"unexpected_field": 1}),
         ] {
             let mut invalid = upgraded.clone();
@@ -2595,9 +2763,10 @@ pub(crate) mod tests {
         drop(storage);
 
         let root_storage = JSONStorage::new(&path);
-        root_storage.save_eth_cursor(123).await.unwrap();
+        let root_state = root_state(123);
+        root_storage.save_root_state(&root_state).await.unwrap();
         let restored = Arc::new(JSONStorage::new(&path));
-        assert_eq!(restored.load_eth_cursor().await.unwrap(), Some(123));
+        assert_eq!(restored.load_root_state().await.unwrap(), Some(root_state));
         assert_eq!(restored.event_start_block().await.unwrap(), Some(10));
         assert_eq!(
             restored
@@ -2857,7 +3026,8 @@ pub(crate) mod tests {
             .bind_event_chain(H256::repeat_byte(0x11), 10)
             .await
             .unwrap();
-        storage.save_eth_cursor(123).await.unwrap();
+        let root_state = root_state(123);
+        storage.save_root_state(&root_state).await.unwrap();
 
         let mut other_queue = lane_identity();
         other_queue.message_queue_address = H160::repeat_byte(0x55);
@@ -2868,7 +3038,7 @@ pub(crate) mod tests {
             .unwrap_err()
             .to_string()
             .contains("HOLD"));
-        assert_eq!(restored.load_eth_cursor().await.unwrap(), Some(123));
+        assert_eq!(restored.load_root_state().await.unwrap(), Some(root_state));
         tokio::fs::remove_dir_all(path).await.unwrap();
 
         let legacy = std::env::temp_dir().join(format!("gear-unbound-cursor-{}", Uuid::new_v4()));
@@ -2877,14 +3047,145 @@ pub(crate) mod tests {
             .write_atomic_json("gear_events.json", &GearEventState::default())
             .await
             .unwrap();
-        unbound.save_eth_cursor(123).await.unwrap();
+        unbound
+            .write_atomic_json("ethereum_root_cursor", &123u64)
+            .await
+            .unwrap();
         let error = unbound
             .bind_outbound_lane(lane_identity())
             .await
             .unwrap_err()
             .to_string();
         assert!(error.contains("HOLD") && error.contains("root cursor"));
-        assert_eq!(unbound.load_eth_cursor().await.unwrap(), Some(123));
+        assert_eq!(
+            tokio::fs::read(legacy.join("ethereum_root_cursor"))
+                .await
+                .unwrap(),
+            b"123"
+        );
         tokio::fs::remove_dir_all(legacy).await.unwrap();
+    }
+    #[tokio::test]
+    async fn unified_roots_replay_legacy_and_preserve_pending_cursor_across_crashes() {
+        use crate::message_relayer::common::{
+            ethereum::{
+                accumulator::utils::{MerkleRoots, RootAddError},
+                merkle_root_extractor::{EthereumRootCursor, EthereumRootPhase},
+            },
+            EthereumRootInclusion, QualifiedMerkleRoot, RelayedMerkleRoot,
+        };
+        use alloy::primitives::B256;
+        let path = std::env::temp_dir().join(format!("gear-root-replay-{}", Uuid::new_v4()));
+        let storage = Arc::new(JSONStorage::new(&path));
+        storage.bind_outbound_lane(lane_identity()).await.unwrap();
+        let stale = RelayedMerkleRoot {
+            block: GearBlockNumber(100),
+            block_hash: H256::repeat_byte(1),
+            authority_set_id: AuthoritySetId(1),
+            merkle_root: H256::repeat_byte(2),
+            timestamp: 100,
+        };
+        storage
+            .write_atomic_json("ethereum_root_cursor", &10_000u64)
+            .await
+            .unwrap();
+        storage
+            .write_atomic_json("merkle_roots", &vec![stale])
+            .await
+            .unwrap();
+        let legacy_bytes = tokio::fs::read(path.join("merkle_roots")).await.unwrap();
+        assert!(storage.load_root_state().await.unwrap().is_none());
+        let mut state = root_state(10_000);
+        storage.save_root_state(&state).await.unwrap();
+        let mut premature = state.clone();
+        premature.phase = EthereumRootPhase::Ready;
+        premature.migration_target = None;
+        assert!(storage.save_root_state(&premature).await.is_err());
+        let canonical = QualifiedMerkleRoot {
+            root: RelayedMerkleRoot {
+                merkle_root: H256::repeat_byte(3),
+                ..stale
+            },
+            inclusion: EthereumRootInclusion {
+                block_number: 100,
+                block_hash: B256::repeat_byte(4),
+                transaction_hash: B256::repeat_byte(5),
+                transaction_index: 0,
+                log_index: 0,
+            },
+        };
+        state.roots = vec![canonical];
+        state.cursor = Some(EthereumRootCursor {
+            block_number: 1_999,
+            block_hash: B256::repeat_byte(6),
+        });
+        storage.save_root_state(&state).await.unwrap();
+        let restored = JSONStorage::new(&path);
+        let resumed = restored.load_root_state().await.unwrap().unwrap();
+        assert_eq!(resumed, state);
+        assert_eq!(resumed.phase, EthereumRootPhase::Rebuilding);
+        let manager = TransactionManager::new(storage.clone());
+        storage.load(&manager).await.unwrap();
+        assert!(manager.merkle_roots.read().await.is_empty());
+        assert_eq!(
+            tokio::fs::read(path.join("merkle_roots")).await.unwrap(),
+            legacy_bytes
+        );
+        state.cursor = state.migration_target;
+        storage.save_root_state(&state).await.unwrap();
+        state.phase = EthereumRootPhase::Ready;
+        state.migration_target = None;
+        storage.save_root_state(&state).await.unwrap();
+        let new = QualifiedMerkleRoot {
+            root: RelayedMerkleRoot {
+                block: GearBlockNumber(200),
+                ..canonical.root
+            },
+            inclusion: EthereumRootInclusion {
+                block_number: 10_001,
+                block_hash: B256::repeat_byte(7),
+                transaction_hash: B256::repeat_byte(8),
+                ..canonical.inclusion
+            },
+        };
+        let mut roots = MerkleRoots::from_qualified(&state.roots, 100).unwrap();
+        roots.add(new).unwrap();
+        state.roots = roots.qualified_roots().to_vec();
+        // First ready save models a crash / lost ACK before cursor commit.
+        storage.save_root_state(&state).await.unwrap();
+        let (update, accepted) =
+            crate::message_relayer::common::ethereum::accumulator::RootUpdate::tracked(new);
+        drop(update); // Consumer died after the durable root save, before accepting it.
+        assert!(accepted.await.is_err());
+        let pending = restored.load_root_state().await.unwrap().unwrap();
+        assert_eq!(pending.cursor.unwrap().block_number, 10_000);
+        let mut replay = MerkleRoots::from_qualified(&pending.roots, 100).unwrap();
+        assert!(matches!(replay.add(new), Err(RootAddError::Unchanged(_))));
+        let mut conflict = pending.clone();
+        conflict.roots[0].inclusion.transaction_hash = B256::repeat_byte(9);
+        assert!(storage.save_root_state(&conflict).await.is_err());
+        assert_eq!(restored.load_root_state().await.unwrap(), Some(pending));
+        state.cursor = Some(EthereumRootCursor {
+            block_number: 10_001,
+            block_hash: new.inclusion.block_hash,
+        });
+        storage.save_root_state(&state).await.unwrap();
+        assert_eq!(
+            restored.load_root_state().await.unwrap(),
+            Some(state.clone())
+        );
+        tokio::fs::write(path.join(".state/ethereum_roots.json.new"), b"interrupted")
+            .await
+            .unwrap();
+        assert!(restored.load_root_state().await.is_err());
+        assert!(storage.save_root_state(&state).await.is_err());
+        let committed: EthereumRootState = serde_json::from_slice(
+            &tokio::fs::read(path.join("ethereum_roots.json"))
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(committed, state);
+        tokio::fs::remove_dir_all(path).await.unwrap();
     }
 }

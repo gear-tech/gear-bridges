@@ -17,6 +17,7 @@ use ethereum_client::{PollingEthApi, TxHash};
 use ethereum_common::SECONDS_PER_SLOT;
 use gear_common::api_provider::ApiProviderConnection;
 use primitive_types::H256;
+use sails_rs::calls::ActionIo;
 use std::{
     fs,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
@@ -38,7 +39,10 @@ pub async fn relay(
     receiver_route: Vec<u8>,
     tx_hash: TxHash,
     storage_path: &Path,
+    cutover_seal: Option<&Path>,
+    approved_manager_code: Option<H256>,
 ) -> AnyResult<()> {
+    super::cutover::reject_sealed(storage_path)?;
     let _journal_lock = lock_journal(storage_path)?;
     let ethereum_genesis_hash = eth_api.get_block(0).await?.header.hash;
     eth_api
@@ -103,7 +107,55 @@ pub async fn relay(
         historical_proxy_address,
         gear_sender: client.account_id().clone().into(),
     };
+    let _signer_lock = super::cutover::lock_signer(runtime.gear_genesis_hash, runtime.gear_sender)?;
+    let predecessor = if receiver_route == vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE
+    {
+        super::cutover::ensure_receipt_domain(&client, receiver_address, slot_number.0).await?;
+        if let Some(path) = cutover_seal {
+            let (seal, _) = super::cutover::verify_markers(path)?;
+            anyhow::ensure!(
+                runtime.ethereum_chain_id == seal.new_identity.ethereum_chain_id
+                    && runtime.ethereum_genesis_hash == seal.new_identity.ethereum_genesis_hash
+                    && runtime.gear_genesis_hash == seal.new_identity.gear_genesis_hash
+                    && runtime.vft_manager_address == seal.new_identity.vft_manager_address
+                    && runtime.historical_proxy_address
+                        == seal.new_identity.historical_proxy_address
+                    && runtime.checkpoint_light_client_address
+                        == seal.new_identity.checkpoint_light_client_address
+                    && runtime.ethereum_start_block >= seal.new_identity.ethereum_start_block,
+                "HOLD: manual target is outside the independently approved successor deployment"
+            );
+            super::cutover::authenticate_startup(
+                &seal.new_identity,
+                Some(path),
+                approved_manager_code,
+                &client,
+                &eth_api,
+            )
+            .await?
+        } else {
+            super::cutover::authenticate_startup(
+                &runtime,
+                None,
+                approved_manager_code,
+                &client,
+                &eth_api,
+            )
+            .await?
+        }
+    } else {
+        anyhow::ensure!(
+            cutover_seal.is_none() && approved_manager_code.is_none(),
+            "HOLD: cutover seals bind only the approved SubmitReceipt consumer"
+        );
+        None
+    };
     let storage = Arc::new(JSONStorage::new(storage_path));
+    if let Some(predecessor) = predecessor {
+        storage
+            .bind_manual_successor_identity(runtime.clone(), target.clone(), predecessor)
+            .await?;
+    }
     let tx_manager = restore_manager(storage.clone(), &runtime, &target).await?;
 
     let gear_block_listener = GearBlockListener::new(
@@ -120,7 +172,8 @@ pub async fn relay(
         provider_connection.clone(),
         gear_suri.clone(),
         None,
-    );
+    )
+    .with_signer_ownership(_signer_lock);
     let proof_composer = ProofComposer::new(
         provider_connection,
         beacon_client,
@@ -165,7 +218,7 @@ fn lock_journal(path: &Path) -> AnyResult<fs::File> {
         .write(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(path.join("manual.lock"))?;
+        .open(path.join("inbound.lock"))?;
     anyhow::ensure!(
         lock.metadata()?.is_file() && lock.metadata()?.permissions().mode() & 0o777 == 0o600,
         "HOLD: manual inbound journal lock must be a private regular file"
@@ -441,6 +494,9 @@ mod tests {
             finalized_dispatch_error: None,
             finalized_reply: None,
             native_reconciliation: None,
+            native_reconciliation_attempts: Vec::new(),
+            finalized_nonce_consumed: None,
+            finalized_reply_error: None,
         };
         let mut tx = Transaction::new(original.clone(), TxStatus::PreparedSubmission);
         let uuid = tx.uuid;

@@ -1,12 +1,12 @@
 use super::*;
-use checkpoint_light_client_client::traits::ServiceReplayBack as _;
+use checkpoint_light_client_client::service_replay_back::io::{Process, Start};
 use checkpoint_light_client_io::ReplayBackStatus;
 use ethereum_beacon_client::{self, BeaconClient};
 use futures::{stream, Stream, StreamExt};
 
 pub struct Args<'a> {
     pub beacon_client: &'a BeaconClient,
-    pub remoting: &'a GClientRemoting,
+    pub gear_api: &'a GearApi,
     pub program_id: [u8; 32],
     pub gas_limit: u64,
     pub replay_back: Option<ReplayBack>,
@@ -19,7 +19,7 @@ pub struct Args<'a> {
 pub async fn execute(args: Args<'_>) -> AnyResult<()> {
     let Args {
         beacon_client,
-        remoting,
+        gear_api,
         program_id,
         gas_limit,
         replay_back,
@@ -42,7 +42,7 @@ pub async fn execute(args: Args<'_>) -> AnyResult<()> {
 
         replay_back_slots(
             beacon_client,
-            remoting,
+            gear_api,
             program_id,
             gas_limit,
             ReplayBackStatus::InProcess,
@@ -84,7 +84,7 @@ pub async fn execute(args: Args<'_>) -> AnyResult<()> {
             ethereum_beacon_client::utils::sync_update_from_update(signature, update.data);
         let status = replay_back_slots_start(
             beacon_client,
-            remoting,
+            gear_api,
             program_id,
             gas_limit,
             slots_batch_iter.next(),
@@ -95,7 +95,7 @@ pub async fn execute(args: Args<'_>) -> AnyResult<()> {
 
         replay_back_slots(
             beacon_client,
-            remoting,
+            gear_api,
             program_id,
             gas_limit,
             status,
@@ -114,7 +114,7 @@ pub async fn execute(args: Args<'_>) -> AnyResult<()> {
 
     let status = replay_back_slots_start(
         beacon_client,
-        remoting,
+        gear_api,
         program_id,
         gas_limit,
         slots_batch_iter.next(),
@@ -125,7 +125,7 @@ pub async fn execute(args: Args<'_>) -> AnyResult<()> {
 
     replay_back_slots(
         beacon_client,
-        remoting,
+        gear_api,
         program_id,
         gas_limit,
         status,
@@ -140,7 +140,7 @@ pub async fn execute(args: Args<'_>) -> AnyResult<()> {
 
 async fn replay_back_slots(
     beacon_client: &BeaconClient,
-    remoting: &GClientRemoting,
+    gear_api: &GearApi,
     program_id: [u8; 32],
     gas_limit: u64,
     status: ReplayBackStatus,
@@ -152,7 +152,7 @@ async fn replay_back_slots(
             log::debug!("slot_start = {slot_start}, slot_end = {slot_end}");
             replay_back_slots_inner(
                 beacon_client,
-                remoting,
+                gear_api,
                 program_id,
                 slot_start,
                 slot_end,
@@ -178,27 +178,23 @@ async fn finish_replay(
 #[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_inner(
     beacon_client: &BeaconClient,
-    remoting: &GClientRemoting,
+    gear_api: &GearApi,
     program_id: [u8; 32],
     slot_start: Slot,
     slot_end: Slot,
     gas_limit: u64,
 ) -> AnyResult<ReplayBackStatus> {
-    let mut service = checkpoint_light_client_client::ServiceReplayBack::new(remoting.clone());
-
-    service
-        .process(beacon_client.request_headers(slot_start, slot_end).await?)
-        .with_gas_limit(gas_limit)
-        .send_recv(program_id.into())
-        .await
-        .map_err(|e| anyhow!("Failed to send ReplayBack message: {e:?}"))?
+    let payload = Process::encode_call(beacon_client.request_headers(slot_start, slot_end).await?);
+    let reply = send_checkpoint_message(gear_api, program_id, payload, gas_limit).await?;
+    Process::decode_reply(reply)
+        .map_err(|e| anyhow!("Failed to decode original ReplayBack reply: {e:?}"))?
         .map_err(|e| anyhow!("Backreplay failed: {e:?}"))
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn replay_back_slots_start(
     beacon_client: &BeaconClient,
-    remoting: &GClientRemoting,
+    gear_api: &GearApi,
     program_id: [u8; 32],
     gas_limit: u64,
     slots: Option<(Slot, Slot)>,
@@ -208,19 +204,15 @@ async fn replay_back_slots_start(
     let Some((slot_start, slot_end)) = slots else {
         return Err(anyhow!("Cannot start replay without a header batch"));
     };
-    let mut service = checkpoint_light_client_client::ServiceReplayBack::new(remoting.clone());
-
-    service
-        .start(
-            sync_update,
-            sync_aggregate_encoded,
-            beacon_client.request_headers(slot_start, slot_end).await?,
-        )
-        .with_gas_limit(gas_limit)
-        .send_recv(program_id.into())
-        .await
-        .map_err(|e| anyhow!("Failed to send ReplayBack start message: {e:?}"))?
-        .map_err(|e| anyhow!("Failed to start ReplayBack failed: {e:?}"))
+    let payload = Start::encode_call(
+        sync_update,
+        sync_aggregate_encoded,
+        beacon_client.request_headers(slot_start, slot_end).await?,
+    );
+    let reply = send_checkpoint_message(gear_api, program_id, payload, gas_limit).await?;
+    Start::decode_reply(reply)
+        .map_err(|e| anyhow!("Failed to decode original ReplayBack start reply: {e:?}"))?
+        .map_err(|e| anyhow!("Failed to start ReplayBack: {e:?}"))
 }
 
 #[cfg(test)]

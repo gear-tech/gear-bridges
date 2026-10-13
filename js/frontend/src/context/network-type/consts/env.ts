@@ -1,5 +1,10 @@
 import { HexString } from '@gear-js/api';
-import { immutableInboundProfile, type InboundProofProfile } from '@gear-js/bridge';
+import {
+  parseInboundProofProfile,
+  validateOwnedFixtureNetwork,
+  type InboundProofProfile,
+  type OwnedFixtureNetwork,
+} from '@gear-js/bridge';
 
 import { IDL_SHA256 } from '@/features/swap/consts/sails/vft-manager';
 
@@ -22,25 +27,24 @@ const ERC20_MANAGER_CONTRACT_ADDRESS = getNetworkEnv<HexString>('ERC20_MANAGER_C
 
 const ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS = getNetworkEnv<HexString>('ETH_MESSAGE_QUEUE_CONTRACT_ADDRESSES');
 
-type SerializedInboundProofProfile = Omit<InboundProofProfile, 'ethereumChainId' | 'beaconGenesisTime' | 'forks'> & {
-  ethereumChainId: string;
-  beaconGenesisTime: string;
-  forks: Array<{ name: string; epoch: string; version: HexString }>;
-};
 function approvedInboundProfile(network: 'MAINNET' | 'TESTNET'): { profile?: InboundProofProfile; hold?: string } {
   try {
     const raw = import.meta.env.VITE_INBOUND_PROOF_PROFILES as string | undefined;
     if (!raw) return { hold: 'HOLD: independently approved inbound deployment profile is unavailable.' };
-    const supplied = (JSON.parse(raw) as Partial<Record<'MAINNET' | 'TESTNET', SerializedInboundProofProfile>>)[
-      network
-    ];
+    const supplied = (JSON.parse(raw) as Partial<Record<'MAINNET' | 'TESTNET', unknown>>)[network];
     if (!supplied) return { hold: 'HOLD: this network has no approved inbound deployment profile.' };
-    const profile = immutableInboundProfile({
-      ...supplied,
-      ethereumChainId: BigInt(supplied.ethereumChainId),
-      beaconGenesisTime: BigInt(supplied.beaconGenesisTime),
-      forks: supplied.forks.map((fork) => ({ ...fork, epoch: BigInt(fork.epoch) })),
-    });
+    const profile = parseInboundProofProfile(JSON.stringify(supplied));
+    if (typeof profile.checkpoint.network !== 'string') {
+      const descriptor = import.meta.env.VITE_OWNED_FIXTURE_NETWORK as string | undefined;
+      if (network !== 'TESTNET' || !descriptor)
+        return { hold: 'HOLD: LocalFixture requires explicit owned test-network approval.' };
+      validateOwnedFixtureNetwork(profile, JSON.parse(descriptor) as OwnedFixtureNetwork, [
+        NODE_ADDRESS[network],
+        ARCHIVE_NODE_ADDRESS[network],
+        ETH_NODE_ADDRESS[network],
+        ETH_BEACON_NODE_ADDRESS[network],
+      ]);
+    }
     if (
       profile.ethereumChainId !== BigInt(ETH_CHAIN_ID[network]) ||
       profile.consumer.programId.toLowerCase() !== VFT_MANAGER_CONTRACT_ADDRESS[network].toLowerCase() ||

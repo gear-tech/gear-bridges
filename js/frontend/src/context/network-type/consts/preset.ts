@@ -59,10 +59,16 @@ const TESTNET_PRESET = {
 
   ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS: ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS.TESTNET,
 
-  NETWORK_NAME: { VARA: 'Vara Testnet', ETH: 'Ethereum Hoodi' },
-  EXPLORER_URL: { VARA: undefined, ETH: 'https://hoodi.etherscan.io' },
+  NETWORK_NAME: {
+    VARA: 'Vara Testnet',
+    ETH: ETH_CHAIN_ID.TESTNET === 31337 ? 'Owned Ethereum Fixture' : 'Ethereum Hoodi',
+  },
+  EXPLORER_URL: { VARA: undefined, ETH: ETH_CHAIN_ID.TESTNET === 31337 ? undefined : 'https://hoodi.etherscan.io' },
 
-  ETH_NETWORK: getEthNetwork(ETH_CHAIN_ID.TESTNET),
+  ETH_NETWORK: getEthNetwork(ETH_CHAIN_ID.TESTNET, {
+    descriptor: import.meta.env.VITE_OWNED_FIXTURE_NETWORK as string | undefined,
+    rpcUrl: ETH_NODE_ADDRESS.TESTNET,
+  }),
 };
 
 const NETWORK_PRESET = {

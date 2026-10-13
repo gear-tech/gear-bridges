@@ -1,30 +1,25 @@
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use gsdk::{
-    ext::{
-        sp_core::{sr25519, Pair as GearPair},
-        subxt::utils::H256,
-    },
-    PairSigner, Value,
-};
-use parity_scale_codec::{Compact, Decode, Encode};
+#[cfg(test)]
+use gear_rpc_client::dto;
+use gear_rpc_client::GearApi;
+use gsdk::{ext::subxt::utils::H256, Value};
+#[cfg(any(test, feature = "deployment"))]
+use parity_scale_codec::Compact;
+use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use sp_consensus_beefy::{
-    ecdsa_crypto::{AuthorityId, Pair as BeefyPair},
-    mmr::BeefyAuthoritySet,
-};
-use sp_core::Pair as BeefyPairTrait;
+use sp_consensus_beefy::{ecdsa_crypto::AuthorityId, mmr::BeefyAuthoritySet};
 use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
 };
 use subxt_rpcs::{client::RpcSubscription, rpc_params};
-use tokio::time::{timeout, Duration, Instant};
+#[cfg(any(test, feature = "deployment"))]
+use tokio::time::Instant;
+use tokio::time::{timeout, Duration};
 
-use gear_rpc_client::{dto, GearApi};
-
-use beefy_relay::{
+use crate::{
     authority_addresses, authority_root, convert_mmr_proof, decode_authority_list,
     decode_beefy_digest, decode_mmr_leaves, decode_mmr_proof, decode_outer_leaf,
     decode_validator_set, decode_versioned_finality_proof, keccak256, outer_leaf_hash,
@@ -66,7 +61,6 @@ fn commitment_identity(raw: &[u8]) -> Result<Hash32> {
 }
 
 const BEEFY_ENGINE: [u8; 4] = *b"BEEF";
-const AUTHORITY_KEY_TYPE: &str = "beef";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthoritySet {
@@ -96,44 +90,6 @@ pub struct SourceProof {
     pub proof: RuntimeLeafProof,
     pub simplified: SimplifiedMmrProof,
 }
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RotationEvidence {
-    pub authority: String,
-    pub stash: Hash32,
-    pub beefy_key: Vec<u8>,
-    pub extrinsic_hash: Hash32,
-    pub block: u32,
-    pub block_hash: Hash32,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PreparedRotation {
-    pub authority: String,
-    pub stash: Hash32,
-    pub beefy_key: Vec<u8>,
-    pub source_genesis: Hash32,
-    pub bridge_domain: Hash32,
-    pub nonce: u64,
-    pub from_height: u32,
-    pub from_hash: Hash32,
-    pub extrinsic_hash: Hash32,
-    pub signed_extrinsic: Vec<u8>,
-    pub call_data: Vec<u8>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ObservedMessage {
-    pub block: u32,
-    pub block_hash: Hash32,
-    pub message: dto::Message,
-    pub message_hash: Hash32,
-    pub inclusion: dto::MerkleProof,
-    pub snapshot: QueueSnapshot,
-    pub retained_at_block: u32,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MmrLeavesProof {
@@ -825,157 +781,6 @@ impl Source {
             simplified,
         })
     }
-
-    pub async fn prepare_rotation(&self, authority: &str, uri: &str) -> Result<PreparedRotation> {
-        prepare_rotation(
-            &self.api,
-            authority,
-            uri,
-            self.source_genesis,
-            self.bridge_domain,
-        )
-        .await
-    }
-
-    async fn validate_rotation(&self, prepared: &PreparedRotation) -> Result<()> {
-        ensure!(
-            prepared.source_genesis == self.source_genesis
-                && prepared.bridge_domain == self.bridge_domain
-                && self.api.block_number_to_hash(prepared.from_height).await?.0
-                    == prepared.from_hash,
-            "prepared rotation belongs to another source or original checkpoint; HOLD"
-        );
-        ensure!(
-            sp_core::blake2_256(&prepared.signed_extrinsic) == prepared.extrinsic_hash,
-            "prepared rotation signed bytes/hash changed; HOLD"
-        );
-        let decoded = subxt::ext::subxt_core::blocks::Extrinsics::<gsdk::GearConfig>::decode_from(
-            vec![prepared.signed_extrinsic.clone()],
-            self.api.api.metadata(),
-        )?;
-        let extrinsic = decoded
-            .iter()
-            .next()
-            .context("prepared rotation has no extrinsic")?;
-        let mut address = [0; 33];
-        address[1..].copy_from_slice(&prepared.stash);
-        ensure!(
-            extrinsic.address_bytes() == Some(address.as_slice())
-                && extrinsic
-                    .transaction_extensions()
-                    .and_then(|extensions| extensions.nonce())
-                    == Some(prepared.nonce)
-                && extrinsic.pallet_name()? == "Session"
-                && extrinsic.variant_name()? == "set_keys"
-                && extrinsic.call_bytes() == prepared.call_data,
-            "prepared rotation signer, nonce or call changed; HOLD"
-        );
-        let call = rotation_call(
-            &self.api,
-            H256(prepared.from_hash),
-            prepared.stash,
-            &prepared.beefy_key,
-        )
-        .await?;
-        ensure!(
-            self.api.api.tx().call_data(&call)? == prepared.call_data,
-            "prepared rotation key bundle changed; HOLD"
-        );
-        Ok(())
-    }
-
-    pub async fn submit_prepared_rotation(
-        &self,
-        prepared: &PreparedRotation,
-    ) -> Result<RotationEvidence> {
-        self.validate_rotation(prepared).await?;
-        let transaction = subxt::tx::SubmittableTransaction::<gsdk::GearConfig, _>::from_bytes(
-            (*self.api.api).clone(),
-            prepared.signed_extrinsic.clone(),
-        );
-        ensure!(
-            transaction.hash().0 == prepared.extrinsic_hash,
-            "prepared rotation SDK hash changed; HOLD"
-        );
-        let progress = transaction.submit_and_watch().await?;
-        let finalized = timeout(MAX_WAIT, progress.wait_for_finalized())
-            .await
-            .context("original rotation finality pending; HOLD")??;
-        finalized
-            .wait_for_success()
-            .await
-            .context("original rotation failed dispatch; HOLD")?;
-        let block_hash = finalized.block_hash();
-        Ok(RotationEvidence {
-            authority: prepared.authority.clone(),
-            stash: prepared.stash,
-            beefy_key: prepared.beefy_key.clone(),
-            extrinsic_hash: prepared.extrinsic_hash,
-            block: self.api.block_hash_to_number(block_hash).await?,
-            block_hash: block_hash.0,
-        })
-    }
-
-    /// Read-only recovery of the original extrinsic. None never permits re-signing
-    /// or another handoff; callers retain their original absolute deadline.
-    pub async fn reconcile_rotation(
-        &self,
-        prepared: &PreparedRotation,
-    ) -> Result<Option<RotationEvidence>> {
-        timeout(MAX_WAIT, async {
-            self.validate_rotation(prepared).await?;
-            let finalized = self
-                .api
-                .block_hash_to_number(self.api.latest_finalized_block().await?)
-                .await?;
-            for height in prepared.from_height..=finalized {
-                let hash = self.api.block_number_to_hash(height).await?;
-                let block = self.api.get_block_at(hash).await?;
-                let extrinsics = block.extrinsics().await?;
-                for extrinsic in extrinsics.iter() {
-                    if extrinsic.hash().0 != prepared.extrinsic_hash {
-                        continue;
-                    }
-                    ensure!(
-                        extrinsic.bytes() == prepared.signed_extrinsic,
-                        "original rotation inclusion changed bytes; HOLD"
-                    );
-                    let events = extrinsic.events().await?;
-                    let mut success = false;
-                    for event in events.iter() {
-                        let event = event?;
-                        ensure!(
-                            event.pallet_name() != "System"
-                                || event.variant_name() != "ExtrinsicFailed",
-                            "original rotation failed dispatch; HOLD"
-                        );
-                        success |= event.pallet_name() == "System"
-                            && event.variant_name() == "ExtrinsicSuccess";
-                    }
-                    ensure!(
-                        success,
-                        "original rotation has no finalized successful dispatch; HOLD"
-                    );
-                    return Ok(Some(RotationEvidence {
-                        authority: prepared.authority.clone(),
-                        stash: prepared.stash,
-                        beefy_key: prepared.beefy_key.clone(),
-                        extrinsic_hash: prepared.extrinsic_hash,
-                        block: height,
-                        block_hash: hash.0,
-                    }));
-                }
-            }
-            Ok(None)
-        })
-        .await
-        .context("original rotation history lookup pending; HOLD")?
-    }
-
-    pub async fn rotate(&self, authority: &str, uri: &str) -> Result<RotationEvidence> {
-        let prepared = self.prepare_rotation(authority, uri).await?;
-        self.submit_prepared_rotation(&prepared).await
-    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -1063,6 +868,37 @@ pub(crate) async fn bridge_domain_at(api: &GearApi, at: H256) -> Result<Hash32> 
     )
 }
 
+// Released GearEthBridge.DestinationBinding is SCALE (H256, H256, H160).
+type DestinationBinding = (Hash32, Hash32, [u8; 20]);
+
+fn validate_destination_binding(
+    genesis: Hash32,
+    domain: Hash32,
+    binding: Option<DestinationBinding>,
+) -> Result<DestinationBinding> {
+    let binding = binding.context("native source destination binding is missing; HOLD")?;
+    ensure!(
+        genesis != [0; 32]
+            && binding.0 == genesis
+            && binding.1 != [0; 32]
+            && binding.2 != [0; 20]
+            && domain != [0; 32],
+        "native source destination binding has wrong genesis or zero identity; HOLD"
+    );
+    // Unlike the deployment helper, the released storage supports all 256 chain-ID bits.
+    const PREFIX: &[u8] = b"vara/gear-eth-bridge-domain/v2";
+    let mut preimage = [0u8; PREFIX.len() + 84];
+    preimage[..PREFIX.len()].copy_from_slice(PREFIX);
+    preimage[PREFIX.len()..PREFIX.len() + 32].copy_from_slice(&genesis);
+    preimage[PREFIX.len() + 32..PREFIX.len() + 64].copy_from_slice(&binding.1);
+    preimage[PREFIX.len() + 64..].copy_from_slice(&binding.2);
+    ensure!(
+        keccak256(&preimage) == domain,
+        "native source destination binding differs from bridge domain; HOLD"
+    );
+    Ok(binding)
+}
+
 async fn discover_source_identity(api: &GearApi, at: H256) -> Result<SourceIdentity> {
     let genesis = api.block_number_to_hash(0).await?;
     let block = api.block_hash_to_number(at).await?;
@@ -1080,10 +916,13 @@ async fn discover_source_identity(api: &GearApi, at: H256) -> Result<SourceIdent
     ensure!(root != [0; 32], "nonempty finalized MMR has zero root");
     let (current, next) = checkpoint_at_hash(api, at, block).await?;
     let domain = bridge_domain_at(api, at).await?;
-    ensure!(
-        domain != [0; 32],
-        "source bridge domain is unconfigured; HOLD"
-    );
+    let destination = validate_destination_binding(
+        genesis.0,
+        domain,
+        storage_decode(api, "GearEthBridge", "DestinationBinding", at, vec![])
+            .await
+            .context("read native destination binding at common finalized pin; HOLD")?,
+    )?;
     let mut lower = 0;
     let mut upper = block;
     while lower < upper {
@@ -1095,9 +934,28 @@ async fn discover_source_identity(api: &GearApi, at: H256) -> Result<SourceIdent
         }
     }
     let binding = lower;
+    let binding_at = api.block_number_to_hash(binding).await?;
+    let binding_domain = bridge_domain_at(api, binding_at).await?;
     ensure!(
-        bridge_domain_at(api, api.block_number_to_hash(binding).await?).await? == domain,
+        binding_domain == domain,
         "source bridge domain changed since first binding; HOLD"
+    );
+    let historical_destination = validate_destination_binding(
+        genesis.0,
+        binding_domain,
+        storage_decode(
+            api,
+            "GearEthBridge",
+            "DestinationBinding",
+            binding_at,
+            vec![],
+        )
+        .await
+        .context("read native destination binding at first binding pin; HOLD")?,
+    )?;
+    ensure!(
+        historical_destination == destination,
+        "native source destination binding changed since first binding; HOLD"
     );
     let first: u32 = start.try_into()?;
     let first_at = api.block_number_to_hash(first).await?;
@@ -1303,325 +1161,6 @@ async fn checkpoint_at_hash(
     Ok((current, next))
 }
 
-async fn prepare_rotation(
-    api: &GearApi,
-    authority: &str,
-    uri: &str,
-    source_genesis: Hash32,
-    bridge_domain: Hash32,
-) -> Result<PreparedRotation> {
-    let authority = match authority.to_ascii_lowercase().as_str() {
-        "alice" => "Alice",
-        "bob" => "Bob",
-        other => bail!("unsupported local authority {other}"),
-    };
-    let stash_pair = sr25519::Pair::from_string(&format!("//{authority}//stash"), None)
-        .with_context(|| format!("derive {authority} stash"))?;
-    let stash = stash_pair.public().0;
-    let block_hash = api.latest_finalized_block().await?;
-    let bonded: [u8; 32] = storage_decode(
-        api,
-        "Staking",
-        "Bonded",
-        block_hash,
-        vec![Value::from_bytes(stash)],
-    )
-    .await?
-    .context("validator stash is not bonded")?;
-    ensure!(
-        bonded == stash,
-        "Staking.Bonded does not map the signer to its validator stash"
-    );
-    let ledger = storage_encoded(
-        api,
-        "Staking",
-        "Ledger",
-        block_hash,
-        vec![Value::from_bytes(stash)],
-    )
-    .await?
-    .context("validator stash has no staking ledger")?;
-    ensure!(
-        ledger.get(..32) == Some(stash.as_slice()),
-        "Staking.Ledger belongs to another stash"
-    );
-    let validators = storage_encoded(api, "Session", "Validators", block_hash, vec![])
-        .await?
-        .ok_or_else(|| anyhow!("Session validators storage is unavailable"))?;
-    let validators = decode_session_validators(&validators)?;
-    ensure!(
-        validators.iter().any(|key| key == &stash),
-        "{authority} stash is not an active validator"
-    );
-    let beefy_pair = BeefyPair::from_string(uri, None).context("derive requested BEEFY key")?;
-    let beefy_key = <AuthorityId as AsRef<[u8]>>::as_ref(&beefy_pair.public()).to_vec();
-    ensure!(
-        beefy_key.len() == 33 && (beefy_key[0] == 2 || beefy_key[0] == 3),
-        "BEEFY key is not compressed SEC1"
-    );
-    let inserted: JsonValue = api
-        .api
-        .rpc()
-        .request(
-            "author_insertKey",
-            rpc_params![
-                AUTHORITY_KEY_TYPE,
-                uri,
-                format!("0x{}", hex::encode(&beefy_key))
-            ],
-        )
-        .await
-        .context("insert local BEEFY key")?;
-    ensure!(
-        inserted.is_null() || inserted.is_string(),
-        "author_insertKey returned an unexpected response"
-    );
-    let call = rotation_call(api, block_hash, stash, &beefy_key).await?;
-    let signer = PairSigner::<gsdk::GearConfig, sr25519::Pair>::new(stash_pair);
-    let nonce = api.api.tx().account_nonce(signer.account_id()).await?;
-    let params = subxt::config::polkadot::PolkadotExtrinsicParamsBuilder::<gsdk::GearConfig>::new()
-        .nonce(nonce)
-        .build();
-    let transaction = api.api.tx().create_signed(&call, &signer, params).await?;
-    let signed_extrinsic = transaction.encoded().to_vec();
-    Ok(PreparedRotation {
-        authority: authority.to_owned(),
-        stash,
-        beefy_key,
-        source_genesis,
-        bridge_domain,
-        nonce,
-        from_height: api.block_hash_to_number(block_hash).await?,
-        from_hash: block_hash.0,
-        extrinsic_hash: transaction.hash().0,
-        signed_extrinsic,
-        call_data: api.api.tx().call_data(&call)?,
-    })
-}
-
-async fn rotation_call(
-    api: &GearApi,
-    block_hash: H256,
-    stash: Hash32,
-    beefy_key: &[u8],
-) -> Result<gsdk::ext::subxt::tx::DynamicPayload> {
-    ensure!(
-        beefy_key.len() == 33 && matches!(beefy_key[0], 2 | 3),
-        "invalid prepared BEEFY key"
-    );
-    let address = subxt::dynamic::storage("Session", "NextKeys", vec![Value::from_bytes(stash)]);
-    let stored = api
-        .api
-        .storage()
-        .at(block_hash)
-        .fetch(&address)
-        .await?
-        .context("Session.NextKeys has no entry for active stash")?;
-    let mut key_value = stored.to_value()?.remove_context();
-    let gsdk::ext::scale_value::ValueDef::Composite(gsdk::ext::scale_value::Composite::Named(
-        fields,
-    )) = &mut key_value.value
-    else {
-        bail!("Session.NextKeys is not a named key bundle in live metadata");
-    };
-    ensure!(
-        fields.len() == 5,
-        "runtime does not expose the expected five session keys"
-    );
-    let (_, key) = fields
-        .iter_mut()
-        .find(|(name, _)| name == "beefy")
-        .context("session bundle has no BEEFY key")?;
-    *key = Value::from_bytes(beefy_key);
-    Ok(gsdk::ext::subxt::tx::dynamic(
-        "Session",
-        "set_keys",
-        vec![key_value, Value::from_bytes([])],
-    ))
-}
-pub async fn fund_stash(api: &GearApi) -> Result<(Hash32, H256)> {
-    let alice =
-        sr25519::Pair::from_string("//Alice", None).context("derive Alice funding signer")?;
-    let stash = sr25519::Pair::from_string("//Alice//stash", None)
-        .context("derive Alice stash")?
-        .public();
-    let call = gsdk::ext::subxt::tx::dynamic(
-        "Balances",
-        "transfer_keep_alive",
-        vec![
-            Value::unnamed_variant("Id", [Value::from_bytes(stash.0)]),
-            Value::u128(100_000_000_000_000),
-        ],
-    );
-    submit(api, call, alice)
-        .await
-        .context("fund bonded stash transaction fees")
-}
-
-pub async fn send_message(
-    api: &GearApi,
-    receiver: [u8; 20],
-    payload: &[u8],
-    gear_suri: &str,
-) -> Result<ObservedMessage> {
-    let pair = sr25519::Pair::from_string(gear_suri, None).context("derive message signer")?;
-    let sender = pair.public().0;
-    let call = gsdk::ext::subxt::tx::dynamic(
-        "GearEthBridge",
-        "send_eth_message",
-        vec![Value::from_bytes(receiver), Value::from_bytes(payload)],
-    );
-    let (progress, block_hash) = submit_in_block(api, call, pair).await?;
-    ensure!(
-        has_event(api, block_hash, "GearEthBridge", "MessageQueued").await?,
-        "included message transaction has no dynamic MessageQueued event"
-    );
-    let messages = api.message_queued_events(block_hash).await?;
-    let message = messages
-        .into_iter()
-        .find(|message| {
-            message.source == sender
-                && message.destination == receiver
-                && message.payload == payload
-        })
-        .ok_or_else(|| {
-            anyhow!("MessageQueued event does not contain requested source/destination/payload")
-        })?;
-    let block = api.block_hash_to_number(block_hash).await?;
-    let bridge_domain: Hash32 =
-        storage_decode(api, "GearEthBridge", "BridgeDomain", block_hash, vec![])
-            .await?
-            .context("source bridge domain is missing")?;
-    let source_timestamp_ms = api.fetch_timestamp(block_hash).await?;
-    let (queue_id, queue_root) = api.fetch_queue_merkle_root(block_hash).await?;
-    let initialized = bridge_initialized(api, block_hash).await?;
-    ensure!(
-        initialized,
-        "message was queued before bridge initialization"
-    );
-    let snapshot = QueueSnapshot::new(
-        bridge_domain,
-        source_timestamp_ms,
-        true,
-        queue_id,
-        queue_root.0,
-    )?;
-    let message_hash = crate::message_hash(&message);
-    let inclusion = api
-        .fetch_message_inclusion_merkle_proof(block_hash, H256(message_hash))
-        .await
-        .context("retain message inclusion proof before queue clear")?;
-    ensure!(
-        inclusion.root == snapshot.queue_root,
-        "message inclusion proof root differs from source queue snapshot"
-    );
-    ensure!(
-        inclusion.num_leaves > inclusion.leaf_index,
-        "message inclusion index is outside queue"
-    );
-    let best: H256 = api
-        .api
-        .rpc()
-        .request("chain_getBlockHash", rpc_params![])
-        .await?;
-    let retained_at_block = api.block_hash_to_number(best).await?;
-    ensure!(
-        api.fetch_queue_merkle_root(best).await?.0 == snapshot.queue_id,
-        "queue cleared before message proof was retained"
-    );
-    let finalized = timeout(MAX_WAIT, progress.wait_for_finalized())
-        .await
-        .context("timed out waiting for message finality")??;
-    ensure!(
-        finalized.block_hash() == block_hash,
-        "message reorged after its proof was retained"
-    );
-    Ok(ObservedMessage {
-        block,
-        block_hash: block_hash.0,
-        message,
-        message_hash,
-        inclusion,
-        snapshot,
-        retained_at_block,
-    })
-}
-
-pub async fn initialize_bridge(api: &GearApi) -> Result<()> {
-    let deadline = Instant::now() + MAX_WAIT;
-    let initial_hash = api.latest_finalized_block().await?;
-    if !bridge_initialized(api, initial_hash).await? {
-        let mut cursor = api
-            .block_hash_to_number(initial_hash)
-            .await?
-            .saturating_sub(32);
-        let mut observed = false;
-        loop {
-            let head_hash = api.latest_finalized_block().await?;
-            let head = api.block_hash_to_number(head_hash).await?;
-            while cursor <= head {
-                let hash = api.block_number_to_hash(cursor).await?;
-                if has_event(api, hash, "GearEthBridge", "BridgeInitialized").await? {
-                    observed = true;
-                    cursor = head.saturating_add(1);
-                    break;
-                }
-                cursor = cursor.saturating_add(1);
-            }
-            if observed && bridge_initialized(api, head_hash).await? {
-                break;
-            }
-            ensure!(
-                Instant::now() < deadline,
-                "timed out waiting for BridgeInitialized"
-            );
-            tokio::time::sleep(Duration::from_millis(300)).await;
-        }
-    }
-    if bridge_paused(api, api.latest_finalized_block().await?).await? {
-        let alice =
-            sr25519::Pair::from_string("//Alice", None).context("derive Alice sudo signer")?;
-        let inner = gsdk::ext::subxt::tx::dynamic("GearEthBridge", "unpause", Vec::<Value>::new())
-            .into_value();
-        let call = gsdk::ext::subxt::tx::dynamic("Sudo", "sudo", vec![inner]);
-        let (_, block_hash) = submit_in_block(api, call, alice).await?;
-        ensure!(
-            has_event(api, block_hash, "GearEthBridge", "BridgeUnpaused").await?,
-            "unpause included without BridgeUnpaused"
-        );
-        ensure!(
-            !bridge_paused(api, block_hash).await?,
-            "bridge remains paused after sudo unpause"
-        );
-    }
-    Ok(())
-}
-pub async fn pause_bridge(api: &GearApi) -> Result<()> {
-    let block = api.latest_finalized_block().await?;
-    ensure!(
-        bridge_initialized(api, block).await?,
-        "bridge is not initialized"
-    );
-    ensure!(
-        !bridge_paused(api, block).await?,
-        "bridge is already paused"
-    );
-    let alice = sr25519::Pair::from_string("//Alice", None).context("derive Alice sudo signer")?;
-    let inner =
-        gsdk::ext::subxt::tx::dynamic("GearEthBridge", "pause", Vec::<Value>::new()).into_value();
-    let call = gsdk::ext::subxt::tx::dynamic("Sudo", "sudo", vec![inner]);
-    let (tx_hash, block_hash) = submit_in_block(api, call, alice).await?;
-    ensure!(
-        has_event(api, block_hash, "GearEthBridge", "BridgePaused").await?,
-        "pause included without BridgePaused"
-    );
-    ensure!(
-        bridge_paused(api, block_hash).await?,
-        "bridge remains unpaused after sudo pause"
-    );
-    println!("Gear builtin paused: tx={tx_hash:?} block={block_hash:?}");
-    Ok(())
-}
 pub async fn bridge_status(api: &GearApi, at_block: Option<u32>) -> Result<()> {
     let block = match at_block {
         Some(number) => api.block_number_to_hash(number).await?,
@@ -1740,7 +1279,7 @@ async fn mmr_leaf_count(api: &GearApi, at: H256) -> Result<u64> {
         .map_err(|error| anyhow!("MMR leaf-count API returned {error:?}"))
 }
 
-async fn bridge_initialized(api: &GearApi, at: H256) -> Result<bool> {
+pub async fn bridge_initialized(api: &GearApi, at: H256) -> Result<bool> {
     Ok(
         storage_decode(api, "GearEthBridge", "Initialized", at, vec![])
             .await?
@@ -1748,7 +1287,24 @@ async fn bridge_initialized(api: &GearApi, at: H256) -> Result<bool> {
     )
 }
 
-async fn bridge_paused(api: &GearApi, at: H256) -> Result<bool> {
+/// Match the native pallet's bridge_snapshot: an uninitialized bridge has no
+/// queue snapshot, not an initialized zero root. Once initialized, the root key
+/// must exist; RPC absence or malformed storage remains an error.
+pub async fn queue_snapshot_at(api: &GearApi, at: H256) -> Result<Option<(u64, H256)>> {
+    if !bridge_initialized(api, at)
+        .await
+        .with_context(|| format!("read bridge initialization at {at:?}; HOLD"))?
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        api.fetch_queue_merkle_root(at)
+            .await
+            .with_context(|| format!("read initialized bridge queue at {at:?}; HOLD"))?,
+    ))
+}
+
+pub async fn bridge_paused(api: &GearApi, at: H256) -> Result<bool> {
     Ok(storage_decode(api, "GearEthBridge", "Paused", at, vec![])
         .await?
         .unwrap_or(true))
@@ -1773,12 +1329,7 @@ pub async fn bridge_events(api: &GearApi, at_block: u32, full: bool) -> Result<(
     }
     Ok(())
 }
-pub(crate) async fn has_event(
-    api: &GearApi,
-    at: H256,
-    pallet: &str,
-    variant: &str,
-) -> Result<bool> {
+pub async fn has_event(api: &GearApi, at: H256, pallet: &str, variant: &str) -> Result<bool> {
     let block = api.get_block_at(at).await?;
     let events = block.events().await?;
     for event in events.iter() {
@@ -1823,79 +1374,6 @@ async fn storage_encoded(
         .map(|value| value.into_encoded()))
 }
 
-async fn submit_watched(
-    api: &GearApi,
-    call: gsdk::ext::subxt::tx::DynamicPayload,
-    pair: sr25519::Pair,
-) -> Result<subxt::tx::TxProgress<gsdk::GearConfig, subxt::OnlineClient<gsdk::GearConfig>>> {
-    let signer = PairSigner::<gsdk::GearConfig, sr25519::Pair>::new(pair);
-    api.api
-        .tx()
-        .sign_and_submit_then_watch_default(&call, &signer)
-        .await
-        .map_err(|error| anyhow!("submit dynamic extrinsic: {error:?}"))
-}
-
-async fn submit_in_block(
-    api: &GearApi,
-    call: gsdk::ext::subxt::tx::DynamicPayload,
-    pair: sr25519::Pair,
-) -> Result<(
-    subxt::tx::TxProgress<gsdk::GearConfig, subxt::OnlineClient<gsdk::GearConfig>>,
-    H256,
-)> {
-    use subxt::tx::TxStatus;
-    let mut progress = submit_watched(api, call, pair).await?;
-    let block_hash = timeout(MAX_WAIT, async {
-        loop {
-            match progress
-                .next()
-                .await
-                .context("transaction status subscription closed")??
-            {
-                TxStatus::InBestBlock(block) => {
-                    block
-                        .wait_for_success()
-                        .await
-                        .context("included extrinsic failed")?;
-                    break Ok::<_, anyhow::Error>(block.block_hash());
-                }
-                TxStatus::Error { message }
-                | TxStatus::Invalid { message }
-                | TxStatus::Dropped { message } => bail!("transaction rejected: {message}"),
-                TxStatus::InFinalizedBlock(_) => {
-                    bail!("transaction finalized before inclusion could be captured")
-                }
-                TxStatus::NoLongerInBestBlock => {
-                    bail!("transaction reorged before inclusion capture")
-                }
-                _ => {}
-            }
-        }
-    })
-    .await
-    .context("timed out waiting for transaction inclusion")??;
-    Ok((progress, block_hash))
-}
-
-async fn submit(
-    api: &GearApi,
-    call: gsdk::ext::subxt::tx::DynamicPayload,
-    pair: sr25519::Pair,
-) -> Result<(Hash32, H256)> {
-    let progress = submit_watched(api, call, pair).await?;
-    let tx_hash = progress.extrinsic_hash().0;
-    let finalized = timeout(MAX_WAIT, progress.wait_for_finalized())
-        .await
-        .map_err(|_| anyhow!("timed out waiting for extrinsic finality"))??;
-    let block_hash = finalized.block_hash();
-    finalized
-        .wait_for_success()
-        .await
-        .context("finalized extrinsic failed")?;
-    Ok((tx_hash, block_hash))
-}
-
 fn authority_set_root(keys: &[Vec<u8>]) -> Result<Hash32> {
     let keys = key_arrays(keys)?;
     authority_root(&authority_addresses(&keys)?)
@@ -1927,6 +1405,7 @@ fn decode_exact<T: Decode + Encode>(bytes: &[u8]) -> Result<T> {
     Ok(value)
 }
 
+#[cfg(any(test, feature = "deployment"))]
 fn decode_session_validators(bytes: &[u8]) -> Result<Vec<[u8; 32]>> {
     let mut input = bytes;
     let len = Compact::<u32>::decode(&mut input)?.0 as usize;
@@ -2013,6 +1492,78 @@ fn justification_bytes(value: &JsonValue) -> Result<Option<Vec<u8>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_destination_binding_authenticates_genesis_chain_id_queue_and_domain() -> Result<()> {
+        let genesis = [0x22; 32];
+        let queue = [0x33; 20];
+        let mut chain_id = [0; 32];
+        chain_id[24..].copy_from_slice(&31_337u64.to_be_bytes());
+        let binding = (genesis, chain_id, queue);
+        // Existing runtime/protocol vector: chain ID is 32-byte big endian, not SCALE u64.
+        let domain =
+            parse_h256("9aac6d72e183672d20696112082accb15719870152120212f541e3e233837944")?;
+        assert_eq!(
+            validate_destination_binding(genesis, domain, Some(binding))?,
+            binding
+        );
+        for invalid in [
+            None,
+            Some(([0; 32], chain_id, queue)),
+            Some(([0x23; 32], chain_id, queue)),
+            Some((genesis, [0; 32], queue)),
+            Some((genesis, chain_id, [0; 20])),
+            Some((genesis, chain_id, [0x34; 20])),
+        ] {
+            assert!(validate_destination_binding(genesis, domain, invalid).is_err());
+        }
+        assert!(validate_destination_binding([0; 32], domain, Some(binding)).is_err());
+        assert!(validate_destination_binding([0x23; 32], domain, Some(binding)).is_err());
+        assert!(validate_destination_binding(genesis, [0; 32], Some(binding)).is_err());
+        assert!(validate_destination_binding(genesis, [1; 32], Some(binding)).is_err());
+        chain_id[24..].copy_from_slice(&31_337u64.to_le_bytes());
+        assert!(
+            validate_destination_binding(genesis, domain, Some((genesis, chain_id, queue)))
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn native_destination_binding_decodes_exact_released_tuple_without_chain_id_truncation(
+    ) -> Result<()> {
+        let genesis = [0x22; 32];
+        let mut chain_id = [0; 32];
+        chain_id[0] = 0x80; // A valid nonzero chain ID whose low 64 bits are zero.
+        let queue = [0x33; 20];
+        let bytes = (
+            sp_core::H256::from(genesis),
+            sp_core::H256::from(chain_id),
+            sp_core::H160::from(queue),
+        )
+            .encode();
+        assert_eq!(bytes.len(), 84);
+        let binding = decode_exact::<DestinationBinding>(&bytes)?;
+        assert_eq!(binding, (genesis, chain_id, queue));
+        let preimage = [
+            b"vara/gear-eth-bridge-domain/v2".as_slice(),
+            bytes.as_slice(),
+        ]
+        .concat();
+        let domain = sp_core::keccak_256(&preimage);
+        assert_eq!(
+            validate_destination_binding(genesis, domain, Some(binding))?,
+            binding
+        );
+        let mut changed = binding;
+        changed.1[0] ^= 1;
+        assert!(validate_destination_binding(genesis, domain, Some(changed)).is_err());
+        assert!(decode_exact::<DestinationBinding>(&bytes[..83]).is_err());
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(decode_exact::<DestinationBinding>(&trailing).is_err());
+        Ok(())
+    }
 
     #[test]
     fn attachment_preserves_labeled_runtime_hashes_not_artifact_or_genesis_guesses() {
@@ -2198,7 +1749,7 @@ mod tests {
     fn alternate_quorate_subsets_share_semantics_but_still_require_valid_signatures() -> Result<()>
     {
         use sp_consensus_beefy::VersionedFinalityProof;
-        let fixture = beefy_relay::fixtures::generate_fixtures()?;
+        let fixture = crate::fixtures::generate_fixtures()?;
         let case = fixture
             .cases
             .iter()
@@ -2407,4 +1958,9 @@ mod tests {
         .context("real source catch-up/recovery exceeded the original 45-second bound")??;
         Ok(())
     }
+}
+
+#[cfg(any(test, feature = "deployment"))]
+pub mod local {
+    include!("local_source.rs");
 }

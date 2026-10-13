@@ -14,7 +14,7 @@ export class SailsProgram {
   constructor(public api: GearApi, programId?: `0x${string}`) {
     const types: Record<string, any> = {
       Init: {"network":"Network","bootstrap_header":"BlockHeader","sync_committee_current_pub_keys":"FixedArrayForArrOf96U8","sync_committee_current_aggregate_pubkey":"BytesFixed","sync_committee_current_branch":"Vec<[u8; 32]>","update":"Update","sync_aggregate_encoded":"Vec<u8>","trusted_bootstrap_root":"H256"},
-      Network: {"_enum":["Mainnet","Sepolia","Holesky","Hoodi"]},
+      Network: {"_enum":{"Mainnet":"Null","Sepolia":"Null","Holesky":"Null","Hoodi":"Null","LocalFixture":{"genesis_time":"u64","genesis_validators_root":"H256"}}},
       BlockHeader: {"slot":"u64","proposer_index":"u64","parent_root":"H256","state_root":"H256","body_root":"H256"},
       FixedArrayForArrOf96U8: "([[u8; 96]; 512])",
       BytesFixed: "(FixedArrayForU8)",
@@ -209,7 +209,6 @@ export class ServiceSyncUpdate {
     });
   }
 }
-
   export interface Init {
     network: Network;
     bootstrap_header: BlockHeader;
@@ -221,7 +220,12 @@ export class ServiceSyncUpdate {
     trusted_bootstrap_root: H256;
   }
 
-  export type Network = "Mainnet" | "Sepolia" | "Holesky" | "Hoodi";
+  export type Network =
+    | { Mainnet: null }
+    | { Sepolia: null }
+    | { Holesky: null }
+    | { Hoodi: null }
+    | { LocalFixture: { genesis_time: number | string | bigint; genesis_validators_root: H256 } };
 
   /**
    * According to Ethereum spec [v1.4.0](https://github.com/ethereum/consensus-specs/blob/v1.4.0/specs/phase0/beacon-chain.md#beaconblockheader).
@@ -311,5 +315,3 @@ export class ServiceSyncUpdate {
     */
     replay_back: ReplayBack | null;
   }
-
-export const IDL_SHA256 = '2e5d5576576bdbbf8bfe7c3a9f83f48be400e602bf47d906d5ab3a7ff1f28b4f';

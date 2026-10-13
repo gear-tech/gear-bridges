@@ -105,18 +105,19 @@ impl Relayer {
         );
 
         let (roots_sender, roots_receiver) = mpsc::unbounded_channel();
-        let merkle_root_extractor = MerkleRootExtractor::new(
+        let mut merkle_root_extractor = MerkleRootExtractor::new(
             eth_api.clone(),
             api_provider.clone(),
             confirmations_merkle_root,
             roots_sender,
             storage.clone(),
         );
+        *tx_manager.merkle_roots.write().await = merkle_root_extractor.qualify().await?;
+        tx_manager.requalify_unsigned_roots(&eth_api).await?;
 
         let accumulator = Accumulator::new(
             roots_receiver,
             tx_manager.merkle_roots.clone(),
-            storage.clone(),
             governance_admin,
             governance_pauser,
             eth_api.clone(),

@@ -324,6 +324,7 @@ async fn test_tx_manager() {
             delivered.tx.tx_hash,
             TRANSACTIONS.get(&delivered.tx.tx_hash).unwrap().event(),
             signed,
+            None,
         ));
         let rejected = message_sender_io
             .recv()

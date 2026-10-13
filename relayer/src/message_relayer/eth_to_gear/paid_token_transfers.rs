@@ -1,4 +1,5 @@
 use super::{
+    cutover::{self, JournalOwnership},
     message_sender, proof_composer,
     storage::{InboundRuntimeIdentity, JSONStorage, Storage},
     tx_manager,
@@ -43,6 +44,7 @@ pub struct Relayer {
     tx_events_receiver: Option<UnboundedReceiver<TxHashWithSlot>>,
 
     storage: Arc<dyn Storage>,
+    _journal_ownership: Arc<JournalOwnership>,
 }
 
 impl MeteredService for Relayer {
@@ -74,7 +76,15 @@ impl Relayer {
         from_eth_block: u64,
         eth_unprocessed_block_storage_path: String,
         http_receiver: Option<UnboundedReceiver<EthTransaction>>,
+        cutover_seal: Option<std::path::PathBuf>,
+        approved_manager_code: Option<H256>,
     ) -> anyhow::Result<Self> {
+        cutover::reject_sealed(std::path::Path::new(&storage_path))?;
+        cutover::reject_sealed(std::path::Path::new(&eth_unprocessed_block_storage_path))?;
+        let journal_ownership = Arc::new(cutover::lock_original_journals(
+            std::path::Path::new(&storage_path),
+            std::path::Path::new(&eth_unprocessed_block_storage_path),
+        )?);
         anyhow::ensure!(
             std::path::Path::new(&storage_path).join("state.json").try_exists()?
                 == std::path::Path::new(&eth_unprocessed_block_storage_path).try_exists()?,
@@ -86,7 +96,9 @@ impl Relayer {
             Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
         );
 
-        let storage = Arc::new(JSONStorage::new(&storage_path));
+        let storage = Arc::new(
+            JSONStorage::new(&storage_path).with_journal_ownership(journal_ownership.clone()),
+        );
 
         let tx_manager = TransactionManager::new(storage.clone());
 
@@ -114,23 +126,49 @@ impl Relayer {
             historical_proxy_address,
             gear_sender: client.account_id().clone().into(),
         };
-        let block_storage = Arc::new(
-            ethereum::block_storage::JSONBlockStorage::new(
-                eth_unprocessed_block_storage_path.into(),
-                identity.clone(),
-            )
-            .await?,
-        );
-        let expected_genesis = alloy::primitives::B256::from(identity.ethereum_genesis_hash.0);
-        storage.bind_runtime_identity(identity).await?;
+        let signer_ownership =
+            cutover::lock_signer(identity.gear_genesis_hash, identity.gear_sender)?;
         eth_api
             .enable_finality_archive(
                 &std::path::Path::new(&storage_path).join("ethereum-finality"),
-                expected_genesis,
+                alloy::primitives::B256::from(identity.ethereum_genesis_hash.0),
             )
             .await?;
+        let predecessor = cutover::authenticate_startup(
+            &identity,
+            cutover_seal.as_deref(),
+            approved_manager_code,
+            &client,
+            &eth_api,
+        )
+        .await?;
+        log::info!(
+            "Authenticated inbound runtime: {}; predecessor_cutover: {}",
+            serde_json::to_string(&identity)?,
+            serde_json::to_string(&predecessor)?
+        );
+        let (minimum_receipt_slot, last_receipt_slot) =
+            cutover::receipt_domain(&client, vft_manager_address).await?;
+        log::info!("Authenticated inbound receipt domain: minimum={minimum_receipt_slot}; last={last_receipt_slot:?}; independently approved successor CodeId={approved_manager_code:?}");
+        let block_storage = Arc::new(
+            ethereum::block_storage::JSONBlockStorage::new_bound(
+                eth_unprocessed_block_storage_path.into(),
+                identity.clone(),
+                predecessor.clone(),
+            )
+            .await?
+            .with_journal_ownership(journal_ownership.clone()),
+        );
+        if let Some(predecessor) = predecessor {
+            storage
+                .bind_successor_identity(identity, predecessor)
+                .await?;
+        } else {
+            storage.bind_runtime_identity(identity).await?;
+        }
         let ethereum_block_listener =
-            EthereumBlockListener::new(eth_api.clone(), block_storage.clone());
+            EthereumBlockListener::new(eth_api.clone(), block_storage.clone())
+                .with_last_receipt_slot(genesis_time, last_receipt_slot);
         let message_paid_event_extractor = MessagePaidEventExtractor::new(
             eth_api.clone(),
             bridging_payment_address,
@@ -152,7 +190,8 @@ impl Relayer {
             api_provider.clone(),
             suri.clone(),
             None,
-        );
+        )
+        .with_signer_ownership(signer_ownership);
 
         let proof_composer = proof_composer::ProofComposer::new(
             api_provider,
@@ -170,7 +209,8 @@ impl Relayer {
                     genesis_time,
                     tx_events_sender.downgrade(),
                     http_receiver,
-                );
+                )
+                .with_receipt_domain(minimum_receipt_slot, last_receipt_slot);
                 (
                     Some(extractor),
                     Some(tx_events_sender),
@@ -181,6 +221,7 @@ impl Relayer {
             };
 
         Ok(Self {
+            _journal_ownership: journal_ownership,
             gear_block_listener,
             ethereum_block_listener,
 

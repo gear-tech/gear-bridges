@@ -21,9 +21,8 @@ contract BeefyHoodi is Script, Base {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
         bytes32 deployerSource = bytes32(uint256(uint160(deployer)));
-        // The message-only profile omits the token deployments before governance.
-        address predictedQueue = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 5);
         messageOnlyBridge = true;
+        address predictedQueue = _predictBeefyMessageQueue(deployer);
         _deployBeefyClient(privateKey, predictedQueue);
 
         address[] memory emergencyStopObservers = new address[](1);

@@ -1,6 +1,6 @@
 # MessageHandler Contract
 
-This test application uses the retained bridge queue and a paired Ping program. It has no token, custody or governance role.
+This test application uses an independently approved bridge queue and a paired Ping program. It has no token, custody or governance role.
 
 ## Contract bindings
 
@@ -12,7 +12,7 @@ The constructor is `MessageHandler(address queue, bytes32 expectedVaraSource, ad
 
 Errors are `NotQueue`, `WrongSource`, `NotSender`, `InvalidPayload`, `AlreadySent(bytes32)` and `AlreadyReceived(bytes32)`. Invalid calls revert before delivery effects.
 
-The existing `script/Deploy.s.sol:Deploy` now requires explicit `MESSAGE_QUEUE`, `EXPECTED_VARA_SOURCE` and `ETHEREUM_SENDER` constructor inputs. It prints the deployed address and does not claim to create deployment-manifest files. The retained Hoodi milestone uses its existing admission wrapper and private signed-intent journal instead of this standalone broadcast script.
+The existing `script/Deploy.s.sol:Deploy` requires explicit `MESSAGE_QUEUE`, `EXPECTED_VARA_SOURCE` and `ETHEREUM_SENDER` constructor inputs. It prints the deployed address and does not claim to create deployment-manifest files. Deployment authorization and retention of the original signed deployment intent are the caller's responsibility.
 
 ## Paired Ping ABI
 
@@ -39,4 +39,4 @@ yarn workspace @gear-js/bridge typecheck
 
 The IDL generator uses native-only Sails IDL dependencies; the deployed WASM excludes them. Rust owner tests execute the compiled Ping WASM and exercise authenticated receipts, exact bytes and replay, native-value rollback, strict builtin replies and late-original-reply reconciliation. Their counterpart builtin is a test actor, not evidence of a live bridge builtin. Foundry tests execute this contract's queue/source/sender checks, payload boundaries and both replay namespaces.
 
-These checks qualify candidate code only. App deployment and delivery on the retained lane remain gated by its named token preflight and warmup PASS, followed by finalized live application/probe/restart evidence.
+These checks qualify candidate code only. Live application delivery requires an independently approved deployment, the original canonical finalized transaction/reply, exact payload and same-pin effect readback. The generic SDK examples relay existing original messages only; campaign admission, journals, probes and restart qualification are not owned by this sample contract.

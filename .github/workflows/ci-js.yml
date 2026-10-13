@@ -34,10 +34,6 @@ jobs:
             common:
               - 'js/common/**'
               - 'api/**'
-              - 'tools/beefy-relay/ops/**'
-              - 'tools/beefy-relay/src/source.rs'
-              - 'tools/beefy-relay/src/tokens.rs'
-              - 'tools/beefy-relay/src/tokens_soak.rs'
               - 'package.json'
               - 'yarn.lock'
               - 'lerna.json'
@@ -86,9 +82,6 @@ jobs:
       - name: 'Install dependencies'
         run: yarn workspaces focus @gear-js/bridge gear-bridges
 
-      - name: Read-only RPC gateway boundary checks
-        run: node tools/beefy-relay/ops/test_readonly_rpc_gateway.mjs
-
       - name: 'Build @gear-js/bridge lib'
         run: yarn build:bridge-js
 
@@ -96,6 +89,8 @@ jobs:
         run: |
           yarn workspace @gear-js/bridge typecheck
           yarn workspace @gear-js/bridge build:examples
+      - name: Read-only CI gateway boundaries
+        run: node js/bridge-js/test/test_readonly_rpc_gateway.mjs
       - name: Offline SDK protocol checks (not live qualification)
         run: yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts --mode unit
 

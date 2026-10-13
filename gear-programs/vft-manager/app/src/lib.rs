@@ -33,6 +33,9 @@ impl Program {
                 transactions.insert((_slot_first, i as u64));
             }
 
+            if count != 0 {
+                VftManager::new().record_receipt_admission(_slot_first);
+            }
             self_
         }
 
@@ -46,6 +49,7 @@ impl Program {
         services::submit_receipt::token_operations::handle_persistent_reply();
         services::handle_bridge_reply();
         services::handle_source_token_reply();
+        services::handle_upgrade_reply();
     }
 
     pub fn vft_manager(&self) -> VftManager {

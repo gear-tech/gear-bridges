@@ -6,8 +6,7 @@ import { VaraMessage, Proof } from './types.js';
 export class GearClient {
   constructor(private _api: GearApi) {}
 
-  public async fetchMerkleProof(blockNumber: number, messageHash: HexString): Promise<Proof> {
-    const blockHash = await this._api.blocks.getBlockHash(blockNumber);
+  public async fetchMerkleProof(blockHash: HexString, messageHash: HexString): Promise<Proof> {
     const proof = await this._api.ethBridge.merkleProof(messageHash, blockHash);
 
     return {
@@ -18,9 +17,8 @@ export class GearClient {
     };
   }
 
-  public async findMessageQueuedEvent(blockNumber: number, nonce: bigint): Promise<VaraMessage | null> {
-    const blockHash = await this._api.blocks.getBlockHash(blockNumber);
-    const events = await this._api.blocks.getEvents(blockHash.toHex());
+  public async findMessageQueuedEvent(blockHash: HexString, nonce: bigint): Promise<VaraMessage | null> {
+    const events = await this._api.blocks.getEvents(blockHash);
     const messages = events
       .filter(({ event }) => event.section === 'gearEthBridge' && event.method === 'MessageQueued')
       .map(({ event }) => event.data[0] as unknown as import('./types.js').EthBridgeMessage)

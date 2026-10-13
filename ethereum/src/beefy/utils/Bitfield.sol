@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
+// Modified for the Vara bridge; upstream provenance and licenses: ethereum/README.md.
 pragma solidity ^0.8.37;
 
 import {Bits} from "./Bits.sol";

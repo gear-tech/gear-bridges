@@ -13,6 +13,9 @@ const CHUNK_HEADERS: usize = 512;
 
 /// Files are untrusted proof material, never a persisted finality verdict.
 /// A chunk is reusable only after every canonical RLP hash and parent link is checked.
+/// Ownership is per canonical directory, not per chain: independent journals can
+/// retain separate archives for one genesis. The client authenticates every
+/// registered directory's durable fence before completing any of them.
 pub(crate) struct HeaderArchive {
     directory: PathBuf,
     chunks: Mutex<BTreeMap<u64, Vec<PathBuf>>>,

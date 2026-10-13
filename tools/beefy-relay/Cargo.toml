@@ -6,6 +6,20 @@ edition.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+test-support = []
+deployment = ["dep:gclient", "dep:sails-rs", "dep:historical-proxy", "dep:historical-proxy-client", "dep:eth-events-electra", "dep:eth-events-electra-client", "dep:vft-manager", "dep:vft-manager-client", "dep:vft", "dep:vft-client", "dep:vft-vara", "dep:vft-vara-client", "dep:gear-core", "dep:checkpoint-light-client-client", "dep:bridging-payment", "dep:bridging-payment-client", "dep:relayer"]
+
+[[bin]]
+name = "beefy-relay"
+path = "src/main.rs"
+
+[[bin]]
+name = "beefy-deploy"
+path = "src/deploy.rs"
+required-features = ["deployment"]
+
 [dependencies]
 anyhow.workspace = true
 hash-db = "0.16.0"
@@ -23,7 +37,6 @@ tiny-keccak.workspace = true
 alloy.workspace = true
 alloy-consensus = { workspace = true, features = ["k256"] }
 clap.workspace = true
-ethereum_beacon_client.workspace = true
 ethereum-client.workspace = true
 ethereum-common = { workspace = true, features = ["std"] }
 gear-rpc-client.workspace = true
@@ -33,21 +46,23 @@ subxt-rpcs.workspace = true
 tokio.workspace = true
 futures.workspace = true
 url.workspace = true
+gclient = { workspace = true, optional = true }
+relayer = { path = "../../relayer", optional = true, default-features = false }
+sails-rs = { workspace = true, features = ["gclient"], optional = true }
+historical-proxy = { workspace = true, features = ["wasm-binary"], optional = true }
+historical-proxy-client = { workspace = true, optional = true }
+eth-events-electra = { workspace = true, features = ["wasm-binary"], optional = true }
+eth-events-electra-client = { workspace = true, optional = true }
+vft-manager = { workspace = true, features = ["wasm-binary"], optional = true }
+vft-manager-client = { workspace = true, optional = true }
+vft = { workspace = true, features = ["wasm-binary"], optional = true }
+vft-client = { workspace = true, optional = true }
+vft-vara = { workspace = true, features = ["wasm-binary"], optional = true }
+vft-vara-client = { workspace = true, optional = true }
+gear-core = { workspace = true, optional = true }
+checkpoint-light-client-client = { workspace = true, optional = true }
+bridging-payment = { workspace = true, features = ["wasm-binary"], optional = true }
+bridging-payment-client = { workspace = true, optional = true }
+
+[dev-dependencies]
 tempfile = "3.23.0"
-gclient.workspace = true
-sails-rs = { workspace = true, features = ["gclient"] }
-historical-proxy = { workspace = true, features = ["wasm-binary"] }
-historical-proxy-client.workspace = true
-eth-events-electra = { workspace = true, features = ["wasm-binary"] }
-eth-events-electra-client.workspace = true
-vft-manager = { workspace = true, features = ["wasm-binary"] }
-vft-manager-client.workspace = true
-vft = { workspace = true, features = ["wasm-binary"] }
-vft-client.workspace = true
-vft-vara = { workspace = true, features = ["wasm-binary"] }
-vft-vara-client.workspace = true
-gear-core.workspace = true
-relayer = { path = "../../relayer" }
-checkpoint-light-client-client.workspace = true
-bridging-payment = { workspace = true, features = ["wasm-binary"] }
-bridging-payment-client.workspace = true

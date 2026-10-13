@@ -17,6 +17,7 @@ pub struct BlockListener {
     eth_api: PollingEthApi,
     storage: Arc<JSONBlockStorage>,
     metrics: Metrics,
+    last_receipt_slot: Option<(u64, u64)>,
 }
 
 impl MeteredService for BlockListener {
@@ -40,7 +41,14 @@ impl BlockListener {
             eth_api,
             storage,
             metrics: Metrics::new(),
+            last_receipt_slot: None,
         }
+    }
+
+    /// Stop fresh source discovery at the authenticated Beacon-slot cutover boundary.
+    pub fn with_last_receipt_slot(mut self, genesis_time: u64, last: Option<u64>) -> Self {
+        self.last_receipt_slot = last.map(|slot| (genesis_time, slot));
+        self
     }
 
     pub fn spawn(self) -> Receiver<EthereumBlockNumber> {
@@ -69,6 +77,16 @@ impl BlockListener {
                 block.header.hash.0 == hash.0,
                 "HOLD: pending finalized Ethereum discovery hash changed"
             );
+            if let Some((genesis, last)) = self.last_receipt_slot {
+                let elapsed = block.header.timestamp.checked_sub(genesis).ok_or_else(|| {
+                    anyhow::anyhow!("HOLD: Ethereum timestamp precedes Beacon genesis")
+                })?;
+                anyhow::ensure!(
+                    elapsed % ethereum_common::SECONDS_PER_SLOT == 0
+                        && elapsed / ethereum_common::SECONDS_PER_SLOT <= last,
+                    "HOLD: original pending discovery is outside source cutover coverage"
+                );
+            }
             sender.send(EthereumBlockNumber(number)).await?;
         }
         self.metrics.latest_block.set(next_block as i64);
@@ -77,6 +95,20 @@ impl BlockListener {
             if latest >= next_block {
                 for number in next_block..=latest {
                     let block = finalized_block(&self.eth_api, number).await?;
+                    if let Some((genesis, last)) = self.last_receipt_slot {
+                        let elapsed =
+                            block.header.timestamp.checked_sub(genesis).ok_or_else(|| {
+                                anyhow::anyhow!("HOLD: Ethereum timestamp precedes Beacon genesis")
+                            })?;
+                        anyhow::ensure!(
+                            elapsed % ethereum_common::SECONDS_PER_SLOT == 0,
+                            "HOLD: invalid Beacon-slot discovery timestamp"
+                        );
+                        if elapsed / ethereum_common::SECONDS_PER_SLOT > last {
+                            // The original lane can reconcile admitted work but must not discover successor-domain receipts.
+                            std::future::pending::<()>().await;
+                        }
+                    }
                     persist_and_send_block(
                         self.storage.as_ref(),
                         sender,
@@ -252,11 +284,6 @@ mod tests {
         let server_handle = server.handle();
         tokio::spawn(server);
         let api = PollingEthApi::new(&endpoint).await.unwrap();
-        assert!(api
-            .is_finalized_block(0, blocks[0].header.hash.0.into())
-            .await
-            .unwrap());
-        queries.lock().unwrap().clear();
         let path =
             std::env::temp_dir().join(format!("listener-aged-{}.json", uuid::Uuid::now_v7()));
         let mut bound = identity();

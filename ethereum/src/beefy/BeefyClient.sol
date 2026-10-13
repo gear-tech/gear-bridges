@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
+// Modified for the Vara bridge; upstream provenance and licenses: ethereum/README.md.
 pragma solidity ^0.8.37;
 
 import {VaraBridgeMetadata} from "./VaraBridgeMetadata.sol";
@@ -326,9 +327,7 @@ contract BeefyClient {
         // Check if validatorSignature is correct, ie. check if it matches
         // the signature of senderPublicKey on the commitmentHash
         bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
-        if (ECDSA.recover(commitmentHash, proof.v, proof.r, proof.s) != proof.account) {
-            revert InvalidSignature();
-        }
+        _verifySignature(commitmentHash, proof);
 
         // For the initial submission, the supplied bitfield should claim that more than
         // two thirds of the validator set have sign the commitment
@@ -424,22 +423,7 @@ contract BeefyClient {
         verifyCommitment(commitmentHash, ticketID, bitfield, vset, proofs);
 
         bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
-        _validateAuthenticatedLeaf(commitment, newMMRRoot, leaf, snapshot, leafProof, leafProofOrder);
-
-        if (is_next_session) {
-            if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
-                revert InvalidMMRLeaf();
-            }
-            currentValidatorSet = nextValidatorSet;
-            nextValidatorSet.id = leaf.nextAuthoritySetID;
-            nextValidatorSet.length = leaf.nextAuthoritySetLen;
-            nextValidatorSet.root = leaf.nextAuthoritySetRoot;
-            nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
-        }
-
-        latestMMRRoot = newMMRRoot;
-        latestBeefyBlock = commitment.blockNumber;
-        lastAuthenticatedSourceTimestampMs = snapshot.sourceTimestampMs;
+        _acceptCommitment(commitment, newMMRRoot, leaf, snapshot, leafProof, leafProofOrder, is_next_session);
         delete tickets[ticketID];
 
         emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
@@ -573,9 +557,25 @@ contract BeefyClient {
         bytes32 newMMRRoot = ensureProvidesMMRRoot(commitment);
         bytes32 commitmentHash = keccak256(encodeCommitment(commitment));
         verifyFiatShamirCommitment(commitmentHash, bitfield, vset, proofs);
-        _validateAuthenticatedLeaf(commitment, newMMRRoot, leaf, snapshot, leafProof, leafProofOrder);
+        _acceptCommitment(commitment, newMMRRoot, leaf, snapshot, leafProof, leafProofOrder, is_next_session);
 
-        if (is_next_session) {
+        emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
+    }
+
+    /* Internal Functions */
+
+    // Protocol-specific tickets, sampling and signature counts are checked before this shared tail.
+    function _acceptCommitment(
+        Commitment calldata commitment,
+        bytes32 newMMRRoot,
+        MMRLeaf calldata leaf,
+        VaraBridgeMetadata.Snapshot calldata snapshot,
+        bytes32[] calldata leafProof,
+        uint256 leafProofOrder,
+        bool isNextSession
+    ) internal {
+        _validateAuthenticatedLeaf(commitment, newMMRRoot, leaf, snapshot, leafProof, leafProofOrder);
+        if (isNextSession) {
             if (leaf.nextAuthoritySetID <= nextValidatorSet.id) {
                 revert InvalidMMRLeaf();
             }
@@ -585,15 +585,10 @@ contract BeefyClient {
             nextValidatorSet.root = leaf.nextAuthoritySetRoot;
             nextValidatorSet.usageCounters = createUint16Array(leaf.nextAuthoritySetLen);
         }
-
         latestMMRRoot = newMMRRoot;
         latestBeefyBlock = commitment.blockNumber;
         lastAuthenticatedSourceTimestampMs = snapshot.sourceTimestampMs;
-
-        emit NewMMRRoot(newMMRRoot, commitment.blockNumber);
     }
-
-    /* Internal Functions */
 
     function _validateValidatorSet(ValidatorSet memory validatorSet) internal pure {
         if (
@@ -733,9 +728,7 @@ contract BeefyClient {
             }
 
             // Check that validator signed the commitment
-            if (ECDSA.recover(commitmentHash, proof.v, proof.r, proof.s) != proof.account) {
-                revert InvalidSignature();
-            }
+            _verifySignature(commitmentHash, proof);
 
             // Ensure no validator can appear more than once in bitfield
             Bitfield.unset(finalbitfield, proof.index);
@@ -773,12 +766,16 @@ contract BeefyClient {
             }
 
             // Check that validator signed the commitment
-            if (ECDSA.recover(commitmentHash, proof.v, proof.r, proof.s) != proof.account) {
-                revert InvalidSignature();
-            }
+            _verifySignature(commitmentHash, proof);
 
             // Ensure no validator can appear more than once in bitfield
             Bitfield.unset(finalbitfield, proof.index);
+        }
+    }
+
+    function _verifySignature(bytes32 commitmentHash, ValidatorProof calldata proof) internal pure {
+        if (ECDSA.recover(commitmentHash, proof.v, proof.r, proof.s) != proof.account) {
+            revert InvalidSignature();
         }
     }
 

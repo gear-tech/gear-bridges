@@ -1,15 +1,17 @@
 use ::gstd::{static_mut, static_ref};
 use gstd::exec::{self};
 use sails_rs::{
-    calls::*,
-    gstd::{self, calls::GStdRemoting, msg},
+    gstd::{self, msg},
     prelude::*,
 };
-use vft_client::traits::*;
-use vft_manager_client::traits::VftManager as _;
 
+mod cutover;
 mod error;
 mod token_mapping;
+pub use cutover::{
+    handle_upgrade_reply, CustodyTransferAttempt, CustodyTransferOutcome, CutoverPhase,
+    CutoverStatus,
+};
 
 use error::Error;
 pub use request_bridging::{
@@ -21,11 +23,6 @@ mod request_bridging;
 pub mod submit_receipt;
 
 pub use submit_receipt::abi as eth_abi;
-
-#[allow(dead_code)]
-mod vft_manager_client {
-    include!(concat!(env!("OUT_DIR"), "/vft_manager_client.rs"));
-}
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
 /// Two days at Vara's three-second block time.
@@ -215,9 +212,15 @@ pub struct State {
     /// Is the `vft-manager` currently on pause.
     is_paused: bool,
     native_wrapper: Option<ActorId>,
-    /// Address of the new vft-manager program which the current should upgrade to.
-    /// It is required to handle cases when gas exhausted during execution of `upgrade` method.
-    vft_manager_new: Option<ActorId>,
+    cutover: CutoverStatus,
+    frozen_mappings: Vec<(ActorId, H160, TokenSupply)>,
+    custody_transfers: Vec<CustodyTransferAttempt>,
+    custody_latest: collections::BTreeMap<ActorId, usize>,
+    custody_children: collections::BTreeMap<MessageId, usize>,
+    custody_completed: collections::BTreeSet<ActorId>,
+    has_economic_activity: bool,
+    maximum_admitted_receipt_slot: Option<u64>,
+    economic_revision: u64,
 }
 
 /// Config that should be provided to this service on initialization.
@@ -265,6 +268,7 @@ impl VftManager {
     #[export]
     pub fn update_erc20_manager_address(&mut self, erc20_manager_address_new: H160) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         if erc20_manager_address_new == Default::default() {
             panic!("Invalid address of ERC20Manger");
@@ -283,6 +287,7 @@ impl VftManager {
     #[export]
     pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         let old = self.state_mut().historical_proxy_address;
         self.state_mut().historical_proxy_address = historical_proxy_address_new;
@@ -308,13 +313,15 @@ impl VftManager {
         slot: u64,
         transaction_index: u64,
     ) -> Result<ReceiptStatus, Error> {
-        submit_receipt::reconcile_receipt((slot, transaction_index)).await
+        self.ensure_receipt_domain(slot)?;
+        submit_receipt::reconcile_receipt((slot, transaction_index), self.config()).await
     }
 
     /// Settlement policy is explicit, and only changes at a paused boundary.
     #[export]
     pub fn configure_native_wrapper(&mut self, wrapper: Option<ActorId>) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
         assert!(self.state().is_paused, "Not paused");
         if let Some(wrapper) = wrapper {
             assert!(!wrapper.is_zero(), "Invalid native wrapper");
@@ -341,6 +348,7 @@ impl VftManager {
         supply_type: TokenSupply,
     ) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         self.state_mut()
             .token_map
@@ -358,6 +366,7 @@ impl VftManager {
     #[export]
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         assert_ne!(
             self.state().native_wrapper,
@@ -380,6 +389,7 @@ impl VftManager {
     #[export]
     pub fn update_config(&mut self, config: Config) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         unsafe {
             CONFIG = Some(config);
@@ -472,8 +482,8 @@ impl VftManager {
     /// Pause the `vft-manager`.
     ///
     /// When `vft-manager` is paused it means that any requests to
-    /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
-    /// will be rejected.
+    /// `submit_receipt` and `request_bridging` will be rejected. Definite, authorized
+    /// interrupted-transfer refunds remain available while paused or emergency-stopped.
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
     #[export]
@@ -486,6 +496,9 @@ impl VftManager {
         }
 
         if state.is_paused {
+            if state.cutover.phase == CutoverPhase::Draining {
+                return;
+            }
             panic!("Already paused");
         }
 
@@ -513,10 +526,16 @@ impl VftManager {
             panic!("Already unpaused");
         }
 
-        if state.vft_manager_new.is_some() {
-            panic!("Upgrading")
+        assert!(
+            matches!(
+                state.cutover.phase,
+                CutoverPhase::Active | CutoverPhase::Draining | CutoverPhase::Ready
+            ),
+            "Cutover not ready"
+        );
+        if state.cutover.phase == CutoverPhase::Ready {
+            self.state_mut().cutover.phase = CutoverPhase::Active;
         }
-
         self.state_mut().is_paused = false;
 
         self.emit_event(Event::Unpaused)
@@ -544,6 +563,7 @@ impl VftManager {
         transaction_index: u64,
         receipt_rlp: Vec<u8>,
     ) -> Result<(), Error> {
+        self.ensure_receipt_domain(slot)?;
         self.ensure_running()?;
 
         submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
@@ -560,6 +580,7 @@ impl VftManager {
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
+        self.ensure_source_domain()?;
         self.ensure_running()?;
 
         let value = msg::value();
@@ -589,76 +610,60 @@ impl VftManager {
         &mut self,
         msg_id: MessageId,
     ) -> Result<(), Error> {
-        self.ensure_running()?;
-
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
 
     #[export]
-    pub async fn upgrade(&mut self, vft_manager_new: ActorId) {
+    pub fn begin_cutover(&mut self, destination: ActorId, last_receipt_slot: u64) {
         self.ensure_admin();
+        cutover::begin(self, destination, last_receipt_slot);
+    }
 
-        if !self.state().is_paused {
-            panic!("Not paused");
-        }
+    #[export]
+    pub async fn prepare_cutover(&mut self, source: ActorId, last_receipt_slot: u64) {
+        self.ensure_admin();
+        cutover::prepare(self, source, last_receipt_slot).await;
+    }
 
-        let service = vft_manager_client::VftManager::new(GStdRemoting);
-        let destination_paused = service
-            .is_paused()
-            .recv(vft_manager_new)
-            .await
-            .expect("vft_manager_new doesn't seem to be a VftManager program");
-        if !destination_paused {
-            panic!("Destination VftManager is not paused");
-        }
+    #[export]
+    pub async fn upgrade(&mut self, destination: ActorId) {
+        self.ensure_admin();
+        cutover::upgrade(self, destination).await;
+    }
 
-        if self
-            .state()
-            .vft_manager_new
-            .map(|address| address != vft_manager_new)
-            .unwrap_or(false)
-        {
-            panic!(
-                "Upgrade called with vft_manager_new = {:?}",
-                self.state().vft_manager_new
-            );
-        }
+    #[export]
+    pub async fn finalize_cutover(&mut self) {
+        self.ensure_admin();
+        cutover::finalize(self).await;
+    }
 
-        self.state_mut().vft_manager_new = Some(vft_manager_new);
+    #[export]
+    pub fn cutover_status(&self) -> CutoverStatus {
+        cutover::status(self)
+    }
 
-        let vft_manager = Syscall::program_id();
-        let mut service = vft_client::Vft::new(GStdRemoting);
-        let mappings = self.state().token_map.read_state();
-        for (vft, _erc20, _supply) in mappings {
-            let balance = service
-                .balance_of(vft_manager)
-                .recv(vft)
-                .await
-                .expect("Unable to get the balance of VftManager");
-
-            if balance > 0.into()
-                && !service
-                    .transfer(vft_manager_new, balance)
-                    .send_recv(vft)
-                    .await
-                    .expect("Unable to request a transfer to the new VftManager")
-            {
-                panic!("Unable to transfer tokens to the new VftManager ({vft:?})");
-            }
-        }
-
-        exec::exit(vft_manager_new);
+    #[export]
+    pub fn cutover_transfers(&self, start: u32, count: u32) -> Vec<CustodyTransferAttempt> {
+        self.state()
+            .custody_transfers
+            .iter()
+            .skip(start as usize)
+            .take(count as usize)
+            .cloned()
+            .collect()
     }
 
     #[export]
     pub async fn update_vfts(&mut self, vft_map: Vec<(ActorId, ActorId)>) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
+        let revision = self.state().economic_revision;
         let gas_required = self.config().gas_for_swap_token_maps;
         self.state_mut()
             .token_map
-            .update_vfts(gas_required, vft_map)
-            .await
+            .update_vfts(gas_required, vft_map, revision)
+            .await;
     }
 
     /// Get state of a `request_bridging` message tracker.
@@ -745,54 +750,21 @@ impl VftManager {
 
     #[export]
     pub fn transactions(&self, order: Order, start: u32, count: u32) -> Vec<(u64, u64)> {
-        fn collect<'a, T, L, R, F>(start: u32, count: u32, left: L, right: R, before: F) -> Vec<T>
-        where
-            T: 'a + Copy + Ord,
-            L: Iterator<Item = &'a T>,
-            R: Iterator<Item = &'a T>,
-            F: Fn(&T, &T) -> bool,
-        {
-            let mut left = left.peekable();
-            let mut right = right.peekable();
-            let mut skipped = 0;
-            let mut result = Vec::new();
-
-            while result.len() < count as usize {
-                let next = match (left.peek(), right.peek()) {
-                    (Some(a), Some(b)) if a == b => {
-                        right.next();
-                        left.next()
-                    }
-                    (Some(a), Some(b)) if before(a, b) => left.next(),
-                    (Some(_), Some(_)) => right.next(),
-                    (Some(_), None) => left.next(),
-                    (None, Some(_)) => right.next(),
-                    (None, None) => break,
-                };
-
-                if skipped < start {
-                    skipped += 1;
-                } else if let Some(value) = next {
-                    result.push(*value);
-                }
-            }
-
-            result
-        }
-
         let processed = submit_receipt::transactions();
-        let reserved = submit_receipt::reserved_transactions();
         match order {
-            Order::Direct => collect(start, count, processed.iter(), reserved.iter(), |a, b| {
-                a < b
-            }),
-            Order::Reverse => collect(
-                start,
-                count,
-                processed.iter().rev(),
-                reserved.iter().rev(),
-                |a, b| a > b,
-            ),
+            Order::Direct => processed
+                .iter()
+                .skip(start as usize)
+                .take(count as usize)
+                .copied()
+                .collect(),
+            Order::Reverse => processed
+                .iter()
+                .rev()
+                .skip(start as usize)
+                .take(count as usize)
+                .copied()
+                .collect(),
         }
     }
 
@@ -802,36 +774,6 @@ impl VftManager {
         submit_receipt::receipt_status((slot, transaction_index))
     }
 
-    #[export]
-    pub async fn insert_transactions(&mut self, data: Vec<(u64, u64)>) {
-        self.ensure_admin();
-
-        if !self.state().is_paused {
-            panic!("Not paused");
-        }
-
-        let transactions = submit_receipt::transactions_mut();
-        for key in data {
-            if transactions.contains(&key) {
-                continue;
-            }
-
-            if transactions.len() >= submit_receipt::TX_HISTORY_DEPTH {
-                if transactions
-                    .first()
-                    .map(|first| &key < first)
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-
-                transactions.pop_first();
-            }
-
-            transactions.insert(key);
-        }
-    }
-
     /// The method is intended for tests and is available only when the feature `mocks`
     /// is enabled. Populates the collection with processed transactions.
     ///
@@ -839,9 +781,14 @@ impl VftManager {
     #[export]
     pub fn fill_transactions(&mut self) -> bool {
         self.ensure_admin();
+        self.ensure_economic_mutable();
         #[cfg(feature = "mocks")]
         {
-            submit_receipt::fill_transactions()
+            let filled = submit_receipt::fill_transactions();
+            if let Some(&(slot, _)) = submit_receipt::transactions().last() {
+                self.record_receipt_admission(slot);
+            }
+            filled
         }
 
         #[cfg(not(feature = "mocks"))]
@@ -859,6 +806,9 @@ impl VftManager {
     ) -> Result<SourceRequestOutcome, Error> {
         self.ensure_admin();
         assert!(self.state().is_paused, "Not paused");
+        if self.state().cutover.phase == CutoverPhase::Retired {
+            return Err(Error::Retired);
+        }
         request_bridging::reconcile_source_request(request, child, request_hash)
     }
 
@@ -880,39 +830,12 @@ impl VftManager {
         _supply_type: TokenSupply,
     ) -> Result<(), Error> {
         self.ensure_admin();
+        self.ensure_receipt_domain(_slot)?;
+        self.ensure_economic_mutable();
+        self.record_receipt_admission(_slot);
         #[cfg(feature = "mocks")]
         {
-            use submit_receipt::token_operations;
-
-            let source = Syscall::message_source();
-            let erc20_sender = H160::zero();
-            match _supply_type {
-                TokenSupply::Ethereum => {
-                    token_operations::mint(
-                        _slot,
-                        _transaction_index,
-                        erc20_sender,
-                        source,
-                        source,
-                        100u32.into(),
-                        self.config(),
-                    )
-                    .await
-                }
-
-                TokenSupply::Gear => {
-                    token_operations::unlock(
-                        _slot,
-                        _transaction_index,
-                        erc20_sender,
-                        source,
-                        source,
-                        100u32.into(),
-                        self.config(),
-                    )
-                    .await
-                }
-            }
+            submit_receipt::benchmark_reply(self, (_slot, _transaction_index), _supply_type).await
         }
 
         #[cfg(not(feature = "mocks"))]
@@ -926,6 +849,7 @@ impl VftManager {
     #[export]
     pub async fn calculate_gas_for_token_map_swap(&mut self) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
         #[cfg(feature = "mocks")]
         {
             self.state_mut()
@@ -939,6 +863,70 @@ impl VftManager {
 }
 
 impl VftManager {
+    pub(crate) fn record_receipt_admission(&mut self, slot: u64) {
+        let state = self.state_mut();
+        state.has_economic_activity = true;
+        state.maximum_admitted_receipt_slot = Some(
+            state
+                .maximum_admitted_receipt_slot
+                .map_or(slot, |previous| previous.max(slot)),
+        );
+    }
+
+    fn ensure_economic_mutable(&mut self) {
+        assert_eq!(
+            self.state().cutover.phase,
+            CutoverPhase::Active,
+            "Economic configuration frozen"
+        );
+        self.state_mut().economic_revision = self
+            .state()
+            .economic_revision
+            .checked_add(1)
+            .expect("Economic revision overflow");
+    }
+
+    fn ensure_receipt_domain(&self, slot: u64) -> Result<(), Error> {
+        let cutover = &self.state().cutover;
+        if cutover.phase == CutoverPhase::Retired {
+            return Err(Error::Retired);
+        }
+        if slot < cutover.minimum_receipt_slot
+            || cutover.last_receipt_slot.is_some_and(|last| slot > last)
+        {
+            return Err(Error::ReceiptOutsideDeployment);
+        }
+        if !matches!(cutover.phase, CutoverPhase::Active | CutoverPhase::Draining) {
+            return Err(Error::CutoverNotReady);
+        }
+        Ok(())
+    }
+
+    fn ensure_source_domain(&self) -> Result<(), Error> {
+        match self.state().cutover.phase {
+            CutoverPhase::Active => Ok(()),
+            CutoverPhase::Retired => Err(Error::Retired),
+            _ => Err(Error::CutoverNotReady),
+        }
+    }
+
+    fn ensure_quiescent(&self) {
+        assert!(self.state().is_paused, "Not paused");
+        assert!(
+            submit_receipt::is_quiescent(),
+            "Unresolved receipt children"
+        );
+        // Reservations survive retryable, ambiguous and native-queued outcomes.
+        assert!(
+            submit_receipt::reserved_transactions().is_empty(),
+            "Unresolved receipt obligations"
+        );
+        assert!(
+            request_bridging::is_quiescent(),
+            "Unresolved source or refund obligations"
+        );
+    }
+
     /// Initialize VFT Manager service.
     pub fn seed(config: InitConfig) {
         unsafe {
@@ -954,7 +942,15 @@ impl VftManager {
                 historical_proxy_address: config.historical_proxy_address,
                 is_paused: true,
                 native_wrapper: None,
-                vft_manager_new: None,
+                cutover: CutoverStatus::default(),
+                frozen_mappings: Vec::new(),
+                custody_transfers: Vec::new(),
+                custody_latest: collections::BTreeMap::new(),
+                custody_children: collections::BTreeMap::new(),
+                custody_completed: collections::BTreeSet::new(),
+                has_economic_activity: false,
+                maximum_admitted_receipt_slot: None,
+                economic_revision: 0,
             });
             CONFIG = Some(config.config);
         }

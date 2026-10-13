@@ -1,4 +1,6 @@
-use ethereum_client::{prepared_content_message_identity, PreparedContentMessage, TxHash};
+use ethereum_client::{
+    prepared_content_message_identity, FinalizedSubmissionSnapshot, PreparedContentMessage, TxHash,
+};
 use gear_rpc_client::dto::{MerkleProof, Message};
 use prometheus::IntCounter;
 use sails_rs::ActorId;
@@ -27,6 +29,10 @@ pub struct Transaction {
     pub journal_version: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion: Option<status_fetcher::CompletionEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_evidence: Option<status_fetcher::FinalizedFailureEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce_disposition: Option<FinalizedSubmissionSnapshot>,
     pub uuid: Uuid,
     pub message: MessageInBlock,
     pub message_hash: [u8; 32],
@@ -46,8 +52,10 @@ impl Transaction {
     pub fn new(message: MessageInBlock, status: TxStatus) -> Self {
         let uuid = Uuid::now_v7();
         Self {
-            journal_version: 3,
+            journal_version: 4,
             completion: None,
+            failure_evidence: None,
+            nonce_disposition: None,
             uuid,
             status,
             message_hash: message_hash(&message.message),
@@ -68,7 +76,7 @@ impl Transaction {
     /// Validate persisted identity/effects; callers must separately recheck canonical finality.
     pub fn validate_journal(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
-            matches!(self.journal_version, 2 | 3),
+            matches!(self.journal_version, 2 | 3 | 4),
             "HOLD: unsupported outbound transaction journal version {}",
             self.journal_version
         );
@@ -83,10 +91,36 @@ impl Transaction {
             })?;
             status_fetcher::validate_completion(&self.message.message, signed, evidence)?;
             anyhow::ensure!(
-                self.journal_version == 3 && self.ethereum_tx_hash == Some(signed.hash),
+                self.journal_version >= 3 && self.ethereum_tx_hash == Some(signed.hash),
                 "HOLD: completion version/hash changed"
             );
         }
+        if let Some(evidence) = &self.failure_evidence {
+            let signed = self
+                .ethereum_submission
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("HOLD: failed original lacks signed bytes"))?;
+            status_fetcher::validate_failure(&self.message.message, signed, evidence)?;
+            anyhow::ensure!(
+                matches!(self.status, TxStatus::Failed { .. })
+                    && self.completion.is_none()
+                    && self.ethereum_tx_hash.is_none(),
+                "HOLD: failed original claims completion"
+            );
+        }
+        if let Some(snapshot) = &self.nonce_disposition {
+            anyhow::ensure!(
+                self.ethereum_submission.is_some()
+                    && snapshot.pinned_nonce_consumed
+                    && snapshot.block_hash != alloy::primitives::B256::ZERO,
+                "HOLD: invalid original nonce disposition"
+            );
+        }
+        anyhow::ensure!(
+            matches!(self.status, TxStatus::Completed)
+                || (self.completion.is_none() && self.ethereum_tx_hash.is_none()),
+            "HOLD: unresolved original claims completion"
+        );
         anyhow::ensure!(
             self.message_hash == message_hash(&self.message.message),
             "HOLD: outbound message identity changed for {}",
@@ -105,7 +139,7 @@ impl Transaction {
             );
         }
         if let Some(signed) = &self.ethereum_submission {
-            prepared_content_message_identity(signed)?;
+            status_fetcher::validate_original_submission(&self.message.message, signed)?;
             anyhow::ensure!(
                 !unsigned,
                 "HOLD: signed outbound submission has an unsigned status"
@@ -196,8 +230,9 @@ impl TransactionManager {
     }
 
     pub async fn fail_transaction(&self, tx_uuid: Uuid, reason: String) {
-        self.failed.write().await.insert(tx_uuid, reason);
-        self.metrics.failed_transactions.inc();
+        if self.failed.write().await.insert(tx_uuid, reason).is_none() {
+            self.metrics.failed_transactions.inc();
+        }
     }
 
     async fn fail_active_transaction(&self, tx_uuid: Uuid, reason: String) -> Option<[u8; 32]> {
@@ -241,9 +276,15 @@ impl TransactionManager {
             TxStatus::PrepareMessage(..)
                 | TxStatus::SendMessage(..)
                 | TxStatus::WaitConfirmations(_)
+                | TxStatus::NeedsReconciliation { .. }
+                | TxStatus::Failed { .. }
         ) {
             return Ok(false);
         }
+        anyhow::ensure!(
+            current.failure_evidence.is_none(),
+            "HOLD: finalized failed original cannot become successful"
+        );
         let signed = current
             .ethereum_submission
             .as_ref()
@@ -260,12 +301,50 @@ impl TransactionManager {
             tx.remember_attempt(hash);
         }
         tx.status = TxStatus::Completed;
-        tx.journal_version = 3;
+        tx.journal_version = 4;
         tx.completion = Some(evidence);
         tx.ethereum_tx_hash = ethereum_tx_hash;
         self.completed.write().await.insert(uuid, tx);
         self.failed.write().await.remove(&uuid);
         self.metrics.completed_transactions.inc();
+        Ok(true)
+    }
+
+    async fn record_finalized_failure(
+        &self,
+        uuid: Uuid,
+        evidence: status_fetcher::FinalizedFailureEvidence,
+    ) -> anyhow::Result<bool> {
+        let reason;
+        {
+            let mut active = self.transactions.write().await;
+            let Some(tx) = active.get_mut(&uuid) else {
+                return Ok(false);
+            };
+            let signed = tx
+                .ethereum_submission
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("HOLD: failed original lacks signed bytes"))?;
+            status_fetcher::validate_failure(&tx.message.message, signed, &evidence)?;
+            reason = format!("Original transaction {} finalized reverted", signed.hash);
+            if let Some(saved) = &tx.failure_evidence {
+                anyhow::ensure!(
+                    saved.receipt == evidence.receipt
+                        && saved.included_block_number == evidence.included_block_number
+                        && saved.included_block_hash == evidence.included_block_hash,
+                    "HOLD: failed original inclusion changed"
+                );
+            } else {
+                tx.failure_evidence = Some(evidence);
+            }
+            tx.status = TxStatus::Failed {
+                diagnostic: reason.clone(),
+            };
+            tx.journal_version = 4;
+        }
+        self.fail_transaction(uuid, reason).await;
+        // The sender cannot unlock the account until the complete failed-original journal is durable.
+        self.storage.save(self).await?;
         Ok(true)
     }
 
@@ -393,6 +472,94 @@ impl TransactionManager {
                 .ack_event_pair(tx.message.message.nonce_be)
                 .await?;
         }
+        for tx in self.transactions.read().await.values() {
+            tx.validate_journal()?;
+            let Some(signed) = &tx.ethereum_submission else {
+                continue;
+            };
+            if let Some(saved) = &tx.failure_evidence {
+                anyhow::ensure!(
+                    api.is_finalized_block(
+                        saved.finalized_block_number,
+                        primitive_types::H256(saved.finalized_block_hash.0)
+                    )
+                    .await?,
+                    "HOLD: failed original finalized anchor changed"
+                );
+                let receipt = api
+                    .get_finalized_receipt(signed.hash)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("HOLD: failed original receipt is unavailable")
+                    })?;
+                let observed =
+                    status_fetcher::failure_evidence(api, &tx.message.message, signed, receipt)
+                        .await?;
+                anyhow::ensure!(
+                    observed.receipt == saved.receipt,
+                    "HOLD: failed original receipt changed"
+                );
+            }
+            if let Some(saved) = &tx.nonce_disposition {
+                api.verify_finalized_submission_snapshot(
+                    signed.nonce,
+                    tx.message.message.nonce_be,
+                    saved,
+                )
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) async fn requalify_unsigned_roots(
+        &self,
+        api: &ethereum_client::EthApi,
+    ) -> anyhow::Result<()> {
+        let mut transactions = self.transactions.write().await;
+        let mut view = None;
+        let roots = self.merkle_roots.read().await;
+        for tx in transactions.values_mut() {
+            if tx.ethereum_submission.is_some() {
+                continue;
+            }
+            let root = match &tx.status {
+                TxStatus::FetchMerkleRoot(root) | TxStatus::PrepareMessage(root, _) => *root,
+                _ => continue,
+            };
+            if view.is_none() {
+                view = Some(api.verified_finalized_view().await?);
+            }
+            let pin = view.as_ref().expect("finalized pin established");
+            let observed = api
+                .read_finalized_merkle_root_at(root.block.0, pin.block_number(), pin.block_hash())
+                .await?;
+            tx.status = if observed == Some(root.merkle_root.0)
+                && roots
+                    .qualified_roots()
+                    .iter()
+                    .any(|qualified| qualified.root == root)
+            {
+                // Rebuild an unsigned saved proof from the authenticated source rather than trust legacy cache bytes.
+                TxStatus::FetchMerkleRoot(root)
+            } else {
+                TxStatus::WaitForMerkleRoot
+            };
+        }
+        if let Some(pin) = view {
+            anyhow::ensure!(
+                api.is_finalized_block(
+                    pin.block_number(),
+                    primitive_types::H256(pin.block_hash().0)
+                )
+                .await?,
+                "HOLD: unsigned root qualification pin changed"
+            );
+            drop(roots);
+            drop(transactions);
+            self.storage.save(self).await?;
+        }
         Ok(())
     }
 
@@ -411,9 +578,6 @@ impl TransactionManager {
             match &tx.status {
                 TxStatus::SendMessage(..) if tx.ethereum_submission.is_none() => {
                     return Err(Self::ambiguous_send_error(tx))
-                }
-                TxStatus::NeedsReconciliation { diagnostic } | TxStatus::Failed { diagnostic } => {
-                    anyhow::bail!("HOLD: outbound transaction {} nonce {} retains attempts {:?}: {diagnostic}", tx.uuid, hex::encode(tx.message.message.nonce_be), tx.ethereum_tx_attempts);
                 }
                 _ => {}
             }
@@ -489,6 +653,7 @@ impl TransactionManager {
         &self,
         tx_uuid: Uuid,
         diagnostic: String,
+        nonce_disposition: Option<FinalizedSubmissionSnapshot>,
     ) -> anyhow::Result<()> {
         {
             let mut transactions = self.transactions.write().await;
@@ -496,6 +661,14 @@ impl TransactionManager {
                 log::warn!("Received HOLD for unknown transaction: {tx_uuid}");
                 return Ok(());
             };
+            if tx.failure_evidence.is_some() {
+                anyhow::bail!(
+                    "HOLD: saved failed original evidence cannot be replaced: {diagnostic}"
+                );
+            }
+            if tx.nonce_disposition.is_none() {
+                tx.nonce_disposition = nonce_disposition;
+            }
             if let TxStatus::WaitConfirmations(hash) = &tx.status {
                 let hash = *hash;
                 tx.remember_attempt(hash);
@@ -505,7 +678,8 @@ impl TransactionManager {
             };
         }
         self.storage.save(self).await?;
-        anyhow::bail!("HOLD: outbound transaction {tx_uuid}: {diagnostic}")
+        log::warn!("HOLD: outbound transaction {tx_uuid}: {diagnostic}");
+        Ok(())
     }
 
     pub(super) async fn resume(
@@ -517,17 +691,31 @@ impl TransactionManager {
     ) -> anyhow::Result<bool> {
         self.hold_ambiguous_send().await?;
         let transactions = self.transactions.write().await;
+        for tx in transactions.values().filter(|tx| {
+            tx.ethereum_submission.is_some()
+                || !tx.ethereum_tx_attempts.is_empty()
+                || matches!(tx.status, TxStatus::WaitConfirmations(_))
+        }) {
+            message_sender.retain_original(tx.uuid);
+        }
 
         // Saved signatures reserve their original nonces before any fresh preparation.
-        for tx in transactions
-            .values()
-            .filter(|tx| tx.ethereum_submission.is_some())
-            .chain(
-                transactions
-                    .values()
-                    .filter(|tx| tx.ethereum_submission.is_none()),
-            )
-        {
+        for tx in resume_order(&transactions) {
+            if let Some(signed) = &tx.ethereum_submission {
+                if !message_sender.register_original(
+                    tx.uuid,
+                    tx.message.message.clone(),
+                    signed.clone(),
+                ) || !status_fetcher.send_request(
+                    tx.uuid,
+                    signed.hash,
+                    tx.message.message.clone(),
+                    Some(signed.clone()),
+                ) {
+                    return Ok(false);
+                }
+                continue;
+            }
             match tx.status {
                 TxStatus::WaitForMerkleRoot => {
                     self.storage
@@ -604,7 +792,7 @@ impl TransactionManager {
 
                 TxStatus::NeedsReconciliation { ref diagnostic }
                 | TxStatus::Failed { ref diagnostic } => {
-                    anyhow::bail!("HOLD: outbound transaction {}: {diagnostic}", tx.uuid)
+                    log::warn!("HOLD: outbound transaction {}: {diagnostic}", tx.uuid);
                 }
                 TxStatus::Completed => {}
             }
@@ -810,6 +998,7 @@ impl TransactionManager {
                 match message {
                     message_sender::Response::Prepared { tx_uuid, submission, durable } => {
                         if self.journal_signed_submission(tx_uuid, submission).await? {
+                            message_sender.retain_original(tx_uuid);
                             let _ = durable.send(());
                         }
                     }
@@ -824,6 +1013,7 @@ impl TransactionManager {
                                     return None;
                                 }
                                 tx.remember_attempt(tx_hash);
+                                tx.status = TxStatus::WaitConfirmations(tx_hash);
                                 Some((tx.message.message.clone(), tx.ethereum_submission.clone()))
                             })
                         };
@@ -850,7 +1040,7 @@ impl TransactionManager {
                         }
                     }
                     message_sender::Response::Hold(tx_uuid, reason) => {
-                        self.hold_active_transaction(tx_uuid, reason).await?;
+                        self.hold_active_transaction(tx_uuid, reason, None).await?;
                     }
                 }
             }
@@ -862,10 +1052,11 @@ impl TransactionManager {
                 };
 
                 match status {
-                    (uuid, Ok(evidence)) => {
+                    (uuid, status_fetcher::SubmissionOutcome::Completed(evidence)) => {
                         if self.complete_transaction(uuid, evidence).await? {
                             self.storage.save(self).await?;
                             self.ack_completed_event(uuid).await?;
+                            message_sender.reconcile_original(uuid);
                             log::info!(
                                 "Transaction {uuid} completed with original finalized receipt and matching effects"
                             );
@@ -874,10 +1065,15 @@ impl TransactionManager {
                         }
                     }
 
-                    (uuid, Err(error)) => {
-                        // Without the original raw bytes/account nonce, a replacement
-                        // after any uncertain outcome is not safe to create automatically.
-                        self.hold_active_transaction(uuid, error).await?;
+                    (uuid, status_fetcher::SubmissionOutcome::FinalizedRevert(evidence)) => {
+                        if self.record_finalized_failure(uuid, evidence).await? {
+                            message_sender.reconcile_original(uuid);
+                        }
+                    }
+                    (uuid, status_fetcher::SubmissionOutcome::NeedsReconciliation { diagnostic, nonce_disposition }) => {
+                        let release = nonce_disposition.as_ref().is_some_and(|snapshot| snapshot.pinned_nonce_consumed);
+                        self.hold_active_transaction(uuid, diagnostic, nonce_disposition).await?;
+                        if release { message_sender.reconcile_original(uuid); }
                     }
                 }
             }
@@ -885,6 +1081,16 @@ impl TransactionManager {
 
         Ok(true)
     }
+}
+
+fn resume_order(transactions: &BTreeMap<Uuid, Transaction>) -> Vec<&Transaction> {
+    let mut ordered: Vec<_> = transactions.values().collect();
+    // Mining waits for lower nonces, including originals the RPC mempool forgot.
+    ordered.sort_unstable_by_key(|tx| match &tx.ethereum_submission {
+        Some(signed) => (false, signed.nonce),
+        None => (true, 0),
+    });
+    ordered
 }
 
 #[cfg(test)]
@@ -1007,6 +1213,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_original_is_durable_counted_once_and_never_reprepared() {
+        let path = std::env::temp_dir().join(format!("gear-original-revert-{}", Uuid::new_v4()));
+        let storage = bound_storage(&path).await;
+        let manager = TransactionManager::new(storage.clone());
+        let mut tx = transaction();
+        let signed = signed_content(&tx, 36).await;
+        let success = status_fetcher::tests::evidence(&tx.message.message, &signed, false);
+        let mut receipt = serde_json::to_value(&success.receipt).unwrap();
+        receipt["status"] = serde_json::json!("0x0");
+        receipt["logs"] = serde_json::json!([]);
+        let evidence = status_fetcher::FinalizedFailureEvidence {
+            receipt: serde_json::from_value(receipt).unwrap(),
+            included_block_number: 100,
+            included_block_hash: alloy::primitives::B256::from([3; 32]),
+            finalized_block_number: success.finalized_block_number,
+            finalized_block_hash: success.finalized_block_hash,
+        };
+        tx.status = TxStatus::WaitConfirmations(signed.hash);
+        tx.ethereum_submission = Some(signed.clone());
+        tx.remember_attempt(signed.hash);
+        let uuid = tx.uuid;
+        let message = tx.message.clone();
+        manager.add_transaction(tx).await;
+        manager.update_storage().await.unwrap();
+        let snapshot = FinalizedSubmissionSnapshot {
+            block_number: 107,
+            block_hash: alloy::primitives::B256::from([4; 32]),
+            pinned_nonce_consumed: true,
+            message_processed: true,
+        };
+        manager
+            .hold_active_transaction(
+                uuid,
+                "original absent; competitor processed".into(),
+                Some(snapshot),
+            )
+            .await
+            .unwrap();
+        assert_eq!(manager.metrics.failed_transactions.get(), 0);
+        assert!(manager.completed.read().await.is_empty());
+        assert!(manager
+            .record_finalized_failure(uuid, evidence.clone())
+            .await
+            .unwrap());
+        assert!(manager
+            .record_finalized_failure(uuid, evidence)
+            .await
+            .unwrap());
+        assert_eq!(manager.metrics.failed_transactions.get(), 1);
+        let restored = TransactionManager::new(storage);
+        restored.load_from_storage().await.unwrap();
+        assert!(restored.accept_message(message).await.unwrap().is_none());
+        let active = restored.transactions.read().await;
+        let tx = &active[&uuid];
+        assert!(tx.ethereum_submission.as_ref() == Some(&signed));
+        assert!(matches!(tx.status, TxStatus::Failed { .. }));
+        assert_eq!(
+            tx.failure_evidence
+                .as_ref()
+                .unwrap()
+                .receipt
+                .transaction_hash,
+            signed.hash
+        );
+        assert_eq!(tx.nonce_disposition, Some(snapshot));
+        assert!(tx.ethereum_tx_hash.is_none() && tx.completion.is_none());
+        drop(active);
+        assert!(restored.completed.read().await.is_empty());
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn ineligible_operator_handoff_keeps_journal_clean_then_valid_pair_admits_once() {
         for queued_before_request in [false, true] {
             let path =
@@ -1050,7 +1328,6 @@ mod tests {
             for name in [
                 "gear_events.json",
                 "failed",
-                "merkle_roots",
                 "blocks.json",
                 "transaction_status.json",
             ] {
@@ -1297,8 +1574,7 @@ mod tests {
         assert_eq!(view["failed"], serde_json::json!([uuid]));
 
         let restored = TransactionManager::new(storage.clone());
-        let error = restored.load_from_storage().await.unwrap_err().to_string();
-        assert!(error.contains("HOLD") && error.contains(&uuid.to_string()));
+        restored.load_from_storage().await.unwrap();
         assert!(matches!(
             restored.existing_transaction(&message).await.unwrap(),
             Some(ExistingTransaction::Active(_))
@@ -1452,20 +1728,13 @@ mod tests {
         tx.status = TxStatus::WaitConfirmations(original);
         manager.add_transaction(tx).await;
         manager.update_storage().await.unwrap();
-        let error = manager
-            .hold_active_transaction(uuid, "no canonical receipt yet".into())
+        manager
+            .hold_active_transaction(uuid, "no canonical receipt yet".into(), None)
             .await
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("HOLD") && error.contains(&uuid.to_string()));
+            .unwrap();
 
         let restored = TransactionManager::new(storage.clone());
-        assert!(restored
-            .load_from_storage()
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("HOLD"));
+        restored.load_from_storage().await.unwrap();
         let active = restored.transactions.read().await;
         assert!(matches!(
             &active[&uuid].status,
@@ -1539,6 +1808,32 @@ mod tests {
         assert!(
             matches!(&manager.transactions.read().await[&uuid].status, TxStatus::FetchMerkleRoot(remaining) if remaining == &root)
         );
+    }
+
+    #[tokio::test]
+    async fn restored_originals_resume_by_account_nonce_before_unsigned_work() {
+        let mut transactions = BTreeMap::new();
+        for (id, nonce) in [(1, None), (2, Some(37)), (3, Some(36))] {
+            let mut message = transaction().message;
+            message.message.nonce_be = [id as u8; 32];
+            let mut tx = Transaction::new(message, TxStatus::WaitForMerkleRoot);
+            tx.uuid = Uuid::from_u128(id);
+            let (root, proof) = inclusion(&tx);
+            tx.status = TxStatus::PrepareMessage(root, proof.clone());
+            if let Some(nonce) = nonce {
+                let signed = signed_content(&tx, nonce).await;
+                tx.ethereum_tx_attempts = vec![signed.hash];
+                tx.ethereum_submission = Some(signed);
+                tx.status = TxStatus::SendMessage(root, proof);
+            }
+            transactions.insert(tx.uuid, tx);
+        }
+        let order: Vec<_> = resume_order(&transactions)
+            .into_iter()
+            .map(|tx| tx.uuid)
+            .collect();
+        assert_eq!(order, [Uuid::from_u128(3), Uuid::from_u128(2), Uuid::from_u128(1)],
+            "a higher saved nonce must not wait for finality while its prerequisite is still queued");
     }
 
     #[tokio::test]

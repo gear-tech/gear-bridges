@@ -473,7 +473,10 @@ async fn main() {
                         .send_recv(program_id)
                         .await
                         .expect("Interrupted-transfer recovery transport failed");
-                    println!("recovery: {result:?}");
+                    println!(
+                        "recovery: {:?}",
+                        result.expect("Interrupted-transfer recovery rejected")
+                    );
                 }
                 ManagerAction::Unmap { vft } => {
                     manager

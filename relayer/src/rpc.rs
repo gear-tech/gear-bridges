@@ -193,6 +193,7 @@ pub async fn reconnect_polling_eth(api: &mut ethereum_client::PollingEthApi) -> 
     Ok(())
 }
 
+#[cfg(feature = "legacy-prover")]
 pub(crate) async fn retry_eth_bounded<T, F, Fut>(
     api: &mut ethereum_client::EthApi,
     operation: &'static str,
@@ -388,6 +389,31 @@ mod tests {
         for status in [400, 401, 403, 404, 501] {
             let err = TransportErrorKind::http_error(status, String::new());
             assert_eq!(classify_alloy_rpc(&err), RetryDecision::Fail);
+        }
+    }
+
+    #[tokio::test]
+    async fn classifies_http_errors_from_actual_event_readers() {
+        for (status, expected) in [(429, RetryDecision::Retry), (401, RetryDecision::Fail)] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let app = axum::Router::new().route("/", axum::routing::post(move || async move {
+                (axum::http::StatusCode::from_u16(status).unwrap(), "RPC unavailable")
+            }));
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let api = ethereum_client::PollingEthApi::new_with_retries(&endpoint, None, None)
+                .await.unwrap();
+            let paid = api.fetch_fee_paid_events_txs_at(Default::default(), 1, Default::default())
+                .await.unwrap_err();
+            let deposit = api.fetch_deposit_events_at(Default::default(), 1, Default::default())
+                .await.unwrap_err();
+            let signing_client = ethereum_client::EthApi::new(
+                &endpoint, "0x0000000000000000000000000000000000000001", None, None, None,
+            ).await.err().expect("HTTP status must reject signing-client initialization");
+            assert_eq!(classify_anyhow(&anyhow::Error::new(signing_client)), expected);
+            server.abort();
+            assert_eq!(classify_anyhow(&paid), expected);
+            assert_eq!(classify_anyhow(&deposit), expected);
         }
     }
 

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result as AnyResult};
+use anyhow::{anyhow, ensure, Context, Result as AnyResult};
 use futures::{
     future::{self, Either},
     pin_mut,
@@ -17,7 +17,7 @@ use checkpoint_light_client_io::{
 };
 use ethereum_beacon_client::{slots_batch::Iter as SlotsBatchIter, BeaconClient};
 use ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
-use sails_rs::{calls::*, gclient::calls::*};
+use sails_rs::calls::ActionIo;
 use utils_prometheus::MeteredService;
 
 mod metrics;
@@ -85,7 +85,6 @@ impl Relayer {
         log::info!("Gas limit for extrinsics: {gas_limit}");
 
         let mut slot_last = 0;
-        let remoting = GClientRemoting::new(self.gear_api.clone());
 
         update_total_balance(&self.gear_api, &self.metrics).await;
 
@@ -126,7 +125,7 @@ impl Relayer {
             }
 
             let result = sync_update::try_to_apply(
-                &remoting,
+                &self.gear_api,
                 self.program_id.0,
                 sync_update.clone(),
                 sync_aggregate_encoded.clone(),
@@ -140,7 +139,7 @@ impl Relayer {
                 }) => {
                     replay_back::execute(replay_back::Args {
                         beacon_client: &self.beacon_client,
-                        remoting: &remoting,
+                        gear_api: &self.gear_api,
                         program_id: self.program_id.0,
                         gas_limit,
                         replay_back,
@@ -180,6 +179,105 @@ impl Relayer {
             update_total_balance(&self.gear_api, &self.metrics).await;
         }
     }
+}
+
+async fn send_checkpoint_message(
+    api: &GearApi,
+    program_id: [u8; 32],
+    payload: Vec<u8>,
+    gas_limit: u64,
+) -> AnyResult<Vec<u8>> {
+    use gsdk::gear::{self, runtime_types::gear_common::event::MessageEntry};
+
+    let signer: gsdk::signer::Signer = api.clone().into();
+    let sender: &[u8] = signer.account_id().as_ref();
+    let target = gear_core::ids::ActorId::from(program_id);
+    let tx = signer
+        .process(
+            gear::tx()
+                .gear()
+                .send_message(target, payload, gas_limit, 0, false),
+        )
+        .await?;
+    let original_hash = tx.extrinsic_hash();
+    let result = async {
+    let included_hash = tx.block_hash();
+    let included_number = api.block_number_at(included_hash).await?;
+    let mut queued = None;
+    let mut success = false;
+    for event in tx.fetch_events().await?.iter() {
+        let event = event?;
+        if let Some(error) = gear_rpc_client::extrinsic_failure(&event)? {
+            anyhow::bail!("Original checkpoint {original_hash:#x} failed dispatch: {error}");
+        }
+        if event.pallet_name() == "System" && event.variant_name() == "ExtrinsicSuccess" {
+            ensure!(!success, "Duplicate checkpoint dispatch success; HOLD");
+            success = true;
+        }
+        if let Some(message) = event.as_event::<gear::gear::events::MessageQueued>()? {
+            ensure!(
+                queued.is_none()
+                    && message.source.0.as_slice() == sender
+                    && message.destination == target
+                    && message.entry == MessageEntry::Handle,
+                "Original checkpoint {original_hash:#x} queued identity changed; HOLD"
+            );
+            queued = Some(message.id);
+        }
+    }
+    ensure!(success, "Original checkpoint {original_hash:#x} lacks successful dispatch; HOLD");
+    let id = queued.ok_or_else(|| anyhow!("Original checkpoint {original_hash:#x} lacks queued message; HOLD"))?;
+    log::info!("Checkpoint original {original_hash:#x} finalized at {included_hash:#x}, message {id:?}");
+
+
+        let mut next = included_number;
+        let mut previous = (included_number, included_hash);
+        loop {
+            let finalized_hash = api.last_block_hash().await?;
+            let finalized_number = api.block_number_at(finalized_hash).await?;
+            ensure!(
+                finalized_number >= previous.0
+                    && api.get_block_hash(previous.0).await? == previous.1
+                    && api.get_block_hash(included_number).await? == included_hash,
+                "Checkpoint finalized history changed; HOLD"
+            );
+            for number in next..=finalized_number {
+                let block_hash = api.get_block_hash(number).await?;
+                let events = signer.api().blocks().at(block_hash).await?.events().await?;
+                for event in events.iter() {
+                    let event = event?;
+                    let Some(gear::gear::events::UserMessageSent { message, .. }) =
+                        event.as_event::<gear::gear::events::UserMessageSent>()?
+                    else { continue };
+                    let Some(details) = message.details() else { continue };
+                    if details.to_message_id() != id { continue; }
+                    ensure!(
+                        message.source() == target
+                            && message.destination().as_ref() == sender,
+                        "Original checkpoint reply actor or recipient changed; HOLD"
+                    );
+                    ensure!(
+                        api.get_block_hash(number).await? == block_hash
+                            && api.get_block_hash(finalized_number).await? == finalized_hash,
+                        "Original checkpoint reply finalized pin changed; HOLD"
+                    );
+                    ensure!(details.to_reply_code().is_success(),
+                        "Original checkpoint terminal reply failed: {:?}, payload=0x{}; HOLD",
+                        details.to_reply_code(), hex::encode(message.payload_bytes()));
+                    log::info!("Checkpoint original {original_hash:#x} reply finalized at {block_hash:#x}");
+                    return Ok(message.payload_bytes().to_vec());
+                }
+            }
+            ensure!(api.get_block_hash(finalized_number).await? == finalized_hash,
+                "Checkpoint finality changed while waiting for original reply; HOLD");
+            previous = (finalized_number, finalized_hash);
+            next = finalized_number.checked_add(1).ok_or_else(|| anyhow!("Checkpoint source height overflow; HOLD"))?;
+            time::sleep(Duration::from_secs(3)).await;
+        }
+    }.await;
+    result.with_context(|| {
+        format!("Original checkpoint {original_hash:#x}; HOLD/reconcile before retry")
+    })
 }
 
 async fn update_total_balance(client: &GearApi, update_metrics: &metrics::Updates) {

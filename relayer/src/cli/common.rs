@@ -47,6 +47,10 @@ pub struct EthereumArgs {
     /// Ethereum address of message queue contract
     #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     pub mq_address: String,
+
+    /// Direct CREATE locator; finalized transaction/receipt tries and signature authenticate queue birth
+    #[arg(long, env = "QUEUE_DEPLOYMENT_TRANSACTION")]
+    pub queue_deployment_transaction: Option<alloy::primitives::B256>,
 }
 
 #[derive(Args)]

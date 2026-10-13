@@ -624,9 +624,12 @@ fn off_curve_signature_returns_an_error_without_losing_checkpoint_state() {
 fn trusted_bootstrap_identity_period_and_canonical_encoding_fail_closed() {
     large_stack(|| {
         let data: Value = serde_json::from_slice(SYNTHETIC).unwrap();
-        for case in 0..5 {
+        for case in 0..6 {
             let system = System::new();
             system.mint_to(ACTOR, 100_000_000_000_000_000);
+            let bls = Program::mock_with_id(&system, LEGACY_BLS, NativeBls);
+            let init_bls = bls.send_bytes(ACTOR, b"INIT");
+            assert!(system.run_next_block().succeed.contains(&init_bls));
             let program = Program::from_binary_with_id(&system, PROGRAM, WASM_BINARY);
             let bootstrap: BootstrapResponse =
                 serde::Deserialize::deserialize(&data["bootstrap"]).unwrap();
@@ -640,6 +643,12 @@ fn trusted_bootstrap_identity_period_and_canonical_encoding_fail_closed() {
                 }
                 2 => init.network = Network::Mainnet,
                 3 => init.sync_aggregate_encoded.push(0),
+                5 => {
+                    init.network = Network::LocalFixture {
+                        genesis_time: Network::Hoodi.genesis_time(),
+                        genesis_validators_root: [1; 32].into(),
+                    };
+                }
                 _ => (),
             }
             let mut payload = <factory_io::Init as ActionIo>::encode_call(&init);
@@ -647,10 +656,9 @@ fn trusted_bootstrap_identity_period_and_canonical_encoding_fail_closed() {
                 payload.push(0);
             }
             let id = program.send_bytes(ACTOR, payload);
-            let result = system.run_next_block();
             assert!(
-                result.failed.contains(&id),
-                "invalid bootstrap case {case} activated"
+                (0..100).any(|_| system.run_next_block().failed.contains(&id)),
+                "invalid bootstrap case {case} was not rejected"
             );
         }
     });

@@ -1,4 +1,4 @@
-import { Account, PublicClient, WalletClient, TransactionSerializable, zeroHash, parseEventLogs, encodeFunctionData, TransactionReceiptNotFoundError } from 'viem';
+import { Account, PublicClient, WalletClient, TransactionSerializable, zeroHash, parseEventLogs, encodeFunctionData, TransactionReceiptNotFoundError, ContractFunctionRevertedError, BaseError } from 'viem';
 import { bytesToHex } from '@ethereumjs/util';
 import { HexString } from '@gear-js/api';
 
@@ -58,6 +58,7 @@ export const MessageQueueAbi = [
     stateMutability: 'view',
   },
   { type: 'error', name: 'EmergencyStop', inputs: [] },
+  { type: 'error', name: 'MerkleRootDelayNotPassed', inputs: [] },
   { type: 'error', name: 'InvalidMerkleProof', inputs: [] },
   { type: 'error', name: 'InvalidPlonkProof', inputs: [] },
   {
@@ -338,6 +339,7 @@ export class MessageQueueClient {
     expectedEffect: OutboundEffect,
     statusCb: StatusCb = () => {},
     deadline = Date.now() + 44 * 60 * 1000,
+    options: { wait?: boolean } = {},
   ): Promise<MessageProcessResult> {
     const wallet = this._walletClient, account = this._account;
     if (!wallet || !account) throw new Error('Wallet client must be provided');
@@ -347,8 +349,38 @@ export class MessageQueueClient {
       if (!Number.isSafeInteger(deadline) || Date.now() >= deadline) throw new Error('Original relay deadline expired');
       const args = getProcessMessageArgs(blockNumber, varaMessage, merkleProof);
       assertTokenMessage(varaMessage, expectedEffect);
-      await this._client.simulateContract({ address: this._address, abi: MessageQueueAbi, functionName: 'processMessage',
-        args, account: this._account });
+      let maturityAnchor: { height: bigint; hash: HexString } | undefined;
+      for (;;) {
+        if (maturityAnchor) {
+          const finalized = await withOriginalDeadline(deadline, () => this._client.getBlock({ blockTag: 'finalized' }));
+          if (typeof finalized.number !== 'bigint' || finalized.number < maturityAnchor.height ||
+              !/^0x[0-9a-f]{64}$/i.test(finalized.hash ?? '') ||
+              (await withOriginalDeadline(deadline, () => this._client.getBlock({ blockNumber: maturityAnchor!.height }))).hash !== maturityAnchor.hash ||
+              (await withOriginalDeadline(deadline, () => this.getMerkleRoot(blockNumber, finalized.number)))?.toLowerCase() !== merkleProof.root.toLowerCase() ||
+              (await withOriginalDeadline(deadline, () => this._client.getBlock({ blockNumber: finalized.number }))).hash !== finalized.hash) {
+            throw new Error('HOLD: finalized queue root or maturity anchor changed');
+          }
+          maturityAnchor = { height: finalized.number, hash: finalized.hash };
+        }
+        try {
+          await withOriginalDeadline(deadline, () => this._client.simulateContract({ address: this._address, abi: MessageQueueAbi, functionName: 'processMessage',
+            args, account: this._account }));
+          break;
+        } catch (error) {
+          const revert = error instanceof BaseError ? error.walk(cause => cause instanceof ContractFunctionRevertedError) : undefined;
+          if (!options.wait || !(revert instanceof ContractFunctionRevertedError) || revert.data?.errorName !== 'MerkleRootDelayNotPassed') throw error;
+          if (!maturityAnchor) {
+            const finalized = await withOriginalDeadline(deadline, () => this._client.getBlock({ blockTag: 'finalized' }));
+            if (typeof finalized.number !== 'bigint' || finalized.number < 0n || !/^0x[0-9a-f]{64}$/i.test(finalized.hash ?? '')) {
+              throw new Error('HOLD: malformed finalized maturity anchor');
+            }
+            maturityAnchor = { height: finalized.number, hash: finalized.hash };
+          }
+          statusCb('Waiting for the selected root block maturity delay', { blockNumber: blockNumber.toString() });
+          await withOriginalDeadline(deadline, () => new Promise(resolve => setTimeout(resolve,
+            Math.max(1, Math.min(this._client.pollingInterval, deadline - Date.now())))));
+        }
+      }
       statusCb('Sending processMessage transaction');
       if (Date.now() >= deadline) throw new Error('Original relay deadline expired before broadcasting');
       if (account.type === 'local') {

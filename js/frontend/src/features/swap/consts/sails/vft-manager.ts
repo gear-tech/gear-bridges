@@ -13,9 +13,13 @@ export class SailsProgram {
       InitConfig: {"gear_bridge_builtin":"[u8;32]","historical_proxy_address":"[u8;32]","config":"Config"},
       Config: {"gas_for_token_ops":"u64","gas_for_reply_deposit":"u64","gas_to_send_request_to_builtin":"u64","gas_for_swap_token_maps":"u64","reply_timeout":"u32","fee_bridge":"u128","fee_incoming":"u128"},
       TokenSupply: {"_enum":["Ethereum","Gear"]},
-      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null"}},
+      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null"}},
       ReceiptStatus: {"_enum":["Unknown","Reserved","Processed"]},
       SourceRequestOutcome: {"_enum":{"Pending":"Null","Queued":{"nonce":"U256","hash":"H256","queue_id":"u64"},"NotQueued":"Null"}},
+      CutoverStatus: {"phase":"CutoverPhase","predecessor":"Option<[u8;32]>","successor":"Option<[u8;32]>","minimum_receipt_slot":"u64","last_receipt_slot":"Option<u64>","config_fingerprint":"Option<H256>","transfer_count":"u32","completed_transfer_count":"u32","in_flight_transfer_count":"u32"},
+      CutoverPhase: {"_enum":["Active","Draining","AwaitingSource","Transferring","Retired","Ready"]},
+      CustodyTransferAttempt: {"token":"[u8;32]","amount":"U256","child":"[u8;32]","outcome":"CustodyTransferOutcome"},
+      CustodyTransferOutcome: {"_enum":["InFlight","Completed","Rejected","Ambiguous"]},
       ReceiptDepositState: {"log_index":"u64","sender":"H160","receiver":"[u8;32]","token_id":"[u8;32]","eth_token_id":"H160","amount":"U256","supply":"TokenSupply","native":"bool","operation_id":"H256","child":"Option<[u8;32]>","outcome":"ReceiptDepositOutcome"},
       ReceiptDepositOutcome: {"_enum":["Pending","InFlight","Settled","Rejected","Unknown","NativeQueued"]},
       MessageInfo: {"status":"MessageStatus","details":"TxDetails"},
@@ -141,6 +145,21 @@ export class VftManager {
     );
   }
 
+  public beginCutover(destination: ActorId, last_receipt_slot: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'BeginCutover',
+      [destination, last_receipt_slot],
+      '([u8;32], u64)',
+      'Null',
+      this._program.programId,
+    );
+  }
+
   /**
    * The method is intended for tests and is available only when the feature `mocks`
    * is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
@@ -261,6 +280,21 @@ export class VftManager {
     );
   }
 
+  public finalizeCutover(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'FinalizeCutover',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
   /**
    * Process message further if some error was encountered during the `request_bridging`.
    * 
@@ -289,21 +323,6 @@ export class VftManager {
     );
   }
 
-  public insertTransactions(data: Array<[number | string | bigint, number | string | bigint]>): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'VftManager',
-      'InsertTransactions',
-      data,
-      'Vec<(u64, u64)>',
-      'Null',
-      this._program.programId,
-    );
-  }
-
   /**
    * Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   */
@@ -326,8 +345,8 @@ export class VftManager {
    * Pause the `vft-manager`.
    * 
    * When `vft-manager` is paused it means that any requests to
-   * `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
-   * will be rejected.
+   * `submit_receipt` and `request_bridging` will be rejected. Definite, authorized
+   * interrupted-transfer refunds remain available while paused or emergency-stopped.
    * 
    * Can be called only by a [State::admin] or [State::pause_admin].
   */
@@ -341,6 +360,21 @@ export class VftManager {
       'Pause',
       null,
       null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  public prepareCutover(source: ActorId, last_receipt_slot: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'PrepareCutover',
+      [source, last_receipt_slot],
+      '([u8;32], u64)',
       'Null',
       this._program.programId,
     );
@@ -592,7 +626,7 @@ export class VftManager {
     );
   }
 
-  public upgrade(vft_manager_new: ActorId): TransactionBuilder<null> {
+  public upgrade(destination: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
@@ -600,7 +634,7 @@ export class VftManager {
       'send_message',
       'VftManager',
       'Upgrade',
-      vft_manager_new,
+      destination,
       '[u8;32]',
       'Null',
       this._program.programId,
@@ -620,6 +654,32 @@ export class VftManager {
       null,
       null,
       '[u8;32]',
+    );
+  }
+
+  public cutoverStatus(): QueryBuilder<CutoverStatus> {
+    return new QueryBuilder<CutoverStatus>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'CutoverStatus',
+      null,
+      null,
+      'CutoverStatus',
+    );
+  }
+
+  public cutoverTransfers(start: number, count: number): QueryBuilder<Array<CustodyTransferAttempt>> {
+    return new QueryBuilder<Array<CustodyTransferAttempt>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'CutoverTransfers',
+      [start, count],
+      '(u32, u32)',
+      'Vec<CustodyTransferAttempt>',
     );
   }
 
@@ -1054,277 +1114,302 @@ export class VftManager {
     });
   }
 }
-
+/**
+ * Config that should be provided to this service on initialization.
+*/
+export interface InitConfig {
   /**
-   * Config that should be provided to this service on initialization.
+   * Address of the gear-eth-bridge built-in actor.
   */
-  export interface InitConfig {
-    /**
-     * Address of the gear-eth-bridge built-in actor.
-    */
-    gear_bridge_builtin: ActorId;
-    /**
-     * Address of the `historical-proxy` program.
-     * 
-     * For more info see [State::historical_proxy_address].
-    */
-    historical_proxy_address: ActorId;
-    /**
-     * Config that will be used to send messages to the other programs.
-     * 
-     * For more info see [Config].
-    */
-    config: Config;
-  }
-
+  gear_bridge_builtin: ActorId;
+  /**
+   * Address of the `historical-proxy` program.
+   *
+   * For more info see [State::historical_proxy_address].
+  */
+  historical_proxy_address: ActorId;
   /**
    * Config that will be used to send messages to the other programs.
+   *
+   * For more info see [Config].
   */
-  export interface Config {
-    /**
-     * Gas limit for token operations. Token operations include:
-     * - Mint
-     * - Burn
-     * - TransferFrom
-    */
-    gas_for_token_ops: number | string | bigint;
-    /**
-     * Gas to reserve for reply processing.
-    */
-    gas_for_reply_deposit: number | string | bigint;
-    /**
-     * Gas limit for gear-eth-bridge built-in actor request.
-    */
-    gas_to_send_request_to_builtin: number | string | bigint;
-    /**
-     * Required gas to commit changes in [VftManager::update_vfts].
-    */
-    gas_for_swap_token_maps: number | string | bigint;
-    /**
-     * Timeout in blocks that current program will wait for reply from
-     * the other programs such as VFT and `gear-eth-bridge` built-in actor.
-    */
-    reply_timeout: number;
-    /**
-     * Fee to pay `gear-eth-bridge` built-in actor.
-    */
-    fee_bridge: number | string | bigint;
-    /**
-     * Incoming fee.
-    */
-    fee_incoming: number | string | bigint;
-  }
+  config: Config;
+}
 
+/**
+ * Config that will be used to send messages to the other programs.
+*/
+export interface Config {
   /**
-   * Type of the token supply.
+   * Gas limit for token operations. Token operations include:
+   * - Mint
+   * - Burn
+   * - TransferFrom
   */
-  export type TokenSupply = "Ethereum" | "Gear";
-
+  gas_for_token_ops: number | string | bigint;
   /**
-   * Error types for VFT Manageer service.
+   * Gas to reserve for reply processing.
   */
-  export type Error = 
-    /**
-     * Error sending message to the program.
-    */
-    | { SendFailure: string }
-    /**
-     * Error while waiting for reply from the program.
-    */
-    | { ReplyFailure: string }
-    /**
-     * Failed to set reply timeout.
-    */
-    | { ReplyTimeout: string }
-    /**
-     * Failed to set reply hook.
-    */
-    | { ReplyHook: string }
-    /**
-     * A message does not have a reply code.
-    */
-    | { NoReplyCode: string }
-    /**
-     * Original `MessageId` wasn't found in message tracker when processing reply.
-    */
-    | { MessageNotFound: null }
-    /**
-     * Invalid message status was found in the message tracker when processing reply.
-    */
-    | { InvalidMessageStatus: null }
-    /**
-     * Message sent to the program failed.
-    */
-    | { MessageFailed: null }
-    /**
-     * Failed to decode Burn reply.
-    */
-    | { BurnTokensDecode: string }
-    /**
-     * Failed to decode TransferFrom reply.
-    */
-    | { TransferFromDecode: string }
-    /**
-     * Failed to decode Mint reply.
-    */
-    | { MintTokensDecode: string }
-    /**
-     * Failed to decode payload from gear-eth-bridge built-in actor.
-    */
-    | { BuiltinDecode: string }
-    /**
-     * Gas reservation for reply is too low.
-    */
-    | { GasForReplyTooLow: string }
-    /**
-     * `ERC20` address wasn't found in the token mapping.
-    */
-    | { NoCorrespondingEthAddress: null }
-    /**
-     * `VFT` address wasn't found in the token mapping.
-    */
-    | { NoCorrespondingVaraAddress: null }
-    /**
-     * `submit_receipt` can only be called by `historical-proxy` program.
-    */
-    | { NotHistoricalProxy: null }
-    /**
-     * Ethereum transaction receipt is not supported.
-    */
-    | { UnsupportedEthEvent: null }
-    /**
-     * Ethereum transaction is too old and already have been removed from storage.
-    */
-    | { TransactionTooOld: null }
-    /**
-     * Ethereum transaction was already processed by VFT Manager service.
-    */
-    | { AlreadyProcessed: null }
-    /**
-     * Vft-manager is paused and cannot process the request.
-    */
-    | { Paused: null }
-    /**
-     * Failed to burn tokens from the receiver in VftVara.
-    */
-    | { BurnFromFailed: string }
-    /**
-     * Internal unspecified VFT error
-    */
-    | { Internal: string }
-    /**
-     * Invalid or unexpected reply received from a VFT program.
-    */
-    | { InvalidReply: null }
-    | { NativeSettlementPending: null }
-    | { NativeSettlementReturned: null }
-    | { ReceiptLeaseActive: null }
-    | { InvalidReconciliation: null };
-
+  gas_for_reply_deposit: number | string | bigint;
   /**
-   * The on-chain outcome of an Ethereum receipt key.
+   * Gas limit for gear-eth-bridge built-in actor request.
   */
-  export type ReceiptStatus = "Unknown" | "Reserved" | "Processed";
-
-  export type SourceRequestOutcome = 
-    | { Pending: null }
-    | { Queued: { nonce: number | string | bigint; hash: H256; queue_id: number | string | bigint } }
-    | { NotQueued: null };
-
-  export interface ReceiptDepositState {
-    log_index: number | string | bigint;
-    sender: H160;
-    receiver: ActorId;
-    token_id: ActorId;
-    eth_token_id: H160;
-    amount: number | string | bigint;
-    supply: TokenSupply;
-    native: boolean;
-    operation_id: H256;
-    child: MessageId | null;
-    outcome: ReceiptDepositOutcome;
-  }
-
-  export type ReceiptDepositOutcome = "Pending" | "InFlight" | "Settled" | "Rejected" | "Unknown" | "NativeQueued";
-
+  gas_to_send_request_to_builtin: number | string | bigint;
   /**
-   * Entry for a single message in [MessageTracker].
+   * Required gas to commit changes in [VftManager::update_vfts].
   */
-  export interface MessageInfo {
-    /**
-     * State of the message.
-    */
-    status: MessageStatus;
-    /**
-     * Request details.
-    */
-    details: TxDetails;
-  }
-
+  gas_for_swap_token_maps: number | string | bigint;
   /**
-   * State in which message processing can be.
+   * Timeout in blocks that current program will wait for reply from
+   * the other programs such as VFT and `gear-eth-bridge` built-in actor.
   */
-  export type MessageStatus = 
-    /**
-     * Message to deposit tokens is sent.
-    */
-    | { SendingMessageToDepositTokens: null }
-    /**
-     * Reply is received for a token deposit message.
-    */
-    | { TokenDepositCompleted: boolean }
-    /**
-     * Message to the `pallet-gear-eth-bridge` is sent. This status is also the
-     * fail-closed quarantine state when the outcome is ambiguous.
-    */
-    | { SendingMessageToBridgeBuiltin: null }
-    /**
-     * Reply is received for a message to the `pallet-gear-eth-bridge`.
-    */
-    | { BridgeResponseReceived: [number | string | bigint, H256, number | string | bigint] | null }
-    /**
-     * Message to refund tokens is sent.
-    */
-    | { SendingMessageToReturnTokens: null }
-    /**
-     * Reply is received for a token refund message.
-    */
-    | { TokensReturnComplete: boolean };
-
+  reply_timeout: number;
   /**
-   * Details about a request associated with a message stored in [MessageTracker].
+   * Fee to pay `gear-eth-bridge` built-in actor.
   */
-  export interface TxDetails {
-    /**
-     * Address of the `VFT` token which is being bridged.
-    */
-    vara_token_id: ActorId;
-    /**
-     * Original `VFT` token owner.
-    */
-    sender: ActorId;
-    /**
-     * Bridged tokens amount.
-    */
-    amount: number | string | bigint;
-    /**
-     * `ERC20` token receiver on Ethereum.
-    */
-    receiver: H160;
-    /**
-     * [TokenSupply] type of the token being bridged.
-    */
-    token_supply: TokenSupply;
-  }
+  fee_bridge: number | string | bigint;
+  /**
+   * Incoming fee.
+  */
+  fee_incoming: number | string | bigint;
+}
 
-  export interface SourceRequestEvidence {
-    request: MessageId;
-    child: MessageId;
-    builtin: ActorId;
-    request_hash: H256;
-    outcome: SourceRequestOutcome;
-  }
+/**
+ * Type of the token supply.
+*/
+export type TokenSupply = "Ethereum" | "Gear";
 
-  export type Order = "Direct" | "Reverse";
+/**
+ * Error types for VFT Manageer service.
+*/
+export type Error =
+  /**
+   * Error sending message to the program.
+  */
+  | { SendFailure: string }
+  /**
+   * Error while waiting for reply from the program.
+  */
+  | { ReplyFailure: string }
+  /**
+   * Failed to set reply timeout.
+  */
+  | { ReplyTimeout: string }
+  /**
+   * Failed to set reply hook.
+  */
+  | { ReplyHook: string }
+  /**
+   * A message does not have a reply code.
+  */
+  | { NoReplyCode: string }
+  /**
+   * Original `MessageId` wasn't found in message tracker when processing reply.
+  */
+  | { MessageNotFound: null }
+  /**
+   * Invalid message status was found in the message tracker when processing reply.
+  */
+  | { InvalidMessageStatus: null }
+  /**
+   * Message sent to the program failed.
+  */
+  | { MessageFailed: null }
+  /**
+   * Failed to decode Burn reply.
+  */
+  | { BurnTokensDecode: string }
+  /**
+   * Failed to decode TransferFrom reply.
+  */
+  | { TransferFromDecode: string }
+  /**
+   * Failed to decode Mint reply.
+  */
+  | { MintTokensDecode: string }
+  /**
+   * Failed to decode payload from gear-eth-bridge built-in actor.
+  */
+  | { BuiltinDecode: string }
+  /**
+   * Gas reservation for reply is too low.
+  */
+  | { GasForReplyTooLow: string }
+  /**
+   * `ERC20` address wasn't found in the token mapping.
+  */
+  | { NoCorrespondingEthAddress: null }
+  /**
+   * `VFT` address wasn't found in the token mapping.
+  */
+  | { NoCorrespondingVaraAddress: null }
+  /**
+   * `submit_receipt` can only be called by `historical-proxy` program.
+  */
+  | { NotHistoricalProxy: null }
+  /**
+   * Ethereum transaction receipt is not supported.
+  */
+  | { UnsupportedEthEvent: null }
+  /**
+   * Ethereum transaction is too old and already have been removed from storage.
+  */
+  | { TransactionTooOld: null }
+  /**
+   * Ethereum transaction was already processed by VFT Manager service.
+  */
+  | { AlreadyProcessed: null }
+  /**
+   * Vft-manager is paused and cannot process the request.
+  */
+  | { Paused: null }
+  /**
+   * Failed to burn tokens from the receiver in VftVara.
+  */
+  | { BurnFromFailed: string }
+  /**
+   * Internal unspecified VFT error
+  */
+  | { Internal: string }
+  /**
+   * Invalid or unexpected reply received from a VFT program.
+  */
+  | { InvalidReply: null }
+  | { NativeSettlementPending: null }
+  | { NativeSettlementReturned: null }
+  | { ReceiptLeaseActive: null }
+  | { InvalidReconciliation: null }
+  | { ReceiptOutsideDeployment: null }
+  | { Retired: null }
+  | { CutoverNotReady: null };
 
-export const IDL_SHA256 = 'ceb2235140a76a6fb289c0673e4b4f17a2907acc50103f570218c333b527d683';
+/**
+ * The on-chain outcome of an Ethereum receipt key.
+*/
+export type ReceiptStatus = "Unknown" | "Reserved" | "Processed";
+
+export type SourceRequestOutcome =
+  | { Pending: null }
+  | { Queued: { nonce: number | string | bigint; hash: H256; queue_id: number | string | bigint } }
+  | { NotQueued: null };
+
+export interface CutoverStatus {
+  phase: CutoverPhase;
+  predecessor: ActorId | null;
+  successor: ActorId | null;
+  minimum_receipt_slot: number | string | bigint;
+  last_receipt_slot: number | string | bigint | null;
+  config_fingerprint: H256 | null;
+  transfer_count: number;
+  completed_transfer_count: number;
+  in_flight_transfer_count: number;
+}
+
+export type CutoverPhase = "Active" | "Draining" | "AwaitingSource" | "Transferring" | "Retired" | "Ready";
+
+export interface CustodyTransferAttempt {
+  token: ActorId;
+  amount: number | string | bigint;
+  child: MessageId;
+  outcome: CustodyTransferOutcome;
+}
+
+export type CustodyTransferOutcome = "InFlight" | "Completed" | "Rejected" | "Ambiguous";
+
+export interface ReceiptDepositState {
+  log_index: number | string | bigint;
+  sender: H160;
+  receiver: ActorId;
+  token_id: ActorId;
+  eth_token_id: H160;
+  amount: number | string | bigint;
+  supply: TokenSupply;
+  native: boolean;
+  operation_id: H256;
+  child: MessageId | null;
+  outcome: ReceiptDepositOutcome;
+}
+
+export type ReceiptDepositOutcome = "Pending" | "InFlight" | "Settled" | "Rejected" | "Unknown" | "NativeQueued";
+
+/**
+ * Entry for a single message in [MessageTracker].
+*/
+export interface MessageInfo {
+  /**
+   * State of the message.
+  */
+  status: MessageStatus;
+  /**
+   * Request details.
+  */
+  details: TxDetails;
+}
+
+/**
+ * State in which message processing can be.
+*/
+export type MessageStatus =
+  /**
+   * Message to deposit tokens is sent.
+  */
+  | { SendingMessageToDepositTokens: null }
+  /**
+   * Reply is received for a token deposit message.
+  */
+  | { TokenDepositCompleted: boolean }
+  /**
+   * Message to the `pallet-gear-eth-bridge` is sent. This status is also the
+   * fail-closed quarantine state when the outcome is ambiguous.
+  */
+  | { SendingMessageToBridgeBuiltin: null }
+  /**
+   * Reply is received for a message to the `pallet-gear-eth-bridge`.
+  */
+  | { BridgeResponseReceived: [number | string | bigint, H256, number | string | bigint] | null }
+  /**
+   * Message to refund tokens is sent.
+  */
+  | { SendingMessageToReturnTokens: null }
+  /**
+   * Reply is received for a token refund message.
+  */
+  | { TokensReturnComplete: boolean };
+
+/**
+ * Details about a request associated with a message stored in [MessageTracker].
+*/
+export interface TxDetails {
+  /**
+   * Address of the `VFT` token which is being bridged.
+  */
+  vara_token_id: ActorId;
+  /**
+   * Original `VFT` token owner.
+  */
+  sender: ActorId;
+  /**
+   * Bridged tokens amount.
+  */
+  amount: number | string | bigint;
+  /**
+   * `ERC20` token receiver on Ethereum.
+  */
+  receiver: H160;
+  /**
+   * [TokenSupply] type of the token being bridged.
+  */
+  token_supply: TokenSupply;
+}
+
+export interface SourceRequestEvidence {
+  request: MessageId;
+  child: MessageId;
+  builtin: ActorId;
+  request_hash: H256;
+  outcome: SourceRequestOutcome;
+}
+
+export type Order = "Direct" | "Reverse";
+
+export const IDL_SHA256 = 'dd3fd53597a7225b3a5cfdf57ca2b60f3b6d0aaef846de8eaca3e247354d6e9e';

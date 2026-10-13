@@ -25,17 +25,17 @@ Holesky fixture convention. Tests decompress the original bytes offline;
 synthetic cross-language vectors remain readable JSON.
 
 ```sh
-rtk cargo test -p beefy-relay --lib
-rtk forge test --root ethereum --match-path 'test/*Beefy*.t.sol' -vvv
+cargo test -p beefy-relay --lib
+forge test --root ethereum --match-path 'test/*Beefy*.t.sol' -vvv
 # Deliberately regenerate the shared fixture after a protocol change:
-UPDATE_BEEFY_FIXTURE=1 rtk cargo test -p beefy-relay --lib fixtures
+UPDATE_BEEFY_FIXTURE=1 cargo test -p beefy-relay --lib fixtures
 ```
 
 The local trusted genesis checkpoint and sampling parameters are not production
 security policy. Queue maturity/conflict hardening and source/domain checks do
 not authorize production activation or migration of an existing deployment.
 For isolated local nodes and a real Hoodi bridge, use the
-[sealed deployment guide](docs/running-the-bridge.md#sealed-local-deployment-operations).
+[local deployment guide](docs/running-the-bridge.md#local-nodes-and-hoodi).
 
 The BEEFY scripts share bootstrap and verifier selection in `ethereum/test/Base.sol`;
 its `deployBridge()` also owns governance and queue deployment. `BeefyHoodi` selects
@@ -45,52 +45,19 @@ After Solidity test or script changes, regenerate the compiler artifacts listed 
 the CI API-file check: AST identifiers can change even when ABI and bytecode do not.
 
 Queue administration uses the existing UUPS `DEFAULT_ADMIN_ROLE` authority, not
-a separate recovery controller. The one-time `reinitialize()` (`reinitializer(7)`)
-address `0x1111111111111111111111111111111111111111` is a placeholder for an
-approved real Safe in production; test impersonation is not deployment evidence.
-See [existing administration](docs/running-the-bridge.md#beefy-expiry-and-existing-administration)
-and the [blocked public migration gates](docs/zk-to-beefy-migration.md).
+a separate recovery controller. The admin-only `migrateToBeefy` reinitializer
+keeps the existing proxy, roles, custody, roots and replay state while binding
+a qualified BEEFY verifier and permanent publication floor. It grants no new
+administrator. See the [mainnet migration candidate and release gates](ethereum/README.md#mainnet-custody-preserving-migration-candidate).
+Fresh-deployment scripts do not migrate existing custody.
 
-### Bounded local rehearsal
-
-Build the node from the sibling Gear worktree at base commit `0b13f2c61b0e5d9844c7efd12727487a2fdb8c63`:
-
-```sh
-rtk cargo build -p gear-cli --release --features fast-runtime --target-dir target/beefy-e2e
-```
-
-`fast-runtime` accepts only explicit dev/local chain IDs. It uses eight-slot
-epochs and a one-block BEEFY minimum interval; the normal interval remains eight.
-The slot duration stays 3000 ms. The one-block local interval is necessary to fit
-both real rotations, messages and the stale-anchor step inside the unchanged
-120-second cap. It is not a production timing change.
-
-Install Foundry's Soldeer dependencies with `rtk forge soldeer install` from
-`ethereum/`. With `forge` and `anvil` on PATH, run from this bridge worktree:
-
-```sh
-rtk forge build --root ethereum --force
-rtk cargo build -p beefy-relay --release
-rtk target/release/beefy-relay rehearse \
-  --gear-node "$PWD/../gear-beefy-e2e/target/beefy-e2e/release/gear" \
-  --output-dir /tmp/vara-beefy-e2e-new
-```
-
-The output directory must not exist. Preparation deploys fresh local contracts
-before the timer starts. The command owns Anvil and two indexed archive Gear
-authorities, funds Alice's stash, rotates its actual session key twice and sends
-two Charlie messages. Only Anvil's clock advances for queue maturity. Message
-proofs are captured before a natural queue clear and used only after the source
-block is finalized on the same chain. The retained second message must survive
-the clear, an obsolete anchor must fail, and its regenerated proof must deliver.
-
-The command writes `manifest.json`, `commitments.jsonl`, `messages.json`,
-`transactions.json` and process logs on success or failure. These retain binary
-and runtime hashes, accepted signed commitments, authority transitions, proofs,
-receipts, checked delivery events and rejection outcomes. Development node data
-and rotated private keys live in a temporary directory outside the evidence;
-owned processes and that directory are cleaned up on exit. No remote endpoint,
-production key or prover fallback is accepted.
+The normal `beefy-relay` binary owns authenticated source following, durable root
+publication and history audit. Local setup belongs to the explicit `beefy-deploy`
+target (`--features deployment --bin beefy-deploy`), not a campaign supervisor.
+The deployment feature adds the program WASMs; the normal actor does not need them.
+No Python, launchd, sealed-run manifests or uninterrupted soak are required to
+run the reusable actor. Original transaction journals and finality checks remain
+mandatory on restart.
 
 ## Security
 

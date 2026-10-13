@@ -274,6 +274,10 @@ async function prepareOriginalEthToVaraRelay(params: PrepareEthToVaraParams & { 
     throw new Error('Original Ethereum receipt is not canonical finalized history');
   }
   const proof = await composeProof(beaconClient, ethClient, proxy, params.transactionHash, profile, params.wait ?? false, statusCb, deadline);
+  if ((await read(() => params.ethereumPublicClient.getBlock({ blockNumber: receipt.blockNumber }))).hash !== receipt.blockHash ||
+      (await read(() => params.ethereumPublicClient.getBlock({ blockNumber: finalized.number }))).hash !== finalized.hash) {
+    throw new Error('Original finalized Ethereum preparation history changed during Beacon proof I/O');
+  }
   if (Date.now() >= deadline) throw new Error('Original relay deadline expired during proof preparation');
   const transaction = proxy.historicalProxy.redirect(
     proof.proofBlock.block.slot,
@@ -511,6 +515,9 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
       throw new Error('Original consumer finalized pin changed during effect readback');
     }
     return result;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`HOLD: original Gear transaction ${txHash}: ${reason}. Reconcile the original before retrying.`);
   } finally {
     finished = true;
     unsubscribe?.();

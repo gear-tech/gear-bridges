@@ -2,7 +2,7 @@ use collections::{btree_map::BTreeMap, btree_set::BTreeSet};
 use gstd::{static_mut, static_ref};
 use sails_rs::prelude::*;
 
-use super::{error::Error, ReceiptStatus, TokenSupply, VftManager};
+use super::{error::Error, Config, ReceiptStatus, TokenSupply, VftManager};
 
 pub mod abi;
 pub mod token_operations;
@@ -18,10 +18,6 @@ static mut RESERVED_TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 /// Maximum amount of successfully processed Ethereum transactions that this
 /// program can store.
 pub const TX_HISTORY_DEPTH: usize = 50_000_000;
-
-/// A temporary storage for reply statuses. Tracks the status of `handle_reply` hook invocations.
-/// Maps a `(slot, transaction_index)` pair to a `Result<(), Error>`.
-static mut REPLY_STATUSES: Option<BTreeMap<(u64, u64), Result<(), Error>>> = None;
 
 /// Per-log progress lets one authenticated receipt account for every deposit without
 /// repeating effects already completed by an earlier attempt.
@@ -234,7 +230,7 @@ pub fn reserved_transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
 
 /// Reconcile already-dispatched native payouts without replacing the proof request,
 /// claiming a generation, or dispatching mint/unlock/redemption again.
-pub async fn reconcile_receipt(key: (u64, u64)) -> Result<ReceiptStatus, Error> {
+pub async fn reconcile_receipt(key: (u64, u64), config: &Config) -> Result<ReceiptStatus, Error> {
     if receipt_status(key) != ReceiptStatus::Reserved {
         return Ok(receipt_status(key));
     }
@@ -264,6 +260,7 @@ pub async fn reconcile_receipt(key: (u64, u64)) -> Result<ReceiptStatus, Error> 
             deposit.receiver,
             deposit.amount,
             deposit.operation_id,
+            config,
         )
         .await
         {
@@ -301,18 +298,20 @@ fn receipt_status_in(
     }
 }
 
-/// Get a reference to the reply statuses global map.
-pub fn reply_statuses() -> &'static BTreeMap<(u64, u64), Result<(), Error>> {
-    unsafe { static_ref!(REPLY_STATUSES).as_ref() }.expect("Program should be constructed")
-}
-
-/// Get a mutable reference to the reply statuses global map.
-pub fn reply_statuses_mut() -> &'static mut BTreeMap<(u64, u64), Result<(), Error>> {
-    unsafe { static_mut!(REPLY_STATUSES).as_mut() }.expect("Program should be constructed")
+pub(super) fn is_quiescent() -> bool {
+    reserved_transactions().is_empty() && token_operations::is_quiescent()
 }
 
 /// Move a successful receipt reservation into bounded processed history.
 pub fn complete_transaction(key: (u64, u64)) {
+    if !receipt_progress_mut().get(&key).is_some_and(|p| {
+        !p.deposits.is_empty()
+            && p.deposits
+                .iter()
+                .all(|log| matches!(log.status, DepositStatus::Processed))
+    }) {
+        return;
+    }
     reserved_transactions_mut().remove(&key);
     transactions_mut().insert(key);
     if transactions().len() > TX_HISTORY_DEPTH {
@@ -341,9 +340,66 @@ pub fn seed() {
     unsafe {
         TRANSACTIONS = Some(BTreeSet::new());
         RESERVED_TRANSACTIONS = Some(BTreeSet::new());
-        REPLY_STATUSES = Some(BTreeMap::new());
         RECEIPT_PROGRESS = Some(BTreeMap::new());
     }
+}
+
+/// Seed one isolated synthetic log, then measure the production mint/unlock reply path.
+#[cfg(feature = "mocks")]
+pub(super) async fn benchmark_reply(
+    service: &mut VftManager,
+    key: (u64, u64),
+    supply: TokenSupply,
+) -> Result<(), Error> {
+    if transactions().contains(&key)
+        || reserved_transactions().contains(&key)
+        || receipt_progress_mut().contains_key(&key)
+    {
+        return Err(Error::AlreadyProcessed);
+    }
+    let lease_until = Syscall::block_height()
+        .checked_add(service.config().reply_timeout.max(1))
+        .ok_or(Error::ReceiptLeaseActive)?;
+    let source = Syscall::message_source();
+    let identity = H256(gstd::msg::id().into_bytes());
+    let deposit = ReceiptDeposit {
+        log_index: 0,
+        sender: H160::zero(),
+        receiver: source,
+        token_id: source,
+        eth_token_id: H160::zero(),
+        amount: 100u32.into(),
+        supply,
+        native: false,
+        operation_id: identity,
+    };
+    reserved_transactions_mut().insert(key);
+    receipt_progress_mut().insert(
+        key,
+        ReceiptProgress {
+            deposits: vec![ReceiptLogProgress {
+                deposit: deposit.clone(),
+                status: DepositStatus::InFlight,
+                child: None,
+            }],
+            receipt_hash: identity,
+            generation: 1,
+            lease_until,
+        },
+    );
+    let result = match supply {
+        TokenSupply::Ethereum => token_operations::mint_log(key, &deposit, service.config()).await,
+        TokenSupply::Gear => token_operations::unlock_log(key, &deposit, service.config()).await,
+    };
+    match &result {
+        Ok(()) => complete_transaction(key),
+        Err(error) if matches!(deposit_status(key, 0), Some(DepositStatus::InFlight)) => {
+            set_deposit_status(key, 0, DepositStatus::Ambiguous(error.clone()));
+        }
+        Err(_) => {}
+    }
+    release_receipt_lease(key, 1);
+    result
 }
 
 /// Submit rlp-encoded transaction receipt.
@@ -359,6 +415,7 @@ pub async fn submit_receipt(
     transaction_index: u64,
     receipt_rlp: Vec<u8>,
 ) -> Result<(), Error> {
+    service.ensure_receipt_domain(slot)?;
     use alloy_rlp::Decodable;
     use alloy_sol_types::SolEvent;
     use ethereum_common::utils::ReceiptEnvelope;
@@ -504,6 +561,7 @@ pub async fn submit_receipt(
         }
     }
 
+    service.record_receipt_admission(slot);
     let mut retryable_error = None;
     let mut ambiguous_error = None;
     for deposit in &deposits {

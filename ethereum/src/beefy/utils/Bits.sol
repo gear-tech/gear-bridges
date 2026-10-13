@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
 // Code from https://github.com/ethereum/solidity-examples
+// Modified for the Vara bridge; upstream provenance and licenses: ethereum/README.md.
 pragma solidity ^0.8.37;
 
 library Bits {

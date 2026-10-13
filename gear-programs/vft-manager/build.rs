@@ -6,6 +6,12 @@ use std::{
 };
 
 fn main() {
+    // Use release-equivalent WASM settings to fit the runtime code limit.
+    // These overrides affect only this build script's child Cargo, not other programs.
+    env::set_var("CARGO_PROFILE_DEV_LTO", "fat");
+    env::set_var("CARGO_PROFILE_DEV_CODEGEN_UNITS", "1");
+    env::set_var("CARGO_PROFILE_DEV_DEBUG_ASSERTIONS", "false");
+    env::set_var("CARGO_PROFILE_DEV_OVERFLOW_CHECKS", "false");
     sails_rs::build_wasm();
 
     if env::var("__GEAR_WASM_BUILDER_NO_BUILD").is_ok() {

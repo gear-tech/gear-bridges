@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, test, expect, describe, vi } from 'vitest';
-import { encodeFunctionData, encodeEventTopics, encodeAbiParameters, parseAbiParameters, PublicClient, WalletClient, Account, hexToBytes } from 'viem';
+import { encodeFunctionData, encodeEventTopics, encodeAbiParameters, parseAbiParameters, PublicClient, WalletClient, Account, hexToBytes, ContractFunctionRevertedError, encodeErrorResult } from 'viem';
 import { GearApi, HexString } from '@gear-js/api';
 import dotenv from 'dotenv';
 import * as fs from 'fs';
@@ -66,9 +66,9 @@ function rootsFixture() {
         nonce: scalar(0n), source: pin(hash(3)), destination: pin(address(4)), payload: { toU8a: () => message.payload },
       }] } }],
     },
-    rpc: { chain: { getHeader: async () => ({ number: scalar(20n) }) } },
-    ethBridge: { merkleProof: async (_hash: HexString, rootPin: { toHex(): HexString }) => ({
-      root: pin(BigInt(rootPin.toHex()) === 12n ? proof.root : hash(99)), proof: [], number_of_leaves: scalar(1n), leaf_index: scalar(0n),
+    rpc: { chain: { getHeader: async (at: HexString | { toHex(): HexString }) => ({ number: scalar(BigInt(typeof at === 'string' ? at : at.toHex())) }) } },
+    ethBridge: { merkleProof: async (_hash: HexString, rootPin: HexString) => ({
+      root: pin(BigInt(rootPin) === 12n ? proof.root : hash(99)), proof: [], number_of_leaves: scalar(1n), leaf_index: scalar(0n),
     }) },
   } as unknown as GearApi;
   const client = {
@@ -102,6 +102,90 @@ describe('SDK outbound acceptance', () => {
     expect(prepared.proof.root).toBe(proof.root);
     expect(prepared.args).toEqual(getProcessMessageArgs(12n, message, proof));
   });
+
+  test('recent finalized roots are tried before walking millions of empty historical blocks', async () => {
+    const fixture = rootsFixture();
+    fixture.roots.delete(8n);
+    fixture.params.ethereumPublicClient.getBlock = async () => ({ number: 2_000_000n, hash: hash(2) }) as never;
+    const ranges: [bigint, bigint][] = [];
+    fixture.params.ethereumPublicClient.getLogs = async ({ fromBlock, toBlock } = {}) => {
+      ranges.push([fromBlock as bigint, toBlock as bigint]);
+      if ((fromBlock as bigint) >= 1_998_001n) return [{ args: { blockNumber: 12n, merkleRoot: proof.root } }] as never;
+      return [] as never;
+    };
+    expect((await prepareVaraToEthRelay(fixture.params)).blockNumber).toBe(12n);
+    expect(ranges).toEqual([[1_998_001n, 2_000_000n]]);
+  });
+
+  test('expired discovery stops issuing pages after an already admitted log RPC returns', async () => {
+    vi.useFakeTimers();
+    const fixture = rootsFixture();
+    fixture.roots.clear();
+    fixture.params.ethereumPublicClient.getBlock = async () => ({ number: 2_000_000n, hash: hash(2) }) as never;
+    let finish!: (logs: never[]) => void, started!: () => void;
+    const admission = new Promise<void>((resolve) => { started = resolve; });
+    let calls = 0;
+    fixture.params.ethereumPublicClient.getLogs = async () => {
+      calls++;
+      if (calls === 1) { started(); return new Promise((resolve) => { finish = resolve; }) as never; }
+      return [] as never;
+    };
+    fixture.params.deadline = Date.now() + 30;
+    try {
+      const rejection = expect(prepareVaraToEthRelay(fixture.params)).rejects.toThrow('deadline expired');
+      await admission;
+      await vi.advanceTimersByTimeAsync(31);
+      await rejection;
+      finish([]);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(calls).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  test.each(['verified', 'missing-code', 'archive-unavailable', 'noncanonical'])(
+    '%s deployment hint never hides an older valid stored-root claim', async (kind) => {
+      const fixture = rootsFixture();
+      fixture.roots.delete(8n);
+      const params = { ...fixture.params, messageQueueDeploymentBlock: 9000n };
+      let canonicalReads = 0;
+      params.ethereumPublicClient.getBlock = async ({ blockNumber } = {}) => ({
+        number: blockNumber ?? 10_000n,
+        hash: kind === 'noncanonical' && blockNumber === 9000n && ++canonicalReads > 1 ? hash(99) : hash(Number(blockNumber ?? 10_000n)),
+      }) as never;
+      params.ethereumPublicClient.getBytecode = async ({ blockNumber }) => {
+        if (kind === 'archive-unavailable') throw new Error('Historical code unavailable');
+        return blockNumber === 9000n && kind !== 'missing-code' ? '0x6000' : '0x';
+      };
+      const ranges: [bigint, bigint][] = [];
+      params.ethereumPublicClient.getLogs = async ({ fromBlock, toBlock } = {}) => {
+        ranges.push([fromBlock as bigint, toBlock as bigint]);
+        return (fromBlock as bigint) <= 8000n && (toBlock as bigint) >= 8000n
+          ? [{ args: { blockNumber: 12n, merkleRoot: proof.root } }] as never : [] as never;
+      };
+      expect((await prepareVaraToEthRelay(params)).blockNumber).toBe(12n);
+      if (kind === 'verified') expect(ranges).toEqual([[9000n, 10_000n], [7000n, 8999n]]);
+      else expect(ranges).toEqual([[8001n, 10_000n], [6001n, 8000n]]);
+    });
+
+  test('discovery cannot use an indexer-like log whose root is absent from finalized queue storage', async () => {
+    const fixture = rootsFixture();
+    fixture.roots.delete(8n);
+    fixture.roots.delete(12n);
+    await expect(prepareVaraToEthRelay(fixture.params)).rejects.toThrow('No authenticated stored-root claim');
+  });
+
+  test('source and Ethereum canonical pins remain mandatory with recent-first discovery', async () => {
+    for (const network of ['source', 'ethereum']) {
+      const fixture = rootsFixture();
+      fixture.roots.delete(8n);
+      let sourceReads = 0;
+      if (network === 'source') fixture.params.gearApi.blocks.getBlockHash = async (height) => pin(hash(Number(height) === 8 && ++sourceReads > 1 ? 99 : Number(height))) as never;
+      else fixture.params.ethereumPublicClient.getBlock = async ({ blockTag } = {}) => ({ number: 2n, hash: blockTag === 'finalized' ? hash(2) : hash(99) }) as never;
+      await expect(prepareVaraToEthRelay(fixture.params)).rejects.toThrow('Canonical finalized source or queue history changed');
+    }
+  });
+
+
 
   test('unavailable old proofs do not create a replacement claim or reset an expired deadline', async () => {
     const fixture = rootsFixture();
@@ -148,6 +232,99 @@ describe('SDK outbound acceptance', () => {
     });
 
 
+  test.each(['matures', 'deadline', 'root', 'anchor', 'other', 'disabled'])('unsigned maturity waiting: %s', async (kind) => {
+    vi.useFakeTimers();
+    const fixture = receiptFixture();
+    const sign = vi.fn(async () => '0x01'), broadcast = vi.fn(async () => hash(7));
+    const simulated: unknown[] = [];
+    const client = { ...fixture.params.ethereumPublicClient,
+      getBlock: async ({ blockTag, blockNumber }: { blockTag?: string; blockNumber?: bigint }) =>
+        blockTag === 'finalized' ? { number: 6n, hash: hash(6) } :
+          { number: blockNumber, hash: blockNumber === 6n && kind === 'anchor' ? hash(99) : hash(Number(blockNumber)) },
+      readContract: async ({ functionName }: { functionName: string }) => functionName === 'isProcessed' ? true : kind === 'root' ? hash(99) : proof.root,
+      simulateContract: async ({ args }: { args: unknown }) => {
+        simulated.push(args);
+        if (simulated.length === 1 || kind === 'deadline') throw new ContractFunctionRevertedError({
+          abi: MessageQueueAbi, functionName: 'processMessage',
+          data: encodeErrorResult({ abi: MessageQueueAbi, errorName: kind === 'other' ? 'InvalidMerkleProof' : 'MerkleRootDelayNotPassed' }),
+        });
+        return {};
+      },
+    } as unknown as PublicClient;
+    try {
+      const queue = new MessageQueueClient(fixture.params.messageQueueAddress, client,
+        { prepareTransactionRequest: async () => ({}), sendRawTransaction: broadcast } as unknown as WalletClient,
+        { address: fixture.params.sender, type: 'local', signTransaction: sign } as unknown as Account);
+      const pending = queue.processMessage(12n, message, proof, { kind: 'application' }, undefined, Date.now() + 10,
+        { wait: kind !== 'disabled' });
+      await vi.advanceTimersByTimeAsync(11);
+      const result = await pending;
+      expect(result.success).toBe(kind === 'matures');
+      expect(sign).toHaveBeenCalledTimes(kind === 'matures' ? 1 : 0);
+      expect(broadcast).toHaveBeenCalledTimes(kind === 'matures' ? 1 : 0);
+      if (kind === 'matures') expect(simulated).toEqual([getProcessMessageArgs(12n, message, proof), getProcessMessageArgs(12n, message, proof)]);
+      if (kind === 'deadline') expect(result.error).toContain('deadline expired');
+      if (kind === 'root' || kind === 'anchor') expect(simulated).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  test.each(['source-regression', 'source-history', 'ethereum-regression', 'ethereum-history'])('discovery retains previous finalized observations: %s', async (kind) => {
+    vi.useFakeTimers();
+    const fixture = rootsFixture();
+    fixture.roots.clear();
+    let polls = 0;
+    fixture.params.gearApi.blocks.getFinalizedHead = async () => {
+      polls++;
+      return pin(hash(polls <= 2 ? 20 : polls === 3 ? 21 : kind === 'source-regression' ? 20 : 22)) as never;
+    };
+    fixture.params.gearApi.blocks.getBlockHash = async height =>
+      pin(hash(kind === 'source-history' && polls >= 4 && BigInt(height.toString()) === 21n ? 99 : Number(height))) as never;
+    fixture.params.ethereumPublicClient.getBlock = async ({ blockTag, blockNumber } = {}) => {
+      const height = blockTag === 'finalized' ? (polls <= 2 ? 2n : polls === 3 ? 3n : kind === 'ethereum-regression' ? 2n : 4n) : blockNumber!;
+      return { number: height, hash: hash(kind === 'ethereum-history' && polls >= 4 && height === 3n ? 99 : Number(height)) } as never;
+    };
+    try {
+      const pending = prepareVaraToEthRelay({ ...fixture.params, wait: true }).catch(error => error);
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await pending as Error).message).toContain(kind.startsWith('source') ? 'source history changed' : 'finalized queue history changed');
+    } finally { vi.useRealTimers(); }
+  });
+
+  test('candidate proof is fetched at its resolved exact hash and rejected if that hash changes', async () => {
+    const fixture = rootsFixture();
+    fixture.roots.delete(8n);
+    let candidateReads = 0;
+    fixture.params.gearApi.blocks.getBlockHash = async height =>
+      pin(hash(Number(height) === 12 && ++candidateReads > 1 ? 99 : Number(height))) as never;
+    const proofRpc = vi.spyOn(fixture.params.gearApi.ethBridge, 'merkleProof');
+    await expect(prepareVaraToEthRelay(fixture.params)).rejects.toThrow('Canonical finalized source or queue history changed');
+    expect(proofRpc).toHaveBeenCalledWith(messageHash(message), hash(12));
+  });
+
+  test('a stalled simulation expires without signing or broadcasting even when it later resolves', async () => {
+    vi.useFakeTimers();
+    const fixture = receiptFixture();
+    let finishSimulation!: () => void;
+    const simulation = new Promise<void>((resolve) => { finishSimulation = resolve; });
+    const prepare = vi.fn(async () => ({})), sign = vi.fn(async () => '0x01'), broadcast = vi.fn(async () => hash(7));
+    try {
+      const client = new MessageQueueClient(fixture.params.messageQueueAddress,
+        { ...fixture.params.ethereumPublicClient, simulateContract: async () => simulation } as unknown as PublicClient,
+        { prepareTransactionRequest: prepare, sendRawTransaction: broadcast, writeContract: broadcast } as unknown as WalletClient,
+        { address: fixture.params.sender, type: 'local', signTransaction: sign } as unknown as Account);
+      const pending = client.processMessage(12n, message, proof, { kind: 'application' }, undefined, Date.now() + 1000);
+      await vi.advanceTimersByTimeAsync(1001);
+      const result = await pending;
+      expect(result.success).toBe(false);
+      expect(result.transactionHash).toBe('0x');
+      expect(result.error).toContain('deadline expired');
+      finishSimulation();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(prepare).not.toHaveBeenCalled();
+      expect(sign).not.toHaveBeenCalled();
+      expect(broadcast).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
   test('timed-out local EVM signing cannot trigger a later raw submission', async () => {
     vi.useFakeTimers();
     const fixture = receiptFixture();
@@ -242,7 +419,7 @@ describe('VaraToEth', () => {
   let gearApi: GearApi;
   let gearClient: GearClient;
   let expected: string[];
-  let nonce: bigint, blockNumber: number;
+  let nonce: bigint, blockNumber: number, blockHash: HexString;
   beforeAll(async () => {
     expected = ['vara_to_eth_message_hash', 'vara_to_eth_root', 'vara_to_eth_proof', 'vara_to_eth_num_leaves', 'vara_to_eth_leaf_index', 'process_message_calldata']
       .map((name) => fs.readFileSync('test/tmp/' + name, 'utf8'));
@@ -250,26 +427,27 @@ describe('VaraToEth', () => {
     blockNumber = Number(process.env.VARA_TO_ETH_BLOCK_NUMBER!);
     gearApi = await GearApi.create({ providerAddress: process.env.VARA_WS_RPC });
     gearClient = new GearClient(gearApi);
+    blockHash = (await gearApi.blocks.getBlockHash(blockNumber)).toHex();
   });
   afterAll(async () => { if (gearApi) await gearApi.disconnect(); });
   test('message hash', async () => {
-    const msg = await gearClient.findMessageQueuedEvent(blockNumber, nonce);
+    const msg = await gearClient.findMessageQueuedEvent(blockHash, nonce);
     if (!msg) throw new Error('Message not found');
     expect(messageHash(msg).slice(2)).toEqual(expected[0]);
   });
   test('merkle proof', async () => {
-    const msg = await gearClient.findMessageQueuedEvent(blockNumber, nonce);
+    const msg = await gearClient.findMessageQueuedEvent(blockHash, nonce);
     if (!msg) throw new Error('Message not found');
-    const merkleProof = await gearClient.fetchMerkleProof(blockNumber, messageHash(msg));
+    const merkleProof = await gearClient.fetchMerkleProof(blockHash, messageHash(msg));
     expect(merkleProof.leafIndex.toString()).toEqual(expected[4]);
     expect(merkleProof.numLeaves.toString()).toEqual(expected[3]);
     expect(merkleProof.root.slice(2)).toEqual(expected[1]);
     expect(merkleProof.proof.map((item) => item.slice(2)).join('')).toEqual(expected[2]);
   });
   test('process message call', async () => {
-    const msg = await gearClient.findMessageQueuedEvent(blockNumber, nonce);
+    const msg = await gearClient.findMessageQueuedEvent(blockHash, nonce);
     if (!msg) throw new Error('Message not found');
-    const merkleProof = await gearClient.fetchMerkleProof(blockNumber, messageHash(msg));
+    const merkleProof = await gearClient.fetchMerkleProof(blockHash, messageHash(msg));
     const data = encodeFunctionData({ abi: MessageQueueAbi, functionName: 'processMessage', args: getProcessMessageArgs(BigInt(blockNumber), msg, merkleProof) });
     expect(data.slice(2)).toEqual(expected[5]);
   });

@@ -1,4 +1,5 @@
 use super::{
+    cutover::{self, JournalOwnership},
     message_sender::MessageSender,
     proof_composer::ProofComposer,
     storage::{InboundRuntimeIdentity, JSONStorage, Storage},
@@ -37,6 +38,7 @@ pub struct Relayer {
     storage: Arc<dyn Storage>,
 
     tx_manager: TransactionManager,
+    _journal_ownership: Arc<JournalOwnership>,
 }
 
 impl MeteredService for Relayer {
@@ -64,7 +66,15 @@ impl Relayer {
         genesis_time: u64,
         from_eth_block: u64,
         eth_unprocessed_block_storage_path: String,
+        cutover_seal: Option<std::path::PathBuf>,
+        approved_manager_code: Option<H256>,
     ) -> anyhow::Result<Self> {
+        cutover::reject_sealed(std::path::Path::new(&storage_path))?;
+        cutover::reject_sealed(std::path::Path::new(&eth_unprocessed_block_storage_path))?;
+        let journal_ownership = Arc::new(cutover::lock_original_journals(
+            std::path::Path::new(&storage_path),
+            std::path::Path::new(&eth_unprocessed_block_storage_path),
+        )?);
         let gear_block_listener = GearBlockListener::new(api_provider.clone(), Arc::new(NoStorage));
 
         anyhow::ensure!(
@@ -73,7 +83,9 @@ impl Relayer {
             "HOLD: inbound transaction/discovery journal pair is incomplete; reconcile the original deployment coverage"
         );
 
-        let storage = Arc::new(JSONStorage::new(&storage_path));
+        let storage = Arc::new(
+            JSONStorage::new(&storage_path).with_journal_ownership(journal_ownership.clone()),
+        );
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
@@ -99,20 +111,49 @@ impl Relayer {
             historical_proxy_address,
             gear_sender: client.account_id().clone().into(),
         };
-        let block_storage = Arc::new(
-            JSONBlockStorage::new(eth_unprocessed_block_storage_path.into(), identity.clone())
-                .await?,
-        );
-        let expected_genesis = alloy::primitives::B256::from(identity.ethereum_genesis_hash.0);
-        storage.bind_runtime_identity(identity).await?;
+        let signer_ownership =
+            cutover::lock_signer(identity.gear_genesis_hash, identity.gear_sender)?;
         eth_api
             .enable_finality_archive(
                 &std::path::Path::new(&storage_path).join("ethereum-finality"),
-                expected_genesis,
+                alloy::primitives::B256::from(identity.ethereum_genesis_hash.0),
             )
             .await?;
+        let predecessor = cutover::authenticate_startup(
+            &identity,
+            cutover_seal.as_deref(),
+            approved_manager_code,
+            &client,
+            &eth_api,
+        )
+        .await?;
+        log::info!(
+            "Authenticated inbound runtime: {}; predecessor_cutover: {}",
+            serde_json::to_string(&identity)?,
+            serde_json::to_string(&predecessor)?
+        );
+        let (minimum_receipt_slot, last_receipt_slot) =
+            cutover::receipt_domain(&client, vft_manager_address).await?;
+        log::info!("Authenticated inbound receipt domain: minimum={minimum_receipt_slot}; last={last_receipt_slot:?}; independently approved successor CodeId={approved_manager_code:?}");
+        let block_storage = Arc::new(
+            JSONBlockStorage::new_bound(
+                eth_unprocessed_block_storage_path.into(),
+                identity.clone(),
+                predecessor.clone(),
+            )
+            .await?
+            .with_journal_ownership(journal_ownership.clone()),
+        );
+        if let Some(predecessor) = predecessor {
+            storage
+                .bind_successor_identity(identity, predecessor)
+                .await?;
+        } else {
+            storage.bind_runtime_identity(identity).await?;
+        }
         let ethereum_block_listener =
-            EthereumBlockListener::new(eth_api.clone(), block_storage.clone());
+            EthereumBlockListener::new(eth_api.clone(), block_storage.clone())
+                .with_last_receipt_slot(genesis_time, last_receipt_slot);
         let deposit_event_extractor = DepositEventExtractor::new(
             eth_api.clone(),
             erc20_manager_address,
@@ -134,7 +175,8 @@ impl Relayer {
             api_provider.clone(),
             suri.clone(),
             Some(erc20_manager_address),
-        );
+        )
+        .with_signer_ownership(signer_ownership);
 
         let proof_composer = ProofComposer::new(
             api_provider,
@@ -147,6 +189,7 @@ impl Relayer {
         let tx_manager = TransactionManager::new(storage.clone());
 
         Ok(Self {
+            _journal_ownership: journal_ownership,
             gear_block_listener,
             ethereum_block_listener,
 

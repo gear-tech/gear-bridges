@@ -133,16 +133,22 @@ pub enum Added {
     Removed(RelayedMerkleRoot),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum RootAddError {
+    Unchanged(usize),
+    Conflict,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct MerkleRoots {
-    roots: Vec<RelayedMerkleRoot>,
+    roots: Vec<QualifiedMerkleRoot>,
     #[serde(skip)]
     capacity: usize,
 }
 
 impl MerkleRoots {
-    // Bound both authority history and roots per authority; preserve older authority coverage.
+    // Bound retained publications globally; source-height ordering is only for proof selection.
     pub fn new(capacity: usize) -> Self {
         Self {
             roots: Vec::with_capacity(capacity),
@@ -181,6 +187,7 @@ impl MerkleRoots {
         };
         self.roots[..end]
             .iter()
+            .map(|qualified| &qualified.root)
             .rev()
             .take_while(|root| root.authority_set_id == authority_set_id)
             .find(|root| {
@@ -199,11 +206,24 @@ impl MerkleRoots {
     }
 
     pub fn get(&self, i: usize) -> Option<&RelayedMerkleRoot> {
-        self.roots.get(i)
+        self.roots.get(i).map(|qualified| &qualified.root)
     }
 
-    // Err(i): duplicate identity or a root older than the retained history bound.
-    pub fn add(&mut self, root_new: RelayedMerkleRoot) -> Result<Added, usize> {
+    pub fn qualified_roots(&self) -> &[QualifiedMerkleRoot] {
+        &self.roots
+    }
+
+    pub fn from_qualified(roots: &[QualifiedMerkleRoot], capacity: usize) -> anyhow::Result<Self> {
+        let mut result = Self::new(capacity);
+        for root in roots {
+            if matches!(result.add(*root), Err(RootAddError::Conflict)) {
+                anyhow::bail!("Conflicting finalized root provenance; HOLD");
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn add(&mut self, root_new: QualifiedMerkleRoot) -> Result<Added, RootAddError> {
         let i = match self.roots.binary_search_by(|root| {
             Self::compare(
                 root.authority_set_id,
@@ -212,49 +232,44 @@ impl MerkleRoots {
                 root_new.block,
             )
         }) {
-            Ok(i) => return Err(i),
+            Ok(i) => {
+                return Err(if self.roots[i] == root_new {
+                    RootAddError::Unchanged(i)
+                } else {
+                    RootAddError::Conflict
+                })
+            }
             Err(i) => i,
         };
-        let start = self
-            .roots
-            .partition_point(|root| root.authority_set_id > root_new.authority_set_id);
-        let end = self
-            .roots
-            .partition_point(|root| root.authority_set_id >= root_new.authority_set_id);
-        if start != end && end - start >= self.capacity {
-            if i == end {
-                return Err(i);
-            }
-            self.roots[i..end].rotate_right(1);
-            return Ok(Added::Removed(std::mem::replace(
-                &mut self.roots[i],
-                root_new,
-            )));
+        if self.capacity == 0 {
+            return Err(RootAddError::Unchanged(i));
         }
-        let mut removed = None;
-        if start == end {
-            let authorities = usize::from(!self.roots.is_empty())
-                + self
-                    .roots
-                    .windows(2)
-                    .filter(|pair| pair[0].authority_set_id != pair[1].authority_set_id)
-                    .count();
-            if authorities >= self.capacity {
-                if i == self.roots.len() {
-                    return Err(i);
-                }
-                let oldest = self
-                    .roots
-                    .last()
-                    .expect("retained authority exists")
-                    .authority_set_id;
-                let cutoff = self
-                    .roots
-                    .partition_point(|root| root.authority_set_id > oldest);
-                removed = Some(self.roots[cutoff]);
-                self.roots.truncate(cutoff);
+        let position = |root: &QualifiedMerkleRoot| {
+            (
+                root.inclusion.block_number,
+                root.inclusion.transaction_index,
+                root.inclusion.log_index,
+            )
+        };
+        let mut i = i;
+        let removed = if self.roots.len() == self.capacity {
+            let (oldest, root) = self
+                .roots
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, root)| position(root))
+                .expect("nonzero retention");
+            if position(&root_new) <= position(root) {
+                return Err(RootAddError::Unchanged(i));
             }
-        }
+            let removed = self.roots.remove(oldest).root;
+            if oldest < i {
+                i -= 1;
+            }
+            Some(removed)
+        } else {
+            None
+        };
         self.roots.insert(i, root_new);
         Ok(removed.map_or(Added::Ok, Added::Removed))
     }
@@ -264,6 +279,19 @@ impl MerkleRoots {
 mod tests {
     use super::*;
     use hex_literal::hex;
+
+    fn qualified(root: RelayedMerkleRoot) -> QualifiedMerkleRoot {
+        QualifiedMerkleRoot {
+            root,
+            inclusion: crate::message_relayer::common::EthereumRootInclusion {
+                block_number: u64::from(root.block.0) + root.authority_set_id.0 * 1000,
+                block_hash: [3; 32].into(),
+                transaction_hash: [4; 32].into(),
+                transaction_index: 0,
+                log_index: 0,
+            },
+        }
+    }
 
     #[test]
     fn bounded_root_history_preserves_authority_coverage() {
@@ -285,8 +313,8 @@ mod tests {
             ..root
         };
         let mut roots = MerkleRoots::new(2);
-        roots.add(root).unwrap();
-        roots.add(newer).unwrap();
+        roots.add(qualified(root)).unwrap();
+        roots.add(qualified(newer)).unwrap();
         assert_eq!(
             roots.find(root.authority_set_id, root.block, 1300, 300),
             Some(&root)
@@ -295,9 +323,9 @@ mod tests {
             roots.find(root.authority_set_id, GearBlockNumber(101), 1300, 300),
             None
         );
-        assert!(matches!(roots.add(newest), Ok(Added::Removed(value)) if value == root));
-        assert!(roots.add(root).is_err());
-        assert!(roots.add(newer).is_err());
+        assert!(matches!(roots.add(qualified(newest)), Ok(Added::Removed(value)) if value == root));
+        assert!(roots.add(qualified(root)).is_err());
+        assert!(roots.add(qualified(newer)).is_err());
         assert_eq!(
             roots.find(root.authority_set_id, root.block, 1400, 300),
             Some(&newer)
@@ -306,34 +334,28 @@ mod tests {
             authority_set_id: AuthoritySetId(2),
             ..newest
         };
-        roots.add(next_authority).unwrap();
+        roots.add(qualified(next_authority)).unwrap();
         assert_eq!(
             roots.find(root.authority_set_id, root.block, 1400, 300),
-            Some(&newer)
+            None
         );
-        // Hydrate the unchanged JSON array through the bounded owner path used at startup.
-        let saved: MerkleRoots =
-            serde_json::from_str(&serde_json::to_string(&roots).unwrap()).unwrap();
-        let mut restored = MerkleRoots::new(2);
-        for i in 0..saved.len() {
-            restored.add(*saved.get(i).unwrap()).unwrap();
-        }
+        let mut restored = MerkleRoots::from_qualified(roots.qualified_roots(), 2).unwrap();
         assert_eq!(
             restored.find(root.authority_set_id, root.block, 1400, 300),
-            Some(&newer)
+            None
         );
         let last_authority = RelayedMerkleRoot {
             authority_set_id: AuthoritySetId(3),
             ..newest
         };
         assert!(
-            matches!(restored.add(last_authority), Ok(Added::Removed(value)) if value == newest)
+            matches!(restored.add(qualified(last_authority)), Ok(Added::Removed(value)) if value == newest)
         );
         assert_eq!(
             restored.find(root.authority_set_id, root.block, u64::MAX, 0),
             None
         );
-        assert!(restored.add(root).is_err());
+        assert!(restored.add(qualified(root)).is_err());
         assert_eq!(
             restored.find(
                 next_authority.authority_set_id,
@@ -343,6 +365,63 @@ mod tests {
             ),
             Some(&next_authority)
         );
+    }
+
+    #[test]
+    fn replay_requires_identical_root_and_inclusion_provenance() {
+        let original = qualified(RelayedMerkleRoot {
+            block: GearBlockNumber(100),
+            block_hash: [1; 32].into(),
+            authority_set_id: AuthoritySetId(1),
+            merkle_root: [2; 32].into(),
+            timestamp: 1000,
+        });
+        let mut roots = MerkleRoots::from_qualified(&[original], 100).unwrap();
+        assert!(matches!(
+            roots.add(original),
+            Err(RootAddError::Unchanged(0))
+        ));
+        let mut altered = original;
+        altered.inclusion.block_hash = [9; 32].into();
+        assert!(matches!(roots.add(altered), Err(RootAddError::Conflict)));
+        altered = original;
+        altered.root.merkle_root = [9; 32].into();
+        assert!(matches!(roots.add(altered), Err(RootAddError::Conflict)));
+        assert_eq!(roots.qualified_roots(), &[original]);
+    }
+
+    #[test]
+    fn full_retention_accepts_a_new_historical_publication() {
+        let mut roots = MerkleRoots::new(100);
+        for block in 100..200 {
+            roots
+                .add(qualified(RelayedMerkleRoot {
+                    block: GearBlockNumber(block),
+                    block_hash: [1; 32].into(),
+                    authority_set_id: AuthoritySetId(1),
+                    merkle_root: [2; 32].into(),
+                    timestamp: 1000,
+                }))
+                .unwrap();
+        }
+        let mut backfill = qualified(RelayedMerkleRoot {
+            block: GearBlockNumber(41),
+            block_hash: [3; 32].into(),
+            authority_set_id: AuthoritySetId(1),
+            merkle_root: [4; 32].into(),
+            timestamp: 2000,
+        });
+        backfill.inclusion.block_number = 2000;
+        assert!(
+            matches!(roots.add(backfill), Ok(Added::Removed(old)) if old.block == GearBlockNumber(100))
+        );
+        assert_eq!(roots.len(), 100);
+        assert_eq!(
+            roots.find(AuthoritySetId(1), GearBlockNumber(41), 2300, 300),
+            Some(&backfill.root)
+        );
+        let restored = MerkleRoots::from_qualified(roots.qualified_roots(), 100).unwrap();
+        assert_eq!(restored.qualified_roots(), roots.qualified_roots());
     }
 
     #[test]
@@ -713,8 +792,8 @@ mod tests {
         };
 
         let mut merkle_roots = MerkleRoots::new(10);
-        merkle_roots.add(root1).unwrap();
-        merkle_roots.add(root2).unwrap();
+        merkle_roots.add(qualified(root1)).unwrap();
+        merkle_roots.add(qualified(root2)).unwrap();
         let newer = RelayedMerkleRoot {
             block: GearBlockNumber(110),
             block_hash: [3; 32].into(),
@@ -722,7 +801,7 @@ mod tests {
             timestamp: 2250,
             ..root1
         };
-        merkle_roots.add(newer).unwrap();
+        merkle_roots.add(qualified(newer)).unwrap();
 
         let messages_data = [
             // Message that should match with delay

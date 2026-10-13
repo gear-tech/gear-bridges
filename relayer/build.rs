@@ -1,7 +1,9 @@
 fn main() {
+    #[cfg(feature = "legacy-prover")]
     go_bindings();
 }
 
+#[cfg(feature = "legacy-prover")]
 fn go_bindings() {
     println!("cargo:rerun-if-changed=../gnark-wrapper/main.go");
     println!("cargo:rerun-if-changed=../gnark-wrapper/go.mod");

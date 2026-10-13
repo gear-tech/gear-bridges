@@ -33,6 +33,8 @@ pub use alloy::primitives::TxHash;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 mod finality_archive;
+mod queue_deployment;
+pub use queue_deployment::QueueDeployment;
 use tokio::time::{timeout, Instant};
 
 const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -55,6 +57,38 @@ async fn connect_ws(ws: WsConnect) -> Result<alloy::rpc::client::RpcClient, Tran
     )
     .await
     .map_err(|_| TransportErrorKind::custom_str("Ethereum WebSocket connection timed out"))?
+}
+
+async fn connect_rpc(
+    url: &Url,
+    ws_max_retry: Option<u32>,
+    ws_retry_interval: Option<Duration>,
+) -> Result<alloy::rpc::client::RpcClient, Error> {
+    match url.scheme() {
+        "http" | "https" => Ok(alloy::rpc::client::RpcClient::builder()
+            .layer(tower::util::MapFutureLayer::new(
+                |future| -> alloy::transports::TransportFut<'static> { Box::pin(future) },
+            ))
+            .layer(tower::util::MapErrLayer::new(
+                |error: tower::BoxError| match error.downcast::<TransportError>() {
+                    Ok(error) => *error,
+                    Err(error) => RpcError::Transport(TransportErrorKind::Custom(error)),
+                },
+            ))
+            .layer(tower::timeout::TimeoutLayer::new(RPC_REQUEST_TIMEOUT))
+            .http(url.clone())),
+        "ws" | "wss" => {
+            let mut ws = WsConnect::new(url.clone());
+            if let Some(retries) = ws_max_retry {
+                ws = ws.with_max_retries(retries);
+            }
+            if let Some(interval) = ws_retry_interval {
+                ws = ws.with_retry_interval(interval);
+            }
+            Ok(connect_ws(ws).await?)
+        }
+        _ => Err(Error::WrongNodeUrl),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,13 +180,6 @@ use abi::{
 
 pub mod error;
 pub use error::Error;
-
-#[derive(Debug)]
-pub struct ContentMessageSubmissionError {
-    pub error: Error,
-    /// Ethereum account nonce selected for this submission, when allocation succeeded.
-    pub nonce: Option<u64>,
-}
 
 /// Holds exclusive ownership of Ethereum account submissions across retries.
 pub struct SubmissionGuard {
@@ -257,10 +284,94 @@ pub struct Contracts {
     max_priority_fee_per_gas: u128,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MerkleRootEntry {
     pub block_number: u64,
     pub merkle_root: H256,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MerkleRootObservation {
+    pub entry: MerkleRootEntry,
+    pub block_number: u64,
+    pub block_hash: B256,
+    pub transaction_hash: B256,
+    pub transaction_index: u64,
+    pub log_index: u64,
+    pub removed: bool,
+}
+
+fn merkle_root_observation(
+    event: &MerkleRoot,
+    log: &RpcLog,
+    from: u64,
+    to: u64,
+) -> Result<MerkleRootObservation, Error> {
+    let invalid = |field: &str| {
+        Error::InvalidMerkleRootObservation(format!("HOLD: invalid merkle root {field}"))
+    };
+    let source_block =
+        u32::try_from(event.blockNumber).map_err(|_| invalid("source block exceeds u32"))?;
+    let block_number = log.block_number.ok_or_else(|| invalid("block number"))?;
+    if !(from..=to).contains(&block_number) {
+        return Err(invalid("inclusion outside requested range"));
+    }
+    Ok(MerkleRootObservation {
+        entry: MerkleRootEntry {
+            block_number: u64::from(source_block),
+            merkle_root: event.merkleRoot.0.into(),
+        },
+        block_number,
+        block_hash: log.block_hash.ok_or_else(|| invalid("block hash"))?,
+        transaction_hash: log
+            .transaction_hash
+            .ok_or_else(|| invalid("transaction hash"))?,
+        transaction_index: log
+            .transaction_index
+            .ok_or_else(|| invalid("transaction index"))?,
+        log_index: log.log_index.ok_or_else(|| invalid("log index"))?,
+        removed: log.removed,
+    })
+}
+
+fn validate_merkle_root_observations(observations: &[MerkleRootObservation]) -> Result<(), Error> {
+    let mut logs = BTreeMap::new();
+    let mut blocks = BTreeMap::new();
+    let mut transactions = BTreeMap::new();
+    let mut transaction_indices = BTreeMap::new();
+    for observation in observations {
+        let location = (
+            observation.block_number,
+            observation.block_hash,
+            observation.transaction_index,
+        );
+        if logs
+            .insert(
+                (observation.block_number, observation.log_index),
+                observation,
+            )
+            .is_some_and(|old| old != observation)
+            || blocks
+                .insert(observation.block_number, observation.block_hash)
+                .is_some_and(|old| old != observation.block_hash)
+            || transactions
+                .insert(observation.transaction_hash, location)
+                .is_some_and(|old| old != location)
+            || transaction_indices
+                .insert(
+                    (observation.block_number, observation.transaction_index),
+                    observation.transaction_hash,
+                )
+                .is_some_and(|old| old != observation.transaction_hash)
+        {
+            return Err(Error::InvalidMerkleRootObservation(
+                "HOLD: conflicting merkle root inclusion identities".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -288,7 +399,8 @@ pub struct FinalizedTransactionReceipt {
     pub finalized_block_number: u64,
     pub finalized_block_hash: B256,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FinalizedSubmissionSnapshot {
     pub block_number: u64,
     pub block_hash: B256,
@@ -315,20 +427,8 @@ impl PollingEthApi {
         ws_retry_interval: Option<Duration>,
     ) -> AnyResult<Self> {
         let url = Url::parse(url).context("Provided url is not valid")?;
-        let provider = match url.scheme() {
-            "http" | "https" => RootProvider::builder().connect_http(url.clone()),
-            "ws" | "wss" => {
-                let mut ws = WsConnect::new(url.clone());
-                if let Some(ws_max_retry) = ws_max_retry {
-                    ws = ws.with_max_retries(ws_max_retry);
-                }
-                if let Some(ws_retry_interval) = ws_retry_interval {
-                    ws = ws.with_retry_interval(ws_retry_interval);
-                }
-                RootProvider::builder().connect_client(connect_ws(ws).await?)
-            }
-            scheme => anyhow::bail!("Unsupported Ethereum RPC URL scheme: {scheme}"),
-        };
+        let provider = RootProvider::builder()
+            .connect_client(connect_rpc(&url, ws_max_retry, ws_retry_interval).await?);
 
         Ok(Self {
             provider,
@@ -391,27 +491,6 @@ impl PollingEthApi {
         self::get_block(&self.provider, block).await
     }
 
-    pub async fn fetch_fee_paid_events_txs(
-        &self,
-        contract_address: H160,
-        block: u64,
-    ) -> AnyResult<Vec<TxHash>> {
-        let filter = Filter::new()
-            .address(Address::from_slice(contract_address.as_bytes()))
-            .event_signature(BridgingPayment::FeePaid::SIGNATURE_HASH)
-            .from_block(block)
-            .to_block(block);
-
-        let event: Event<_, BridgingPayment::FeePaid, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-
-        let logs = event.query().await.context("Failed to query event")?;
-
-        logs.into_iter()
-            .map(|(_, log)| log.transaction_hash.context("Failed to fetch transaction"))
-            .collect()
-    }
-
     pub async fn fetch_fee_paid_events_txs_at(
         &self,
         contract_address: H160,
@@ -426,7 +505,8 @@ impl PollingEthApi {
             Event::new(self.provider.clone(), filter);
         event
             .query()
-            .await?
+            .await
+            .map_err(Error::ErrorQueryingEvent)?
             .into_iter()
             .map(|(_, log)| {
                 ensure!(
@@ -455,7 +535,8 @@ impl PollingEthApi {
             Event::new(self.provider.clone(), filter);
         event
             .query()
-            .await?
+            .await
+            .map_err(Error::ErrorQueryingEvent)?
             .into_iter()
             .map(|(deposit, log)| {
                 ensure!(
@@ -476,51 +557,6 @@ impl PollingEthApi {
                         .context("deposit log has no original transaction hash")?,
                 })
             })
-            .collect()
-    }
-
-    pub async fn fetch_deposit_events(
-        &self,
-        contract_address: H160,
-        block: u64,
-    ) -> AnyResult<Vec<DepositEventEntry>> {
-        let filter = Filter::new()
-            .address(Address::from_slice(contract_address.as_bytes()))
-            .event_signature(IERC20Manager::BridgingRequested::SIGNATURE_HASH)
-            .from_block(block)
-            .to_block(block);
-
-        let event: Event<_, IERC20Manager::BridgingRequested, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-
-        let logs = event.query().await.context("Failed to query event")?;
-
-        logs.into_iter()
-            .map(
-                |(
-                    IERC20Manager::BridgingRequested {
-                        from,
-                        to,
-                        token,
-                        amount,
-                    },
-                    log,
-                )| {
-                    let tx_hash = log
-                        .transaction_hash
-                        .context("Failed to fetch transaction")?;
-
-                    Ok(DepositEventEntry {
-                        from: H160(*from.0),
-                        to: H256(to.0),
-                        token: H160(*token.0),
-                        amount: primitive_types::U256::from_little_endian(
-                            &amount.to_le_bytes_vec(),
-                        ),
-                        tx_hash,
-                    })
-                },
-            )
             .collect()
     }
 }
@@ -575,7 +611,7 @@ struct VerifiedAncestry {
 static FINALIZED_ANCESTRY: OnceLock<std::sync::Mutex<HashMap<B256, VerifiedAncestry>>> =
     OnceLock::new();
 static FINALITY_ARCHIVES: OnceLock<
-    std::sync::Mutex<HashMap<B256, Arc<finality_archive::HeaderArchive>>>,
+    std::sync::Mutex<HashMap<B256, Vec<Arc<finality_archive::HeaderArchive>>>>,
 > = OnceLock::new();
 static FINALITY_LOCKS: OnceLock<std::sync::Mutex<HashMap<B256, Weak<Mutex<()>>>>> = OnceLock::new();
 const MAX_CHAINS: usize = 8;
@@ -591,13 +627,14 @@ impl VerifiedAncestry {
     }
 }
 
-fn archive_for(genesis: B256) -> Option<Arc<finality_archive::HeaderArchive>> {
+fn archives_for(genesis: B256) -> Vec<Arc<finality_archive::HeaderArchive>> {
     FINALITY_ARCHIVES
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(&genesis)
         .cloned()
+        .unwrap_or_default()
 }
 
 fn finality_lock(genesis: B256) -> Arc<Mutex<()>> {
@@ -615,21 +652,26 @@ fn finality_lock(genesis: B256) -> Arc<Mutex<()>> {
 }
 
 fn register_archive(directory: &std::path::Path, genesis: B256) -> AnyResult<()> {
+    std::fs::create_dir_all(directory)?;
+    let directory = std::fs::canonicalize(directory)?;
     let mut archives = FINALITY_ARCHIVES
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(existing) = archives.get(&genesis) {
-        ensure!(
-            existing.directory() == directory,
-            "finality archive directory changed within one owner"
-        );
-    } else {
-        archives.insert(
-            genesis,
-            Arc::new(finality_archive::HeaderArchive::open(directory)?),
-        );
+    for (chain, registered) in archives.iter() {
+        if registered
+            .iter()
+            .any(|archive| archive.directory() == directory)
+        {
+            ensure!(
+                *chain == genesis,
+                "finality archive belongs to another chain; HOLD"
+            );
+            return Ok(());
+        }
     }
+    let archive = Arc::new(finality_archive::HeaderArchive::open(&directory)?);
+    archives.entry(genesis).or_default().push(archive);
     Ok(())
 }
 
@@ -684,7 +726,7 @@ async fn walk_ancestors(
     start: (u64, B256),
     target: u64,
     started: Instant,
-    archive: Option<&finality_archive::HeaderArchive>,
+    archives: &[Arc<finality_archive::HeaderArchive>],
     targets: Option<&BTreeMap<u64, B256>>,
 ) -> Result<(u64, B256, Vec<(u64, B256)>), Error> {
     use std::collections::VecDeque;
@@ -694,11 +736,12 @@ async fn walk_ancestors(
     let mut ready = BTreeMap::new();
     let mut next_request = number;
     let mut local = VecDeque::new();
+    let archive = archives.first();
     let mut chunk = Vec::with_capacity(archive.map_or(0, |_| 512));
     while number > target && started.elapsed() < MAX_PROOF_DURATION {
         if local.is_empty() {
-            if let Some(archive) = archive {
-                let stored = archive
+            for candidate in archives {
+                let stored = candidate
                     .read(number, hash)
                     .map_err(|_| Error::FinalizedAncestryPending)?
                     .unwrap_or_default();
@@ -709,13 +752,16 @@ async fn walk_ancestors(
                     ready.clear();
                     next_request = number;
                     if !chunk.is_empty() {
-                        archive
+                        candidate
                             .save(&chunk)
                             .map_err(|_| Error::FinalizedAncestryPending)?;
                         chunk.clear();
                     }
                 }
                 local = stored.into();
+                if !local.is_empty() {
+                    break;
+                }
             }
         }
         let header = if let Some(header) = local.pop_front() {
@@ -853,7 +899,7 @@ impl FinalizedView {
         {
             return Err(Error::FinalizedAncestryPending);
         }
-        let archive = archive_for(self.genesis);
+        let archives = archives_for(self.genesis);
         if let Some(expected) = targets.get(&self.block_number()) {
             if *expected != self.block_hash() {
                 return Err(Error::FinalizedAncestryConflict);
@@ -864,7 +910,7 @@ impl FinalizedView {
             (self.block_number(), self.block_hash()),
             oldest,
             Instant::now(),
-            archive.as_deref(),
+            &archives,
             Some(targets),
         )
         .await?;
@@ -928,14 +974,23 @@ async fn finalized_ancestor_at(
     if number > head.0 {
         return Err(Error::FinalizedAncestryPending);
     }
-    let archive = archive_for(genesis);
-    let durable_required = if let Some(archive) = archive.as_ref() {
-        archive
+    // Every directory retains its own durable fence. Registering another proof
+    // owner must not replace or bypass any previously witnessed generation.
+    let archives = archives_for(genesis);
+    let mut durable_required = BTreeMap::new();
+    for archive in &archives {
+        for (number, hash) in archive
             .witness(genesis, &header.inner)
             .map_err(|_| Error::FinalizedAncestryPending)?
-    } else {
-        Vec::new()
-    };
+        {
+            if durable_required
+                .insert(number, hash)
+                .is_some_and(|old| old != hash)
+            {
+                return Err(Error::FinalizedAncestryConflict);
+            }
+        }
+    }
     let state = FINALIZED_ANCESTRY.get_or_init(Default::default);
     let previous = state
         .lock()
@@ -950,15 +1005,8 @@ async fn finalized_ancestor_at(
             return Err(Error::FinalizedAncestryPending);
         }
         if head != old_head {
-            let (height, ancestor, extension) = walk_ancestors(
-                provider,
-                head,
-                old_head.0,
-                started,
-                archive.as_deref(),
-                None,
-            )
-            .await?;
+            let (height, ancestor, extension) =
+                walk_ancestors(provider, head, old_head.0, started, &archives, None).await?;
             let mut cache = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1036,7 +1084,7 @@ async fn finalized_ancestor_at(
             start,
             required.0,
             started,
-            archive.as_deref(),
+            &archives,
             Some(&required_heads),
         )
         .await?;
@@ -1057,17 +1105,10 @@ async fn finalized_ancestor_at(
         }
         cache.required_heads.clear();
     }
-    if let Some(&(oldest, _)) = durable_required.iter().min_by_key(|tip| tip.0) {
-        let targets: BTreeMap<_, _> = durable_required.into_iter().collect();
-        let (height, ancestor, links) = walk_ancestors(
-            provider,
-            head,
-            oldest,
-            started,
-            archive.as_deref(),
-            Some(&targets),
-        )
-        .await?;
+    if let Some((&oldest, _)) = durable_required.first_key_value() {
+        let targets = durable_required;
+        let (height, ancestor, links) =
+            walk_ancestors(provider, head, oldest, started, &archives, Some(&targets)).await?;
         if height != oldest {
             let mut cache = state
                 .lock()
@@ -1115,7 +1156,7 @@ async fn finalized_ancestor_at(
         })
     };
     let (height, ancestor, proof) =
-        walk_ancestors(provider, start, number, started, archive.as_deref(), None).await?;
+        walk_ancestors(provider, start, number, started, &archives, None).await?;
     let mut cache = state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1138,7 +1179,7 @@ async fn finalized_ancestor_at(
     if ancestor != hash {
         return Ok(None);
     }
-    if let Some(archive) = archive {
+    for archive in &archives {
         archive
             .complete(genesis, &header.inner)
             .map_err(|_| Error::FinalizedAncestryPending)?;
@@ -1180,6 +1221,7 @@ async fn finalized_transaction_receipt(
 #[derive(Clone)]
 pub struct EthApi {
     contracts: Contracts,
+    queue_deployment_transaction: Option<B256>,
     chain_id: u64,
     public_key: Address,
     wallet: EthereumWallet,
@@ -1239,16 +1281,6 @@ impl EthApi {
 
         let url = Url::parse(url).map_err(|_| Error::WrongNodeUrl)?;
 
-        let mut ws = WsConnect::new(url.clone());
-
-        if let Some(ws_max_retry) = ws_max_retry {
-            ws = ws.with_max_retries(ws_max_retry)
-        }
-
-        if let Some(ws_retry_interval) = ws_retry_interval {
-            ws = ws.with_retry_interval(ws_retry_interval)
-        }
-
         let provider: ProviderType = ProviderBuilder::new()
             .disable_recommended_fillers()
             .with_gas_estimation()
@@ -1256,7 +1288,7 @@ impl EthApi {
             .with_simple_nonce_management()
             .fetch_chain_id()
             .wallet(wallet.clone())
-            .connect_client(connect_ws(ws).await?);
+            .connect_client(connect_rpc(&url, ws_max_retry, ws_retry_interval).await?);
 
         let chain_id = provider.get_chain_id().await?;
         let contracts = Contracts::new(
@@ -1268,6 +1300,7 @@ impl EthApi {
 
         Ok(EthApi {
             contracts,
+            queue_deployment_transaction: None,
             chain_id,
             public_key,
             url,
@@ -1279,13 +1312,6 @@ impl EthApi {
     }
 
     pub async fn reconnect(&self) -> Result<EthApi, Error> {
-        let mut ws = WsConnect::new(self.url.clone());
-        if let Some(ws_max_retry) = self.ws_max_retry {
-            ws = ws.with_max_retries(ws_max_retry);
-        }
-        if let Some(ws_retry_interval) = self.ws_retry_interval {
-            ws = ws.with_retry_interval(ws_retry_interval);
-        }
         let provider: ProviderType = ProviderBuilder::new()
             .disable_recommended_fillers()
             .with_gas_estimation()
@@ -1293,7 +1319,7 @@ impl EthApi {
             .with_simple_nonce_management()
             .fetch_chain_id()
             .wallet(self.wallet.clone())
-            .connect_client(connect_ws(ws).await?);
+            .connect_client(connect_rpc(&self.url, self.ws_max_retry, self.ws_retry_interval).await?);
 
         let contracts = Contracts::new(
             provider,
@@ -1304,6 +1330,7 @@ impl EthApi {
 
         Ok(EthApi {
             contracts,
+            queue_deployment_transaction: self.queue_deployment_transaction,
             chain_id: self.chain_id,
             public_key: self.public_key,
             url: self.url.clone(),
@@ -1317,6 +1344,14 @@ impl EthApi {
     // TODO: Don't expose provider here.
     pub fn raw_provider(&self) -> &ProviderType {
         &self.contracts.provider
+    }
+    pub fn with_queue_deployment_transaction(mut self, hash: Option<B256>) -> Self {
+        self.queue_deployment_transaction = hash;
+        self
+    }
+
+    pub fn queue_deployment_transaction(&self) -> Option<B256> {
+        self.queue_deployment_transaction
     }
     pub fn sender_address(&self) -> H160 {
         H160::from_slice(self.public_key.as_slice())
@@ -1337,6 +1372,9 @@ impl EthApi {
         verified_finalized_view(self.raw_provider()).await
     }
 
+    /// Attach an independently owned archive without replacing same-chain owners.
+    /// Every attached durable tip is linked to the fresh finalized head before
+    /// this view is returned; canonical path aliases reuse the same file lock.
     pub async fn verified_finalized_view_with_archive(
         &self,
         directory: &std::path::Path,
@@ -1615,6 +1653,17 @@ impl EthApi {
             .await
     }
 
+    /// Read queue state at the exact authenticated finalized view, without repinning.
+    pub async fn read_merkle_root_in_view(
+        &self,
+        gear_block: u32,
+        view: &FinalizedView,
+    ) -> Result<Option<[u8; 32]>, Error> {
+        self.contracts
+            .read_merkle_root_at(U256::from(gear_block), view.block_id())
+            .await
+    }
+
     pub async fn read_chainhead_merkle_root(
         &self,
         gear_block: u32,
@@ -1628,7 +1677,7 @@ impl EthApi {
         &self,
         from: u64,
         to: u64,
-    ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
+    ) -> Result<Vec<MerkleRootObservation>, Error> {
         self.contracts.fetch_merkle_roots_in_range(from, to).await
     }
 
@@ -1641,6 +1690,18 @@ impl EthApi {
             .ok_or(Error::ErrorFetchingBlock)?
             .header
             .timestamp)
+    }
+
+    pub async fn get_block_timestamp_by_hash(&self, number: u64, hash: B256) -> Result<u64, Error> {
+        let block = self
+            .raw_provider()
+            .get_block_by_hash(hash)
+            .await?
+            .ok_or(Error::FinalizedAncestryPending)?;
+        if !valid_header(&block, number, hash) {
+            return Err(Error::FinalizedAncestryPending);
+        }
+        Ok(block.header.timestamp)
     }
 
     pub async fn block_number(&self) -> Result<u64, Error> {
@@ -1662,57 +1723,6 @@ impl EthApi {
         Ok(self::safe_block(self.raw_provider()).await?.header.number)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn provide_content_message(
-        &self,
-        _submission_guard: &SubmissionGuard,
-        block_number: u32,
-        total_leaves: u32,
-        leaf_index: u32,
-        nonce: [u8; 32],
-        sender: [u8; 32],
-        receiver: [u8; 20],
-        payload: Vec<u8>,
-        proof: Vec<[u8; 32]>,
-        account_nonce: Option<u64>,
-    ) -> Result<(TxHash, u64), ContentMessageSubmissionError> {
-        let account_nonce = match account_nonce {
-            Some(nonce) => nonce,
-            None => self
-                .raw_provider()
-                .get_transaction_count(self.public_key)
-                .pending()
-                .await
-                .map_err(|error| ContentMessageSubmissionError {
-                    error: error.into(),
-                    nonce: None,
-                })?,
-        };
-
-        self.contracts
-            .provide_content_message(
-                U256::from(block_number),
-                U256::from(total_leaves),
-                U256::from(leaf_index),
-                U256::from_be_bytes(nonce),
-                B256::from(sender),
-                Address::from(receiver),
-                Bytes::from(payload),
-                proof.into_iter().map(B256::from).collect(),
-                account_nonce,
-            )
-            .await
-            .map(|tx_hash| (tx_hash, account_nonce))
-            .map_err(|error| {
-                // Only pin the nonce after eth_sendRawTransaction was attempted.
-                // Pre-send failures must re-query pending nonce on retry because
-                // another serialized submission may use this nonce meanwhile.
-                let nonce =
-                    matches!(error, Error::ErrorSendingTransaction(_)).then_some(account_nonce);
-                ContentMessageSubmissionError { error, nonce }
-            })
-    }
-
     /// Reads the relayer nonce and bridge processed bit from one canonical finalized block.
     /// None means the finalized block could not be confirmed canonical; callers must hold.
     pub async fn get_finalized_submission_snapshot(
@@ -1727,6 +1737,44 @@ impl EthApi {
                 U256::from_be_bytes(message_nonce),
             )
             .await
+    }
+    /// Reauthenticate every saved bit at its original canonical finalized state pin.
+    /// Latest state cannot substitute for a historical nonce disposition.
+    pub async fn verify_finalized_submission_snapshot(
+        &self,
+        pinned_nonce: u64,
+        message_nonce: [u8; 32],
+        saved: &FinalizedSubmissionSnapshot,
+    ) -> AnyResult<()> {
+        ensure!(
+            saved.block_hash != B256::ZERO,
+            "HOLD: saved nonce disposition has no block hash"
+        );
+        let pin = H256::from(saved.block_hash.0);
+        ensure!(
+            self.is_finalized_block(saved.block_number, pin).await?,
+            "HOLD: saved nonce disposition is not canonical and finalized"
+        );
+        let block_id = BlockId::hash_canonical(saved.block_hash);
+        let account_nonce = self
+            .raw_provider()
+            .get_transaction_count(self.public_key)
+            .block_id(block_id)
+            .await?;
+        let processed = self
+            .contracts
+            .is_message_processed_at(U256::from_be_bytes(message_nonce), block_id)
+            .await?;
+        ensure!(
+            saved.pinned_nonce_consumed == (account_nonce > pinned_nonce)
+                && saved.message_processed == processed,
+            "HOLD: saved nonce disposition differs from original finalized state"
+        );
+        ensure!(
+            self.is_finalized_block(saved.block_number, pin).await?,
+            "HOLD: saved nonce disposition changed canonical ancestry during readback"
+        );
+        Ok(())
     }
 
     pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
@@ -1910,7 +1958,7 @@ impl Contracts {
     pub async fn fetch_merkle_roots(
         &self,
         depth: u64,
-    ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
+    ) -> Result<Vec<MerkleRootObservation>, Error> {
         let current_block: u64 = self.provider.get_block_number().await?;
 
         self.fetch_merkle_roots_in_range(
@@ -1924,7 +1972,7 @@ impl Contracts {
         &self,
         from: u64,
         to: u64,
-    ) -> Result<Vec<(MerkleRootEntry, Option<u64>)>, Error> {
+    ) -> Result<Vec<MerkleRootObservation>, Error> {
         let filter = Filter::new()
             .address(*self.message_queue_instance.address())
             .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH)
@@ -1936,18 +1984,20 @@ impl Contracts {
 
         let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
 
-        Ok(logs
+        let mut observations = logs
             .iter()
-            .map(|(event, log)| {
-                (
-                    MerkleRootEntry {
-                        block_number: event.blockNumber.to(),
-                        merkle_root: event.merkleRoot.0.into(),
-                    },
-                    log.block_number,
-                )
-            })
-            .collect())
+            .map(|(event, log)| merkle_root_observation(event, log, from, to))
+            .collect::<Result<Vec<_>, _>>()?;
+        observations.sort_unstable_by_key(|observation| {
+            (
+                observation.block_number,
+                observation.transaction_index,
+                observation.log_index,
+            )
+        });
+        validate_merkle_root_observations(&observations)?;
+        observations.dedup();
+        Ok(observations)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2041,48 +2091,6 @@ impl Contracts {
         Ok(call.into_transaction_request())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn provide_content_message(
-        &self,
-        block_number: U256,
-        total_leaves: U256,
-        leaf_index: U256,
-        nonce: U256,
-        source: B256,
-        destination: Address,
-        payload: Bytes,
-        proof: Vec<B256>,
-        account_nonce: u64,
-    ) -> Result<TxHash, Error> {
-        use alloy::providers::WalletProvider;
-        let request = self
-            .content_message_request(
-                block_number,
-                total_leaves,
-                leaf_index,
-                nonce,
-                source,
-                destination,
-                payload,
-                proof,
-                account_nonce,
-                self.provider.default_signer_address(),
-            )
-            .await?;
-        match self.provider.send_transaction(request).await {
-            Ok(pending) => Ok(*pending.tx_hash()),
-            Err(error) => {
-                let error = alloy::contract::Error::from(error);
-                if let Some(rejection) =
-                    error.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>()
-                {
-                    return Err(Error::MessageQueue(rejection));
-                }
-                Err(Error::ErrorSendingTransaction(error))
-            }
-        }
-    }
-
     pub async fn read_merkle_root(
         &self,
         block: U256,
@@ -2153,6 +2161,13 @@ impl Contracts {
         let message_processed = self
             .is_message_processed_at(message_nonce, block_id)
             .await?;
+        match finalized_ancestor(&self.provider, block_number, block_hash).await {
+            Ok(Some(_)) => {}
+            Ok(None) | Err(Error::FinalizedAncestryPending | Error::FinalizedAncestryConflict) => {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        }
 
         Ok(Some(FinalizedSubmissionSnapshot {
             block_number,
@@ -2196,6 +2211,118 @@ impl Contracts {
 mod tests {
     use super::*;
 
+    #[test]
+    fn merkle_root_metadata_is_required_and_source_height_is_checked() {
+        let event = MerkleRoot {
+            blockNumber: U256::from(12),
+            merkleRoot: B256::from([3; 32]),
+        };
+        let value = serde_json::json!({
+            "address": Address::ZERO, "topics": [], "data": "0x",
+            "blockNumber": "0x7", "blockHash": B256::from([1; 32]),
+            "transactionHash": B256::from([2; 32]), "transactionIndex": "0x0",
+            "logIndex": "0x1", "removed": false
+        });
+        let log: RpcLog = serde_json::from_value(value.clone()).unwrap();
+        let observation = merkle_root_observation(&event, &log, 7, 7).unwrap();
+        assert_eq!(observation.entry.block_number, 12);
+        assert_eq!(observation.transaction_index, 0);
+        for field in [
+            "blockNumber",
+            "blockHash",
+            "transactionHash",
+            "transactionIndex",
+            "logIndex",
+        ] {
+            let mut missing = value.clone();
+            missing[field] = Value::Null;
+            let log: RpcLog = serde_json::from_value(missing).unwrap();
+            assert!(
+                matches!(
+                    merkle_root_observation(&event, &log, 7, 7),
+                    Err(Error::InvalidMerkleRootObservation(_))
+                ),
+                "{field}"
+            );
+        }
+        assert!(merkle_root_observation(&event, &log, 8, 9).is_err());
+        let overflow = MerkleRoot {
+            blockNumber: U256::from(u32::MAX) + U256::from(1),
+            merkleRoot: event.merkleRoot,
+        };
+        assert!(merkle_root_observation(&overflow, &log, 7, 7).is_err());
+        let mut removed = log;
+        removed.removed = true;
+        assert!(
+            merkle_root_observation(&event, &removed, 7, 7)
+                .unwrap()
+                .removed
+        );
+        validate_merkle_root_observations(&[observation, observation]).unwrap();
+        for field in ["block", "transaction", "transaction_index", "root"] {
+            let mut conflicting = observation;
+            match field {
+                "block" => conflicting.block_hash = B256::from([9; 32]),
+                "transaction" => conflicting.transaction_hash = B256::from([9; 32]),
+                "transaction_index" => conflicting.transaction_index += 1,
+                "root" => conflicting.entry.merkle_root = H256::repeat_byte(9),
+                _ => unreachable!(),
+            }
+            assert!(
+                validate_merkle_root_observations(&[observation, conflicting]).is_err(),
+                "{field}"
+            );
+        }
+        let encoded = serde_json::to_value(observation).unwrap();
+        for field in [
+            "entry",
+            "block_number",
+            "block_hash",
+            "transaction_hash",
+            "transaction_index",
+            "log_index",
+            "removed",
+        ] {
+            let mut missing = encoded.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<MerkleRootObservation>(missing).is_err(),
+                "{field}"
+            );
+        }
+        let mut extra = encoded;
+        extra["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<MerkleRootObservation>(extra).is_err());
+    }
+
+    #[test]
+    fn finalized_submission_snapshot_serde_requires_exact_evidence_fields() {
+        let snapshot = FinalizedSubmissionSnapshot {
+            block_number: 100,
+            block_hash: B256::from([7; 32]),
+            pinned_nonce_consumed: true,
+            message_processed: false,
+        };
+        let value = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(
+            serde_json::from_value::<FinalizedSubmissionSnapshot>(value.clone()).unwrap(),
+            snapshot
+        );
+        for field in [
+            "block_number",
+            "block_hash",
+            "pinned_nonce_consumed",
+            "message_processed",
+        ] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<FinalizedSubmissionSnapshot>(missing).is_err());
+        }
+        let mut extra = value;
+        extra["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<FinalizedSubmissionSnapshot>(extra).is_err());
+    }
+
     static ANCESTRY_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
     struct ClearOwnedChains<const N: usize>([B256; N]);
@@ -2212,6 +2339,21 @@ mod tests {
         }
     }
 
+    struct Cleanup {
+        directory: std::path::PathBuf,
+        genesis: B256,
+    }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if let Some(cache) = FINALIZED_ANCESTRY.get() {
+                cache.lock().unwrap().remove(&self.genesis);
+            }
+            if let Some(archives) = FINALITY_ARCHIVES.get() {
+                archives.lock().unwrap().remove(&self.genesis);
+            }
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
     fn header_chain(seed: u8, height: u64) -> Vec<Block> {
         let mut parent = B256::ZERO;
         (0..=height)
@@ -2241,6 +2383,7 @@ mod tests {
             .connect_mocked_client(asserter);
         Ok(EthApi {
             contracts: Contracts::new(provider, [9; 20], None, None)?,
+            queue_deployment_transaction: None,
             chain_id: 560048,
             public_key,
             wallet,
@@ -2651,6 +2794,7 @@ mod tests {
     #[tokio::test]
     async fn nonce_processed_and_root_reads_use_one_finalized_hash_or_hold() -> AnyResult<()> {
         let _ancestry_test_guard = ANCESTRY_TEST_LOCK.lock().await;
+        use alloy::sol_types::SolCall;
         use serde_json::json;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -2664,9 +2808,14 @@ mod tests {
         let pinned_for_server = pinned.clone();
         let root = [67u8; 32];
         let expected_root = format!("{:#x}", B256::from(root));
+        let processed_selector = format!(
+            "0x{}",
+            alloy::hex::encode(IMessageQueue::isProcessedCall::SELECTOR)
+        );
         let server = tokio::spawn(async move {
             let mut observed = Vec::new();
-            for index in 0..13 {
+            let mut nonce_reads = 0;
+            loop {
                 let (mut socket, _) = listener.accept().await?;
                 let mut buffer = Vec::new();
                 let request = loop {
@@ -2693,6 +2842,9 @@ mod tests {
                 };
                 let method = request["method"].as_str().context("missing RPC method")?;
                 let is_pinned = request["params"][1] == pinned_for_server;
+                if method == "eth_getTransactionCount" {
+                    nonce_reads += 1;
+                }
                 let result = match method {
                     "eth_getBlockByNumber" => {
                         if request["params"][0] == "0x0" {
@@ -2701,20 +2853,28 @@ mod tests {
                             head.clone()
                         }
                     }
-                    "eth_getTransactionCount" if index == 12 && is_pinned => {
+                    "eth_getTransactionCount" if nonce_reads == 2 && is_pinned => {
                         let response = json!({"jsonrpc":"2.0", "id":request["id"],
                             "error":{"code":-32602,"message":"hash-pinned reads unsupported"}})
                         .to_string();
                         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).as_bytes()).await?;
                         observed.push(request);
-                        continue;
+                        break;
                     }
                     "eth_getTransactionCount" => json!(if is_pinned { "0x7" } else { "0x8" }),
-                    "eth_call" if index == 3 || index == 6 => json!(if is_pinned {
-                        format!("0x{:064x}", 1u8)
-                    } else {
-                        format!("0x{:064x}", 0u8)
-                    }),
+                    "eth_call"
+                        if request["params"][0]
+                            .get("data")
+                            .or_else(|| request["params"][0].get("input"))
+                            .and_then(Value::as_str)
+                            .is_some_and(|input| input.starts_with(&processed_selector)) =>
+                    {
+                        json!(if is_pinned {
+                            format!("0x{:064x}", 1u8)
+                        } else {
+                            format!("0x{:064x}", 0u8)
+                        })
+                    }
                     "eth_call" => json!(if is_pinned {
                         expected_root.clone()
                     } else {
@@ -2764,10 +2924,15 @@ mod tests {
             "unsupported hash-pinned nonce lookup must hold rather than fall back to block number"
         );
         let requests = server.await??;
-        for index in [2, 3, 6, 9, 12] {
+        for request in requests.iter().filter(|request| {
+            matches!(
+                request["method"].as_str(),
+                Some("eth_call" | "eth_getTransactionCount")
+            )
+        }) {
             assert_eq!(
-                requests[index]["params"][1], pinned,
-                "unbound state read #{index}"
+                request["params"][1], pinned,
+                "unbound finalized state read: {request}"
             );
         }
         Ok(())
@@ -2824,6 +2989,118 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn same_chain_archives_revalidate_every_durable_tip() -> AnyResult<()> {
+        use alloy::transports::mock::Asserter;
+        let _serial = ANCESTRY_TEST_LOCK.lock().await;
+        let chain = header_chain(104, 6);
+        let genesis = chain[0].header.hash;
+        let directory = std::env::temp_dir().join(format!(
+            "beefy-multiple-finality-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let _cleanup = Cleanup {
+            directory: directory.clone(),
+            genesis,
+        };
+        let history = directory.join("finality-history/headers");
+        let bootstrap = directory.join("deployment-bootstrap/headers");
+        let audit = directory.join("audit/headers");
+        // Independently persisted owners must all be authenticated on attachment,
+        // even when the in-memory ancestry cache has never seen their old tips.
+        finality_archive::HeaderArchive::open(&history)?
+            .witness(genesis, &chain[2].header.inner)?;
+        {
+            let archive = finality_archive::HeaderArchive::open(&bootstrap)?;
+            archive.witness(genesis, &chain[4].header.inner)?;
+            let headers: Vec<_> = (1..=6)
+                .rev()
+                .map(|number| chain[number].header.inner.clone())
+                .collect();
+            archive.save(&headers)?;
+        }
+        register_archive(&history, genesis)?;
+        register_archive(&bootstrap, genesis)?;
+        register_archive(&history.join("."), genesis)?;
+        assert_eq!(archives_for(genesis).len(), 2);
+        assert!(register_archive(&history, B256::from([105; 32])).is_err());
+        let asserter = Asserter::new();
+        let api = mocked_ancestry_api(asserter.clone())?;
+        asserter.push_success(&chain[6]);
+        asserter.push_success(&chain[0]);
+        let mut view = api
+            .verified_finalized_view_with_archive(&audit, genesis)
+            .await?;
+        view.verify_blocks(
+            api.raw_provider(),
+            &BTreeMap::from([(2, chain[2].header.hash)]),
+        )
+        .await?;
+        assert!(view.contains(2, chain[2].header.hash));
+        assert!(
+            asserter.read_q().is_empty(),
+            "proof chunks from the second owner must remain reusable"
+        );
+        assert_eq!(archives_for(genesis).len(), 3);
+        for archive in archives_for(genesis) {
+            assert!(archive.witness(genesis, &chain[6].header.inner)?.is_empty());
+        }
+
+        // Restart with an old conflicting interior tip in a non-primary archive.
+        // The current finalized height and the primary owner's fence still agree.
+        let mut fork = chain[4].header.inner.clone();
+        fork.extra_data = vec![0xaa].into();
+        finality_archive::atomic_json(
+            &bootstrap.join("fence.json"),
+            &serde_json::json!({"genesis":genesis,"tips":[fork]}),
+        )?;
+        FINALIZED_ANCESTRY
+            .get()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .remove(&genesis);
+        FINALITY_ARCHIVES
+            .get()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .remove(&genesis);
+        register_archive(&history, genesis)?;
+        register_archive(&bootstrap, genesis)?;
+        asserter.push_success(&chain[6]);
+        asserter.push_success(&chain[0]);
+        assert!(api
+            .verified_finalized_view_with_archive(&audit, genesis)
+            .await
+            .is_err());
+        assert!(asserter.read_q().is_empty());
+        let retained: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(bootstrap.join("fence.json"))?)?;
+        assert_eq!(
+            retained["tips"].as_array().unwrap().len(),
+            2,
+            "a conflicting old tip must not be collapsed"
+        );
+
+        // Same-height conflicts across directories must not be lost by map union.
+        finality_archive::atomic_json(
+            &history.join("fence.json"),
+            &serde_json::json!({"genesis":genesis,"tips":[chain[4].header.inner]}),
+        )?;
+        asserter.push_success(&chain[6]);
+        asserter.push_success(&chain[0]);
+        assert!(api
+            .verified_finalized_view_with_archive(&audit, genesis)
+            .await
+            .is_err());
+        assert!(asserter.read_q().is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn durable_history_revalidates_tenfold_age_and_records_and_retains_restart_fences(
     ) -> AnyResult<()> {
         use alloy::transports::mock::Asserter;
@@ -2838,28 +3115,14 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_nanos()
         ));
-        struct Cleanup {
-            directory: std::path::PathBuf,
-            genesis: B256,
-        }
-        impl Drop for Cleanup {
-            fn drop(&mut self) {
-                if let Some(cache) = FINALIZED_ANCESTRY.get() {
-                    cache.lock().unwrap().remove(&self.genesis);
-                }
-                if let Some(archives) = FINALITY_ARCHIVES.get() {
-                    archives.lock().unwrap().remove(&self.genesis);
-                }
-                let _ = std::fs::remove_dir_all(&self.directory);
-            }
-        }
         let _cleanup = Cleanup {
             directory: directory.clone(),
             genesis,
         };
         register_archive(&directory, genesis)?;
         {
-            let archive = archive_for(genesis).unwrap();
+            let archives = archives_for(genesis);
+            let archive = &archives[0];
             let mut top = height;
             while top > 0 {
                 let bottom = top.saturating_sub(511).max(1);

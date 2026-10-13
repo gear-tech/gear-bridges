@@ -10,17 +10,7 @@ use blake2::{
 use dto::{AuthoritySetState, BranchNodeData};
 use futures_util::{Stream, StreamExt};
 use gear_core::ids::ActorId;
-use gsdk::{
-    gear::{
-        runtime_types::{
-            pallet_gear::pallet::Event as GearEvent,
-            pallet_gear_eth_bridge::pallet::Event as GearEthBridgeEvent,
-            vara_runtime::RuntimeEvent,
-        },
-        system::storage::types::events::Events,
-    },
-    GearConfig,
-};
+use gsdk::{gear, GearConfig};
 use parity_scale_codec::{Compact, Decode, Encode};
 use sc_consensus_grandpa::FinalityProof;
 use sp_consensus_grandpa::GrandpaJustification;
@@ -30,7 +20,8 @@ use subxt::{
     backend::BlockRef,
     blocks::Block as BlockImpl,
     dynamic::DecodedValueThunk,
-    storage::{Address, DynamicAddress},
+    events::{EventDetails, Events},
+    storage::Address,
     utils::H256,
     OnlineClient,
 };
@@ -42,6 +33,25 @@ pub mod dto;
 pub use gsdk::{ext, gp};
 
 pub type GearBlock = BlockImpl<GearConfig, OnlineClient<GearConfig>>;
+
+#[derive(subxt::ext::scale_decode::DecodeAsType)]
+#[decode_as_type(crate_path = "subxt::ext::scale_decode")]
+struct SystemExtrinsicFailure {
+    dispatch_error: gear::runtime_types::sp_runtime::DispatchError,
+}
+
+impl subxt::events::StaticEvent for SystemExtrinsicFailure {
+    const PALLET: &'static str = "System";
+    const EVENT: &'static str = "ExtrinsicFailed";
+}
+
+/// Decode the required dispatch error with current metadata, preserving the
+/// journal representation without decoding unrelated DispatchInfo fields.
+pub fn extrinsic_failure(event: &EventDetails<GearConfig>) -> AnyResult<Option<String>> {
+    Ok(event
+        .as_event::<SystemExtrinsicFailure>()?
+        .map(|failure| format!("{:?}", failure.dispatch_error)))
+}
 
 struct StorageTrieInclusionProof {
     branch_nodes_data: Vec<BranchNodeData>,
@@ -756,47 +766,29 @@ impl GearApi {
         Ok((queue_id, merkle_root))
     }
 
-    pub async fn get_events_at(
-        &self,
-        block_hash: Option<H256>,
-    ) -> anyhow::Result<Vec<RuntimeEvent>> {
-        let addr = gsdk::gear::storage().system().events();
-
-        let events = self
-            .api
-            .storage_fetch_at(
-                &DynamicAddress::new(addr.pallet_name(), addr.entry_name(), ()),
-                block_hash,
-            )
-            .await?
-            .as_type::<Events>()
-            .map_err(|e| anyhow!("Failed to decode events: {e}"))?;
-
-        Ok(events.into_iter().map(|record| record.event).collect())
+    /// Hash-pinned metadata-directed events. Propagate iteration and named-event
+    /// decoding errors; unrelated events need not fit the generated RuntimeEvent.
+    pub async fn metadata_events_at(&self, block_hash: H256) -> AnyResult<Events<GearConfig>> {
+        let client: &OnlineClient<GearConfig> = &self.api;
+        Ok(client.events().at(block_hash).await?)
     }
 
     pub async fn message_queued_events(&self, block: H256) -> AnyResult<Vec<dto::Message>> {
-        let events = self.get_events_at(Some(block)).await?;
-
-        let events = events.into_iter().filter_map(|event| {
-            if let RuntimeEvent::GearEthBridge(GearEthBridgeEvent::MessageQueued {
-                message, ..
-            }) = event
+        let events = self.metadata_events_at(block).await?;
+        let mut messages = Vec::new();
+        for event in events.iter() {
+            if let Some(gear::gear_eth_bridge::events::MessageQueued { message, .. }) =
+                event?.as_event::<gear::gear_eth_bridge::events::MessageQueued>()?
             {
-                let nonce_be = primitive_types::U256(message.nonce.0).to_big_endian();
-
-                Some(dto::Message {
-                    nonce_be,
+                messages.push(dto::Message {
+                    nonce_be: primitive_types::U256(message.nonce.0).to_big_endian(),
                     source: message.source.0,
                     destination: message.destination.0,
                     payload: message.payload,
-                })
-            } else {
-                None
+                });
             }
-        });
-
-        Ok(events.collect())
+        }
+        Ok(messages)
     }
 
     pub async fn user_message_sent_events(
@@ -805,27 +797,24 @@ impl GearApi {
         to_user: H256,
         block: H256,
     ) -> AnyResult<Vec<dto::UserMessageSent>> {
-        let events = self.get_events_at(Some(block)).await?;
-
-        let events = events.into_iter().filter_map(|event| {
-            let RuntimeEvent::Gear(GearEvent::UserMessageSent { message, .. }) = event else {
-                return None;
+        let events = self.metadata_events_at(block).await?;
+        let mut messages = Vec::new();
+        for event in events.iter() {
+            let Some(gear::gear::events::UserMessageSent { message, .. }) =
+                event?.as_event::<gear::gear::events::UserMessageSent>()?
+            else {
+                continue;
             };
-
-            if message.source() != ActorId::new(from_program.0) {
-                return None;
+            if message.source() != ActorId::new(from_program.0)
+                || message.destination() != ActorId::new(to_user.0)
+            {
+                continue;
             }
-
-            if message.destination() != ActorId::new(to_user.0) {
-                return None;
-            }
-
-            Some(dto::UserMessageSent {
+            messages.push(dto::UserMessageSent {
                 payload: message.payload_bytes().to_vec(),
-            })
-        });
-
-        Ok(events.collect())
+            });
+        }
+        Ok(messages)
     }
 
     pub async fn get_constant(
@@ -863,6 +852,70 @@ impl GearApi {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use scale_info::{meta_type, PortableRegistry, Registry, TypeInfo};
+    use subxt::ext::scale_decode::DecodeAsType;
+
+    #[test]
+    fn failure_requires_named_compatible_error_not_old_dispatch_info() {
+        #[derive(Encode, TypeInfo)]
+        enum Error {
+            Other,
+        }
+        #[derive(Encode, TypeInfo)]
+        struct NativeFailure {
+            dispatch_error: Error,
+            dispatch_info: (u64, u64, u8, u8),
+        }
+        #[derive(Encode, TypeInfo)]
+        struct MissingError {
+            error: Error,
+            dispatch_info: (u64, u64, u8, u8),
+        }
+        #[derive(Encode, TypeInfo)]
+        enum ChangedError {
+            Unknown,
+        }
+        #[derive(Encode, TypeInfo)]
+        struct IncompatibleError {
+            dispatch_error: ChangedError,
+        }
+        let mut registry = Registry::new();
+        let valid = registry.register_type(&meta_type::<NativeFailure>()).id;
+        let missing = registry.register_type(&meta_type::<MissingError>()).id;
+        let incompatible = registry.register_type(&meta_type::<IncompatibleError>()).id;
+        let types: PortableRegistry = registry.into();
+        let bytes = NativeFailure {
+            dispatch_error: Error::Other,
+            dispatch_info: (31, 47, 0, 1),
+        }
+        .encode();
+        let mut input = bytes.as_slice();
+        let decoded = SystemExtrinsicFailure::decode_as_type(&mut input, valid, &types).unwrap();
+        assert_eq!(format!("{:?}", decoded.dispatch_error), "Other");
+        assert!(
+            input.is_empty(),
+            "unconsumed DispatchInfo must still be metadata-skipped"
+        );
+        let bytes = MissingError {
+            error: Error::Other,
+            dispatch_info: (31, 47, 0, 1),
+        }
+        .encode();
+        assert!(
+            SystemExtrinsicFailure::decode_as_type(&mut bytes.as_slice(), missing, &types).is_err()
+        );
+        let bytes = IncompatibleError {
+            dispatch_error: ChangedError::Unknown,
+        }
+        .encode();
+        assert!(SystemExtrinsicFailure::decode_as_type(
+            &mut bytes.as_slice(),
+            incompatible,
+            &types
+        )
+        .is_err());
+    }
 
     #[test]
     fn storage_correct() {

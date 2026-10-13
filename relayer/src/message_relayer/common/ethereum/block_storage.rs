@@ -1,6 +1,9 @@
 use crate::message_relayer::{
     common::{EthereumSlotNumber, TxHashWithSlot},
-    eth_to_gear::storage::{InboundRuntimeIdentity, Storage},
+    eth_to_gear::{
+        cutover::{self, PredecessorCutover},
+        storage::{InboundRuntimeIdentity, Storage},
+    },
 };
 use anyhow::Context;
 use ethereum_client::PollingEthApi;
@@ -24,8 +27,12 @@ pub struct BlockCursor {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DiscoveryState {
-    schema_version: u32,
-    identity: InboundRuntimeIdentity,
+    pub schema_version: u32,
+    pub identity: InboundRuntimeIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predecessor_cutover: Option<PredecessorCutover>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_parent_hash: Option<H256>,
     pub discovered: Option<BlockCursor>,
     pub extracted: Option<BlockCursor>,
     pub pending: BTreeMap<u64, H256>,
@@ -42,7 +49,17 @@ impl DiscoveryState {
         }
     }
 
-    fn validate(&self) -> anyhow::Result<()> {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            matches!(self.schema_version, 1 | 2)
+                && (self.schema_version == 2 || self.predecessor_cutover.is_none()),
+            "HOLD: unsupported discovery schema/predecessor binding"
+        );
+        anyhow::ensure!(
+            self.predecessor_cutover.is_none() == self.start_parent_hash.is_none()
+                && self.start_parent_hash != Some(H256::zero()),
+            "HOLD: missing successor boundary ancestry"
+        );
         let start = self.identity.ethereum_start_block;
         let mut next = match self.extracted {
             Some(cursor) => {
@@ -82,10 +99,20 @@ impl DiscoveryState {
 pub struct JSONBlockStorage {
     path: PathBuf,
     state: RwLock<DiscoveryState>,
+    _journal_ownership: Option<std::sync::Arc<cutover::JournalOwnership>>,
 }
 
 impl JSONBlockStorage {
     pub async fn new(path: PathBuf, identity: InboundRuntimeIdentity) -> anyhow::Result<Self> {
+        Self::new_bound(path, identity, None).await
+    }
+
+    pub async fn new_bound(
+        path: PathBuf,
+        identity: InboundRuntimeIdentity,
+        predecessor: Option<PredecessorCutover>,
+    ) -> anyhow::Result<Self> {
+        cutover::reject_sealed(&path)?;
         anyhow::ensure!(
             !tokio::fs::try_exists(path.with_extension("tmp")).await?,
             "HOLD: incomplete Ethereum discovery journal at {}; preserve it for reconciliation",
@@ -98,14 +125,22 @@ impl JSONBlockStorage {
                 format!("HOLD: unbound or malformed Ethereum discovery journal at {}; explicit authenticated reconciliation is required", path.display())
             })?;
             anyhow::ensure!(
-                state.schema_version == 1 && state.identity == identity,
+                matches!(state.schema_version, 1 | 2)
+                    && state.identity == identity
+                    && state.predecessor_cutover == predecessor,
                 "HOLD: Ethereum discovery journal schema or immutable runtime identity changed"
             );
             state.validate()?;
             state
         } else {
+            anyhow::ensure!(
+                predecessor.is_none(),
+                "HOLD: initialize successor journals from their verified cutover seal first"
+            );
             DiscoveryState {
-                schema_version: 1,
+                schema_version: 2,
+                predecessor_cutover: predecessor,
+                start_parent_hash: None,
                 identity,
                 discovered: None,
                 extracted: None,
@@ -115,6 +150,7 @@ impl JSONBlockStorage {
         let storage = Self {
             path,
             state: RwLock::new(state),
+            _journal_ownership: None,
         };
         if !exists {
             storage.save(&*storage.state.read().await).await?;
@@ -122,11 +158,20 @@ impl JSONBlockStorage {
         Ok(storage)
     }
 
+    pub fn with_journal_ownership(
+        mut self,
+        ownership: std::sync::Arc<cutover::JournalOwnership>,
+    ) -> Self {
+        self._journal_ownership = Some(ownership);
+        self
+    }
+
     pub async fn snapshot(&self) -> DiscoveryState {
         self.state.read().await.clone()
     }
 
     async fn save(&self, state: &DiscoveryState) -> anyhow::Result<()> {
+        cutover::reject_sealed(&self.path)?;
         let parent = self
             .path
             .parent()
@@ -161,6 +206,11 @@ impl JSONBlockStorage {
             anyhow::ensure!(
                 parent_hash == previous.hash,
                 "HOLD: Ethereum finalized discovery ancestry changed"
+            );
+        } else if let Some(expected) = state.start_parent_hash {
+            anyhow::ensure!(
+                parent_hash == expected,
+                "HOLD: successor discovery does not follow the authenticated cutover boundary"
             );
         } else if block.number == 0 {
             anyhow::ensure!(

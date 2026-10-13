@@ -166,7 +166,7 @@ const runProcessor = async () => {
   await initDecoders();
 
   const db = new TypeormDatabase({
-    supportHotBlocks: true,
+    supportHotBlocks: false,
     stateSchema: 'gear_processor',
   });
 

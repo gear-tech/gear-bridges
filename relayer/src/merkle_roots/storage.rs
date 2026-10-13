@@ -2,7 +2,7 @@ use crate::{
     merkle_roots::MerkleRoot,
     message_relayer::common::{
         gear::block_storage::{UnprocessedBlocks, UnprocessedBlocksStorage},
-        GearBlock,
+        BridgeEvent, GearBlock,
     },
     proof_storage::ProofStorage,
 };
@@ -43,17 +43,17 @@ impl Block {
 }
 
 pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<(u64, H256)> {
-    block.events().iter().find_map(|event| match event {
-        gsdk::Event::GearEthBridge(
-            gsdk::gear::gear_eth_bridge::Event::QueueMerkleRootChanged { queue_id, root },
+    block.bridge_events().iter().find_map(|event| match event {
+        BridgeEvent::QueueMerkleRootChanged(
+            gsdk::gear::gear_eth_bridge::events::QueueMerkleRootChanged { queue_id, root },
         ) => Some((*queue_id, *root)),
         _ => None,
     })
 }
 
 pub(super) fn message_queued_events_of(block: &GearBlock) -> impl Iterator<Item = U256> + use<'_> {
-    block.events().iter().filter_map(|event| match event {
-        gsdk::Event::GearEthBridge(gsdk::gear::gear_eth_bridge::Event::MessageQueued {
+    block.bridge_events().iter().filter_map(|event| match event {
+        BridgeEvent::MessageQueued(gsdk::gear::gear_eth_bridge::events::MessageQueued {
             message,
             ..
         }) => Some(U256(message.nonce.0)),
@@ -80,13 +80,11 @@ pub(super) fn priority_bridging_paid<'a>(
 
 pub(super) fn authority_set_changed(block: &GearBlock) -> bool {
     block
-        .events()
+        .bridge_events()
         .iter()
         .find_map(|event| match event {
-            gsdk::Event::GearEthBridge(
-                gsdk::gear::gear_eth_bridge::Event::AuthoritySetHashChanged(_),
-            )
-            | gsdk::Event::Grandpa(gsdk::gear::grandpa::Event::NewAuthorities { .. }) => Some(()),
+            BridgeEvent::AuthoritySetHashChanged(_)
+            | BridgeEvent::NewAuthorities(_) => Some(()),
             _ => None,
         })
         .is_some()

@@ -28,6 +28,8 @@ pub struct Transaction {
     pub status: TxStatus,
     pub tx: TxHashWithSlot,
     pub receipt_observation: Option<message_sender::FinalizedReceiptObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved_settlement_observation: Option<message_sender::FinalizedReceiptObservation>,
     pub receipt: Option<ReceiptEvidence>,
 }
 
@@ -38,11 +40,12 @@ impl Transaction {
             status,
             tx,
             receipt_observation: None,
+            saved_settlement_observation: None,
             receipt: None,
         }
     }
 
-    pub(super) fn receipt_event(&self) -> anyhow::Result<EthToVaraEvent> {
+    pub fn receipt_event(&self) -> anyhow::Result<EthToVaraEvent> {
         let receipt = self.receipt.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "HOLD: transaction {} has no original receipt evidence",
@@ -364,7 +367,7 @@ impl TransactionManager {
                     }
                     self.failed.write().await.insert(tx_uuid, diagnostic);
                     self.storage.save(self).await?;
-                    if !message_sender.submit_prepared(tx_uuid, tx.tx.tx_hash, event, signed) {
+                    if !message_sender.submit_prepared(tx_uuid, tx.tx.tx_hash, event, signed, tx.saved_settlement_observation.clone()) {
                         log::info!("Message sender connection closed, exiting...");
                         return Ok(false);
                     }
@@ -376,7 +379,7 @@ impl TransactionManager {
                     })?;
                     if let Some(signed) = receipt.signed_submission.clone() {
                         let event = tx.receipt_event()?;
-                        if !message_sender.submit_prepared(tx_uuid, tx.tx.tx_hash, event, signed) {
+                        if !message_sender.submit_prepared(tx_uuid, tx.tx.tx_hash, event, signed, tx.saved_settlement_observation.clone()) {
                             log::info!("Message sender connection closed, exiting...");
                             return Ok(false);
                         }
@@ -451,7 +454,7 @@ impl TransactionManager {
         self.storage.save_blocks().await
     }
 
-    async fn submit_message(&self, tx_uuid: Uuid, payload: EthToVaraEvent) -> anyhow::Result<()> {
+    pub async fn submit_message(&self, tx_uuid: Uuid, payload: EthToVaraEvent) -> anyhow::Result<()> {
         let mut transactions = self.transactions.write().await;
         let Some(tx) = transactions.get_mut(&tx_uuid) else {
             log::warn!("Received proof for unknown transaction: {tx_uuid}");
@@ -481,7 +484,7 @@ impl TransactionManager {
         self.storage.save(self).await
     }
 
-    async fn finalize_transaction(&self, response: message_sender::Response) -> anyhow::Result<()> {
+    pub async fn finalize_transaction(&self, response: message_sender::Response) -> anyhow::Result<()> {
         let message_sender::Response {
             tx_uuid,
             mut status,
@@ -530,7 +533,12 @@ impl TransactionManager {
                 .and_then(|receipt| receipt.signed_submission.as_ref())
             {
                 anyhow::ensure!(
-                    previous.same_request(signed),
+                    previous.same_request(signed)
+                        && previous.inclusion_block_number.is_none_or(|number| signed.inclusion_block_number == Some(number))
+                        && previous.inclusion_block_hash.as_ref().is_none_or(|hash| signed.inclusion_block_hash.as_ref() == Some(hash))
+                        && previous.message_id.as_ref().is_none_or(|id| signed.message_id.as_ref() == Some(id))
+                        && previous.finalized_dispatch_error.as_ref().is_none_or(|error| signed.finalized_dispatch_error.as_ref() == Some(error))
+                        && previous.finalized_reply_error.as_ref().is_none_or(|error| signed.finalized_reply_error.as_ref() == Some(error)),
                     "Original signed proof bytes/nonce/identity changed for {tx_uuid}"
                 );
                 anyhow::ensure!(
@@ -540,23 +548,8 @@ impl TransactionManager {
                         .is_none_or(|reply| signed.finalized_reply.as_ref() == Some(reply)),
                     "Original finalized proof reply identity changed for {tx_uuid}"
                 );
-                if let Some(original) = &previous.native_reconciliation {
-                    anyhow::ensure!(
-                        signed
-                            .native_reconciliation
-                            .as_ref()
-                            .is_some_and(|current| original.same_request(current)),
-                        "Original signed reconciliation bytes/nonce/identity changed for {tx_uuid}"
-                    );
-                    anyhow::ensure!(
-                        original.finalized_reply.as_ref().is_none_or(|reply| signed
-                            .native_reconciliation
-                            .as_ref()
-                            .and_then(|current| current.finalized_reply.as_ref())
-                            == Some(reply)),
-                        "Original finalized reconciliation reply identity changed for {tx_uuid}"
-                    );
-                }
+                anyhow::ensure!(signed.preserves_reconciliation(previous),
+                    "Original reconciliation history/bytes/reply changed for {tx_uuid}");
             }
         }
         if let Some(evidence) = &submission {
@@ -593,6 +586,10 @@ impl TransactionManager {
                     diagnostic: "Completion omitted the original finalized signed dispatch/reply evidence".into(),
                     receipt_observation: receipt_observation.clone(),
                 };
+            } else if let (Some(original), Some(pin)) = (original, receipt_observation.as_ref()) {
+                original.validate_settlement_order(pin)?;
+                anyhow::ensure!(tx.saved_settlement_observation.as_ref().is_none_or(|saved| saved == pin),
+                    "HOLD: saved completion was queried at a different settlement pin");
             }
         }
         let mut tx = transactions
@@ -626,6 +623,7 @@ impl TransactionManager {
                 receipt_observation,
             } => {
                 if let Some(observation) = receipt_observation {
+                    tx.saved_settlement_observation.get_or_insert_with(|| observation.clone());
                     tx.receipt_observation = Some(observation);
                 }
                 tx.status = TxStatus::Completed;
@@ -723,6 +721,9 @@ pub(super) mod tests {
             finalized_dispatch_error: None,
             finalized_reply: None,
             native_reconciliation: None,
+            native_reconciliation_attempts: Vec::new(),
+            finalized_nonce_consumed: None,
+            finalized_reply_error: None,
             chain_genesis_hash: "0x01".into(),
             manager: "0x02".into(),
             historical_proxy: "0x03".into(),
@@ -742,6 +743,185 @@ pub(super) mod tests {
             inclusion_block_hash: None,
             message_id: None,
         }
+    }
+
+
+    #[tokio::test]
+    async fn continuation_archive_requires_terminal_evidence_and_increasing_nonces() {
+        use subxt::config::{substrate::BlakeTwo256, Hasher};
+        use vft_manager_client::vft_manager::io::ReconcileReceipt;
+        let mut proof = signed_submission((17, 4));
+        proof.inclusion_block_number = Some(51);
+        proof.inclusion_block_hash = Some("0x07".into());
+        proof.message_id = Some("0x08".into());
+        proof.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
+            payload: vec![1], observation: message_sender::FinalizedReceiptObservation {
+                finalized_block_number: Some(52), finalized_block_hash: "0x09".into(),
+            },
+        });
+        let mut continuation = signed_submission(proof.receipt_key);
+        continuation.nonce = proof.nonce + 1;
+        continuation.prepared_finalized_number = 52;
+        continuation.scanned_finalized_number = 54;
+        continuation.payload_hash = format!("{:#x}", alloy_primitives::keccak256(ReconcileReceipt::encode_call(17, 4)));
+        continuation.extrinsic_hash = format!("{:#x}", BlakeTwo256.hash(&continuation.raw_extrinsic));
+        proof.native_reconciliation = Some(Box::new(continuation.clone()));
+        assert!(proof.validate_native_reconciliation().is_ok());
+        assert!(!continuation.has_terminal_reconciliation(), "RPC absence or unknown reply cannot authorize a new signature");
+        let previous = proof.clone();
+        proof.native_reconciliation = None;
+        proof.native_reconciliation_attempts.push(continuation.clone());
+        assert!(proof.validate_native_reconciliation().is_err());
+        proof.native_reconciliation_attempts[0].finalized_nonce_consumed = Some(continuation.nonce + 1);
+        assert!(proof.validate_native_reconciliation().is_ok());
+        assert!(proof.preserves_reconciliation(&previous));
+        let archived = proof.clone();
+        continuation.nonce += 1;
+        proof.native_reconciliation = Some(Box::new(continuation.clone()));
+        assert!(proof.validate_native_reconciliation().is_ok());
+        assert!(proof.preserves_reconciliation(&archived));
+        proof.native_reconciliation.as_mut().unwrap().nonce -= 1;
+        assert!(proof.validate_native_reconciliation().is_err());
+        proof.native_reconciliation = None;
+        for field in ["raw", "chain", "manager", "proxy", "sender", "key", "payload", "nested", "archive"] {
+            let mut changed = archived.clone();
+            let child = &mut changed.native_reconciliation_attempts[0];
+            match field {
+                "raw" => child.raw_extrinsic.push(0),
+                "chain" => child.chain_genesis_hash.push('0'),
+                "manager" => child.manager.push('0'),
+                "proxy" => child.historical_proxy.push('0'),
+                "sender" => child.sender.push('0'),
+                "key" => child.receipt_key.1 += 1,
+                "payload" => child.payload_hash.push('0'),
+                "nested" => child.native_reconciliation = Some(Box::new(continuation.clone())),
+                "archive" => child.native_reconciliation_attempts.push(continuation.clone()),
+                _ => unreachable!(),
+            }
+            assert!(changed.validate_native_reconciliation().is_err(), "{field}");
+        }
+        let mut dispatch_failure = continuation.clone();
+        dispatch_failure.inclusion_block_number = Some(55);
+        dispatch_failure.inclusion_block_hash = Some("0x55".into());
+        dispatch_failure.finalized_dispatch_error = Some("dispatch failed".into());
+        assert!(dispatch_failure.has_terminal_reconciliation());
+        dispatch_failure.message_id = Some("0x56".into());
+        assert!(!dispatch_failure.has_terminal_reconciliation(), "queued message is not a pre-message failure");
+        dispatch_failure.finalized_dispatch_error = None;
+        assert!(!dispatch_failure.has_terminal_reconciliation(), "missing reply remains held");
+        dispatch_failure.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
+            payload: vec![], observation: message_sender::FinalizedReceiptObservation {
+                finalized_block_number: Some(56), finalized_block_hash: "0x56".into(),
+            },
+        });
+        dispatch_failure.finalized_reply_error = Some("terminal runtime error".into());
+        assert!(dispatch_failure.has_terminal_reconciliation(), "authenticated terminal reply to the read-only call permits retry");
+        use super::super::storage::JSONStorage;
+        let path = std::env::temp_dir().join(format!("inbound-native-archive-{}", Uuid::now_v7()));
+        let storage = Arc::new(JSONStorage::new(&path));
+        storage.bind_runtime_identity(runtime_identity()).await.unwrap();
+        let manager = TransactionManager::new(storage.clone());
+        let (lock, event) = receipt_fixtures().remove(0);
+        // Use the same receipt identity for the existing original and archived continuation.
+        let mut previous = previous;
+        previous.receipt_key = (lock.slot_number.0, event.transaction_index);
+        previous.native_reconciliation.as_mut().unwrap().receipt_key = previous.receipt_key;
+        previous.native_reconciliation.as_mut().unwrap().payload_hash = format!("{:#x}",
+            alloy_primitives::keccak256(ReconcileReceipt::encode_call(previous.receipt_key.0, previous.receipt_key.1)));
+        let mut archived = previous.clone();
+        let mut terminal = *archived.native_reconciliation.take().unwrap();
+        terminal.finalized_nonce_consumed = Some(terminal.nonce + 1);
+        archived.native_reconciliation_attempts.push(terminal.clone());
+        let mut tx = Transaction::new(lock, TxStatus::NeedsReconciliation { diagnostic: "unknown original read-only reply".into() });
+        tx.receipt = Some(ReceiptEvidence {
+            payload: event.encode(), receipt_key: previous.receipt_key, composed_at_ms: 1,
+            handed_off_at_ms: Some(2), initial_response: None, signed_submission: Some(previous),
+            submission_attempts: Vec::new(),
+        });
+        let uuid = tx.uuid;
+        manager.add_transaction(tx).await;
+        storage.save(&manager).await.unwrap();
+        manager.finalize_transaction(message_sender::Response {
+            tx_uuid: uuid, status: MessageStatus::Prepared, submission: None,
+            signed_submission: Some(archived.clone()),
+        }).await.unwrap();
+        let disk: serde_json::Value = serde_json::from_slice(&tokio::fs::read(path.join("state.json")).await.unwrap()).unwrap();
+        let saved = &disk["transactions"][uuid.to_string()]["receipt"]["signed_submission"];
+        assert_eq!(saved["native_reconciliation_attempts"][0]["raw_extrinsic"], serde_json::to_value(&terminal.raw_extrinsic).unwrap());
+        assert_eq!(saved["native_reconciliation_attempts"][0]["finalized_nonce_consumed"], terminal.nonce + 1);
+        assert!(saved.get("native_reconciliation").is_none(), "no fresh signature before the terminal archive commit");
+        let restored = TransactionManager::new(storage.clone());
+        storage.load(&restored).await.unwrap();
+        assert_eq!(restored.transactions.read().await[&uuid].receipt.as_ref().unwrap().signed_submission.as_ref(), Some(&archived));
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn saved_completion_restores_original_pin_not_latest_polling_observation() {
+        use super::super::storage::JSONStorage;
+        let path = std::env::temp_dir().join(format!("inbound-historical-pin-{}", Uuid::now_v7()));
+        let storage = Arc::new(JSONStorage::new(&path));
+        storage.bind_runtime_identity(runtime_identity()).await.unwrap();
+        let manager = TransactionManager::new(storage.clone());
+        let (lock, event) = receipt_fixtures().remove(0);
+        let mut signed = signed_submission((lock.slot_number.0, event.transaction_index));
+        signed.inclusion_block_number = Some(18);
+        signed.inclusion_block_hash = Some("0x18".into());
+        signed.message_id = Some("0x19".into());
+        signed.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
+            payload: vec![1], observation: message_sender::FinalizedReceiptObservation {
+                finalized_block_number: Some(19), finalized_block_hash: "0x19".into(),
+            },
+        });
+        let pin = message_sender::FinalizedReceiptObservation {
+            finalized_block_number: Some(20), finalized_block_hash: "0x20".into(),
+        };
+        assert!(signed.validate_settlement_order(&pin).is_ok());
+        let mut early = pin.clone();
+        early.finalized_block_number = Some(18);
+        assert!(signed.validate_settlement_order(&early).is_err());
+        let mut tx = Transaction::new(lock, TxStatus::Completed);
+        tx.receipt = Some(ReceiptEvidence {
+            payload: event.encode(), receipt_key: signed.receipt_key, composed_at_ms: 1,
+            handed_off_at_ms: Some(2), initial_response: None, signed_submission: Some(signed),
+            submission_attempts: Vec::new(),
+        });
+        tx.receipt_observation = Some(pin.clone());
+        let uuid = tx.uuid;
+        manager.completed.write().await.insert(uuid, tx);
+        storage.save(&manager).await.unwrap();
+        let restored = TransactionManager::new(storage.clone());
+        storage.load(&restored).await.unwrap();
+        // Latest state may have evicted every receipt row; the request still carries hash 20.
+        restored.transactions.write().await.get_mut(&uuid).unwrap().receipt_observation = Some(
+            message_sender::FinalizedReceiptObservation { finalized_block_number: Some(74), finalized_block_hash: "0x74".into() });
+        let (requests, mut sent) = unbounded_channel();
+        let (_responses, received) = unbounded_channel();
+        let mut sender = MessageSenderIo::new(requests, received);
+        let (requests, _proof_requests) = unbounded_channel();
+        let (_responses, received) = unbounded_channel();
+        let mut composer = ProofComposerIo::new(requests, received);
+        restored.resume(&mut sender, &mut composer).await.unwrap();
+        match sent.try_recv().unwrap() {
+            message_sender::Request::SubmitPrepared { settlement_pin, .. } => assert_eq!(settlement_pin, Some(pin.clone())),
+            other => panic!("saved completion substituted unsigned/latest work: {other:?}"),
+        }
+        storage.save(&restored).await.unwrap();
+        let twice = TransactionManager::new(storage.clone());
+        storage.load(&twice).await.unwrap();
+        assert_eq!(twice.transactions.read().await[&uuid].saved_settlement_observation, Some(pin));
+        // A Processed-only legacy completion without a historical pin gets no latest shortcut.
+        manager.completed.write().await.get_mut(&uuid).unwrap().receipt_observation = None;
+        storage.save(&manager).await.unwrap();
+        let legacy = TransactionManager::new(storage.clone());
+        storage.load(&legacy).await.unwrap();
+        let legacy = legacy.transactions.read().await;
+        let held = &legacy[&uuid];
+        assert!(held.saved_settlement_observation.as_ref().unwrap().finalized_block_number.is_none());
+        assert!(held.receipt.as_ref().unwrap().signed_submission.as_ref().unwrap()
+            .validate_settlement_order(held.saved_settlement_observation.as_ref().unwrap()).is_err());
+        drop(legacy);
+        tokio::fs::remove_dir_all(path).await.unwrap();
     }
 
     #[tokio::test]
@@ -849,7 +1029,7 @@ pub(super) mod tests {
         let persisted: serde_json::Value =
             serde_json::from_slice(&tokio::fs::read(path.join("state.json")).await.unwrap())
                 .unwrap();
-        assert_eq!(persisted["schema_version"], 6);
+        assert_eq!(persisted["schema_version"], 7);
         assert_eq!(
             persisted["operator_extension"],
             legacy["operator_extension"]

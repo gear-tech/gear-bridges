@@ -1,5 +1,6 @@
 use crate::message_relayer::{
     common::{
+        eligible_message_dispatch::EligibleMessageDispatch,
         ethereum::{
             accumulator::Accumulator, merkle_root_extractor::MerkleRootExtractor,
             message_sender::MessageSender, status_fetcher::StatusFetcher,
@@ -11,7 +12,6 @@ use crate::message_relayer::{
             message_paid_event_extractor::MessagePaidEventExtractor,
             message_queued_event_extractor::{bind_event_storage, MessageQueuedEventExtractor},
         },
-        paid_messages_filter::PaidMessagesFilter,
         web_request::Message,
         MessageInBlock,
     },
@@ -37,7 +37,7 @@ pub struct Relayer {
     listener_message_queued: MessageQueuedEventExtractor,
     message_paid_listener: MessagePaidEventExtractor,
 
-    paid_messages_filter: PaidMessagesFilter,
+    eligible_message_dispatch: EligibleMessageDispatch,
 
     merkle_root_extractor: MerkleRootExtractor,
     message_sender: MessageSender,
@@ -59,7 +59,6 @@ impl MeteredService for Relayer {
             .chain(self.gear_block_listener.get_sources())
             .chain(self.listener_message_queued.get_sources())
             .chain(self.message_paid_listener.get_sources())
-            .chain(self.paid_messages_filter.get_sources())
             .chain(self.merkle_root_extractor.get_sources())
             .chain(self.message_sender.get_sources())
             .chain(self.accumulator.get_sources())
@@ -125,13 +124,15 @@ impl Relayer {
         );
 
         let (roots_sender, roots_receiver) = mpsc::unbounded_channel();
-        let merkle_root_extractor = MerkleRootExtractor::new(
+        let mut merkle_root_extractor = MerkleRootExtractor::new(
             eth_api.clone(),
             api_provider.clone(),
             confirmations_merkle_root,
             roots_sender,
             storage.clone(),
         );
+        *tx_manager.merkle_roots.write().await = merkle_root_extractor.qualify().await?;
+        tx_manager.requalify_unsigned_roots(&eth_api).await?;
 
         let message_sender = MessageSender::new(eth_api.clone());
 
@@ -145,13 +146,12 @@ impl Relayer {
             receiver,
             storage.clone(),
         );
-        let paid_messages_filter =
-            PaidMessagesFilter::new(excluded_from_fees, messages_sender, storage.clone());
+        let eligible_message_dispatch =
+            EligibleMessageDispatch::new(messages_sender, storage.clone());
 
         let accumulator = Accumulator::new(
             roots_receiver,
             tx_manager.merkle_roots.clone(),
-            storage.clone(),
             governance_admin,
             governance_pauser,
             eth_api.clone(),
@@ -163,7 +163,7 @@ impl Relayer {
             listener_message_queued,
             message_paid_listener,
 
-            paid_messages_filter,
+            eligible_message_dispatch,
 
             merkle_root_extractor,
             message_sender,
@@ -185,7 +185,7 @@ impl Relayer {
         let message_paid_receiver = self.message_paid_listener.run(gear_blocks_1).await;
         self.listener_message_queued.spawn(gear_blocks_0);
 
-        self.paid_messages_filter
+        self.eligible_message_dispatch
             .spawn(self.message_queued_receiver, message_paid_receiver);
         self.merkle_root_extractor.spawn();
         let accumulator_io = self.accumulator.spawn();

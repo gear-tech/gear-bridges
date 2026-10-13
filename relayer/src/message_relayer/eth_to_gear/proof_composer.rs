@@ -1,4 +1,7 @@
-use std::ops::ControlFlow;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    ops::ControlFlow,
+};
 
 use crate::{
     message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
@@ -105,7 +108,7 @@ pub struct ProofComposer {
     pub api_provider: ApiProviderConnection,
     pub beacon_client: BeaconClient,
     pub eth_api: PollingEthApi,
-    pub waiting_for_checkpoints: Vec<(Uuid, TxHashWithSlot)>,
+    pub waiting_for_checkpoints: HashMap<Uuid, TxHashWithSlot>,
     pub last_checkpoint: Option<EthereumSlotNumber>,
     pub historical_proxy_address: H256,
     pub suri: String,
@@ -132,7 +135,7 @@ impl ProofComposer {
             api_provider,
             beacon_client,
             eth_api,
-            waiting_for_checkpoints: Vec::new(),
+            waiting_for_checkpoints: HashMap::new(),
             last_checkpoint: None,
             historical_proxy_address,
             suri,
@@ -252,14 +255,7 @@ async fn handle_requests(
 
                     this.metrics.last_checkpoint.set(checkpoint.0 as i64);
 
-                    this.waiting_for_checkpoints.retain(|(tx_uuid, tx)| {
-                        if tx.slot_number <= checkpoint {
-                            this.to_process.push((*tx_uuid, tx.clone()));
-                            false
-                        } else {
-                            true
-                        }
-                    });
+                    this.to_process.extend(this.waiting_for_checkpoints.extract_if(|_, tx| tx.slot_number <= checkpoint));
 
                     continue;
                 } else {
@@ -273,10 +269,10 @@ async fn handle_requests(
                     if this.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
                         .is_some()
                     {
-                        this.to_process.push((tx_uuid, tx.clone()));
+                        this.to_process.push((tx_uuid, tx));
                     } else {
                         log::debug!("Transaction {tx_uuid} is waiting for checkpoint, adding to queue");
-                        this.waiting_for_checkpoints.push((tx_uuid, tx));
+                        queue_checkpoint_request(&mut this.waiting_for_checkpoints, tx_uuid, tx)?;
                     }
                 } else {
                     log::info!("Requests channel connection closed, exiting...");
@@ -285,6 +281,23 @@ async fn handle_requests(
             }
         }
     }
+}
+
+fn queue_checkpoint_request(
+    pending: &mut HashMap<Uuid, TxHashWithSlot>,
+    tx_uuid: Uuid,
+    tx: TxHashWithSlot,
+) -> anyhow::Result<()> {
+    match pending.entry(tx_uuid) {
+        Entry::Vacant(entry) => {
+            entry.insert(tx);
+        }
+        Entry::Occupied(entry) => anyhow::ensure!(
+            entry.get().slot_number == tx.slot_number && entry.get().tx_hash == tx.tx_hash,
+            "HOLD: checkpoint retry changed the original transaction identity"
+        ),
+    }
+    Ok(())
 }
 
 pub async fn compose(
@@ -372,6 +385,94 @@ pub async fn compose(
     compose_event(tx_hash, &receipt, inclusion, receipts)
 }
 
+/// Authenticate a selected boundary against the independently pinned checkpoint program.
+pub async fn authenticate_cutover_boundary(
+    beacon_client: &BeaconClient,
+    gear_api: &gclient::GearApi,
+    checkpoint_program: ActorId,
+    slot: u64,
+) -> anyhow::Result<beacon::electra::Block> {
+    use sails_rs::gclient::calls::QueryExtGClient;
+    let at = gear_api.last_block_hash().await?;
+    let checkpoint_service = ServiceCheckpointFor::new(GClientRemoting::new(gear_api.clone()));
+    let (checkpoint_slot, checkpoint) = checkpoint_service
+        .get(slot)
+        .at_block(sails_rs::H256::from_slice(at.as_ref()))
+        .recv(checkpoint_program)
+        .await
+        .map_err(|e| anyhow::anyhow!("Checkpoint query failed: {e:?}"))?
+        .map_err(|e| anyhow::anyhow!("Checkpoint unavailable: {e:?}"))?;
+    let block = beacon_client
+        .get_block::<beacon::electra::Block>(slot)
+        .await?;
+    anyhow::ensure!(block.slot == slot, "HOLD: selected boundary slot changed");
+    let headers = if slot == checkpoint_slot {
+        vec![]
+    } else {
+        beacon_client
+            .request_headers(
+                slot.checked_add(1).context("Slot overflow")?,
+                checkpoint_slot.checked_add(1).context("Slot overflow")?,
+            )
+            .await?
+    };
+    Ok(authenticate_beacon_block(block, checkpoint_slot, checkpoint, headers)?.block)
+}
+
+/// Complete hash-pinned block receipt validation, including empty blocks.
+/// Callers must first authenticate the header and transaction inventory.
+pub fn validate_receipt_set(
+    block_number: u64,
+    block_hash: TxHash,
+    transaction_hashes: &[TxHash],
+    receipts_root: TxHash,
+    receipts: &mut [TransactionReceipt],
+) -> anyhow::Result<Vec<eth_utils::Receipt>> {
+    anyhow::ensure!(
+        receipts.len() == transaction_hashes.len(),
+        "Receipt count differs from transaction count"
+    );
+    receipts.sort_unstable_by_key(|receipt| receipt.transaction_index);
+    let mapped = receipts
+        .iter()
+        .enumerate()
+        .map(|(index, receipt)| {
+            anyhow::ensure!(
+                receipt.transaction_index == Some(index as u64),
+                "Receipt indices must be complete, contiguous and unique"
+            );
+            anyhow::ensure!(
+                receipt.block_hash == Some(block_hash)
+                    && receipt.block_number == Some(block_number),
+                "Receipt block metadata differs from authenticated header"
+            );
+            anyhow::ensure!(
+                receipt.transaction_hash == transaction_hashes[index],
+                "Receipt hash differs from transaction inventory"
+            );
+            Ok((
+                index as u64,
+                eth_utils::map_receipt_envelope(receipt.as_ref()),
+            ))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    use ethereum_common::{patricia_trie::TrieDBMut, trie_db::TrieMut};
+    let mut db = memory_db::new();
+    let mut root = Hash256::zero();
+    {
+        let mut trie = TrieDBMut::new(&mut db, &mut root);
+        for (key, value) in eth_utils::rlp_encode_receipts_and_nibble_tuples(&mapped) {
+            trie.insert(&key, &value)
+                .map_err(|_| anyhow::anyhow!("Receipt trie insertion failed"))?;
+        }
+        anyhow::ensure!(
+            trie.root().as_bytes() == receipts_root.as_slice(),
+            "Rebuilt receipt trie differs from authenticated header"
+        );
+    }
+    Ok(mapped)
+}
+
 struct FullBlockInclusionProof {
     block: beacon::electra::Block,
     headers: Vec<beacon::BlockHeader>,
@@ -407,39 +508,18 @@ fn compose_event(
         "Requested hash differs from authenticated transaction at receipt index"
     );
 
-    anyhow::ensure!(
-        receipts.len() == payload.transactions.len(),
-        "Receipt count differs from authenticated transaction count"
-    );
-    receipts.sort_unstable_by_key(|receipt| receipt.transaction_index);
-    let receipts = receipts
+    let transaction_hashes = payload
+        .transactions
         .iter()
-        .enumerate()
-        .map(|(index, receipt)| {
-            anyhow::ensure!(
-                receipt.transaction_index == Some(index as u64),
-                "Receipt indices must be complete, contiguous and unique"
-            );
-            anyhow::ensure!(
-                receipt.block_hash == Some(block_hash)
-                    && receipt.block_number == Some(payload.block_number),
-                "Receipt block metadata differs from authenticated execution payload"
-            );
-            let expected_hash = if index == selected_index {
-                tx_hash
-            } else {
-                alloy_primitives::keccak256(payload.transactions[index].0.as_ref())
-            };
-            anyhow::ensure!(
-                receipt.transaction_hash == expected_hash,
-                "Receipt hash differs from authenticated transaction at its index"
-            );
-            Ok((
-                index as u64,
-                eth_utils::map_receipt_envelope(receipt.as_ref()),
-            ))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .map(|transaction| alloy_primitives::keccak256(transaction.0.as_ref()))
+        .collect::<Vec<_>>();
+    let receipts = validate_receipt_set(
+        payload.block_number,
+        block_hash,
+        &transaction_hashes,
+        TxHash::from(payload.receipts_root.0 .0),
+        &mut receipts,
+    )?;
     anyhow::ensure!(
         receipts[selected_index].1 == eth_utils::map_receipt_envelope(original_receipt.as_ref()),
         "Original receipt differs from hash-pinned block receipt"
@@ -664,6 +744,40 @@ mod tests {
     use ethereum_common::utils::{BeaconBlockHeaderResponse, BeaconBlockResponse};
     use serde::Deserialize;
     use std::{io::Read, sync::LazyLock};
+
+    #[test]
+    fn checkpoint_retries_preserve_one_original_transaction() {
+        let uuid = Uuid::from_u128(1);
+        let original = TxHashWithSlot {
+            slot_number: EthereumSlotNumber(42),
+            tx_hash: TxHash::repeat_byte(7),
+        };
+        let mut pending = HashMap::new();
+        for _ in 0..100 {
+            queue_checkpoint_request(&mut pending, uuid, original.clone()).unwrap();
+        }
+        assert_eq!(
+            pending.len(),
+            1,
+            "retries must compose only one proof when the checkpoint arrives"
+        );
+        for conflicting in [
+            TxHashWithSlot {
+                slot_number: EthereumSlotNumber(43),
+                ..original.clone()
+            },
+            TxHashWithSlot {
+                tx_hash: TxHash::repeat_byte(8),
+                ..original.clone()
+            },
+        ] {
+            assert!(queue_checkpoint_request(&mut pending, uuid, conflicting).is_err());
+        }
+        let retained = pending.remove(&uuid).unwrap();
+        assert_eq!(retained.slot_number, original.slot_number);
+        assert_eq!(retained.tx_hash, original.tx_hash);
+        assert!(pending.is_empty());
+    }
 
     #[derive(Deserialize)]
     struct Receipts {

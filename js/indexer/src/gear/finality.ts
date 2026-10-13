@@ -8,14 +8,27 @@ export async function requireFinalizedBatch(ctx: ProcessorContext): Promise<void
   const lastHeight = ctx.blocks.reduce((height, block) => Math.max(height, block.header.height), 0);
   let finalizedHash = '';
   let finalizedHeight = '';
-  for (let attempt = 0; attempt < 5; attempt++) {
-    finalizedHash = await rpc.call<string>('chain_getFinalizedHead', [], options);
-    if (!/^0x[0-9a-f]{64}$/i.test(finalizedHash)) throw new Error('HOLD: finalized Gear hash unavailable');
-    const header = await rpc.call<{ number: string } | null>('chain_getHeader', [finalizedHash], options);
-    if (!header || !/^0x[0-9a-f]+$/i.test(header.number)) throw new Error('HOLD: finalized Gear header unavailable');
+  // HOLD the whole batch during valid finality lag; shutdown cancels the processor.
+  while (true) {
+    const currentHash = await rpc.call<string>('chain_getFinalizedHead', [], options);
+    if (typeof currentHash !== 'string' || !/^0x[0-9a-f]{64}$/i.test(currentHash)) {
+      throw new Error('HOLD: finalized Gear hash unavailable');
+    }
+    const header = await rpc.call<{ number: string } | null>('chain_getHeader', [currentHash], options);
+    if (!header || typeof header.number !== 'string' || !/^0x[0-9a-f]+$/i.test(header.number)) {
+      throw new Error('HOLD: finalized Gear header unavailable');
+    }
+    if (finalizedHash) {
+      if (BigInt(header.number) < BigInt(finalizedHeight)) throw new Error('HOLD: finalized Gear height regressed');
+      const previous = await rpc.call<string>('chain_getBlockHash', [finalizedHeight], options);
+      if (previous?.toLowerCase() !== finalizedHash.toLowerCase() ||
+          (BigInt(header.number) === BigInt(finalizedHeight) && currentHash.toLowerCase() !== finalizedHash.toLowerCase())) {
+        throw new Error('HOLD: previous finalized Gear anchor changed');
+      }
+    }
+    finalizedHash = currentHash;
     finalizedHeight = header.number;
     if (BigInt(finalizedHeight) >= BigInt(lastHeight)) break;
-    if (attempt === 4) throw new Error('HOLD: batch exceeds canonical finalized Gear height');
     await setTimeout(30_000);
   }
   for (let offset = 0; offset < ctx.blocks.length; offset += 64) {

@@ -3,12 +3,22 @@ name = "relayer"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "relayer"
+path = "src/main.rs"
+required-features = ["legacy-prover"]
+
+[features]
+default = ["legacy-prover"]
+# BEEFY consumers reuse the real message relayer without the legacy ZK prover.
+legacy-prover = ["dep:prover", "dep:cgo_oligami", "dep:gear_proof_storage"]
+
 [dependencies]
 bridging-payment-client.workspace = true
 ethereum-client.workspace = true
-gear_proof_storage = { workspace = true, features = ["std"] }
+gear_proof_storage = { workspace = true, features = ["std"], optional = true }
 gear-rpc-client.workspace = true
-prover.workspace = true
+prover = { workspace = true, optional = true }
 
 alloy.workspace = true
 alloy-consensus.workspace = true
@@ -67,7 +77,7 @@ async-trait.workspace = true
 sp-consensus-grandpa = { workspace = true, features = ["std"] }
 
 [build-dependencies]
-cgo_oligami.workspace = true
+cgo_oligami = { workspace = true, optional = true }
 
 [dev-dependencies]
 hex-literal.workspace = true

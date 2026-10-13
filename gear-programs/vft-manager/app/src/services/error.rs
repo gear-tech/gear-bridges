@@ -62,4 +62,7 @@ pub enum Error {
     NativeSettlementReturned,
     ReceiptLeaseActive,
     InvalidReconciliation,
+    ReceiptOutsideDeployment,
+    Retired,
+    CutoverNotReady,
 }

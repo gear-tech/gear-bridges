@@ -17,7 +17,7 @@ contract BeefyLocal is Script, Base {
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployerAddress = vm.addr(privateKey);
-        address predictedQueue = vm.computeCreateAddress(deployerAddress, vm.getNonce(deployerAddress) + 12);
+        address predictedQueue = _predictBeefyMessageQueue(deployerAddress);
         _deployBeefyClient(privateKey, predictedQueue);
 
         address[] memory emergencyStopObservers = new address[](2);

@@ -38,7 +38,7 @@ struct TxDetails {
     receiver: ActorId,
     token_id: ActorId,
     amount: U256,
-    log_index: Option<u64>,
+    log_index: u64,
     action: ChildAction,
     terminal: bool,
 }
@@ -54,13 +54,17 @@ fn children() -> &'static mut collections::BTreeMap<MessageId, TxDetails> {
     unsafe { gstd::static_mut!(CHILDREN).get_or_insert_with(collections::BTreeMap::new) }
 }
 
+pub(super) fn is_quiescent() -> bool {
+    children().values().all(|child| child.terminal)
+}
+
 async fn send<Action>(
     (slot, transaction_index): (u64, u64),
     erc20_sender: H160,
     token_id: ActorId,
     params: &Action::Params,
     config: &Config,
-    log_index: Option<u64>,
+    log_index: u64,
     action: ChildAction,
 ) -> Result<(), Error>
 where
@@ -90,9 +94,7 @@ where
     .expect("Dispatch/reply funding failed: roll back the entire child dispatch");
     let child = reply.waiting_reply_to;
     children().insert(child, tx_details);
-    if let Some(log_index) = log_index {
-        super::record_child((slot, transaction_index), log_index, child);
-    }
+    super::record_child((slot, transaction_index), log_index, child);
     let reply = reply
         .up_to(Some(config.reply_timeout))
         .expect("Cannot install child timeout: roll back dispatch")
@@ -103,30 +105,20 @@ where
         _ => Error::Internal(format!("{e:?}")),
     });
 
-    if let Some(log_index) = log_index {
-        return match super::deposit_status((slot, transaction_index), log_index) {
-            Some(super::DepositStatus::Processed) => Ok(()),
-            Some(super::DepositStatus::NativeQueued) => Err(Error::NativeSettlementPending),
-            Some(
-                super::DepositStatus::Retryable(error) | super::DepositStatus::Ambiguous(error),
-            ) => Err(error),
-            Some(super::DepositStatus::Pending | super::DepositStatus::InFlight) | None => {
-                awaited.map(|_| ()).and_then(|_| {
-                    Err(Error::Internal(
-                        "VFT reply hook did not record receipt progress".into(),
-                    ))
-                })
-            }
-        };
-    }
-
-    awaited.map(|_| ()).and_then(|_| {
-        let key = (slot, transaction_index);
-        match super::reply_statuses_mut().remove(&key) {
-            Some(status) => status,
-            None => unreachable!("Status always set if a VFT invocation was successful"),
+    match super::deposit_status((slot, transaction_index), log_index) {
+        Some(super::DepositStatus::Processed) => Ok(()),
+        Some(super::DepositStatus::NativeQueued) => Err(Error::NativeSettlementPending),
+        Some(super::DepositStatus::Retryable(error) | super::DepositStatus::Ambiguous(error)) => {
+            Err(error)
         }
-    })
+        Some(super::DepositStatus::Pending | super::DepositStatus::InFlight) | None => {
+            awaited.map(|_| ()).and_then(|_| {
+                Err(Error::Internal(
+                    "VFT reply hook did not record receipt progress".into(),
+                ))
+            })
+        }
+    }
 }
 
 /// Persistent linkage survives a timed-out or dead originating continuation.
@@ -138,10 +130,8 @@ pub fn handle_persistent_reply() {
     if data.terminal || msg::source() != data.token_id {
         return;
     }
-    if let Some(log) = data.log_index {
-        if super::original_child((data.slot, data.transaction_index), log) != Some(child) {
-            return;
-        }
+    if super::original_child((data.slot, data.transaction_index), data.log_index) != Some(child) {
+        return;
     }
     let status = (|| {
         if matches!(msg::reply_code(), Ok(ReplyCode::Error(_))) {
@@ -170,28 +160,24 @@ pub fn handle_persistent_reply() {
             }
         }
     })();
-    children().get_mut(&child).unwrap().terminal = true;
-    let key = (data.slot, data.transaction_index);
-    if let Some(log_index) = data.log_index {
-        let progress = match &status {
-            Ok(()) => super::DepositStatus::Processed,
-            Err(Error::NativeSettlementPending) => super::DepositStatus::NativeQueued,
-            Err(error @ Error::ReplyFailure(_)) => super::DepositStatus::Retryable(error.clone()),
-            Err(error) => super::DepositStatus::Ambiguous(error.clone()),
-        };
-        super::set_deposit_status(key, log_index, progress);
-        if status.is_ok() {
-            emit_event(data.receiver, data.erc20_sender, data.amount, data.token_id);
-            super::emit_settled(key, log_index);
-        }
+    if status.is_ok() {
+        // Completed progress retains the original child and replay evidence.
+        children().remove(&child);
     } else {
-        super::reply_statuses_mut().insert(key, status.clone());
-        if status.is_ok() {
-            super::complete_transaction(key);
-            emit_event(data.receiver, data.erc20_sender, data.amount, data.token_id);
-        } else if matches!(status, Err(Error::ReplyFailure(_) | Error::InvalidReply)) {
-            super::reserved_transactions_mut().remove(&key);
-        }
+        children().get_mut(&child).unwrap().terminal = true;
+    }
+    let key = (data.slot, data.transaction_index);
+    let log_index = data.log_index;
+    let progress = match &status {
+        Ok(()) => super::DepositStatus::Processed,
+        Err(Error::NativeSettlementPending) => super::DepositStatus::NativeQueued,
+        Err(error @ Error::ReplyFailure(_)) => super::DepositStatus::Retryable(error.clone()),
+        Err(error) => super::DepositStatus::Ambiguous(error.clone()),
+    };
+    super::set_deposit_status(key, log_index, progress);
+    if status.is_ok() {
+        emit_event(data.receiver, data.erc20_sender, data.amount, data.token_id);
+        super::emit_settled(key, log_index);
     }
 }
 
@@ -211,31 +197,6 @@ where
     Ok(reply)
 }
 
-/// Mint `amount` tokens into the `receiver` address.
-///
-/// It will send `Mint` call to the corresponding `VFT` program and
-/// asynchronously wait for the reply.
-pub async fn mint(
-    slot: u64,
-    transaction_index: u64,
-    erc20_sender: H160,
-    token_id: ActorId,
-    receiver: ActorId,
-    amount: U256,
-    config: &Config,
-) -> Result<(), Error> {
-    send::<Mint>(
-        (slot, transaction_index),
-        erc20_sender,
-        token_id,
-        &(receiver, amount),
-        config,
-        None,
-        ChildAction::Mint,
-    )
-    .await
-}
-
 pub(super) async fn mint_log(
     key: (u64, u64),
     deposit: &super::ReceiptDeposit,
@@ -247,36 +208,8 @@ pub(super) async fn mint_log(
         deposit.token_id,
         &(deposit.receiver, deposit.amount),
         config,
-        Some(deposit.log_index),
+        deposit.log_index,
         ChildAction::Mint,
-    )
-    .await
-}
-
-/// Transfer `amount` tokens from the current program address to the `receiver` address,
-/// effectively unlocking them.
-///
-/// It will send `TransferFrom` call to the corresponding `VFT` program and
-/// asynchronously wait for the reply.
-/// Transfer `amount` tokens from the current program address to the `receiver` address,
-/// effectively unlocking them.
-pub async fn unlock(
-    slot: u64,
-    transaction_index: u64,
-    erc20_sender: H160,
-    token_id: ActorId,
-    receiver: ActorId,
-    amount: U256,
-    config: &Config,
-) -> Result<(), Error> {
-    send::<TransferFrom>(
-        (slot, transaction_index),
-        erc20_sender,
-        token_id,
-        &(Syscall::program_id(), receiver, amount),
-        config,
-        None,
-        ChildAction::Unlock,
     )
     .await
 }
@@ -292,7 +225,7 @@ pub(super) async fn unlock_log(
         deposit.token_id,
         &(Syscall::program_id(), deposit.receiver, deposit.amount),
         config,
-        Some(deposit.log_index),
+        deposit.log_index,
         ChildAction::Unlock,
     )
     .await
@@ -324,6 +257,7 @@ pub(super) async fn redeem_native_log(
             deposit.receiver,
             deposit.amount,
             deposit.operation_id,
+            config,
         )
         .await
     } else {
@@ -338,7 +272,7 @@ pub(super) async fn redeem_native_log(
                 deposit.amount,
             ),
             config,
-            Some(deposit.log_index),
+            deposit.log_index,
             ChildAction::Native,
         )
         .await
@@ -354,6 +288,7 @@ pub(super) async fn reconcile_native_log(
     receiver: ActorId,
     amount: U256,
     operation_id: H256,
+    config: &Config,
 ) -> Result<(), Error> {
     if matches!(
         super::deposit_status(key, log_index),
@@ -367,10 +302,21 @@ pub(super) async fn reconcile_native_log(
     ) {
         return Err(Error::NativeSettlementPending);
     }
-    let bytes = msg::send_bytes_for_reply(token_id, GetRedemption::encode_call(operation_id), 0, 0)
-        .map_err(|e| Error::Internal(format!("{e:?}")))?
-        .await
-        .map_err(|e| Error::Internal(format!("{e:?}")))?;
+    let bytes = msg::send_bytes_with_gas_for_reply(
+        token_id,
+        GetRedemption::encode_call(operation_id),
+        config.gas_for_token_ops,
+        0,
+        config.gas_for_reply_deposit,
+    )
+    .map_err(|e| Error::Internal(format!("{e:?}")))?
+    .up_to(Some(config.reply_timeout))
+    .map_err(|e| Error::Internal(format!("{e:?}")))?
+    .await
+    .map_err(|e| match e {
+        GStdError::Timeout(..) => Error::ReplyTimeout(format!("{e:?}")),
+        _ => Error::Internal(format!("{e:?}")),
+    })?;
     let redemption = decode_complete::<GetRedemption>(&bytes)?.ok_or(Error::InvalidReply)?;
     if (redemption.from, redemption.to, redemption.amount)
         != (Syscall::program_id(), receiver, amount)
@@ -392,6 +338,9 @@ pub(super) async fn reconcile_native_log(
                 return Err(Error::NativeSettlementPending);
             }
             super::set_deposit_status(key, log_index, super::DepositStatus::Processed);
+            if let Some(child) = super::original_child(key, log_index) {
+                children().remove(&child);
+            }
             super::emit_settled(key, log_index);
             emit_event(receiver, erc20_sender, amount, token_id);
             Ok(())

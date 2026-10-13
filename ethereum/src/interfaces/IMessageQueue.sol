@@ -3,6 +3,7 @@
 pragma solidity ^0.8.37;
 
 import {IPausable} from "src/interfaces/IPausable.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
 
 /**
  * @dev Type representing message being bridged from Gear-based chain (Vara Network) to Ethereum.
@@ -60,6 +61,8 @@ interface IMessageQueue is IPausable {
     error EmptyQueueProgressNotForward();
     error InvalidEmptyQueueProgressProof();
     error InvalidBeefyVerifier();
+    /// @dev Legacy state changed or the proposed BEEFY publication boundary is unsafe.
+    error InvalidBeefyMigration();
 
     /**
      * @dev Message nonce is already processed.
@@ -78,7 +81,6 @@ interface IMessageQueue is IPausable {
     error MerkleRootTimestampNotFound(uint256 blockNumber);
     error InvalidSourceBlock();
     error BlockNumberBelowMinimum(uint256 blockNumber, uint256 minimum);
-    error MerkleRootProgressNotForward();
 
     /**
      * @dev Merkle proof is invalid.
@@ -142,6 +144,9 @@ interface IMessageQueue is IPausable {
     event MerkleRoot(uint256 blockNumber, bytes32 merkleRoot);
     /// @dev A verified empty source snapshot advanced height without registering a root.
     event EmptyQueueProgress(uint256 indexed sourceBlock);
+    event MigratedToBeefy(
+        address indexed legacyVerifier, address indexed beefyVerifier, uint256 legacyMaxBlock, uint256 firstBeefyBlock
+    );
 
     /**
      * @dev Emitted when message processing is allowed during emergency stop.
@@ -317,6 +322,14 @@ interface IMessageQueue is IPausable {
 
     /// @dev Permanent publication floor; historical message redemption remains available.
     function beefyRootMinimum() external view returns (uint256);
+
+    /// @dev Preserve legacy state while atomically switching a paused proxy to a disjoint BEEFY publication range.
+    function migrateToBeefy(
+        IVerifier expectedLegacyVerifier,
+        IVerifier beefyVerifier,
+        uint256 expectedLegacyMaxBlock,
+        uint256 firstBeefyBlock
+    ) external;
 
     /**
      * @dev Verifies and processes message originated from Vara Network.

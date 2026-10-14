@@ -150,16 +150,24 @@ pub enum BridgeEvent {
 
 impl BridgeEvent {
     fn decode(event: &subxt::events::EventDetails<GearConfig>) -> anyhow::Result<Option<Self>> {
-        if let Some(event) = event.as_event::<gsdk::gear::gear_eth_bridge::events::MessageQueued>()? {
+        if let Some(event) =
+            event.as_event::<gsdk::gear::gear_eth_bridge::events::MessageQueued>()?
+        {
             return Ok(Some(Self::MessageQueued(event)));
         }
-        if let Some(event) = event.as_event::<gsdk::gear::gear_eth_bridge::events::QueueMerkleRootChanged>()? {
+        if let Some(event) =
+            event.as_event::<gsdk::gear::gear_eth_bridge::events::QueueMerkleRootChanged>()?
+        {
             return Ok(Some(Self::QueueMerkleRootChanged(event)));
         }
-        if let Some(event) = event.as_event::<gsdk::gear::gear_eth_bridge::events::AuthoritySetHashChanged>()? {
+        if let Some(event) =
+            event.as_event::<gsdk::gear::gear_eth_bridge::events::AuthoritySetHashChanged>()?
+        {
             return Ok(Some(Self::AuthoritySetHashChanged(event)));
         }
-        if let Some(event) = event.as_event::<gsdk::gear::gear_eth_bridge::events::QueueOverflowed>()? {
+        if let Some(event) =
+            event.as_event::<gsdk::gear::gear_eth_bridge::events::QueueOverflowed>()?
+        {
             return Ok(Some(Self::QueueOverflowed(event)));
         }
         if let Some(event) = event.as_event::<gsdk::gear::grandpa::events::NewAuthorities>()? {
@@ -180,7 +188,6 @@ pub struct GearBlock {
 }
 
 impl GearBlock {
-
     pub fn number(&self) -> u32 {
         self.header.number()
     }
@@ -199,16 +206,20 @@ impl GearBlock {
         from_program: H256,
         to_user: H256,
     ) -> impl Iterator<Item = &[u8]> + use<'_> {
-        self.bridge_events.iter().filter_map(move |event| match event {
-            BridgeEvent::UserMessageSent(gsdk::gear::gear::events::UserMessageSent { message, .. })
-                if message.source().into_bytes() == from_program.0
+        self.bridge_events
+            .iter()
+            .filter_map(move |event| match event {
+                BridgeEvent::UserMessageSent(gsdk::gear::gear::events::UserMessageSent {
+                    message,
+                    ..
+                }) if message.source().into_bytes() == from_program.0
                     && message.destination().into_bytes() == to_user.0 =>
-            {
-                Some(message.payload_bytes())
-            }
+                {
+                    Some(message.payload_bytes())
+                }
 
-            _ => None,
-        })
+                _ => None,
+            })
     }
 
     pub async fn from_subxt_block(
@@ -271,22 +282,25 @@ impl GearBlock {
 fn message_queued_events_of(
     block: &GearBlock,
 ) -> impl Iterator<Item = gear_rpc_client::dto::Message> + use<'_> {
-    block.bridge_events().iter().filter_map(|event| match event {
-        BridgeEvent::MessageQueued(gsdk::gear::gear_eth_bridge::events::MessageQueued {
-            message,
-            ..
-        }) => {
-            let nonce_be = primitive_types::U256(message.nonce.0).to_big_endian();
+    block
+        .bridge_events()
+        .iter()
+        .filter_map(|event| match event {
+            BridgeEvent::MessageQueued(gsdk::gear::gear_eth_bridge::events::MessageQueued {
+                message,
+                ..
+            }) => {
+                let nonce_be = primitive_types::U256(message.nonce.0).to_big_endian();
 
-            Some(gear_rpc_client::dto::Message {
-                nonce_be,
-                source: message.source.0,
-                destination: message.destination.0,
-                payload: message.payload.clone(),
-            })
-        }
-        _ => None,
-    })
+                Some(gear_rpc_client::dto::Message {
+                    nonce_be,
+                    source: message.source.0,
+                    destination: message.destination.0,
+                    payload: message.payload.clone(),
+                })
+            }
+            _ => None,
+        })
 }
 
 pub fn message_hash(message: &Message) -> [u8; 32] {
@@ -381,17 +395,28 @@ mod native_event_tests {
     #[ignore = "requires retained native archive and read-only loopback RPC"]
     async fn native_bridge_events_smoke() -> anyhow::Result<()> {
         let rpc = std::env::var("GEAR_ORIGINAL_RPC")?;
-        anyhow::ensure!(url::Url::parse(&rpc)?.host_str() == Some("127.0.0.1"), "loopback RPC required");
+        anyhow::ensure!(
+            url::Url::parse(&rpc)?.host_str() == Some("127.0.0.1"),
+            "loopback RPC required"
+        );
         let api = GearApi::new(&rpc, 0).await?;
-        assert_eq!(format!("{:#x}", api.api.genesis_hash()), "0xa12f631344f61644239b70f9ab53e4842e540d8b0c1e7adb9570c06a62c3af3f");
-        let archived = H256::from_str("0x92ebd056cf9f953ba87d066bc617b33c83d4922dead25f9f0c0068a7b1ddd855")?;
+        assert_eq!(
+            format!("{:#x}", api.api.genesis_hash()),
+            "0xa12f631344f61644239b70f9ab53e4842e540d8b0c1e7adb9570c06a62c3af3f"
+        );
+        let archived =
+            H256::from_str("0x92ebd056cf9f953ba87d066bc617b33c83d4922dead25f9f0c0068a7b1ddd855")?;
         assert_eq!(api.block_number_to_hash(813).await?, archived);
         let finalized = api.latest_finalized_block().await?;
         let finalized_number = api.block_hash_to_number(finalized).await?;
-        assert!(finalized_number > 813, "current finalized block must follow the archive");
+        assert!(
+            finalized_number > 813,
+            "current finalized block must follow the archive"
+        );
         let mut archived_replies = 0;
         for hash in [archived, finalized] {
-            let block = GearBlock::from_finalized_block(&api, api.get_block_at(hash).await?).await?;
+            let block =
+                GearBlock::from_finalized_block(&api, api.get_block_at(hash).await?).await?;
             assert_eq!(block.hash(), hash);
             assert_eq!(api.block_number_to_hash(block.number()).await?, hash);
             let metadata_events = api.metadata_events_at(hash).await?;
@@ -399,17 +424,36 @@ mod native_event_tests {
             for event in metadata_events.iter() {
                 let event = event?;
                 expected_bridge_events += usize::from(BridgeEvent::decode(&event)?.is_some());
-                if let Some(reply) = event.as_event::<gsdk::gear::gear::events::UserMessageSent>()? {
-                    assert!(event.as_event::<IncompatibleUserMessageSent>().is_err(), "incompatible consumed schema must not be ignored");
+                if let Some(reply) =
+                    event.as_event::<gsdk::gear::gear::events::UserMessageSent>()?
+                {
+                    let incompatible = event.as_event::<IncompatibleUserMessageSent>();
+                    assert!(
+                        incompatible.is_err(),
+                        "incompatible consumed schema decoded as {:?}",
+                        incompatible.ok().flatten().map(|event| event.message)
+                    );
                     let source = H256::from(reply.message.source().into_bytes());
                     let destination = H256::from(reply.message.destination().into_bytes());
-                    let expected: Vec<_> = block.user_message_sent_events(source, destination).collect();
-                    let actual = api.user_message_sent_events(source, destination, hash).await?;
-                    assert_eq!(actual.iter().map(|message| message.payload.as_slice()).collect::<Vec<_>>(), expected);
+                    let expected: Vec<_> = block
+                        .user_message_sent_events(source, destination)
+                        .collect();
+                    let actual = api
+                        .user_message_sent_events(source, destination, hash)
+                        .await?;
+                    assert_eq!(
+                        actual
+                            .iter()
+                            .map(|message| message.payload.as_slice())
+                            .collect::<Vec<_>>(),
+                        expected
+                    );
                     assert!(expected.contains(&reply.message.payload_bytes()));
                     let mut wrong_source = source;
                     wrong_source.0[0] ^= 1;
-                    assert!(!block.user_message_sent_events(wrong_source, destination).any(|payload| payload == reply.message.payload_bytes()));
+                    assert!(!block
+                        .user_message_sent_events(wrong_source, destination)
+                        .any(|payload| payload == reply.message.payload_bytes()));
                     archived_replies += usize::from(hash == archived);
                 }
             }
@@ -423,7 +467,13 @@ mod native_event_tests {
                 assert_eq!(actual.destination, expected.destination);
                 assert_eq!(actual.payload, expected.payload);
             }
-            println!("native bridge events block={} hash={hash:#x} total={} consumed={} queued={}", block.number(), metadata_events.len(), block.bridge_events().len(), queued.len());
+            println!(
+                "native bridge events block={} hash={hash:#x} total={} consumed={} queued={}",
+                block.number(),
+                metadata_events.len(),
+                block.bridge_events().len(),
+                queued.len()
+            );
         }
         assert!(archived_replies > 0, "archived constructor reply missing");
         assert_eq!(api.block_number_to_hash(813).await?, archived);

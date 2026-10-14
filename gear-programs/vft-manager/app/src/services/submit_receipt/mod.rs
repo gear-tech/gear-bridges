@@ -252,18 +252,7 @@ pub async fn reconcile_receipt(key: (u64, u64), config: &Config) -> Result<Recei
             .collect::<Vec<_>>()
     };
     for deposit in native {
-        match token_operations::reconcile_native_log(
-            key,
-            deposit.log_index,
-            deposit.sender,
-            deposit.token_id,
-            deposit.receiver,
-            deposit.amount,
-            deposit.operation_id,
-            config,
-        )
-        .await
-        {
+        match token_operations::reconcile_native_log(key, &deposit, config).await {
             Ok(()) | Err(Error::NativeSettlementPending) => {}
             Err(error) => return Err(error),
         }

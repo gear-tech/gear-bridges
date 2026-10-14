@@ -129,8 +129,7 @@ async fn main() -> Result<()> {
             owned_fixture_network,
         } => {
             follower::audit_history(
-                &source_rpc,
-                &witness_rpc,
+                (&source_rpc, &witness_rpc),
                 &ethereum_rpc,
                 &deployment_manifest,
                 &follower_state,

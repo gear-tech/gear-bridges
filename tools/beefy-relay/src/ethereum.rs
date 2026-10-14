@@ -567,28 +567,45 @@ pub(crate) async fn authenticate_recorded_receipts(
 }
 
 const HOODI_CHAIN_ID: u64 = 560_048;
-const HOODI_GENESIS_BLOCK: B256 = alloy::primitives::b256!("bbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b");
-const MAINNET_GENESIS_BLOCK: B256 = alloy::primitives::b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
+const HOODI_GENESIS_BLOCK: B256 =
+    alloy::primitives::b256!("bbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b");
+const MAINNET_GENESIS_BLOCK: B256 =
+    alloy::primitives::b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 const HOODI_DEFAULT_RPC: &str = "wss://ethereum-hoodi-rpc.publicnode.com";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum PublicEthereumNetwork { Hoodi, Mainnet }
+pub enum PublicEthereumNetwork {
+    Hoodi,
+    Mainnet,
+}
 
 impl PublicEthereumNetwork {
     fn chain_id(self) -> u64 {
-        match self { Self::Hoodi => HOODI_CHAIN_ID, Self::Mainnet => 1 }
+        match self {
+            Self::Hoodi => HOODI_CHAIN_ID,
+            Self::Mainnet => 1,
+        }
     }
 
     fn genesis(self) -> B256 {
-        match self { Self::Hoodi => HOODI_GENESIS_BLOCK, Self::Mainnet => MAINNET_GENESIS_BLOCK }
+        match self {
+            Self::Hoodi => HOODI_GENESIS_BLOCK,
+            Self::Mainnet => MAINNET_GENESIS_BLOCK,
+        }
     }
 
     pub(crate) fn deployment_mode(self) -> &'static str {
-        match self { Self::Hoodi => "hoodi-token-stack", Self::Mainnet => "mainnet-token-stack" }
+        match self {
+            Self::Hoodi => "hoodi-token-stack",
+            Self::Mainnet => "mainnet-token-stack",
+        }
     }
 
     pub(crate) fn follower_mode(self) -> &'static str {
-        match self { Self::Hoodi => "hoodi-token-follow", Self::Mainnet => "mainnet-token-follow" }
+        match self {
+            Self::Hoodi => "hoodi-token-follow",
+            Self::Mainnet => "mainnet-token-follow",
+        }
     }
 }
 
@@ -611,17 +628,25 @@ impl OwnedFixtureNetwork {
     }
 
     pub fn validate(&self) -> Result<()> {
-        ensure!(self.schema_version == 1 && self.ethereum_chain_id == 31_337,
-            "owned fixture requires schema 1 and Ethereum chain 31337; HOLD");
-        ensure!(self.ethereum_genesis_hash != B256::ZERO
-            && self.beacon_genesis_validators_root != B256::ZERO
-            && self.beacon_genesis_time > 0, "owned fixture genesis approval is incomplete; HOLD");
+        ensure!(
+            self.schema_version == 1 && self.ethereum_chain_id == 31_337,
+            "owned fixture requires schema 1 and Ethereum chain 31337; HOLD"
+        );
+        ensure!(
+            self.ethereum_genesis_hash != B256::ZERO
+                && self.beacon_genesis_validators_root != B256::ZERO
+                && self.beacon_genesis_time > 0,
+            "owned fixture genesis approval is incomplete; HOLD"
+        );
         Ok(())
     }
 
     pub fn validate_endpoints(&self, source: &str, witness: &str, ethereum: &str) -> Result<()> {
         self.validate()?;
-        ensure!(source != witness, "owned fixture requires independent source/witness endpoints");
+        ensure!(
+            source != witness,
+            "owned fixture requires independent source/witness endpoints"
+        );
         for endpoint in [source, witness, ethereum] {
             self.validate_endpoint(endpoint)?;
         }
@@ -630,9 +655,14 @@ impl OwnedFixtureNetwork {
 
     fn validate_endpoint(&self, endpoint: &str) -> Result<()> {
         self.validate()?;
-        ensure!(crate::local_source_rpc(endpoint)
-            && matches!(url::Url::parse(endpoint)?.host(), Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))),
-            "owned fixture endpoints must be numeric loopback websocket authorities; HOLD");
+        ensure!(
+            crate::local_source_rpc(endpoint)
+                && matches!(
+                    url::Url::parse(endpoint)?.host(),
+                    Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
+                ),
+            "owned fixture endpoints must be numeric loopback websocket authorities; HOLD"
+        );
         Ok(())
     }
 
@@ -640,34 +670,57 @@ impl OwnedFixtureNetwork {
         self.validate()?;
         let persisted: Self = serde_json::from_value(deployment["ownedFixtureNetwork"].clone())
             .context("owned fixture approval missing from deployment; HOLD")?;
-        ensure!(persisted == *self && deployment["localRehearsal"] == false
-            && manifest_u64(&deployment["ethereum"], "chainId")? == self.ethereum_chain_id,
-            "owned fixture approval differs from immutable deployment; HOLD");
+        ensure!(
+            persisted == *self
+                && deployment["localRehearsal"] == false
+                && manifest_u64(&deployment["ethereum"], "chainId")? == self.ethereum_chain_id,
+            "owned fixture approval differs from immutable deployment; HOLD"
+        );
         Ok(())
     }
 }
 
 pub fn approved_fixture_network(
-    path: Option<&Path>, deployment: &Value, source: &str, witness: &str, ethereum: &str,
+    path: Option<&Path>,
+    deployment: &Value,
+    source: &str,
+    witness: &str,
+    ethereum: &str,
     public_network: PublicEthereumNetwork,
 ) -> Result<Option<OwnedFixtureNetwork>> {
     let network = path.map(OwnedFixtureNetwork::read).transpose()?;
-    validate_fixture_approval(network.as_ref(), deployment, source, witness, ethereum, public_network)?;
+    validate_fixture_approval(
+        network.as_ref(),
+        deployment,
+        source,
+        witness,
+        ethereum,
+        public_network,
+    )?;
     Ok(network)
 }
 
 pub(crate) fn validate_fixture_approval(
-    network: Option<&OwnedFixtureNetwork>, deployment: &Value,
-    source: &str, witness: &str, ethereum: &str,
+    network: Option<&OwnedFixtureNetwork>,
+    deployment: &Value,
+    source: &str,
+    witness: &str,
+    ethereum: &str,
     public_network: PublicEthereumNetwork,
 ) -> Result<()> {
     if public_network == PublicEthereumNetwork::Mainnet {
-        ensure!(network.is_none() && deployment["localRehearsal"] == false,
-            "mainnet cannot use an owned fixture or local rehearsal; HOLD");
-        ensure!(deployment["mode"] == public_network.deployment_mode(),
-            "mainnet requires an independently reviewed mainnet-token-stack manifest; HOLD");
-        ensure!(ethereum.starts_with("https://") || ethereum.starts_with("wss://"),
-            "mainnet requires HTTPS or WSS; HOLD");
+        ensure!(
+            network.is_none() && deployment["localRehearsal"] == false,
+            "mainnet cannot use an owned fixture or local rehearsal; HOLD"
+        );
+        ensure!(
+            deployment["mode"] == public_network.deployment_mode(),
+            "mainnet requires an independently reviewed mainnet-token-stack manifest; HOLD"
+        );
+        ensure!(
+            ethereum.starts_with("https://") || ethereum.starts_with("wss://"),
+            "mainnet requires HTTPS or WSS; HOLD"
+        );
     }
     if let Some(network) = network {
         network.validate_endpoints(source, witness, ethereum)?;
@@ -675,8 +728,10 @@ pub(crate) fn validate_fixture_approval(
     } else {
         ensure!(deployment.get("ownedFixtureNetwork").is_none(),
             "owned fixture requires explicit --owned-fixture-network approval on every attachment; HOLD");
-        ensure!(manifest_u64(&deployment["ethereum"], "chainId")? == public_network.chain_id(),
-            "deployment differs from explicitly selected public network; HOLD");
+        ensure!(
+            manifest_u64(&deployment["ethereum"], "chainId")? == public_network.chain_id(),
+            "deployment differs from explicitly selected public network; HOLD"
+        );
     }
     Ok(())
 }
@@ -947,40 +1002,72 @@ impl Ethereum {
     }
 
     pub async fn connect(
-        endpoint: &str, wallet: &Path, manifest: &Value, fixture: Option<&OwnedFixtureNetwork>,
+        endpoint: &str,
+        wallet: &Path,
+        manifest: &Value,
+        fixture: Option<&OwnedFixtureNetwork>,
         public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
-        let ethereum = Self::connect_addresses(endpoint, Some(wallet), manifest, fixture, public_network).await?;
+        let ethereum =
+            Self::connect_addresses(endpoint, Some(wallet), manifest, fixture, public_network)
+                .await?;
         verify_manifest(&ethereum, manifest).await?;
         Ok(ethereum)
     }
 
     /// Read the deployment only after independently approved network authentication.
     pub async fn token_manifest(
-        endpoint: &str, wallet: &Path, addresses: &Value, fixture: Option<&OwnedFixtureNetwork>,
+        endpoint: &str,
+        wallet: &Path,
+        addresses: &Value,
+        fixture: Option<&OwnedFixtureNetwork>,
     ) -> Result<Value> {
-        let ethereum = Self::connect_addresses(endpoint, Some(wallet), addresses, fixture, PublicEthereumNetwork::Hoodi).await?;
+        let ethereum = Self::connect_addresses(
+            endpoint,
+            Some(wallet),
+            addresses,
+            fixture,
+            PublicEthereumNetwork::Hoodi,
+        )
+        .await?;
         verify_secure_policy(ethereum.client_address, ethereum.api.raw_provider().clone()).await?;
         verify_bindings(
-            ethereum.verifier_address, ethereum.client_address, ethereum.queue_address,
-            ethereum.expected_chain_id(), ethereum.api.raw_provider().clone(),
-        ).await?;
+            ethereum.verifier_address,
+            ethereum.client_address,
+            ethereum.queue_address,
+            ethereum.expected_chain_id(),
+            ethereum.api.raw_provider().clone(),
+        )
+        .await?;
         let manifest = ethereum.manifest().await?;
         verify_manifest(&ethereum, &manifest).await?;
         Ok(manifest)
     }
 
     async fn connect_addresses(
-        endpoint: &str, wallet: Option<&Path>, manifest: &Value, fixture: Option<&OwnedFixtureNetwork>,
+        endpoint: &str,
+        wallet: Option<&Path>,
+        manifest: &Value,
+        fixture: Option<&OwnedFixtureNetwork>,
         public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
-        ensure!(fixture.is_none() || public_network == PublicEthereumNetwork::Hoodi,
-            "mainnet cannot use an owned fixture; HOLD");
-        ensure!(public_network != PublicEthereumNetwork::Mainnet
-            || endpoint.starts_with("https://") || endpoint.starts_with("wss://"),
-            "mainnet requires HTTPS or WSS; HOLD");
-        let chain_id = fixture.map_or(public_network.chain_id(), |network| network.ethereum_chain_id);
-        ensure!(manifest_u64(manifest, "chainId")? == chain_id, "deployment chain id differs from approved network; HOLD");
+        ensure!(
+            fixture.is_none() || public_network == PublicEthereumNetwork::Hoodi,
+            "mainnet cannot use an owned fixture; HOLD"
+        );
+        ensure!(
+            public_network != PublicEthereumNetwork::Mainnet
+                || endpoint.starts_with("https://")
+                || endpoint.starts_with("wss://"),
+            "mainnet requires HTTPS or WSS; HOLD"
+        );
+        let chain_id = fixture.map_or(public_network.chain_id(), |network| {
+            network.ethereum_chain_id
+        });
+        ensure!(
+            manifest_u64(manifest, "chainId")? == chain_id,
+            "deployment chain id differs from approved network; HOLD"
+        );
         if let Some(network) = fixture {
             network.validate_endpoint(endpoint)?;
         }
@@ -990,33 +1077,64 @@ impl Ethereum {
         let receiver_address = manifest_address(manifest, "receiver")?;
         let endpoint = hoodi_rpc_endpoint(endpoint)?;
         if let Some(network) = fixture {
-            ensure_ethereum_network(&endpoint, network.ethereum_chain_id, network.ethereum_genesis_hash).await?;
+            ensure_ethereum_network(
+                &endpoint,
+                network.ethereum_chain_id,
+                network.ethereum_genesis_hash,
+            )
+            .await?;
         } else {
-            ensure_ethereum_network(&endpoint, public_network.chain_id(), public_network.genesis()).await?;
+            ensure_ethereum_network(
+                &endpoint,
+                public_network.chain_id(),
+                public_network.genesis(),
+            )
+            .await?;
         }
-        let private_key = wallet.map(read_hoodi_wallet).transpose()?.map(|(_, key)| key);
-        let api = EthApi::new(&endpoint, &address_string(queue_address), private_key.as_deref(), None, None)
-            .await.context("connect Ethereum deployment")?;
+        let private_key = wallet
+            .map(read_hoodi_wallet)
+            .transpose()?
+            .map(|(_, key)| key);
+        let api = EthApi::new(
+            &endpoint,
+            &address_string(queue_address),
+            private_key.as_deref(),
+            None,
+            None,
+        )
+        .await
+        .context("connect Ethereum deployment")?;
         Ok(Self {
             _anvil: None,
             owned_fixture_network: fixture.cloned(),
             public_network,
-            api, client_address, verifier_address, queue_address, receiver_address,
+            api,
+            client_address,
+            verifier_address,
+            queue_address,
+            receiver_address,
             transactions: Vec::new(),
         })
     }
 
     pub(crate) async fn connect_readonly(
-        endpoint: &str, manifest: &Value, fixture: Option<&OwnedFixtureNetwork>,
+        endpoint: &str,
+        manifest: &Value,
+        fixture: Option<&OwnedFixtureNetwork>,
         public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
-        let ethereum = Self::connect_addresses(endpoint, None, manifest, fixture, public_network).await?;
+        let ethereum =
+            Self::connect_addresses(endpoint, None, manifest, fixture, public_network).await?;
         verify_manifest(&ethereum, manifest).await?;
         Ok(ethereum)
     }
 
     fn expected_chain_id(&self) -> u64 {
-        self.owned_fixture_network.as_ref().map_or(self.public_network.chain_id(), |network| network.ethereum_chain_id)
+        self.owned_fixture_network
+            .as_ref()
+            .map_or(self.public_network.chain_id(), |network| {
+                network.ethereum_chain_id
+            })
     }
 
     pub(crate) async fn finality_genesis(&self) -> Result<B256> {
@@ -1026,10 +1144,17 @@ impl Ethereum {
         // The synthetic Anvil rehearsal exists only inside the pre-existing unit fixtures.
         #[cfg(test)]
         if self._anvil.is_some() {
-            let genesis = self.api.raw_provider().get_block_by_number(0u64.into()).await?
+            let genesis = self
+                .api
+                .raw_provider()
+                .get_block_by_number(0u64.into())
+                .await?
                 .context("owned rehearsal genesis is missing")?;
-            ensure!(genesis.header.number == 0 && genesis.header.inner.hash_slow() == genesis.header.hash,
-                "owned rehearsal genesis is not canonical RLP; HOLD");
+            ensure!(
+                genesis.header.number == 0
+                    && genesis.header.inner.hash_slow() == genesis.header.hash,
+                "owned rehearsal genesis is not canonical RLP; HOLD"
+            );
             return Ok(genesis.header.hash);
         }
         Ok(self.public_network.genesis())
@@ -1055,8 +1180,10 @@ impl Ethereum {
         use alloy::sol_types::SolValue;
         if saved.is_object() {
             ensure!(
-                deployment_transaction.is_none_or(|hint|
-                    saved["txHash"].as_str().and_then(|hash| hash.parse::<B256>().ok()) == Some(hint)),
+                deployment_transaction.is_none_or(|hint| saved["txHash"]
+                    .as_str()
+                    .and_then(|hash| hash.parse::<B256>().ok())
+                    == Some(hint)),
                 "client deployment transaction hint conflicts with saved bootstrap; HOLD"
             );
         }
@@ -1075,13 +1202,23 @@ impl Ethereum {
             )
         } else if let Some(transaction_hash) = deployment_transaction {
             // Receipt JSON is only a locator. The finalized header and both tries authenticate it below.
-            let receipt = self.api.raw_provider().get_transaction_receipt(transaction_hash).await?
+            let receipt = self
+                .api
+                .raw_provider()
+                .get_transaction_receipt(transaction_hash)
+                .await?
                 .context("client deployment transaction receipt unavailable; HOLD")?;
-            ensure!(receipt.transaction_hash == transaction_hash,
-                "client deployment locator transaction changed; HOLD");
+            ensure!(
+                receipt.transaction_hash == transaction_hash,
+                "client deployment locator transaction changed; HOLD"
+            );
             (
-                receipt.block_number.context("client deployment locator block unavailable; HOLD")?,
-                receipt.block_hash.context("client deployment locator hash unavailable; HOLD")?,
+                receipt
+                    .block_number
+                    .context("client deployment locator block unavailable; HOLD")?,
+                receipt
+                    .block_hash
+                    .context("client deployment locator hash unavailable; HOLD")?,
                 transaction_hash,
             )
         } else {
@@ -1733,9 +1870,16 @@ impl Ethereum {
 }
 
 fn hoodi_rpc_endpoint(endpoint: &str) -> Result<String> {
-    let endpoint = if endpoint.is_empty() { HOODI_DEFAULT_RPC } else { endpoint };
+    let endpoint = if endpoint.is_empty() {
+        HOODI_DEFAULT_RPC
+    } else {
+        endpoint
+    };
     ensure!(
-        matches!(url::Url::parse(endpoint)?.scheme(), "http" | "https" | "ws" | "wss"),
+        matches!(
+            url::Url::parse(endpoint)?.scheme(),
+            "http" | "https" | "ws" | "wss"
+        ),
         "Hoodi Ethereum endpoint must use HTTP(S) or WS(S)"
     );
     Ok(endpoint.to_owned())
@@ -1806,19 +1950,36 @@ pub(crate) async fn wait_canonical_receipt(
     .context("HOLD: original receipt block header remains unavailable after 120 seconds")?
 }
 
-
-async fn ensure_ethereum_network(endpoint: &str, chain_id: u64, expected_genesis: B256) -> Result<()> {
-    let provider = PollingEthApi::new(endpoint).await.context("connect approved Ethereum endpoint")?;
+async fn ensure_ethereum_network(
+    endpoint: &str,
+    chain_id: u64,
+    expected_genesis: B256,
+) -> Result<()> {
+    let provider = PollingEthApi::new(endpoint)
+        .await
+        .context("connect approved Ethereum endpoint")?;
     verify_ethereum_network(&*provider, chain_id, expected_genesis).await
 }
 
-async fn verify_ethereum_network(provider: &impl Provider, chain_id: u64, expected_genesis: B256) -> Result<()> {
-    ensure!(provider.get_chain_id().await? == chain_id, "Ethereum endpoint has unexpected chain id; HOLD");
-    let genesis = provider.get_block_by_number(BlockNumberOrTag::Number(0)).await?
+async fn verify_ethereum_network(
+    provider: &impl Provider,
+    chain_id: u64,
+    expected_genesis: B256,
+) -> Result<()> {
+    ensure!(
+        provider.get_chain_id().await? == chain_id,
+        "Ethereum endpoint has unexpected chain id; HOLD"
+    );
+    let genesis = provider
+        .get_block_by_number(BlockNumberOrTag::Number(0))
+        .await?
         .context("Ethereum genesis block is missing")?;
-    ensure!(genesis.header.number == 0 && genesis.header.hash == expected_genesis
-        && genesis.header.inner.hash_slow() == expected_genesis,
-        "Ethereum endpoint has unexpected or noncanonical genesis block; HOLD");
+    ensure!(
+        genesis.header.number == 0
+            && genesis.header.hash == expected_genesis
+            && genesis.header.inner.hash_slow() == expected_genesis,
+        "Ethereum endpoint has unexpected or noncanonical genesis block; HOLD"
+    );
     Ok(())
 }
 
@@ -2176,133 +2337,333 @@ mod tests {
 
     #[tokio::test]
     async fn bootstrap_deployment_hint_authenticates_creation_and_restart() -> Result<()> {
-        use alloy::{network::TransactionBuilder, rpc::types::TransactionRequest, sol_types::SolValue};
-        let anvil = Anvil::new().host("127.0.0.1").port(0u16).chain_id(31_337)
-            .arg("--slots-in-an-epoch").arg("1")
-            .arg("--timestamp").arg("1700000000").try_spawn()?;
+        use alloy::{
+            network::TransactionBuilder, rpc::types::TransactionRequest, sol_types::SolValue,
+        };
+        let anvil = Anvil::new()
+            .host("127.0.0.1")
+            .port(0u16)
+            .chain_id(31_337)
+            .arg("--slots-in-an-epoch")
+            .arg("1")
+            .arg("--timestamp")
+            .arg("1700000000")
+            .try_spawn()?;
         let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
         let queue = Address::from([3; 20]);
-        let api = EthApi::new(&anvil.ws_endpoint(), &address_string(queue), Some(&key), None, None).await?;
+        let api = EthApi::new(
+            &anvil.ws_endpoint(),
+            &address_string(queue),
+            Some(&key),
+            None,
+            None,
+        )
+        .await?;
         let provider = api.raw_provider().clone();
-        let arguments = (B256::from([1; 32]), U256::from(31_337), queue, 1u64, 2u64,
-            1_700_000_000_000u64, (7u128, 1u128, B256::from([4; 32])),
-            (8u128, 1u128, B256::from([5; 32]))).abi_encode();
+        let arguments = (
+            B256::from([1; 32]),
+            U256::from(31_337),
+            queue,
+            1u64,
+            2u64,
+            1_700_000_000_000u64,
+            (7u128, 1u128, B256::from([4; 32])),
+            (8u128, 1u128, B256::from([5; 32])),
+        )
+            .abi_encode();
         let input = [BeefyClient::BYTECODE.as_ref(), arguments.as_slice()].concat();
-        let receipt = provider.send_transaction(TransactionRequest::default()
-            .with_deploy_code(input).with_gas_limit(6_000_000)).await?.get_receipt().await?;
+        let receipt = provider
+            .send_transaction(
+                TransactionRequest::default()
+                    .with_deploy_code(input)
+                    .with_gas_limit(6_000_000),
+            )
+            .await?
+            .get_receipt()
+            .await?;
         assert!(receipt.status());
-        let wrong = provider.send_transaction(TransactionRequest::default()
-            .with_to(queue).with_gas_limit(21_000)).await?.get_receipt().await?;
-        provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
-        let ethereum = Ethereum { _anvil: Some(anvil), owned_fixture_network: None, api,
+        let wrong = provider
+            .send_transaction(
+                TransactionRequest::default()
+                    .with_to(queue)
+                    .with_gas_limit(21_000),
+            )
+            .await?
+            .get_receipt()
+            .await?;
+        provider
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x3",))
+            .await?;
+        let ethereum = Ethereum {
+            _anvil: Some(anvil),
+            owned_fixture_network: None,
+            api,
             public_network: PublicEthereumNetwork::Hoodi,
             client_address: receipt.contract_address.context("missing created client")?,
-            verifier_address: Address::ZERO, queue_address: queue, receiver_address: Address::ZERO,
-            transactions: Vec::new() };
+            verifier_address: Address::ZERO,
+            queue_address: queue,
+            receiver_address: Address::ZERO,
+            transactions: Vec::new(),
+        };
         let directory = tempfile::tempdir()?;
-        let (checkpoint, pin) = ethereum.authenticate_bootstrap(directory.path(), &Value::Null,
-            Some(receipt.transaction_hash)).await?;
+        let (checkpoint, pin) = ethereum
+            .authenticate_bootstrap(
+                directory.path(),
+                &Value::Null,
+                Some(receipt.transaction_hash),
+            )
+            .await?;
         assert_eq!(checkpoint.block, 2);
         assert_eq!(checkpoint.source_timestamp_ms, 1_700_000_000_000);
-        assert_eq!(pin, json!({"block":receipt.block_number, "blockHash":receipt.block_hash,
-            "txHash":receipt.transaction_hash}));
+        assert_eq!(
+            pin,
+            json!({"block":receipt.block_number, "blockHash":receipt.block_hash,
+            "txHash":receipt.transaction_hash})
+        );
         for hint in [None, Some(receipt.transaction_hash)] {
-            let (restored, restored_pin) = ethereum.authenticate_bootstrap(directory.path(), &pin, hint).await?;
+            let (restored, restored_pin) = ethereum
+                .authenticate_bootstrap(directory.path(), &pin, hint)
+                .await?;
             assert_eq!(restored, checkpoint);
             assert_eq!(restored_pin, pin);
         }
-        let missing = ethereum.authenticate_bootstrap(directory.path(), &Value::Null, Some(B256::ZERO)).await.unwrap_err();
-        assert!(missing.to_string().contains("receipt unavailable"), "{missing:#}");
-        let unrelated = ethereum.authenticate_bootstrap(directory.path(), &Value::Null,
-            Some(wrong.transaction_hash)).await.unwrap_err();
-        assert!(unrelated.to_string().contains("signed identity"), "{unrelated:#}");
-        let conflicting = ethereum.authenticate_bootstrap(directory.path(), &pin,
-            Some(wrong.transaction_hash)).await.unwrap_err();
-        assert!(conflicting.to_string().contains("conflicts with saved bootstrap"), "{conflicting:#}");
+        let missing = ethereum
+            .authenticate_bootstrap(directory.path(), &Value::Null, Some(B256::ZERO))
+            .await
+            .unwrap_err();
+        assert!(
+            missing.to_string().contains("receipt unavailable"),
+            "{missing:#}"
+        );
+        let unrelated = ethereum
+            .authenticate_bootstrap(directory.path(), &Value::Null, Some(wrong.transaction_hash))
+            .await
+            .unwrap_err();
+        assert!(
+            unrelated.to_string().contains("signed identity"),
+            "{unrelated:#}"
+        );
+        let conflicting = ethereum
+            .authenticate_bootstrap(directory.path(), &pin, Some(wrong.transaction_hash))
+            .await
+            .unwrap_err();
+        assert!(
+            conflicting
+                .to_string()
+                .contains("conflicts with saved bootstrap"),
+            "{conflicting:#}"
+        );
         let mut changed = pin.clone();
         changed["blockHash"] = json!(B256::from([9; 32]));
-        assert!(ethereum.authenticate_bootstrap(directory.path(), &changed,
-            Some(receipt.transaction_hash)).await.is_err());
+        assert!(ethereum
+            .authenticate_bootstrap(directory.path(), &changed, Some(receipt.transaction_hash))
+            .await
+            .is_err());
         changed = pin.clone();
         changed["block"] = json!(receipt.block_number.unwrap() + 1);
-        assert!(ethereum.authenticate_bootstrap(directory.path(), &changed, None).await.is_err());
+        assert!(ethereum
+            .authenticate_bootstrap(directory.path(), &changed, None)
+            .await
+            .is_err());
         // Archive discovery remains available without a locator and cannot change the pin.
-        let (discovered, discovered_pin) = ethereum.authenticate_bootstrap(directory.path(), &Value::Null, None).await?;
+        let (discovered, discovered_pin) = ethereum
+            .authenticate_bootstrap(directory.path(), &Value::Null, None)
+            .await?;
         assert_eq!(discovered, checkpoint);
         assert_eq!(discovered_pin, pin);
-        assert!(ethereum.transactions.is_empty(), "bootstrap reads must not sign or populate submissions");
+        assert!(
+            ethereum.transactions.is_empty(),
+            "bootstrap reads must not sign or populate submissions"
+        );
         Ok(())
     }
 
     #[tokio::test]
     #[ignore = "read-only original deployment and independently compiled bytecode comparison"]
     async fn actual_client_creation_matches_compiled_approved_bytecode() -> Result<()> {
-        let evidence: Value = serde_json::from_slice(&fs::read(std::env::var("BEEFY_TEST_CLIENT_DEPLOYMENT_EVIDENCE")?)?)?;
-        let original = evidence["originals"].as_array().context("missing originals")?.iter()
-            .find(|entry| entry["contractName"] == "BeefyClient").context("missing client creation")?;
+        let evidence: Value = serde_json::from_slice(&fs::read(std::env::var(
+            "BEEFY_TEST_CLIENT_DEPLOYMENT_EVIDENCE",
+        )?)?)?;
+        let original = evidence["originals"]
+            .as_array()
+            .context("missing originals")?
+            .iter()
+            .find(|entry| entry["contractName"] == "BeefyClient")
+            .context("missing client creation")?;
         let hash = manifest_b256(original, "hash")?;
-        let raw = hex::decode(original["raw"].as_str().context("missing signed original")?.trim_start_matches("0x"))?;
-        ensure!(B256::from(keccak256(&raw)) == hash, "original raw hash changed");
+        let raw = hex::decode(
+            original["raw"]
+                .as_str()
+                .context("missing signed original")?
+                .trim_start_matches("0x"),
+        )?;
+        ensure!(
+            B256::from(keccak256(&raw)) == hash,
+            "original raw hash changed"
+        );
         let mut encoded = raw.as_slice();
         let signed = TxEnvelope::decode_2718(&mut encoded)?;
-        ensure!(encoded.is_empty() && signed.to().is_none()
-            && signed.recover_signer()?.create(signed.nonce()) == manifest_address(original, "contractAddress")?,
-            "original CREATE identity changed");
+        ensure!(
+            encoded.is_empty()
+                && signed.to().is_none()
+                && signed.recover_signer()?.create(signed.nonce())
+                    == manifest_address(original, "contractAddress")?,
+            "original CREATE identity changed"
+        );
         let endpoint = std::env::var("BEEFY_TEST_HOODI_RPC")?;
         let api = PollingEthApi::new(&endpoint).await?;
-        let observed = api.get_transaction_by_hash(hash).await?.context("creation unavailable")?.into_inner();
-        ensure!(observed.encoded_2718() == raw, "live creation differs from saved signed original");
+        let observed = api
+            .get_transaction_by_hash(hash)
+            .await?
+            .context("creation unavailable")?
+            .into_inner();
+        ensure!(
+            observed.encoded_2718() == raw,
+            "live creation differs from saved signed original"
+        );
         let code = BeefyClient::BYTECODE.as_ref();
-        ensure!(observed.input().starts_with(code), "actual creation does not match compiled approved BYTECODE");
-        let artifact: Value = serde_json::from_slice(&fs::read(std::env::var("BEEFY_TEST_CLIENT_ARTIFACT")?)?)?;
-        let artifact_code = hex::decode(artifact["bytecode"]["object"].as_str().context("missing artifact bytecode")?.trim_start_matches("0x"))?;
-        ensure!(artifact_code == code, "coherent deployment artifact differs from compiled approval");
-        println!("creation={hash:#x} approved_bytes={} constructor_bytes={} approved_keccak={:#x}",
-            code.len(), observed.input().len() - code.len(), B256::from(keccak256(code)));
+        ensure!(
+            observed.input().starts_with(code),
+            "actual creation does not match compiled approved BYTECODE"
+        );
+        let artifact: Value =
+            serde_json::from_slice(&fs::read(std::env::var("BEEFY_TEST_CLIENT_ARTIFACT")?)?)?;
+        let artifact_code = hex::decode(
+            artifact["bytecode"]["object"]
+                .as_str()
+                .context("missing artifact bytecode")?
+                .trim_start_matches("0x"),
+        )?;
+        ensure!(
+            artifact_code == code,
+            "coherent deployment artifact differs from compiled approval"
+        );
+        println!(
+            "creation={hash:#x} approved_bytes={} constructor_bytes={} approved_keccak={:#x}",
+            code.len(),
+            observed.input().len() - code.len(),
+            B256::from(keccak256(code))
+        );
         Ok(())
     }
 
     #[test]
     fn owned_fixture_descriptor_refuses_missing_approval_and_rebinding() -> Result<()> {
-        let network = OwnedFixtureNetwork { schema_version: 1, ethereum_chain_id: 31_337,
+        let network = OwnedFixtureNetwork {
+            schema_version: 1,
+            ethereum_chain_id: 31_337,
             ethereum_genesis_hash: B256::from([1; 32]),
-            beacon_genesis_validators_root: B256::from([2; 32]), beacon_genesis_time: 1_700_000_000 };
+            beacon_genesis_validators_root: B256::from([2; 32]),
+            beacon_genesis_time: 1_700_000_000,
+        };
         let encoded = serde_json::to_value(&network)?;
-        assert_eq!(serde_json::from_value::<OwnedFixtureNetwork>(encoded.clone())?, network);
+        assert_eq!(
+            serde_json::from_value::<OwnedFixtureNetwork>(encoded.clone())?,
+            network
+        );
         let mut unknown = encoded.clone();
         unknown["trustLiveRpc"] = json!(true);
         assert!(serde_json::from_value::<OwnedFixtureNetwork>(unknown).is_err());
         let mut malformed = encoded.clone();
         malformed["ethereumGenesisHash"] = json!("0x01");
         assert!(serde_json::from_value::<OwnedFixtureNetwork>(malformed).is_err());
-        for field in ["schemaVersion", "ethereumChainId", "ethereumGenesisHash", "beaconGenesisValidatorsRoot", "beaconGenesisTime"] {
+        for field in [
+            "schemaVersion",
+            "ethereumChainId",
+            "ethereumGenesisHash",
+            "beaconGenesisValidatorsRoot",
+            "beaconGenesisTime",
+        ] {
             let mut missing = encoded.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(serde_json::from_value::<OwnedFixtureNetwork>(missing).is_err());
         }
         let deployment = json!({"localRehearsal":false, "ethereum":{"chainId":31337}, "ownedFixtureNetwork":encoded});
-        let endpoints = ("ws://127.0.0.1:9944", "ws://127.0.0.1:9945", "ws://127.0.0.1:8546");
-        validate_fixture_approval(Some(&network), &deployment, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Hoodi)?;
-        assert!(validate_fixture_approval(None, &deployment, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Hoodi).is_err());
-        assert!(validate_fixture_approval(Some(&network), &deployment, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Mainnet).is_err());
-        for endpoint in ["ws://localhost:8546", "wss://ethereum-hoodi-rpc.publicnode.com", "ws://192.168.1.1:8546", "ws://127.0.0.1:8546/path", "ws://user@127.0.0.1:8546"] {
-            assert!(network.validate_endpoints(endpoints.0, endpoints.1, endpoint).is_err());
+        let endpoints = (
+            "ws://127.0.0.1:9944",
+            "ws://127.0.0.1:9945",
+            "ws://127.0.0.1:8546",
+        );
+        validate_fixture_approval(
+            Some(&network),
+            &deployment,
+            endpoints.0,
+            endpoints.1,
+            endpoints.2,
+            PublicEthereumNetwork::Hoodi,
+        )?;
+        assert!(validate_fixture_approval(
+            None,
+            &deployment,
+            endpoints.0,
+            endpoints.1,
+            endpoints.2,
+            PublicEthereumNetwork::Hoodi
+        )
+        .is_err());
+        assert!(validate_fixture_approval(
+            Some(&network),
+            &deployment,
+            endpoints.0,
+            endpoints.1,
+            endpoints.2,
+            PublicEthereumNetwork::Mainnet
+        )
+        .is_err());
+        for endpoint in [
+            "ws://localhost:8546",
+            "wss://ethereum-hoodi-rpc.publicnode.com",
+            "ws://192.168.1.1:8546",
+            "ws://127.0.0.1:8546/path",
+            "ws://user@127.0.0.1:8546",
+        ] {
+            assert!(network
+                .validate_endpoints(endpoints.0, endpoints.1, endpoint)
+                .is_err());
         }
-        for field in ["ethereumGenesisHash", "beaconGenesisValidatorsRoot", "beaconGenesisTime"] {
+        for field in [
+            "ethereumGenesisHash",
+            "beaconGenesisValidatorsRoot",
+            "beaconGenesisTime",
+        ] {
             let mut changed = deployment.clone();
-            changed["ownedFixtureNetwork"][field] = if field == "beaconGenesisTime" { json!(1_700_000_001) } else { json!(B256::from([3;32])) };
+            changed["ownedFixtureNetwork"][field] = if field == "beaconGenesisTime" {
+                json!(1_700_000_001)
+            } else {
+                json!(B256::from([3; 32]))
+            };
             assert!(network.validate_manifest(&changed).is_err());
         }
         let mut rehearsal = deployment.clone();
         rehearsal["localRehearsal"] = json!(true);
         assert!(network.validate_manifest(&rehearsal).is_err());
-        for field in ["schemaVersion", "ethereumChainId", "ethereumGenesisHash", "beaconGenesisValidatorsRoot", "beaconGenesisTime"] {
+        for field in [
+            "schemaVersion",
+            "ethereumChainId",
+            "ethereumGenesisHash",
+            "beaconGenesisValidatorsRoot",
+            "beaconGenesisTime",
+        ] {
             let mut invalid = serde_json::to_value(&network)?;
-            invalid[field] = if field.ends_with("Hash") || field.ends_with("Root") { json!(B256::ZERO) } else { json!(0) };
-            assert!(serde_json::from_value::<OwnedFixtureNetwork>(invalid)?.validate().is_err());
+            invalid[field] = if field.ends_with("Hash") || field.ends_with("Root") {
+                json!(B256::ZERO)
+            } else {
+                json!(0)
+            };
+            assert!(serde_json::from_value::<OwnedFixtureNetwork>(invalid)?
+                .validate()
+                .is_err());
         }
         let hoodi = json!({"ethereum":{"chainId":HOODI_CHAIN_ID}});
-        validate_fixture_approval(None, &hoodi, endpoints.0, endpoints.1, endpoints.2, PublicEthereumNetwork::Hoodi)?;
+        validate_fixture_approval(
+            None,
+            &hoodi,
+            endpoints.0,
+            endpoints.1,
+            endpoints.2,
+            PublicEthereumNetwork::Hoodi,
+        )?;
         assert!(network.validate_manifest(&hoodi).is_err());
         Ok(())
     }
@@ -2310,17 +2671,29 @@ mod tests {
     #[test]
     fn mainnet_admission_requires_explicit_matching_public_identity() -> Result<()> {
         use PublicEthereumNetwork::{Hoodi, Mainnet};
-        let mainnet = json!({"mode":"mainnet-token-stack", "localRehearsal":false, "ethereum":{"chainId":1}});
-        let check = |deployment: &Value, network, endpoint| validate_fixture_approval(
-            None, deployment, "wss://source.example", "wss://witness.example", endpoint, network);
+        let mainnet =
+            json!({"mode":"mainnet-token-stack", "localRehearsal":false, "ethereum":{"chainId":1}});
+        let check = |deployment: &Value, network, endpoint| {
+            validate_fixture_approval(
+                None,
+                deployment,
+                "wss://source.example",
+                "wss://witness.example",
+                endpoint,
+                network,
+            )
+        };
         check(&mainnet, Mainnet, "https://ethereum.example")?;
         assert!(check(&mainnet, Hoodi, "https://ethereum.example").is_err());
         for endpoint in ["http://ethereum.example", "ws://127.0.0.1:8546", ""] {
             assert!(check(&mainnet, Mainnet, endpoint).is_err());
         }
-        for (pointer, value) in [("/mode", json!("hoodi-token-stack")),
-            ("/localRehearsal", json!(true)), ("/ethereum/chainId", json!(560048)),
-            ("/ethereum/chainId", json!(31337))] {
+        for (pointer, value) in [
+            ("/mode", json!("hoodi-token-stack")),
+            ("/localRehearsal", json!(true)),
+            ("/ethereum/chainId", json!(560048)),
+            ("/ethereum/chainId", json!(31337)),
+        ] {
             let mut changed = mainnet.clone();
             *changed.pointer_mut(pointer).unwrap() = value;
             assert!(check(&changed, Mainnet, "https://ethereum.example").is_err());
@@ -2337,17 +2710,34 @@ mod tests {
         let endpoint = std::env::var("BEEFY_TEST_MAINNET_RPC")?;
         let network = PublicEthereumNetwork::Mainnet;
         ensure_ethereum_network(&endpoint, network.chain_id(), network.genesis()).await?;
-        ensure!(ensure_ethereum_network(&endpoint, HOODI_CHAIN_ID, HOODI_GENESIS_BLOCK).await.is_err(),
-            "mainnet endpoint was admitted as Hoodi");
+        ensure!(
+            ensure_ethereum_network(&endpoint, HOODI_CHAIN_ID, HOODI_GENESIS_BLOCK)
+                .await
+                .is_err(),
+            "mainnet endpoint was admitted as Hoodi"
+        );
         let api = EthApi::new(&endpoint, &address_string(Address::ZERO), None, None, None).await?;
         let directory = tempfile::tempdir()?;
-        let view = api.verified_finalized_view_with_archive(directory.path(), network.genesis()).await?;
-        let header = api.raw_provider().get_block_by_hash(view.block_hash()).await?
+        let view = api
+            .verified_finalized_view_with_archive(directory.path(), network.genesis())
+            .await?;
+        let header = api
+            .raw_provider()
+            .get_block_by_hash(view.block_hash())
+            .await?
             .context("finalized mainnet header missing")?;
-        ensure!(header.header.number == view.block_number()
-            && header.header.inner.hash_slow() == view.block_hash(), "mainnet finalized identity changed");
-        println!("chain={} genesis={:#x} finalized={} hash={:#x}",
-            network.chain_id(), network.genesis(), view.block_number(), view.block_hash());
+        ensure!(
+            header.header.number == view.block_number()
+                && header.header.inner.hash_slow() == view.block_hash(),
+            "mainnet finalized identity changed"
+        );
+        println!(
+            "chain={} genesis={:#x} finalized={} hash={:#x}",
+            network.chain_id(),
+            network.genesis(),
+            view.block_number(),
+            view.block_hash()
+        );
         Ok(())
     }
 
@@ -2366,10 +2756,22 @@ mod tests {
                 let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
                 asserter.push_success(&format!("0x{observed_chain:x}"));
                 asserter.push_success(&block);
-                assert_eq!(verify_ethereum_network(&provider, expected_chain, expected_genesis).await.is_ok(), accepted);
+                assert_eq!(
+                    verify_ethereum_network(&provider, expected_chain, expected_genesis)
+                        .await
+                        .is_ok(),
+                    accepted
+                );
             }
         }
-        assert!(Ethereum::connect_readonly("ws://127.0.0.1:1", &json!({"chainId":31337}), None, PublicEthereumNetwork::Hoodi).await.is_err());
+        assert!(Ethereum::connect_readonly(
+            "ws://127.0.0.1:1",
+            &json!({"chainId":31337}),
+            None,
+            PublicEthereumNetwork::Hoodi
+        )
+        .await
+        .is_err());
         Ok(())
     }
 

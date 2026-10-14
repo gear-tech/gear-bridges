@@ -234,8 +234,10 @@ pub(crate) fn migrate_commitment_journal(state: &mut Value) -> Result<()> {
 pub(crate) fn validate_token_follower_journal(state: &Value, deployment: &Value) -> Result<()> {
     ensure!(
         matches!(state["schemaVersion"].as_u64(), Some(3 | 4))
-            && ((deployment["mode"] == "mainnet-token-stack" && state["mode"] == "mainnet-token-follow")
-                || (deployment["mode"] == "hoodi-token-stack" && state["mode"] == "hoodi-token-follow")),
+            && ((deployment["mode"] == "mainnet-token-stack"
+                && state["mode"] == "mainnet-token-follow")
+                || (deployment["mode"] == "hoodi-token-stack"
+                    && state["mode"] == "hoodi-token-follow")),
         "unsupported token follower journal schema or mode"
     );
     ensure!(
@@ -642,8 +644,7 @@ async fn revalidate_finalized_commitments(
 /// Operational audit: never signs, broadcasts, changes actor status or rewrites
 /// original journals. Only locally revalidated proof material is populated.
 pub async fn audit_history(
-    source_rpc: &str,
-    witness_rpc: &str,
+    source_rpcs: (&str, &str),
     ethereum_rpc: &str,
     deployment_manifest: &Path,
     state_path: &Path,
@@ -651,9 +652,16 @@ pub async fn audit_history(
     owned_fixture_network: Option<&Path>,
     public_network: crate::ethereum::PublicEthereumNetwork,
 ) -> Result<()> {
+    let (source_rpc, witness_rpc) = source_rpcs;
     let deployment: Value = serde_json::from_slice(&fs::read(deployment_manifest)?)?;
     let fixture = crate::ethereum::approved_fixture_network(
-        owned_fixture_network, &deployment, source_rpc, witness_rpc, ethereum_rpc, public_network)?;
+        owned_fixture_network,
+        &deployment,
+        source_rpc,
+        witness_rpc,
+        ethereum_rpc,
+        public_network,
+    )?;
     let mut state = read_state_file(state_path)?;
     migrate_commitment_journal(&mut state)?;
     validate_token_follower_journal(&state, &deployment)?;
@@ -669,7 +677,12 @@ pub async fn audit_history(
             )
             .await
         },
-        Ethereum::connect_readonly(ethereum_rpc, &state["activeEthereum"], fixture.as_ref(), public_network),
+        Ethereum::connect_readonly(
+            ethereum_rpc,
+            &state["activeEthereum"],
+            fixture.as_ref(),
+            public_network
+        ),
     )?;
     source.validate_attachment(&deployment["anchor"]).await?;
     let started = std::time::Instant::now();
@@ -2520,12 +2533,7 @@ async fn publish_token_roots(
                 crate::root_publication::RootPublicationState::Mined => "mined",
                 crate::root_publication::RootPublicationState::Observed => "observed",
                 crate::root_publication::RootPublicationState::Pending => {
-                    state["roots"][&key]["status"] = json!("pending");
-                    state["follower"]["status"] = json!("held-root");
-                    state["follower"]["lastError"] = json!(
-                        "original signed root remains unmined; HOLD without advancing its anchor"
-                    );
-                    save(output, state, None)?;
+                    record_pending_root_publication(ethereum, output, state, &key).await?;
                     return Ok(uncovered);
                 }
             };
@@ -2548,6 +2556,31 @@ async fn publish_token_roots(
     }
 }
 
+async fn record_pending_root_publication(
+    ethereum: &Ethereum,
+    output: &Path,
+    state: &mut Value,
+    key: &str,
+) -> Result<()> {
+    let publication = Path::new(
+        state["roots"][key]["publication"]
+            .as_str()
+            .context("root publication path missing")?,
+    );
+    let intent: Value = serde_json::from_slice(&fs::read(publication)?)?;
+    crate::root_publication::validate_root_publication(ethereum, publication, &intent).await?;
+    state["roots"][key]["status"] = json!("pending");
+    if intent["observedProgress"].is_object() {
+        state["follower"]["status"] = json!("catching-up");
+        state["follower"]["lastError"] = Value::Null;
+    } else {
+        state["follower"]["status"] = json!("held-root");
+        state["follower"]["lastError"] =
+            json!("original signed root remains unmined; HOLD without advancing its anchor");
+    }
+    save(output, state, None)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn follow_tokens(
     source_rpc: &str,
@@ -2565,8 +2598,17 @@ pub async fn follow_tokens(
 ) -> Result<()> {
     let deployment: Value = serde_json::from_slice(&fs::read(deployment_manifest)?)?;
     let fixture = crate::ethereum::approved_fixture_network(
-        owned_fixture_network, &deployment, source_rpc, witness_rpc, ethereum_rpc, public_network)?;
-    ensure!(!(local_rehearsal && fixture.is_some()), "owned fixture is not a local rehearsal");
+        owned_fixture_network,
+        &deployment,
+        source_rpc,
+        witness_rpc,
+        ethereum_rpc,
+        public_network,
+    )?;
+    ensure!(
+        !(local_rehearsal && fixture.is_some()),
+        "owned fixture is not a local rehearsal"
+    );
     ensure!(
         !source_rpc.is_empty() && !witness_rpc.is_empty(),
         "source and witness RPCs are required"
@@ -2657,8 +2699,14 @@ pub async fn follow_tokens(
     let (anchor, first) =
         authenticated_token_anchor(&mut source, &mut witness, &deployment["anchor"]).await?;
     let anchor_block = anchor.block;
-    let mut ethereum =
-        Ethereum::connect(ethereum_rpc, wallet, selected_ethereum_manifest, fixture.as_ref(), public_network).await?;
+    let mut ethereum = Ethereum::connect(
+        ethereum_rpc,
+        wallet,
+        selected_ethereum_manifest,
+        fixture.as_ref(),
+        public_network,
+    )
+    .await?;
     ensure!(
         decode(&deployment["manager"])?.as_slice() == ethereum.receiver_address.as_slice(),
         "declared ERC20 manager differs from client receiver"
@@ -2900,43 +2948,81 @@ mod tests {
     async fn live_native_root_scan_crosses_uninitialized_floor() -> Result<()> {
         let rpc = std::env::var("SOURCE_IDENTITY_RPC")?;
         let witness_rpc = std::env::var("SOURCE_IDENTITY_WITNESS_RPC")?;
-        ensure!(rpc != witness_rpc && crate::local_source_rpc(&rpc)
-            && crate::local_source_rpc(&witness_rpc), "independent loopback read-only endpoints required");
+        ensure!(
+            rpc != witness_rpc
+                && crate::local_source_rpc(&rpc)
+                && crate::local_source_rpc(&witness_rpc),
+            "independent loopback read-only endpoints required"
+        );
         let genesis: [u8; 32] = decode(&json!(std::env::var("SOURCE_SCAN_GENESIS")?))?
-            .try_into().map_err(|_| anyhow::anyhow!("invalid genesis"))?;
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("invalid genesis"))?;
         let initialized: u32 = std::env::var("SOURCE_SCAN_INITIALIZED_BLOCK")?.parse()?;
         let queued: u32 = std::env::var("SOURCE_SCAN_QUEUED_BLOCK")?.parse()?;
-        ensure!(initialized > 1 && queued > initialized, "invalid native boundary pins");
+        ensure!(
+            initialized > 1 && queued > initialized,
+            "invalid native boundary pins"
+        );
         let (source, witness) = Source::connect_pair(
-            GearApi::new(&rpc, 3).await?, GearApi::new(&witness_rpc, 3).await?
-        ).await?;
-        ensure!(source.source_genesis == genesis && witness.source_genesis == genesis,
-            "native test genesis differs; HOLD");
+            GearApi::new(&rpc, 3).await?,
+            GearApi::new(&witness_rpc, 3).await?,
+        )
+        .await?;
+        ensure!(
+            source.source_genesis == genesis && witness.source_genesis == genesis,
+            "native test genesis differs; HOLD"
+        );
         for block in [1, initialized - 1, initialized, queued] {
             let hash = source.api.block_number_to_hash(block).await?;
-            ensure!(witness.api.block_number_to_hash(block).await? == hash, "native boundary fork");
+            ensure!(
+                witness.api.block_number_to_hash(block).await? == hash,
+                "native boundary fork"
+            );
             let (first, second) = tokio::try_join!(
                 source::queue_snapshot_at(&source.api, hash),
                 source::queue_snapshot_at(&witness.api, hash)
             )?;
             ensure!(first == second, "native boundary snapshot differs");
             if block < initialized {
-                ensure!(first.is_none(), "pre-initialization became an initialized zero root");
+                ensure!(
+                    first.is_none(),
+                    "pre-initialization became an initialized zero root"
+                );
             } else {
                 let (_, root) = first.context("initialized native root is absent")?;
-                ensure!((root.0 == [0; 32]) == (block == initialized), "unexpected native root");
+                ensure!(
+                    (root.0 == [0; 32]) == (block == initialized),
+                    "unexpected native root"
+                );
             }
             println!("native boundary block={block} hash={hash:?} snapshot={first:?}");
         }
         let directory = tempfile::tempdir()?;
-        let mut state = json!({"rootMinimum":1,"rootScan":{"block":0,"blockHash":bytes(genesis)},"roots":{}});
+        let mut state =
+            json!({"rootMinimum":1,"rootScan":{"block":0,"blockHash":bytes(genesis)},"roots":{}});
         scan_token_roots(&source, &witness, directory.path(), &mut state).await?;
-        ensure!(number(&state["rootScan"]["block"])? >= u64::from(queued), "scan did not cover the genuine queued block");
-        let roots = state["roots"].as_object().context("root inventory missing")?;
-        ensure!(roots.values().all(|root| root["block"] != 1), "invented floor root");
-        ensure!(roots.values().any(|root| root["block"] == queued && root["kind"] == "merkleRoot"),
-            "genuine queued epoch was lost");
-        println!("native scan cursor={} roots={}", state["rootScan"], roots.len());
+        ensure!(
+            number(&state["rootScan"]["block"])? >= u64::from(queued),
+            "scan did not cover the genuine queued block"
+        );
+        let roots = state["roots"]
+            .as_object()
+            .context("root inventory missing")?;
+        ensure!(
+            roots.values().all(|root| root["block"] != 1),
+            "invented floor root"
+        );
+        ensure!(
+            roots
+                .values()
+                .any(|root| root["block"] == queued && root["kind"] == "merkleRoot"),
+            "genuine queued epoch was lost"
+        );
+        println!(
+            "native scan cursor={} roots={}",
+            state["rootScan"],
+            roots.len()
+        );
         Ok(())
     }
 
@@ -3256,8 +3342,13 @@ mod tests {
         }
         state["commitments"] = json!(entries);
         let mut source = Source::connect(GearApi::new(&rpc, 3).await?).await?;
-        let mut ethereum =
-            Ethereum::connect_readonly(&ethereum_rpc, &state["activeEthereum"], None, crate::ethereum::PublicEthereumNetwork::Hoodi).await?;
+        let mut ethereum = Ethereum::connect_readonly(
+            &ethereum_rpc,
+            &state["activeEthereum"],
+            None,
+            crate::ethereum::PublicEthereumNetwork::Hoodi,
+        )
+        .await?;
         ethereum.transactions = state["transactions"]
             .as_array()
             .context("transactions")?
@@ -3311,6 +3402,257 @@ mod tests {
             "{}",
             json!({"status":"authenticated", "originalTransactions":3,
             "elapsedMs":started.elapsed().as_millis(), "signer":false, "writesOriginalJournal":false})
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an explicitly owned Hoodi-history Anvil fork and copied public evidence; no native source writes"]
+    async fn authenticated_competing_root_unfences_only_independent_follower() -> Result<()> {
+        use alloy::{
+            consensus::{SignableTransaction, TxEip1559},
+            eips::Encodable2718,
+            network::TxSigner,
+            primitives::TxKind,
+            signers::local::PrivateKeySigner,
+            sol_types::SolCall,
+        };
+        let rpc = std::env::var("BEEFY_TEST_ROOT_FORK_RPC")?;
+        ensure!(
+            crate::local_source_rpc(&rpc),
+            "root regression requires an owned loopback fork"
+        );
+        let fixture = std::path::PathBuf::from(std::env::var("BEEFY_TEST_ROOT_FORK_DIR")?);
+        let manifest: Value = serde_json::from_slice(&fs::read(fixture.join("deployment.json"))?)?;
+        let journal: Value =
+            serde_json::from_slice(&fs::read(fixture.join("follower-original.json"))?)?;
+        let published: Value =
+            serde_json::from_slice(&fs::read(fixture.join("published-root.json"))?)?;
+        let ethereum = Ethereum::connect_readonly(
+            &rpc,
+            &manifest["ethereum"],
+            None,
+            crate::ethereum::PublicEthereumNetwork::Hoodi,
+        )
+        .await?;
+        let provider = ethereum.api.raw_provider();
+        let original_head = provider.get_block_number().await?;
+        ensure!(
+            original_head == 3_810_598,
+            "fork differs from authenticated regression pin"
+        );
+        let target: u32 = number(&published["sourceBlock"])?.try_into()?;
+        let root: [u8; 32] = array(&published["root"])?;
+        let signer = PrivateKeySigner::from_bytes(&B256::from([19; 32]))?;
+        let input = ethereum_client::abi::IMessageQueue::submitMerkleRootCall {
+            blockNumber: alloy::primitives::U256::from(target),
+            merkleRoot: B256::from(root),
+            proof: decode(&published["queueProof"])?.into(),
+        }
+        .abi_encode();
+        let mut transaction = TxEip1559 {
+            chain_id: 560_048,
+            nonce: 0,
+            gas_limit: 1_000_000,
+            max_fee_per_gas: 100_000_000_000,
+            max_priority_fee_per_gas: 1_000_000_000,
+            to: TxKind::Call(ethereum.queue_address),
+            input: input.into(),
+            ..Default::default()
+        };
+        let signature = signer.sign_transaction(&mut transaction).await?;
+        let raw = TxEnvelope::Eip1559(transaction.into_signed(signature)).encoded_2718();
+        let hash = B256::from(keccak256(&raw));
+        let mut intent = published.clone();
+        intent["sender"] = json!(signer.address());
+        intent["nonce"] = json!("0");
+        intent["rawTransaction"] = json!(bytes(&raw));
+        intent["txHash"] = json!(hash);
+        intent["status"] = json!("pending");
+        for field in [
+            "publicationReceipt",
+            "observedProgress",
+            "originalDisposition",
+            "lastError",
+        ] {
+            intent[field] = Value::Null;
+        }
+        intent["terminalSubmissions"] = json!([]);
+        let original = intent.clone();
+        let evidence = fixture.join("pending-reconciliation");
+        fs::create_dir(&evidence).context("fork regression output must be new")?;
+        let path = evidence.join("root.json");
+        fs::write(&path, serde_json::to_vec_pretty(&intent)?)?;
+        let mut state = json!({"roots":{"original":{"status":"pending", "publication":path,
+            "block":target,"kind":"merkleRoot","queueRoot":published["root"]}}, "follower":{}});
+        record_pending_root_publication(&ethereum, &evidence, &mut state, "original").await?;
+        ensure!(
+            state["follower"]["status"] == "held-root",
+            "unobserved original lost its barrier"
+        );
+        let anchor = (
+            number(&intent["proof"]["anchorBlock"])?.try_into()?,
+            array(&intent["proof"]["anchorRoot"])?,
+            B256::from(array::<32>(&intent["acceptedAnchorTx"])?),
+            (
+                number(&intent["acceptedCheckpoint"]["block"])?,
+                B256::from(array::<32>(&intent["acceptedCheckpoint"]["blockHash"])?),
+            ),
+        );
+        for _ in 0..2 {
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(25),
+                crate::root_publication::wait_for_root_receipt(
+                    &ethereum,
+                    &path,
+                    &mut intent,
+                    target,
+                    "merkleRoot",
+                    root,
+                    anchor,
+                ),
+            )
+            .await
+            .context("authenticated progress waited for the 30-second receipt timeout")??;
+            ensure!(
+                outcome == crate::root_publication::RootPublicationState::Pending,
+                "competitor falsely completed the retained signed original"
+            );
+            record_pending_root_publication(&ethereum, &evidence, &mut state, "original").await?;
+            ensure!(
+                state["follower"]["status"] == "catching-up"
+                    && state["follower"]["lastError"].is_null()
+                    && state["roots"]["original"]["status"] == "pending",
+                "actual Pending transition retained the global held-root barrier"
+            );
+        }
+        ensure!(
+            intent["observedProgress"]["actualTransactionHash"] == published["txHash"]
+                && intent["publicationReceipt"].is_null(),
+            "external receipt substituted for original success"
+        );
+        for field in [
+            "rawTransaction",
+            "txHash",
+            "nonce",
+            "acceptedAnchorTx",
+            "acceptedCheckpoint",
+            "proof",
+            "queueProof",
+        ] {
+            ensure!(
+                intent[field] == original[field],
+                "observation rewrote original {field}"
+            );
+        }
+        crate::root_publication::ensure_mined_root_publications(&ethereum, &state["roots"]).await?;
+        // Replay an authentic already-public next commitment only on this owned fork.
+        // This is an EVM actor/barrier regression, not fresh native-source traffic.
+        let next = journal["commitments"]
+            .as_array()
+            .context("missing original commitments")?
+            .iter()
+            .find(|entry| {
+                entry["destinationBlock"]
+                    .as_u64()
+                    .is_some_and(|block| block > original_head)
+            })
+            .context("fork fixture lacks the next authentic original commitment")?;
+        let next_original = commitment_transaction(next)?;
+        let next_hash = B256::from(array::<32>(&next_original["txHash"])?);
+        ensure!(
+            next_original["sender"] != intent["sender"],
+            "commitment signer is not independent"
+        );
+        let snapshot: Value = provider.client().request("evm_snapshot", ()).await?;
+        provider
+            .client()
+            .request::<_, Value>("evm_setAutomine", (true,))
+            .await?;
+        let fork_timestamp = provider
+            .get_block_by_number(alloy::rpc::types::BlockNumberOrTag::Latest)
+            .await?
+            .context("fork head missing")?
+            .header
+            .timestamp;
+        provider
+            .client()
+            .request::<_, Value>(
+                "evm_setNextBlockTimestamp",
+                (
+                    (number(&next["freshnessProof"]["sourceTimestampMs"])? / 1_000 + 12)
+                        .max(fork_timestamp + 1),
+                ),
+            )
+            .await?;
+        let replayed = provider
+            .send_raw_transaction(&decode(&next_original["rawTransaction"])?)
+            .await?
+            .get_receipt()
+            .await?;
+        ensure!(
+            replayed.status()
+                && replayed.transaction_hash == next_hash
+                && ethereum.checkpoint().await?.block == number(&next["block"])?
+                && provider.get_transaction_count(signer.address()).await? == 0
+                && provider.get_transaction_by_hash(hash).await?.is_none(),
+            "independent real BEEFY update failed or consumed the retained root original"
+        );
+        ensure!(
+            serde_json::from_slice::<Value>(&fs::read(&path)?)? == intent,
+            "independent update changed retained root bytes/nonce/anchor"
+        );
+        provider
+            .client()
+            .request::<_, Value>("anvil_setBalance", (signer.address(), "0xde0b6b3a7640000"))
+            .await?;
+        let reverted = provider
+            .send_raw_transaction(&raw)
+            .await?
+            .get_receipt()
+            .await?;
+        ensure!(
+            !reverted.status() && reverted.transaction_hash == hash,
+            "stale original did not retain its distinct failure"
+        );
+        provider
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x100",))
+            .await?;
+        let outcome = crate::root_publication::wait_for_root_receipt(
+            &ethereum,
+            &path,
+            &mut intent,
+            target,
+            "merkleRoot",
+            root,
+            anchor,
+        )
+        .await?;
+        ensure!(
+            outcome == crate::root_publication::RootPublicationState::Observed
+                && intent["originalDisposition"] == "reverted"
+                && intent["publicationReceipt"].is_null()
+                && intent["terminalSubmissions"][0]["original"]["rawTransaction"]
+                    == original["rawTransaction"],
+            "late original failure was replaced by external target success"
+        );
+        let before_reorg = state.clone();
+        let reverted: bool = provider.client().request("evm_revert", (snapshot,)).await?;
+        ensure!(reverted, "owned fork snapshot did not revert");
+        ensure!(
+            record_pending_root_publication(&ethereum, &evidence, &mut state, "original")
+                .await
+                .is_err()
+                && state == before_reorg,
+            "lost original failure evidence silently released reconciliation ownership"
+        );
+        println!(
+            "{}",
+            json!({"scope":"source-independent authenticated Hoodi-history Anvil fork",
+            "target":target,"observedTransaction":published["txHash"],"original":hash,
+            "independentCommitment":next_hash,"independentSourceBlock":next["block"],
+            "originalDisposition":intent["originalDisposition"],"publicWrites":false})
         );
         Ok(())
     }

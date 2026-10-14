@@ -397,20 +397,41 @@ mod tests {
         for (status, expected) in [(429, RetryDecision::Retry), (401, RetryDecision::Fail)] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let endpoint = format!("http://{}", listener.local_addr().unwrap());
-            let app = axum::Router::new().route("/", axum::routing::post(move || async move {
-                (axum::http::StatusCode::from_u16(status).unwrap(), "RPC unavailable")
-            }));
+            let app = axum::Router::new().route(
+                "/",
+                axum::routing::post(move || async move {
+                    (
+                        axum::http::StatusCode::from_u16(status).unwrap(),
+                        "RPC unavailable",
+                    )
+                }),
+            );
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let api = ethereum_client::PollingEthApi::new_with_retries(&endpoint, None, None)
-                .await.unwrap();
-            let paid = api.fetch_fee_paid_events_txs_at(Default::default(), 1, Default::default())
-                .await.unwrap_err();
-            let deposit = api.fetch_deposit_events_at(Default::default(), 1, Default::default())
-                .await.unwrap_err();
+                .await
+                .unwrap();
+            let paid = api
+                .fetch_fee_paid_events_txs_at(Default::default(), 1, Default::default())
+                .await
+                .unwrap_err();
+            let deposit = api
+                .fetch_deposit_events_at(Default::default(), 1, Default::default())
+                .await
+                .unwrap_err();
             let signing_client = ethereum_client::EthApi::new(
-                &endpoint, "0x0000000000000000000000000000000000000001", None, None, None,
-            ).await.err().expect("HTTP status must reject signing-client initialization");
-            assert_eq!(classify_anyhow(&anyhow::Error::new(signing_client)), expected);
+                &endpoint,
+                "0x0000000000000000000000000000000000000001",
+                None,
+                None,
+                None,
+            )
+            .await
+            .err()
+            .expect("HTTP status must reject signing-client initialization");
+            assert_eq!(
+                classify_anyhow(&anyhow::Error::new(signing_client)),
+                expected
+            );
             server.abort();
             assert_eq!(classify_anyhow(&paid), expected);
             assert_eq!(classify_anyhow(&deposit), expected);

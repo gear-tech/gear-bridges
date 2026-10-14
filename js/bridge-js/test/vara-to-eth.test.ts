@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, test, expect, describe, vi } from 'vitest';
-import { encodeFunctionData, encodeEventTopics, encodeAbiParameters, parseAbiParameters, PublicClient, WalletClient, Account, hexToBytes, ContractFunctionRevertedError, encodeErrorResult } from 'viem';
+import { encodeFunctionData, encodeEventTopics, encodeAbiParameters, parseAbiParameters, PublicClient, WalletClient, Account, hexToBytes, ContractFunctionRevertedError, encodeErrorResult, keccak256 } from 'viem';
 import { GearApi, HexString } from '@gear-js/api';
 import dotenv from 'dotenv';
 import * as fs from 'fs';
@@ -19,8 +19,8 @@ const pin = (value: HexString) => ({ toHex: () => value, eq: (other: { toHex(): 
 const message: VaraMessage = { nonce: 0n, source: hexToBytes(hash(3)), destination: hexToBytes(address(4)), payload: Uint8Array.of(0, 255, 1) };
 const proof: Proof = { root: hash(55), proof: [], numLeaves: 1n, leafIndex: 0n };
 
-function receiptFixture(token = false) {
-  const txHash = hash(7), queue = address(1), sender = address(2), rootBlock = 12n;
+function receiptFixture(token = false, txHash = hash(7)) {
+  const queue = address(1), sender = address(2), rootBlock = 12n;
   const effect: OutboundEffect = token ? { kind: 'token', managerAddress: address(4), sourceActorId: hash(3),
     token: address(10), sender: hash(8), receiver: address(9), amount: 12n } : { kind: 'application' };
   const originalMessage = token ? { ...message, payload: hexToBytes((hash(8) + address(9).slice(2) + address(10).slice(2) + hash(12).slice(2)) as HexString) } : message;
@@ -234,8 +234,8 @@ describe('SDK outbound acceptance', () => {
 
   test.each(['matures', 'deadline', 'root', 'anchor', 'other', 'disabled'])('unsigned maturity waiting: %s', async (kind) => {
     vi.useFakeTimers();
-    const fixture = receiptFixture();
-    const sign = vi.fn(async () => '0x01'), broadcast = vi.fn(async () => hash(7));
+    const fixture = receiptFixture(false, keccak256('0x01'));
+    const sign = vi.fn(async () => '0x01'), broadcast = vi.fn(async () => fixture.params.transactionHash);
     const simulated: unknown[] = [];
     const client = { ...fixture.params.ethereumPublicClient,
       getBlock: async ({ blockTag, blockNumber }: { blockTag?: string; blockNumber?: bigint }) =>
@@ -325,6 +325,26 @@ describe('SDK outbound acceptance', () => {
       expect(broadcast).not.toHaveBeenCalled();
     } finally { vi.useRealTimers(); }
   });
+  test.each(['lost-response', 'wrong-hash'])('local broadcast %s retains the original signed hash without a replacement', async (fault) => {
+    const fixture = receiptFixture();
+    const signed = '0x01' as const;
+    const sign = vi.fn(async () => signed);
+    const broadcast = vi.fn(async () => {
+      if (fault === 'lost-response') throw new Error('broadcast response lost');
+      return hash(99);
+    });
+    const client = new MessageQueueClient(fixture.params.messageQueueAddress,
+      { ...fixture.params.ethereumPublicClient, simulateContract: async () => ({}) } as unknown as PublicClient,
+      { prepareTransactionRequest: async () => ({}), sendRawTransaction: broadcast } as unknown as WalletClient,
+      { address: fixture.params.sender, type: 'local', signTransaction: sign } as unknown as Account);
+    const result = await client.processMessage(12n, message, proof, { kind: 'application' });
+    expect(result.success).toBe(false);
+    expect(result.transactionHash).toBe(keccak256(signed));
+    expect(result.error).toContain(fault === 'lost-response' ? 'broadcast response lost' : 'broadcast hash differs');
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
   test('timed-out local EVM signing cannot trigger a later raw submission', async () => {
     vi.useFakeTimers();
     const fixture = receiptFixture();

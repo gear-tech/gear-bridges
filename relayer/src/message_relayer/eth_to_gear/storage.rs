@@ -652,7 +652,7 @@ impl JSONStorage {
                 )
             })?;
         anyhow::ensure!(
-            matches!(schema_version, 5 | 6 | 7),
+            matches!(schema_version, 5..=7),
             "Incompatible transaction journal schema in '{}': found {schema_version}, expected {STATE_SCHEMA_VERSION}",
             self.path.display()
         );

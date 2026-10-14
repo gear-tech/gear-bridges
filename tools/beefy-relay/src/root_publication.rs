@@ -1354,7 +1354,7 @@ fn hold_root_reconciliation(output: &Path, intent: &mut Value) -> Result<RootPub
     Ok(state)
 }
 
-async fn wait_for_root_receipt(
+pub(crate) async fn wait_for_root_receipt(
     ethereum: &crate::ethereum::Ethereum,
     output: &Path,
     intent: &mut Value,
@@ -1388,8 +1388,15 @@ async fn wait_for_root_receipt(
                     RootPublicationState::Pending
                 });
             }
-            observe_finalized_progress(ethereum, output, intent, source_block, kind, expected_root)
-                .await?;
+            let observed = observe_finalized_progress(
+                ethereum,
+                output,
+                intent,
+                source_block,
+                kind,
+                expected_root,
+            )
+            .await?;
             if let Some((block, hash)) =
                 canonical_root_inclusion(ethereum, intent, source_block, kind, expected_root)
                     .await?
@@ -1492,6 +1499,9 @@ async fn wait_for_root_receipt(
                 }
                 return Ok(RootPublicationState::Mined);
             }
+            if observed {
+                return hold_root_reconciliation(output, intent);
+            }
             // A later accepted checkpoint can stale the signed proof, but never
             // releases its nonce or authorizes a replacement. Reconcile/rebroadcast it unchanged.
             intent["finalityStatus"] = json!("pending");
@@ -1529,24 +1539,31 @@ pub async fn publish_root(
     let _owner = lock_token_deployment(deployment_manifest)?;
     let manifest: Value = serde_json::from_slice(&fs::read(deployment_manifest)?)?;
     let fixture = crate::ethereum::approved_fixture_network(
-        owned_fixture_network, &manifest, source_rpc, witness_rpc, ethereum_rpc, public_network)?;
+        owned_fixture_network,
+        &manifest,
+        source_rpc,
+        witness_rpc,
+        ethereum_rpc,
+        public_network,
+    )?;
     let registration: Value = serde_json::from_slice(&fs::read(registration)?)?;
     loop {
-        if publish_root_locked(
-            source_rpc,
-            witness_rpc,
-            ethereum_rpc,
-            wallet,
-            deployment_manifest,
-            publisher_state,
-            &registration,
-            output,
-            fixture.as_ref(),
-            public_network,
-        )
-        .await?
-            == RootPublicationState::Accepted
-        {
+        if matches!(
+            publish_root_locked(
+                source_rpc,
+                witness_rpc,
+                ethereum_rpc,
+                wallet,
+                deployment_manifest,
+                publisher_state,
+                &registration,
+                output,
+                fixture.as_ref(),
+                public_network,
+            )
+            .await?,
+            RootPublicationState::Accepted | RootPublicationState::Observed
+        ) {
             return Ok(());
         }
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -1582,7 +1599,14 @@ pub(crate) async fn publish_root_locked(
         "independent Gear authorities required"
     );
     let manifest: Value = serde_json::from_slice(&fs::read(deployment_manifest)?)?;
-    crate::ethereum::validate_fixture_approval(fixture, &manifest, source_rpc, witness_rpc, ethereum_rpc, public_network)?;
+    crate::ethereum::validate_fixture_approval(
+        fixture,
+        &manifest,
+        source_rpc,
+        witness_rpc,
+        ethereum_rpc,
+        public_network,
+    )?;
     ensure!(
         manifest["mode"] == public_network.deployment_mode(),
         "token deployment differs from selected public network"
@@ -1688,7 +1712,14 @@ pub(crate) async fn publish_root_locked(
             && active_ethereum["mmrStartBlock"] == manifest["ethereum"]["mmrStartBlock"],
         "actor active BEEFY identity differs from the immutable token deployment"
     );
-    let ethereum = Ethereum::connect(ethereum_rpc, wallet, &active_ethereum, fixture, public_network).await?;
+    let ethereum = Ethereum::connect(
+        ethereum_rpc,
+        wallet,
+        &active_ethereum,
+        fixture,
+        public_network,
+    )
+    .await?;
     ethereum
         .verify_token_bindings(decode_hash(&manifest["gearManager"], "gearManager")?)
         .await?;

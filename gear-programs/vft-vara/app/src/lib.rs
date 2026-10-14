@@ -148,7 +148,11 @@ pub struct VftAdmin<'a> {
 impl<'a> VftAdmin<'a> {
     #[export]
     pub fn exit(&mut self, inheritor: ActorId) {
-        assert_eq!(Syscall::message_source(), self.authorities.borrow().admin(), "Not admin");
+        assert_eq!(
+            Syscall::message_source(),
+            self.authorities.borrow().admin(),
+            "Not admin"
+        );
         let _ = inheritor;
         panic!("Native wrapper retirement is unsupported");
     }
@@ -314,7 +318,9 @@ impl NativeEscrow<'_> {
         };
         if redemption.status == PayoutStatus::Delivered {
             self.program.outstanding_redemptions.set(
-                self.program.outstanding_redemptions.get()
+                self.program
+                    .outstanding_redemptions
+                    .get()
                     .checked_sub(1)
                     .expect("Native obligation underflow"),
             );

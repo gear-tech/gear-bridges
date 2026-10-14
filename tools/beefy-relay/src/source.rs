@@ -1297,11 +1297,9 @@ pub async fn queue_snapshot_at(api: &GearApi, at: H256) -> Result<Option<(u64, H
     {
         return Ok(None);
     }
-    Ok(Some(
-        api.fetch_queue_merkle_root(at)
-            .await
-            .with_context(|| format!("read initialized bridge queue at {at:?}; HOLD"))?,
-    ))
+    Ok(Some(api.fetch_queue_merkle_root(at).await.with_context(
+        || format!("read initialized bridge queue at {at:?}; HOLD"),
+    )?))
 }
 
 pub async fn bridge_paused(api: &GearApi, at: H256) -> Result<bool> {

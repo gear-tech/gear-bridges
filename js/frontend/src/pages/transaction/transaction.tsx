@@ -179,7 +179,6 @@ function Transaction() {
                     expectedEffect={{
                       kind: 'token',
                       managerAddress: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
-                      sourceActorId: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS,
                       token: destinationHex,
                       sender: sender as HexString,
                       receiver: receiver as HexString,

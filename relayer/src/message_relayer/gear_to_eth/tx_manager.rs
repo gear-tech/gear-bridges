@@ -76,7 +76,7 @@ impl Transaction {
     /// Validate persisted identity/effects; callers must separately recheck canonical finality.
     pub fn validate_journal(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
-            matches!(self.journal_version, 2 | 3 | 4),
+            matches!(self.journal_version, 2..=4),
             "HOLD: unsupported outbound transaction journal version {}",
             self.journal_version
         );

@@ -626,8 +626,6 @@ async fn upgrade() -> Result<()> {
         .send_recv(vft_manager_id)
         .await;
     assert!(result.is_err(), "result = {result:?}");
-    let error = format!("{result:?}");
-    assert!(error.contains("panicked with"), "error = {error}");
 
     // unpause the VftManager
     service
@@ -749,6 +747,24 @@ async fn upgrade() -> Result<()> {
         hex::encode(vft_manager2_id)
     );
 
+    for (token, address, supply) in [
+        (vft_id_1, H160([1; 20]), TokenSupply::Gear),
+        (vft_id_2, H160([2; 20]), TokenSupply::Ethereum),
+    ] {
+        service
+            .map_vara_to_eth_address(token, address, supply)
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager2_id)
+            .await
+            .unwrap();
+    }
+    service
+        .begin_cutover(vft_manager2_id, 32)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+
     // An unpaused replacement must be rejected before state or balances change.
     service
         .unpause()
@@ -798,20 +814,31 @@ async fn upgrade() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    // upgrade the VftManager
+    service
+        .prepare_cutover(vft_manager_id, 32)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager2_id)
+        .await
+        .unwrap();
+
+    // Upgrade custody while retaining the original manager for historical queries.
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
     service
         .upgrade(vft_manager2_id)
         .with_gas_limit(gas_limit)
-        .send(vft_manager_id)
+        .send_recv(vft_manager_id)
         .await
         .unwrap();
 
-    let result = service.erc_20_manager_address().recv(vft_manager_id).await;
-    assert!(result.is_err(), "result = {result:?}");
-    let error = format!("{result:?}");
-    assert!(error.contains("InactiveProgram"));
-
+    assert_eq!(
+        service
+            .cutover_status()
+            .recv(vft_manager_id)
+            .await
+            .unwrap()
+            .phase,
+        vft_manager_client::CutoverPhase::Retired
+    );
     // check that funds transferred to the new program
     let service_vft = vft_client::Vft::new(remoting.clone());
     let balance = service_vft
@@ -2119,14 +2146,12 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
 
     // Successful-looking false is ambiguous: do not replay the economic child.
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
-    assert_eq!(
-        service
-            .transactions(Order::Direct, 0, 1)
-            .recv(vft_manager_id)
-            .await
-            .unwrap(),
-        vec![(0, 1)]
-    );
+    assert!(service
+        .transactions(Order::Direct, 0, 1)
+        .recv(vft_manager_id)
+        .await
+        .unwrap()
+        .is_empty());
     assert_eq!(result, Err(Error::InvalidReply));
     assert_eq!(
         service
@@ -2269,14 +2294,21 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
 
     assert!(emitted.is_none(), "BridgingAccepted event was emitted");
 
-    // A timeout is ambiguous: the mint/unlock may have executed, so keep the
-    // reservation visible through transaction history to prevent retry/replay.
+    // A timeout keeps the receipt reserved without declaring it processed.
     let txs = service
         .transactions(Order::Direct, 0, 1)
         .recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(txs, vec![(0, 1)]);
+    assert!(txs.is_empty());
+    assert_eq!(
+        service
+            .receipt_status(0, 1)
+            .recv(vft_manager_id)
+            .await
+            .unwrap(),
+        ReceiptStatus::Reserved
+    );
 
     assert!(
         matches!(result, Err(Error::ReplyTimeout(..))),

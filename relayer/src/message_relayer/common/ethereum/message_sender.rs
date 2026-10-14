@@ -251,8 +251,9 @@ async fn task(
             if submission_guard.is_none() {
                 submission_guard = Some(this.eth_api.reserve_submission().await);
             }
-            if prepared.is_none() && !ownership.borrow().is_empty() {
-                if !wait_for_original_completion(
+            let needs_reconciliation = prepared.is_none() && !ownership.borrow().is_empty();
+            if needs_reconciliation
+                && !wait_for_original_completion(
                     &mut this,
                     submission_guard.as_ref().unwrap(),
                     &mut ownership,
@@ -261,10 +262,9 @@ async fn task(
                     &responses,
                 )
                 .await
-                {
-                    retain_until_shutdown(submission_guard).await;
-                    return;
-                }
+            {
+                retain_until_shutdown(submission_guard).await;
+                return;
             }
             match process_request(
                 &mut this,

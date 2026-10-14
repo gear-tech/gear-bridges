@@ -1,6 +1,7 @@
 import { GearApi } from '@gear-js/api';
-import { relayVaraToEth, type OutboundEffect } from '@gear-js/bridge';
+import { prepareVaraToEthRelay, getMessageQueueClient, type OutboundEffect } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
+import { bytesToHex } from 'viem';
 import { useConfig, usePublicClient } from 'wagmi';
 import { getWalletClient } from 'wagmi/actions';
 
@@ -15,7 +16,11 @@ type Params = {
   onError: (error: Error) => void;
 };
 
-function useRelayVaraTx(nonce: bigint, blockNumber: bigint, expectedEffect: OutboundEffect) {
+function useRelayVaraTx(
+  nonce: bigint,
+  blockNumber: bigint,
+  expectedEffect: Omit<Extract<OutboundEffect, { kind: 'token' }>, 'sourceActorId'>,
+) {
   const { NETWORK_PRESET, syncEthWalletNetwork } = useNetworkType();
   const config = useConfig();
   const publicClient = usePublicClient();
@@ -34,19 +39,31 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint, expectedEffect: Outb
       const walletClient = await getWalletClient(config);
       archiveApi = await initArchiveApi();
 
-      const { error, success, transactionHash } = await relayVaraToEth({
+      const prepared = await prepareVaraToEthRelay({
         nonce,
         blockNumber,
         ethereumPublicClient: publicClient,
-        ethereumWalletClient: walletClient,
-        ethereumAccount: walletClient.account,
         gearApi: archiveApi,
         messageQueueAddress: NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
-        expectedEffect,
         statusCb: onLog,
         wait: true,
         deadline,
       });
+      const queue = getMessageQueueClient(
+        NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
+        publicClient,
+        walletClient,
+        walletClient.account,
+      );
+      const { error, success, transactionHash } = await queue.processMessage(
+        prepared.blockNumber,
+        prepared.message,
+        prepared.proof,
+        { ...expectedEffect, sourceActorId: bytesToHex(prepared.message.source) },
+        onLog,
+        deadline,
+        { wait: true },
+      );
 
       if (!success)
         throw new Error(

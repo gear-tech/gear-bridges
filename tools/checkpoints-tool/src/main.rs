@@ -60,7 +60,9 @@ struct Cli {
 }
 
 fn is_loopback_endpoint(endpoint: &str, schemes: &[&str]) -> bool {
-    let Ok(url) = url::Url::parse(endpoint) else { return false; };
+    let Ok(url) = url::Url::parse(endpoint) else {
+        return false;
+    };
     schemes.contains(&url.scheme())
         && url.username().is_empty()
         && url.password().is_none()
@@ -91,7 +93,10 @@ fn select_network(
                 && Network::from_genesis_validators_root(trusted_genesis).is_none(),
             "owned fixture must have its own independently pinned genesis validators root"
         );
-        Ok(Network::LocalFixture { genesis_time, genesis_validators_root: trusted_genesis.into() })
+        Ok(Network::LocalFixture {
+            genesis_time,
+            genesis_validators_root: trusted_genesis.into(),
+        })
     } else {
         Network::from_genesis_validators_root(trusted_genesis)
             .ok_or_else(|| anyhow!("unsupported trusted Ethereum network"))
@@ -105,7 +110,6 @@ fn authenticate_genesis(network: &Network, root: [u8; 32], time: u64) -> AnyResu
     );
     Ok(())
 }
-
 
 #[tokio::main]
 async fn main() -> AnyResult<()> {
@@ -126,7 +130,10 @@ async fn main() -> AnyResult<()> {
             .try_into()
             .map_err(|_| anyhow!("trusted bootstrap root must be 32 bytes"))?;
     let network = select_network(
-        trusted_genesis, cli.owned_fixture_genesis_time, &endpoint, &cli.beacon.beacon_endpoint,
+        trusted_genesis,
+        cli.owned_fixture_genesis_time,
+        &endpoint,
+        &cli.beacon.beacon_endpoint,
     )?;
     let beacon_client = BeaconClient::new(
         cli.beacon.beacon_endpoint,
@@ -136,7 +143,11 @@ async fn main() -> AnyResult<()> {
     let genesis = beacon_client.get_genesis().await?;
     authenticate_genesis(
         &network,
-        genesis.data.genesis_validators_root.try_into().map_err(|_| anyhow!("Beacon genesis validators root must be 32 bytes"))?,
+        genesis
+            .data
+            .genesis_validators_root
+            .try_into()
+            .map_err(|_| anyhow!("Beacon genesis validators root must be 32 bytes"))?,
         genesis.data.genesis_time,
     )?;
     println!("Using Ethereum network: '{network:?}'");
@@ -229,7 +240,10 @@ async fn main() -> AnyResult<()> {
             .context("calculate checkpoint initialization gas")?
             .min_limit
     };
-    ensure!(estimated_gas <= gas_limit, "checkpoint initialization exceeds outer gas ceiling");
+    ensure!(
+        estimated_gas <= gas_limit,
+        "checkpoint initialization exceeds outer gas ceiling"
+    );
     let code_id = api
         .upload_code(WASM_BINARY)
         .await
@@ -305,18 +319,33 @@ mod tests {
         ] {
             assert!(select_network(root, Some(1_800_000_000), gear, beacon).is_err());
         }
-        assert!(select_network(root, Some(1_800_000_000), "ws://[::1]:9944", "http://localhost:5052").is_ok());
+        assert!(select_network(
+            root,
+            Some(1_800_000_000),
+            "ws://[::1]:9944",
+            "http://localhost:5052"
+        )
+        .is_ok());
         assert!(select_network([0; 32], Some(1_800_000_000), gear, beacon).is_err());
         let hoodi = Network::Hoodi.genesis_validators_root().0;
-        assert!(matches!(select_network(hoodi, None, gear, beacon).unwrap(), Network::Hoodi));
+        assert!(matches!(
+            select_network(hoodi, None, gear, beacon).unwrap(),
+            Network::Hoodi
+        ));
         assert!(select_network(hoodi, Some(1_800_000_000), gear, beacon).is_err());
         let root_hex = hex::encode(root);
         let parsed = Cli::try_parse_from([
-            "checkpoints-tool", "--ethereum-beacon-rpc", beacon,
-            "--trusted-bootstrap-root", &root_hex,
-            "--trusted-genesis-validators-root", &root_hex,
-            "--owned-fixture-genesis-time", "1800000000",
-        ]).unwrap();
+            "checkpoints-tool",
+            "--ethereum-beacon-rpc",
+            beacon,
+            "--trusted-bootstrap-root",
+            &root_hex,
+            "--trusted-genesis-validators-root",
+            &root_hex,
+            "--owned-fixture-genesis-time",
+            "1800000000",
+        ])
+        .unwrap();
         assert_eq!(parsed.owned_fixture_genesis_time, Some(1_800_000_000));
     }
 }

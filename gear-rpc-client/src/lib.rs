@@ -21,7 +21,6 @@ use subxt::{
     blocks::Block as BlockImpl,
     dynamic::DecodedValueThunk,
     events::{EventDetails, Events},
-    storage::Address,
     utils::H256,
     OnlineClient,
 };

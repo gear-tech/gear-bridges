@@ -277,8 +277,14 @@ pub async fn manifest(
     let mut ethereum_manifest =
         Ethereum::token_manifest(ethereum_rpc, wallet, &addresses, fixture.as_ref()).await?;
     ethereum_manifest["sourceGenesis"] = anchor["sourceGenesis"].clone();
-    let ethereum =
-        Ethereum::connect(ethereum_rpc, wallet, &ethereum_manifest, fixture.as_ref(), beefy_relay::ethereum::PublicEthereumNetwork::Hoodi).await?;
+    let ethereum = Ethereum::connect(
+        ethereum_rpc,
+        wallet,
+        &ethereum_manifest,
+        fixture.as_ref(),
+        beefy_relay::ethereum::PublicEthereumNetwork::Hoodi,
+    )
+    .await?;
     ethereum
         .verify_token_bindings(gear_manager.into_bytes())
         .await?;
@@ -581,7 +587,7 @@ pub async fn prepare(
     }
     finalized =
         verify_prepared_constructor(&api, &path, "historicalProxy", proxy, proxy_code).await?;
-    let mut proxy_service = historical_proxy_client::HistoricalProxy::new(remoting.clone());
+    let proxy_service = historical_proxy_client::HistoricalProxy::new(remoting.clone());
     ensure!(
         proxy_service
             .admin()
@@ -1747,7 +1753,11 @@ async fn reconcile_setup_message(
             transaction.hash().0 == hash,
             "original SDK hash changed; HOLD"
         );
-        transaction.submit_and_watch().await?.wait_for_finalized().await?;
+        transaction
+            .submit_and_watch()
+            .await?
+            .wait_for_finalized()
+            .await?;
     }
     Ok(None)
 }

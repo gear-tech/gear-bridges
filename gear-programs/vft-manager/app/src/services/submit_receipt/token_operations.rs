@@ -249,17 +249,7 @@ pub(super) async fn redeem_native_log(
         super::deposit_status(key, deposit.log_index),
         Some(super::DepositStatus::NativeQueued)
     ) {
-        reconcile_native_log(
-            key,
-            deposit.log_index,
-            deposit.sender,
-            deposit.token_id,
-            deposit.receiver,
-            deposit.amount,
-            deposit.operation_id,
-            config,
-        )
-        .await
+        reconcile_native_log(key, deposit, config).await
     } else {
         send::<RedeemEscrow>(
             key,
@@ -282,14 +272,18 @@ pub(super) async fn redeem_native_log(
 /// Query the immutable original payout only: this path cannot dispatch an economic effect.
 pub(super) async fn reconcile_native_log(
     key: (u64, u64),
-    log_index: u64,
-    erc20_sender: H160,
-    token_id: ActorId,
-    receiver: ActorId,
-    amount: U256,
-    operation_id: H256,
+    deposit: &super::ReceiptDeposit,
     config: &Config,
 ) -> Result<(), Error> {
+    let super::ReceiptDeposit {
+        log_index,
+        sender: erc20_sender,
+        token_id,
+        receiver,
+        amount,
+        operation_id,
+        ..
+    } = *deposit;
     if matches!(
         super::deposit_status(key, log_index),
         Some(super::DepositStatus::Processed)

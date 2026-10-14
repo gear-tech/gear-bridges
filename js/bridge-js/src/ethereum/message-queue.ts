@@ -1,4 +1,4 @@
-import { Account, PublicClient, WalletClient, TransactionSerializable, zeroHash, parseEventLogs, encodeFunctionData, TransactionReceiptNotFoundError, ContractFunctionRevertedError, BaseError } from 'viem';
+import { Account, PublicClient, WalletClient, TransactionSerializable, zeroHash, parseEventLogs, encodeFunctionData, TransactionReceiptNotFoundError, ContractFunctionRevertedError, BaseError, keccak256 } from 'viem';
 import { bytesToHex } from '@ethereumjs/util';
 import { HexString } from '@gear-js/api';
 
@@ -390,9 +390,11 @@ export class MessageQueueClient {
         }));
         const signed = await withOriginalDeadline(deadline, () => account.signTransaction(request as TransactionSerializable,
           { serializer: wallet.chain?.serializers?.transaction }));
+        hash = keccak256(signed);
         if (Date.now() >= deadline) throw new Error('Original relay deadline expired before raw submission');
         submissionStarted = true;
-        hash = await withOriginalDeadline(deadline, () => wallet.sendRawTransaction({ serializedTransaction: signed }));
+        const submittedHash = await withOriginalDeadline(deadline, () => wallet.sendRawTransaction({ serializedTransaction: signed }));
+        if (submittedHash.toLowerCase() !== hash.toLowerCase()) throw new Error('HOLD: broadcast hash differs from original signed transaction');
       } else {
         submissionStarted = true;
         hash = await withOriginalDeadline(deadline, () => wallet.writeContract({ address: this._address,

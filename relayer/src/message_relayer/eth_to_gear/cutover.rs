@@ -654,7 +654,7 @@ pub fn read_original_journal(path: &Path) -> Result<OriginalJournal> {
     let journal: OriginalJournal =
         serde_json::from_slice(&committed_bytes(&path.join("state.json"))?)?;
     anyhow::ensure!(
-        matches!(journal.schema_version, 5 | 6 | 7)
+        matches!(journal.schema_version, 5..=7)
             && journal.runtime_identity.is_some()
             && (journal.schema_version == 7 || journal.predecessor_cutover.is_none()),
         "HOLD: unsupported original journal identity/schema"

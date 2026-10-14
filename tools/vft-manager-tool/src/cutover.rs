@@ -630,9 +630,14 @@ fn complete(original: &SignedSubmission) -> bool {
         && original.finalized_reply.is_some()
 }
 fn exact_reply<A: ActionIo>(bytes: &[u8]) -> Result<A::Reply> {
-    let mut input = bytes
-        .strip_prefix(A::ROUTE)
-        .context("HOLD: lifecycle reply route changed")?;
+    // Sails 0.9.2 sends unit results as an empty automatic success reply.
+    let mut input = if A::is_empty_tuple::<A::Reply>() {
+        bytes
+    } else {
+        bytes
+            .strip_prefix(A::ROUTE)
+            .context("HOLD: lifecycle reply route changed")?
+    };
     let value = A::Reply::decode(&mut input)?;
     ensure!(input.is_empty(), "HOLD: trailing lifecycle reply bytes");
     Ok(value)
@@ -1409,7 +1414,7 @@ fn validate_covered_block(block: &CoveredBlock) -> Result<()> {
     let hashes = block
         .raw_transactions
         .iter()
-        .map(|raw| alloy_primitives::keccak256(raw))
+        .map(alloy_primitives::keccak256)
         .collect::<Vec<_>>();
     ensure!(
         hashes == block.transactions
@@ -1521,7 +1526,8 @@ fn accepted_external_parent(proof: &[u8], signed: &SignedSubmission) -> bool {
     let Ok(event) = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes) else {
         return false;
     };
-    signed.finalized_reply_error.is_none()
+    bytes.is_empty()
+        && complete(signed)
         && signed.finalized_reply.as_ref().is_some_and(|reply| {
             match exact_reply::<historical_proxy_client::historical_proxy::io::Redirect>(
                 &reply.payload,
@@ -1534,11 +1540,151 @@ fn accepted_external_parent(proof: &[u8], signed: &SignedSubmission) -> bool {
             }
         })
 }
+fn refresh_pending_external_original(
+    previous: &mut seal::CanonicalExternalOriginal,
+    fresh: &seal::CanonicalExternalOriginal,
+) -> Result<()> {
+    let old = &previous.original;
+    let new = &fresh.original;
+    ensure!(
+        previous.provenance == "canonical-external"
+            && fresh.provenance == previous.provenance
+            && new.same_request(old)
+            && new.inclusion_block_number == old.inclusion_block_number
+            && new.inclusion_block_hash == old.inclusion_block_hash
+            && new.message_id == old.message_id
+            && new.finalized_dispatch_error == old.finalized_dispatch_error
+            && new.finalized_reply == old.finalized_reply
+            && new.finalized_reply_error == old.finalized_reply_error
+            && new.finalized_nonce_consumed == old.finalized_nonce_consumed,
+        "HOLD: canonical external original identity/history changed"
+    );
+    new.validate_native_reconciliation()?;
+    // These are canonical public-discovery projections, not locally owned signatures.
+    // Keep the parent and its original discovery pin for historical reauthentication.
+    if previous.original.native_reconciliation_attempts != new.native_reconciliation_attempts {
+        previous
+            .original
+            .native_reconciliation_attempts
+            .clone_from(&new.native_reconciliation_attempts);
+    }
+    if previous.original.native_reconciliation != new.native_reconciliation {
+        previous
+            .original
+            .native_reconciliation
+            .clone_from(&new.native_reconciliation);
+    }
+    Ok(())
+}
+
+struct ExternalReceiptCandidate {
+    proof: Option<Vec<u8>>,
+    receipt_key: (u64, u64),
+    destination: H256,
+    is_continuation: bool,
+}
+fn external_receipt_candidate(
+    destination: H256,
+    payload: &[u8],
+    proxy: H256,
+    receiver: H256,
+    receiver_route: &[u8],
+) -> Option<ExternalReceiptCandidate> {
+    use historical_proxy_client::historical_proxy::io::Redirect;
+    // Public requests are candidates, not retained authenticated evidence.
+    if destination == proxy {
+        let mut payload = payload.strip_prefix(Redirect::ROUTE)?;
+        let (slot, proof, target, route) =
+            <(u64, Vec<u8>, ActorId, Vec<u8>)>::decode(&mut payload).ok()?;
+        if !payload.is_empty() || target != actor(receiver) || route != receiver_route {
+            return None;
+        }
+        let mut bytes = proof.as_slice();
+        let event = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes).ok()?;
+        if !bytes.is_empty() || slot != event.proof_block.block.slot {
+            return None;
+        }
+        Some(ExternalReceiptCandidate {
+            proof: Some(proof),
+            receipt_key: (slot, event.transaction_index),
+            destination: proxy,
+            is_continuation: false,
+        })
+    } else if destination == receiver {
+        let mut payload = payload.strip_prefix(io::ReconcileReceipt::ROUTE)?;
+        let key = <(u64, u64)>::decode(&mut payload).ok()?;
+        payload.is_empty().then_some(ExternalReceiptCandidate {
+            proof: None,
+            receipt_key: key,
+            destination: receiver,
+            is_continuation: true,
+        })
+    } else {
+        None
+    }
+}
+fn attach_external_native_continuations(
+    proof: &[u8],
+    original: &mut SignedSubmission,
+    continuations: &[SignedSubmission],
+) -> Result<()> {
+    let pending_native = accepted_external_parent(proof, original)
+        && original.finalized_reply.as_ref().is_some_and(|reply| {
+            match exact_reply::<historical_proxy_client::historical_proxy::io::Redirect>(
+                &reply.payload,
+            ) {
+                Ok(Ok((_, reply))) => matches!(
+                    exact_reply::<io::SubmitReceipt>(&reply),
+                    Ok(Err(vft_manager_client::Error::NativeSettlementPending))
+                ),
+                _ => false,
+            }
+        });
+    let mut native = continuations
+        .iter()
+        .filter(|continuation| {
+            pending_native
+                && continuation.sender == original.sender
+                && continuation.receipt_key == original.receipt_key
+                && continuation.nonce > original.nonce
+                && original.finalized_reply.as_ref().is_some_and(|reply| {
+                    reply
+                        .observation
+                        .finalized_block_number
+                        .is_some_and(|number| continuation.prepared_finalized_number >= number)
+                })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    native.sort_unstable_by_key(|continuation| continuation.nonce);
+    // Public calls after original completion cannot acquire its reconciliation ownership.
+    if let Some(completed) = native.iter().position(|continuation| {
+        complete(continuation)
+            && continuation.finalized_reply.as_ref().is_some_and(|reply| {
+                matches!(
+                    exact_reply::<io::ReconcileReceipt>(&reply.payload),
+                    Ok(Ok(vft_manager_client::ReceiptStatus::Processed))
+                )
+            })
+    }) {
+        native.truncate(completed + 1);
+    }
+    if let Some(current) = native.pop() {
+        ensure!(
+            native
+                .iter()
+                .all(SignedSubmission::has_terminal_reconciliation),
+            "HOLD: an earlier external native continuation remains unresolved"
+        );
+        original.native_reconciliation_attempts = native;
+        original.native_reconciliation = Some(Box::new(current));
+    }
+    original.validate_native_reconciliation()
+}
 async fn discover_external_originals(
     scanner: &MessageSender,
     genesis: H256,
 ) -> Result<Vec<(Vec<u8>, seal::CanonicalExternalOriginal)>> {
-    use historical_proxy_client::historical_proxy::io::Redirect;
     let chain = scanner.api_provider.client();
     ensure!(
         chain.api.genesis_hash().as_ref() == genesis.as_bytes()
@@ -1558,64 +1704,37 @@ async fn discover_external_originals(
             else {
                 continue;
             };
-            let (proof, key, destination, is_continuation) = if call.destination.as_ref()
-                == scanner.historical_proxy_address.as_bytes()
-            {
-                let Some(mut payload) = call.payload.strip_prefix(Redirect::ROUTE) else {
-                    continue;
-                };
-                let (slot, proof, destination, route) =
-                    <(u64, Vec<u8>, ActorId, Vec<u8>)>::decode(&mut payload)?;
-                if destination != actor(scanner.receiver_address) || route != scanner.receiver_route
-                {
-                    continue;
-                }
-                ensure!(
-                    payload.is_empty(),
-                    "HOLD: archived Redirect has trailing bytes"
-                );
-                let mut bytes = proof.as_slice();
-                let event = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
-                ensure!(
-                    bytes.is_empty() && slot == event.proof_block.block.slot,
-                    "HOLD: archived receipt proof domain/encoding differs"
-                );
-                (
-                    Some(proof),
-                    (slot, event.transaction_index),
-                    scanner.historical_proxy_address,
-                    false,
-                )
-            } else if call.destination.as_ref() == scanner.receiver_address.as_bytes() {
-                let Some(mut payload) = call.payload.strip_prefix(io::ReconcileReceipt::ROUTE)
-                else {
-                    continue;
-                };
-                let key = <(u64, u64)>::decode(&mut payload)?;
-                ensure!(
-                    payload.is_empty(),
-                    "HOLD: archived reconciliation has trailing bytes"
-                );
-                (None, key, scanner.receiver_address, true)
-            } else {
+            let Some(ExternalReceiptCandidate {
+                proof,
+                receipt_key: key,
+                destination,
+                is_continuation,
+            }) = external_receipt_candidate(
+                H256::from_slice(call.destination.as_ref()),
+                &call.payload,
+                scanner.historical_proxy_address,
+                scanner.receiver_address,
+                &scanner.receiver_route,
+            )
+            else {
                 continue;
             };
-            ensure!(
-                call.value == 0,
-                "HOLD: unsupported value-bearing archived receipt call"
-            );
-            let address = extrinsic
-                .address_bytes()
-                .context("HOLD: archived receipt call is unsigned")?;
-            ensure!(
-                address.len() == 33 && address[0] == 0,
-                "HOLD: unsupported archived receipt signer encoding"
-            );
+            if call.value != 0 {
+                continue;
+            }
+            let Some(address) = extrinsic.address_bytes() else {
+                continue;
+            };
+            if address.len() != 33 || address[0] != 0 {
+                continue;
+            }
             let account = subxt::utils::AccountId32(address[1..].try_into()?);
-            let nonce = extrinsic
+            let Some(nonce) = extrinsic
                 .transaction_extensions()
                 .and_then(|extensions| extensions.nonce())
-                .context("HOLD: archived receipt nonce missing")?;
+            else {
+                continue;
+            };
             let previous = chain.block_number_to_hash(number - 1).await?;
             let payload_hash = if let Some(proof) = &proof {
                 alloy_primitives::keccak256(proof)
@@ -1632,8 +1751,12 @@ async fn discover_external_originals(
                 nonce,
                 extrinsic_hash: format!("{:#x}", extrinsic.hash()),
                 raw_extrinsic: extrinsic.bytes().to_vec(),
-                prepared_finalized_number: 0,
-                prepared_finalized_hash: format!("{genesis:#x}"),
+                prepared_finalized_number: if is_continuation { number - 1 } else { 0 },
+                prepared_finalized_hash: if is_continuation {
+                    format!("{previous:#x}")
+                } else {
+                    format!("{genesis:#x}")
+                },
                 scanned_finalized_number: number - 1,
                 scanned_finalized_hash: format!("{previous:#x}"),
                 reply_scanned_finalized_number: number - 1,
@@ -1692,27 +1815,7 @@ async fn discover_external_originals(
     };
     let mut found = Vec::with_capacity(proofs.len());
     for (proof, mut original) in proofs {
-        let mut native = continuations
-            .iter()
-            .filter(|continuation| {
-                continuation.sender == original.sender
-                    && continuation.receipt_key == original.receipt_key
-                    && continuation.nonce > original.nonce
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        native.sort_unstable_by_key(|continuation| continuation.nonce);
-        if let Some(current) = native.pop() {
-            ensure!(
-                native
-                    .iter()
-                    .all(SignedSubmission::has_terminal_reconciliation),
-                "HOLD: an earlier external native continuation remains unresolved"
-            );
-            original.native_reconciliation_attempts = native;
-            original.native_reconciliation = Some(Box::new(current));
-        }
-        original.validate_native_reconciliation()?;
+        attach_external_native_continuations(&proof, &mut original, &continuations)?;
         found.push((
             proof,
             seal::CanonicalExternalOriginal {
@@ -1939,7 +2042,7 @@ async fn scan_coverage(
             .collect::<Vec<_>>();
         let hashes = raw_transactions
             .iter()
-            .map(|raw| alloy_primitives::keccak256(raw))
+            .map(alloy_primitives::keccak256)
             .collect::<Vec<_>>();
         let decoded = raw_transactions
             .iter()
@@ -2010,7 +2113,10 @@ async fn scan_coverage(
                     .as_ref()
                     .context("External discovery cache missing")?
                     .iter()
-                    .find(|(proof, _)| {
+                    .find(|(proof, external)| {
+                        if !accepted_external_parent(proof, &external.original) {
+                            return false;
+                        }
                         let Ok(event) = eth_events_electra_client::EthToVaraEvent::decode(
                             &mut proof.as_slice(),
                         ) else {
@@ -2321,27 +2427,7 @@ async fn drain(
                     .context(
                         "HOLD: recorded external original unavailable in canonical discovery",
                     )?;
-                ensure!(
-                    fresh.original.same_request(&external.original)
-                        && fresh.original.preserves_reconciliation(&external.original)
-                        && fresh.original.inclusion_block_number
-                            == external.original.inclusion_block_number
-                        && fresh.original.inclusion_block_hash
-                            == external.original.inclusion_block_hash
-                        && fresh.original.message_id == external.original.message_id
-                        && external
-                            .original
-                            .finalized_reply
-                            .as_ref()
-                            .is_none_or(
-                                |reply| fresh.original.finalized_reply.as_ref() == Some(reply)
-                            )
-                        && external.original.finalized_reply_error.as_ref().is_none_or(
-                            |code| fresh.original.finalized_reply_error.as_ref() == Some(code)
-                        ),
-                    "HOLD: canonical external original identity/history changed"
-                );
-                external.original = fresh.original.clone();
+                refresh_pending_external_original(external, fresh)?;
             }
             let result = qualify_external_original(
                 api,
@@ -2882,7 +2968,7 @@ fn validate_registration(intent: &Intent, registration: &Registration) -> Result
     let hashes = registration
         .raw_transactions
         .iter()
-        .map(|raw| alloy_primitives::keccak256(raw))
+        .map(alloy_primitives::keccak256)
         .collect::<Vec<_>>();
     let mut receipts = registration.receipts.clone();
     validate_receipt_set(
@@ -3140,7 +3226,60 @@ fn validate_lifecycle_report(work: &Work) -> Result<()> {
     }
     Ok(())
 }
+async fn reconcile_retained_role_calls(api: &GearApi, path: &Path) -> Result<()> {
+    let mut work = read_work(path)?;
+    let signer: gsdk::signer::Signer = api.clone().into();
+    let scanner = sender(
+        ApiProviderConnection::from_api(signer.api().clone()),
+        &work.intent.old_identity,
+        Some(work.intent.erc20_manager),
+    );
+    for index in 0..work.calls.len() {
+        if !matches!(
+            work.calls[index].step,
+            CutoverStep::TokenMinter(_)
+                | CutoverStep::TokenBurner(_)
+                | CutoverStep::WrapperPause
+                | CutoverStep::WrapperConfigureManager
+                | CutoverStep::WrapperSetBurner
+                | CutoverStep::WrapperResume
+        ) {
+            continue;
+        }
+        let call = &mut work.calls[index];
+        validate_fixed_intent(&work.intent, call)?;
+        let result = reconcile_call(api, &scanner_for(&scanner, call.target), call, false).await;
+        let reply = if complete(&call.original) {
+            validate_call_reply(call)
+        } else {
+            Ok(())
+        };
+        save(path, &work)?;
+        result?;
+        reply?;
+    }
+    Ok(())
+}
+
+async fn handoff_after_reconciliation<R, F, H>(reconciliation: R, handoff: F) -> Result<()>
+where
+    R: std::future::Future<Output = Result<()>>,
+    F: FnOnce() -> H,
+    H: std::future::Future<Output = Result<()>>,
+{
+    reconciliation.await?;
+    handoff().await
+}
+
 async fn handoff_roles(api: &GearApi, path: &Path) -> Result<()> {
+    // Delay all role readback/guards until retained originals are persisted.
+    handoff_after_reconciliation(reconcile_retained_role_calls(api, path), || {
+        handoff_roles_reconciled(api, path)
+    })
+    .await
+}
+
+async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
     use vft_client::traits::VftAdmin as _;
     use vft_vara_client::traits::{NativeEscrow as _, VftAdmin as _};
     let work = read_work(path)?;
@@ -3900,13 +4039,635 @@ mod tests {
         assert!(validate_receipt_set(0, block, &[], B256::ZERO, &mut []).is_err());
     }
     #[test]
-    fn lifecycle_reply_requires_exact_route_and_no_scale_tail() {
-        let route = io::Pause::ROUTE;
-        assert!(exact_reply::<io::Pause>(route).is_ok());
-        let mut tailed = route.to_vec();
+    fn lifecycle_unit_reply_is_exactly_empty_and_nonunit_is_routed() {
+        assert!(exact_reply::<io::Pause>(&[]).is_ok());
+        assert!(exact_reply::<io::BeginCutover>(&[]).is_ok());
+        assert!(exact_reply::<vft_client::vft_admin::io::SetMinter>(&[]).is_ok());
+        assert!(exact_reply::<io::Pause>(io::Pause::ROUTE).is_err());
+        assert!(exact_reply::<io::Pause>(&[0]).is_err());
+        assert!(exact_reply::<io::SubmitReceipt>(&[]).is_err());
+        let mut reply = io::SubmitReceipt::ROUTE.to_vec();
+        reply.extend(Result::<(), vft_manager_client::Error>::Ok(()).encode());
+        assert!(matches!(
+            exact_reply::<io::SubmitReceipt>(&reply),
+            Ok(Ok(()))
+        ));
+        assert!(exact_reply::<io::ReconcileReceipt>(&reply).is_err());
+        reply.push(0);
+        assert!(exact_reply::<io::SubmitReceipt>(&reply).is_err());
+    }
+
+    fn receipt_frame() -> eth_events_electra_client::EthToVaraEvent {
+        // A structural SCALE frame, not proof-verifier or economic evidence.
+        let mut block = eth_events_electra_client::BlockGenericForBlockBody::decode(
+            &mut [0u8; 2048].as_slice(),
+        )
+        .unwrap();
+        block.slot = 32;
+        eth_events_electra_client::EthToVaraEvent {
+            proof_block: eth_events_electra_client::BlockInclusionProof {
+                block,
+                headers: vec![],
+            },
+            proof: vec![],
+            transaction_index: 7,
+            receipt_rlp: vec![1, 2, 3],
+        }
+    }
+
+    fn original_with_reply(payload: Option<Vec<u8>>) -> SignedSubmission {
+        use relayer::message_relayer::eth_to_gear::message_sender::FinalizedReplyEvidence;
+        SignedSubmission {
+            chain_genesis_hash: format!("{:#x}", H256::repeat_byte(1)),
+            manager: format!("{:#x}", H256::repeat_byte(2)),
+            historical_proxy: format!("{:#x}", H256::repeat_byte(3)),
+            sender: "original-signer".into(),
+            receipt_key: (32, 7),
+            payload_hash: "original-payload".into(),
+            nonce: 12,
+            extrinsic_hash: "original-hash".into(),
+            raw_extrinsic: vec![1, 2, 3, 4],
+            prepared_finalized_number: 40,
+            prepared_finalized_hash: format!("{:#x}", H256::repeat_byte(4)),
+            scanned_finalized_number: 50,
+            scanned_finalized_hash: format!("{:#x}", H256::repeat_byte(5)),
+            reply_scanned_finalized_number: 52,
+            reply_scanned_finalized_hash: format!("{:#x}", H256::repeat_byte(6)),
+            inclusion_block_number: Some(50),
+            inclusion_block_hash: Some(format!("{:#x}", H256::repeat_byte(5))),
+            message_id: Some(format!("{:#x}", H256::repeat_byte(7))),
+            finalized_dispatch_error: None,
+            finalized_reply: payload.map(|payload| FinalizedReplyEvidence {
+                payload,
+                observation: FinalizedReceiptObservation {
+                    finalized_block_number: Some(52),
+                    finalized_block_hash: format!("{:#x}", H256::repeat_byte(6)),
+                },
+            }),
+            native_reconciliation: None,
+            native_reconciliation_attempts: vec![],
+            finalized_nonce_consumed: None,
+            finalized_reply_error: None,
+        }
+    }
+
+    #[test]
+    fn malformed_public_frames_do_not_hide_a_later_candidate() {
+        use historical_proxy_client::historical_proxy::io::Redirect;
+        let proxy = H256::repeat_byte(1);
+        let receiver = H256::repeat_byte(2);
+        let route = io::SubmitReceipt::ROUTE.to_vec();
+        let event = receipt_frame();
+        let valid = Redirect::encode_call(32, event.encode(), actor(receiver), route.clone());
+        let empty_proof = Redirect::encode_call(32, vec![], actor(receiver), route.clone());
+        let malformed_proof = Redirect::encode_call(32, vec![0], actor(receiver), route.clone());
+        let wrong_slot = Redirect::encode_call(33, event.encode(), actor(receiver), route.clone());
+        let wrong_receiver = Redirect::encode_call(32, event.encode(), actor(proxy), route.clone());
+        let wrong_route = Redirect::encode_call(32, event.encode(), actor(receiver), vec![0]);
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        let mut proof_tail = event.encode();
+        proof_tail.push(0);
+        let trailing_proof = Redirect::encode_call(32, proof_tail, actor(receiver), route.clone());
+        let malformed = [
+            Redirect::ROUTE.to_vec(),
+            empty_proof,
+            malformed_proof,
+            wrong_slot,
+            trailing,
+            trailing_proof,
+            wrong_receiver,
+            wrong_route,
+        ];
+        for payload in &malformed {
+            assert!(external_receipt_candidate(proxy, payload, proxy, receiver, &route).is_none());
+        }
+        let candidates = malformed
+            .iter()
+            .chain(std::iter::once(&valid))
+            .filter_map(|payload| {
+                external_receipt_candidate(proxy, payload, proxy, receiver, &route)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].receipt_key, (32, 7));
+        let reconcile = io::ReconcileReceipt::encode_call(32, 7);
+        assert!(
+            external_receipt_candidate(receiver, &reconcile, proxy, receiver, &route).is_some()
+        );
+        let mut tailed = reconcile.clone();
         tailed.push(0);
-        assert!(exact_reply::<io::Pause>(&tailed).is_err());
-        assert!(exact_reply::<io::Pause>(io::Unpause::ROUTE).is_err());
+        for payload in [io::ReconcileReceipt::ROUTE.to_vec(), tailed] {
+            assert!(
+                external_receipt_candidate(receiver, &payload, proxy, receiver, &route).is_none()
+            );
+        }
+        assert!(external_receipt_candidate(proxy, &reconcile, proxy, receiver, &route).is_none());
+    }
+
+    #[test]
+    fn rejected_self_relay_never_owns_external_admission() {
+        use historical_proxy_client::historical_proxy::io::Redirect;
+        let proof = receipt_frame();
+        for (result, accepted) in [
+            (Ok(()), true),
+            (
+                Err(vft_manager_client::Error::NativeSettlementPending),
+                true,
+            ),
+            (Err(vft_manager_client::Error::Paused), false),
+        ] {
+            let mut manager_reply = io::SubmitReceipt::ROUTE.to_vec();
+            manager_reply.extend(result.encode());
+            let nested: <Redirect as ActionIo>::Reply =
+                Ok((proof.receipt_rlp.clone(), manager_reply));
+            let mut payload = Redirect::ROUTE.to_vec();
+            payload.extend(nested.encode());
+            let original = original_with_reply(Some(payload));
+            assert_eq!(
+                accepted_external_parent(&proof.encode(), &original),
+                accepted
+            );
+            let mut failed = original.clone();
+            failed.finalized_reply_error = Some("Error".into());
+            assert!(!accepted_external_parent(&proof.encode(), &failed));
+            let mut undispatched = original.clone();
+            undispatched.message_id = None;
+            assert!(!accepted_external_parent(&proof.encode(), &undispatched));
+            undispatched.message_id = original.message_id.clone();
+            undispatched.finalized_dispatch_error = Some("DispatchError".into());
+            assert!(!accepted_external_parent(&proof.encode(), &undispatched));
+            let mut tailed = proof.encode();
+            tailed.push(0);
+            assert!(!accepted_external_parent(&tailed, &original));
+        }
+        assert!(!accepted_external_parent(
+            &proof.encode(),
+            &original_with_reply(None)
+        ));
+    }
+
+    fn external_parent_fixture(pending_native: bool) -> (Vec<u8>, SignedSubmission) {
+        use historical_proxy_client::historical_proxy::io::Redirect;
+        let proof = receipt_frame();
+        let mut receiver = io::SubmitReceipt::ROUTE.to_vec();
+        receiver.extend(
+            if pending_native {
+                Result::<(), vft_manager_client::Error>::Err(
+                    vft_manager_client::Error::NativeSettlementPending,
+                )
+            } else {
+                Ok(())
+            }
+            .encode(),
+        );
+        let mut reply = Redirect::ROUTE.to_vec();
+        let nested: <Redirect as ActionIo>::Reply = Ok((proof.receipt_rlp.clone(), receiver));
+        reply.extend(nested.encode());
+        (proof.encode(), original_with_reply(Some(reply)))
+    }
+
+    fn external_continuation_fixture(parent: &SignedSubmission, ordinal: u8) -> SignedSubmission {
+        use subxt::config::{substrate::BlakeTwo256, Hasher};
+        // Structural linkage fixtures only: no proof, runtime or economic evidence is fabricated.
+        let mut continuation = parent.clone();
+        continuation.nonce += u64::from(ordinal);
+        continuation.prepared_finalized_number = 52;
+        continuation.inclusion_block_number = Some(52 + u32::from(ordinal));
+        let payload = io::ReconcileReceipt::encode_call(parent.receipt_key.0, parent.receipt_key.1);
+        continuation.payload_hash = format!("{:#x}", alloy_primitives::keccak256(payload));
+        continuation.raw_extrinsic = vec![ordinal];
+        continuation.extrinsic_hash = format!(
+            "{:#x}",
+            H256::from(BlakeTwo256.hash(&continuation.raw_extrinsic).0)
+        );
+        let mut reply = io::ReconcileReceipt::ROUTE.to_vec();
+        reply.extend(
+            Result::<vft_manager_client::ReceiptStatus, vft_manager_client::Error>::Ok(
+                vft_manager_client::ReceiptStatus::Processed,
+            )
+            .encode(),
+        );
+        let evidence = continuation.finalized_reply.as_mut().unwrap();
+        evidence.payload = reply;
+        evidence.observation.finalized_block_number = Some(54 + u32::from(ordinal));
+        continuation
+    }
+
+    #[test]
+    fn cutover_public_continuation_token_completion_ignores_redundant_call() {
+        let (proof, mut parent) = external_parent_fixture(false);
+        let before = parent.clone();
+        let redundant = external_continuation_fixture(&parent, 1);
+        attach_external_native_continuations(&proof, &mut parent, &[redundant]).unwrap();
+        assert!(parent.same_request(&before));
+        assert_eq!(parent.finalized_reply, before.finalized_reply);
+        assert!(
+            parent.native_reconciliation.is_none(),
+            "token completion must not own a native continuation"
+        );
+        assert!(parent.native_reconciliation_attempts.is_empty());
+    }
+
+    #[test]
+    fn cutover_public_continuation_native_completion_ignores_later_calls() {
+        let (proof, parent) = external_parent_fixture(true);
+        let delivered = external_continuation_fixture(&parent, 1);
+        for failed in [false, true] {
+            let mut redundant = external_continuation_fixture(&parent, 2);
+            if failed {
+                redundant.finalized_reply_error = Some("Error".into());
+                redundant.finalized_reply.as_mut().unwrap().payload.clear();
+            }
+            let mut selected = parent.clone();
+            attach_external_native_continuations(
+                &proof,
+                &mut selected,
+                &[delivered.clone(), redundant],
+            )
+            .unwrap();
+            assert!(selected.same_request(&parent));
+            assert_eq!(selected.native_reconciliation.as_deref(), Some(&delivered),
+                "later redundant/failed public calls must not replace the successful native original");
+            assert!(selected.native_reconciliation_attempts.is_empty());
+            let mut restored: SignedSubmission =
+                serde_json::from_slice(&serde_json::to_vec(&selected).unwrap()).unwrap();
+            let redundant = external_continuation_fixture(&parent, 3);
+            attach_external_native_continuations(
+                &proof,
+                &mut restored,
+                &[delivered.clone(), redundant],
+            )
+            .unwrap();
+            assert_eq!(
+                restored.native_reconciliation,
+                selected.native_reconciliation
+            );
+            assert!(restored.preserves_reconciliation(&selected));
+        }
+    }
+
+    #[test]
+    fn cutover_public_continuation_preserves_earlier_attempts_and_unknown_fences() {
+        let (proof, parent) = external_parent_fixture(true);
+        let mut failed = external_continuation_fixture(&parent, 1);
+        failed.finalized_reply_error = Some("Error".into());
+        failed.finalized_reply.as_mut().unwrap().payload.clear();
+        let delivered = external_continuation_fixture(&parent, 2);
+        let mut selected = parent.clone();
+        attach_external_native_continuations(
+            &proof,
+            &mut selected,
+            &[failed.clone(), delivered.clone()],
+        )
+        .unwrap();
+        assert_eq!(
+            selected.native_reconciliation_attempts,
+            vec![failed.clone()]
+        );
+        assert_eq!(selected.native_reconciliation.as_deref(), Some(&delivered));
+        failed.finalized_reply = None;
+        failed.finalized_reply_error = None;
+        let mut held = parent;
+        assert!(
+            attach_external_native_continuations(&proof, &mut held, &[failed, delivered],).is_err()
+        );
+    }
+
+    #[test]
+    fn cutover_public_continuation_refreshes_only_pending_external_projection() {
+        for pending_native in [false, true] {
+            let (proof, parent) = external_parent_fixture(pending_native);
+            let delivered = external_continuation_fixture(&parent, 1);
+            let mut redundant = external_continuation_fixture(&parent, 2);
+            redundant.finalized_reply_error = Some("Error".into());
+            redundant.finalized_reply.as_mut().unwrap().payload.clear();
+            let mut old = seal::CanonicalExternalOriginal {
+                provenance: "canonical-external".into(),
+                original: parent.clone(),
+                discovered_at: parent.finalized_reply.as_ref().unwrap().observation.clone(),
+            };
+            if pending_native {
+                old.original
+                    .native_reconciliation_attempts
+                    .push(delivered.clone());
+            }
+            old.original.native_reconciliation = Some(Box::new(redundant.clone()));
+            let owned = old.original.clone();
+            let mut fresh = seal::CanonicalExternalOriginal {
+                provenance: old.provenance.clone(),
+                original: parent,
+                discovered_at: old.discovered_at.clone(),
+            };
+            attach_external_native_continuations(
+                &proof,
+                &mut fresh.original,
+                &[delivered, redundant],
+            )
+            .unwrap();
+            assert!(
+                !fresh.original.preserves_reconciliation(&owned),
+                "owned signatures must retain their existing strict preservation fence"
+            );
+            let mut restored: seal::CanonicalExternalOriginal =
+                serde_json::from_slice(&serde_json::to_vec(&old).unwrap()).unwrap();
+            refresh_pending_external_original(&mut restored, &fresh).unwrap();
+            assert!(restored.original.same_request(&owned));
+            assert_eq!(restored.original.finalized_reply, owned.finalized_reply);
+            assert_eq!(restored.discovered_at, old.discovered_at);
+            assert_eq!(
+                restored.original.native_reconciliation,
+                fresh.original.native_reconciliation
+            );
+            assert_eq!(
+                restored.original.native_reconciliation_attempts,
+                fresh.original.native_reconciliation_attempts
+            );
+            for field in [
+                "raw",
+                "nonce",
+                "inclusion",
+                "message",
+                "dispatch",
+                "reply",
+                "code",
+                "disposition",
+                "provenance",
+            ] {
+                let mut changed = fresh.clone();
+                match field {
+                    "raw" => changed.original.raw_extrinsic.push(0),
+                    "nonce" => changed.original.nonce += 1,
+                    "inclusion" => changed.original.inclusion_block_hash = None,
+                    "message" => changed.original.message_id = None,
+                    "dispatch" => {
+                        changed.original.finalized_dispatch_error = Some("changed".into())
+                    }
+                    "reply" => changed
+                        .original
+                        .finalized_reply
+                        .as_mut()
+                        .unwrap()
+                        .payload
+                        .push(0),
+                    "code" => changed.original.finalized_reply_error = Some("changed".into()),
+                    "disposition" => changed.original.finalized_nonce_consumed = Some(100),
+                    "provenance" => changed.provenance = "own".into(),
+                    _ => unreachable!(),
+                }
+                assert!(
+                    refresh_pending_external_original(&mut restored, &changed).is_err(),
+                    "{field}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn first_role_guard_waits_for_durable_original_reconciliation() {
+        let directory = std::env::temp_dir().join(format!("cutover-role-order-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("call.json");
+        let token = H256::repeat_byte(8);
+        let new = actor(H256::repeat_byte(9));
+        let call = FinalizedCutoverCall {
+            step: CutoverStep::TokenMinter(token),
+            attempt: 0,
+            target: token,
+            payload: vft_client::vft_admin::io::SetMinter::encode_call(new),
+            gas: 1,
+            value: 0,
+            original: original_with_reply(None),
+            archived_no_effect: false,
+        };
+        atomic_json(&path, &call, false).unwrap();
+        let before = call.original.clone();
+        let readback_started = std::cell::Cell::new(false);
+        handoff_after_reconciliation(
+            async {
+                // Yield so polling the role callback too early deterministically fails its guard.
+                tokio::task::yield_now().await;
+                let mut saved: FinalizedCutoverCall = serde_json::from_slice(&fs::read(&path)?)?;
+                ensure!(
+                    !readback_started.get(),
+                    "role readback preceded original recovery"
+                );
+                saved.original.finalized_reply = original_with_reply(Some(vec![])).finalized_reply;
+                validate_call_reply(&saved)?;
+                atomic_json(&path, &saved, false)
+            },
+            || async {
+                readback_started.set(true);
+                // The actual role is already the successor, but completion needs the saved original.
+                let live_role = new;
+                let saved: FinalizedCutoverCall = serde_json::from_slice(&fs::read(&path)?)?;
+                ensure!(
+                    live_role == new && complete(&saved.original),
+                    "unjournaled role handoff"
+                );
+                ensure!(
+                    saved.original.same_request(&before),
+                    "original identity replaced"
+                );
+                validate_call_reply(&saved)
+            },
+        )
+        .await
+        .unwrap();
+        assert!(readback_started.get());
+        readback_started.set(false);
+        let held =
+            handoff_after_reconciliation(async { bail!("HOLD: original unresolved") }, || async {
+                readback_started.set(true);
+                Ok(())
+            })
+            .await;
+        assert!(held.is_err());
+        assert!(
+            !readback_started.get(),
+            "failed reconciliation must not query roles or sign"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "read-only owned native stack and two loopback archives required"]
+    async fn owned_native_first_minter_original_replays_before_role_guard() -> Result<()> {
+        use vft_client::traits::VftAdmin as _;
+        let stack_path = std::env::var("CUTOVER_NATIVE_STACK")?;
+        let source = std::env::var("CUTOVER_NATIVE_SOURCE")?;
+        let witness = std::env::var("CUTOVER_NATIVE_WITNESS")?;
+        for rpc in [&source, &witness] {
+            ensure!(
+                rpc.starts_with("ws://127.0.0.1:") && rpc[15..].bytes().all(|b| b.is_ascii_digit()),
+                "only owned loopback archives may run this no-signature replay"
+            );
+        }
+        let stack: serde_json::Value = serde_json::from_slice(&fs::read(stack_path)?)?;
+        let message = stack["configuration"]["actions"]
+            .as_object()
+            .context("actions missing")?
+            .iter()
+            .filter(|(key, _)| key.ends_with(".minter"))
+            .map(|(_, action)| &action["messages"][0])
+            .min_by_key(|message| message["target"].as_str().unwrap_or_default())
+            .context("retained first token SetMinter missing")?;
+        let submission = &message["submission"];
+        let string = |value: &serde_json::Value| -> Result<String> {
+            Ok(value
+                .as_str()
+                .context("missing retained string")?
+                .to_owned())
+        };
+        let target = H256::from_str(&string(&message["target"])?)?;
+        let payload = hex::decode(string(&message["payload"])?.trim_start_matches("0x"))?;
+        let mut params = payload
+            .strip_prefix(vft_client::vft_admin::io::SetMinter::ROUTE)
+            .context("not the original SetMinter route")?;
+        let successor = ActorId::decode(&mut params)?;
+        ensure!(params.is_empty(), "SetMinter trailing bytes");
+        let prepared = u32::try_from(
+            submission["scanFromNumber"]
+                .as_u64()
+                .context("scan pin missing")?,
+        )?;
+        let pin = string(&submission["scanFromHash"])?;
+        // Setup journals encode public account bytes as hex; SignedSubmission uses SS58.
+        let sender = subxt::utils::AccountId32(H256::from_str(&string(&submission["sender"])?)?.0);
+        let mut call = FinalizedCutoverCall {
+            step: CutoverStep::TokenMinter(target),
+            attempt: 0,
+            target,
+            payload: payload.clone(),
+            gas: message["gasLimit"].as_u64().context("gas missing")?,
+            value: 0,
+            archived_no_effect: false,
+            original: SignedSubmission {
+                chain_genesis_hash: string(&stack["sourceGenesis"])?,
+                manager: format!("{target:#x}"),
+                historical_proxy: format!("{target:#x}"),
+                sender: sender.to_string(),
+                receipt_key: (0, 0),
+                payload_hash: format!("{:#x}", alloy_primitives::keccak256(&payload)),
+                nonce: submission["nonce"].as_u64().context("nonce missing")?,
+                extrinsic_hash: string(&submission["extrinsicHash"])?,
+                raw_extrinsic: hex::decode(
+                    string(&submission["rawExtrinsic"])?.trim_start_matches("0x"),
+                )?,
+                prepared_finalized_number: prepared,
+                prepared_finalized_hash: pin.clone(),
+                scanned_finalized_number: prepared,
+                scanned_finalized_hash: pin.clone(),
+                reply_scanned_finalized_number: prepared,
+                reply_scanned_finalized_hash: pin,
+                inclusion_block_number: Some(u32::try_from(
+                    message["inclusionEvidence"]["blockNumber"]
+                        .as_u64()
+                        .context("inclusion missing")?,
+                )?),
+                inclusion_block_hash: Some(string(&message["inclusionEvidence"]["blockHash"])?),
+                message_id: None,
+                finalized_dispatch_error: None,
+                finalized_reply: None,
+                native_reconciliation: None,
+                native_reconciliation_attempts: vec![],
+                finalized_nonce_consumed: None,
+                finalized_reply_error: None,
+            },
+        };
+        let before = call.original.clone();
+        let directory =
+            std::env::temp_dir().join(format!("cutover-native-readonly-{}", Uuid::now_v7()));
+        fs::create_dir(&directory)?;
+        let path = directory.join("first-role.json");
+        atomic_json(&path, &call, false)?;
+        // Both archives reauthenticate the same original; no call preparation, signing or broadcast.
+        for rpc in [source, witness] {
+            call.original = before.clone();
+            let provider = ApiProvider::new(rpc, 0).await?;
+            let connection = provider.connection();
+            let mut readonly = connection.clone();
+            let api = readonly.gclient();
+            let scanner =
+                MessageSender::new(target, vec![], target, connection, String::new(), None);
+            handoff_after_reconciliation(
+                async {
+                    let result = reconcile_call(&api, &scanner, &mut call, false).await;
+                    atomic_json(&path, &call, false)?;
+                    result?;
+                    validate_call_reply(&call)
+                },
+                || async {
+                    let recovered: FinalizedCutoverCall =
+                        serde_json::from_slice(&fs::read(&path)?)?;
+                    ensure!(
+                        recovered.original.same_request(&before) && complete(&recovered.original),
+                        "retained original not recovered before role guard"
+                    );
+                    let reply = recovered
+                        .original
+                        .finalized_reply
+                        .as_ref()
+                        .context("reply absent")?;
+                    ensure!(
+                        reply.payload.is_empty(),
+                        "native unit reply is not exactly empty"
+                    );
+                    ensure!(
+                        reply.observation.finalized_block_hash
+                            == string(&message["replyEvidence"]["blockHash"])?
+                            && recovered.original.message_id.as_deref()
+                                == message["messageId"].as_str(),
+                        "original native reply linkage/pin changed"
+                    );
+                    let hash = H256::from_str(&reply.observation.finalized_block_hash)?;
+                    let minter = vft_client::VftAdmin::new(GClientRemoting::new(api.clone()))
+                        .minter()
+                        .at_block(sails_rs::H256::from_slice(hash.as_bytes()))
+                        .recv(actor(target))
+                        .await?;
+                    ensure!(minter == successor, "authenticated successor role differs");
+                    println!(
+                        "Read-only original {} nonce {} recovered before first-role guard at {}",
+                        recovered.original.extrinsic_hash,
+                        recovered.original.nonce,
+                        reply.observation.finalized_block_hash
+                    );
+                    Ok(())
+                },
+            )
+            .await?;
+        }
+        fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn original_empty_minter_reply_survives_restart_without_replacement() {
+        let token = H256::repeat_byte(8);
+        let new = actor(H256::repeat_byte(9));
+        let mut call = FinalizedCutoverCall {
+            step: CutoverStep::TokenMinter(token),
+            attempt: 0,
+            target: token,
+            payload: vft_client::vft_admin::io::SetMinter::encode_call(new),
+            gas: 1,
+            value: 0,
+            original: original_with_reply(None),
+            archived_no_effect: false,
+        };
+        let saved = call.original.clone();
+        assert!(!complete(&call.original));
+        assert!(validate_call_reply(&call).is_err());
+        // Reconciliation supplies the original automatic success, not a role readback.
+        call.original.finalized_reply = original_with_reply(Some(vec![])).finalized_reply;
+        let recovered: FinalizedCutoverCall =
+            serde_json::from_slice(&serde_json::to_vec(&call).unwrap()).unwrap();
+        assert!(recovered.original.same_request(&saved));
+        assert!(complete(&recovered.original));
+        validate_call_reply(&recovered).unwrap();
+        call.original.finalized_reply_error = Some("Error".into());
+        assert!(!complete(&call.original));
     }
     #[test]
     fn immutable_evidence_is_not_overwritten() {

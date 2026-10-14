@@ -105,7 +105,8 @@ pub async fn try_to_apply(
 ) -> AnyResult<Result<(), Error>> {
     let payload = Process::encode_call(sync_update, sync_aggregate_encoded);
     let reply = send_checkpoint_message(gear_api, program_id, payload, gas_limit).await?;
-    Process::decode_reply(reply).map_err(|e| anyhow!("Failed to decode original sync committee reply: {e:?}"))
+    Process::decode_reply(reply)
+        .map_err(|e| anyhow!("Failed to decode original sync committee reply: {e:?}"))
 }
 
 #[cfg(test)]

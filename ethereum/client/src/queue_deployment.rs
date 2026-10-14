@@ -92,21 +92,17 @@ impl EthApi {
             .context("HOLD: queue deployment receipt lacks transaction index")?;
         let (block, receipts) = tokio::try_join!(
             async {
-                Ok::<_, anyhow::Error>(
-                    provider
-                        .get_block_by_hash(block_hash)
-                        .full()
-                        .await?
-                        .context("queue creation full block unavailable")?,
-                )
+                provider
+                    .get_block_by_hash(block_hash)
+                    .full()
+                    .await?
+                    .context("queue creation full block unavailable")
             },
             async {
-                Ok::<_, anyhow::Error>(
-                    provider
-                        .get_block_receipts(BlockId::hash_canonical(block_hash))
-                        .await?
-                        .context("queue creation receipt set unavailable")?,
-                )
+                provider
+                    .get_block_receipts(BlockId::hash_canonical(block_hash))
+                    .await?
+                    .context("queue creation receipt set unavailable")
             },
         )?;
         ensure!(

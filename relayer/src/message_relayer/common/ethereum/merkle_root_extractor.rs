@@ -5,7 +5,12 @@ use super::accumulator::{
 use crate::message_relayer::common::{
     AuthoritySetId, EthereumRootInclusion, GearBlockNumber, QualifiedMerkleRoot, RelayedMerkleRoot,
 };
-use alloy::{eips::BlockNumberOrTag, primitives::B256, providers::Provider};
+use alloy::{
+    eips::BlockNumberOrTag,
+    primitives::B256,
+    providers::Provider,
+    transports::{RpcError, TransportErrorKind},
+};
 use anyhow::{Context, Result};
 use ethereum_client::{EthApi, FinalizedView, MerkleRootObservation, QueueDeployment};
 use futures::StreamExt;
@@ -359,6 +364,12 @@ impl MerkleRootExtractor {
             let Some(head) = confirmed_block(view.block_number(), self.confirmations) else {
                 return Err(ethereum_client::Error::FinalizedAncestryPending.into());
             };
+            if deployment
+                .as_ref()
+                .is_some_and(|birth| head < birth.block_number)
+            {
+                return Err(ethereum_client::Error::FinalizedAncestryPending.into());
+            }
             let target = self.cursor_at(head).await?;
             view.verify_blocks(
                 self.eth_api.raw_provider(),
@@ -493,7 +504,7 @@ impl MerkleRootExtractor {
             .await?;
         if events {
             // Bounded by the retained 100 roots, not by the distance between their blocks.
-            for (&number, _) in &pins {
+            for &number in pins.keys() {
                 let expected: Vec<_> = state
                     .roots
                     .iter()
@@ -796,15 +807,26 @@ async fn task(mut this: MerkleRootExtractor) {
 }
 
 async fn task_inner(this: &mut MerkleRootExtractor) -> Result<()> {
-    let subscription = this.eth_api.subscribe_logs().await?;
-    let mut stream = subscription.into_result_stream();
+    let mut stream = match this.eth_api.subscribe_logs().await {
+        Ok(subscription) => Some(subscription.into_result_stream()),
+        Err(RpcError::Transport(TransportErrorKind::PubsubUnavailable)) => {
+            log::info!("Ethereum pubsub unavailable; polling finalized roots");
+            None
+        }
+        Err(error) => return Err(error.into()),
+    };
     let mut interval = tokio::time::interval(ETH_RPC_HEALTHCHECK_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         // Subscriptions only wake finalized catch-up; no subscription data is trusted.
         tokio::select! {
             _ = interval.tick() => {}
-            event = stream.next() => match event {
+            event = async {
+                match stream.as_mut() {
+                    Some(stream) => stream.next().await,
+                    None => std::future::pending().await,
+                }
+            } => match event {
                 Some(Ok(_)) => {}
                 Some(Err(error)) => return Err(error.into()),
                 None => anyhow::bail!("Ethereum log subscription closed"),
@@ -821,6 +843,552 @@ async fn task_inner(this: &mut MerkleRootExtractor) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actix_web::{web, App, HttpResponse, HttpServer};
+    use alloy::{
+        consensus::{
+            proofs::{calculate_receipt_root, calculate_transaction_root},
+            transaction::{Recovered, SignerRecoverable},
+            TxEnvelope,
+        },
+        eips::Decodable2718,
+        rpc::types::{Block, BlockTransactions, Transaction, TransactionReceipt},
+    };
+    use futures::SinkExt;
+    use gear_common::api_provider::ApiProvider;
+    use parity_scale_codec::{Decode, Encode};
+    use serde_json::{json, Value};
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    };
+
+    #[derive(Default)]
+    struct MemoryRootStorage {
+        states: Mutex<Vec<EthereumRootState>>,
+        saved: tokio::sync::Notify,
+    }
+
+    #[async_trait::async_trait]
+    impl RootCursorStorage for MemoryRootStorage {
+        async fn load_root_state(&self) -> Result<Option<EthereumRootState>> {
+            Ok(self.states.lock().unwrap().last().cloned())
+        }
+
+        async fn save_root_state(&self, state: &EthereumRootState) -> Result<()> {
+            state.validate()?;
+            let mut states = self.states.lock().unwrap();
+            if let Some(previous) = states.last() {
+                previous.validate_successor(state)?;
+            }
+            states.push(state.clone());
+            self.saved.notify_one();
+            Ok(())
+        }
+    }
+
+    // No source state is fabricated: these Ethereum fixtures have no root events.
+    // The live provider service is retained; unexpected source RPCs fail the test.
+    async fn source_provider() -> Result<(ApiProvider, tokio::task::JoinHandle<()>)> {
+        use subxt::ext::frame_metadata::{
+            v15, RuntimeMetadata, RuntimeMetadataPrefixed, META_RESERVED,
+        };
+        let metadata = RuntimeMetadataPrefixed(
+            META_RESERVED,
+            RuntimeMetadata::V15(v15::RuntimeMetadataV15 {
+                types: Decode::decode(&mut &[0u8][..])?,
+                pallets: vec![],
+                extrinsic: v15::ExtrinsicMetadata {
+                    version: 4,
+                    address_ty: 0.into(),
+                    call_ty: 0.into(),
+                    signature_ty: 0.into(),
+                    extra_ty: 0.into(),
+                    signed_extensions: vec![],
+                },
+                ty: 0.into(),
+                apis: vec![],
+                outer_enums: v15::OuterEnums {
+                    call_enum_ty: 0.into(),
+                    event_enum_ty: 0.into(),
+                    error_enum_ty: 0.into(),
+                },
+                custom: v15::CustomMetadata {
+                    map: BTreeMap::new(),
+                },
+            }),
+        )
+        .encode();
+        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("ws://{}", socket.local_addr()?);
+        let server = tokio::spawn(async move {
+            let (socket, _) = socket.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(socket).await.unwrap();
+            while let Some(Ok(message)) = ws.next().await {
+                if !message.is_text() {
+                    continue;
+                }
+                let request: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                let result = match request["method"].as_str().unwrap() {
+                    "chain_getFinalizedHead" | "chain_getBlockHash" => json!(H256::repeat_byte(1)),
+                    "state_getRuntimeVersion" => {
+                        json!({ "specVersion": 1, "transactionVersion": 1 })
+                    }
+                    "state_getMetadata" => json!(format!("0x{}", hex::encode(&metadata))),
+                    "state_call" => {
+                        assert_eq!(request["params"][0], "Metadata_metadata_at_version");
+                        json!(format!(
+                            "0x{}",
+                            hex::encode(Some(metadata.clone()).encode())
+                        ))
+                    }
+                    method => panic!("unexpected source RPC in empty-root fixture: {method}"),
+                };
+                ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                    json!({"jsonrpc":"2.0", "id":request["id"], "result":result})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            }
+        });
+        let provider = ApiProvider::new(endpoint, 0).await?;
+        assert!(provider.connection().is_alive());
+        Ok((provider, server))
+    }
+
+    struct HttpRoots {
+        api: EthApi,
+        head: Arc<AtomicU64>,
+        calls: Arc<Mutex<Vec<Value>>>,
+        blocks: Arc<Vec<Block>>,
+        birth: QueueDeployment,
+        server: actix_web::dev::ServerHandle,
+    }
+
+    impl HttpRoots {
+        async fn new(head: u64) -> Result<Self> {
+            let mut birth = deployment().await;
+            birth.block_number = 4;
+            let tx = TxEnvelope::decode_2718(&mut birth.raw_transaction.as_ref())?;
+            let sender = tx.recover_signer()?;
+            let mut receipt: TransactionReceipt = serde_json::from_value(json!({
+                "type":"0x2", "status":"0x1", "cumulativeGasUsed":"0x5208",
+                "logs":[], "logsBloom":format!("0x{}", "00".repeat(256)),
+                "transactionHash":birth.transaction_hash, "transactionIndex":"0x0",
+                "blockHash":B256::ZERO, "blockNumber":"0x4", "gasUsed":"0x5208",
+                "effectiveGasPrice":"0x1", "from":sender, "to":null, "contractAddress":birth.queue,
+            }))?;
+            let mut blocks = Vec::new();
+            let mut parent = B256::ZERO;
+            for number in 0..=12 {
+                let mut block: Block = Default::default();
+                block.header.inner.number = number;
+                block.header.inner.parent_hash = parent;
+                block.header.inner.timestamp = number * 12;
+                if number == 0 {
+                    block.header.inner.extra_data = uuid::Uuid::new_v4().as_bytes().to_vec().into();
+                }
+                if number == birth.block_number {
+                    block.header.inner.transactions_root =
+                        calculate_transaction_root(std::slice::from_ref(&tx));
+                    block.header.inner.receipts_root =
+                        calculate_receipt_root(&[receipt.clone().into_primitives_receipt().inner]);
+                }
+                block.header.hash = block.header.inner.hash_slow();
+                if number == birth.block_number {
+                    birth.block_hash = block.header.hash;
+                    receipt.block_hash = Some(block.header.hash);
+                    block.transactions = BlockTransactions::Full(vec![Transaction {
+                        inner: Recovered::new_unchecked(tx.clone(), sender),
+                        block_hash: Some(block.header.hash),
+                        block_number: Some(number),
+                        transaction_index: Some(0),
+                        effective_gas_price: Some(1),
+                    }]);
+                }
+                parent = block.header.hash;
+                blocks.push(block);
+            }
+            birth.genesis_hash = blocks[0].header.hash;
+            let blocks = Arc::new(blocks);
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let head = Arc::new(AtomicU64::new(head));
+            let socket = std::net::TcpListener::bind("127.0.0.1:0")?;
+            let endpoint = format!("http://{}", socket.local_addr()?);
+            let server_blocks = blocks.clone();
+            let server_calls = calls.clone();
+            let server_head = head.clone();
+            let server = HttpServer::new(move || {
+                let blocks = server_blocks.clone();
+                let calls = server_calls.clone();
+                let head = server_head.clone();
+                let receipt = receipt.clone();
+                App::new().route(
+                    "/",
+                    web::post().to(move |request: web::Json<Value>| {
+                        let blocks = blocks.clone();
+                        let calls = calls.clone();
+                        let head = head.clone();
+                        let receipt = receipt.clone();
+                        async move {
+                            calls.lock().unwrap().push(request.0.clone());
+                            let params = &request["params"];
+                            let result = match request["method"].as_str().unwrap() {
+                                "eth_chainId" => json!("0x88bb0"),
+                                "eth_getBlockByNumber" => {
+                                    let tag = params[0].as_str().unwrap();
+                                    let number = if matches!(tag, "finalized" | "latest") {
+                                        head.load(Ordering::SeqCst)
+                                    } else {
+                                        u64::from_str_radix(tag.trim_start_matches("0x"), 16)
+                                            .unwrap()
+                                    };
+                                    json!(&blocks[number as usize])
+                                }
+                                "eth_getBlockByHash" => json!(blocks
+                                    .iter()
+                                    .find(|block| json!(block.header.hash) == params[0])),
+                                "eth_getTransactionReceipt" => {
+                                    assert_eq!(params[0], json!(receipt.transaction_hash));
+                                    json!(receipt)
+                                }
+                                "eth_getBlockReceipts" => {
+                                    assert_eq!(params[0]["blockHash"], json!(receipt.block_hash));
+                                    json!([receipt])
+                                }
+                                "eth_getLogs" => json!([]),
+                                method => panic!("unexpected read-only Ethereum RPC: {method}"),
+                            };
+                            HttpResponse::Ok()
+                                .json(json!({"jsonrpc":"2.0", "id":request["id"], "result":result}))
+                        }
+                    }),
+                )
+            })
+            .workers(1)
+            .listen(socket)?
+            .disable_signals()
+            .run();
+            let handle = server.handle();
+            tokio::spawn(server);
+            let api =
+                EthApi::new(&endpoint, &format!("{:#x}", birth.queue), None, None, None).await?;
+            Ok(Self {
+                api,
+                head,
+                calls,
+                blocks,
+                birth,
+                server: handle,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn http_actor_catches_up_on_timer_without_pubsub() -> Result<()> {
+        let rpc = HttpRoots::new(10).await?;
+        let (provider, source) = source_provider().await?;
+        let storage = Arc::new(MemoryRootStorage::default());
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut extractor = MerkleRootExtractor::new(
+            rpc.api
+                .clone()
+                .with_queue_deployment_transaction(Some(rpc.birth.transaction_hash)),
+            provider.connection(),
+            1,
+            sender,
+            storage.clone(),
+        );
+        extractor.qualify_inner().await?;
+        rpc.calls.lock().unwrap().clear();
+        rpc.head.store(11, Ordering::SeqCst);
+        let actor = tokio::spawn(async move { task_inner(&mut extractor).await });
+        for expected in [11, 12] {
+            tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    if storage
+                        .load_root_state()
+                        .await?
+                        .unwrap()
+                        .cursor
+                        .unwrap()
+                        .block_number
+                        == expected
+                    {
+                        return Ok::<_, anyhow::Error>(());
+                    }
+                    storage.saved.notified().await;
+                }
+            })
+            .await??;
+            // No WS event exists: the next advance must come from the timer.
+            rpc.head.store(12, Ordering::SeqCst);
+        }
+        actor.abort();
+        assert!(actor.await.unwrap_err().is_cancelled());
+        {
+            let calls = rpc.calls.lock().unwrap();
+            let scans: Vec<_> = calls
+                .iter()
+                .filter(|call| call["method"] == "eth_getLogs")
+                .collect();
+            assert!(scans
+                .iter()
+                .any(|call| call["params"][0]["fromBlock"] == "0xb"
+                    && call["params"][0]["toBlock"] == "0xb"));
+            assert!(scans
+                .iter()
+                .any(|call| call["params"][0]["fromBlock"] == "0xc"
+                    && call["params"][0]["toBlock"] == "0xc"));
+            assert!(!calls.iter().any(|call| call["method"] == "eth_subscribe"
+                || call["method"] == "eth_sendRawTransaction"));
+        }
+        rpc.server.stop(true).await;
+        source.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fresh_deployment_waits_for_confirmations_without_persisting_partial_state(
+    ) -> Result<()> {
+        let rpc = HttpRoots::new(9).await?;
+        let (provider, source) = source_provider().await?;
+        let storage = Arc::new(MemoryRootStorage::default());
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut extractor = MerkleRootExtractor::new(
+            rpc.api
+                .clone()
+                .with_queue_deployment_transaction(Some(rpc.birth.transaction_hash)),
+            provider.connection(),
+            8,
+            sender.clone(),
+            storage.clone(),
+        );
+        for head in [9, 10] {
+            rpc.head.store(head, Ordering::SeqCst);
+            let error = extractor
+                .qualify_inner()
+                .await
+                .err()
+                .expect("confirmation lag must stay pending");
+            assert!(matches!(
+                error.downcast_ref::<ethereum_client::Error>(),
+                Some(ethereum_client::Error::FinalizedAncestryPending)
+            ));
+            assert!(!qualification_holds(&error));
+            assert!(extractor.state.is_none());
+            assert!(storage.states.lock().unwrap().is_empty());
+            assert!(!rpc
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| call["method"] == "eth_getLogs"));
+        }
+        rpc.head.store(11, Ordering::SeqCst);
+        extractor.qualify_inner().await?;
+        let state = storage.load_root_state().await?.unwrap();
+        assert_eq!(state.phase, EthereumRootPhase::Ready);
+        assert_eq!(state.scan_start, 4);
+        assert_eq!(
+            state.cursor,
+            Some(EthereumRootCursor {
+                block_number: 4,
+                block_hash: rpc.blocks[4].header.hash
+            })
+        );
+        assert_eq!(state.queue_deployment, Some(rpc.birth.clone()));
+        for saved in storage.states.lock().unwrap().iter() {
+            saved.validate()?;
+            assert_eq!(saved.scan_start, 4);
+            match saved.phase {
+                EthereumRootPhase::Rebuilding => assert!(
+                    saved
+                        .migration_target
+                        .context("rebuilding target missing")?
+                        .block_number
+                        >= 4
+                ),
+                EthereumRootPhase::Ready => {
+                    assert!(saved.migration_target.is_none());
+                    assert!(saved.cursor.context("ready cursor missing")?.block_number >= 4);
+                }
+            }
+        }
+        let scans: Vec<_> = rpc
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call["method"] == "eth_getLogs")
+            .cloned()
+            .collect();
+        assert_eq!(scans.len(), 1);
+        assert_eq!(scans[0]["params"][0]["fromBlock"], "0x4");
+        assert_eq!(scans[0]["params"][0]["toBlock"], "0x4");
+        // Restart with the same authenticated floor, then poll the next confirmed block.
+        rpc.head.store(12, Ordering::SeqCst);
+        let mut restored = MerkleRootExtractor::new(
+            rpc.api
+                .clone()
+                .with_queue_deployment_transaction(Some(rpc.birth.transaction_hash)),
+            provider.connection(),
+            8,
+            sender,
+            storage.clone(),
+        );
+        restored.qualify_inner().await?;
+        restored.catch_up().await?;
+        assert_eq!(
+            storage
+                .load_root_state()
+                .await?
+                .unwrap()
+                .cursor
+                .unwrap()
+                .block_number,
+            5
+        );
+        rpc.server.stop(true).await;
+        source.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn subscription_rpc_rejection_is_not_http_polling_fallback() -> Result<()> {
+        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = format!("ws://{}", socket.local_addr()?);
+        let server = tokio::spawn(async move {
+            let (socket, _) = socket.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(socket).await.unwrap();
+            while let Some(Ok(message)) = ws.next().await {
+                if !message.is_text() {
+                    continue;
+                }
+                let request: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                let response = match request["method"].as_str().unwrap() {
+                    "eth_chainId" => {
+                        json!({"jsonrpc":"2.0", "id":request["id"], "result":"0x88bb0"})
+                    }
+                    "eth_subscribe" => {
+                        json!({"jsonrpc":"2.0", "id":request["id"], "error":{"code":-32000, "message":"subscription authorization denied"}})
+                    }
+                    method => panic!("unexpected RPC after subscription failure: {method}"),
+                };
+                ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                    response.to_string().into(),
+                ))
+                .await
+                .unwrap();
+            }
+        });
+        let api = EthApi::new(
+            &endpoint,
+            &format!("{:#x}", alloy::primitives::Address::repeat_byte(9)),
+            None,
+            None,
+            None,
+        )
+        .await?;
+        let (provider, source) = source_provider().await?;
+        let storage = Arc::new(MemoryRootStorage::default());
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut extractor =
+            MerkleRootExtractor::new(api, provider.connection(), 1, sender, storage.clone());
+        let error = tokio::time::timeout(Duration::from_secs(5), task_inner(&mut extractor))
+            .await?
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("subscription authorization denied"));
+        assert!(storage.states.lock().unwrap().is_empty());
+        server.abort();
+        source.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires explicit read-only HTTP Ethereum and matching loopback Gear endpoints"]
+    async fn live_http_discovery_actor_read_only() -> Result<()> {
+        let rpc = std::env::var("ROOT_DISCOVERY_ETH_RPC")?;
+        let endpoint = url::Url::parse(&rpc)?;
+        anyhow::ensure!(
+            matches!(endpoint.scheme(), "http" | "https"),
+            "HTTP transport required"
+        );
+        let source_rpc = std::env::var("ROOT_DISCOVERY_GEAR_RPC")?;
+        anyhow::ensure!(
+            url::Url::parse(&source_rpc)?.host_str() == Some("127.0.0.1"),
+            "Owned loopback source required"
+        );
+        let provider = ApiProvider::new(source_rpc, 0).await?;
+        let connection = provider.connection();
+        anyhow::ensure!(
+            format!("{:#x}", connection.client().api.genesis_hash())
+                == std::env::var("ROOT_DISCOVERY_GEAR_GENESIS")?,
+            "Approved source genesis changed"
+        );
+        let api = EthApi::new(
+            &rpc,
+            &std::env::var("ROOT_DISCOVERY_QUEUE")?,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        let view = api.verified_finalized_view().await?;
+        anyhow::ensure!(
+            format!("{:#x}", view.genesis_hash()) == std::env::var("ROOT_DISCOVERY_ETH_GENESIS")?,
+            "Approved Ethereum genesis changed"
+        );
+        let preceding = api
+            .raw_provider()
+            .get_block_by_number(BlockNumberOrTag::Number(
+                view.block_number()
+                    .checked_sub(1)
+                    .context("Finalized genesis has no preceding scan pin")?,
+            ))
+            .await?
+            .context("Previous finalized header unavailable")?;
+        let pin = EthereumRootCursor {
+            block_number: preceding.header.number,
+            block_hash: preceding.header.hash,
+        };
+        // Bounded observation-only snapshot in RAM, not a dispatchable lane.
+        // No live journal, replay evidence or signing credential is loaded.
+        let mut state = EthereumRootState::rebuilding(pin);
+        state.cursor = Some(pin);
+        state.finish_rebuild()?;
+        let storage = Arc::new(MemoryRootStorage::default());
+        storage.save_root_state(&state).await?;
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut extractor = MerkleRootExtractor::new(api, connection, 1, sender, storage.clone());
+        extractor.qualify_inner().await?;
+        // The actual HTTP actor must scan at least the latest finalized block,
+        // persist its authenticated cursor in RAM, then stay alive across a timer.
+        assert!(
+            tokio::time::timeout(
+                ETH_RPC_HEALTHCHECK_INTERVAL + Duration::from_secs(5),
+                task_inner(&mut extractor)
+            )
+            .await
+            .is_err(),
+            "healthy HTTP actor must remain pending"
+        );
+        let scanned = storage
+            .load_root_state()
+            .await?
+            .unwrap()
+            .cursor
+            .context("HTTP actor failed to save scan cursor")?;
+        assert!(scanned.block_number >= view.block_number());
+        assert!(
+            extractor.metrics.latest_ethereum_block.get() >= i64::try_from(view.block_number())?
+        );
+        println!("HTTP actor scanned finalized blocks {}..{} ending at {:#x}; source provider alive {}; RAM journal saves {}", pin.block_number + 1, scanned.block_number, scanned.block_hash, provider.connection().is_alive(), storage.states.lock().unwrap().len());
+        Ok(())
+    }
 
     async fn deployment() -> QueueDeployment {
         use alloy::{

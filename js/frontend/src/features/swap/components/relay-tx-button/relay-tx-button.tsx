@@ -1,5 +1,5 @@
 import { HexString } from '@gear-js/api';
-import type { InboundTokenEffect, OutboundEffect } from '@gear-js/bridge';
+import type { InboundTokenEffect } from '@gear-js/bridge';
 import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
@@ -17,7 +17,7 @@ type VaraProps = {
   nonce: bigint;
   blockNumber: string;
   onFinalized: () => void;
-  expectedEffect: OutboundEffect;
+  expectedEffect: Parameters<typeof useRelayVaraTx>[2];
 };
 
 function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {

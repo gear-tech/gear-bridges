@@ -52,13 +52,16 @@ pub(super) fn queue_merkle_root_changed(block: &GearBlock) -> Option<(u64, H256)
 }
 
 pub(super) fn message_queued_events_of(block: &GearBlock) -> impl Iterator<Item = U256> + use<'_> {
-    block.bridge_events().iter().filter_map(|event| match event {
-        BridgeEvent::MessageQueued(gsdk::gear::gear_eth_bridge::events::MessageQueued {
-            message,
-            ..
-        }) => Some(U256(message.nonce.0)),
-        _ => None,
-    })
+    block
+        .bridge_events()
+        .iter()
+        .filter_map(|event| match event {
+            BridgeEvent::MessageQueued(gsdk::gear::gear_eth_bridge::events::MessageQueued {
+                message,
+                ..
+            }) => Some(U256(message.nonce.0)),
+            _ => None,
+        })
 }
 
 pub(super) fn priority_bridging_paid<'a>(
@@ -83,8 +86,7 @@ pub(super) fn authority_set_changed(block: &GearBlock) -> bool {
         .bridge_events()
         .iter()
         .find_map(|event| match event {
-            BridgeEvent::AuthoritySetHashChanged(_)
-            | BridgeEvent::NewAuthorities(_) => Some(()),
+            BridgeEvent::AuthoritySetHashChanged(_) | BridgeEvent::NewAuthorities(_) => Some(()),
             _ => None,
         })
         .is_some()

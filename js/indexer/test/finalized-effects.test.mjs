@@ -19,7 +19,7 @@ const queue = await import('../lib/eth/abi/message-queue.js');
 const { BatchState: GearState } = await import('../lib/gear/batch-state.js');
 const { requireFinalizedBatch: requireEthFinality } = await import('../lib/eth/finality.js');
 const { requireFinalizedBatch: requireGearFinality } = await import('../lib/gear/finality.js');
-const { Transfer, Network, Status, ReceiptRelay, ReceiptSettlement } = await import('../lib/model/index.js');
+const { Transfer, CompletedTransfer, MerkleRootInMessageQueue, Network, Status, ReceiptRelay, ReceiptSettlement } = await import('../lib/model/index.js');
 const quiet = { child() { return this; }, info() {}, debug() {}, warn() {}, error() {} };
 const block = { height: 11, hash: hash('aa'), timestamp: 1_700_000_000_000 };
 function memoryStore() {
@@ -27,9 +27,14 @@ function memoryStore() {
   const matches = (row, where) => !where || (Array.isArray(where)
     ? where.some((part) => matches(row, part))
     : Object.entries(where).every(([key, value]) => {
-      if (value?.type === 'in') return value.value.includes(row[key]);
-      if (value?.type === 'moreThan') return row[key] > value.value;
-      return row[key] === value;
+      const compare = (expected) => {
+        if (expected?.type === 'in') return expected.value.includes(row[key]);
+        if (expected?.type === 'moreThan') return row[key] > expected.value;
+        if (expected?.type === 'isNull') return row[key] == null;
+        if (expected?.type === 'not') return !compare(expected.value);
+        return row[key] === expected;
+      };
+      return compare(value);
     }));
   return { rows, queries, saves,
     async find(entity, options) {
@@ -110,6 +115,65 @@ test('finalized original same-receipt effect is the only outbound completion', a
   later.receipt.logs[1] = event(queue.abi, 'MessageProcessed', [10n, hash('77'), 8n, addr('11')], addr('22'), 1);
   await handleBatch(context(later.receipt, later.transfer));
   assert.equal(later.transfer.status, Status.Completed);
+});
+
+test('outbound completion survives counterpart lag and restart while unrelated roots advance', async () => {
+  const { receipt, transfer } = outbound();
+  const store = memoryStore();
+  store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
+  const ctx = { ...context(receipt, undefined), store };
+  ctx.blocks[0].logs.push({ ...event(queue.abi, 'MerkleRoot', [12n, hash('88')], addr('22'), 2), logIndex: 2 });
+  await handleBatch(ctx);
+  const retained = [...store.rows.get(CompletedTransfer).values()][0];
+  assert.equal(retained.matched, false);
+  assert.equal(retained.outboundReceipt.receipt.transactionHash, txHash);
+  assert.equal(store.rows.get(Transfer), undefined);
+  assert.equal([...store.rows.get(MerkleRootInMessageQueue).values()][0].blockNumber, 12n);
+  // PostgreSQL JSONB may reorder keys when the durable original is replayed after restart.
+  store.rows.get(CompletedTransfer).set(retained.id, new CompletedTransfer({ ...retained,
+    outboundReceipt: Object.fromEntries(Object.entries(JSON.parse(JSON.stringify(retained.outboundReceipt))).reverse()) }));
+  await handleBatch(ctx);
+  assert.equal(store.rows.get(CompletedTransfer).size, 1);
+  ctx.blocks = [];
+  const originalMessageHash = transfer.ethBridgeBuiltInMsgHash;
+  transfer.ethBridgeBuiltInMsgHash = null;
+  await store.save(transfer);
+  await handleBatch(ctx);
+  assert.equal(transfer.status, Status.Bridging);
+  transfer.ethBridgeBuiltInMsgHash = originalMessageHash;
+  await handleBatch(ctx);
+  assert.equal(transfer.status, Status.Completed);
+  assert.equal(transfer.completedAtTxHash, txHash);
+  assert.equal(transfer.completedAtBlock, 11n);
+  assert.equal(store.rows.get(CompletedTransfer).get(retained.id).matched, true);
+  store.saves.length = 0;
+  await handleBatch(ctx);
+  assert.equal(store.saves.flat().filter((row) => row instanceof Transfer).length, 0);
+});
+
+test('pending outbound completion reauthenticates canonical history before matching a late transfer', async () => {
+  const { receipt, transfer } = outbound();
+  const store = memoryStore();
+  store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
+  await handleBatch({ ...context(receipt, undefined), store });
+  await store.save(transfer);
+  const changed = { ...context(receipt, transfer, hash('cc')), store, blocks: [] };
+  await assert.rejects(handleBatch(changed), /noncanonical Ethereum block/);
+  assert.equal(transfer.status, Status.Bridging);
+  assert.equal([...store.rows.get(CompletedTransfer).values()][0].matched, false);
+});
+
+test('legacy completion rows and mismatched deferred effects never complete a late transfer', async () => {
+  const { receipt, transfer } = outbound([hash('44'), addr('55'), addr('66'), 11n]);
+  const store = memoryStore();
+  store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
+  await store.save(new CompletedTransfer({ id: 'legacy', srcNetwork: Network.Vara, destNetwork: Network.Ethereum,
+    txHash, blockNumber: 11n, timestamp: new Date(block.timestamp), matched: false }));
+  await handleBatch({ ...context(receipt, undefined), store });
+  await store.save(transfer);
+  await handleBatch({ ...context(receipt, transfer), store, blocks: [] });
+  assert.equal(transfer.status, Status.Bridging);
+  assert.ok([...store.rows.get(CompletedTransfer).values()].every((row) => !row.matched));
 });
 
 test('noncanonical batch fails before effects or cursor-owning handler return', async () => {

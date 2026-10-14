@@ -17,7 +17,6 @@ use relayer::{
         FetchMerkleRootsArgs, GearEthCoreArgs, GearEthTokensCommands, GearSignerArgs,
         DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
     },
-    common,
     config::{
         EffectiveConfig, EffectiveEthereumConfig, EffectiveGearConfig, EffectiveProofStorageConfig,
         EffectiveRelayerConfig,

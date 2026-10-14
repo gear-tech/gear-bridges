@@ -1319,7 +1319,9 @@ impl EthApi {
             .with_simple_nonce_management()
             .fetch_chain_id()
             .wallet(self.wallet.clone())
-            .connect_client(connect_rpc(&self.url, self.ws_max_retry, self.ws_retry_interval).await?);
+            .connect_client(
+                connect_rpc(&self.url, self.ws_max_retry, self.ws_retry_interval).await?,
+            );
 
         let contracts = Contracts::new(
             provider,

@@ -53,7 +53,10 @@ impl Network {
             Holesky => hex!("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
             // According to https://github.com/eth-clients/hoodi/blob/2b03cffba84b50759b3476a69334fac8412e217c/metadata/genesis_validators_root.txt
             Hoodi => hex!("212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f"),
-            LocalFixture { genesis_validators_root, .. } => genesis_validators_root.0,
+            LocalFixture {
+                genesis_validators_root,
+                ..
+            } => genesis_validators_root.0,
         }
         .into()
     }
@@ -173,7 +176,8 @@ mod tests {
             assert_eq!(network.encode(), [index as u8]);
             assert_eq!(
                 Network::from_genesis_validators_root(network.genesis_validators_root().0)
-                    .unwrap().encode(),
+                    .unwrap()
+                    .encode(),
                 network.encode(),
             );
         }
@@ -181,28 +185,55 @@ mod tests {
             genesis_time: 1_800_000_000,
             genesis_validators_root: Hash256::repeat_byte(1),
         };
-        assert!(Network::from_genesis_validators_root(fixture.genesis_validators_root().0).is_none());
+        assert!(
+            Network::from_genesis_validators_root(fixture.genesis_validators_root().0).is_none()
+        );
         let encoded = fixture.encode();
         assert_eq!(encoded[0], 4);
         assert_eq!(&encoded[1..9], &fixture.genesis_time().to_le_bytes());
         assert_eq!(&encoded[9..], fixture.genesis_validators_root().as_bytes());
-        assert_eq!(Network::decode(&mut &encoded[..]).unwrap().encode(), encoded);
-        assert_eq!(fixture.current_slot(fixture.genesis_time() * 1_000 - 1), None);
-        assert_eq!(fixture.current_slot(fixture.genesis_time() * 1_000 + 12_000), Some(1));
         assert_eq!(
-            (fixture.epoch_deneb(), fixture.epoch_electra(), fixture.epoch_fulu()),
+            Network::decode(&mut &encoded[..]).unwrap().encode(),
+            encoded
+        );
+        assert_eq!(
+            fixture.current_slot(fixture.genesis_time() * 1_000 - 1),
+            None
+        );
+        assert_eq!(
+            fixture.current_slot(fixture.genesis_time() * 1_000 + 12_000),
+            Some(1)
+        );
+        assert_eq!(
+            (
+                fixture.epoch_deneb(),
+                fixture.epoch_electra(),
+                fixture.epoch_fulu()
+            ),
             (0, 0, u64::MAX),
         );
         assert_eq!(crate::merkle::depth_index_current(&fixture, 0), (6, 22));
         let domain = crate::signing_root::compute_domain(
-            DOMAIN_SYNC_COMMITTEE, fixture.fork_version(8192), fixture.genesis_validators_root(),
+            DOMAIN_SYNC_COMMITTEE,
+            fixture.fork_version(8192),
+            fixture.genesis_validators_root(),
         );
         assert_eq!(fixture.fork_version(8192), hex!("60003137"));
-        assert_ne!(domain, crate::signing_root::compute_domain(
-            DOMAIN_SYNC_COMMITTEE, Hoodi.fork_version(8192), Hoodi.genesis_validators_root(),
-        ));
-        assert_ne!(domain, crate::signing_root::compute_domain(
-            DOMAIN_SYNC_COMMITTEE, fixture.fork_version(8192), Hash256::repeat_byte(2),
-        ));
+        assert_ne!(
+            domain,
+            crate::signing_root::compute_domain(
+                DOMAIN_SYNC_COMMITTEE,
+                Hoodi.fork_version(8192),
+                Hoodi.genesis_validators_root(),
+            )
+        );
+        assert_ne!(
+            domain,
+            crate::signing_root::compute_domain(
+                DOMAIN_SYNC_COMMITTEE,
+                fixture.fork_version(8192),
+                Hash256::repeat_byte(2),
+            )
+        );
     }
 }

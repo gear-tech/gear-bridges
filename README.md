@@ -57,7 +57,10 @@ target (`--features deployment --bin beefy-deploy`), not a campaign supervisor.
 The deployment feature adds the program WASMs; the normal actor does not need them.
 No Python, launchd, sealed-run manifests or uninterrupted soak are required to
 run the reusable actor. Original transaction journals and finality checks remain
-mandatory on restart.
+mandatory on restart. Re-included originals remain held until their new inclusion
+is finalized. Keep `root-publications/finality-history/` alongside indexed root
+journals: it is owned archive data, not a root publication. Unknown inventory
+entries and symlinks in place of that directory remain rejected.
 
 ## Security
 

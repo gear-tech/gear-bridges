@@ -705,6 +705,30 @@ pub async fn audit_history(
     );
     Ok(())
 }
+
+fn validate_root_publication_inventory(
+    publications: &Path,
+    registered_paths: &std::collections::BTreeSet<&Path>,
+) -> Result<()> {
+    if publications.try_exists()? {
+        for entry in fs::read_dir(publications)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() && entry.file_name() == "finality-history" {
+                continue;
+            }
+            ensure!(
+                file_type.is_file()
+                    && path.extension().and_then(|extension| extension.to_str()) == Some("json")
+                    && registered_paths.contains(path.as_path()),
+                "unindexed or incomplete root publication evidence; HOLD"
+            );
+        }
+    }
+    Ok(())
+}
+
 // Only a mined observation may move. Signed identity, finalized history and root pins may not.
 async fn authenticate_reinclusion(
     ethereum: &Ethereum,
@@ -817,19 +841,7 @@ async fn authenticate_reinclusion(
                 }
             }
         }
-        if publications.try_exists()? {
-            for entry in fs::read_dir(&publications)? {
-                let entry = entry?;
-                let path = entry.path();
-                ensure!(
-                    entry.file_type()?.is_file()
-                        && path.extension().and_then(|extension| extension.to_str())
-                            == Some("json")
-                        && registered_paths.contains(path.as_path()),
-                    "unindexed or incomplete root publication evidence; HOLD"
-                );
-            }
-        }
+        validate_root_publication_inventory(&publications, &registered_paths)?;
         let raw = decode(&submission["rawTransaction"])?;
         crate::ethereum::signed_transaction_identity(
             &raw,
@@ -3006,6 +3018,36 @@ mod tests {
         )
         .is_err());
         assert_eq!(terminal_state, before);
+        Ok(())
+    }
+
+    #[test]
+    fn root_inventory_accepts_owned_archive_but_rejects_unindexed_entries() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let publication = directory.path().join("original.json");
+        fs::write(&publication, b"{}")?;
+        let registered = std::collections::BTreeSet::from([publication.as_path()]);
+        let archive = directory.path().join("finality-history");
+        fs::create_dir(&archive)?;
+        validate_root_publication_inventory(directory.path(), &registered)?;
+
+        let unindexed = directory.path().join("unindexed.json");
+        fs::write(&unindexed, b"{}")?;
+        assert!(validate_root_publication_inventory(directory.path(), &registered).is_err());
+        fs::remove_file(&unindexed)?;
+        fs::create_dir(&unindexed)?;
+        assert!(validate_root_publication_inventory(directory.path(), &registered).is_err());
+        fs::remove_dir(&unindexed)?;
+
+        fs::remove_dir(&archive)?;
+        fs::write(&archive, b"{}")?;
+        assert!(validate_root_publication_inventory(directory.path(), &registered).is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(&archive)?;
+            std::os::unix::fs::symlink(directory.path(), &archive)?;
+            assert!(validate_root_publication_inventory(directory.path(), &registered).is_err());
+        }
         Ok(())
     }
 

@@ -229,6 +229,8 @@ Bootstrap requires an independently trusted recent checkpoint root, not the depl
 
 Regular updates and replay enforce `current_slot >= signature_slot > attested_slot >= finalized_slot`, sequential authenticated committee transitions and the fork at the preceding signature slot. Replay headers must already be strictly ordered and chain to the authenticated interval; neither the relayer nor the actor sorts malformed input into validity. Revision compare-and-set, bounded checkpoint history and native BLS verification remain enforced.
 
+Checkpoint deployment, updates and native integration tests submit with 95% of the block gas limit. Deployment and native-test gas estimates must fit that ceiling; the exact RPC minimum is not an execution budget. It can exhaust gas during queued BLS execution even when the update is valid.
+
 This process is distinct from the Ethereum token relayer: one advances the light-client state, while the other submits user/event receipts through the programs that consume that state.
 
 ## Token-relayer internals

@@ -111,10 +111,17 @@ async fn calculate_upload_gas(api: &GearApi, code_id: CodeId, init: &Init) -> Re
         payload
     };
 
-    Ok(api
+    let estimated_gas = api
         .calculate_create_gas(Some(origin.0.into()), code_id, payload, 0, true)
         .await?
-        .min_limit)
+        .min_limit;
+    // Match production: exact RPC minima can exhaust gas in queued BLS execution.
+    let gas_limit = api.block_gas_limit()? / 100 * 95;
+    assert!(
+        estimated_gas <= gas_limit,
+        "checkpoint initialization exceeds outer gas ceiling"
+    );
+    Ok(gas_limit)
 }
 
 async fn calculate_gas<T: ActionIo>(
@@ -125,10 +132,16 @@ async fn calculate_gas<T: ActionIo>(
     let origin = H256::from_slice(api.account_id().as_ref());
     let payload = T::encode_call(params);
 
-    Ok(api
+    let estimated_gas = api
         .calculate_handle_gas(Some(origin.0.into()), program_id, payload, 0, true)
         .await?
-        .min_limit)
+        .min_limit;
+    let gas_limit = api.block_gas_limit()? / 100 * 95;
+    assert!(
+        estimated_gas <= gas_limit,
+        "checkpoint action exceeds outer gas ceiling"
+    );
+    Ok(gas_limit)
 }
 
 #[tokio::test]
@@ -278,6 +291,7 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
     println!("process gas_limit = {gas_limit}");
     let result = service
         .process(update, sync_aggregate_encoded)
+        .with_gas_limit(gas_limit)
         .send_recv(program_id)
         .await
         .unwrap();

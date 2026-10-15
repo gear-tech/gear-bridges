@@ -73,6 +73,8 @@ jobs:
       #       https://github.com/arduino/setup-protoc/pull/113
       - name: Install Protoc
         uses: StackOverflowExcept1on/setup-protoc@3c8638272249639ffb4bc8571caff93ee0383579
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 'Install: NodeJS 20.x'
         uses: actions/setup-node@v7

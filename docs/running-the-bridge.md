@@ -156,6 +156,11 @@ Wi-Fi change, unreachable/down networks, and network timeouts. Display text alon
 does not make an error retryable. Explicit permanent RPC/status errors, storage
 failures and ambiguous transaction-send failures keep their fail/HOLD precedence.
 
+Both direct reqwest clients and Alloy’s separate reqwest version preserve typed
+connection-establishment failures, including DNS failures without a portable
+I/O kind, for backoff and reconnect. TLS validation remains enabled; retrying a
+connection failure does not authorize invalid certificates or RPC identity changes.
+
 Inbound Ethereum discovery retries the failed read without discarding its next
 block or pending work. Reconnection uses exponential backoff starting at one
 second, with jitter and a hard 60-second cap; downstream closure cancels the wait.

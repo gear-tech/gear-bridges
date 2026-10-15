@@ -29,6 +29,11 @@ pub fn is_transient_rpc_cause(error: &(dyn StdError + 'static)) -> bool {
             error
                 .downcast_ref::<reqwest::Error>()
                 .map(|error| is_transient_network_error(error))
+                .or_else(|| {
+                    error
+                        .downcast_ref::<alloy::transports::http::reqwest::Error>()
+                        .map(|error| is_transient_network_error(error))
+                })
         })
         .unwrap_or(false)
 }
@@ -66,7 +71,20 @@ pub fn is_transient_network_error(error: &(dyn StdError + 'static)) -> bool {
             if let Some(status) = error.status() {
                 return transient_status(status.as_u16());
             }
-            if error.is_timeout() {
+            if error.is_timeout() || error.is_connect() {
+                return true;
+            }
+            if error.is_builder() || error.is_redirect() || error.is_decode() {
+                return false;
+            }
+        }
+        // Alloy uses reqwest 0.12; direct clients still use 0.11. DNS sources
+        // need not carry a portable I/O kind, so keep the typed connect envelope.
+        if let Some(error) = error.downcast_ref::<alloy::transports::http::reqwest::Error>() {
+            if let Some(status) = error.status() {
+                return transient_status(status.as_u16());
+            }
+            if error.is_timeout() || error.is_connect() {
                 return true;
             }
             if error.is_builder() || error.is_redirect() || error.is_decode() {
@@ -252,6 +270,37 @@ mod tests {
         let error = Error::ErrorQueryingEvent(alloy::contract::Error::TransportError(rpc));
         assert!(is_transient_rpc_error(
             &anyhow::Error::new(error).context("deposit read")
+        ));
+    }
+
+    #[tokio::test]
+    async fn actual_alloy_reqwest_dns_failure_reconnects_without_retrying_storage_errors() {
+        use alloy::transports::http::reqwest::{
+            dns::{Name, Resolve, Resolving},
+            Client,
+        };
+        struct UnavailableDns;
+        impl Resolve for UnavailableDns {
+            fn resolve(&self, _: Name) -> Resolving {
+                Box::pin(async { Err(std::io::Error::other("resolver unavailable").into()) })
+            }
+        }
+        let error = Client::builder()
+            .no_proxy()
+            .dns_resolver(std::sync::Arc::new(UnavailableDns))
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap()
+            .get("https://bridge-dns.invalid")
+            .send()
+            .await
+            .unwrap_err();
+        assert!(error.is_connect(), "{error:?}");
+        assert!(is_transient_rpc_cause(&error));
+        let rpc = TransportErrorKind::custom(error);
+        assert!(is_transient_rpc_error(&rpc.into()));
+        assert!(!is_transient_rpc_error(
+            &std::io::Error::other("resolver unavailable").into()
         ));
     }
 }

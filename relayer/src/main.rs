@@ -17,7 +17,6 @@ use relayer::{
         FetchMerkleRootsArgs, GearEthCoreArgs, GearEthTokensCommands, GearSignerArgs,
         DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
     },
-    common,
     config::{
         EffectiveConfig, EffectiveEthereumConfig, EffectiveGearConfig, EffectiveProofStorageConfig,
         EffectiveRelayerConfig,
@@ -45,7 +44,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::{sync::mpsc, task, time};
+use tokio::{sync::mpsc, task};
 use utils_prometheus::{MeteredService, MetricsBuilder};
 use vft_manager_client::traits::VftManager;
 use zeroize::Zeroizing;
@@ -334,13 +333,13 @@ async fn run() -> AnyResult<()> {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         eth_api,
                         provider.connection(),
+                        args.from_block,
                         args.confirmations_merkle_root
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.confirmations_status
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.storage_path,
-                        governance_admin,
-                        governance_pauser,
+                        (governance_admin, governance_pauser),
                     )
                     .await
                     .unwrap();
@@ -383,6 +382,7 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         bridging_payment_address,
                         provider.connection(),
+                        args.from_block,
                         args.confirmations_merkle_root
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.confirmations_status
@@ -434,7 +434,7 @@ async fn run() -> AnyResult<()> {
                 .run(args.prometheus_args.prometheus_endpoint)
                 .await;
 
-            relayer.run().await;
+            relayer.run().await?;
         }
         CliCommands::EthGearTokens(EthGearTokensArgs {
             command,
@@ -445,8 +445,15 @@ async fn run() -> AnyResult<()> {
             prometheus_args,
             storage_path,
             ethereum_blocks,
+            ethereum_start_block,
+            cutover_seal,
+            successor_manager_code_id,
         }) => {
             let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
+            let approved_manager_code = successor_manager_code_id
+                .as_deref()
+                .map(hex_utils::decode_h256)
+                .transpose()?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -500,7 +507,10 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_start_block,
                         ethereum_blocks.clone(),
+                        cutover_seal.clone(),
+                        approved_manager_code,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -547,8 +557,11 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_start_block,
                         ethereum_blocks.clone(),
                         Some(receiver),
+                        cutover_seal.clone(),
+                        approved_manager_code,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -599,12 +612,16 @@ async fn run() -> AnyResult<()> {
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                 governance_admin,
                 governance_pauser,
+                &args.storage,
             )
-            .await;
+            .await?;
         }
 
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
+            storage,
+            cutover_seal,
+            successor_manager_code_id,
             checkpoint_light_client,
             historical_proxy,
             receiver_program,
@@ -690,13 +707,14 @@ async fn run() -> AnyResult<()> {
                 receiver_address,
                 receiver_route,
                 tx_hash,
+                &storage,
+                cutover_seal.as_deref(),
+                successor_manager_code_id
+                    .as_deref()
+                    .map(hex_utils::decode_h256)
+                    .transpose()?,
             )
             .await?;
-
-            loop {
-                // relay() spawns thread and exits, so we need to add this loop after calling run.
-                time::sleep(Duration::from_secs(1)).await;
-            }
         }
 
         CliCommands::FetchMerkleRoots(args) => fetch_merkle_roots(args).await?,
@@ -1002,6 +1020,7 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         connection,
         tx,
         mq_address,
+        queue_deployment_transaction,
     } = &args.ethereum_args;
 
     EthApi::new_with_retries(
@@ -1015,6 +1034,7 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
     )
     .await
     .expect("Error while creating ethereum client")
+    .with_queue_deployment_transaction(*queue_deployment_transaction)
 }
 
 async fn create_eth_signer_client_from_config(args: &EffectiveEthereumConfig) -> AnyResult<EthApi> {
@@ -1091,6 +1111,7 @@ async fn create_eth_client(args: &EthereumArgs) -> EthApi {
     )
     .await
     .expect("Error while creating ethereum client")
+    .with_queue_deployment_transaction(args.queue_deployment_transaction)
 }
 
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
@@ -1136,16 +1157,38 @@ async fn create_proof_storage_from_config(
 
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     let eth_api = create_eth_client(&args.ethereum_args).await;
-    let block_finalized = eth_api.finalized_block_number().await?;
+    let mut view = eth_api.verified_finalized_view().await?;
+    let block_finalized = view.block_number();
 
     if args.from_eth_block > block_finalized {
         return Ok(());
     }
 
-    let block_range = common::create_range(args.from_eth_block.into(), block_finalized);
+    let start = ethereum_client::get_block(eth_api.raw_provider(), args.from_eth_block).await?;
+    anyhow::ensure!(
+        start.header.number == args.from_eth_block,
+        "HOLD: root scan start header height changed"
+    );
     let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
+        .fetch_merkle_roots_in_range(args.from_eth_block, block_finalized)
         .await?;
+    let mut targets = std::collections::BTreeMap::from([
+        (args.from_eth_block, start.header.hash),
+        (view.block_number(), view.block_hash()),
+    ]);
+    for observation in &merkle_roots {
+        anyhow::ensure!(
+            !observation.removed,
+            "HOLD: removed merkle root observation"
+        );
+        if let Some(old) = targets.insert(observation.block_number, observation.block_hash) {
+            anyhow::ensure!(
+                old == observation.block_hash,
+                "HOLD: conflicting root inclusion hashes"
+            );
+        }
+    }
+    view.verify_blocks(eth_api.raw_provider(), &targets).await?;
 
     let gear_api = gear_rpc_client::GearApi::new(
         &args.gear_args.get_endpoint()?,
@@ -1153,13 +1196,21 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     )
     .await?;
 
-    for (root, block_number_eth) in merkle_roots {
-        let block_hash = gear_api
-            .block_number_to_hash(root.block_number as u32)
+    for observation in merkle_roots {
+        let source_block = u32::try_from(observation.entry.block_number)?;
+        anyhow::ensure!(
+            eth_api
+                .read_merkle_root_in_view(source_block, &view)
+                .await?
+                == Some(observation.entry.merkle_root.0),
+            "HOLD: observed merkle root differs from finalized queue state"
+        );
+        let timestamp = eth_api
+            .get_block_timestamp_by_hash(observation.block_number, observation.block_hash)
             .await?;
+        let block_hash = gear_api.block_number_to_hash(source_block).await?;
         let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-
-        log::info!("{root:?}, block_hash = {block_hash:?}, authority_set_id = {authority_set_id}, block_number_eth = {block_number_eth:?}");
+        log::info!("{observation:?}, block_hash = {block_hash:?}, authority_set_id = {authority_set_id}, timestamp = {timestamp}");
     }
 
     Ok(())

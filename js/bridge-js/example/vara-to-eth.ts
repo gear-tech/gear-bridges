@@ -1,154 +1,92 @@
-import { bytesToHex, createPublicClient, createWalletClient, webSocket } from 'viem';
-import { GearApi, HexString, MessageQueued } from '@gear-js/api';
-import { concatBytes, hexToBytes } from '@ethereumjs/util';
+import assert from 'node:assert/strict';
+import { readFileSync, statSync } from 'node:fs';
+import { GearApi, HexString } from '@gear-js/api';
+import { blake2AsHex } from '@polkadot/util-crypto';
+import type { Bytes } from '@polkadot/types';
+import { bytesToHex, createPublicClient, createWalletClient, http, keccak256, parseAbi, parseEventLogs } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { compactAddLength } from '@polkadot/util';
-import { Keyring } from '@polkadot/api';
-import dotenv from 'dotenv';
-import assert from 'assert';
+import { prepareVaraToEthRelay } from '../src/vara-to-eth/relayer.js';
+import { MessageQueueClient, type FinalizedMessageProcessResult } from '../src/ethereum/message-queue.js';
+import { withOriginalDeadline } from '../src/util.js';
 
-import { decodeEthBridgeMessageResponse, relayVaraToEth, waitForMerkleRootAppearedInMessageQueue } from '../src';
+interface Intent {
+  nonce: string; blockNumber: string; applicationId: HexString; payload: HexString; deadline: number;
+  ethereumChainId: string; ethereumGenesisHash: HexString; sourceGenesisHash: HexString; sourceRuntimeCodeHash: HexString;
+  sourceProgramId: HexString; sourceCodeId: HexString; messageQueueAddress: HexString; queueCodeHash: HexString;
+  handlerAddress: HexString; handlerCodeHash: HexString; ethereumSender: HexString;
+}
+const handlerAbi = parseAbi([
+  'function queue() view returns (address)', 'function expectedVaraSource() view returns (bytes32)',
+  'function received(bytes32) view returns (bool)', 'function payloadOf(bytes32) view returns (bytes)',
+  'event MessageHandled(bytes32 indexed source, bytes32 indexed applicationId, bytes payload)',
+]);
 
-dotenv.config({ quiet: true });
+async function main() {
+  assert(process.argv.length === 3, 'Usage: example:vara-to-eth /absolute/path/original-intent.json');
+  const intent: Intent = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+  assert(/^[0-9]+$/.test(intent.nonce) && /^[0-9]+$/.test(intent.blockNumber), 'Original decimal nonce/block required; nonce zero is valid');
+  assert(/^0x[0-9a-fA-F]{64}$/.test(intent.applicationId) && BigInt(intent.applicationId) !== 0n, 'Nonzero application ID required');
+  assert(/^0x(?:[0-9a-fA-F]{2}){0,1024}$/.test(intent.payload), 'Expected original payload required');
+  assert(Number.isSafeInteger(intent.deadline) && Date.now() < intent.deadline, 'Original deadline expired or absent');
+  assert(/^[0-9]+$/.test(intent.ethereumChainId) && BigInt(intent.ethereumChainId) > 0n, 'Approved Ethereum chain ID required');
+  for (const value of [intent.ethereumGenesisHash, intent.sourceGenesisHash, intent.sourceRuntimeCodeHash,
+    intent.sourceProgramId, intent.sourceCodeId, intent.queueCodeHash, intent.handlerCodeHash]) {
+    assert(/^0x[0-9a-fA-F]{64}$/.test(value) && BigInt(value) !== 0n, 'Nonzero approved deployment hash required');
+  }
+  for (const value of [intent.messageQueueAddress, intent.handlerAddress, intent.ethereumSender]) {
+    assert(/^0x[0-9a-fA-F]{40}$/.test(value) && BigInt(value) !== 0n, 'Nonzero approved deployment address required');
+  }
+  for (const name of ['ETH_RPC_URL', 'VARA_WS_RPC', 'ETH_KEY_FILE']) assert(process.env[name], 'Missing ' + name);
+  const secret = statSync(process.env.ETH_KEY_FILE!);
+  assert(secret.isFile() && (secret.mode & 0o777) === 0o600, 'Signer file must be regular mode 0600');
+  const account = privateKeyToAccount(readFileSync(process.env.ETH_KEY_FILE!, 'utf8').trim() as HexString);
+  assert.equal(account.address.toLowerCase(), intent.ethereumSender.toLowerCase(), 'Original signer mismatch');
+  const ethereumPublicClient = createPublicClient({ transport: http(process.env.ETH_RPC_URL!) });
+  const ethereumWalletClient = createWalletClient({ account, transport: http(process.env.ETH_RPC_URL!) });
+  const gearApi = await GearApi.create({ providerAddress: process.env.VARA_WS_RPC! });
+  const read = <T>(operation: () => Promise<T>) => withOriginalDeadline(intent.deadline, operation);
+  try {
+    assert.equal(BigInt(await read(() => ethereumPublicClient.getChainId())), BigInt(intent.ethereumChainId), 'Wrong Ethereum chain');
+    assert.equal((await read(() => ethereumPublicClient.getBlock({ blockNumber: 0n }))).hash, intent.ethereumGenesisHash, 'Wrong Ethereum genesis');
+    assert.equal(gearApi.genesisHash.toHex(), intent.sourceGenesisHash, 'Wrong source genesis');
+    const pin = (await read(() => gearApi.blocks.getFinalizedHead())).toHex();
+    const runtime = await read(() => gearApi.rpc.state.getStorage<Bytes>(':code', pin));
+    assert(!runtime.isEmpty && blake2AsHex(runtime.toU8a(true), 256) === intent.sourceRuntimeCodeHash, 'Wrong finalized source runtime');
+    const program = await read(() => gearApi.programStorage.getProgram(intent.sourceProgramId, pin));
+    assert(program.state.isInitialized && program.codeId.eq(intent.sourceCodeId), 'Wrong finalized source program');
+    const finalized = await read(() => ethereumPublicClient.getBlock({ blockTag: 'finalized' }));
+    for (const [address, expected] of [[intent.messageQueueAddress, intent.queueCodeHash], [intent.handlerAddress, intent.handlerCodeHash]]) {
+      const code = await read(() => ethereumPublicClient.getCode({ address, blockNumber: finalized.number }));
+      assert(code && code !== '0x' && keccak256(code) === expected, 'Wrong approved Ethereum deployment code');
+    }
+    assert.equal((await read(() => ethereumPublicClient.readContract({ address: intent.handlerAddress, abi: handlerAbi, functionName: 'queue', blockNumber: finalized.number }))).toLowerCase(), intent.messageQueueAddress.toLowerCase());
+    assert.equal((await read(() => ethereumPublicClient.readContract({ address: intent.handlerAddress, abi: handlerAbi, functionName: 'expectedVaraSource', blockNumber: finalized.number }))).toLowerCase(), intent.sourceProgramId.toLowerCase());
+    const prepared = await prepareVaraToEthRelay({ nonce: BigInt(intent.nonce), blockNumber: BigInt(intent.blockNumber),
+      ethereumPublicClient, gearApi, messageQueueAddress: intent.messageQueueAddress, wait: true, deadline: intent.deadline });
+    assert.equal(bytesToHex(prepared.message.source), intent.sourceProgramId.toLowerCase(), 'Original source differs');
+    assert.equal(bytesToHex(prepared.message.destination), intent.handlerAddress.toLowerCase(), 'Original destination differs');
+    assert.equal(bytesToHex(prepared.message.payload), (intent.applicationId + intent.payload.slice(2)).toLowerCase(), 'Original packed message differs');
+    const result = await new MessageQueueClient(intent.messageQueueAddress, ethereumPublicClient, ethereumWalletClient, account)
+      .processMessage(prepared.blockNumber, prepared.message, prepared.proof, { kind: 'application' }, undefined, intent.deadline, { wait: true });
+    assert(result.success, 'Original queue transaction not proven finalized');
+    const evidence = result as FinalizedMessageProcessResult;
+    const receipt = await read(() => ethereumPublicClient.getTransactionReceipt({ hash: result.transactionHash }));
+    assert.equal(receipt.blockHash, evidence.receiptBlockHash, 'Original receipt pin changed');
+    const events = parseEventLogs({ abi: handlerAbi, eventName: 'MessageHandled', strict: true,
+      logs: receipt.logs.filter(log => log.address.toLowerCase() === intent.handlerAddress.toLowerCase()) });
+    assert.equal(events.length, 1, 'Exactly one same-receipt application effect required');
+    assert(!events[0].removed && events[0].transactionHash === receipt.transactionHash &&
+      events[0].blockHash === receipt.blockHash && events[0].blockNumber === receipt.blockNumber &&
+      events[0].transactionIndex === receipt.transactionIndex, 'Application effect is not in the original finalized receipt');
+    assert.deepEqual(events[0].args, { source: intent.sourceProgramId.toLowerCase(), applicationId: intent.applicationId.toLowerCase(), payload: intent.payload.toLowerCase() });
+    assert(await read(() => ethereumPublicClient.readContract({ address: intent.handlerAddress, abi: handlerAbi, functionName: 'received', args: [intent.applicationId], blockNumber: receipt.blockNumber })), 'Application delivery absent');
+    assert.equal(await read(() => ethereumPublicClient.readContract({ address: intent.handlerAddress, abi: handlerAbi, functionName: 'payloadOf', args: [intent.applicationId], blockNumber: receipt.blockNumber })), intent.payload.toLowerCase(), 'Finalized payload mismatch');
+    assert.equal((await read(() => ethereumPublicClient.getBlock({ blockNumber: receipt.blockNumber }))).hash, receipt.blockHash, 'Finalized effect pin changed');
+    console.log('Verified original application delivery', { txHash: result.transactionHash, receiptBlockHash: receipt.blockHash });
+  } finally { await gearApi.disconnect(); }
+}
 
-const assertEnv = (name: string) =>
-  assert.notStrictEqual(process.env[name], undefined, `Missing ${name} environment variable`);
-
-assertEnv('MESSAGE_QUEUE_ADDRESS');
-const MESSAGE_QUEUE_ADDRESS = process.env.MESSAGE_QUEUE_ADDRESS! as HexString;
-assertEnv('ETH_RPC_URL');
-const ETH_WS_RPC = process.env.ETH_RPC_URL!;
-assertEnv('VARA_WS_RPC');
-const VARA_WS_RPC = process.env.VARA_WS_RPC!;
-assertEnv('ETH_PRIVATE_KEY');
-const ETH_PRIVATE_KEY = process.env.ETH_PRIVATE_KEY! as HexString;
-const GEAR_BRIDGE_BUILTIN = '0xf2816ced0b15749595392d3a18b5a2363d6fefe5b3b6153739f218151b7acdbf';
-assertEnv('ETH_DESTINATION');
-const DESTINATION = process.env.ETH_DESTINATION! as HexString;
-
-const [nonceArg, blockNumberArg] = process.argv.slice(2).map((arg) => {
-  const match = arg.match(/^--(nonce|bn)=(\d+)$/);
-  return match ? parseInt(match[2]) : undefined;
+main().catch(() => {
+  console.error('HOLD: original intent not proven delivered. Reconcile it before any retry; do not replace its transaction or deadline.');
+  process.exitCode = 1;
 });
-
-const statusCb = (status: string, details?: any) => {
-  console.log(`[relayVaraToEth]: ${status}`, details || '');
-};
-
-const main = async () => {
-  const ethTransport = webSocket(ETH_WS_RPC);
-  const publicClient = createPublicClient({ transport: ethTransport });
-  const gearApi = await GearApi.create({ providerAddress: VARA_WS_RPC, noInitWarn: true });
-  const walletClient = createWalletClient({ transport: ethTransport });
-  const ethAccount = privateKeyToAccount(ETH_PRIVATE_KEY);
-
-  if (nonceArg && blockNumberArg) {
-    return await relayVaraToEth({
-      nonce: BigInt(nonceArg),
-      blockNumber: BigInt(blockNumberArg),
-      ethereumPublicClient: publicClient,
-      ethereumWalletClient: walletClient,
-      ethereumAccount: ethAccount,
-      gearApi,
-      messageQueueAddress: MESSAGE_QUEUE_ADDRESS,
-      statusCb: (status, details) => {
-        console.log(`[relayEthToVara]: ${status}`, details || '');
-      },
-    });
-  }
-
-  const keyring = new Keyring({ type: 'sr25519', ss58Format: 137 });
-  const varaAccount = keyring.createFromUri('//Alice');
-
-  const payload = compactAddLength(gearApi.createType('String', 'ping').toU8a());
-  const destination = hexToBytes(DESTINATION);
-
-  const ethBridgePayload = concatBytes(Uint8Array.from([0]), destination, payload);
-
-  console.log(`Sending message ${bytesToHex(ethBridgePayload)} to bridge builtin`);
-
-  const tx = gearApi.message.send({
-    destination: GEAR_BRIDGE_BUILTIN,
-    payload: ethBridgePayload,
-    gasLimit: gearApi.blockGasLimit,
-  });
-
-  const [msgId, blockHash] = await new Promise<[HexString, HexString]>((resolve, reject) =>
-    tx.signAndSend(varaAccount, ({ status, events }) => {
-      if (status.isInBlock) {
-        const mqEvent = events.find(({ event: { method } }) => method === 'MessageQueued')?.event as MessageQueued;
-
-        if (!mqEvent) reject(`MessageQueued event not found`);
-        else resolve([mqEvent.data.id.toHex(), status.asInBlock.toHex()]);
-      }
-    }),
-  );
-
-  const msgBn = await gearApi.blocks.getBlockNumber(blockHash);
-
-  console.log(`Message sent in block ${msgBn.toNumber()} with id ${msgId}`);
-
-  const ethBridgeMessages = new Map<string, { nonce: bigint; blockhash: HexString }>();
-
-  const unsub = await gearApi.query.system.events(async (events) => {
-    if (!events.createdAtHash) {
-      return;
-    }
-
-    const _events = events.filter(({ event }) => event.section === 'gearEthBridge' && event.method === 'MessageQueued');
-    if (_events.length === 0) {
-      return;
-    }
-
-    const blockhash = events.createdAtHash.toHex();
-    const bn = await gearApi.blocks.getBlockNumber(blockhash);
-
-    for (const { event } of _events as any) {
-      const hash = event.data[1].toHex();
-      const nonce = event.data[0]['nonce'].toBigInt();
-      ethBridgeMessages.set(hash, { nonce, blockhash });
-      console.log(`Received new eth bridge message ${hash} with nonce ${nonce} in block ${bn.toNumber()}`);
-    }
-  });
-
-  const reply = await gearApi.message.getReplyEvent(GEAR_BRIDGE_BUILTIN, msgId, blockHash);
-
-  const { blockNumber, nonce, hash, queueId } = decodeEthBridgeMessageResponse(reply.data.message.payload.toU8a());
-
-  console.log(`Got reply with nonce ${nonce}, hash ${hash}, queueId ${queueId}, blockNumber: ${blockNumber}`);
-
-  let ethBridgeMessage: { nonce: bigint; blockhash: HexString } | undefined = undefined;
-
-  while (!ethBridgeMessage) {
-    if (!ethBridgeMessages.has(hash)) {
-      console.log(`Waiting for eth bridge message ${hash}`);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    } else {
-      ethBridgeMessage = ethBridgeMessages.get(hash);
-    }
-  }
-
-  unsub();
-
-  console.log(`Waiting for merkle root appeared in message queue`);
-  await waitForMerkleRootAppearedInMessageQueue(blockNumber, publicClient, MESSAGE_QUEUE_ADDRESS, undefined, statusCb);
-
-  await relayVaraToEth({
-    nonce: ethBridgeMessage.nonce,
-    blockNumber,
-    ethereumPublicClient: publicClient,
-    ethereumWalletClient: walletClient,
-    ethereumAccount: ethAccount,
-    gearApi,
-    messageQueueAddress: MESSAGE_QUEUE_ADDRESS,
-    wait: true,
-    statusCb,
-  });
-};
-
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  })
-  .then(() => process.exit());

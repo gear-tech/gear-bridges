@@ -17,6 +17,16 @@ export class Transfer {
   @Column('bigint', { nullable: false, name: 'block_number' })
   blockNumber!: bigint;
 
+  @Column('bigint', { nullable: true, name: 'source_transaction_index' })
+  sourceTransactionIndex?: bigint;
+
+  @Column('bigint', { nullable: true, name: 'source_log_index' })
+  sourceLogIndex?: bigint;
+
+  @Index('IDX_transfer_receipt_slot')
+  @Column('bigint', { nullable: true, name: 'receipt_slot' })
+  receiptSlot?: bigint;
+
   @Index()
   @Column('timestamp with time zone', { nullable: false })
   timestamp!: Date;

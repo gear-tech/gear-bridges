@@ -108,6 +108,99 @@ type Error = enum {
   Internal: str,
   /// Invalid or unexpected reply received from a VFT program.
   InvalidReply,
+  NativeSettlementPending,
+  NativeSettlementReturned,
+  ReceiptLeaseActive,
+  InvalidReconciliation,
+  ReceiptOutsideDeployment,
+  Retired,
+  CutoverNotReady,
+};
+
+/// The on-chain outcome of an Ethereum receipt key.
+type ReceiptStatus = enum {
+  /// No reservation or retained processed record exists.
+  Unknown,
+  /// The receipt is currently being processed.
+  Reserved,
+  /// The receipt completed and remains in bounded history.
+  Processed,
+};
+
+type SourceRequestOutcome = enum {
+  Pending,
+  Queued: struct {
+    nonce: u256,
+    hash: h256,
+    queue_id: u64,
+  },
+  NotQueued,
+};
+
+type CutoverStatus = struct {
+  phase: CutoverPhase,
+  predecessor: opt actor_id,
+  successor: opt actor_id,
+  minimum_receipt_slot: u64,
+  last_receipt_slot: opt u64,
+  config_fingerprint: opt h256,
+  transfer_count: u32,
+  completed_transfer_count: u32,
+  in_flight_transfer_count: u32,
+};
+
+type CutoverPhase = enum {
+  Active,
+  Draining,
+  AwaitingSource,
+  Transferring,
+  Retired,
+  Ready,
+};
+
+type CustodyTransferAttempt = struct {
+  token: actor_id,
+  amount: u256,
+  child: message_id,
+  outcome: CustodyTransferOutcome,
+};
+
+type CustodyTransferOutcome = enum {
+  InFlight,
+  Completed,
+  Rejected,
+  Ambiguous,
+};
+
+type ReceiptDepositState = struct {
+  log_index: u64,
+  sender: h160,
+  receiver: actor_id,
+  token_id: actor_id,
+  eth_token_id: h160,
+  amount: u256,
+  supply: TokenSupply,
+  native: bool,
+  operation_id: h256,
+  child: opt message_id,
+  outcome: ReceiptDepositOutcome,
+};
+
+type ReceiptDepositOutcome = enum {
+  Pending,
+  InFlight,
+  Settled,
+  Rejected,
+  Unknown,
+  NativeQueued,
+};
+
+/// Entry for a single message in [MessageTracker].
+type MessageInfo = struct {
+  /// State of the message.
+  status: MessageStatus,
+  /// Request details.
+  details: TxDetails,
 };
 
 /// State in which message processing can be.
@@ -141,12 +234,12 @@ type TxDetails = struct {
   token_supply: TokenSupply,
 };
 
-/// Entry for a single message in [MessageTracker].
-type MessageInfo = struct {
-  /// State of the message.
-  status: MessageStatus,
-  /// Request details.
-  details: TxDetails,
+type SourceRequestEvidence = struct {
+  request: message_id,
+  child: message_id,
+  builtin: actor_id,
+  request_hash: h256,
+  outcome: SourceRequestOutcome,
 };
 
 type Order = enum {
@@ -164,6 +257,7 @@ constructor {
 service VftManager {
   /// Add an account allowed to stop user operations for two days.
   AddEmergencyStopObserver : (observer: actor_id) -> null;
+  BeginCutover : (destination: actor_id, last_receipt_slot: u64) -> null;
   /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
   /// on the `_supply_type`.
@@ -175,6 +269,8 @@ service VftManager {
   /// 
   /// Swaps internal hash maps of the TokenMap instance.
   CalculateGasForTokenMapSwap : () -> null;
+  /// Settlement policy is explicit, and only changes at a paused boundary.
+  ConfigureNativeWrapper : (wrapper: opt actor_id) -> null;
   /// End an emergency stop before its deadline.
   /// 
   /// Can be called only by a [State::admin] or [State::pause_admin].
@@ -186,6 +282,7 @@ service VftManager {
   /// 
   /// Returns false when the collection is populated.
   FillTransactions : () -> bool;
+  FinalizeCutover : () -> null;
   /// Process message further if some error was encountered during the `request_bridging`.
   /// 
   /// This method should be called only to recover funds that were stuck in the middle of the bridging
@@ -198,22 +295,22 @@ service VftManager {
   /// - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
   /// - Network was heavily loaded and some message was stuck so `request_bridging` failed.
   HandleRequestBridgingInterruptedTransfer : (msg_id: message_id) -> result (null, Error);
-  /// Inserts recoverable message state during a paused program migration.
-  /// An ambiguous bridge request may be changed to `BridgeResponseReceived(None)` only
-  /// after external reconciliation proves that no Ethereum message was queued. Replays
-  /// are idempotent; conflicting or still in-flight state is rejected.
-  InsertMessageInfo : (msg_id: message_id, status: MessageStatus, details: TxDetails) -> null;
-  InsertTransactions : (data: vec struct { u64, u64 }) -> null;
   /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
   MapVaraToEthAddress : (vara_token_id: actor_id, eth_token_id: h160, supply_type: TokenSupply) -> null;
   /// Pause the `vft-manager`.
   /// 
   /// When `vft-manager` is paused it means that any requests to
-  /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
-  /// will be rejected.
+  /// `submit_receipt` and `request_bridging` will be rejected. Definite, authorized
+  /// interrupted-transfer refunds remain available while paused or emergency-stopped.
   /// 
   /// Can be called only by a [State::admin] or [State::pause_admin].
   Pause : () -> null;
+  PrepareCutover : (source: actor_id, last_receipt_slot: u64) -> null;
+  /// Reconcile original native payout outcomes; this never starts an economic child.
+  ReconcileReceipt : (slot: u64, transaction_index: u64) -> result (ReceiptStatus, Error);
+  /// Reconcile only the immutable original request and its authenticated terminal
+  /// builtin reply. Missing/ambiguous outcomes are not evidence of queue absence.
+  ReconcileSourceRequest : (request: message_id, child: message_id, request_hash: h256) -> result (SourceRequestOutcome, Error);
   /// Remove an emergency stop observer.
   RemoveEmergencyStopObserver : (observer: actor_id) -> null;
   /// Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
@@ -249,9 +346,11 @@ service VftManager {
   /// Change [State::historical_proxy_address]. Can be called only by a [State::admin].
   UpdateHistoricalProxyAddress : (historical_proxy_address_new: actor_id) -> null;
   UpdateVfts : (vft_map: vec struct { actor_id, actor_id }) -> null;
-  Upgrade : (vft_manager_new: actor_id) -> null;
+  Upgrade : (destination: actor_id) -> null;
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
+  query CutoverStatus : () -> CutoverStatus;
+  query CutoverTransfers : (start: u32, count: u32) -> vec CustodyTransferAttempt;
   /// Get accounts allowed to activate the bounded emergency stop.
   query EmergencyStopObservers : () -> vec actor_id;
   /// Get the block at which the current or latest emergency stop expires.
@@ -268,10 +367,15 @@ service VftManager {
   query IsEmergencyStopped : () -> bool;
   /// Check if `vft-manager` is manually paused.
   query IsPaused : () -> bool;
+  query NativeWrapper : () -> opt actor_id;
   /// Get current [State::pause_admin] address.
   query PauseAdmin : () -> actor_id;
+  query ReceiptDeposits : (slot: u64, transaction_index: u64) -> vec ReceiptDepositState;
+  /// Read the current status for one Ethereum receipt key.
+  query ReceiptStatus : (slot: u64, transaction_index: u64) -> ReceiptStatus;
   /// Get state of a `request_bridging` message tracker.
   query RequestBridingMsgTrackerState : (start: u32, count: u32) -> vec struct { message_id, MessageInfo };
+  query SourceRequestEvidence : (request: message_id) -> opt SourceRequestEvidence;
   query Transactions : (order: Order, start: u32, count: u32) -> vec struct { u64, u64 };
   /// Get current [token mapping](State::token_map).
   query VaraToEthAddresses : () -> vec struct { actor_id, h160, TokenSupply };
@@ -357,6 +461,19 @@ service VftManager {
       amount: u256,
       /// Respective Vara token Id
       token: actor_id,
+    };
+    ReceiptDepositSettled: struct {
+      slot: u64,
+      transaction_index: u64,
+      log_index: u64,
+      deposit_count: u64,
+      operation_id: h256,
+      eth_token_id: h160,
+      vara_token_id: actor_id,
+      sender: h160,
+      receiver: actor_id,
+      amount: u256,
+      native: bool,
     };
   }
 };

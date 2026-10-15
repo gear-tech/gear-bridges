@@ -116,6 +116,7 @@ type Error = enum {
   InvalidBlockProof,
   TrieDbFailure,
   InvalidReceiptProof,
+  UnsupportedFork,
 };
 
 constructor {

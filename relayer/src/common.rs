@@ -1,26 +1,33 @@
-use std::{sync::Arc, time::Duration};
+#[cfg(feature = "legacy-prover")]
+use std::sync::Arc;
+use std::time::Duration;
 
-use alloy::{
-    network::Ethereum,
-    providers::PendingTransactionBuilder,
-    transports::{RpcError, TransportErrorKind},
-};
+use alloy::transports::{RpcError, TransportErrorKind};
+#[cfg(feature = "legacy-prover")]
+use alloy::{network::Ethereum, providers::PendingTransactionBuilder};
 use gsdk::ext::subxt_rpcs;
+#[cfg(feature = "legacy-prover")]
 use prover::proving::GenesisConfig;
+#[cfg(feature = "legacy-prover")]
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::rpc::{self, RetryDecision};
+#[cfg(feature = "legacy-prover")]
 use crate::{
     merkle_roots::authority_set_sync,
     proof_storage::ProofStorage,
     prover_interface::{self, FinalProof},
-    rpc::{self, RetryDecision},
 };
 
+#[cfg(feature = "legacy-prover")]
 use ethereum_client::{EthApi, TxHash};
+#[cfg(feature = "legacy-prover")]
 use gear_rpc_client::GearApi;
 
+#[cfg(feature = "legacy-prover")]
 pub(crate) type SyncStepCount = usize;
 
+#[cfg(feature = "legacy-prover")]
 pub(crate) async fn sync_authority_set_id(
     gear_api: &GearApi,
     proof_storage: &Arc<dyn ProofStorage>,
@@ -104,6 +111,7 @@ pub(crate) async fn sync_authority_set_id(
     Ok(0)
 }
 
+#[cfg(feature = "legacy-prover")]
 pub(crate) async fn submit_merkle_root_to_ethereum(
     eth_api: &EthApi,
     proof: FinalProof,
@@ -121,6 +129,7 @@ pub(crate) async fn submit_merkle_root_to_ethereum(
     Ok(pending_tx)
 }
 
+#[cfg(feature = "legacy-prover")]
 pub(crate) async fn send_challege_root_to_ethereum(
     eth_api: &EthApi,
 ) -> Result<TxHash, ethereum_client::Error> {

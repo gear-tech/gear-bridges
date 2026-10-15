@@ -1,4 +1,5 @@
 import ClockSVG from '@/assets/clock.svg?react';
+import { useNetworkType } from '@/context/network-type';
 
 import CircleCheckSVG from '../../assets/circle-check.svg?react';
 import HandSVG from '../../assets/hand.svg?react';
@@ -64,12 +65,13 @@ function Settings({
   onPriorityChange,
   onClaimTypeChange,
 }: Props) {
+  const { NETWORK_PRESET } = useNetworkType();
   return (
     <div className={styles.settings}>
       <h3 className={styles.heading}>Transfer Settings</h3>
 
       <div className={styles.body}>
-        {isVaraNetwork && (
+        {isVaraNetwork && NETWORK_PRESET.OUTBOUND_VERIFICATION === 'zk' && (
           <Setting
             heading="Transfer Speed"
             tooltip={TooltipContent.Priority}

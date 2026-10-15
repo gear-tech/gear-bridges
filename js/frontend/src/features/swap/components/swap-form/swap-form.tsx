@@ -37,6 +37,7 @@ type Props = {
 function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsEstimate }: Props) {
   const { NETWORK_PRESET } = useNetworkType();
   const { network, token, destinationToken } = useBridgeContext();
+  const inboundHold = !network.isVara ? NETWORK_PRESET.INBOUND_PROOF_PROFILE.hold : undefined;
 
   const { api } = useApi();
 
@@ -53,8 +54,14 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   >();
 
   const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.HIGH);
-  const shouldPayPriorityFee = priority === PRIORITY.HIGH;
-  const time = shouldPayPriorityFee || !network.isVara ? '20 mins' : '1 hour';
+  const isBeefy = NETWORK_PRESET.OUTBOUND_VERIFICATION === 'beefy';
+  const shouldPayPriorityFee = network.isVara && !isBeefy && priority === PRIORITY.HIGH;
+  const time =
+    network.isVara && isBeefy
+      ? 'Depends on finality and queue maturity'
+      : shouldPayPriorityFee || !network.isVara
+        ? '20 mins'
+        : '1 hour';
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
   const shouldPayBridgingFee = claimType === CLAIM_TYPE.AUTO;
@@ -76,18 +83,18 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   });
 
   const getContractFees = () => {
-    if (isUndefined(bridgingFee)) return;
+    if (shouldPayBridgingFee && isUndefined(bridgingFee)) return;
 
     let result = 0n;
 
     if (network.isVara) {
-      if (isUndefined(vftManagerFee) || isUndefined(priorityFee)) return;
+      if (isUndefined(vftManagerFee) || (shouldPayPriorityFee && isUndefined(priorityFee))) return;
 
       result += vftManagerFee;
-      if (shouldPayPriorityFee) result += priorityFee;
+      if (shouldPayPriorityFee) result += priorityFee!;
     }
 
-    if (shouldPayBridgingFee) result += bridgingFee;
+    if (shouldPayBridgingFee) result += bridgingFee!;
 
     return result;
   };
@@ -103,6 +110,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const totalFees = getTotalFees();
 
   const openTransactionModal = (values: FormattedValues) => {
+    if (inboundHold) throw new Error(inboundHold);
     definedAssert(token, 'Token');
     definedAssert(destinationToken, 'Destination token');
     definedAssert(totalFees, 'Transaction estimation');
@@ -127,8 +135,13 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     ...fees,
   });
 
+  const isFeeLoading = network.isVara
+    ? isUndefined(vftManagerFee) ||
+      (shouldPayBridgingFee && isUndefined(bridgingFee)) ||
+      (shouldPayPriorityFee && isUndefined(priorityFee))
+    : config.isLoading;
   const isLoading =
-    sendTxs.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || txsEstimate.isLoading;
+    sendTxs.isPending || accountBalance.isLoading || ftBalance.isLoading || isFeeLoading || txsEstimate.isLoading;
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -145,12 +158,21 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   };
 
   const isEnoughBalance = () => {
-    if (!api || !token || isUndefined(bridgingFee) || !txsEstimate.data || !accountBalance.data) return false;
+    if (inboundHold) return false;
+    if (
+      !api ||
+      !token ||
+      (shouldPayBridgingFee && isUndefined(bridgingFee)) ||
+      !txsEstimate.data ||
+      !accountBalance.data
+    )
+      return false;
 
     return accountBalance.data > txsEstimate.data.requiredBalance;
   };
 
   const getButtonText = () => {
+    if (inboundHold) return 'HOLD: inbound deployment not approved';
     if (!txsEstimate.data) return 'Fill the form';
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
@@ -233,7 +255,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
             onClaimTypeChange={setClaimType}
             isVaraNetwork={network.isVara}
             fee={totalFees || contractFees}
-            isFeeLoading={config.isLoading || txsEstimate.isLoading}
+            isFeeLoading={isFeeLoading || txsEstimate.isLoading}
             disabled={isLoading}
             time={time}
           />

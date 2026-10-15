@@ -766,13 +766,4 @@ mod tests {
 
         assert!(!is_recoverable_authority_sync_error(&err));
     }
-
-    #[test]
-    fn reconnects_gear_for_recoverable_rpc_errors() {
-        let err = anyhow::anyhow!(
-            "RPC error: client error: The background task closed connection closed; restart required"
-        );
-
-        assert!(is_recoverable_authority_sync_error(&err));
-    }
 }

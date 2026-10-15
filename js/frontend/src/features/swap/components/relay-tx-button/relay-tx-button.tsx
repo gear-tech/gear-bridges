@@ -1,4 +1,5 @@
 import { HexString } from '@gear-js/api';
+import type { InboundTokenEffect } from '@gear-js/bridge';
 import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
@@ -6,15 +7,17 @@ import { useAppKit } from '@reown/appkit/react';
 import { captureException } from '@sentry/react';
 
 import { Tooltip } from '@/components';
+import { useNetworkType } from '@/context/network-type';
 import { useAccountsConnection, useModal } from '@/hooks';
-import { getErrorMessage, isUndefined, logger } from '@/utils';
+import { getErrorMessage, logger } from '@/utils';
 
-import { useIsEthRelayAvailable, useIsVaraRelayAvailable, useRelayEthTx, useRelayVaraTx } from '../../hooks';
+import { useRelayEthTx, useRelayVaraTx } from '../../hooks';
 
 type VaraProps = {
   nonce: bigint;
   blockNumber: string;
-  onReceipt: () => void;
+  onFinalized: () => void;
+  expectedEffect: Parameters<typeof useRelayVaraTx>[2];
 };
 
 function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
@@ -23,8 +26,7 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
 
   const alert = useAlert();
 
-  const { data: isAvailable } = useIsVaraRelayAvailable(blockNumber);
-  const { mutate, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber));
+  const { mutate, isPending } = useRelayVaraTx(nonce, BigInt(blockNumber), props.expectedEffect);
 
   const handleClick = async () => {
     if (!isEthAccount) return openEthModal();
@@ -32,9 +34,9 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
     const alertId = alert.loading('Relaying Vara transaction...');
     const onLog = (message: string) => alert.update(alertId, message);
 
-    const onReceipt = () => {
-      props.onReceipt();
-      alert.update(alertId, 'Vara transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
+    const onFinalized = () => {
+      props.onFinalized();
+      alert.update(alertId, 'Original token transfer finalized on Ethereum', DEFAULT_SUCCESS_OPTIONS);
     };
 
     const onError = (error: Error) => {
@@ -43,21 +45,14 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
       captureException(error, { tags: { feature: 'manual-tx-relay' } });
     };
 
-    mutate({ onLog, onReceipt, onError });
+    mutate({ onLog, onFinalized, onError });
   };
 
   const renderTooltipText = () => {
-    if (!isAvailable)
-      return (
-        <>
-          <p>Disabled until finalization completes.</p>
-          <p>You&apos;ll be able to claim manually once the block is verified on the Ethereum chain.</p>
-        </>
-      );
-
     return (
       <>
         <p>Use your Ethereum chain wallet to claim tokens by yourself.</p>
+        <p>Preparation waits for an authenticated finalized root and its maturity delay.</p>
         <p>A network fee is required. {!isEthAccount && 'Wallet connection will be requested.'}</p>
       </>
     );
@@ -73,8 +68,8 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
           text="Claim Manually"
           size="x-small"
           onClick={handleClick}
-          isLoading={isPending || isUndefined(isAvailable)}
-          disabled={!isAvailable}
+          isLoading={isPending}
+          disabled={isPending}
           block
         />
       </span>
@@ -83,19 +78,22 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
 }
 
 type EthProps = {
-  blockNumber: bigint;
   txHash: HexString;
-  onInBlock: () => void;
+  onFinalized: () => void;
+  expectedEffect: InboundTokenEffect;
 };
 
-function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
+function RelayEthTxButton({ txHash, ...props }: EthProps) {
+  const { NETWORK_PRESET } = useNetworkType();
+  const hold =
+    NETWORK_PRESET.INBOUND_PROOF_PROFILE.hold ??
+    (!NETWORK_PRESET.INBOUND_PROOF_PROFILE.profile ? 'HOLD: approved inbound profile is missing' : undefined);
   const { isAnyAccount, isVaraAccount } = useAccountsConnection();
   const [isSubstrateModalOpen, openSubstrateModal, closeSubstrateModal] = useModal();
 
   const alert = useAlert();
 
-  const { data: isAvailable } = useIsEthRelayAvailable(blockNumber);
-  const { mutate, isPending } = useRelayEthTx(txHash);
+  const { mutate, isPending } = useRelayEthTx(txHash, props.expectedEffect);
 
   const handleClick = () => {
     if (!isVaraAccount) return openSubstrateModal();
@@ -104,9 +102,9 @@ function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
 
     const onLog = (message: string) => alert.update(alertId, message);
 
-    const onInBlock = () => {
-      alert.update(alertId, 'Ethereum transaction relayed successfully', DEFAULT_SUCCESS_OPTIONS);
-      props.onInBlock();
+    const onFinalized = () => {
+      alert.update(alertId, 'Original consumer and token effect finalized on Vara', DEFAULT_SUCCESS_OPTIONS);
+      props.onFinalized();
     };
 
     const onError = (error: Error) => {
@@ -114,21 +112,15 @@ function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
       alert.update(alertId, getErrorMessage(error), DEFAULT_ERROR_OPTIONS);
     };
 
-    mutate({ onLog, onInBlock, onError });
+    mutate({ onLog, onFinalized, onError });
   };
 
   const renderTooltipText = () => {
-    if (!isAvailable)
-      return (
-        <>
-          <p>Disabled until finalization completes.</p>
-          <p>You&apos;ll be able to claim manually once the block is verified on the Vara chain.</p>
-        </>
-      );
-
+    if (hold) return <p role="status">{hold} This claim remains pending.</p>;
     return (
       <>
         <p>Use your Vara chain wallet to claim tokens by yourself.</p>
+        <p>Preparation waits for an authenticated finalized checkpoint.</p>
         <p>A network fee is required. {!isVaraAccount && 'Wallet connection will be requested.'}</p>
       </>
     );
@@ -145,8 +137,8 @@ function RelayEthTxButton({ txHash, blockNumber, ...props }: EthProps) {
             text="Claim Manually"
             size="x-small"
             onClick={handleClick}
-            isLoading={isPending || isUndefined(isAvailable)}
-            disabled={!isAvailable}
+            isLoading={!hold && isPending}
+            disabled={Boolean(hold) || isPending}
             block
           />
         </span>

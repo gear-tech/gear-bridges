@@ -4,7 +4,7 @@ import { In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not } from 'typeorm';
 import { FindManyOptions, Store } from '@subsquid/typeorm-store';
 import { Logger } from '@subsquid/logger';
 
-import { CompletedTransfer, Network, Pair, Status, Transfer } from '../model/index.js';
+import { Network, Pair, Status, Transfer } from '../model/index.js';
 import { mapKeys, mapValues, setValues } from './map.js';
 
 const PAIR_RETRY_LIMIT = 5;
@@ -12,7 +12,6 @@ const PAIR_RETRY_DELAY = 1000;
 
 export abstract class BaseBatchState<Context extends SubstrateContext<Store, any> | EthereumContext<Store, any>> {
   protected _transfers: Map<string, Transfer>;
-  protected _completed: Map<string, CompletedTransfer>;
   protected _pairs: Map<string, Pair>;
   protected _statuses: Map<string, Status>;
   protected _priorityRequests: Set<string>;
@@ -24,7 +23,6 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     private _counterpartNetwork: Network,
   ) {
     this._transfers = new Map();
-    this._completed = new Map();
     this._statuses = new Map();
     this._pairs = new Map();
     this._priorityRequests = new Set();
@@ -32,7 +30,6 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
   protected _clear() {
     this._transfers.clear();
-    this._completed.clear();
     this._pairs.clear();
     this._statuses.clear();
     this._priorityRequests.clear();
@@ -106,74 +103,6 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     } else {
       return pair.ethToken.toLowerCase();
     }
-  }
-
-  protected async _processCompletedTransfers(): Promise<void> {
-    const completed = await this._ctx.store.find(CompletedTransfer, { where: { srcNetwork: this._network } });
-
-    if (completed.length === 0) return;
-
-    const nonces = completed.map((info) => info.id);
-
-    const transfers = await this._ctx.store.find(Transfer, {
-      where: { nonce: In(nonces), sourceNetwork: this._network },
-    });
-
-    if (transfers.length === 0) return;
-
-    const completedToRemove: CompletedTransfer[] = [];
-
-    for (const transfer of transfers) {
-      const completedInfo = completed.find((info) => info.id === transfer.nonce)!;
-      transfer.status = Status.Completed;
-      transfer.completedAt = completedInfo.timestamp;
-      transfer.completedAtBlock = completedInfo.blockNumber;
-      transfer.completedAtTxHash = completedInfo.txHash;
-      completedToRemove.push(completedInfo);
-    }
-
-    await this._ctx.store.save(transfers);
-    this._log.info({ count: transfers.length }, 'Transfers marked as completed');
-    this._log.debug({ nonces: transfers.map((transfer) => transfer.nonce) });
-
-    await this._ctx.store.remove(completedToRemove);
-    this._log.info({ count: completedToRemove.length }, 'Completed records removed');
-    this._log.debug({ nonces: completedToRemove.map((transfer) => transfer.id) });
-  }
-
-  protected async _saveCompletedTransfers(): Promise<void> {
-    if (this._completed.size === 0) return;
-
-    const duplicates = await this._ctx.store.find(CompletedTransfer, {
-      where: { id: In(mapKeys(this._completed)) },
-    });
-
-    const nonces = duplicates.map((info) => info.id);
-
-    if (duplicates.length > 0) {
-      this._log.info({ count: duplicates.length }, 'Found duplicates of completed transfers');
-
-      for (const duplicate of duplicates) {
-        this._log.info(
-          {
-            nonce: duplicate.id,
-            blockNumber: duplicate.blockNumber,
-            txHash: duplicate.txHash,
-            pendingBlockNumber: this._completed.get(duplicate.id)!.blockNumber,
-            pendingTxHash: this._completed.get(duplicate.id)!.txHash,
-          },
-          'Duplicate completed transfer found',
-        );
-      }
-    }
-
-    const completedToSave = mapValues(this._completed).filter(({ id }) => !nonces.includes(id));
-
-    if (completedToSave.length === 0) return;
-
-    await this._ctx.store.save(completedToSave);
-    this._log.info({ count: completedToSave.length }, 'Completed records saved');
-    this._log.debug({ nonces: completedToSave.map((info) => info.id) });
   }
 
   protected async _processStatuses() {
@@ -303,22 +232,6 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
   public setIsPriority(nonce: string) {
     this._priorityRequests.add(nonce);
     this._log.info({ nonce }, 'Request marked as priority');
-  }
-
-  public setCompletedTransfer(nonce: string, timestamp: Date, blockNumber: bigint, txHash: string) {
-    this._completed.set(
-      nonce,
-      new CompletedTransfer({
-        id: nonce,
-        timestamp,
-        destNetwork: this._network,
-        srcNetwork: this._counterpartNetwork,
-        blockNumber,
-        txHash,
-      }),
-    );
-
-    this._log.info({ nonce, blockNumber, txHash }, 'Transfer completed');
   }
 
   protected async _getTransfer(nonce: string): Promise<Transfer | undefined> {

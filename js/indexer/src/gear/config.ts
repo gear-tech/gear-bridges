@@ -3,8 +3,10 @@ import { getEnv } from '../common/index.js';
 let apiPath = getEnv('GEAR_API_PATH', './api/gear');
 
 apiPath = apiPath.endsWith('/') ? apiPath.slice(0, -1) : apiPath;
+const rpcOnly = getEnv('GEAR_RPC_ONLY', 'false') === 'true';
 
 export const config = {
+  rpcOnly,
   archiveUrl: getEnv('GEAR_ARCHIVE_URL', 'https://v2.archive.subsquid.io/network/vara-testnet'),
   rpcUrl: getEnv('GEAR_RPC_URL', 'wss://testnet.vara.network'),
   vftManager: getEnv('GEAR_VFT_MANAGER'),
@@ -15,5 +17,5 @@ export const config = {
   ethRpcUrl: getEnv('ETH_HTTP_RPC_URL'),
   rateLimit: Number(getEnv('GEAR_RATE_LIMIT', '100')),
   apiPath,
-  apiKey: getEnv('GEAR_SQUID_API_KEY'),
+  apiKey: rpcOnly ? undefined : getEnv('GEAR_SQUID_API_KEY'),
 };

@@ -4,6 +4,7 @@ import { setPrograms, updateId } from '../programIds.js';
 import { gearNonce } from '../../common/index.js';
 import {
   BridgingRequested,
+  ReceiptDepositSettled,
   HistoricalProxyAddressChanged,
   MessageQueuedContext,
   TokenMappingAdded,
@@ -19,6 +20,11 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
   const msg = event.args.message;
 
   switch (method) {
+    case VftManagerMethods.ReceiptDepositSettled: {
+      const deposit = decoder.decodeEvent<ReceiptDepositSettled>(service, method, msg.payload);
+      state.recordReceiptSettlement(deposit, new Date(blockHeader.timestamp!), blockNumber, event.extrinsic!.hash);
+      return;
+    }
     case VftManagerMethods.BridgingRequested: {
       const { nonce, vara_token_id, sender, receiver, amount, queue_id, hash } = decoder.decodeEvent<BridgingRequested>(
         service,

@@ -47,7 +47,7 @@ const networks: [AppKitNetwork, AppKitNetwork] =
 const metadata = {
   name: 'Vara Network Bridge',
   description: 'Bridge Vara and Ethereum with ease',
-  url: 'https://bridge.vara.network',
+  url: window.location.origin,
   icons: [
     'https://raw.githubusercontent.com/gear-tech/gear-bridges/refs/heads/main/js/frontend/public/favicons/web-app-manifest-512x512.png',
   ],

@@ -9,6 +9,7 @@ import { definedAssert } from '@/utils';
 
 import { ERC20_MANAGER_ABI } from '../../consts';
 import { useBridgeContext } from '../../context';
+import { assertSuccessfulReceipt } from '../../submission';
 
 type Parameters = {
   amount: bigint;
@@ -65,7 +66,7 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
           args: [token.address, amount, accountAddress, NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
         });
 
-    return waitForTransactionReceipt(config, { hash });
+    return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };
 
   const getGasLimitWithoutFee = ({ amount, accountAddress }: Parameters) => {
@@ -101,7 +102,7 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
           args: [token.address, amount, accountAddress],
         });
 
-    return waitForTransactionReceipt(config, { hash });
+    return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };
 
   const transferWithoutFeeMutation = {

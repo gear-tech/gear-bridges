@@ -88,9 +88,8 @@ impl TokenMap {
     /// Read state of the token mapping. Will return all entries present in the mapping.
     pub fn read_state(&self) -> Vec<(ActorId, H160, TokenSupply)> {
         self.vara_to_eth
-            .clone()
-            .into_iter()
-            .map(|(vara_token, (eth_token, supply))| (vara_token, eth_token, supply))
+            .iter()
+            .map(|(vara_token, (eth_token, supply))| (*vara_token, *eth_token, *supply))
             .collect()
     }
 
@@ -111,13 +110,21 @@ impl TokenMap {
         self.swap_maps(&mut vara_to_eth, &mut eth_to_vara);
     }
 
-    pub async fn update_vfts(&mut self, gas_required: u64, vft_map: Vec<(ActorId, ActorId)>) {
+    pub async fn update_vfts(
+        &mut self,
+        gas_required: u64,
+        vft_map: Vec<(ActorId, ActorId)>,
+        revision: u64,
+    ) {
         let mut vara_to_eth = HashMap::with_capacity(self.vara_to_eth.len());
         let mut eth_to_vara = HashMap::with_capacity(vara_to_eth.len());
 
+        // An administrator may change/freeze state while the read-only query awaits.
+        // Own the inventory instead of retaining a HashMap iterator across that await.
+        let mappings = self.read_state();
         let vft_manager = Syscall::program_id();
         let service = vft_client::Vft::new(GStdRemoting);
-        for (vft, (erc20, supply)) in &self.vara_to_eth {
+        for (vft, erc20, supply) in &mappings {
             let vft_new = match vft_map
                 .iter()
                 .find_map(|(vft_old, vft_new)| (vft_old == vft).then_some(vft_new))
@@ -147,6 +154,22 @@ impl TokenMap {
             eth_to_vara.insert(*erc20, *vft_new);
         }
 
+        let service = super::VftManager::new();
+        assert_eq!(
+            service.state().cutover.phase,
+            super::CutoverPhase::Active,
+            "Economic configuration frozen"
+        );
+        assert_eq!(
+            service.state().economic_revision,
+            revision,
+            "Configuration changed while querying VFTs"
+        );
+        assert_eq!(
+            vara_to_eth.len(),
+            self.vara_to_eth.len(),
+            "Duplicate Gear identity"
+        );
         if eth_to_vara == self.eth_to_vara {
             return;
         }

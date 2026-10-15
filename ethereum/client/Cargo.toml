@@ -5,14 +5,15 @@ edition.workspace = true
 
 [dependencies]
 ahash.workspace = true
-alloy.workspace = true
+alloy = { workspace = true, features = ["k256"] }
 anyhow.workspace = true
 keccak-hash.workspace = true
 log.workspace = true
-primitive-types.workspace = true
+primitive-types = { workspace = true, features = ["serde"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sp-core = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio.workspace = true
+tower.workspace = true

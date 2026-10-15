@@ -16,6 +16,22 @@ log.workspace = true
 pretty_env_logger.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true
-vft-manager = { workspace = true, features = ["wasm-binary"] }
 vft-manager-client.workspace = true
 cli-utils.workspace = true
+relayer = { path = "../../relayer", default-features = false }
+ethereum-client.workspace = true
+ethereum_beacon_client.workspace = true
+ethereum-common = { workspace = true, features = ["std"] }
+alloy.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+primitive-types = { workspace = true, features = ["std"] }
+subxt.workspace = true
+uuid.workspace = true
+vft-client.workspace = true
+vft-vara-client.workspace = true
+eth-events-electra-client.workspace = true
+historical-proxy-client.workspace = true
+alloy-rlp.workspace = true

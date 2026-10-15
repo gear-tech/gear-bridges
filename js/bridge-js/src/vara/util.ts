@@ -16,9 +16,11 @@ export const getPrefix = (service: string, method: string): `0x${string}` => {
 export const decodeEthBridgeMessageResponse = (
   data: Uint8Array,
 ): { blockNumber: bigint; hash: HexString; nonce: bigint; queueId: bigint } => {
-  const _data = data.length == 76 ? data : data.slice(data.length - 76);
+  if (data.length !== 77 || data[0] !== 0) {
+    throw new Error('Invalid EthBridge response: expected the exact tagged EthMessageQueued response');
+  }
 
-  const [blockNumber, hash, nonce, queueId] = registry.createType('(u32, H256, U256, u64)', _data);
+  const [blockNumber, hash, nonce, queueId] = registry.createType('(u32, H256, U256, u64)', data.subarray(1));
 
   return {
     blockNumber: blockNumber.toBigInt(),

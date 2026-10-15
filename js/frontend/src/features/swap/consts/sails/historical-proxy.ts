@@ -1,85 +1,18 @@
 /* eslint-disable */
-
 import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import {
-  TransactionBuilder,
-  ActorId,
-  QueryBuilder,
-  getServiceNamePrefix,
-  getFnNamePrefix,
-  ZERO_ADDRESS,
-} from 'sails-js';
-
-/**
- * Errors returned by the Historical Proxy service.
- */
-export type ProxyError =
-  /**
-   * Endpoint for requested slot not found.
-   */
-  | { NoEndpointForSlot: number | string | bigint }
-  /**
-   * Failed to send message.
-   */
-  | { SendFailure: string }
-  /**
-   * Failed to receive reply.
-   */
-  | { ReplyFailure: string }
-  /**
-   * Failed to decode reply.
-   */
-  | { DecodeFailure: string }
-  /**
-   * `eth-events-*` returned error.
-   */
-  | { EthereumEventClient: Error };
-
-export type Error =
-  | 'DecodeReceiptEnvelopeFailure'
-  | 'FailedEthTransaction'
-  | 'SendFailure'
-  | 'ReplyFailure'
-  | 'HandleResultDecodeFailure'
-  | 'MissingCheckpoint'
-  | 'InvalidBlockProof'
-  | 'TrieDbFailure'
-  | 'InvalidReceiptProof';
+import { TransactionBuilder, ActorId, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly historicalProxy: HistoricalProxy;
-  private _program?: BaseGearProgram;
+  private _program!: BaseGearProgram;
 
-  constructor(
-    public api: GearApi,
-    programId?: `0x${string}`,
-  ) {
+  constructor(public api: GearApi, programId?: `0x${string}`) {
     const types: Record<string, any> = {
-      ProxyError: {
-        _enum: {
-          NoEndpointForSlot: 'u64',
-          SendFailure: 'String',
-          ReplyFailure: 'String',
-          DecodeFailure: 'String',
-          EthereumEventClient: 'Error',
-        },
-      },
-      Error: {
-        _enum: [
-          'DecodeReceiptEnvelopeFailure',
-          'FailedEthTransaction',
-          'SendFailure',
-          'ReplyFailure',
-          'HandleResultDecodeFailure',
-          'MissingCheckpoint',
-          'InvalidBlockProof',
-          'TrieDbFailure',
-          'InvalidReceiptProof',
-        ],
-      },
-    };
+      ProxyError: {"_enum":{"NoEndpointForSlot":"u64","SendFailure":"String","ReplyFailure":"String","DecodeFailure":"String","EthereumEventClient":"Error"}},
+      Error: {"_enum":["DecodeReceiptEnvelopeFailure","FailedEthTransaction","SendFailure","ReplyFailure","HandleResultDecodeFailure","MissingCheckpoint","InvalidBlockProof","TrieDbFailure","InvalidReceiptProof","UnsupportedFork"]},
+    }
 
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
@@ -107,9 +40,9 @@ export class SailsProgram {
       null,
       'String',
       code,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -125,9 +58,9 @@ export class SailsProgram {
       null,
       'String',
       codeId,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -139,9 +72,9 @@ export class HistoricalProxy {
   /**
    * Add new endpoint to the map. Endpoint will be effective for all the
    * requests with slots starting from `slot`.
-   *
+   * 
    * This function can be called only by an admin.
-   */
+  */
   public addEndpoint(slot: number | string | bigint, endpoint: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -161,25 +94,20 @@ export class HistoricalProxy {
    * Redirect message to `eth-events-*` program which is valid for `slot`.
    * If message is relayed successfully then reply is sent to `client` address
    * to `client_route` route.
-   *
+   * 
    * # Parameters
-   *
+   * 
    * - `slot`: slot for which message is relayed.
    * - `proofs`: SCALE encoded `EthToVaraEvent`.
    * - `client`: client address to send receipt to on success.
    * - `client_route`: route to send receipt to on success.
-   *
+   * 
    * # Returns
-   *
+   * 
    * - `(Vec<u8>, Vec<u8>)`: on success where first vector is receipt and second vector is reply from calling `client_route`.
    * - `ProxyError`: if redirect failed
-   */
-  public redirect(
-    slot: number | string | bigint,
-    proofs: `0x${string}`,
-    client: ActorId,
-    client_route: `0x${string}`,
-  ): TransactionBuilder<{ ok: [`0x${string}`, `0x${string}`] } | { err: ProxyError }> {
+  */
+  public redirect(slot: number | string | bigint, proofs: `0x${string}`, client: ActorId, client_route: `0x${string}`): TransactionBuilder<{ ok: [`0x${string}`, `0x${string}`] } | { err: ProxyError }> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<{ ok: [`0x${string}`, `0x${string}`] } | { err: ProxyError }>(
       this._program.api,
@@ -196,9 +124,9 @@ export class HistoricalProxy {
 
   /**
    * Update the current service admin to `admin_new`.
-   *
+   * 
    * This function can be called only by the admin.
-   */
+  */
   public updateAdmin(admin_new: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -216,7 +144,7 @@ export class HistoricalProxy {
 
   /**
    * Get current service admin.
-   */
+  */
   public admin(): QueryBuilder<ActorId> {
     return new QueryBuilder<ActorId>(
       this._program.api,
@@ -232,7 +160,7 @@ export class HistoricalProxy {
 
   /**
    * Get endpoint for the specified `slot`.
-   */
+  */
   public endpointFor(slot: number | string | bigint): QueryBuilder<{ ok: ActorId } | { err: ProxyError }> {
     return new QueryBuilder<{ ok: ActorId } | { err: ProxyError }>(
       this._program.api,
@@ -248,7 +176,7 @@ export class HistoricalProxy {
 
   /**
    * Get endpoint map stored in this service.
-   */
+  */
   public endpoints(): QueryBuilder<Array<[number | string | bigint, ActorId]>> {
     return new QueryBuilder<Array<[number | string | bigint, ActorId]>>(
       this._program.api,
@@ -263,36 +191,48 @@ export class HistoricalProxy {
   }
 
   /**
-   * Tx receipt is checked to be valid and successfully sent to the
-   * underlying program.
-   */
-  public subscribeToRelayedEvent(
-    callback: (data: {
-      slot: number | string | bigint;
-      block_number: number | string | bigint;
-      transaction_index: number;
-    }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+   * Receipt proof accepted and consumer reply returned. This is transport
+   * evidence, not proof that the app-owned reply reports application success.
+  */
+  public subscribeToRelayedEvent(callback: (data: { slot: number | string | bigint; block_number: number | string | bigint; transaction_index: number }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'HistoricalProxy' && getFnNamePrefix(payload) === 'Relayed') {
-        callback(
-          this._program.registry
-            .createType(
-              '(String, String, {"slot":"u64","block_number":"u64","transaction_index":"u32"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as {
-            slot: number | string | bigint;
-            block_number: number | string | bigint;
-            transaction_index: number;
-          },
-        );
+        callback(this._program.registry.createType('(String, String, {"slot":"u64","block_number":"u64","transaction_index":"u32"})', message.payload)[2].toJSON() as unknown as { slot: number | string | bigint; block_number: number | string | bigint; transaction_index: number });
       }
     });
   }
 }
+
+  /**
+   * Errors returned by the Historical Proxy service.
+  */
+  export type ProxyError = 
+    /**
+     * Endpoint for requested slot not found.
+    */
+    | { NoEndpointForSlot: number | string | bigint }
+    /**
+     * Failed to send message.
+    */
+    | { SendFailure: string }
+    /**
+     * Failed to receive reply.
+    */
+    | { ReplyFailure: string }
+    /**
+     * Failed to decode reply.
+    */
+    | { DecodeFailure: string }
+    /**
+     * `eth-events-*` returned error.
+    */
+    | { EthereumEventClient: Error };
+
+  export type Error = "DecodeReceiptEnvelopeFailure" | "FailedEthTransaction" | "SendFailure" | "ReplyFailure" | "HandleResultDecodeFailure" | "MissingCheckpoint" | "InvalidBlockProof" | "TrieDbFailure" | "InvalidReceiptProof" | "UnsupportedFork";
+
+export const IDL_SHA256 = '4bde230e4759abfedd44070790b3a579d7f75aadff14266e0f1a287f61942bc7';

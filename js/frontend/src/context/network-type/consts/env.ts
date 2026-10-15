@@ -1,4 +1,12 @@
 import { HexString } from '@gear-js/api';
+import {
+  parseInboundProofProfile,
+  validateOwnedFixtureNetwork,
+  type InboundProofProfile,
+  type OwnedFixtureNetwork,
+} from '@gear-js/bridge';
+
+import { IDL_SHA256 } from '@/features/swap/consts/sails/vft-manager';
 
 import { getNetworkEnv } from '../utils';
 
@@ -19,6 +27,49 @@ const ERC20_MANAGER_CONTRACT_ADDRESS = getNetworkEnv<HexString>('ERC20_MANAGER_C
 
 const ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS = getNetworkEnv<HexString>('ETH_MESSAGE_QUEUE_CONTRACT_ADDRESSES');
 
+const OUTBOUND_VERIFICATION = getNetworkEnv('OUTBOUND_VERIFICATION_MODES', (value): 'zk' | 'beefy' => {
+  if (value !== 'zk' && value !== 'beefy') throw new Error('HOLD: unknown outbound verification mode');
+  return value;
+});
+
+function approvedInboundProfile(network: 'MAINNET' | 'TESTNET'): { profile?: InboundProofProfile; hold?: string } {
+  try {
+    const raw = import.meta.env.VITE_INBOUND_PROOF_PROFILES as string | undefined;
+    if (!raw) return { hold: 'HOLD: independently approved inbound deployment profile is unavailable.' };
+    const supplied = (JSON.parse(raw) as Partial<Record<'MAINNET' | 'TESTNET', unknown>>)[network];
+    if (!supplied) return { hold: 'HOLD: this network has no approved inbound deployment profile.' };
+    const profile = parseInboundProofProfile(JSON.stringify(supplied));
+    if (typeof profile.checkpoint.network !== 'string') {
+      const descriptor = import.meta.env.VITE_OWNED_FIXTURE_NETWORK as string | undefined;
+      if (network !== 'TESTNET' || !descriptor)
+        return { hold: 'HOLD: LocalFixture requires explicit owned test-network approval.' };
+      validateOwnedFixtureNetwork(profile, JSON.parse(descriptor) as OwnedFixtureNetwork, [
+        NODE_ADDRESS[network],
+        ARCHIVE_NODE_ADDRESS[network],
+        ETH_NODE_ADDRESS[network],
+        ETH_BEACON_NODE_ADDRESS[network],
+      ]);
+    }
+    if (
+      profile.ethereumChainId !== BigInt(ETH_CHAIN_ID[network]) ||
+      profile.consumer.programId.toLowerCase() !== VFT_MANAGER_CONTRACT_ADDRESS[network].toLowerCase() ||
+      profile.consumer.idlSha256 !== IDL_SHA256 ||
+      profile.consumer.service !== 'VftManager' ||
+      profile.consumer.method !== 'SubmitReceipt' ||
+      !profile.nativeWrapper
+    ) {
+      return { hold: 'HOLD: inbound consumer/profile differs from this network deployment.' };
+    }
+    return { profile };
+  } catch {
+    return { hold: 'HOLD: inbound deployment profile is malformed or unknown.' };
+  }
+}
+const INBOUND_PROOF_PROFILE = {
+  MAINNET: approvedInboundProfile('MAINNET'),
+  TESTNET: approvedInboundProfile('TESTNET'),
+};
+
 export {
   NODE_ADDRESS,
   ARCHIVE_NODE_ADDRESS,
@@ -31,4 +82,6 @@ export {
   ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
   ERC20_MANAGER_CONTRACT_ADDRESS,
   ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
+  INBOUND_PROOF_PROFILE,
+  OUTBOUND_VERIFICATION,
 };

@@ -25,15 +25,14 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this._savePaidRequests();
     await this._saveTransfers();
     await this._saveMerkleRoots();
-    await this._saveCompletedTransfers();
-    await this._processCompletedTransfers();
+    // Retained legacy completion rows are not authenticated economic evidence.
   }
 
   private async _savePaidRequests() {
     for (const [_nonce, transfer] of this._transfers.entries()) {
       if (this._paidRequests.has(transfer.txHash)) {
         transfer.status = Status.Bridging;
-        this._paidRequests.delete(transfer.txHash);
+        // One fee receipt can cover multiple deposit logs in the same transaction.
       }
     }
   }

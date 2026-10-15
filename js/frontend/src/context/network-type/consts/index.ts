@@ -1,3 +1,5 @@
+import { getNetworkTypeFromStorage, getNetworkTypeFromUrl } from '../utils';
+
 import { NETWORK_PRESET } from './preset';
 
 const NETWORK_SEARCH_PARAM = 'network';
@@ -8,7 +10,7 @@ const NETWORK_TYPE = {
   TESTNET: 'testnet',
 } as const;
 
-const DEFAULT_NETWORK_TYPE = NETWORK_TYPE.MAINNET;
+const DEFAULT_NETWORK_TYPE = getNetworkTypeFromUrl() ?? getNetworkTypeFromStorage() ?? NETWORK_TYPE.MAINNET;
 
 const DEFAULT_NETWORK_PRESET = NETWORK_PRESET[DEFAULT_NETWORK_TYPE.toUpperCase() as keyof typeof NETWORK_PRESET];
 

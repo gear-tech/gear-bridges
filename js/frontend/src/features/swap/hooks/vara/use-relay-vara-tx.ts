@@ -1,5 +1,5 @@
 import { GearApi } from '@gear-js/api';
-import { relayVaraToEth } from '@gear-js/bridge';
+import { prepareVaraToEthRelay, getMessageQueueClient, type OutboundEffect } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
 import { useConfig, usePublicClient } from 'wagmi';
 import { getWalletClient } from 'wagmi/actions';
@@ -11,17 +11,22 @@ import { useInitArchiveApi } from './use-init-archive-api';
 
 type Params = {
   onLog: (message: string) => void;
-  onReceipt: () => void;
+  onFinalized: () => void;
   onError: (error: Error) => void;
 };
 
-function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
+function useRelayVaraTx(
+  nonce: bigint,
+  blockNumber: bigint,
+  expectedEffect: Omit<Extract<OutboundEffect, { kind: 'token' }>, 'sourceActorId'>,
+) {
   const { NETWORK_PRESET, syncEthWalletNetwork } = useNetworkType();
   const config = useConfig();
   const publicClient = usePublicClient();
   const initArchiveApi = useInitArchiveApi();
 
-  const relay = async ({ onLog, onReceipt, onError }: Params) => {
+  const relay = async ({ onLog, onFinalized, onError }: Params) => {
+    const deadline = Date.now() + 44 * 60 * 1000;
     let archiveApi: GearApi | undefined;
 
     try {
@@ -33,21 +38,38 @@ function useRelayVaraTx(nonce: bigint, blockNumber: bigint) {
       const walletClient = await getWalletClient(config);
       archiveApi = await initArchiveApi();
 
-      const { error, success } = await relayVaraToEth({
+      const prepared = await prepareVaraToEthRelay({
         nonce,
         blockNumber,
         ethereumPublicClient: publicClient,
-        ethereumWalletClient: walletClient,
-        ethereumAccount: walletClient.account,
         gearApi: archiveApi,
         messageQueueAddress: NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
         statusCb: onLog,
+        wait: true,
+        deadline,
       });
+      const queue = getMessageQueueClient(
+        NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
+        publicClient,
+        walletClient,
+        walletClient.account,
+      );
+      const { error, success, transactionHash } = await queue.processMessage(
+        prepared.blockNumber,
+        prepared.message,
+        prepared.proof,
+        { ...expectedEffect, sourceActorId: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS },
+        onLog,
+        deadline,
+        { wait: true },
+      );
 
-      if (error) throw new Error(error);
-      if (!success) throw new Error('Failed to relay Vara transaction');
+      if (!success)
+        throw new Error(
+          `HOLD: ${transactionHash !== '0x' ? `original Ethereum transaction ${transactionHash}; ` : ''}${error ?? 'Original delivery is unproven'}. Reconcile before retrying.`,
+        );
 
-      onReceipt();
+      onFinalized();
     } catch (error) {
       onError(error as Error);
     } finally {

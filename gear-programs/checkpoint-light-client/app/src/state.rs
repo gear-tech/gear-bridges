@@ -18,9 +18,11 @@ pub struct State<const N: usize> {
     pub sync_committee_next: Rc<SyncCommitteeKeys>,
     pub checkpoints: Checkpoints<N>,
     pub replay_back: Option<ReplayBackState>,
+    pub revision: u64,
 }
 
 pub struct ReplayBackState {
+    pub base_checkpoint: (Slot, Hash256),
     pub finalized_header: BeaconBlockHeader,
     pub sync_committee_next: Option<Rc<SyncCommitteeKeys>>,
     pub checkpoints: Vec<(Slot, Hash256)>,
@@ -41,8 +43,12 @@ impl<const N: usize> Checkpoints<N> {
         Self(CircularBuffer::boxed())
     }
 
-    pub fn push(&mut self, slot: Slot, checkpoint: Hash256) {
-        self.0.push_back((slot, checkpoint))
+    pub fn push(&mut self, slot: Slot, checkpoint: Hash256) -> Result<(), CheckpointError> {
+        if self.last().is_some_and(|(last, _)| slot <= last) {
+            return Err(CheckpointError::OutDated);
+        }
+        self.0.push_back((slot, checkpoint));
+        Ok(())
     }
 
     pub fn checkpoints(&self) -> Vec<(Slot, Hash256)> {
@@ -174,7 +180,7 @@ fn checkpoints() {
     let mut checkpoints = Checkpoints::<COUNT>::new();
 
     for (slot, checkpoint) in &data {
-        checkpoints.push(*slot, *checkpoint);
+        checkpoints.push(*slot, *checkpoint).unwrap();
     }
 
     assert!(matches!(
@@ -194,7 +200,9 @@ fn checkpoints() {
         5_188_096,
         hex!("5d90dad12f5cebadbc16db005500a19a53618257ceca748d7183cbff45507ca2").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 
@@ -204,7 +212,9 @@ fn checkpoints() {
         5_188_128,
         hex!("942b118b30e777151d9040c53471563fe7710df79b57e611bff927c26efa6202").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 
@@ -214,7 +224,9 @@ fn checkpoints() {
         5_188_160,
         hex!("4d26e1bfafef3597d6c0cfb67f8c31fd6c7ee970fa855aa9a6bdd8b1670f31cd").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 
@@ -224,7 +236,9 @@ fn checkpoints() {
         5_188_192,
         hex!("9c047d8c543183cd407b6955b4bb253bf437b2a4b8cc62859ad46a726f693476").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 
@@ -234,7 +248,9 @@ fn checkpoints() {
         5_188_224,
         hex!("b7d7f7efdef892d855640777226bcc7f08e328f264bd879bad61e844c3387f2f").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 
@@ -244,7 +260,9 @@ fn checkpoints() {
         5_188_256,
         hex!("7b17d44ed3f5b7ca49aad6069caa7dcf3f496e2b8dee4221dac042c4219894a0").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 
@@ -254,7 +272,9 @@ fn checkpoints() {
         5_188_288,
         hex!("10c57533bfcf7343b2003a2ce912958c60805f342455b68c611666fdee1205a5").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 }
@@ -286,7 +306,7 @@ fn checkpoints_with_gaps() {
     let mut checkpoints = Checkpoints::<COUNT>::new();
 
     for (slot, checkpoint) in &data {
-        checkpoints.push(*slot, *checkpoint);
+        checkpoints.push(*slot, *checkpoint).unwrap();
     }
 
     // after overwrite data[0] slot = 5_187_936
@@ -295,7 +315,9 @@ fn checkpoints_with_gaps() {
         5_188_032,
         hex!("4401b2d3939a1aa28129400aa5ac4250e1cdec18f1836eb2c2c8c3fc7d49df88").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 
@@ -305,7 +327,9 @@ fn checkpoints_with_gaps() {
         5_188_096,
         hex!("5d90dad12f5cebadbc16db005500a19a53618257ceca748d7183cbff45507ca2").into(),
     ));
-    checkpoints.push(data.last().unwrap().0, data.last().unwrap().1);
+    checkpoints
+        .push(data.last().unwrap().0, data.last().unwrap().1)
+        .unwrap();
 
     compare_checkpoints(&data, &checkpoints);
 }
@@ -352,7 +376,7 @@ fn checkpoints_get() {
     let mut checkpoints = Checkpoints::<COUNT>::new();
 
     for (slot, checkpoint) in &data {
-        checkpoints.push(*slot, *checkpoint);
+        checkpoints.push(*slot, *checkpoint).unwrap();
     }
 
     assert!(checkpoints.checkpoint(2_498_625).is_err());
@@ -365,5 +389,21 @@ fn checkpoints_get() {
             assert_eq!(actual_slot, expected_slot, "slot = {slot}");
             assert_eq!(actual_checkpoint, expected_checkpoint);
         }
+    }
+}
+
+#[test]
+fn obsolete_checkpoints_cannot_reorder_or_evict_history() {
+    let mut checkpoints = Checkpoints::<2>::new();
+    checkpoints.push(10, [1; 32].into()).unwrap();
+    checkpoints.push(20, [2; 32].into()).unwrap();
+    for (slot, hash) in [(5, [3; 32]), (20, [2; 32]), (20, [4; 32])] {
+        assert!(matches!(
+            checkpoints.push(slot, hash.into()),
+            Err(CheckpointError::OutDated)
+        ));
+        assert_eq!(checkpoints.checkpoint(0).unwrap(), (10, [1; 32].into()));
+        assert_eq!(checkpoints.checkpoint(11).unwrap(), (20, [2; 32].into()));
+        assert_eq!(checkpoints.last(), Some((20, [2; 32].into())));
     }
 }

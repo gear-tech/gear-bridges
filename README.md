@@ -2,6 +2,66 @@
 
 Gear Bridge is an implementation of a trustless ZK-based cross-chain bridge facilitating the transfer of assets between Ethereum and Gear-based blockchains, such as the [Vara network](https://vara.network/).
 
+## Local BEEFY interoperability
+
+The isolated BEEFY path lives in `tools/beefy-relay`, `ethereum/src/beefy`, and
+`VaraQueueRootVerifier.sol`. It does not replace the production prover or upgrade
+an existing MessageQueue. The adapter uses the unchanged MessageQueue verifier
+interface and trusts only the configured client's latest accepted MMR anchor.
+
+The consensus sources derive from Snowbridge commit
+`1201293e482ef052b9c3989dcf680046704fef3d`. Local verification and deployment
+hardening goes beyond compiler/import changes; this is not identical audited
+upstream bytecode. Both interactive and Fiat-Shamir verification remain
+supported. Fiat-Shamir verifies the selected sample, while the Rust relay checks
+every available signature.
+
+Rust and Foundry share `ethereum/test/fixtures/beefy-interop.json`. Its synthetic
+signatures, SCALE leaves and commitments, MMR proofs, and canonical ABI envelopes
+are reproducible with the deterministic development keys in `fixtures.rs`.
+Fixture agreement alone does not qualify code changes or deployed artifacts.
+Recorded Hoodi committee-boundary data uses `.json.zst`, following the existing
+Holesky fixture convention. Tests decompress the original bytes offline;
+synthetic cross-language vectors remain readable JSON.
+
+```sh
+cargo test -p beefy-relay --lib
+forge test --root ethereum --match-path 'test/*Beefy*.t.sol' -vvv
+# Deliberately regenerate the shared fixture after a protocol change:
+UPDATE_BEEFY_FIXTURE=1 cargo test -p beefy-relay --lib fixtures
+```
+
+The local trusted genesis checkpoint and sampling parameters are not production
+security policy. Queue maturity/conflict hardening and source/domain checks do
+not authorize production activation or migration of an existing deployment.
+For isolated local nodes and a real Hoodi bridge, use the
+[local deployment guide](docs/running-the-bridge.md#local-nodes-and-hoodi).
+
+The BEEFY scripts share bootstrap and verifier selection in `ethereum/test/Base.sol`;
+its `deployBridge()` also owns governance and queue deployment. `BeefyHoodi` selects
+the message-only profile (queue at the starting deployer nonce + 5), while
+`BeefyLocal` and `BeefyTokens` retain token deployment (queue at nonce + 12).
+After Solidity test or script changes, regenerate the compiler artifacts listed in
+the CI API-file check: AST identifiers can change even when ABI and bytecode do not.
+
+Queue administration uses the existing UUPS `DEFAULT_ADMIN_ROLE` authority, not
+a separate recovery controller. The admin-only `migrateToBeefy` reinitializer
+keeps the existing proxy, roles, custody, roots and replay state while binding
+a qualified BEEFY verifier and permanent publication floor. It grants no new
+administrator. See the [mainnet migration candidate and release gates](ethereum/README.md#mainnet-custody-preserving-migration-candidate).
+Fresh-deployment scripts do not migrate existing custody.
+
+The normal `beefy-relay` binary owns authenticated source following, durable root
+publication and history audit. Local setup belongs to the explicit `beefy-deploy`
+target (`--features deployment --bin beefy-deploy`), not a campaign supervisor.
+The deployment feature adds the program WASMs; the normal actor does not need them.
+No Python, launchd, sealed-run manifests or uninterrupted soak are required to
+run the reusable actor. Original transaction journals and finality checks remain
+mandatory on restart. Re-included originals remain held until their new inclusion
+is finalized. Keep `root-publications/finality-history/` alongside indexed root
+journals: it is owned archive data, not a root publication. Unknown inventory
+entries and symlinks in place of that directory remain rejected.
+
 ## Security
 
 [Ethernal](https://ethernal.tech/) team have performed partial [audit](audits/ethernal.pdf) of the code, which covered the following scope for the commit [d42251c](https://github.com/gear-tech/gear-bridges/commit/d42251c3c9d94309a7855d6d774c6054a139a674):

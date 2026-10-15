@@ -1,1 +1,3 @@
-export { relayEthToVara, type RelayEthToVaraParams } from './relayer.js';
+export { relayEthToVara, decodeConsumerReply, assertNativePendingReply, type ConsumerReplyContract, type RelayResult, type RelayEthToVaraParams } from './relayer.js';
+export { immutableInboundProfile, parseInboundProofProfile, immutableOwnedFixtureNetwork, validateOwnedFixtureNetwork, type InboundProofProfile, type OwnedFixtureNetwork, type CheckpointNetwork } from './proof-composer.js';
+export { validateInboundTokenEffect, validateNativePendingCohort, validateNativeRedemption, type NativeReceiptIdentity, type InboundTokenEffect, type SettledReceiptDeposit, type NativeReceiptDeposit, type NativeRedemption } from './token-effect.js';

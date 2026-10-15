@@ -1,0 +1,68 @@
+[package]
+name = "beefy-relay"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+test-support = []
+deployment = ["dep:gclient", "dep:sails-rs", "dep:historical-proxy", "dep:historical-proxy-client", "dep:eth-events-electra", "dep:eth-events-electra-client", "dep:vft-manager", "dep:vft-manager-client", "dep:vft", "dep:vft-client", "dep:vft-vara", "dep:vft-vara-client", "dep:gear-core", "dep:checkpoint-light-client-client", "dep:bridging-payment", "dep:bridging-payment-client", "dep:relayer"]
+
+[[bin]]
+name = "beefy-relay"
+path = "src/main.rs"
+
+[[bin]]
+name = "beefy-deploy"
+path = "src/deploy.rs"
+required-features = ["deployment"]
+
+[dependencies]
+anyhow.workspace = true
+hash-db = "0.16.0"
+binary-merkle-tree.workspace = true
+hex = { workspace = true, features = ["std"] }
+k256.workspace = true
+parity-scale-codec = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std"] }
+serde_json.workspace = true
+sp-consensus-beefy = { workspace = true, features = ["std"] }
+sp-mmr-primitives = { workspace = true, features = ["std"] }
+sp-core = { workspace = true, features = ["std"] }
+sp-runtime = { workspace = true, features = ["std"] }
+tiny-keccak.workspace = true
+alloy.workspace = true
+alloy-consensus = { workspace = true, features = ["k256"] }
+clap.workspace = true
+ethereum-client.workspace = true
+ethereum-common = { workspace = true, features = ["std"] }
+gear-rpc-client.workspace = true
+gsdk.workspace = true
+subxt.workspace = true
+subxt-rpcs.workspace = true
+tokio.workspace = true
+futures.workspace = true
+url.workspace = true
+gclient = { workspace = true, optional = true }
+relayer = { path = "../../relayer", optional = true, default-features = false }
+sails-rs = { workspace = true, features = ["gclient"], optional = true }
+historical-proxy = { workspace = true, features = ["wasm-binary"], optional = true }
+historical-proxy-client = { workspace = true, optional = true }
+eth-events-electra = { workspace = true, features = ["wasm-binary"], optional = true }
+eth-events-electra-client = { workspace = true, optional = true }
+vft-manager = { workspace = true, features = ["wasm-binary"], optional = true }
+vft-manager-client = { workspace = true, optional = true }
+vft = { workspace = true, features = ["wasm-binary"], optional = true }
+vft-client = { workspace = true, optional = true }
+vft-vara = { workspace = true, features = ["wasm-binary"], optional = true }
+vft-vara-client = { workspace = true, optional = true }
+gear-core = { workspace = true, optional = true }
+checkpoint-light-client-client = { workspace = true, optional = true }
+bridging-payment = { workspace = true, features = ["wasm-binary"], optional = true }
+bridging-payment-client = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3.23.0"

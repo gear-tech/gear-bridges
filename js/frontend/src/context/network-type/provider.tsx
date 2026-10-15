@@ -48,9 +48,10 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   useChainIdLogs();
 
   useEffect(() => {
-    searchParams.set(NETWORK_SEARCH_PARAM, NETWORK_TYPE.MAINNET);
+    if (searchParams.get(NETWORK_SEARCH_PARAM) === networkType) return;
+    searchParams.set(NETWORK_SEARCH_PARAM, networkType);
     setSearchParams(searchParams, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [networkType, searchParams, setSearchParams]);
 
   // useSwitchChain switches connector's network if wallet is connected,
   // so setting config directly to avoid it
@@ -67,7 +68,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
   const switchNetworks = (value: NetworkType) => {
     const NEXT_PRESET = NETWORK_PRESET[value.toUpperCase() as keyof typeof NETWORK_PRESET];
 
-    setNetworkType(value as 'mainnet');
+    setNetworkType(value);
     switchWagmiNetwork(NEXT_PRESET.ETH_CHAIN_ID);
 
     searchParams.set(NETWORK_SEARCH_PARAM, value);
@@ -86,7 +87,7 @@ function NetworkTypeProvider({ children }: PropsWithChildren) {
     () => ({
       networkType,
       isMainnet,
-      isTestnet: false,
+      isTestnet: !isMainnet,
       isLoading,
       NETWORK_PRESET: PRESET,
       switchNetworks,

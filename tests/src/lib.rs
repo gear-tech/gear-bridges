@@ -110,31 +110,39 @@ pub fn create_receipt_rlp(
     token: H160,
     amount: U256,
 ) -> Vec<u8> {
-    let event = ERC20_MANAGER::BridgingRequested {
-        from: from.0.into(),
-        to: receiver.into_bytes().into(),
-        token: token.0.into(),
-        amount: {
-            let mut bytes = [0u8; 32];
-            amount.to_little_endian(&mut bytes[..]);
+    create_receipt_rlp_with_logs(erc20_manager_address, vec![(from, receiver, token, amount)])
+}
 
-            alloy_primitives::U256::from_le_bytes(bytes)
-        },
-    };
-
+pub fn create_receipt_rlp_with_logs(
+    erc20_manager_address: H160,
+    deposits: Vec<(H160, ActorId, H160, U256)>,
+) -> Vec<u8> {
+    let logs = deposits
+        .into_iter()
+        .map(|(from, receiver, token, amount)| {
+            let event = ERC20_MANAGER::BridgingRequested {
+                from: from.0.into(),
+                to: receiver.into_bytes().into(),
+                token: token.0.into(),
+                amount: {
+                    let mut bytes = [0u8; 32];
+                    amount.to_little_endian(&mut bytes[..]);
+                    alloy_primitives::U256::from_le_bytes(bytes)
+                },
+            };
+            alloy_primitives::Log {
+                address: erc20_manager_address.0.into(),
+                data: Into::into(&event),
+            }
+        })
+        .collect();
     let receipt = ReceiptWithBloom::from(Receipt {
         status: true.into(),
         cumulative_gas_used: 100_000u64,
-        logs: vec![alloy_primitives::Log {
-            address: erc20_manager_address.0.into(),
-            data: Into::into(&event),
-        }],
+        logs,
     });
-
     let receipt = ReceiptEnvelope::Eip2930(receipt);
-
     let mut receipt_rlp = vec![];
     alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
-
     receipt_rlp
 }

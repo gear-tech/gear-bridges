@@ -1,6 +1,9 @@
 #![no_std]
 
-use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
+use checkpoint_light_client_client::{
+    traits::{ServiceCheckpointFor as _, ServiceState as _},
+    ServiceCheckpointFor, ServiceState,
+};
 use ethereum_common::{
     beacon::BlockHeader as BeaconBlockHeader,
     hash_db, memory_db,
@@ -10,7 +13,6 @@ use ethereum_common::{
     utils::{self as eth_utils, ReceiptEnvelope},
     H256,
 };
-use ops::ControlFlow::*;
 use sails_rs::{calls::*, gstd::calls::GStdRemoting, prelude::*};
 
 #[derive(Clone, Debug, Encode, Decode, TypeInfo)]
@@ -26,6 +28,7 @@ pub enum Error {
     InvalidBlockProof,
     TrieDbFailure,
     InvalidReceiptProof,
+    UnsupportedFork,
 }
 
 pub struct State {
@@ -45,6 +48,7 @@ pub struct CheckedProofs {
 #[derive(Clone, Debug)]
 pub struct Proofs {
     pub checkpoint_light_client_address: ActorId,
+    pub electra: bool,
     pub slot: u64,
     pub block_root: H256,
     pub receipts_root: H256,
@@ -60,11 +64,12 @@ impl Proofs {
     pub async fn check(self) -> Result<CheckedProofs, Error> {
         let Proofs {
             checkpoint_light_client_address,
+            electra,
             slot,
             block_root,
             receipts_root,
             block_number,
-            mut headers,
+            headers,
             proof,
             transaction_index,
             receipt_rlp,
@@ -72,28 +77,18 @@ impl Proofs {
 
         let receipt = decode_and_check_receipt(&receipt_rlp)?;
 
-        // verify the proof of block inclusion
-        let checkpoint = request_checkpoint(checkpoint_light_client_address, slot).await?;
-
-        headers.sort_unstable_by(|a, b| a.slot.cmp(&b.slot));
-        let Continue(block_root_parent) =
-            headers
-                .iter()
-                .rev()
-                .try_fold(checkpoint, |block_root_parent, header| {
-                    let block_root = header.tree_hash_root();
-                    match block_root == block_root_parent {
-                        true => Continue(header.parent_root),
-                        false => Break(()),
-                    }
-                })
-        else {
-            return Err(Error::InvalidBlockProof);
-        };
-
-        if block_root != block_root_parent {
-            return Err(Error::InvalidBlockProof);
+        let network = ServiceState::new(GStdRemoting)
+            .network()
+            .recv(checkpoint_light_client_address)
+            .await
+            .map_err(|_| Error::ReplyFailure)?;
+        let epoch = eth_utils::calculate_epoch(slot);
+        if epoch < network.epoch_deneb() || electra != (epoch >= network.epoch_electra()) {
+            return Err(Error::UnsupportedFork);
         }
+        let (checkpoint_slot, checkpoint_root) =
+            request_checkpoint(checkpoint_light_client_address, slot).await?;
+        check_ancestry(slot, block_root, &headers, checkpoint_slot, checkpoint_root)?;
 
         // verify Merkle-PATRICIA proof
         let mut memory_db = memory_db::new();
@@ -120,10 +115,17 @@ impl Proofs {
 fn decode_and_check_receipt(receipt_rlp: &[u8]) -> Result<ReceiptEnvelope, Error> {
     use alloy_rlp::Decodable;
 
-    let receipt = ReceiptEnvelope::decode(&mut &receipt_rlp[..])
-        .map_err(|_| Error::DecodeReceiptEnvelopeFailure)?;
-
-    if !receipt.is_success() {
+    let mut input = receipt_rlp;
+    let receipt =
+        ReceiptEnvelope::decode(&mut input).map_err(|_| Error::DecodeReceiptEnvelopeFailure)?;
+    if !input.is_empty() {
+        return Err(Error::DecodeReceiptEnvelopeFailure);
+    }
+    if receipt
+        .as_receipt()
+        .and_then(|receipt| receipt.status.as_eip658())
+        != Some(true)
+    {
         return Err(Error::FailedEthTransaction);
     }
 
@@ -133,7 +135,7 @@ fn decode_and_check_receipt(receipt_rlp: &[u8]) -> Result<ReceiptEnvelope, Error
 async fn request_checkpoint(
     checkpoint_light_client_address: ActorId,
     slot: u64,
-) -> Result<H256, Error> {
+) -> Result<(u64, H256), Error> {
     let service = ServiceCheckpointFor::new(GStdRemoting);
     let result = service
         .get(slot)
@@ -142,7 +144,35 @@ async fn request_checkpoint(
         .map_err(|_| Error::SendFailure)?;
 
     match result {
-        Ok((_slot, hash)) => Ok(hash),
+        Ok(checkpoint) => Ok(checkpoint),
         Err(_) => Err(Error::MissingCheckpoint),
     }
+}
+
+fn check_ancestry(
+    slot: u64,
+    block_root: H256,
+    headers: &[BeaconBlockHeader],
+    checkpoint_slot: u64,
+    checkpoint_root: H256,
+) -> Result<(), Error> {
+    if slot > checkpoint_slot {
+        return Err(Error::InvalidBlockProof);
+    }
+    let mut previous_slot = slot;
+    let mut previous_root = block_root;
+    for header in headers {
+        if header.slot <= previous_slot
+            || header.slot > checkpoint_slot
+            || header.parent_root != previous_root
+        {
+            return Err(Error::InvalidBlockProof);
+        }
+        previous_slot = header.slot;
+        previous_root = header.tree_hash_root();
+    }
+    if previous_slot != checkpoint_slot || previous_root != checkpoint_root {
+        return Err(Error::InvalidBlockProof);
+    }
+    Ok(())
 }

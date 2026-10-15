@@ -1,320 +1,33 @@
 /* eslint-disable */
-
-import {
-  ActorId,
-  H256,
-  H160,
-  TransactionBuilder,
-  MessageId,
-  QueryBuilder,
-  getServiceNamePrefix,
-  getFnNamePrefix,
-  ZERO_ADDRESS,
-} from 'sails-js';
 import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-
-/**
- * Config that should be provided to this service on initialization.
- */
-export interface InitConfig {
-  /**
-   * Address of the gear-eth-bridge built-in actor.
-   */
-  gear_bridge_builtin: ActorId;
-  /**
-   * Address of the `historical-proxy` program.
-   *
-   * For more info see [State::historical_proxy_address].
-   */
-  historical_proxy_address: ActorId;
-  /**
-   * Config that will be used to send messages to the other programs.
-   *
-   * For more info see [Config].
-   */
-  config: Config;
-}
-
-/**
- * Config that will be used to send messages to the other programs.
- */
-export interface Config {
-  /**
-   * Gas limit for token operations. Token operations include:
-   * - Mint
-   * - Burn
-   * - TransferFrom
-   */
-  gas_for_token_ops: number | string | bigint;
-  /**
-   * Gas to reserve for reply processing.
-   */
-  gas_for_reply_deposit: number | string | bigint;
-  /**
-   * Gas limit for gear-eth-bridge built-in actor request.
-   */
-  gas_to_send_request_to_builtin: number | string | bigint;
-  /**
-   * Required gas to commit changes in [VftManager::update_vfts].
-   */
-  gas_for_swap_token_maps: number | string | bigint;
-  /**
-   * Timeout in blocks that current program will wait for reply from
-   * the other programs such as VFT and `gear-eth-bridge` built-in actor.
-   */
-  reply_timeout: number;
-  /**
-   * Fee to pay `gear-eth-bridge` built-in actor.
-   */
-  fee_bridge: number | string | bigint;
-  /**
-   * Incoming fee.
-   */
-  fee_incoming: number | string | bigint;
-}
-
-/**
- * Type of the token supply.
- */
-export type TokenSupply = 'Ethereum' | 'Gear';
-
-/**
- * Error types for VFT Manageer service.
- */
-export type Error =
-  /**
-   * Error sending message to the program.
-   */
-  | { SendFailure: string }
-  /**
-   * Error while waiting for reply from the program.
-   */
-  | { ReplyFailure: string }
-  /**
-   * Failed to set reply timeout.
-   */
-  | { ReplyTimeout: string }
-  /**
-   * Failed to set reply hook.
-   */
-  | { ReplyHook: string }
-  /**
-   * A message does not have a reply code.
-   */
-  | { NoReplyCode: string }
-  /**
-   * Original `MessageId` wasn't found in message tracker when processing reply.
-   */
-  | { MessageNotFound: null }
-  /**
-   * Invalid message status was found in the message tracker when processing reply.
-   */
-  | { InvalidMessageStatus: null }
-  /**
-   * Message sent to the program failed.
-   */
-  | { MessageFailed: null }
-  /**
-   * Failed to decode Burn reply.
-   */
-  | { BurnTokensDecode: string }
-  /**
-   * Failed to decode TransferFrom reply.
-   */
-  | { TransferFromDecode: string }
-  /**
-   * Failed to decode Mint reply.
-   */
-  | { MintTokensDecode: string }
-  /**
-   * Failed to decode payload from gear-eth-bridge built-in actor.
-   */
-  | { BuiltinDecode: string }
-  /**
-   * Gas reservation for reply is too low.
-   */
-  | { GasForReplyTooLow: string }
-  /**
-   * `ERC20` address wasn't found in the token mapping.
-   */
-  | { NoCorrespondingEthAddress: null }
-  /**
-   * `VFT` address wasn't found in the token mapping.
-   */
-  | { NoCorrespondingVaraAddress: null }
-  /**
-   * `submit_receipt` can only be called by `historical-proxy` program.
-   */
-  | { NotHistoricalProxy: null }
-  /**
-   * Ethereum transaction receipt is not supported.
-   */
-  | { UnsupportedEthEvent: null }
-  /**
-   * Ethereum transaction is too old and already have been removed from storage.
-   */
-  | { TransactionTooOld: null }
-  /**
-   * Ethereum transaction was already processed by VFT Manager service.
-   */
-  | { AlreadyProcessed: null }
-  /**
-   * Vft-manager is paused and cannot process the request.
-   */
-  | { Paused: null }
-  /**
-   * Failed to burn tokens from the receiver in VftVara.
-   */
-  | { BurnFromFailed: string }
-  /**
-   * Internal unspecified VFT error
-   */
-  | { Internal: string }
-  /**
-   * Invalid or unexpected reply received from a VFT program.
-   */
-  | { InvalidReply: null };
-
-/**
- * State in which message processing can be.
- */
-export type MessageStatus =
-  /**
-   * Message to deposit tokens is sent.
-   */
-  | { SendingMessageToDepositTokens: null }
-  /**
-   * Reply is received for a token deposit message.
-   */
-  | { TokenDepositCompleted: boolean }
-  /**
-   * Message to the `pallet-gear-eth-bridge` is sent.
-   */
-  | { SendingMessageToBridgeBuiltin: null }
-  /**
-   * Reply is received for a message to the `pallet-gear-eth-bridge`.
-   */
-  | { BridgeResponseReceived: [number | string | bigint, H256, number | string | bigint] | null }
-  /**
-   * Message to refund tokens is sent.
-   */
-  | { SendingMessageToReturnTokens: null }
-  /**
-   * Reply is received for a token refund message.
-   */
-  | { TokensReturnComplete: boolean };
-
-/**
- * Details about a request associated with a message stored in [MessageTracker].
- */
-export interface TxDetails {
-  /**
-   * Address of the `VFT` token which is being bridged.
-   */
-  vara_token_id: ActorId;
-  /**
-   * Original `VFT` token owner.
-   */
-  sender: ActorId;
-  /**
-   * Bridged tokens amount.
-   */
-  amount: number | string | bigint;
-  /**
-   * `ERC20` token receiver on Ethereum.
-   */
-  receiver: H160;
-  /**
-   * [TokenSupply] type of the token being bridged.
-   */
-  token_supply: TokenSupply;
-}
-
-/**
- * Entry for a single message in [MessageTracker].
- */
-export interface MessageInfo {
-  /**
-   * State of the message.
-   */
-  status: MessageStatus;
-  /**
-   * Request details.
-   */
-  details: TxDetails;
-}
-
-export type Order = 'Direct' | 'Reverse';
+import { TransactionBuilder, ActorId, MessageId, H160, H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly vftManager: VftManager;
-  private _program?: BaseGearProgram;
+  private _program!: BaseGearProgram;
 
-  constructor(
-    public api: GearApi,
-    programId?: `0x${string}`,
-  ) {
+  constructor(public api: GearApi, programId?: `0x${string}`) {
     const types: Record<string, any> = {
-      InitConfig: { gear_bridge_builtin: '[u8;32]', historical_proxy_address: '[u8;32]', config: 'Config' },
-      Config: {
-        gas_for_token_ops: 'u64',
-        gas_for_reply_deposit: 'u64',
-        gas_to_send_request_to_builtin: 'u64',
-        gas_for_swap_token_maps: 'u64',
-        reply_timeout: 'u32',
-        fee_bridge: 'u128',
-        fee_incoming: 'u128',
-      },
-      TokenSupply: { _enum: ['Ethereum', 'Gear'] },
-      Error: {
-        _enum: {
-          SendFailure: 'String',
-          ReplyFailure: 'String',
-          ReplyTimeout: 'String',
-          ReplyHook: 'String',
-          NoReplyCode: 'String',
-          MessageNotFound: 'Null',
-          InvalidMessageStatus: 'Null',
-          MessageFailed: 'Null',
-          BurnTokensDecode: 'String',
-          TransferFromDecode: 'String',
-          MintTokensDecode: 'String',
-          BuiltinDecode: 'String',
-          GasForReplyTooLow: 'String',
-          NoCorrespondingEthAddress: 'Null',
-          NoCorrespondingVaraAddress: 'Null',
-          NotHistoricalProxy: 'Null',
-          UnsupportedEthEvent: 'Null',
-          TransactionTooOld: 'Null',
-          AlreadyProcessed: 'Null',
-          Paused: 'Null',
-          BurnFromFailed: 'String',
-          Internal: 'String',
-          InvalidReply: 'Null',
-        },
-      },
-      MessageStatus: {
-        _enum: {
-          SendingMessageToDepositTokens: 'Null',
-          TokenDepositCompleted: 'bool',
-          SendingMessageToBridgeBuiltin: 'Null',
-          BridgeResponseReceived: 'Option<(U256, H256, u64)>',
-          SendingMessageToReturnTokens: 'Null',
-          TokensReturnComplete: 'bool',
-        },
-      },
-      TxDetails: {
-        vara_token_id: '[u8;32]',
-        sender: '[u8;32]',
-        amount: 'U256',
-        receiver: 'H160',
-        token_supply: 'TokenSupply',
-      },
-      MessageInfo: { status: 'MessageStatus', details: 'TxDetails' },
-      Order: { _enum: ['Direct', 'Reverse'] },
-    };
+      InitConfig: {"gear_bridge_builtin":"[u8;32]","historical_proxy_address":"[u8;32]","config":"Config"},
+      Config: {"gas_for_token_ops":"u64","gas_for_reply_deposit":"u64","gas_to_send_request_to_builtin":"u64","gas_for_swap_token_maps":"u64","reply_timeout":"u32","fee_bridge":"u128","fee_incoming":"u128"},
+      TokenSupply: {"_enum":["Ethereum","Gear"]},
+      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null"}},
+      ReceiptStatus: {"_enum":["Unknown","Reserved","Processed"]},
+      SourceRequestOutcome: {"_enum":{"Pending":"Null","Queued":{"nonce":"U256","hash":"H256","queue_id":"u64"},"NotQueued":"Null"}},
+      CutoverStatus: {"phase":"CutoverPhase","predecessor":"Option<[u8;32]>","successor":"Option<[u8;32]>","minimum_receipt_slot":"u64","last_receipt_slot":"Option<u64>","config_fingerprint":"Option<H256>","transfer_count":"u32","completed_transfer_count":"u32","in_flight_transfer_count":"u32"},
+      CutoverPhase: {"_enum":["Active","Draining","AwaitingSource","Transferring","Retired","Ready"]},
+      CustodyTransferAttempt: {"token":"[u8;32]","amount":"U256","child":"[u8;32]","outcome":"CustodyTransferOutcome"},
+      CustodyTransferOutcome: {"_enum":["InFlight","Completed","Rejected","Ambiguous"]},
+      ReceiptDepositState: {"log_index":"u64","sender":"H160","receiver":"[u8;32]","token_id":"[u8;32]","eth_token_id":"H160","amount":"U256","supply":"TokenSupply","native":"bool","operation_id":"H256","child":"Option<[u8;32]>","outcome":"ReceiptDepositOutcome"},
+      ReceiptDepositOutcome: {"_enum":["Pending","InFlight","Settled","Rejected","Unknown","NativeQueued"]},
+      MessageInfo: {"status":"MessageStatus","details":"TxDetails"},
+      MessageStatus: {"_enum":{"SendingMessageToDepositTokens":"Null","TokenDepositCompleted":"bool","SendingMessageToBridgeBuiltin":"Null","BridgeResponseReceived":"Option<(U256, H256, u64)>","SendingMessageToReturnTokens":"Null","TokensReturnComplete":"bool"}},
+      TxDetails: {"vara_token_id":"[u8;32]","sender":"[u8;32]","amount":"U256","receiver":"H160","token_supply":"TokenSupply"},
+      SourceRequestEvidence: {"request":"[u8;32]","child":"[u8;32]","builtin":"[u8;32]","request_hash":"H256","outcome":"SourceRequestOutcome"},
+      Order: {"_enum":["Direct","Reverse"]},
+    }
 
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
@@ -334,13 +47,8 @@ export class SailsProgram {
   /**
    * The constructor is intended for test purposes and is available only when the feature
    * `mocks` is enabled.
-   */
-  gasCalculationCtorFromCode(
-    code: Uint8Array | Buffer | HexString,
-    _init_config: InitConfig,
-    _slot_first: number | string | bigint,
-    _count: number | null,
-  ): TransactionBuilder<null> {
+  */
+  gasCalculationCtorFromCode(code: Uint8Array | Buffer | HexString, _init_config: InitConfig, _slot_first: number | string | bigint, _count: number | null): TransactionBuilder<null> {
     const builder = new TransactionBuilder<null>(
       this.api,
       this.registry,
@@ -351,9 +59,9 @@ export class SailsProgram {
       '(InitConfig, u64, Option<u32>)',
       'String',
       code,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -361,13 +69,8 @@ export class SailsProgram {
   /**
    * The constructor is intended for test purposes and is available only when the feature
    * `mocks` is enabled.
-   */
-  gasCalculationCtorFromCodeId(
-    codeId: `0x${string}`,
-    _init_config: InitConfig,
-    _slot_first: number | string | bigint,
-    _count: number | null,
-  ) {
+  */
+  gasCalculationCtorFromCodeId(codeId: `0x${string}`, _init_config: InitConfig, _slot_first: number | string | bigint, _count: number | null) {
     const builder = new TransactionBuilder<null>(
       this.api,
       this.registry,
@@ -378,9 +81,9 @@ export class SailsProgram {
       '(InitConfig, u64, Option<u32>)',
       'String',
       codeId,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -395,9 +98,9 @@ export class SailsProgram {
       'InitConfig',
       'String',
       code,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -413,9 +116,9 @@ export class SailsProgram {
       'InitConfig',
       'String',
       codeId,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -425,17 +128,46 @@ export class VftManager {
   constructor(private _program: SailsProgram) {}
 
   /**
+   * Add an account allowed to stop user operations for two days.
+  */
+  public addEmergencyStopObserver(observer: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'AddEmergencyStopObserver',
+      observer,
+      '[u8;32]',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  public beginCutover(destination: ActorId, last_receipt_slot: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'BeginCutover',
+      [destination, last_receipt_slot],
+      '([u8;32], u64)',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
    * The method is intended for tests and is available only when the feature `mocks`
    * is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
    * on the `_supply_type`.
-   *
+   * 
    * Designed for benchmarking gas consumption by the VFT-response processing function.
-   */
-  public calculateGasForReply(
-    _slot: number | string | bigint,
-    _transaction_index: number | string | bigint,
-    _supply_type: TokenSupply,
-  ): TransactionBuilder<{ ok: null } | { err: Error }> {
+  */
+  public calculateGasForReply(_slot: number | string | bigint, _transaction_index: number | string | bigint, _supply_type: TokenSupply): TransactionBuilder<{ ok: null } | { err: Error }> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<{ ok: null } | { err: Error }>(
       this._program.api,
@@ -453,9 +185,9 @@ export class VftManager {
   /**
    * The method is intended for tests and is available only when the feature `mocks`
    * is enabled.
-   *
+   * 
    * Swaps internal hash maps of the TokenMap instance.
-   */
+  */
   public calculateGasForTokenMapSwap(): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -472,11 +204,67 @@ export class VftManager {
   }
 
   /**
+   * Settlement policy is explicit, and only changes at a paused boundary.
+  */
+  public configureNativeWrapper(wrapper: ActorId | null): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'ConfigureNativeWrapper',
+      wrapper,
+      'Option<[u8;32]>',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * End an emergency stop before its deadline.
+   * 
+   * Can be called only by a [State::admin] or [State::pause_admin].
+  */
+  public disableEmergencyStop(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'DisableEmergencyStop',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Stop user operations for two days. Can be called only by an emergency stop observer.
+  */
+  public emergencyStop(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'EmergencyStop',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
    * The method is intended for tests and is available only when the feature `mocks`
    * is enabled. Populates the collection with processed transactions.
-   *
+   * 
    * Returns false when the collection is populated.
-   */
+  */
   public fillTransactions(): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<boolean>(
@@ -492,19 +280,35 @@ export class VftManager {
     );
   }
 
+  public finalizeCutover(): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'FinalizeCutover',
+      null,
+      null,
+      'Null',
+      this._program.programId,
+    );
+  }
+
   /**
    * Process message further if some error was encountered during the `request_bridging`.
-   *
+   * 
    * This method should be called only to recover funds that were stuck in the middle of the bridging
    * and is not a part of a normal workflow.
-   *
+   * 
+   * Can be called only by the sender of the original `request_bridging` message or by
+   * the [State::admin].
+   * 
    * There can be several reasons for `request_bridging` to fail:
    * - Gas attached to a message wasn't enough to execute entire logic in `request_bridging`.
    * - Network was heavily loaded and some message was stuck so `request_bridging` failed.
-   */
-  public handleRequestBridgingInterruptedTransfer(
-    msg_id: MessageId,
-  ): TransactionBuilder<{ ok: null } | { err: Error }> {
+  */
+  public handleRequestBridgingInterruptedTransfer(msg_id: MessageId): TransactionBuilder<{ ok: null } | { err: Error }> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<{ ok: null } | { err: Error }>(
       this._program.api,
@@ -520,49 +324,9 @@ export class VftManager {
   }
 
   /**
-   * The method is intended for tests and is available only when the feature `mocks`
-   * is enabled. Inserts the message info into the corresponding collection.
-   */
-  public insertMessageInfo(_msg_id: MessageId, _status: MessageStatus, _details: TxDetails): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'VftManager',
-      'InsertMessageInfo',
-      [_msg_id, _status, _details],
-      '([u8;32], MessageStatus, TxDetails)',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  public insertTransactions(
-    data: Array<[number | string | bigint, number | string | bigint]>,
-  ): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'VftManager',
-      'InsertTransactions',
-      data,
-      'Vec<(u64, u64)>',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  /**
    * Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
-   */
-  public mapVaraToEthAddress(
-    vara_token_id: ActorId,
-    eth_token_id: H160,
-    supply_type: TokenSupply,
-  ): TransactionBuilder<null> {
+  */
+  public mapVaraToEthAddress(vara_token_id: ActorId, eth_token_id: H160, supply_type: TokenSupply): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
@@ -579,13 +343,13 @@ export class VftManager {
 
   /**
    * Pause the `vft-manager`.
-   *
+   * 
    * When `vft-manager` is paused it means that any requests to
-   * `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
-   * will be rejected.
-   *
+   * `submit_receipt` and `request_bridging` will be rejected. Definite, authorized
+   * interrupted-transfer refunds remain available while paused or emergency-stopped.
+   * 
    * Can be called only by a [State::admin] or [State::pause_admin].
-   */
+  */
   public pause(): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -601,9 +365,79 @@ export class VftManager {
     );
   }
 
+  public prepareCutover(source: ActorId, last_receipt_slot: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'PrepareCutover',
+      [source, last_receipt_slot],
+      '([u8;32], u64)',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Reconcile original native payout outcomes; this never starts an economic child.
+  */
+  public reconcileReceipt(slot: number | string | bigint, transaction_index: number | string | bigint): TransactionBuilder<{ ok: ReceiptStatus } | { err: Error }> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<{ ok: ReceiptStatus } | { err: Error }>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'ReconcileReceipt',
+      [slot, transaction_index],
+      '(u64, u64)',
+      'Result<ReceiptStatus, Error>',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Reconcile only the immutable original request and its authenticated terminal
+   * builtin reply. Missing/ambiguous outcomes are not evidence of queue absence.
+  */
+  public reconcileSourceRequest(request: MessageId, child: MessageId, request_hash: H256): TransactionBuilder<{ ok: SourceRequestOutcome } | { err: Error }> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<{ ok: SourceRequestOutcome } | { err: Error }>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'ReconcileSourceRequest',
+      [request, child, request_hash],
+      '([u8;32], [u8;32], H256)',
+      'Result<SourceRequestOutcome, Error>',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Remove an emergency stop observer.
+  */
+  public removeEmergencyStopObserver(observer: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'RemoveEmergencyStopObserver',
+      observer,
+      '[u8;32]',
+      'Null',
+      this._program.programId,
+    );
+  }
+
   /**
    * Remove the token pair from [State::token_map]. Can be called only by a [State::admin].
-   */
+  */
   public removeVaraToEthAddress(vara_token_id: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -621,15 +455,11 @@ export class VftManager {
 
   /**
    * Request bridging of tokens from Gear to Ethereum.
-   *
+   * 
    * Allowance should be granted to the current program to spend `amount` tokens
    * from the source address.
-   */
-  public requestBridging(
-    vara_token_id: ActorId,
-    amount: number | string | bigint,
-    receiver: H160,
-  ): TransactionBuilder<{ ok: [number | string | bigint, H160] } | { err: Error }> {
+  */
+  public requestBridging(vara_token_id: ActorId, amount: number | string | bigint, receiver: H160): TransactionBuilder<{ ok: [number | string | bigint, H160] } | { err: Error }> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<{ ok: [number | string | bigint, H160] } | { err: Error }>(
       this._program.api,
@@ -646,7 +476,7 @@ export class VftManager {
 
   /**
    * Change [State::admin]. Can be called only by a [State::admin].
-   */
+  */
   public setAdmin(new_admin: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -664,7 +494,7 @@ export class VftManager {
 
   /**
    * Change [State::pause_admin]. Can be called only by a [State::admin].
-   */
+  */
   public setPauseAdmin(new_pause_admin: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -682,17 +512,13 @@ export class VftManager {
 
   /**
    * Submit rlp-encoded transaction receipt.
-   *
+   * 
    * This receipt is decoded under the hood and checked that it's a valid receipt from tx
    * sent to `ERC20Manager` contract.
-   *
+   * 
    * This method can be called only by [State::historical_proxy_address] program.
-   */
-  public submitReceipt(
-    slot: number | string | bigint,
-    transaction_index: number | string | bigint,
-    receipt_rlp: `0x${string}`,
-  ): TransactionBuilder<{ ok: null } | { err: Error }> {
+  */
+  public submitReceipt(slot: number | string | bigint, transaction_index: number | string | bigint, receipt_rlp: `0x${string}`): TransactionBuilder<{ ok: null } | { err: Error }> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<{ ok: null } | { err: Error }>(
       this._program.api,
@@ -709,11 +535,11 @@ export class VftManager {
 
   /**
    * Unpause the `vft-manager`.
-   *
+   * 
    * It will effectively cancel effect of the [VftManager::pause].
-   *
+   * 
    * Can be called only by a [State::admin] or [State::pause_admin].
-   */
+  */
   public unpause(): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -731,9 +557,9 @@ export class VftManager {
 
   /**
    * Change [Config]. Can be called only by a [State::admin].
-   *
+   * 
    * For more info see [Config] docs.
-   */
+  */
   public updateConfig(config: Config): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -751,7 +577,7 @@ export class VftManager {
 
   /**
    * Change [State::erc20_manager_address]. Can be called only by a [State::admin].
-   */
+  */
   public updateErc20ManagerAddress(erc20_manager_address_new: H160): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -769,7 +595,7 @@ export class VftManager {
 
   /**
    * Change [State::historical_proxy_address]. Can be called only by a [State::admin].
-   */
+  */
   public updateHistoricalProxyAddress(historical_proxy_address_new: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -800,7 +626,7 @@ export class VftManager {
     );
   }
 
-  public upgrade(vft_manager_new: ActorId): TransactionBuilder<null> {
+  public upgrade(destination: ActorId): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
@@ -808,7 +634,7 @@ export class VftManager {
       'send_message',
       'VftManager',
       'Upgrade',
-      vft_manager_new,
+      destination,
       '[u8;32]',
       'Null',
       this._program.programId,
@@ -817,7 +643,7 @@ export class VftManager {
 
   /**
    * Get current [State::admin] address.
-   */
+  */
   public admin(): QueryBuilder<ActorId> {
     return new QueryBuilder<ActorId>(
       this._program.api,
@@ -831,9 +657,67 @@ export class VftManager {
     );
   }
 
+  public cutoverStatus(): QueryBuilder<CutoverStatus> {
+    return new QueryBuilder<CutoverStatus>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'CutoverStatus',
+      null,
+      null,
+      'CutoverStatus',
+    );
+  }
+
+  public cutoverTransfers(start: number, count: number): QueryBuilder<Array<CustodyTransferAttempt>> {
+    return new QueryBuilder<Array<CustodyTransferAttempt>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'CutoverTransfers',
+      [start, count],
+      '(u32, u32)',
+      'Vec<CustodyTransferAttempt>',
+    );
+  }
+
+  /**
+   * Get accounts allowed to activate the bounded emergency stop.
+  */
+  public emergencyStopObservers(): QueryBuilder<Array<ActorId>> {
+    return new QueryBuilder<Array<ActorId>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'EmergencyStopObservers',
+      null,
+      null,
+      'Vec<[u8;32]>',
+    );
+  }
+
+  /**
+   * Get the block at which the current or latest emergency stop expires.
+  */
+  public emergencyStopUntil(): QueryBuilder<number> {
+    return new QueryBuilder<number>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'EmergencyStopUntil',
+      null,
+      null,
+      'u32',
+    );
+  }
+
   /**
    * Get current [State::erc20_manager_address] address.
-   */
+  */
   public erc20ManagerAddress(): QueryBuilder<H160 | null> {
     return new QueryBuilder<H160 | null>(
       this._program.api,
@@ -849,7 +733,7 @@ export class VftManager {
 
   /**
    * Get current [State::gear_bridge_builtin] address.
-   */
+  */
   public gearBridgeBuiltin(): QueryBuilder<ActorId> {
     return new QueryBuilder<ActorId>(
       this._program.api,
@@ -865,7 +749,7 @@ export class VftManager {
 
   /**
    * Get current [Config].
-   */
+  */
   public getConfig(): QueryBuilder<Config> {
     return new QueryBuilder<Config>(
       this._program.api,
@@ -881,7 +765,7 @@ export class VftManager {
 
   /**
    * Get current [State::historical_proxy_address].
-   */
+  */
   public historicalProxyAddress(): QueryBuilder<ActorId> {
     return new QueryBuilder<ActorId>(
       this._program.api,
@@ -896,8 +780,24 @@ export class VftManager {
   }
 
   /**
-   * Check if `vft-manager` is currently paused.
-   */
+   * Check if an observer's bounded emergency stop is active.
+  */
+  public isEmergencyStopped(): QueryBuilder<boolean> {
+    return new QueryBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'IsEmergencyStopped',
+      null,
+      null,
+      'bool',
+    );
+  }
+
+  /**
+   * Check if `vft-manager` is manually paused.
+  */
   public isPaused(): QueryBuilder<boolean> {
     return new QueryBuilder<boolean>(
       this._program.api,
@@ -911,9 +811,22 @@ export class VftManager {
     );
   }
 
+  public nativeWrapper(): QueryBuilder<ActorId | null> {
+    return new QueryBuilder<ActorId | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'NativeWrapper',
+      null,
+      null,
+      'Option<[u8;32]>',
+    );
+  }
+
   /**
    * Get current [State::pause_admin] address.
-   */
+  */
   public pauseAdmin(): QueryBuilder<ActorId> {
     return new QueryBuilder<ActorId>(
       this._program.api,
@@ -927,9 +840,38 @@ export class VftManager {
     );
   }
 
+  public receiptDeposits(slot: number | string | bigint, transaction_index: number | string | bigint): QueryBuilder<Array<ReceiptDepositState>> {
+    return new QueryBuilder<Array<ReceiptDepositState>>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'ReceiptDeposits',
+      [slot, transaction_index],
+      '(u64, u64)',
+      'Vec<ReceiptDepositState>',
+    );
+  }
+
+  /**
+   * Read the current status for one Ethereum receipt key.
+  */
+  public receiptStatus(slot: number | string | bigint, transaction_index: number | string | bigint): QueryBuilder<ReceiptStatus> {
+    return new QueryBuilder<ReceiptStatus>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'ReceiptStatus',
+      [slot, transaction_index],
+      '(u64, u64)',
+      'ReceiptStatus',
+    );
+  }
+
   /**
    * Get state of a `request_bridging` message tracker.
-   */
+  */
   public requestBridingMsgTrackerState(start: number, count: number): QueryBuilder<Array<[MessageId, MessageInfo]>> {
     return new QueryBuilder<Array<[MessageId, MessageInfo]>>(
       this._program.api,
@@ -943,11 +885,20 @@ export class VftManager {
     );
   }
 
-  public transactions(
-    order: Order,
-    start: number,
-    count: number,
-  ): QueryBuilder<Array<[number | string | bigint, number | string | bigint]>> {
+  public sourceRequestEvidence(request: MessageId): QueryBuilder<SourceRequestEvidence | null> {
+    return new QueryBuilder<SourceRequestEvidence | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'SourceRequestEvidence',
+      request,
+      '[u8;32]',
+      'Option<SourceRequestEvidence>',
+    );
+  }
+
+  public transactions(order: Order, start: number, count: number): QueryBuilder<Array<[number | string | bigint, number | string | bigint]>> {
     return new QueryBuilder<Array<[number | string | bigint, number | string | bigint]>>(
       this._program.api,
       this._program.registry,
@@ -962,7 +913,7 @@ export class VftManager {
 
   /**
    * Get current [token mapping](State::token_map).
-   */
+  */
   public varaToEthAddresses(): QueryBuilder<Array<[ActorId, H160, TokenSupply]>> {
     return new QueryBuilder<Array<[ActorId, H160, TokenSupply]>>(
       this._program.api,
@@ -978,112 +929,69 @@ export class VftManager {
 
   /**
    * Token mapping was added.
-   *
+   * 
    * This means that VFT Manager service now supports specified
    * [vara_token_id](Event::TokenMappingAdded::vara_token_id)/[eth_token_id](Event::TokenMappingAdded::eth_token_id) pair.
-   */
-  public subscribeToTokenMappingAddedEvent(
-    callback: (data: { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  */
+  public subscribeToTokenMappingAddedEvent(callback: (data: { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'TokenMappingAdded') {
-        callback(
-          this._program.registry
-            .createType(
-              '(String, String, {"vara_token_id":"[u8;32]","eth_token_id":"H160","supply_type":"TokenSupply"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply },
-        );
+        callback(this._program.registry.createType('(String, String, {"vara_token_id":"[u8;32]","eth_token_id":"H160","supply_type":"TokenSupply"})', message.payload)[2].toJSON() as unknown as { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply });
       }
     });
   }
 
   /**
    * Token mapping was removed.
-   *
+   * 
    * This means that VFT Manager service doesn't support specified
    * [vara_token_id](Event::TokenMappingRemoved::vara_token_id)/[eth_token_id](Event::TokenMappingRemoved::eth_token_id)
    * pair anymore.
-   */
-  public subscribeToTokenMappingRemovedEvent(
-    callback: (data: { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  */
+  public subscribeToTokenMappingRemovedEvent(callback: (data: { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'TokenMappingRemoved') {
-        callback(
-          this._program.registry
-            .createType(
-              '(String, String, {"vara_token_id":"[u8;32]","eth_token_id":"H160","supply_type":"TokenSupply"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply },
-        );
+        callback(this._program.registry.createType('(String, String, {"vara_token_id":"[u8;32]","eth_token_id":"H160","supply_type":"TokenSupply"})', message.payload)[2].toJSON() as unknown as { vara_token_id: ActorId; eth_token_id: H160; supply_type: TokenSupply });
       }
     });
   }
 
   /**
    * Bridging of tokens from Gear to Ethereum was requested.
-   *
+   * 
    * When this event is emitted it means that `VFT` tokens were locked/burned and
    * a message to the gear-eth-bridge built-in actor was successfully submitted.
-   */
-  public subscribeToBridgingRequestedEvent(
-    callback: (data: {
-      nonce: number | string | bigint;
-      queue_id: number | string | bigint;
-      hash: H256;
-      vara_token_id: ActorId;
-      amount: number | string | bigint;
-      sender: ActorId;
-      receiver: H160;
-    }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  */
+  public subscribeToBridgingRequestedEvent(callback: (data: { nonce: number | string | bigint; queue_id: number | string | bigint; hash: H256; vara_token_id: ActorId; amount: number | string | bigint; sender: ActorId; receiver: H160 }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'BridgingRequested') {
-        callback(
-          this._program.registry
-            .createType(
-              '(String, String, {"nonce":"U256","queue_id":"u64","hash":"H256","vara_token_id":"[u8;32]","amount":"U256","sender":"[u8;32]","receiver":"H160"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as {
-            nonce: number | string | bigint;
-            queue_id: number | string | bigint;
-            hash: H256;
-            vara_token_id: ActorId;
-            amount: number | string | bigint;
-            sender: ActorId;
-            receiver: H160;
-          },
-        );
+        callback(this._program.registry.createType('(String, String, {"nonce":"U256","queue_id":"u64","hash":"H256","vara_token_id":"[u8;32]","amount":"U256","sender":"[u8;32]","receiver":"H160"})', message.payload)[2].toJSON() as unknown as { nonce: number | string | bigint; queue_id: number | string | bigint; hash: H256; vara_token_id: ActorId; amount: number | string | bigint; sender: ActorId; receiver: H160 });
       }
     });
   }
 
   /**
    * Vft-manager was paused by an admin.
-   *
+   * 
    * It means that any user requests to it will be rejected.
-   */
+  */
   public subscribeToPausedEvent(callback: (data: null) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
@@ -1097,11 +1005,11 @@ export class VftManager {
 
   /**
    * Vft-manager was unpaused by an admin.
-   *
+   * 
    * It means that normal operation is continued after the pause.
-   */
+  */
   public subscribeToUnpausedEvent(callback: (data: null) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
@@ -1114,79 +1022,394 @@ export class VftManager {
   }
 
   /**
-   * Address of the `historical-proxy` program was changed.
-   */
-  public subscribeToHistoricalProxyAddressChangedEvent(
-    callback: (data: { old: ActorId; new: ActorId }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+   * A bridge observer stopped user operations for a bounded period.
+  */
+  public subscribeToEmergencyStoppedEvent(callback: (data: { observer: ActorId; until_block: number }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
-      if (
-        getServiceNamePrefix(payload) === 'VftManager' &&
-        getFnNamePrefix(payload) === 'HistoricalProxyAddressChanged'
-      ) {
-        callback(
-          this._program.registry
-            .createType('(String, String, {"old":"[u8;32]","new":"[u8;32]"})', message.payload)[2]
-            .toJSON() as unknown as { old: ActorId; new: ActorId },
-        );
+      if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'EmergencyStopped') {
+        callback(this._program.registry.createType('(String, String, {"observer":"[u8;32]","until_block":"u32"})', message.payload)[2].toJSON() as unknown as { observer: ActorId; until_block: number });
+      }
+    });
+  }
+
+  /**
+   * A bridge admin ended an emergency stop before its deadline.
+  */
+  public subscribeToEmergencyStopDisabledEvent(callback: (data: null) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'EmergencyStopDisabled') {
+        callback(null);
+      }
+    });
+  }
+
+  /**
+   * Address of the `historical-proxy` program was changed.
+  */
+  public subscribeToHistoricalProxyAddressChangedEvent(callback: (data: { old: ActorId; new: ActorId }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'HistoricalProxyAddressChanged') {
+        callback(this._program.registry.createType('(String, String, {"old":"[u8;32]","new":"[u8;32]"})', message.payload)[2].toJSON() as unknown as { old: ActorId; new: ActorId });
       }
     });
   }
 
   /**
    * Address of the `ERC20Manager` contract address on Ethereum was changed.
-   */
-  public subscribeToErc20ManagerAddressChangedEvent(
-    callback: (data: { old: H160; new: H160 }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  */
+  public subscribeToErc20ManagerAddressChangedEvent(callback: (data: { old: H160; new: H160 }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'Erc20ManagerAddressChanged') {
-        callback(
-          this._program.registry
-            .createType('(String, String, {"old":"H160","new":"H160"})', message.payload)[2]
-            .toJSON() as unknown as { old: H160; new: H160 },
-        );
+        callback(this._program.registry.createType('(String, String, {"old":"H160","new":"H160"})', message.payload)[2].toJSON() as unknown as { old: H160; new: H160 });
       }
     });
   }
 
   /**
    * Transaction receipt submitted via [VftManager::submit_receipt] processed successfully.
-   */
-  public subscribeToBridgingAcceptedEvent(
-    callback: (data: {
-      to: ActorId;
-      from: H160;
-      amount: number | string | bigint;
-      token: ActorId;
-    }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  */
+  public subscribeToBridgingAcceptedEvent(callback: (data: { to: ActorId; from: H160; amount: number | string | bigint; token: ActorId }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'BridgingAccepted') {
-        callback(
-          this._program.registry
-            .createType(
-              '(String, String, {"to":"[u8;32]","from":"H160","amount":"U256","token":"[u8;32]"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as { to: ActorId; from: H160; amount: number | string | bigint; token: ActorId },
-        );
+        callback(this._program.registry.createType('(String, String, {"to":"[u8;32]","from":"H160","amount":"U256","token":"[u8;32]"})', message.payload)[2].toJSON() as unknown as { to: ActorId; from: H160; amount: number | string | bigint; token: ActorId });
+      }
+    });
+  }
+
+  public subscribeToReceiptDepositSettledEvent(callback: (data: { slot: number | string | bigint; transaction_index: number | string | bigint; log_index: number | string | bigint; deposit_count: number | string | bigint; operation_id: H256; eth_token_id: H160; vara_token_id: ActorId; sender: H160; receiver: ActorId; amount: number | string | bigint; native: boolean }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'ReceiptDepositSettled') {
+        callback(this._program.registry.createType('(String, String, {"slot":"u64","transaction_index":"u64","log_index":"u64","deposit_count":"u64","operation_id":"H256","eth_token_id":"H160","vara_token_id":"[u8;32]","sender":"H160","receiver":"[u8;32]","amount":"U256","native":"bool"})', message.payload)[2].toJSON() as unknown as { slot: number | string | bigint; transaction_index: number | string | bigint; log_index: number | string | bigint; deposit_count: number | string | bigint; operation_id: H256; eth_token_id: H160; vara_token_id: ActorId; sender: H160; receiver: ActorId; amount: number | string | bigint; native: boolean });
       }
     });
   }
 }
+/**
+ * Config that should be provided to this service on initialization.
+*/
+export interface InitConfig {
+  /**
+   * Address of the gear-eth-bridge built-in actor.
+  */
+  gear_bridge_builtin: ActorId;
+  /**
+   * Address of the `historical-proxy` program.
+   *
+   * For more info see [State::historical_proxy_address].
+  */
+  historical_proxy_address: ActorId;
+  /**
+   * Config that will be used to send messages to the other programs.
+   *
+   * For more info see [Config].
+  */
+  config: Config;
+}
+
+/**
+ * Config that will be used to send messages to the other programs.
+*/
+export interface Config {
+  /**
+   * Gas limit for token operations. Token operations include:
+   * - Mint
+   * - Burn
+   * - TransferFrom
+  */
+  gas_for_token_ops: number | string | bigint;
+  /**
+   * Gas to reserve for reply processing.
+  */
+  gas_for_reply_deposit: number | string | bigint;
+  /**
+   * Gas limit for gear-eth-bridge built-in actor request.
+  */
+  gas_to_send_request_to_builtin: number | string | bigint;
+  /**
+   * Required gas to commit changes in [VftManager::update_vfts].
+  */
+  gas_for_swap_token_maps: number | string | bigint;
+  /**
+   * Timeout in blocks that current program will wait for reply from
+   * the other programs such as VFT and `gear-eth-bridge` built-in actor.
+  */
+  reply_timeout: number;
+  /**
+   * Fee to pay `gear-eth-bridge` built-in actor.
+  */
+  fee_bridge: number | string | bigint;
+  /**
+   * Incoming fee.
+  */
+  fee_incoming: number | string | bigint;
+}
+
+/**
+ * Type of the token supply.
+*/
+export type TokenSupply = "Ethereum" | "Gear";
+
+/**
+ * Error types for VFT Manageer service.
+*/
+export type Error =
+  /**
+   * Error sending message to the program.
+  */
+  | { SendFailure: string }
+  /**
+   * Error while waiting for reply from the program.
+  */
+  | { ReplyFailure: string }
+  /**
+   * Failed to set reply timeout.
+  */
+  | { ReplyTimeout: string }
+  /**
+   * Failed to set reply hook.
+  */
+  | { ReplyHook: string }
+  /**
+   * A message does not have a reply code.
+  */
+  | { NoReplyCode: string }
+  /**
+   * Original `MessageId` wasn't found in message tracker when processing reply.
+  */
+  | { MessageNotFound: null }
+  /**
+   * Invalid message status was found in the message tracker when processing reply.
+  */
+  | { InvalidMessageStatus: null }
+  /**
+   * Message sent to the program failed.
+  */
+  | { MessageFailed: null }
+  /**
+   * Failed to decode Burn reply.
+  */
+  | { BurnTokensDecode: string }
+  /**
+   * Failed to decode TransferFrom reply.
+  */
+  | { TransferFromDecode: string }
+  /**
+   * Failed to decode Mint reply.
+  */
+  | { MintTokensDecode: string }
+  /**
+   * Failed to decode payload from gear-eth-bridge built-in actor.
+  */
+  | { BuiltinDecode: string }
+  /**
+   * Gas reservation for reply is too low.
+  */
+  | { GasForReplyTooLow: string }
+  /**
+   * `ERC20` address wasn't found in the token mapping.
+  */
+  | { NoCorrespondingEthAddress: null }
+  /**
+   * `VFT` address wasn't found in the token mapping.
+  */
+  | { NoCorrespondingVaraAddress: null }
+  /**
+   * `submit_receipt` can only be called by `historical-proxy` program.
+  */
+  | { NotHistoricalProxy: null }
+  /**
+   * Ethereum transaction receipt is not supported.
+  */
+  | { UnsupportedEthEvent: null }
+  /**
+   * Ethereum transaction is too old and already have been removed from storage.
+  */
+  | { TransactionTooOld: null }
+  /**
+   * Ethereum transaction was already processed by VFT Manager service.
+  */
+  | { AlreadyProcessed: null }
+  /**
+   * Vft-manager is paused and cannot process the request.
+  */
+  | { Paused: null }
+  /**
+   * Failed to burn tokens from the receiver in VftVara.
+  */
+  | { BurnFromFailed: string }
+  /**
+   * Internal unspecified VFT error
+  */
+  | { Internal: string }
+  /**
+   * Invalid or unexpected reply received from a VFT program.
+  */
+  | { InvalidReply: null }
+  | { NativeSettlementPending: null }
+  | { NativeSettlementReturned: null }
+  | { ReceiptLeaseActive: null }
+  | { InvalidReconciliation: null }
+  | { ReceiptOutsideDeployment: null }
+  | { Retired: null }
+  | { CutoverNotReady: null };
+
+/**
+ * The on-chain outcome of an Ethereum receipt key.
+*/
+export type ReceiptStatus = "Unknown" | "Reserved" | "Processed";
+
+export type SourceRequestOutcome =
+  | { Pending: null }
+  | { Queued: { nonce: number | string | bigint; hash: H256; queue_id: number | string | bigint } }
+  | { NotQueued: null };
+
+export interface CutoverStatus {
+  phase: CutoverPhase;
+  predecessor: ActorId | null;
+  successor: ActorId | null;
+  minimum_receipt_slot: number | string | bigint;
+  last_receipt_slot: number | string | bigint | null;
+  config_fingerprint: H256 | null;
+  transfer_count: number;
+  completed_transfer_count: number;
+  in_flight_transfer_count: number;
+}
+
+export type CutoverPhase = "Active" | "Draining" | "AwaitingSource" | "Transferring" | "Retired" | "Ready";
+
+export interface CustodyTransferAttempt {
+  token: ActorId;
+  amount: number | string | bigint;
+  child: MessageId;
+  outcome: CustodyTransferOutcome;
+}
+
+export type CustodyTransferOutcome = "InFlight" | "Completed" | "Rejected" | "Ambiguous";
+
+export interface ReceiptDepositState {
+  log_index: number | string | bigint;
+  sender: H160;
+  receiver: ActorId;
+  token_id: ActorId;
+  eth_token_id: H160;
+  amount: number | string | bigint;
+  supply: TokenSupply;
+  native: boolean;
+  operation_id: H256;
+  child: MessageId | null;
+  outcome: ReceiptDepositOutcome;
+}
+
+export type ReceiptDepositOutcome = "Pending" | "InFlight" | "Settled" | "Rejected" | "Unknown" | "NativeQueued";
+
+/**
+ * Entry for a single message in [MessageTracker].
+*/
+export interface MessageInfo {
+  /**
+   * State of the message.
+  */
+  status: MessageStatus;
+  /**
+   * Request details.
+  */
+  details: TxDetails;
+}
+
+/**
+ * State in which message processing can be.
+*/
+export type MessageStatus =
+  /**
+   * Message to deposit tokens is sent.
+  */
+  | { SendingMessageToDepositTokens: null }
+  /**
+   * Reply is received for a token deposit message.
+  */
+  | { TokenDepositCompleted: boolean }
+  /**
+   * Message to the `pallet-gear-eth-bridge` is sent. This status is also the
+   * fail-closed quarantine state when the outcome is ambiguous.
+  */
+  | { SendingMessageToBridgeBuiltin: null }
+  /**
+   * Reply is received for a message to the `pallet-gear-eth-bridge`.
+  */
+  | { BridgeResponseReceived: [number | string | bigint, H256, number | string | bigint] | null }
+  /**
+   * Message to refund tokens is sent.
+  */
+  | { SendingMessageToReturnTokens: null }
+  /**
+   * Reply is received for a token refund message.
+  */
+  | { TokensReturnComplete: boolean };
+
+/**
+ * Details about a request associated with a message stored in [MessageTracker].
+*/
+export interface TxDetails {
+  /**
+   * Address of the `VFT` token which is being bridged.
+  */
+  vara_token_id: ActorId;
+  /**
+   * Original `VFT` token owner.
+  */
+  sender: ActorId;
+  /**
+   * Bridged tokens amount.
+  */
+  amount: number | string | bigint;
+  /**
+   * `ERC20` token receiver on Ethereum.
+  */
+  receiver: H160;
+  /**
+   * [TokenSupply] type of the token being bridged.
+  */
+  token_supply: TokenSupply;
+}
+
+export interface SourceRequestEvidence {
+  request: MessageId;
+  child: MessageId;
+  builtin: ActorId;
+  request_hash: H256;
+  outcome: SourceRequestOutcome;
+}
+
+export type Order = "Direct" | "Reverse";
+
+export const IDL_SHA256 = 'dd3fd53597a7225b3a5cfdf57ca2b60f3b6d0aaef846de8eaca3e247354d6e9e';

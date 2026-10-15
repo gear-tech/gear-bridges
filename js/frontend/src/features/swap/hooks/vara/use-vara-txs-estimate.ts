@@ -1,6 +1,7 @@
 import { useAccount, useApi } from '@gear-js/react-hooks';
 import { useQuery } from '@tanstack/react-query';
 
+import { useNetworkType } from '@/context/network-type';
 import { useDebounce } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
@@ -29,6 +30,7 @@ function useVaraTxsEstimate({
 }: Params) {
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
+  const { NETWORK_PRESET } = useNetworkType();
 
   const { token } = useBridgeContext();
 
@@ -63,6 +65,12 @@ function useVaraTxsEstimate({
   return useQuery({
     queryKey: [
       'vara-txs-estimate',
+      api?.genesisHash.toHex(),
+      NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS,
+      NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS,
+      vftManagerFee?.toString(),
+      shouldPayBridgingFee ? bridgingFee?.toString() : undefined,
+      shouldPayPriorityFee ? priorityFee?.toString() : undefined,
       debouncedAmount,
       debouncedAccountAddress,
       shouldPayBridgingFee,
@@ -74,9 +82,9 @@ function useVaraTxsEstimate({
     queryFn: estimateTxs,
 
     enabled:
-      !isUndefined(bridgingFee) &&
+      (!shouldPayBridgingFee || !isUndefined(bridgingFee)) &&
       !isUndefined(vftManagerFee) &&
-      !isUndefined(priorityFee) &&
+      (!shouldPayPriorityFee || !isUndefined(priorityFee)) &&
       Boolean(api && formValues && token && prepareTxs) &&
       isAccountReady,
   });

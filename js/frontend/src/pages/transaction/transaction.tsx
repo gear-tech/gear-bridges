@@ -115,6 +115,7 @@ function Transaction() {
   const { data } = useTransaction(id);
   const optimisticTxUpdate = useOptimisticTxUpdate(id);
   const getFullNetworkName = useGetFullNetworkName();
+  const { NETWORK_PRESET } = useNetworkType();
 
   if (!data || !getHistoryToken) return <TransactionSkeleton />;
 
@@ -149,6 +150,7 @@ function Transaction() {
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
+  const isClaimable = !completedAt && (isAwaitingPayment || status === StatusEnum.Bridging);
 
   return (
     <Container className={styles.container}>
@@ -162,10 +164,10 @@ function Transaction() {
           <p className={styles.subheading}>Cross-chain swap transaction information</p>
         </div>
 
-        {isAwaitingPayment && (
+        {isClaimable && (
           <div className={styles.sidebar}>
             <div className={styles.buttons}>
-              {isVaraNetwork && (
+              {isVaraNetwork && isAwaitingPayment && (
                 <PayVaraFeeButton nonce={nonce} onInBlock={() => optimisticTxUpdate(StatusEnum.Bridging)} />
               )}
 
@@ -174,23 +176,34 @@ function Transaction() {
                   <RelayTxButton.Vara
                     nonce={BigInt(nonce)}
                     blockNumber={bridgingStartedAtBlock}
-                    onReceipt={optimisticTxUpdate}
+                    onFinalized={optimisticTxUpdate}
+                    expectedEffect={{
+                      kind: 'token',
+                      managerAddress: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
+                      token: destinationHex,
+                      sender: sender as HexString,
+                      receiver: receiver as HexString,
+                      amount: BigInt(amount),
+                    }}
                   />
                 )
               ) : (
                 <RelayTxButton.Eth
                   txHash={txHash as HexString}
-                  blockNumber={BigInt(blockNumber)}
-                  onInBlock={optimisticTxUpdate}
+                  onFinalized={optimisticTxUpdate}
+                  expectedEffect={{
+                    managerAddress: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
+                    sourceToken: sourceHex,
+                    destinationToken: destinationHex,
+                    sender: sender as HexString,
+                    receiver: receiver as HexString,
+                    amount: BigInt(amount),
+                  }}
                 />
               )}
             </div>
 
-            {isVaraNetwork ? (
-              bridgingStartedAtBlock && <RelayTxNote.Vara blockNumber={bridgingStartedAtBlock} />
-            ) : (
-              <RelayTxNote.Eth blockNumber={BigInt(blockNumber)} />
-            )}
+            {isVaraNetwork ? <RelayTxNote.Vara /> : <RelayTxNote.Eth />}
           </div>
         )}
       </header>
@@ -290,26 +303,30 @@ function Transaction() {
             </ExplorerLink>
           </Field>
 
-          <Field label="Vara Block Number">
-            {bridgingStartedAtBlock ? (
-              <ExplorerLink network={NetworkEnum.Vara} id={bridgingStartedAtBlock.toString()} useUrl={useBlockUrl}>
-                #{bridgingStartedAtBlock}
-              </ExplorerLink>
-            ) : (
-              <Skeleton width="5rem" disabled />
-            )}
-          </Field>
+          {isVaraNetwork && (
+            <>
+              <Field label="Vara Block Number">
+                {bridgingStartedAtBlock ? (
+                  <ExplorerLink network={NetworkEnum.Vara} id={bridgingStartedAtBlock.toString()} useUrl={useBlockUrl}>
+                    #{bridgingStartedAtBlock}
+                  </ExplorerLink>
+                ) : (
+                  <Skeleton width="5rem" disabled />
+                )}
+              </Field>
 
-          <Field label="Vara Message ID">
-            {bridgingStartedAtMessageId ? (
-              <>
-                <Address value={bridgingStartedAtMessageId} />
-                <CopyButton value={bridgingStartedAtMessageId} message="Message ID copied to clipboard" />
-              </>
-            ) : (
-              <Skeleton width="5rem" disabled />
-            )}
-          </Field>
+              <Field label="Vara Message ID">
+                {bridgingStartedAtMessageId ? (
+                  <>
+                    <Address value={bridgingStartedAtMessageId} />
+                    <CopyButton value={bridgingStartedAtMessageId} message="Message ID copied to clipboard" />
+                  </>
+                ) : (
+                  <Skeleton width="5rem" disabled />
+                )}
+              </Field>
+            </>
+          )}
         </SectionCard>
 
         <SectionCard heading="Timings">

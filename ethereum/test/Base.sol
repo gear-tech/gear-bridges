@@ -16,8 +16,10 @@ import {ERC20Manager} from "src/ERC20Manager.sol";
 import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
+import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {VerifierMainnet} from "src/VerifierMainnet.sol";
 import {VerifierTestnet} from "src/VerifierTestnet.sol";
+import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
 import {WrappedBitcoin} from "src/erc20/WrappedBitcoin.sol";
@@ -68,7 +70,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
     using ERC20ManagerPacker for TransferMessage;
 
     uint256 public messageNonce;
-    uint256 public currentBlockNumber;
+    uint256 public currentBlockNumber = 1;
 
     DeploymentArguments public deploymentArguments;
 
@@ -86,6 +88,15 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
     IVerifier public verifier;
     MessageQueue public messageQueue;
+    BeefyClient internal beefyClient;
+    address internal expectedMessageQueueAddress;
+    bool internal messageOnlyBridge;
+    bool internal includeOrdinaryGearToken;
+
+    // CREATEs before the queue proxy: both governance contracts, verifier, queue implementation.
+    uint256 internal constant GOVERNANCE_TO_QUEUE_PROXY_CREATES = 4;
+    // Token profiles add five tokens and the WrappedVara implementation/proxy before governance.
+    uint256 internal constant TOKEN_PROFILE_CREATES = 7;
 
     ERC20Manager public erc20Manager;
 
@@ -276,9 +287,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
                 source: governanceAdmin.governance(),
                 destination: address(governanceAdmin),
                 payload: UpgradeProxyMessage({
-                    proxy: address(messageQueue),
-                    newImplementation: newImplementation1,
-                    data: abi.encodeWithSelector(MessageQueue.reinitialize.selector)
+                    proxy: address(messageQueue), newImplementation: newImplementation1, data: ""
                 }).pack()
             });
             console.logBytes(message1.payload);
@@ -350,84 +359,112 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
 
         //////////////////////////////////////////////////////////////////////////////
 
-        console.log("ERC20 tokens:");
+        uint256 chainId = block.chainid;
+        address erc20ManagerAddress;
+        address governanceAdminAddress;
+        address governancePauserAddress;
+        if (messageOnlyBridge) {
+            uint256 deployerNonce = vm.getNonce(deploymentArguments.deployerAddress);
+            governanceAdminAddress = vm.computeCreateAddress(deploymentArguments.deployerAddress, deployerNonce);
+            governancePauserAddress = vm.computeCreateAddress(deploymentArguments.deployerAddress, deployerNonce + 1);
+        } else {
+            console.log("ERC20 tokens:");
 
-        // for verification purposes on Etherscan
-        erc20GearSupply = new ERC20GearSupply(deploymentArguments.deployerAddress, "MyToken", "MTK", 18);
-
-        if (isTest && !isFork) {
-            deployTestTokens();
-        } else if (isScript || isFork) {
-            if (shouldUseOverrides()) {
-                circleToken = IERC20Metadata(deploymentArguments.overrides.circleToken);
-                tetherToken = IERC20Metadata(deploymentArguments.overrides.tetherToken);
-                wrappedEther = IERC20Metadata(deploymentArguments.overrides.wrappedEther);
-                wrappedBitcoin = IERC20Metadata(deploymentArguments.overrides.wrappedBitcoin);
-            } else {
-                deployTestTokens();
+            if (!includeOrdinaryGearToken) {
+                // Existing deployment profiles retain their verification-only token.
+                erc20GearSupply = new ERC20GearSupply(deploymentArguments.deployerAddress, "MyToken", "MTK", 18);
             }
-        }
 
-        console.log("    USDC:                ", address(circleToken));
-        console.log("    USDT:                ", address(tetherToken));
-        console.log("    WETH:                ", address(wrappedEther));
-        console.log("    WBTC:                ", address(wrappedBitcoin));
+            if (isTest && !isFork) {
+                deployTestTokens();
+            } else if (isScript || isFork) {
+                if (shouldUseOverrides()) {
+                    circleToken = IERC20Metadata(deploymentArguments.overrides.circleToken);
+                    tetherToken = IERC20Metadata(deploymentArguments.overrides.tetherToken);
+                    wrappedEther = IERC20Metadata(deploymentArguments.overrides.wrappedEther);
+                    wrappedBitcoin = IERC20Metadata(deploymentArguments.overrides.wrappedBitcoin);
+                } else {
+                    deployTestTokens();
+                }
+            }
+            if (includeOrdinaryGearToken) {
+                // Reuse the existing CREATE slot; the queue and manager nonce geometry stays unchanged.
+                address tokenMinter = vm.computeCreateAddress(
+                    deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 9
+                );
+                erc20GearSupply = new ERC20GearSupply(tokenMinter, "Bridged Gear Origin Test", "GOT", 12);
+            }
 
-        address erc20ManagerAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 8
-        );
-        address governanceAdminAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 2
-        );
-        address governancePauserAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 3
-        );
+            console.log("    USDC:                ", address(circleToken));
+            console.log("    USDT:                ", address(tetherToken));
+            console.log("    WETH:                ", address(wrappedEther));
+            console.log("    WBTC:                ", address(wrappedBitcoin));
 
-        // forge-lint: disable-next-line(todo-comment)
-        // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
-        if (!isFork) {
-            wrappedVara = WrappedVara(
-                Upgrades.deployUUPSProxy(
-                    "WrappedVara.sol",
-                    abi.encodeCall(
-                        WrappedVara.initialize,
-                        (
-                            IGovernance(governanceAdminAddress),
-                            IGovernance(governancePauserAddress),
-                            ERC20Manager(erc20ManagerAddress)
+            erc20ManagerAddress = vm.computeCreateAddress(
+                deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 8
+            );
+            governanceAdminAddress = vm.computeCreateAddress(
+                deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 2
+            );
+            governancePauserAddress = vm.computeCreateAddress(
+                deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 3
+            );
+
+            // forge-lint: disable-next-line(todo-comment)
+            // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
+            if (!isFork) {
+                wrappedVara = WrappedVara(
+                    Upgrades.deployUUPSProxy(
+                        "WrappedVara.sol",
+                        abi.encodeCall(
+                            WrappedVara.initialize,
+                            (
+                                IGovernance(governanceAdminAddress),
+                                IGovernance(governancePauserAddress),
+                                ERC20Manager(erc20ManagerAddress)
+                            )
                         )
                     )
-                )
-            );
+                );
+            }
+
+            if (chainId == 1) {
+                console.log("    WVARA:               ", address(wrappedVara));
+            } else {
+                console.log("    WTVARA:              ", address(wrappedVara));
+            }
+
+            if (!isFork) {
+                assertEq(wrappedVara.governanceAdmin(), governanceAdminAddress);
+                assertEq(wrappedVara.governancePauser(), governancePauserAddress);
+                assertEq(wrappedVara.minter(), erc20ManagerAddress);
+            } else {
+                assertEq(wrappedVara.governanceAdmin(), address(governanceAdmin));
+                assertEq(wrappedVara.governancePauser(), address(governancePauser));
+                assertEq(wrappedVara.minter(), address(erc20Manager));
+            }
+
+            console.log();
+
+            //////////////////////////////////////////////////////////////////////////////
         }
-
-        uint256 chainId = block.chainid;
-
-        if (chainId == 1) {
-            console.log("    WVARA:               ", address(wrappedVara));
-        } else {
-            console.log("    WTVARA:              ", address(wrappedVara));
-        }
-
-        if (!isFork) {
-            assertEq(wrappedVara.governanceAdmin(), governanceAdminAddress);
-            assertEq(wrappedVara.governancePauser(), governancePauserAddress);
-            assertEq(wrappedVara.minter(), erc20ManagerAddress);
-        } else {
-            assertEq(wrappedVara.governanceAdmin(), address(governanceAdmin));
-            assertEq(wrappedVara.governancePauser(), address(governancePauser));
-            assertEq(wrappedVara.minter(), address(erc20Manager));
-        }
-
-        console.log();
-
-        //////////////////////////////////////////////////////////////////////////////
 
         console.log("Bridge governance:");
 
+        uint256 queueDeployerNonce = vm.getNonce(deploymentArguments.deployerAddress);
         address messageQueueAddress = vm.computeCreateAddress(
-            deploymentArguments.deployerAddress, vm.getNonce(deploymentArguments.deployerAddress) + 4
+            deploymentArguments.deployerAddress, queueDeployerNonce + GOVERNANCE_TO_QUEUE_PROXY_CREATES
         );
+        if (expectedMessageQueueAddress != address(0)) {
+            require(
+                deploymentArguments.overrides.circleToken == BaseConstants.ZERO_ADDRESS
+                    && deploymentArguments.overrides.tetherToken == BaseConstants.ZERO_ADDRESS
+                    && deploymentArguments.overrides.wrappedEther == BaseConstants.ZERO_ADDRESS
+                    && deploymentArguments.overrides.wrappedBitcoin == BaseConstants.ZERO_ADDRESS,
+                "queue prediction requires no token overrides"
+            );
+            assertEq(messageQueueAddress, expectedMessageQueueAddress, "predicted queue address mismatch");
+        }
 
         if (!isFork) {
             governanceAdmin = new GovernanceAdmin(
@@ -464,15 +501,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridge core:");
 
         if (!isFork) {
-            if (isTest) {
-                verifier = new VerifierMock(true);
-            } else if (isScript) {
-                if (chainId == 1) {
-                    verifier = new VerifierMainnet();
-                } else {
-                    verifier = new VerifierTestnet();
-                }
-            }
+            verifier = _deployVerifier(isTest, isScript, chainId, messageQueueAddress);
         }
 
         console.log("    Verifier:            ", address(verifier));
@@ -480,25 +509,31 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         // forge-lint: disable-next-line(todo-comment)
         // TODO: `npm warn exec The following package was not found and will be installed: @openzeppelin/upgrades-core@x.y.z`
         if (!isFork) {
-            messageQueue = MessageQueue(
-                Upgrades.deployUUPSProxy(
-                    "MessageQueue.sol",
-                    abi.encodeCall(
-                        MessageQueue.initialize,
-                        (
-                            governanceAdmin,
-                            governancePauser,
-                            deploymentArguments.emergencyStopAdmin,
-                            deploymentArguments.emergencyStopObservers,
-                            verifier
-                        )
-                    )
-                )
+            bytes memory queueInitialization = abi.encodeWithSelector(
+                expectedMessageQueueAddress == address(0)
+                    ? MessageQueue.initialize.selector
+                    : MessageQueue.initializeBeefy.selector,
+                governanceAdmin,
+                governancePauser,
+                deploymentArguments.emergencyStopAdmin,
+                deploymentArguments.emergencyStopObservers,
+                verifier
             );
+            messageQueue = MessageQueue(Upgrades.deployUUPSProxy("MessageQueue.sol", queueInitialization));
         }
         console.log("    MessageQueue:        ", address(messageQueue));
 
         messageQueueAssertions(isFork ? address(messageQueue) : messageQueueAddress);
+
+        if (messageOnlyBridge) {
+            messageHandlerMock = new MessageHandlerMock();
+            if (isTest) {
+                vm.stopPrank();
+            } else {
+                vm.stopBroadcast();
+            }
+            return;
+        }
 
         console.log();
 
@@ -507,13 +542,16 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         console.log("Bridge:");
 
         if (!isFork) {
-            IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](5);
+            IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](includeOrdinaryGearToken ? 6 : 5);
 
             tokens[0] = IERC20Manager.TokenInfo(address(circleToken), IERC20Manager.TokenType.Ethereum);
             tokens[1] = IERC20Manager.TokenInfo(address(tetherToken), IERC20Manager.TokenType.Ethereum);
             tokens[2] = IERC20Manager.TokenInfo(address(wrappedEther), IERC20Manager.TokenType.Ethereum);
             tokens[3] = IERC20Manager.TokenInfo(address(wrappedVara), IERC20Manager.TokenType.Gear);
             tokens[4] = IERC20Manager.TokenInfo(address(wrappedBitcoin), IERC20Manager.TokenType.Ethereum);
+            if (includeOrdinaryGearToken) {
+                tokens[5] = IERC20Manager.TokenInfo(address(erc20GearSupply), IERC20Manager.TokenType.Gear);
+            }
 
             erc20Manager = ERC20Manager(
                 Upgrades.deployUUPSProxy(
@@ -579,6 +617,96 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         }
     }
 
+    function _predictBeefyMessageQueue(address deployer) internal view returns (address) {
+        // The client is deployed first; ordinary Gear tokens reuse the same token CREATE slots.
+        uint256 createsBeforeQueue = 1 + GOVERNANCE_TO_QUEUE_PROXY_CREATES;
+        if (!messageOnlyBridge) createsBeforeQueue += TOKEN_PROFILE_CREATES;
+        return vm.computeCreateAddress(deployer, vm.getNonce(deployer) + createsBeforeQueue);
+    }
+
+    function _deployBeefyClient(uint256 privateKey, address predictedQueue) internal {
+        bytes32 sourceDomain = vm.envBytes32("BEEFY_SOURCE_DOMAIN");
+        require(sourceDomain != bytes32(0), "missing source domain");
+        uint64 mmrStartBlock = _envUint64("BEEFY_MMR_START_BLOCK");
+        uint64 initialBeefyBlock = _envUint64("BEEFY_INITIAL_BLOCK");
+        uint64 initialSourceTimestampMs = _envUint64("BEEFY_INITIAL_SOURCE_TIMESTAMP_MS");
+        BeefyClient.ValidatorSet memory currentSet = BeefyClient.ValidatorSet({
+            id: _envUint128("BEEFY_CURRENT_ID"),
+            length: _envUint128("BEEFY_CURRENT_LENGTH"),
+            root: vm.envBytes32("BEEFY_CURRENT_ROOT")
+        });
+        BeefyClient.ValidatorSet memory nextSet = BeefyClient.ValidatorSet({
+            id: _envUint128("BEEFY_NEXT_ID"),
+            length: _envUint128("BEEFY_NEXT_LENGTH"),
+            root: vm.envBytes32("BEEFY_NEXT_ROOT")
+        });
+        expectedMessageQueueAddress = predictedQueue;
+        bytes32 configuredBridgeDomain = vm.envBytes32("BEEFY_BRIDGE_DOMAIN");
+        bytes32 predictedBridgeDomain = keccak256(
+            abi.encodePacked("vara/gear-eth-bridge-domain/v2", sourceDomain, bytes32(block.chainid), predictedQueue)
+        );
+        require(
+            configuredBridgeDomain != bytes32(0) && configuredBridgeDomain == predictedBridgeDomain,
+            "configured bridge domain mismatch"
+        );
+
+        vm.startBroadcast(privateKey);
+        beefyClient = new BeefyClient(
+            sourceDomain,
+            block.chainid,
+            predictedQueue,
+            mmrStartBlock,
+            initialBeefyBlock,
+            initialSourceTimestampMs,
+            currentSet,
+            nextSet
+        );
+        require(
+            beefyClient.minNumRequiredSignatures() == 86 && beefyClient.fiatShamirRequiredSignatures() == 86
+                && beefyClient.MAX_VALIDATORS() == 256 && beefyClient.randaoCommitDelay() == 128
+                && beefyClient.randaoCommitExpiration() == 24,
+            "client policy mismatch"
+        );
+        require(
+            beefyClient.destinationChainId() == block.chainid && beefyClient.destinationQueue() == predictedQueue
+                && beefyClient.bridgeDomain() == configuredBridgeDomain,
+            "client destination authentication mismatch"
+        );
+        vm.stopBroadcast();
+    }
+
+    function _envUint64(string memory key) internal view returns (uint64 value) {
+        uint256 raw = vm.envUint(key);
+        require(raw <= type(uint64).max, string.concat(key, " exceeds uint64"));
+        return uint64(raw);
+    }
+
+    function _envUint128(string memory key) internal view returns (uint128 value) {
+        uint256 raw = vm.envUint(key);
+        require(raw <= type(uint128).max, string.concat(key, " exceeds uint128"));
+        return uint128(raw);
+    }
+
+    function _deployVerifier(bool isTest, bool isScript, uint256 chainId, address messageQueueAddress)
+        internal
+        virtual
+        returns (IVerifier)
+    {
+        if (isTest) {
+            return new VerifierMock(true);
+        }
+        if (isScript) {
+            if (address(beefyClient) != address(0)) {
+                return new VaraQueueRootVerifier(beefyClient, messageQueueAddress, chainId);
+            }
+            if (chainId == 1) {
+                return new VerifierMainnet();
+            }
+            return new VerifierTestnet();
+        }
+        return IVerifier(address(0));
+    }
+
     function deployTestTokens() public {
         circleToken = new CircleToken(deploymentArguments.deployerAddress);
         tetherToken = new TetherToken(deploymentArguments.deployerAddress);
@@ -632,15 +760,16 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(vftManagers4.length, expectedVftManagers);
         assertEq(vftManagers4[expectedVftManagers - 1], deploymentArguments.vftManager);
         assertTrue(erc20Manager.isVftManager(deploymentArguments.vftManager));
-        assertEq(erc20Manager.totalTokens(), 5);
+        uint256 expectedTokens = includeOrdinaryGearToken ? 6 : 5;
+        assertEq(erc20Manager.totalTokens(), expectedTokens);
         address[] memory tokens1 = erc20Manager.tokens();
-        assertEq(tokens1.length, 5);
+        assertEq(tokens1.length, expectedTokens);
         assertEq(tokens1[0], address(circleToken));
         assertEq(tokens1[1], address(tetherToken));
         assertEq(tokens1[2], address(wrappedEther));
         assertEq(tokens1[3], address(wrappedVara));
         assertEq(tokens1[4], address(wrappedBitcoin));
-        address[] memory tokens2 = erc20Manager.tokens(5, 5);
+        address[] memory tokens2 = erc20Manager.tokens(expectedTokens, 5);
         assertEq(tokens2.length, 0);
         address[] memory tokens3 = erc20Manager.tokens(0, 2);
         assertEq(tokens3.length, 2);
@@ -652,7 +781,7 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertEq(tokens4[1], address(wrappedVara));
         assertEq(tokens4[2], address(wrappedBitcoin));
         address[] memory tokens5 = erc20Manager.tokens(0, 6);
-        assertEq(tokens5.length, 5);
+        assertEq(tokens5.length, expectedTokens);
         assertEq(tokens5[0], address(circleToken));
         assertEq(tokens5[1], address(tetherToken));
         assertEq(tokens5[2], address(wrappedEther));
@@ -664,6 +793,12 @@ abstract contract Base is CommonBase, StdAssertions, StdChains, StdCheats, StdIn
         assertTrue(erc20Manager.getTokenType(address(wrappedVara)) == IERC20Manager.TokenType.Gear);
         assertTrue(erc20Manager.getTokenType(address(wrappedBitcoin)) == IERC20Manager.TokenType.Ethereum);
         assertTrue(erc20Manager.getTokenType(address(0)) == IERC20Manager.TokenType.Unknown);
+        if (includeOrdinaryGearToken) {
+            assertEq(tokens1[5], address(erc20GearSupply));
+            assertEq(tokens5[5], address(erc20GearSupply));
+            assertEq(ERC20GearSupply(address(erc20GearSupply)).owner(), erc20ManagerAddress);
+            assertTrue(erc20Manager.getTokenType(address(erc20GearSupply)) == IERC20Manager.TokenType.Gear);
+        }
     }
 
     function bridgingPaymentAssertions() public view {

@@ -8,6 +8,8 @@ import {
   MerkleRootInMessageQueue,
   Pair,
   Transfer,
+  ReceiptRelay,
+  ReceiptSettlement,
   VaraBridgeProgram,
 } from './entities/index.js';
 
@@ -26,6 +28,8 @@ const AppDataSource = new DataSource({
     InitiatedTransfer,
     Pair,
     Transfer,
+    ReceiptRelay,
+    ReceiptSettlement,
     VaraBridgeProgram,
     MerkleRootInMessageQueue,
   ],

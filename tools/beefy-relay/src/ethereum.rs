@@ -571,7 +571,7 @@ const HOODI_GENESIS_BLOCK: B256 =
     alloy::primitives::b256!("bbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b");
 const MAINNET_GENESIS_BLOCK: B256 =
     alloy::primitives::b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
-const HOODI_DEFAULT_RPC: &str = "wss://ethereum-hoodi-rpc.publicnode.com";
+const HOODI_DEFAULT_RPC: &str = "https://hoodi.drpc.org";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum PublicEthereumNetwork {

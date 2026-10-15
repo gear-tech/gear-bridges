@@ -423,6 +423,69 @@ abstract contract BeefyFixtureTest is Test {
         );
     }
 
+    function customQueueProofFor(
+        BeefyClient targetClient,
+        uint32 sourceBlock,
+        uint64 anchorBlock,
+        bytes32 queueRoot,
+        uint64 historicalTimestamp,
+        uint64 freshnessTimestamp
+    ) internal returns (QueueProof memory p) {
+        uint64 authenticatedTimestamp = targetClient.lastAuthenticatedSourceTimestampMs();
+        if (freshnessTimestamp <= authenticatedTimestamp) freshnessTimestamp = authenticatedTimestamp + 1;
+        p = queueProof(0);
+        p.leaf.parentNumber = sourceBlock;
+        bytes32 bridgeDomain = targetClient.bridgeDomain();
+        uint64 queueId = uint64(vm.parseJsonUint(fixtures, ".cases[0].queueId"));
+        uint64 freshnessQueueId = uint64(vm.parseJsonUint(fixtures, ".cases[0].freshnessProof.queueId"));
+        bytes32 freshnessRoot = fixtureHash(0, "freshnessProof.queueRoot");
+        VaraBridgeMetadata.Snapshot memory historicalSnapshot = VaraBridgeMetadata.Snapshot({
+            version: 2,
+            bridgeDomain: bridgeDomain,
+            sourceTimestampMs: historicalTimestamp,
+            initialized: true,
+            queueId: queueId,
+            queueRoot: queueRoot
+        });
+        VaraBridgeMetadata.Snapshot memory freshnessSnapshot = VaraBridgeMetadata.Snapshot({
+            version: 2,
+            bridgeDomain: bridgeDomain,
+            sourceTimestampMs: freshnessTimestamp,
+            initialized: true,
+            queueId: freshnessQueueId,
+            queueRoot: freshnessRoot
+        });
+        p.proofVersion = 2;
+        p.bridgeVersion = 2;
+        p.initialized = true;
+        p.bridgeDomain = bridgeDomain;
+        p.sourceTimestampMs = historicalTimestamp;
+        p.queueId = queueId;
+        p.leaf.parachainHeadsRoot = VaraBridgeMetadata.hash(historicalSnapshot);
+        BeefyClient.MMRLeaf memory freshnessLeaf = BeefyClient.MMRLeaf({
+            version: p.leaf.version,
+            parentNumber: uint32(anchorBlock - 1),
+            parentHash: p.leaf.parentHash ^ bytes32(uint256(anchorBlock)),
+            nextAuthoritySetID: p.leaf.nextAuthoritySetID,
+            nextAuthoritySetLen: p.leaf.nextAuthoritySetLen,
+            nextAuthoritySetRoot: p.leaf.nextAuthoritySetRoot,
+            parachainHeadsRoot: VaraBridgeMetadata.hash(freshnessSnapshot)
+        });
+        bytes32 historicalLeafHash = keccak256(leafBytes(p.leaf));
+        bytes32 freshnessLeafHash = keccak256(leafBytes(freshnessLeaf));
+        p.anchorBlock = anchorBlock;
+        p.anchorRoot = keccak256(abi.encodePacked(historicalLeafHash, freshnessLeafHash));
+        p.items = new bytes32[](1);
+        p.items[0] = freshnessLeafHash;
+        p.order = 0;
+        BeefyClient.Commitment memory c = commitment(uint32(anchorBlock), 0, p.anchorRoot);
+        bytes32[] memory freshnessProof = new bytes32[](1);
+        freshnessProof[0] = historicalLeafHash;
+        targetClient.submitFiatShamir(
+            c, allSigners(), signedProofs(targetClient, c, ""), freshnessLeaf, freshnessSnapshot, freshnessProof, 1
+        );
+    }
+
     function finishUpdate(
         bool interactive,
         BeefyClient client,

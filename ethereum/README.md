@@ -112,6 +112,119 @@ receipts, deployed contracts, and the deployer nonce.
 These scripts deploy fresh, isolated BEEFY lanes; they do not migrate an existing
 ZK queue proxy. Use the gated existing-proxy migration below instead.
 
+### Full-transaction BEEFY gas and operating cost
+
+Run from this directory with the existing Foundry tools and Python standard library:
+
+```shell
+python3 script/benchmark-full-transactions.py
+```
+
+The command owns one ephemeral loopback-only Anvil (chain 31337, explicit Osaka
+hardfork and fixture-era timestamp), mines real transactions using Anvil's test
+account, and stops only that node. It accepts no remote RPC or private key. It
+reuses the existing compiler/dependencies and signed 59/150/256-validator
+`beefy-interop.json` fixtures. The first update uses their saved signatures;
+subsequent ordinary updates and handovers are genuinely ECDSA-signed synthetic
+local source snapshots, using the same fixture keys/Merkle proofs and the
+unchanged verifier. Handovers rotate through the real fixture authority roots
+and lengths (59→150→59, 150→256→150, 256→59→256), rather than measuring only
+same-root storage writes. The bridge/source domain remains the original client's
+domain throughout each sequence. No proof verifier, expiry, quorum or custody
+policy is bypassed. This is a local gas benchmark, not source-runtime activation
+or production BEEFY certification.
+
+`out/fulltx-benchmark/receipts.json` retains actual RPC transactions (including
+full calldata), successful mined receipts and inclusion headers, fixture/source
+SHA-256 digests, tool/compiler settings and checked post-state. Forge broadcast
+records and logs remain beside it; `--output <directory>` selects a separate
+evidence location. Existing test Anvils and public networks are not modified.
+Do not run two benchmark writers against the same output directory/build cache.
+
+Measured with Forge/Anvil 1.7.1, Solc 0.8.37, optimizer + via-IR, Osaka (2026-10-15):
+
+| Signing validators | Selected signatures | First saved-fixture update | Ordinary update | Largest measured handover |
+|---:|---:|---:|---:|---:|
+| 59 | 20 | 361,162 | 345,430 | 450,484 |
+| 150 | 51 | 876,546 | 849,160 | 939,465 |
+| 256 | 86 | 1,421,390 | 1,409,880 | 1,514,546 |
+
+Every number above is receipt `gasUsed`, **not** a `gasleft()` delta. In
+particular the historical call-only 229,615 / 552,825 / 898,382 measurements are
+not transaction costs. The largest handover rows include changing roots and
+validator-count/counter-array transitions: 256→59→256, 150→150→256 and
+150→256→150 respectively (previous current → signing set → newly announced
+next set). They are maxima of these measured cases, not a protocol-wide gas
+upper bound. Ordinary/handover snapshots use a single authenticated MMR leaf;
+the first saved-fixture update has its fixture proof. Real source MMR depth,
+payloads, key bytes, storage state and transitions can change the receipt cost.
+
+| Transaction case | Calldata bytes | Standard intrinsic gas | EIP-7623 calldata floor | Actual receipt gas |
+|---|---:|---:|---:|---:|
+| 59 ordinary | 10,084 | 131,116 | 296,290 | 345,430 |
+| 59 largest handover | 10,052 | 130,436 | 294,590 | 450,484 |
+| 150 ordinary | 26,532 | 331,920 | 798,300 | 849,160 |
+| 150 largest handover | 26,756 | 335,564 | 807,410 | 939,465 |
+| 256 ordinary | 45,188 | 559,484 | 1,367,210 | 1,409,880 |
+| 256 largest handover | 45,188 | 559,472 | 1,367,180 | 1,514,546 |
+| Queue root publication | 740 | 27,020 | 36,050 | 161,983 |
+| Escrow-backed ERC20 message execution | 484 | 23,860 | 28,150 | 133,365 |
+
+For these non-creation transactions without access lists, let `T = zeroBytes +
+4 × nonzeroBytes`. Standard intrinsic gas is `21,000 + 4T`; the post-Pectra
+EIP-7623 floor is `21,000 + 10T`. The command counts the actual transaction
+bytes and checks the floor against each receipt. None of the measured rows is
+floor-bound, but the floor must not be omitted when comparing calldata-heavy
+proof designs. Receipt gas already includes intrinsic gas and the applicable
+floor/refund rules: **do not add either again**.
+
+The root/execution rows use the existing signed queue fixture construction and
+real queue/verifier/manager proxies plus CircleToken, not a verifier/handler
+mock. The separate three-validator anchor costs 116,697 gas and is not a
+59-validator update price. After the root's configured onchain delay, execution
+moves exactly 10 units from 30 units of manager escrow, leaves 20 there, and
+marks the original nonce processed. This measures an Ethereum-supply ERC20
+release, not every token/native path. Previously reported Hoodi receipts
+(174,605 root publication / 155,428 ERC20 execution) are separate historical
+observations, not results of this local command or universal gas constants.
+
+For a gross monthly budget before fee income, use explicit cadence and traffic:
+
+```text
+monthly_gas = days × (handovers_per_day × handover_gas
+                    + additional_updates_per_day × ordinary_update_gas)
+            + roots_per_month × root_gas
+            + messages_per_month × message_gas
+            + other_monthly_gas
+monthly_USD = infrastructure_USD
+            + monthly_gas × effective_gas_price_gwei × 1e-9 × ETH_USD
+            + vara_execution_amount × VARA_USD + contingency_USD
+```
+
+Count additional updates separately from required ordered authority handovers;
+multiple messages can share a root/checkpoint, but each execution still costs
+gas. Include deployment amortization, failed originals/retries, governance and
+other paid transactions in `other_monthly_gas` as applicable. Infrastructure
+includes RPC/archive/source services and relayer/follower hosting. If transaction
+classes have different effective prices, price and sum them separately.
+
+At 30 days and an assumed 12 handovers/day, the conservative measured
+59-validator handover scenario alone is **162,174,240 gas/month**. Add bounded
+traffic-triggered updates, roots and executions; do not multiply the historical
+call-only measurement by cadence. Neither 12/day nor a gas price/ETH exchange
+rate is a production guarantee: use the actual source schedule and explicitly
+label price assumptions (for example ETH_USD = 3,000 is a planning assumption,
+not a current quote). For a US$5,000 gross ceiling, require the complete formula
+to stay below that ceiling with operational headroom; fee income is not a
+substitute for the gross-cost bound. Sparse scheduling does not waive any
+source-domain, latest-anchor, authority-handover, original-signature, finality or
+24-hour client-expiry requirement.
+
+See the [operating envelope](../docs/running-the-bridge.md#monthly-operating-cost-envelope)
+for the US$5,000 target, infrastructure allowances, traffic/fee conditions and
+the separately identified, not-yet-deployed queue-root coalescing design.
+
+
 ### Mainnet custody-preserving migration candidate
 
 Keep the existing queue proxy, ERC20 manager, token contracts and Vara programs.

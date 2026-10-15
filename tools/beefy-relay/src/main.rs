@@ -17,7 +17,7 @@ enum Command {
         source_rpc: String,
         #[arg(long, default_value = "ws://127.0.0.1:9945")]
         witness_rpc: String,
-        #[arg(long, default_value = "wss://ethereum-hoodi-rpc.publicnode.com")]
+        #[arg(long, default_value = "https://hoodi.drpc.org")]
         ethereum_rpc: String,
         #[arg(long)]
         wallet: PathBuf,
@@ -54,7 +54,7 @@ enum Command {
         source_rpc: String,
         #[arg(long, default_value = "ws://127.0.0.1:9945")]
         witness_rpc: String,
-        #[arg(long, default_value = "wss://ethereum-hoodi-rpc.publicnode.com")]
+        #[arg(long, default_value = "https://hoodi.drpc.org")]
         ethereum_rpc: String,
         #[arg(long)]
         wallet: PathBuf,

@@ -1409,6 +1409,18 @@ fn client_heartbeat_due(source_timestamp_ms: u64, destination_timestamp_ms: u64)
     destination_timestamp_ms.saturating_sub(source_timestamp_ms) >= 12 * 60 * 60 * 1_000
 }
 
+fn same_set_commitment_due(
+    handover_only: bool,
+    checkpoint_block: u64,
+    candidate_block: u32,
+    target: u32,
+    root_target: Option<u32>,
+) -> bool {
+    (!handover_only || root_target.is_some_and(|block| u64::from(block) >= checkpoint_block))
+        && candidate_block >= target.saturating_sub(2)
+        && root_target.is_none_or(|block| candidate_block > block)
+}
+
 async fn record_mined_commitment(
     ethereum: &mut Ethereum,
     output: &Path,
@@ -1836,7 +1848,7 @@ async fn advance(
     state: &mut Value,
     mut handover_only: bool,
     root_witness: Option<&Source>,
-) -> Result<CapturedCommitment> {
+) -> Result<Option<CapturedCommitment>> {
     'progress: loop {
         reconcile_original_submission(ethereum, output, state).await?;
         let before = ethereum.checkpoint().await?;
@@ -1852,6 +1864,8 @@ async fn advance(
             .block_hash_to_number(source.api.latest_finalized_block().await?)
             .await?;
         let mut freshness_check: Option<std::time::Instant> = None;
+        // Freeze one discovered demand batch; later traffic must not move its target forever.
+        let mut root_target = None;
         let anchor = loop {
             let mut candidate = match source.next_commitment().await {
                 Ok(candidate) => candidate,
@@ -1869,11 +1883,10 @@ async fn advance(
                     "source archive passed the original reserved commitment; HOLD"
                 );
             }
-            // Leave half an epoch for destination inclusion without breaching the 64-block lag gate.
-            handover_only &= u64::from(candidate.block).saturating_sub(before.block) < 32;
             if handover_only
                 && freshness_check.is_none_or(|checked| checked.elapsed().as_secs() >= 60)
             {
+                promote_finality(source, ethereum, output, state).await?;
                 let block = ethereum
                     .api
                     .raw_provider()
@@ -1888,14 +1901,22 @@ async fn advance(
                 handover_only = !client_heartbeat_due(before.source_timestamp_ms, timestamp_ms);
                 freshness_check = Some(std::time::Instant::now());
             }
-            let root_target = if let Some(witness) = root_witness {
+            if let Some(witness) = root_witness {
                 scan_token_roots(source, witness, output, state).await?;
                 let pending = pending_token_root_block(state)?;
-                handover_only &= pending.is_none();
-                pending
-            } else {
-                None
-            };
+                if handover_only
+                    && state["submission"].is_null()
+                    && candidate.current.id == before.current_id
+                    && u64::from(candidate.block) > before.block
+                    && pending.is_some_and(|block| u64::from(block) < before.block)
+                {
+                    // Publish newly discovered, already-covered roots without buying a new anchor.
+                    return Ok(None);
+                }
+                if root_target.is_none() {
+                    root_target = pending.filter(|block| u64::from(*block) >= before.block);
+                }
+            }
             if u64::from(candidate.block) <= before.block {
                 let bootstrap = client_bootstrap(state, ethereum.client_address)?;
                 if u64::from(candidate.block) == before.block {
@@ -1987,7 +2008,7 @@ async fn advance(
                         .await?;
                     }
                     reconcile_original_submission(ethereum, output, state).await?;
-                    return Ok(candidate);
+                    return Ok(Some(candidate));
                 }
                 continue;
             }
@@ -2017,11 +2038,28 @@ async fn advance(
             }
             // Intermediate same-set roots need not be relayed; every handover must be.
             if candidate.current.id == before.next_id
-                || (!handover_only
-                    && candidate.block >= target.saturating_sub(2)
-                    && root_target.is_none_or(|block| candidate.block > block))
+                || same_set_commitment_due(
+                    handover_only,
+                    before.block,
+                    candidate.block,
+                    target,
+                    root_target,
+                )
             {
                 break candidate;
+            }
+            if candidate.block >= target.saturating_sub(2)
+                && root_target.is_none()
+                && state["submission"].is_null()
+                && matches!(
+                    state["follower"]["status"].as_str(),
+                    Some("starting" | "catching-up")
+                )
+            {
+                // Caught up does not require buying an update or extending the accepted expiry.
+                state["follower"]["status"] = json!("healthy");
+                state["follower"]["lastError"] = Value::Null;
+                save(output, state, Some(ethereum))?;
             }
         };
         promote_finality(source, ethereum, output, state).await?;
@@ -2062,7 +2100,7 @@ async fn advance(
                         )
                         .await?;
                         reconcile_original_submission(ethereum, output, state).await?;
-                        return Ok(anchor);
+                        return Ok(Some(anchor));
                     }
                     ensure!(
                         ethereum.checkpoint().await?.block > u64::from(anchor.block),
@@ -2102,7 +2140,7 @@ async fn advance(
                 "Hoodi: reconciled interrupted source block {}",
                 anchor.block
             );
-            return Ok(anchor);
+            return Ok(Some(anchor));
         }
         let proof = source.proof(anchor.block - 1, &anchor).await?;
         let prior = (!state["submission"].is_null()).then(|| state["submission"].clone());
@@ -2135,7 +2173,7 @@ async fn advance(
                     record_external_commitment(ethereum, output, state, &anchor, &proof, accepted)
                         .await?;
                     reconcile_original_submission(ethereum, output, state).await?;
-                    return Ok(anchor);
+                    return Ok(Some(anchor));
                 }
             }
             if !state["submission"]["txHash"].is_null() {
@@ -2152,7 +2190,7 @@ async fn advance(
             }
             reconcile_original_submission(ethereum, output, state).await?;
             if state["submission"].is_null() {
-                return Ok(anchor);
+                return Ok(Some(anchor));
             }
             return Err(error);
         }
@@ -2169,7 +2207,7 @@ async fn advance(
             "Hoodi: mined block {} set {}; destination finality pending",
             anchor.block, anchor.current.id
         );
-        return Ok(anchor);
+        return Ok(Some(anchor));
     }
 }
 async fn follow_external_progress(
@@ -2918,7 +2956,7 @@ pub async fn follow_tokens(
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 continue;
             }
-            let handover_only = !uncovered && state["follower"]["status"] == "healthy";
+            let handover_only = !uncovered;
             advance(
                 &mut source,
                 &mut ethereum,
@@ -3024,6 +3062,108 @@ mod tests {
             roots.len()
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires paired owned native archive RPCs; read-only scheduler smoke"]
+    async fn live_idle_scheduler_skips_authenticated_same_set_distance() -> Result<()> {
+        let rpc = std::env::var("BEEFY_TEST_SOURCE_RPC")?;
+        let witness_rpc = std::env::var("BEEFY_TEST_WITNESS_RPC")?;
+        ensure!(
+            crate::local_source_rpc(&rpc) && crate::local_source_rpc(&witness_rpc),
+            "scheduler smoke requires owned loopback source RPCs"
+        );
+        let (mut source, witness) = Source::connect_pair(
+            GearApi::new(&rpc, 3).await?,
+            GearApi::new(&witness_rpc, 3).await?,
+        )
+        .await?;
+        let head = source
+            .api
+            .block_hash_to_number(source.api.latest_finalized_block().await?)
+            .await?;
+        source.seek_from(head.saturating_sub(128).max(1))?;
+        let mut initial = source.next_commitment().await?;
+        let mut skipped = 0;
+        loop {
+            let candidate = source.next_commitment().await?;
+            let second = witness
+                .recapture(candidate.block, candidate.raw.clone())
+                .await?;
+            ensure!(
+                candidate.block_hash == second.block_hash
+                    && candidate.validated.mmr_root == second.validated.mmr_root
+                    && candidate.current == second.current
+                    && candidate.next == second.next,
+                "scheduler candidate differs on independent witness; HOLD"
+            );
+            if candidate.current.id != initial.current.id {
+                // A handover is mandatory, never counted as an idle same-set skip.
+                ensure!(
+                    candidate.current == initial.next,
+                    "ordered source skipped handover"
+                );
+                initial = candidate;
+                skipped = 0;
+                continue;
+            }
+            ensure!(
+                !same_set_commitment_due(
+                    true,
+                    u64::from(initial.block),
+                    candidate.block,
+                    candidate.block,
+                    None
+                ),
+                "idle same-set update became payable"
+            );
+            skipped += 1;
+            if candidate.block.saturating_sub(initial.block) >= 32 {
+                let proof = source.proof(candidate.block - 1, &candidate).await?;
+                let second = witness.proof(candidate.block - 1, &candidate).await?;
+                ensure!(
+                    proof.snapshot == second.snapshot && proof.raw_leaf == second.raw_leaf,
+                    "scheduler freshness proof differs on witness; HOLD"
+                );
+                ensure!(
+                    same_set_commitment_due(
+                        true,
+                        u64::from(initial.block),
+                        candidate.block,
+                        candidate.block,
+                        Some(candidate.block - 1)
+                    ),
+                    "covering demand batch was skipped"
+                );
+                println!(
+                    "{}",
+                    json!({"sourceGenesis":bytes(source.source_genesis),
+                    "runtimeCadence":source.identity.runtime["babe"],
+                    "initialBlock":initial.block,"candidateBlock":candidate.block,
+                    "sameSetSkipped":skipped,"authoritySet":candidate.current.id,
+                    "candidateHash":bytes(candidate.block_hash),"idlePaidUpdates":0,
+                    "coveringDemandAccepted":true,"sourceWrites":false,"ethereumWrites":false})
+                );
+                return Ok(());
+            }
+        }
+    }
+
+    #[test]
+    fn idle_scheduler_skips_same_set_blocks_without_losing_root_batch_or_heartbeat() {
+        for block in [132, 164, 2_500, 14_400] {
+            assert!(
+                !same_set_commitment_due(true, 100, block, block, None),
+                "idle source distance must not trigger a paid same-set update at {block}"
+            );
+        }
+        assert!(same_set_commitment_due(false, 100, 132, 132, None));
+        assert!(!same_set_commitment_due(false, 100, 140, 150, Some(139)));
+        assert!(!same_set_commitment_due(false, 100, 150, 150, Some(150)));
+        assert!(same_set_commitment_due(false, 100, 151, 150, Some(150)));
+        assert!(!same_set_commitment_due(true, 200, 300, 300, Some(199)));
+        assert!(same_set_commitment_due(true, 200, 300, 300, Some(299)));
+        assert!(!same_set_commitment_due(true, 200, 299, 300, Some(299)));
     }
 
     #[test]
@@ -3801,7 +3941,8 @@ mod tests {
                 false,
                 None,
             )
-            .await?;
+            .await?
+            .context("original commitment was not reconciled")?;
             ensure!(
                 recovered.block == anchor.block && restored["submission"].is_null(),
                 "restart did not reconcile original commitment"

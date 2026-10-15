@@ -134,7 +134,13 @@ pub fn classify_alloy_rpc(err: &RpcError<TransportErrorKind>) -> RetryDecision {
             {
                 RetryDecision::Retry
             }
-            TransportErrorKind::Custom(message) if is_recoverable_error_text(message) => {
+            TransportErrorKind::Custom(message)
+                if std::iter::successors(
+                    Some(message.as_ref() as &(dyn std::error::Error + 'static)),
+                    |error| error.source(),
+                )
+                .any(is_recoverable_error_text) =>
+            {
                 RetryDecision::Retry
             }
             _ => RetryDecision::Fail,
@@ -159,6 +165,12 @@ pub fn is_recoverable_error_text(message: impl std::fmt::Display) -> bool {
         || message.contains("connection refused")
         || message.contains("connection reset")
         || message.contains("broken pipe")
+        || message.contains("no route to host")
+        || message.contains("host unreachable")
+        || message.contains("network is unreachable")
+        || message.contains("network unreachable")
+        || message.contains("network is down")
+        || message.contains("network down")
         || message.contains("timed out")
         || message.contains("timeout")
 }
@@ -438,6 +450,30 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn retries_nested_socket_resets_from_actual_http_readers() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                // Leave the rest of the HTTP request unread so closing resets the connection.
+                let _ = socket.read_exact(&mut [0; 1]).await;
+            }
+        });
+        let api = ethereum_client::PollingEthApi::new(&endpoint)
+            .await
+            .unwrap();
+        let block = api.finalized_block().await.unwrap_err();
+        let deposit = api
+            .fetch_deposit_events_at(Default::default(), 1, Default::default())
+            .await
+            .unwrap_err();
+        server.abort();
+        for error in [block, deposit] {
+            assert_eq!(classify_anyhow(&error), RetryDecision::Retry, "{error:#}");
+        }
+    }
     #[test]
     fn treats_missing_pubsub_support_as_permanent() {
         let err = TransportErrorKind::pubsub_unavailable();
@@ -522,6 +558,36 @@ mod tests {
         let err = anyhow::anyhow!("transport error: connection refused");
 
         assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+    }
+
+    #[test]
+    fn retries_unreachable_network_transports_but_not_rpc_rejections() {
+        for message in [
+            "No route to host (os error 65)",
+            "Network is unreachable (os error 101)",
+            "Network is down (os error 50)",
+            "host unreachable",
+            "network unreachable",
+            "network down",
+        ] {
+            let transport = RpcError::Transport(TransportErrorKind::Custom(Box::new(
+                std::io::Error::other(message),
+            )));
+            assert_eq!(
+                classify_alloy_rpc(&transport),
+                RetryDecision::Retry,
+                "{message}"
+            );
+            let rejection = RpcError::ErrorResp(
+                serde_json::from_value(serde_json::json!({"code": -32603, "message": message}))
+                    .unwrap(),
+            );
+            assert_eq!(classify_alloy_rpc(&rejection), RetryDecision::Fail);
+            let send = ethereum_client::Error::ErrorSendingTransaction(
+                alloy::contract::Error::TransportError(transport),
+            );
+            assert_eq!(classify_ethereum_error(&send), RetryDecision::Fail);
+        }
     }
 
     #[tokio::test]

@@ -2049,48 +2049,11 @@ impl Contracts {
             }
         };
 
-        let (max_priority_fee_per_gas, gas_price) = tokio::join!(
-            self.provider.get_max_priority_fee_per_gas(),
-            self.provider.get_gas_price()
-        );
-        log::trace!("max_priority_fee_per_gas_chain = {max_priority_fee_per_gas:?}, gas_price_chain = {gas_price:?}");
-
-        let max_fee_per_gas = gas_price
-            .map(|gas_price| {
-                if gas_price < MAX_FEE_PER_GAS {
-                    MAX_FEE_PER_GAS
-                } else {
-                    gas_price
-                }
-            })
-            .unwrap_or(MAX_FEE_PER_GAS);
-
-        let max_priority_fee_per_gas = max_priority_fee_per_gas
-            .map(|max_priority_fee_per_gas| {
-                if max_priority_fee_per_gas < MAX_PRIORITY_FEE_PER_GAS {
-                    MAX_PRIORITY_FEE_PER_GAS
-                } else {
-                    max_priority_fee_per_gas
-                }
-            })
-            .unwrap_or(MAX_PRIORITY_FEE_PER_GAS);
-
-        let call = call
+        // The existing GasFiller estimates market fees before the original is signed.
+        Ok(call
             .gas(gas_estimated)
             .nonce(account_nonce)
-            .max_fee_per_gas(max_fee_per_gas)
-            .max_priority_fee_per_gas(max_priority_fee_per_gas);
-
-        let request = call.as_ref();
-        log::trace!(
-            "new max_priority_fee_per_gas = {max_priority_fee_per_gas:?}, new max_fee_per_gas = {max_fee_per_gas:?}, gas_estimated = {gas_estimated}, gas_price = {:?}, max_fee_per_gas = {:?}, max_priority_fee_per_gas = {:?}, gas_limit = {:?}",
-            request.gas_price(),
-            request.max_fee_per_gas(),
-            request.max_priority_fee_per_gas(),
-            request.gas_limit(),
-        );
-
-        Ok(call.into_transaction_request())
+            .into_transaction_request())
     }
 
     pub async fn read_merkle_root(
@@ -3367,6 +3330,61 @@ mod tests {
         assert_eq!(identity.nonce, 0);
         assert_eq!(identity.to, None);
         assert_eq!(identity.block_number, None);
+        Ok(())
+    }
+    #[tokio::test]
+    #[ignore = "requires Anvil; signs and mines a local fee-envelope transaction"]
+    async fn content_message_follows_market_fees_without_fixed_tip() -> AnyResult<()> {
+        use alloy::{
+            consensus::{Transaction, TxEnvelope},
+            eips::Decodable2718,
+            node_bindings::Anvil,
+        };
+        let anvil = Anvil::new()
+            .host("127.0.0.1")
+            .port(0u16)
+            .args(["--base-fee", "1", "--gas-price", "1"])
+            .try_spawn()?;
+        let private_key = format!("{:#x}", B256::from_slice(&anvil.keys()[0].to_bytes()));
+        // Fee/signature smoke only: an EOA avoids conflating queue settlement with fee policy.
+        let api = EthApi::new(
+            &anvil.endpoint(),
+            &format!("{:#x}", anvil.addresses()[1]),
+            Some(&private_key),
+            None,
+            None,
+        )
+        .await?;
+        let quote = api.raw_provider().estimate_eip1559_fees().await?;
+        ensure!(
+            quote.max_priority_fee_per_gas < 500_000_000,
+            "fixture must quote below the old tip floor"
+        );
+        let guard = api.reserve_submission().await;
+        let prepared = api
+            .prepare_content_message(&guard, 1, 1, 0, [0; 32], [1; 32], [2; 20], vec![], vec![])
+            .await?;
+        let signed = TxEnvelope::decode_2718(&mut prepared.raw_transaction.as_slice())?;
+        assert_eq!(
+            signed.max_priority_fee_per_gas(),
+            Some(quote.max_priority_fee_per_gas)
+        );
+        assert_eq!(signed.max_fee_per_gas(), quote.max_fee_per_gas);
+        let hash = api
+            .broadcast_prepared_content_message(&guard, &prepared)
+            .await?;
+        let receipt = api
+            .raw_provider()
+            .get_transaction_receipt(hash)
+            .await?
+            .context("local original receipt missing")?;
+        assert_eq!(receipt.transaction_hash, prepared.hash);
+        assert!(receipt.status());
+        assert!(receipt.effective_gas_price < 500_000_000);
+        println!(
+            "signed original {hash:#x}: gas={}, effectiveGasPrice={} wei",
+            receipt.gas_used, receipt.effective_gas_price
+        );
         Ok(())
     }
 }

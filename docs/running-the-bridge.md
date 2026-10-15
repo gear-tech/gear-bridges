@@ -148,7 +148,15 @@ The Merkle-root relayer saves its block/root/submission state periodically and o
 
 Keep the state file, its `.bak` file, proof-storage directory, verifier/SRS data, and transaction-storage directories together. Back them up before changing authority-set configuration or deleting old state. A genesis authority-set change changes the circuit's fixed genesis inputs and makes later proofs incompatible; coordinate such a change with the deployed verifier and proof storage.
 
-For a transient RPC failure, the Gear listener reconnects and replays missing finalized blocks; Ethereum pollers reconnect and resume from their persisted cursors. The shared Ethereum WebSocket handshake and individual RPC requests time out after 30 seconds for `EthApi`, `PollingEthApi` and raw-provider calls. Transient receipt-evidence transport failures reconnect and recheck the original signed transaction; identity, finality and event mismatches remain HOLD. A timeout is not proof of non-submission and does not authorize replacement signing, a different nonce or changed deadlines. A child task that exits permanently is surfaced as a process failure. Inspect logs and metrics before deciding whether to retry, restore state, or escalate to the emergency procedures.
+For a transient RPC failure, the Gear listener reconnects and replays missing finalized blocks; Ethereum pollers reconnect and resume from their persisted cursors. The shared Ethereum WebSocket handshake and individual RPC requests time out after 30 seconds for `EthApi`, `PollingEthApi` and raw-provider calls. Transient receipt-evidence transport failures reconnect and recheck the original signed transaction; identity, finality and event mismatches remain HOLD. A timeout is not proof of non-submission and does not authorize replacement signing, a different nonce or changed deadlines. A zero process exit code does not establish worker health: a failed child task can close the pipeline without a nonzero exit. Inspect logs and metrics before deciding whether to retry, restore state, or escalate to the emergency procedures.
+
+Wrapped HTTP transport errors are classified through their source chain: a
+reqwest/hyper connection reset or an unreachable/down host or network must not
+become permanent merely because its outer display says only “error sending
+request”. Explicit permanent RPC/status
+errors and ambiguous transaction-send failures keep their existing fail/HOLD
+precedence. The regression drives actual finalized-block and deposit readers
+against a loopback server that resets the socket after receiving the request.
 
 The full relayer suite, six live Hoodi reconnect cases and real-contract Anvil original-receipt/restart/replay smoke passed in local review evidence. Those logs remain local evidence, not timed-campaign or production qualification.
 
@@ -206,11 +214,28 @@ Inbound token workers require `--ethereum-blocks <discovery.json>` and `--ethere
 
 The BEEFY publisher persists its transaction intent, source block identity, and nonce before broadcast; after an uncertain send it reconciles the same transaction and canonical contract state instead of choosing a new nonce. Fresh commitment records include the source block number before the first nonce-reservation checkpoint. Restart selects that exact reserved source block rather than an earlier eligible handover; an archive that passes it without finding it holds the lane. Saved signed bytes are decoded completely and checked against their hash, sender, nonce, and destination. RPC transaction lookups decode only the required identity and optional inclusion fields, so a missing `accessList` does not prevent recovery; malformed or conflicting identity still holds the operation. Canonical receipt and checkpoint verification remain mandatory. Keep root publication and token relayer signing keys separate. A conflicting root or source reorganization requires operator investigation; do not discard the journal to force progress.
 
-Follower schema 4 separates commitment provenance: `origin: "own"` retains `submission`; `origin: "external"` retains the actual accepted signed `acceptedTransaction`. First attachment may adopt progress beyond the authenticated deployment bootstrap, but only after ordered source authority handovers and canonical finalized transaction/receipt proofs are verified. A log or current checkpoint alone is insufficient. `lastSuccessfulUpdate` remains own-success accounting; authenticated external progress may advance finalized/observed progress without completing an original transaction. Signed originals retain nonce ownership until their own finalized receipt or consumed-nonce disposition is durable; terminal originals move atomically into `terminalSubmissions` with complete original bytes and evidence. Competitor hashes never replace originals. Changed unfinalized inclusion requires independent finalized-header, transaction/receipt-trie, source-proof and accepted-checkpoint authentication; `firstInclusion` remains retained and finalized history cannot move. Within-set refreshes after 32 source blocks preserve the strict 64-block readiness limit.
+Follower schema 4 separates commitment provenance: `origin: "own"` retains `submission`; `origin: "external"` retains the actual accepted signed `acceptedTransaction`. First attachment may adopt progress beyond the authenticated deployment bootstrap, but only after ordered source authority handovers and canonical finalized transaction/receipt proofs are verified. A log or current checkpoint alone is insufficient. `lastSuccessfulUpdate` remains own-success accounting; authenticated external progress may advance finalized/observed progress without completing an original transaction. Signed originals retain nonce ownership until their own finalized receipt or consumed-nonce disposition is durable; terminal originals move atomically into `terminalSubmissions` with complete original bytes and evidence. Competitor hashes never replace originals. Changed unfinalized inclusion requires independent finalized-header, transaction/receipt-trie, source-proof and accepted-checkpoint authentication; `firstInclusion` remains retained and finalized history cannot move. Idle same-set commitments are skipped; authenticated handovers, uncovered root demand and the 12-hour heartbeat drive paid updates. Readiness uses authenticated source age and the onchain 24-hour expiry, not an obsolete 64-block lag policy.
 
 On follower restart, saved finalized commitments are revalidated against their original signed identity, receipt inclusion, finalized anchor and source block before any new submission. A finalized boolean is not sufficient. The worker uses one fresh verified finalized view, deduplicated targets and bounded 32-way checks. Durable hash-linked RLP headers and transaction/receipt trie evidence are locally authenticated on reload; incomplete ancestry fences and interior progress survive interruption beyond the unchanged 32,768-header memory bound. History revalidation and pending-transaction reconciliation share one 300-second startup deadline. Changed or incomplete evidence holds instead of skipping history, resetting the journal or extending warmup deadlines.
 
 `beefy-relay tokens-history-audit --source-rpc <source> --witness-rpc <witness> --ethereum-rpc <EL> --deployment-manifest <manifest> --follower-state <existing-state.json> --proof-dir <new-private-audit-directory>` exercises that read-only historical authentication path without a signer. Keep the original journal untouched and use a separately owned proof directory, never the running follower’s archive. Repeat with the same audit directory for the warm-recovery check; fresh deployment history is not evidence for aged-journal recovery.
+
+The Hoodi CLI default is `https://hoodi.drpc.org`. Its hash-pinned historical state and canonical receipts were checked against the retained v2.1.0 deployment; the read-only history audit authenticated all 693 originals in 58.1 seconds cold and 2.0 seconds warm without changing the follower journal. This qualifies that observed history, not a provider SLA or a mainnet endpoint. The previously used ethpandaops endpoint returned malformed null contract results/timeouts; PublicNode could not serve required old state. Do not substitute latest state, clear journals, fabricate missing results, or automatically rebroadcast through an unqualified provider. Before an endpoint switch, verify the approved chain/genesis, oldest and newest retained EIP-1898 state pins, original transaction/receipt identities, and both cold/warm history audits within the existing startup deadline. Then restart the single existing journal owner with an explicit `--ethereum-rpc`, unchanged wallets/deployment/output directory, and inspect canonical progress. Budget a dedicated archival execution service and historical Beacon access for production; public free access alone is not a production availability commitment.
+
+Live recovery preserved every prior signed submission and authenticated the two
+catch-up handovers through finalized original receipts, reaching 695 finalized
+records without replacing a nonce or signature. The existing outbound worker
+was rebuilt and restarted against the same archive, wallet and durable storage;
+its completed transfer record remained unchanged and HTTP root polling resumed.
+Sparse scheduling still promotes receipt finality on its existing freshness
+check interval. After an authenticated near-head same-set scan, an idle restart
+becomes healthy without buying a transaction or extending the accepted expiry.
+
+Back up the authenticated execution proof cache with the signed journals. The
+693-record timing is not a guarantee for an arbitrarily old cold journal; use
+the read-only audit to warm/qualify retained history before moving an aged actor,
+and retain resumable evidence rather than weakening the startup deadline.
+
 
 Public Ethereum selection is explicit: `--ethereum-network mainnet` applies to the follower, root publisher and history audit; the default remains Hoodi. Mainnet requires an independently reviewed `mainnet-token-stack` deployment with chain 1, no rehearsal/fixture approval, and HTTPS or WSS. Its execution genesis and finalized-history archive are pinned to Ethereum mainnet, never learned as approval from the endpoint. Existing Hoodi journals retain their original modes and identities; do not relabel them for mainnet. Fresh `tokens-manifest`/`tokens-configure` tooling remains Hoodi/owned-fixture scoped; mainnet consumes the separately reviewed retained-state migration manifest.
 
@@ -227,6 +252,101 @@ Historical source inventory starts at immutable `beefyRootMinimum`, not first pu
 Outbound discovery has one atomic `ethereum_roots.json` owner. It binds retained roots to finalized Ethereum block hashes and transaction/log coordinates; subscriptions only wake finalized catch-up. The extractor saves roots before in-memory acceptance and advances its hash-bound cursor only after all acknowledgements. A legacy numeric cursor/cache triggers a full replay from block zero in 2,000-block batches to an authenticated saved target, never a fixed rewind. Old files remain evidence, not runtime inputs. Rebuilding roots cannot reach the accumulator or unsigned sender; restart resumes and revalidates the rebuild before hydrating ready state. Preserve historical execution headers and source archive state. Authenticated conflicts HOLD; unavailable finality retries without cursor advance. Saved unsigned selections are requalified before preparation; original signatures are never rewritten.
 
 The root cache retains at most 100 authenticated publications globally, by Ethereum publication order rather than source height. A newly published historical root can therefore enter a full cache without displacing its own proof merely because later source heights were published first.
+
+### Monthly operating-cost envelope
+
+The gross target is **under US$5,000 per 30 days before fee income**. Bridged
+principal is not operating treasury. The [receipt benchmark](../ethereum/README.md#full-transaction-beefy-gas-and-operating-cost)
+includes Ethereum intrinsic/calldata costs; it is not a production gas ceiling.
+
+The follower no longer buys an idle update every 32 source blocks. It preserves
+ordered authority handovers, a 12-hour heartbeat, 24-hour expiry and root demand.
+At the observed native 3-second/2,400-block epoch cadence, idle updates fall from
+about 900/day to 12/day (98.7% fewer); verify the activated mainnet schedule.
+New unsigned token executions use the existing Alloy fee-history estimator,
+not a fixed 0.5-gwei minimum tip. The former 2-gwei max-fee floor was a cap,
+not the amount necessarily paid. Original signed transactions are never repriced.
+The local signing/mining regression is
+`cargo test --locked -p ethereum-client --lib tests::content_message_follows_market_fees_without_fixed_tip -- --ignored --exact --nocapture`.
+
+Planning assumptions, not exchange-rate/vendor quotes: ETH = $3,000, VARA =
+$0.001, 59 signing validators, 360 handovers/month. The finalized mainnet roster
+read at block 36,913,322 contained 59 validators and runtime spec 11000; that
+observation does not certify the pending BEEFY activation. Reprice after the
+runtime upgrade, a roster change or a source-schedule change.
+
+| Monthly allocation | USD | Qualification |
+|---|---:|---|
+| Two independent Vara archive nodes | 500 | Procurement allowance; production archive growth/sizing not yet measured |
+| Archival Ethereum execution + historical Beacon RPC | 250 | Allowance; require explicit history retention, quotas and availability terms |
+| Relayer/indexer hosting | 150 | Allowance; no recurring ZK prover/GPU assumed for this BEEFY lane |
+| Backups and monitoring | 100 | Allowance; preserve signed journals and authenticated proof cache |
+| Vara execution/checkpoint costs | 100 | Local checkpoint estimate about 43,000 VARA/month plus about 3.96 VARA/inbound; covers 100 inbound/day at the planning rate, not production weights |
+| Operational contingency | 500 | Failed originals, exceptional maintenance and variance; not bridged funds |
+
+Use gas allowances of 500,000/handover, 400,000/additional demand update,
+200,000/root publication and 180,000/ERC20 execution. These are margins over
+measured cases, not universal maxima. Charge each outbound transfer its own
+additional update, root and execution (780,000 gas), with no batching savings.
+Allow 15 extra empty-progress root publications/month; measure actual non-message
+root events/progress and charge any excess as well. Include deployment/migration
+separately: these are steady-state operating scenarios, not the launch budget.
+
+The previously measured fresh 16-transaction Hoodi deployment used 18,721,390
+gas (about $56.16 at the planning 1-gwei/$3,000 assumptions); that is not a
+retained-state mainnet migration quote. Charge actual launch transactions to
+the first-month budget/contingency rather than treating them as free.
+User-facing service-fee schedules are unchanged by these operating-cost fixes.
+
+| Outbound ERC20 volume | Effective gas price, including tip | Ethereum USD/month | Total USD/month, including all allocations above |
+|---|---:|---:|---:|
+| 35/day | 1 gwei | 3,006.00 | 4,606.00 |
+| 100/day | 0.4 gwei | 3,027.60 | 4,627.60 |
+| 100/day | 1 gwei | 7,569.00 | 9,169.00 |
+
+Recommended launch planning envelope: 35 outbound/day at a 1-gwei monthly
+weighted effective price, or 100/day only while the weighted price is at most
+0.4 gwei. These are capacity/budget conditions, **not implemented admission
+limits or price guarantees**. Native/custom token paths need their own measured
+allowance. Reforecast receipts, volume, roster, exchange rates and provider
+invoices daily. At roughly 6.2 gwei the mandatory handover baseline alone exhausts
+the available Ethereum allowance; this architecture cannot guarantee $5,000 at
+arbitrary congestion even with zero users. Never enforce the budget by skipping
+handovers, weakening proofs, starving an already signed original or using
+custody balances. Escalate funding/traffic/SLA decisions before the envelope is
+exceeded; existing liabilities and messages must remain recoverable.
+
+The next cost design is unsigned **root coalescing within each QueueId**, not
+merely delaying the existing publisher: the runtime's cumulative root changes
+once per changed source block, and the current publisher retains each row.
+The implemented frozen demand batch shares a BEEFY update, not publications.
+A later root may cover earlier messages in the same queue epoch, but a cutover
+must prove complete nonce/leaf coverage, preserve every nonzero queue epoch and
+historical claim, update proof/discovery consumers together, and leave signed
+originals immutable. Qualify overflow, epoch reset, backfill and restart before
+root elimination. Aligning a valid final root with each 2-hour handover could
+avoid extra demand updates, at up to roughly 2 hours of additional batching
+latency. With exactly one root per handover, 100 ERC20 executions/day and the
+same allowances, the indicative 1-gwei total is $3,985/month; queue overflow,
+extra epochs and stricter latency increase it. This is a researched design,
+**not deployed savings**. Do not change quorum/sample security or migrate custody
+to another chain to make the estimate fit.
+
+Free public dRPC currently resolves the observed Hoodi archive failure, but is
+not the production availability plan. [dRPC pricing](https://drpc.org/pricing)
+and [request tiers](https://drpc.org/docs/pricing/requests) distinguish public
+free capacity from paid service; obtain the actual archive/Beacon coverage and
+price before procurement. [Vara node requirements](https://wiki.vara.network/docs/vara-network/node)
+are node minima, not archive disk forecasts. Reuse the two existing local archive
+nodes for qualification; provision production history deliberately rather than
+assuming a pruned RPC can recover old state. Provider allowances above are not
+purchases or claimed SLAs.
+For a concrete procurement candidate, [Chainstack advertises Ethereum archive
+access from $49/month](https://chainstack.com/build-better-with-ethereum) and
+documents a [Beacon API](https://docs.chainstack.com/reference/beacon-chain).
+Those pages do not establish the historical Beacon-state retention needed here;
+verify it and replay the pinned EL/Beacon history before approving a plan. No
+paid provider credentials were present in the existing follower configuration.
 
 ### BEEFY expiry and existing administration
 

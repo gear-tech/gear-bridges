@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 #[cfg(test)]
 use gear_rpc_client::dto;
 use gear_rpc_client::GearApi;
@@ -426,9 +426,13 @@ impl Source {
             }
             match timeout(Duration::from_secs(3), self.subscription.next()).await {
                 Err(_) => {}
-                Ok(None) => bail!("BEEFY justification subscription closed"),
+                Ok(None) => {
+                    return Err(
+                        subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped).into(),
+                    )
+                }
                 Ok(Some(Err(error))) => {
-                    return Err(anyhow!("BEEFY justification subscription failed: {error}"))
+                    return Err(anyhow!(error).context("BEEFY justification subscription failed"))
                 }
                 Ok(Some(Ok(raw))) => {
                     self.queue_justification(decode_hex_bounded(&raw, MAX_BEEFY_PROOF_BYTES)?)

@@ -1,7 +1,6 @@
 import { GearApi } from '@gear-js/api';
 import { prepareVaraToEthRelay, getMessageQueueClient, type OutboundEffect } from '@gear-js/bridge';
 import { useMutation } from '@tanstack/react-query';
-import { bytesToHex } from 'viem';
 import { useConfig, usePublicClient } from 'wagmi';
 import { getWalletClient } from 'wagmi/actions';
 
@@ -59,7 +58,7 @@ function useRelayVaraTx(
         prepared.blockNumber,
         prepared.message,
         prepared.proof,
-        { ...expectedEffect, sourceActorId: bytesToHex(prepared.message.source) },
+        { ...expectedEffect, sourceActorId: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS },
         onLog,
         deadline,
         { wait: true },

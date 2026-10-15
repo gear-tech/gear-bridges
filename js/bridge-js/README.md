@@ -90,7 +90,7 @@ Simulation, signing and submission share the original deadline. Gear and local E
 
 ### `waitForMerkleRootAppearedInMessageQueue`
 
-This helper reports root availability only. Availability does not prove the original inclusion proof, transaction finality or destination effect.
+This helper reports root availability only. It first checks the exact finalized stored root, then scans inclusive 2,000-block publication windows recent-first from the supplied Ethereum history floor (or genesis). It returns the lowest eligible source height in the first matching window, not a global minimum; maximum source progress is never a discovery cursor, so late historical backfills remain visible. After installing the watcher, inclusive catch-up closes the history/subscription gap. Removed and zero-root events are ignored, failures remain visible, and the watcher is released when the wait settles. Historical/live event candidates may still be unfinalized: availability does not prove an original inclusion proof, root maturity, transaction finality or destination effect. Use authenticated relay preparation and settlement verification for a claim.
 
 ## Authenticated application examples
 

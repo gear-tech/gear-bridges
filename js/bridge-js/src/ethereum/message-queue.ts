@@ -263,34 +263,67 @@ export class MessageQueueClient {
     const merkleRoot = await this.getMerkleRoot(bn);
     if (merkleRoot) return { blockNumber: bn, merkleRoot };
 
-    const latestBlock = await this._client.getBlockNumber();
+    const latestBlock = await this._client.getBlockNumber({ cacheTime: 0 });
+    let settled = false;
+    const selectRoot = (logs: readonly { removed?: boolean; args?: Partial<MerkleRootLogArgs> }[]) => {
+      let selected: MerkleRootLogArgs | undefined;
+      for (const { removed, args } of logs) {
+        if (!removed && args?.blockNumber !== undefined && args.blockNumber >= bn &&
+            args.merkleRoot && args.merkleRoot !== zeroHash &&
+            (!selected || args.blockNumber < selected.blockNumber)) {
+          selected = { blockNumber: args.blockNumber, merkleRoot: args.merkleRoot };
+        }
+      }
+      return selected;
+    };
+    const scan = async (start: bigint, finish: bigint) => {
+      for (let end = finish; end >= start && !settled;) {
+        const from = end - 1999n > start ? end - 1999n : start;
+        const root = selectRoot(await this.getMerkleRootLogsInRange(from, end));
+        if (root) return root;
+        end = from - 1n;
+      }
+    };
+    const historicalRoot = await scan(fromBlock ?? 0n, latestBlock);
+    if (historicalRoot) return historicalRoot;
 
     return new Promise<MerkleRootLogArgs>((resolve, reject) => {
+      let unwatch: (() => void) | undefined;
+      const settle = (error: unknown, root?: MerkleRootLogArgs) => {
+        if (settled) return;
+        settled = true;
+        unwatch?.();
+        if (root) resolve(root);
+        else reject(error);
+      };
       statusCb(`Subscribing to merkle root events`);
-      const unwatch = this._client.watchContractEvent({
-        address: this._address,
-        abi: MerkleRootEventAbi,
-        eventName: 'MerkleRoot',
-        fromBlock: fromBlock ?? latestBlock,
-        onLogs: (logs) => {
-          for (const log of logs) {
-            if ('args' in log) {
-              const { blockNumber, merkleRoot } = log.args as MerkleRootLogArgs;
-              statusCb(`Received merkle root`, { blockNumber: blockNumber.toString(), merkleRoot });
-              if (blockNumber >= bn) {
-                unwatch();
-                return resolve({ blockNumber, merkleRoot });
-              }
-            }
-          }
-        },
-        onError: (error) => {
-          if (unwatch) {
-            unwatch();
-          }
-          reject(error);
-        },
-      });
+      try {
+        unwatch = this._client.watchContractEvent({
+          address: this._address,
+          abi: MerkleRootEventAbi,
+          eventName: 'MerkleRoot',
+          fromBlock: latestBlock,
+          onLogs: (logs) => {
+            const root = selectRoot(logs);
+            if (root) settle(undefined, root);
+          },
+          onError: (error) => settle(error),
+        });
+        // A watcher can deliver logs or an error before returning its cleanup function.
+        if (settled) {
+          unwatch();
+          return;
+        }
+        // Inclusive catch-up closes the history/watch gap even when the captured head is unchanged.
+        void (async () => {
+          const head = await this._client.getBlockNumber({ cacheTime: 0 });
+          if (settled) return;
+          const root = await scan(latestBlock, head);
+          if (root) settle(undefined, root);
+        })().catch((error) => settle(error));
+      } catch (error) {
+        settle(error);
+      }
     });
   }
 

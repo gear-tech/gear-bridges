@@ -3,6 +3,7 @@ import { useAccount } from '@gear-js/react-hooks';
 import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
 import { Token, useTokens } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { useEthAccount } from '@/hooks';
 
 import { NETWORK } from './consts';
@@ -35,6 +36,7 @@ const { Provider } = BridgeContext;
 const useBridgeContext = () => useContext(BridgeContext);
 
 function BridgeProvider({ children }: PropsWithChildren) {
+  const { isMainnet } = useNetworkType();
   // network
   const { account } = useAccount();
   const ethAccount = useEthAccount();
@@ -60,7 +62,7 @@ function BridgeProvider({ children }: PropsWithChildren) {
         name: token?.network || NETWORK.VARA,
         isVara: isVaraNetwork,
         switch: () => {
-          if (isEthToVaraUsdcBridgeDisabled(destinationToken)) return;
+          if (isEthToVaraUsdcBridgeDisabled(destinationToken, isMainnet)) return;
 
           setTokenAddress(destinationToken?.address);
         },
@@ -69,7 +71,7 @@ function BridgeProvider({ children }: PropsWithChildren) {
       token: token ? { ...token, set: setTokenAddress } : undefined,
       destinationToken,
     }),
-    [destinationToken, isVaraNetwork, token],
+    [destinationToken, isVaraNetwork, token, isMainnet],
   );
 
   return <Provider value={value}>{children}</Provider>;

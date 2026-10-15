@@ -56,7 +56,7 @@ async fn connect_ws(ws: WsConnect) -> Result<alloy::rpc::client::RpcClient, Tran
             .ws(ws),
     )
     .await
-    .map_err(|_| TransportErrorKind::custom_str("Ethereum WebSocket connection timed out"))?
+    .map_err(TransportErrorKind::custom)?
 }
 
 async fn connect_rpc(
@@ -179,7 +179,7 @@ use abi::{
 };
 
 pub mod error;
-pub use error::Error;
+pub use error::{is_transient_rpc_error, Error};
 
 /// Holds exclusive ownership of Ethereum account submissions across retries.
 pub struct SubmissionGuard {

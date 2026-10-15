@@ -7,6 +7,7 @@ import { WRAPPED_ETH_ABI } from '@/consts';
 import { definedAssert } from '@/utils';
 
 import { useBridgeContext } from '../../context';
+import { assertSuccessfulReceipt } from '../../submission';
 
 function useMint() {
   const { token } = useBridgeContext();
@@ -23,7 +24,7 @@ function useMint() {
       value,
     });
 
-    return waitForTransactionReceipt(config, { hash });
+    return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };
 
   const getGasLimit = ({ value }: { value: bigint }) => {

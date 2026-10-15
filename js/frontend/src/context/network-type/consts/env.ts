@@ -27,6 +27,11 @@ const ERC20_MANAGER_CONTRACT_ADDRESS = getNetworkEnv<HexString>('ERC20_MANAGER_C
 
 const ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS = getNetworkEnv<HexString>('ETH_MESSAGE_QUEUE_CONTRACT_ADDRESSES');
 
+const OUTBOUND_VERIFICATION = getNetworkEnv('OUTBOUND_VERIFICATION_MODES', (value): 'zk' | 'beefy' => {
+  if (value !== 'zk' && value !== 'beefy') throw new Error('HOLD: unknown outbound verification mode');
+  return value;
+});
+
 function approvedInboundProfile(network: 'MAINNET' | 'TESTNET'): { profile?: InboundProofProfile; hold?: string } {
   try {
     const raw = import.meta.env.VITE_INBOUND_PROOF_PROFILES as string | undefined;
@@ -78,4 +83,5 @@ export {
   ERC20_MANAGER_CONTRACT_ADDRESS,
   ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS,
   INBOUND_PROOF_PROFILE,
+  OUTBOUND_VERIFICATION,
 };

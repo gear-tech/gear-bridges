@@ -4,7 +4,7 @@ import { request } from 'graphql-request';
 import { useNetworkType } from '@/context/network-type';
 
 import { TRANSFERS_QUERY, TRANSACTIONS_LIMIT } from '../consts';
-import { TransferFilter, TransfersQueryQuery } from '../graphql/graphql';
+import { StatusEnum, TransferFilter, TransfersQueryQuery } from '../graphql/graphql';
 
 function useTransactions(filter: TransferFilter | undefined) {
   const { NETWORK_PRESET } = useNetworkType();
@@ -32,6 +32,12 @@ function useTransactions(filter: TransferFilter | undefined) {
     initialPageParam: 0,
 
     getNextPageParam,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) =>
+        page.allTransfers?.nodes.some((row) => row && row.status !== StatusEnum.Failed && !row.completedAt),
+      )
+        ? 60000
+        : false,
 
     select: ({ pages }) => ({
       transactions: pages.flatMap(({ allTransfers }) => allTransfers?.nodes || []),

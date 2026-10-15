@@ -150,6 +150,7 @@ function Transaction() {
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
+  const isClaimable = !completedAt && (isAwaitingPayment || status === StatusEnum.Bridging);
 
   return (
     <Container className={styles.container}>
@@ -163,10 +164,10 @@ function Transaction() {
           <p className={styles.subheading}>Cross-chain swap transaction information</p>
         </div>
 
-        {isAwaitingPayment && (
+        {isClaimable && (
           <div className={styles.sidebar}>
             <div className={styles.buttons}>
-              {isVaraNetwork && (
+              {isVaraNetwork && isAwaitingPayment && (
                 <PayVaraFeeButton nonce={nonce} onInBlock={() => optimisticTxUpdate(StatusEnum.Bridging)} />
               )}
 

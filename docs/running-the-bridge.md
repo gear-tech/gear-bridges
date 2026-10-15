@@ -150,13 +150,42 @@ Keep the state file, its `.bak` file, proof-storage directory, verifier/SRS data
 
 For a transient RPC failure, the Gear listener reconnects and replays missing finalized blocks; Ethereum pollers reconnect and resume from their persisted cursors. The shared Ethereum WebSocket handshake and individual RPC requests time out after 30 seconds for `EthApi`, `PollingEthApi` and raw-provider calls. Transient receipt-evidence transport failures reconnect and recheck the original signed transaction; identity, finality and event mismatches remain HOLD. A timeout is not proof of non-submission and does not authorize replacement signing, a different nonce or changed deadlines. A zero process exit code does not establish worker health: a failed child task can close the pipeline without a nonzero exit. Inspect logs and metrics before deciding whether to retry, restore state, or escalate to the emergency procedures.
 
-Wrapped HTTP transport errors are classified through their source chain: a
-reqwest/hyper connection reset or an unreachable/down host or network must not
-become permanent merely because its outer display says only “error sending
-request”. Explicit permanent RPC/status
-errors and ambiguous transaction-send failures keep their existing fail/HOLD
-precedence. The regression drives actual finalized-block and deposit readers
-against a loopback server that resets the socket after receiving the request.
+Wrapped HTTP transport errors are classified by typed network envelopes and their
+source chains, including connection resets, unavailable local addresses after a
+Wi-Fi change, unreachable/down networks, and network timeouts. Display text alone
+does not make an error retryable. Explicit permanent RPC/status errors, storage
+failures and ambiguous transaction-send failures keep their fail/HOLD precedence.
+
+Inbound Ethereum discovery retries the failed read without discarding its next
+block or pending work. Reconnection uses exponential backoff starting at one
+second, with jitter and a hard 60-second cap; downstream closure cancels the wait.
+
+The BEEFY token follower retries transient source, witness and Ethereum transport
+failures with a one-second exponential backoff capped at 30 seconds. It retains
+the deployment ownership lock across retries, reloads its durable journal,
+reconnects and authenticates both source endpoints, Ethereum, the bootstrap and
+full retained history, then reconciles original signed transactions before
+continuing. It never replaces an original transaction to recover connectivity.
+`--reconcile-once` remains bounded and does not enter this retry loop. Persistence
+failures, identity mismatches and the 300-second startup authentication deadline
+remain terminal/HOLD conditions, not transport retries.
+
+Accepted-commitment discovery snapshots the current Ethereum block number and
+scans the complete history in explicit inclusive batches of at most 2,000 blocks.
+A match does not end the scan: conflicting matches across batches HOLD, and
+accepted transactions still require original signed-receipt/finality
+authentication. Provider HTTP 400/range rejections remain terminal, never
+transient reconnect triggers.
+
+Laptop sleep pauses these processes; recoverable connections resume after wake
+and network restoration while the processes remain alive. Process termination
+or reboot still requires a supervisor. Reconnection does not bypass client
+expiry, archival-evidence requirements or other safety holds.
+
+Local Hoodi review interrupted the real execution-RPC transport for 90 seconds.
+Both workers resumed with unchanged PIDs and original transaction data; inbound
+discovery and follower scanning advanced after restoration. This is transport
+recovery evidence, not production qualification.
 
 The full relayer suite, six live Hoodi reconnect cases and real-contract Anvil original-receipt/restart/replay smoke passed in local review evidence. Those logs remain local evidence, not timed-campaign or production qualification.
 
@@ -220,7 +249,19 @@ On follower restart, saved finalized commitments are revalidated against their o
 
 `beefy-relay tokens-history-audit --source-rpc <source> --witness-rpc <witness> --ethereum-rpc <EL> --deployment-manifest <manifest> --follower-state <existing-state.json> --proof-dir <new-private-audit-directory>` exercises that read-only historical authentication path without a signer. Keep the original journal untouched and use a separately owned proof directory, never the running follower’s archive. Repeat with the same audit directory for the warm-recovery check; fresh deployment history is not evidence for aged-journal recovery.
 
+Historical endpoint qualification (not a promise of current availability):
+
 The Hoodi CLI default is `https://hoodi.drpc.org`. Its hash-pinned historical state and canonical receipts were checked against the retained v2.1.0 deployment; the read-only history audit authenticated all 693 originals in 58.1 seconds cold and 2.0 seconds warm without changing the follower journal. This qualifies that observed history, not a provider SLA or a mainnet endpoint. The previously used ethpandaops endpoint returned malformed null contract results/timeouts; PublicNode could not serve required old state. Do not substitute latest state, clear journals, fabricate missing results, or automatically rebroadcast through an unqualified provider. Before an endpoint switch, verify the approved chain/genesis, oldest and newest retained EIP-1898 state pins, original transaction/receipt identities, and both cold/warm history audits within the existing startup deadline. Then restart the single existing journal owner with an explicit `--ethereum-rpc`, unchanged wallets/deployment/output directory, and inspect canonical progress. Budget a dedicated archival execution service and historical Beacon access for production; public free access alone is not a production availability commitment.
+
+During subsequent PR finalization, dRPC rejected explicit 500–2,000-block log
+ranges with HTTP 400, despite accepting 100-block ranges; PublicNode again lacked
+required historical state. The existing `https://rpc.hoodi.ethpandaops.io` endpoint
+was requalified with the original journal and full startup authentication. The
+follower resumed there, preserved prior signed transactions and accepted the
+original root for Gear block 48194. The corresponding 100-token user transfer
+completed through its original canonical finalized receipt, with the expected
+finalized recipient balance. These observations supersede the earlier endpoint
+availability result, not the archival checks or production qualification gates.
 
 Live recovery preserved every prior signed submission and authenticated the two
 catch-up handovers through finalized original receipts, reaching 695 finalized

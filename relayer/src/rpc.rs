@@ -56,7 +56,7 @@ impl RetryPolicy {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.subsec_nanos() as u64 % jitter_bound)
             .unwrap_or_default();
-        delay + Duration::from_millis(jitter_ms)
+        (delay + Duration::from_millis(jitter_ms)).min(self.max_delay)
     }
 }
 
@@ -80,7 +80,7 @@ pub fn classify_anyhow(err: &anyhow::Error) -> RetryDecision {
         return RetryDecision::Retry;
     }
 
-    if err.chain().any(is_recoverable_error_text) {
+    if ethereum_client::is_transient_rpc_error(err) {
         return RetryDecision::Retry;
     }
 
@@ -112,67 +112,19 @@ pub(crate) fn classify_gear_transport_error(err: &anyhow::Error) -> RetryDecisio
 }
 
 pub fn classify_ethereum_error(err: &ethereum_client::Error) -> RetryDecision {
-    match err {
-        ethereum_client::Error::ErrorInHTTPTransport(err) => classify_alloy_rpc(err),
-        ethereum_client::Error::ErrorDuringContractExecution(err)
-        | ethereum_client::Error::ErrorQueryingEvent(err) => match err {
-            alloy::contract::Error::TransportError(err) => classify_alloy_rpc(err),
-            _ => RetryDecision::Fail,
-        },
-        _ => RetryDecision::Fail,
+    if ethereum_client::error::is_transient_rpc_cause(err) {
+        RetryDecision::Retry
+    } else {
+        RetryDecision::Fail
     }
 }
 
 pub fn classify_alloy_rpc(err: &RpcError<TransportErrorKind>) -> RetryDecision {
-    match err {
-        RpcError::Transport(transport) => match transport {
-            TransportErrorKind::MissingBatchResponse(_) | TransportErrorKind::BackendGone => {
-                RetryDecision::Retry
-            }
-            TransportErrorKind::HttpError(err)
-                if matches!(err.status, 408 | 429 | 500 | 502 | 503 | 504) =>
-            {
-                RetryDecision::Retry
-            }
-            TransportErrorKind::Custom(message)
-                if std::iter::successors(
-                    Some(message.as_ref() as &(dyn std::error::Error + 'static)),
-                    |error| error.source(),
-                )
-                .any(is_recoverable_error_text) =>
-            {
-                RetryDecision::Retry
-            }
-            _ => RetryDecision::Fail,
-        },
-        RpcError::ErrorResp(_) => RetryDecision::Fail,
-        RpcError::NullResp => RetryDecision::Retry,
-        _ => RetryDecision::Fail,
+    if ethereum_client::error::is_transient_rpc_cause(err) {
+        RetryDecision::Retry
+    } else {
+        RetryDecision::Fail
     }
-}
-
-pub fn is_recoverable_error_text(message: impl std::fmt::Display) -> bool {
-    let message = message.to_string().to_ascii_lowercase();
-    message.contains("background task closed")
-        || message.contains("connection closed")
-        || message.contains("disconnectedwillreconnect")
-        || message.contains("disconnected will reconnect")
-        || message.contains("restart required")
-        || message.contains("backend gone")
-        || message.contains("backend connection task has stopped")
-        || message.contains("transport error")
-        || message.contains("subscription dropped")
-        || message.contains("connection refused")
-        || message.contains("connection reset")
-        || message.contains("broken pipe")
-        || message.contains("no route to host")
-        || message.contains("host unreachable")
-        || message.contains("network is unreachable")
-        || message.contains("network unreachable")
-        || message.contains("network is down")
-        || message.contains("network down")
-        || message.contains("timed out")
-        || message.contains("timeout")
 }
 
 /// Retry an Ethereum operation without dropping its in-memory work item.
@@ -199,6 +151,28 @@ where
     )
     .await
 }
+/// Retry a read without unwinding the listener's cursor or queued work.
+pub async fn retry_polling_eth<T, F, Fut>(
+    api: &mut ethereum_client::PollingEthApi,
+    operation: &'static str,
+    f: F,
+) -> anyhow::Result<T>
+where
+    F: FnMut(ethereum_client::PollingEthApi) -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
+{
+    retry(
+        api,
+        operation,
+        RetryPolicy::default(),
+        None,
+        f,
+        |api| async move { api.reconnect().await },
+        classify_anyhow,
+    )
+    .await
+}
+
 /// Reconnect a polling Ethereum client and retain the replacement provider.
 pub async fn reconnect_polling_eth(api: &mut ethereum_client::PollingEthApi) -> anyhow::Result<()> {
     *api = api.reconnect().await?;
@@ -369,12 +343,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classifies_known_disconnect_text_as_recoverable() {
+    fn does_not_classify_untyped_disconnect_text_as_rpc() {
         let err = anyhow::anyhow!(
             "RPC error: client error: The background task closed connection closed; restart required"
         );
 
-        assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+        assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
     }
 
     #[test]
@@ -547,40 +521,40 @@ mod tests {
     }
 
     #[test]
-    fn classifies_backend_task_stopped_text_as_recoverable() {
+    fn does_not_classify_untyped_backend_text_as_rpc() {
         let err = anyhow::anyhow!("backend connection task has stopped");
 
-        assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+        assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
     }
 
     #[test]
-    fn classifies_real_socket_failures_as_recoverable() {
+    fn does_not_classify_untyped_socket_text_as_rpc() {
         let err = anyhow::anyhow!("transport error: connection refused");
 
-        assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+        assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
     }
 
     #[test]
     fn retries_unreachable_network_transports_but_not_rpc_rejections() {
-        for message in [
-            "No route to host (os error 65)",
-            "Network is unreachable (os error 101)",
-            "Network is down (os error 50)",
-            "host unreachable",
-            "network unreachable",
-            "network down",
+        for kind in [
+            std::io::ErrorKind::AddrNotAvailable,
+            std::io::ErrorKind::NetworkDown,
+            std::io::ErrorKind::NetworkUnreachable,
+            std::io::ErrorKind::HostUnreachable,
         ] {
             let transport = RpcError::Transport(TransportErrorKind::Custom(Box::new(
-                std::io::Error::other(message),
+                std::io::Error::from(kind),
             )));
             assert_eq!(
                 classify_alloy_rpc(&transport),
                 RetryDecision::Retry,
-                "{message}"
+                "{kind:?}"
             );
             let rejection = RpcError::ErrorResp(
-                serde_json::from_value(serde_json::json!({"code": -32603, "message": message}))
-                    .unwrap(),
+                serde_json::from_value(
+                    serde_json::json!({"code": -32603, "message": format!("{kind:?}")}),
+                )
+                .unwrap(),
             );
             assert_eq!(classify_alloy_rpc(&rejection), RetryDecision::Fail);
             let send = ethereum_client::Error::ErrorSendingTransaction(
@@ -588,6 +562,37 @@ mod tests {
             );
             assert_eq!(classify_ethereum_error(&send), RetryDecision::Fail);
         }
+    }
+
+    #[tokio::test]
+    async fn retry_stops_on_permanent_reconnect_failure_without_replaying_work() {
+        let mut api = 17;
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = retry(
+            &mut api,
+            "listener reconnect",
+            RetryPolicy {
+                base_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+            },
+            None,
+            |_| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { Err::<(), _>("disconnected") }
+            },
+            |_| async { Err("unauthorized") },
+            |error| {
+                if *error == "disconnected" {
+                    RetryDecision::Retry
+                } else {
+                    RetryDecision::Fail
+                }
+            },
+        )
+        .await;
+        assert_eq!(result, Err("unauthorized"));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(api, 17);
     }
 
     #[tokio::test]

@@ -1,9 +1,6 @@
-use crate::{
-    common,
-    message_relayer::common::{
-        ethereum::block_storage::{finalized_block, BlockCursor, JSONBlockStorage},
-        EthereumBlockNumber,
-    },
+use crate::message_relayer::common::{
+    ethereum::block_storage::{finalized_block, BlockCursor, JSONBlockStorage},
+    EthereumBlockNumber,
 };
 use ethereum_client::PollingEthApi;
 use prometheus::IntGauge;
@@ -64,7 +61,12 @@ impl BlockListener {
             .into_iter()
             .flatten()
         {
-            let block = finalized_block(&self.eth_api, cursor.number).await?;
+            let block = crate::rpc::retry_polling_eth(
+                &mut self.eth_api,
+                "Ethereum discovery finalized block",
+                |api| async move { finalized_block(&api, cursor.number).await },
+            )
+            .await?;
             anyhow::ensure!(
                 block.header.hash.0 == cursor.hash.0,
                 "HOLD: original finalized Ethereum discovery cursor changed"
@@ -72,7 +74,12 @@ impl BlockListener {
         }
         let mut next_block = snapshot.next_block()?;
         for (&number, &hash) in &snapshot.pending {
-            let block = finalized_block(&self.eth_api, number).await?;
+            let block = crate::rpc::retry_polling_eth(
+                &mut self.eth_api,
+                "Ethereum discovery finalized block",
+                |api| async move { finalized_block(&api, number).await },
+            )
+            .await?;
             anyhow::ensure!(
                 block.header.hash.0 == hash.0,
                 "HOLD: pending finalized Ethereum discovery hash changed"
@@ -91,10 +98,22 @@ impl BlockListener {
         }
         self.metrics.latest_block.set(next_block as i64);
         loop {
-            let latest = self.eth_api.finalized_block().await?.header.number;
+            let latest = crate::rpc::retry_polling_eth(
+                &mut self.eth_api,
+                "Ethereum discovery finalized head",
+                |api| async move { api.finalized_block().await },
+            )
+            .await?
+            .header
+            .number;
             if latest >= next_block {
                 for number in next_block..=latest {
-                    let block = finalized_block(&self.eth_api, number).await?;
+                    let block = crate::rpc::retry_polling_eth(
+                        &mut self.eth_api,
+                        "Ethereum discovery finalized block",
+                        |api| async move { finalized_block(&api, number).await },
+                    )
+                    .await?;
                     if let Some((genesis, last)) = self.last_receipt_slot {
                         let elapsed =
                             block.header.timestamp.checked_sub(genesis).ok_or_else(|| {
@@ -143,26 +162,12 @@ async fn persist_and_send_block(
 }
 
 async fn task(mut this: BlockListener, sender: Sender<EthereumBlockNumber>) {
-    loop {
-        let Err(error) = this.run_inner(&sender).await else {
-            continue;
-        };
-        log::error!("Ethereum block listener failed: {error:?}");
-        if !common::is_transport_error_recoverable(&error) {
-            log::error!("Non recoverable error, exiting.");
-            return;
-        }
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        loop {
-            match this.eth_api.reconnect().await {
-                Ok(api) => {
-                    this.eth_api = api;
-                    break;
-                }
-                Err(error) => {
-                    log::error!("Failed to reconnect to Ethereum API: {error}. Retrying...");
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                }
+    // Dropping the downstream lane also cancels an outage backoff or cutover wait.
+    tokio::select! {
+        _ = sender.closed() => {},
+        result = this.run_inner(&sender) => {
+            if let Err(error) = result {
+                log::error!("Ethereum block listener stopped on non-transient error: {error:#}");
             }
         }
     }
@@ -215,7 +220,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restarted_listener_replays_only_pending_and_new_finalized_blocks() {
+    async fn restarted_listener_retains_pending_and_cursor_through_rpc_outage() {
         let mut blocks = Vec::new();
         let mut parent = alloy_primitives::B256::ZERO;
         for number in 0..=272 {
@@ -233,6 +238,8 @@ mod tests {
         }
         let blocks = Arc::new(blocks);
         let queries = Arc::new(Mutex::new(Vec::new()));
+        let unavailable_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server_unavailable_reads = unavailable_reads.clone();
         let socket = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", socket.local_addr().unwrap());
         let server_blocks = blocks.clone();
@@ -240,12 +247,21 @@ mod tests {
         let server = HttpServer::new(move || {
             let blocks = server_blocks.clone();
             let queries = server_queries.clone();
+            let unavailable_reads = server_unavailable_reads.clone();
             App::new().route(
                 "/",
                 web::post().to(move |request: web::Json<Value>| {
                     let blocks = blocks.clone();
                     let queries = queries.clone();
+                    let unavailable_reads = unavailable_reads.clone();
                     async move {
+                        if request["method"] == "eth_getBlockByNumber"
+                            && request["params"][0] == "0x10f"
+                            && unavailable_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                                < 2
+                        {
+                            return HttpResponse::ServiceUnavailable().finish();
+                        }
                         let result = match request["method"].as_str().unwrap() {
                             "eth_chainId" => json!("0x88bb0"),
                             "eth_getBlockByNumber" => {
@@ -310,8 +326,8 @@ mod tests {
         drop(storage);
         let restored = Arc::new(JSONBlockStorage::new(path.clone(), bound).await.unwrap());
         let (sender, mut receiver) = channel(1);
-        let mut listener = BlockListener::new(api, restored.clone());
-        let actor = tokio::spawn(async move { listener.run_inner(&sender).await });
+        let listener = BlockListener::new(api, restored.clone());
+        let actor = tokio::spawn(task(listener, sender));
         for expected in 270..=272 {
             let actual = tokio::time::timeout(Duration::from_secs(10), receiver.recv())
                 .await
@@ -326,8 +342,12 @@ mod tests {
                 .await
                 .unwrap();
         }
-        actor.abort();
-        assert!(actor.await.unwrap_err().is_cancelled());
+        drop(receiver);
+        tokio::time::timeout(Duration::from_secs(1), actor)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(unavailable_reads.load(std::sync::atomic::Ordering::SeqCst) >= 3);
         assert!(queries
             .lock()
             .unwrap()

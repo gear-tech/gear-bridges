@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::bail;
 use gsdk::{
     ext::sp_core::{sr25519, Pair as _},
     PairSigner,

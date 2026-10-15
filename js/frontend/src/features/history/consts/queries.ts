@@ -17,6 +17,7 @@ const TRANSFERS_QUERY = graphql(`
         sourceNetwork
         status
         timestamp
+        completedAt
         nonce
         blockNumber
       }

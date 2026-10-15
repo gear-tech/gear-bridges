@@ -10,9 +10,9 @@ type BridgeToken = {
   symbol: string;
 };
 
-// TODO: temporarily disabled — bridged USDC is not tradeable on DEX
-const isEthToVaraUsdcBridgeDisabled = (token: BridgeToken | undefined) =>
-  token?.network === NETWORK.ETH && token.symbol.toLowerCase().includes('usdc');
+// Mainnet business restriction: bridged USDC is not tradeable on DEX.
+const isEthToVaraUsdcBridgeDisabled = (token: BridgeToken | undefined, isMainnet: boolean) =>
+  isMainnet && token?.network === NETWORK.ETH && token.symbol.toLowerCase().includes('usdc');
 
 const getAmountSchema = (
   isNativeToken: boolean | undefined,

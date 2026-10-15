@@ -17,6 +17,7 @@ use futures::{stream, StreamExt};
 use gear_rpc_client::GearApi;
 use serde_json::{json, Value};
 use std::{
+    cell::Cell,
     fs::{self, File, OpenOptions},
     io::Write,
     path::Path,
@@ -251,7 +252,20 @@ pub(crate) fn validate_token_follower_journal(state: &Value, deployment: &Value)
     Ok(())
 }
 
+#[derive(Debug)]
+struct FollowerPersistenceFailed;
+impl std::fmt::Display for FollowerPersistenceFailed {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("follower journal persistence failed; HOLD without retry")
+    }
+}
+impl std::error::Error for FollowerPersistenceFailed {}
+
 fn save(output: &Path, state: &mut Value, ethereum: Option<&Ethereum>) -> Result<()> {
+    save_state(output, state, ethereum).context(FollowerPersistenceFailed)
+}
+
+fn save_state(output: &Path, state: &mut Value, ethereum: Option<&Ethereum>) -> Result<()> {
     let _lock = lock_state(output)?;
     if let Some(ethereum) = ethereum {
         state["transactions"] = json!(ethereum.transactions);
@@ -1219,40 +1233,76 @@ async fn accepted_tx(
             from = from.max(number(&entry["destinationBlock"])?);
         }
     }
-    let logs = ethereum
-        .api
-        .raw_provider()
-        .get_logs(
-            &Filter::new()
-                .address(ethereum.client_address)
-                .event_signature(B256::from(keccak256(b"NewMMRRoot(bytes32,uint64)")))
-                .from_block(from),
-        )
-        .await?;
+    let provider = ethereum.api.raw_provider();
+    let to = provider.get_block_number().await?;
+    accepted_tx_in_range(
+        from,
+        to,
+        anchor.validated.mmr_root,
+        anchor.block,
+        |start, end| async move {
+            provider
+                .get_logs(
+                    &Filter::new()
+                        .address(ethereum.client_address)
+                        .event_signature(B256::from(keccak256(b"NewMMRRoot(bytes32,uint64)")))
+                        .from_block(start)
+                        .to_block(end),
+                )
+                .await
+                .with_context(|| format!("eth_getLogs accepted commitment {} at client {:#x}, Ethereum range {start}..={end} (snapshot {to})", anchor.block, ethereum.client_address))
+        },
+    )
+    .await
+}
+
+async fn accepted_tx_in_range<F, Fut>(
+    mut from: u64,
+    to: u64,
+    root: Hash32,
+    source_block: u32,
+    mut fetch: F,
+) -> Result<Option<[u8; 32]>>
+where
+    F: FnMut(u64, u64) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<alloy::rpc::types::Log>>>,
+{
     let mut accepted = None;
-    for log in logs {
-        let data = log.data().data.as_ref();
-        if data.len() == 64
-            && data[..32] == anchor.validated.mmr_root
-            && data[32..56].iter().all(|byte| *byte == 0)
-            && data[56..64] == u64::from(anchor.block).to_be_bytes()
-        {
-            ensure!(
-                !log.removed
-                    && log.block_number.is_some()
-                    && log.block_hash.is_some()
-                    && log.transaction_index.is_some()
-                    && log.log_index.is_some(),
-                "accepted event coordinates missing; HOLD"
-            );
-            let hash = log
-                .transaction_hash
-                .context("accepted event transaction missing")?;
-            ensure!(
-                accepted.replace(hash).is_none(),
-                "multiple accepted commitment identities; HOLD"
-            );
+    while from <= to {
+        let end = from.saturating_add(1_999).min(to);
+        for log in fetch(from, end).await? {
+            let data = log.data().data.as_ref();
+            if data.len() == 64
+                && data[..32] == root
+                && data[32..56].iter().all(|byte| *byte == 0)
+                && data[56..64] == u64::from(source_block).to_be_bytes()
+            {
+                ensure!(
+                    !log.removed
+                        && log.block_hash.is_some()
+                        && log.transaction_index.is_some()
+                        && log.log_index.is_some(),
+                    "accepted event coordinates missing; HOLD"
+                );
+                ensure!(
+                    log.block_number
+                        .is_some_and(|number| number >= from && number <= end),
+                    "accepted event is outside requested range; HOLD"
+                );
+                let hash = log
+                    .transaction_hash
+                    .context("accepted event transaction missing")?;
+                ensure!(
+                    accepted.replace(hash).is_none(),
+                    "multiple accepted commitment identities; HOLD"
+                );
+            }
         }
+        // Scan the complete fixed snapshot: a later batch may contain a conflict.
+        if end == to {
+            break;
+        }
+        from = end + 1;
     }
     Ok(accepted.map(Into::into))
 }
@@ -2168,6 +2218,9 @@ async fn advance(
             )
             .await;
         if let Err(error) = submission_result {
+            if error.is::<FollowerPersistenceFailed>() {
+                return Err(error);
+            }
             if let Some(accepted) = accepted_tx(state, ethereum, &anchor).await? {
                 if state["submission"]["txHash"] != bytes(accepted) {
                     record_external_commitment(ethereum, output, state, &anchor, &proof, accepted)
@@ -2619,6 +2672,114 @@ async fn record_pending_root_publication(
     save(output, state, None)
 }
 
+// Reconnect only at the retained-state boundary: the failed session (including all
+// providers) is dropped before waiting, while the deployment owner remains held.
+async fn run_token_sessions<F, Fut>(
+    output: &Path,
+    reconcile_once: bool,
+    progressed: &Cell<bool>,
+    mut session: F,
+) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let mut delay = Duration::from_secs(1);
+    loop {
+        let error = match session().await {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        if reconcile_once || !is_transient_follower_error(&error) {
+            return Err(error);
+        }
+        if progressed.replace(false) {
+            delay = Duration::from_secs(1);
+        }
+        let mut state = read_state_file(&output.join("state.json"))?;
+        state["follower"]["status"] = json!("reconnecting");
+        state["follower"]["lastError"] = json!(format!("{error:#}"));
+        // Persistence failure supersedes the transport failure, never another retry.
+        save(output, &mut state, None)?;
+        eprintln!(
+            "BEEFY: reconnecting authenticated token session in {}s: {error:#}",
+            delay.as_secs()
+        );
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(Duration::from_secs(30));
+    }
+}
+
+fn is_transient_follower_error(error: &anyhow::Error) -> bool {
+    if error.is::<FollowerPersistenceFailed>() {
+        return false;
+    }
+    if ethereum_client::is_transient_rpc_error(error) {
+        return true;
+    }
+    error.chain().any(|cause| {
+        if let Some(error) = cause.downcast_ref::<gsdk::Error>() {
+            return match error {
+                gsdk::Error::Subxt(error) => is_transient_subxt_error(error),
+                gsdk::Error::SubxtRpc(error) => is_transient_source_rpc_error(error),
+                gsdk::Error::ClientError(error) => is_transient_source_client_error(error),
+                _ => false,
+            };
+        }
+        if let Some(error) = cause.downcast_ref::<subxt::Error>() {
+            return is_transient_subxt_error(error);
+        }
+        cause
+            .downcast_ref::<subxt_rpcs::Error>()
+            .is_some_and(is_transient_source_rpc_error)
+    })
+}
+
+fn is_transient_subxt_error(error: &subxt::Error) -> bool {
+    match error {
+        subxt::Error::Rpc(subxt::error::RpcError::ClientError(error)) => {
+            is_transient_source_rpc_error(error)
+        }
+        subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped) => true,
+        _ => false,
+    }
+}
+
+fn is_transient_source_rpc_error(error: &subxt_rpcs::Error) -> bool {
+    if error.is_disconnected_will_reconnect() {
+        return true;
+    }
+    match error {
+        subxt_rpcs::Error::Client(error) => {
+            // Subxt can nest its client envelope during connection establishment.
+            if let Some(error) = error.downcast_ref::<subxt_rpcs::Error>() {
+                return is_transient_source_rpc_error(error);
+            }
+            error
+                .downcast_ref::<subxt::ext::jsonrpsee::core::ClientError>()
+                .is_some_and(is_transient_source_client_error)
+        }
+        _ => false,
+    }
+}
+
+fn is_transient_source_client_error(error: &subxt::ext::jsonrpsee::core::ClientError) -> bool {
+    use subxt::ext::jsonrpsee::core::ClientError;
+    match error {
+        ClientError::RequestTimeout => true,
+        // A terminated websocket backend must be rebuilt even when its close
+        // reason (for example a WebSocket close frame) has no nested OS error.
+        ClientError::RestartNeeded(error) => {
+            matches!(error.as_ref(), ClientError::Transport(_))
+                || is_transient_source_client_error(error)
+        }
+        ClientError::Transport(error) => {
+            ethereum_client::error::is_transient_network_error(error.as_ref())
+        }
+        _ => false,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn follow_tokens(
     source_rpc: &str,
@@ -2676,6 +2837,8 @@ pub async fn follow_tokens(
     let output_directory = fs::canonicalize(output)?;
     let output = output_directory.as_path();
     let state_path = output.join("state.json");
+    let progressed = Cell::new(false);
+    run_token_sessions(output, reconcile_once, &progressed, || async {
     let resumed = state_path.exists();
     let mut state = if resumed {
         let state = read_state_file(&state_path)?;
@@ -2914,7 +3077,11 @@ pub async fn follow_tokens(
             }
             return Ok(());
         }
+        let scanned = number(&state["rootScan"]["block"])?;
         scan_token_roots(&source, &witness, output, &mut state).await?;
+        if number(&state["rootScan"]["block"])? > scanned {
+            progressed.set(true);
+        }
         publish_token_roots(
             source_rpc,
             witness_rpc,
@@ -2934,7 +3101,11 @@ pub async fn follow_tokens(
             promote_finality(&mut source, &mut ethereum, output, &mut state).await?;
             follow_external_progress(&mut source, &witness, &mut ethereum, output, &mut state)
                 .await?;
+            let scanned = number(&state["rootScan"]["block"])?;
             scan_token_roots(&source, &witness, output, &mut state).await?;
+            if number(&state["rootScan"]["block"])? > scanned {
+                progressed.set(true);
+            }
             let uncovered = publish_token_roots(
                 source_rpc,
                 witness_rpc,
@@ -2957,7 +3128,7 @@ pub async fn follow_tokens(
                 continue;
             }
             let handover_only = !uncovered;
-            advance(
+            if advance(
                 &mut source,
                 &mut ethereum,
                 output,
@@ -2965,21 +3136,222 @@ pub async fn follow_tokens(
                 handover_only,
                 Some(&witness),
             )
-            .await?;
+            .await?.is_some() {
+                progressed.set(true);
+            }
         }
     }
     .await;
     if let Err(error) = &result {
-        state["follower"]["status"] = json!("failed");
-        state["follower"]["lastError"] = json!(format!("{error:#}"));
-        save(output, &mut state, Some(&ethereum))?;
+        if !error.is::<FollowerPersistenceFailed>() {
+            state["follower"]["status"] = json!("failed");
+            state["follower"]["lastError"] = json!(format!("{error:#}"));
+            save(output, &mut state, Some(&ethereum))?;
+        }
     }
     result
+    }).await
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use anyhow::bail;
+
+    fn accepted_log(number: u64, hash: u8) -> alloy::rpc::types::Log {
+        let mut data = vec![7; 32];
+        data.extend_from_slice(&[0; 24]);
+        data.extend_from_slice(&42u64.to_be_bytes());
+        alloy::rpc::types::Log {
+            inner: alloy::primitives::Log::new_unchecked(Address::ZERO, vec![], data.into()),
+            block_number: Some(number),
+            block_hash: Some(B256::repeat_byte(1)),
+            transaction_hash: Some(B256::repeat_byte(hash)),
+            transaction_index: Some(0),
+            log_index: Some(0),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_scan_covers_fixed_snapshot_in_bounded_inclusive_batches() -> Result<()> {
+        for included in [2_099, 2_100, 12_100] {
+            let mut ranges = Vec::new();
+            let accepted = accepted_tx_in_range(100, 12_100, [7; 32], 42, |start, end| {
+                ranges.push((start, end));
+                std::future::ready(Ok(if (start..=end).contains(&included) {
+                    vec![accepted_log(included, 9)]
+                } else {
+                    vec![]
+                }))
+            })
+            .await?;
+            assert_eq!(accepted, Some([9; 32]));
+            assert_eq!(
+                ranges,
+                vec![
+                    (100, 2_099),
+                    (2_100, 4_099),
+                    (4_100, 6_099),
+                    (6_100, 8_099),
+                    (8_100, 10_099),
+                    (10_100, 12_099),
+                    (12_100, 12_100),
+                ]
+            );
+        }
+        let accepted = accepted_tx_in_range(u64::MAX, u64::MAX, [7; 32], 42, |start, end| {
+            assert_eq!((start, end), (u64::MAX, u64::MAX));
+            std::future::ready(Ok(vec![accepted_log(start, 9)]))
+        })
+        .await?;
+        assert_eq!(accepted, Some([9; 32]));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn accepted_scan_rejects_duplicate_identities_across_batches() {
+        let error = accepted_tx_in_range(100, 4_100, [7; 32], 42, |start, _| {
+            std::future::ready(Ok(vec![accepted_log(
+                start,
+                if start == 100 { 9 } else { 10 },
+            )]))
+        })
+        .await
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("multiple accepted commitment identities"));
+    }
+
+    #[tokio::test]
+    async fn accepted_scan_holds_on_invalid_coordinates_and_later_rpc_failure() {
+        let original = accepted_log(100, 9);
+        let mut missing = original.clone();
+        missing.block_number = None;
+        let mut removed = original.clone();
+        removed.removed = true;
+        for log in [missing, removed, accepted_log(2_100, 9)] {
+            assert!(accepted_tx_in_range(100, 2_099, [7; 32], 42, |_, _| {
+                std::future::ready(Ok(vec![log.clone()]))
+            })
+            .await
+            .is_err());
+        }
+        let error = accepted_tx_in_range(100, 2_100, [7; 32], 42, |start, _| {
+            std::future::ready(if start == 100 {
+                Ok(vec![original.clone()])
+            } else {
+                Err(
+                    alloy::transports::TransportErrorKind::http_error(400, "range rejected".into())
+                        .into(),
+                )
+            })
+        })
+        .await
+        .unwrap_err();
+        assert!(!is_transient_follower_error(&error));
+    }
+
+    fn disconnected_source() -> anyhow::Error {
+        subxt::Error::Rpc(subxt::error::RpcError::ClientError(
+            subxt_rpcs::Error::DisconnectedWillReconnect("test disconnect".into()),
+        ))
+        .into()
+    }
+
+    #[tokio::test]
+    async fn reconnect_is_terminal_for_holds_permanent_errors_and_reconcile_once() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let progress = Cell::new(false);
+        for error in [
+            anyhow::anyhow!("source identity changed; HOLD"),
+            anyhow::anyhow!("finalized hash changed; HOLD"),
+            ethereum_client::Error::FinalizedAncestryConflict.into(),
+            alloy::transports::TransportErrorKind::http_error(401, "timeout".into()).into(),
+            subxt_rpcs::Error::User(subxt_rpcs::UserError::method_not_found()).into(),
+            std::io::Error::from(std::io::ErrorKind::AddrNotAvailable).into(),
+            disconnected_source().context(FollowerPersistenceFailed),
+            anyhow::anyhow!("RPC transport error: connection reset"),
+        ] {
+            let calls = Cell::new(0);
+            let error = std::cell::RefCell::new(Some(error));
+            assert!(run_token_sessions(directory.path(), false, &progress, || {
+                calls.set(calls.get() + 1);
+                let error = error
+                    .borrow_mut()
+                    .take()
+                    .expect("terminal error must not retry");
+                async { Err(error) }
+            })
+            .await
+            .is_err());
+            assert_eq!(calls.get(), 1);
+        }
+        assert!(
+            run_token_sessions(directory.path(), true, &progress, || async {
+                Err(disconnected_source())
+            })
+            .await
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reconnect_preserves_cancellation_and_failed_journal_writes() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let mut state = json!({"follower":{}});
+        save(directory.path(), &mut state, None)?;
+        let progress = Cell::new(false);
+        let calls = Cell::new(0);
+        let result = tokio::time::timeout(
+            Duration::from_millis(20),
+            run_token_sessions(directory.path(), false, &progress, || {
+                calls.set(calls.get() + 1);
+                async { Err(disconnected_source()) }
+            }),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "cancellation must escape the reconnect wait"
+        );
+        assert_eq!(calls.get(), 1);
+        let original = fs::read(directory.path().join("state.json"))?;
+        fs::create_dir(directory.path().join("state.json.tmp"))?;
+        let error = run_token_sessions(directory.path(), false, &progress, || async {
+            Err(disconnected_source())
+        })
+        .await
+        .unwrap_err();
+        assert!(error.is::<FollowerPersistenceFailed>());
+        assert_eq!(fs::read(directory.path().join("state.json"))?, original);
+        Ok(())
+    }
+
+    #[test]
+    fn reconnect_classifies_only_typed_source_transports() {
+        use subxt::ext::jsonrpsee::core::ClientError;
+        for error in [
+            disconnected_source(),
+            subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped).into(),
+            gsdk::Error::ClientError(ClientError::RequestTimeout).into(),
+            subxt_rpcs::Error::Client(Box::new(ClientError::Transport(Box::new(
+                std::io::Error::from(std::io::ErrorKind::AddrNotAvailable),
+            ))))
+            .into(),
+        ] {
+            assert!(is_transient_follower_error(&error));
+        }
+        let rejection = ClientError::Call(subxt::ext::jsonrpsee::types::ErrorObjectOwned::owned(
+            -32603,
+            "timeout, connection reset",
+            None::<()>,
+        ));
+        assert!(!is_transient_follower_error(
+            &gsdk::Error::ClientError(rejection).into()
+        ));
+    }
 
     #[tokio::test]
     #[ignore = "requires independent archived native RPCs and initialization/queued block pins; read-only"]
@@ -3199,6 +3571,39 @@ mod tests {
         let signature = signer.sign_transaction(&mut tx).await?;
         let raw = TxEnvelope::Eip1559(tx.into_signed(signature)).encoded_2718();
         let original = json!({"clientAddress":format!("{client:#x}"),"block":420,"blockHash":bytes([8;32]),"root":bytes([9;32]),"txHash":bytes(keccak256(&raw)),"nonce":36,"rawTransaction":bytes(&raw),"sender":format!("{:#x}",signer.address()),"chainId":560_048});
+        let directory = tempfile::tempdir()?;
+        let mut state = json!({"submission":original,"follower":{}});
+        save(directory.path(), &mut state, None)?;
+        let calls = Cell::new(0);
+        let progressed = Cell::new(false);
+        run_token_sessions(directory.path(), false, &progressed, || {
+            calls.set(calls.get() + 1);
+            let attempt = calls.get();
+            let original = &original;
+            let directory = directory.path();
+            async move {
+                let retained = read_state_file(&directory.join("state.json"))?;
+                assert_eq!(&retained["submission"], original);
+                crate::ethereum::signed_transaction_identity(
+                    &decode(&retained["submission"]["rawTransaction"])?,
+                    B256::from(array::<32>(&retained["submission"]["txHash"])?),
+                    number(&retained["submission"]["nonce"])?,
+                    client,
+                )?;
+                match attempt {
+                    1 => Err(disconnected_source()),
+                    2 => Err(ethereum_client::Error::ErrorInHTTPTransport(
+                        alloy::transports::TransportErrorKind::custom(std::io::Error::from(
+                            std::io::ErrorKind::AddrNotAvailable,
+                        )),
+                    )
+                    .into()),
+                    _ => Ok(()),
+                }
+            }
+        })
+        .await?;
+        assert_eq!(calls.get(), 3);
         let own = json!({"origin":"own","block":420,"blockHash":bytes([8;32]),"txHash":original["txHash"],"submission":original});
         assert_eq!(commitment_transaction(&own)?, &original);
         let external = json!({"origin":"external","block":420,"blockHash":bytes([8;32]),"txHash":original["txHash"],"acceptedTransaction":original});

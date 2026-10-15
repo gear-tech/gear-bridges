@@ -729,7 +729,8 @@ async fn observe_finalized_progress(
                         .from_block(start)
                         .to_block(end),
                 )
-                .await?;
+                .await
+                .with_context(|| format!("eth_getLogs queue progress for source {target} at queue {:#x}, Ethereum range {start}..={end} (finalized snapshot {finalized_block}), event {signature:#x}", ethereum.queue_address))?;
             for log in logs {
                 ensure!(!log.removed, "removed finalized root log; HOLD");
                 let Some(event) = queue_progress_event(&log.inner, ethereum.queue_address)? else {

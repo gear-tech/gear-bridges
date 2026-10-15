@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { TypedDocumentNode as DocumentNode } from '@graphql-typed-document-node/core';
 export type Maybe<T> = T | null;
-export type InputMaybe<T> = Maybe<T>;
+export type InputMaybe<T> = T | null | undefined;
 export type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
 export type MakeOptional<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]?: Maybe<T[SubKey]> };
 export type MakeMaybe<T, K extends keyof T> = Omit<T, K> & { [SubKey in K]: Maybe<T[SubKey]> };
@@ -9,24 +9,26 @@ export type MakeEmpty<T extends { [key: string]: unknown }, K extends keyof T> =
 export type Incremental<T> = T | { [P in keyof T]?: P extends ' $fragmentName' | '__typename' ? T[P] : never };
 /** All built-in and custom scalars, mapped to their actual values */
 export type Scalars = {
-  ID: { input: string; output: string };
-  String: { input: string; output: string };
-  Boolean: { input: boolean; output: boolean };
-  Int: { input: number; output: number };
-  Float: { input: number; output: number };
+  ID: { input: string; output: string; }
+  String: { input: string; output: string; }
+  Boolean: { input: boolean; output: boolean; }
+  Int: { input: number; output: number; }
+  Float: { input: number; output: number; }
   /**
    * A signed eight-byte integer. The upper big integer values are greater than the
    * max value for a JavaScript number. Therefore all big integers will be output as
    * strings and not numbers.
    */
-  BigInt: { input: string; output: string };
+  BigInt: { input: string; output: string; }
   /** A location in a connection that can be used for resuming pagination. */
-  Cursor: { input: any; output: any };
+  Cursor: { input: any; output: any; }
   /**
    * A point in time as described by the [ISO
    * 8601](https://en.wikipedia.org/wiki/ISO_8601) standard. May or may not include a timezone.
    */
-  Datetime: { input: string; output: string };
+  Datetime: { input: string; output: string; }
+  /** The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf). */
+  JSON: { input: any; output: any; }
 };
 
 /** A filter to be used against BigInt fields. All fields are combined with a logical ‘and.’ */
@@ -80,79 +82,6 @@ export type BooleanFilter = {
   /** Not included in the specified list. */
   notIn: InputMaybe<Array<Scalars['Boolean']['input']>>;
 };
-
-export type CheckpointSlot = Node & {
-  __typename?: 'CheckpointSlot';
-  id: Scalars['String']['output'];
-  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
-  nodeId: Scalars['ID']['output'];
-  slot: Scalars['BigInt']['output'];
-  treeHashRoot: Scalars['String']['output'];
-};
-
-/**
- * A condition to be used against `CheckpointSlot` object types. All fields are
- * tested for equality and combined with a logical ‘and.’
- */
-export type CheckpointSlotCondition = {
-  /** Checks for equality with the object’s `id` field. */
-  id: InputMaybe<Scalars['String']['input']>;
-  /** Checks for equality with the object’s `slot` field. */
-  slot: InputMaybe<Scalars['BigInt']['input']>;
-  /** Checks for equality with the object’s `treeHashRoot` field. */
-  treeHashRoot: InputMaybe<Scalars['String']['input']>;
-};
-
-/** A filter to be used against `CheckpointSlot` object types. All fields are combined with a logical ‘and.’ */
-export type CheckpointSlotFilter = {
-  /** Checks for all expressions in this list. */
-  and: InputMaybe<Array<CheckpointSlotFilter>>;
-  /** Filter by the object’s `id` field. */
-  id: InputMaybe<StringFilter>;
-  /** Negates the expression. */
-  not: InputMaybe<CheckpointSlotFilter>;
-  /** Checks for any expressions in this list. */
-  or: InputMaybe<Array<CheckpointSlotFilter>>;
-  /** Filter by the object’s `slot` field. */
-  slot: InputMaybe<BigIntFilter>;
-  /** Filter by the object’s `treeHashRoot` field. */
-  treeHashRoot: InputMaybe<StringFilter>;
-};
-
-/** A connection to a list of `CheckpointSlot` values. */
-export type CheckpointSlotsConnection = {
-  __typename?: 'CheckpointSlotsConnection';
-  /** A list of edges which contains the `CheckpointSlot` and cursor to aid in pagination. */
-  edges: Array<CheckpointSlotsEdge>;
-  /** A list of `CheckpointSlot` objects. */
-  nodes: Array<CheckpointSlot>;
-  /** Information to aid in pagination. */
-  pageInfo: PageInfo;
-  /** The count of *all* `CheckpointSlot` you could get from the connection. */
-  totalCount: Scalars['Int']['output'];
-};
-
-/** A `CheckpointSlot` edge in the connection. */
-export type CheckpointSlotsEdge = {
-  __typename?: 'CheckpointSlotsEdge';
-  /** A cursor for use in pagination. */
-  cursor: Maybe<Scalars['Cursor']['output']>;
-  /** The `CheckpointSlot` at the end of the edge. */
-  node: CheckpointSlot;
-};
-
-/** Methods to use when ordering `CheckpointSlot`. */
-export enum CheckpointSlotsOrderBy {
-  IdAsc = 'ID_ASC',
-  IdDesc = 'ID_DESC',
-  Natural = 'NATURAL',
-  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
-  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
-  SlotAsc = 'SLOT_ASC',
-  SlotDesc = 'SLOT_DESC',
-  TreeHashRootAsc = 'TREE_HASH_ROOT_ASC',
-  TreeHashRootDesc = 'TREE_HASH_ROOT_DESC',
-}
 
 /** A filter to be used against Datetime fields. All fields are combined with a logical ‘and.’ */
 export type DatetimeFilter = {
@@ -250,7 +179,7 @@ export enum GearEthBridgeMessagesOrderBy {
   NonceAsc = 'NONCE_ASC',
   NonceDesc = 'NONCE_DESC',
   PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
-  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC'
 }
 
 /** A filter to be used against Int fields. All fields are combined with a logical ‘and.’ */
@@ -279,6 +208,42 @@ export type IntFilter = {
   notIn: InputMaybe<Array<Scalars['Int']['input']>>;
 };
 
+/** A filter to be used against JSON fields. All fields are combined with a logical ‘and.’ */
+export type JsonFilter = {
+  /** Contained by the specified JSON. */
+  containedBy: InputMaybe<Scalars['JSON']['input']>;
+  /** Contains the specified JSON. */
+  contains: InputMaybe<Scalars['JSON']['input']>;
+  /** Contains all of the specified keys. */
+  containsAllKeys: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Contains any of the specified keys. */
+  containsAnyKeys: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Contains the specified key. */
+  containsKey: InputMaybe<Scalars['String']['input']>;
+  /** Not equal to the specified value, treating null like an ordinary value. */
+  distinctFrom: InputMaybe<Scalars['JSON']['input']>;
+  /** Equal to the specified value. */
+  equalTo: InputMaybe<Scalars['JSON']['input']>;
+  /** Greater than the specified value. */
+  greaterThan: InputMaybe<Scalars['JSON']['input']>;
+  /** Greater than or equal to the specified value. */
+  greaterThanOrEqualTo: InputMaybe<Scalars['JSON']['input']>;
+  /** Included in the specified list. */
+  in: InputMaybe<Array<Scalars['JSON']['input']>>;
+  /** Is null (if `true` is specified) or is not null (if `false` is specified). */
+  isNull: InputMaybe<Scalars['Boolean']['input']>;
+  /** Less than the specified value. */
+  lessThan: InputMaybe<Scalars['JSON']['input']>;
+  /** Less than or equal to the specified value. */
+  lessThanOrEqualTo: InputMaybe<Scalars['JSON']['input']>;
+  /** Equal to the specified value, treating null like an ordinary value. */
+  notDistinctFrom: InputMaybe<Scalars['JSON']['input']>;
+  /** Not equal to the specified value. */
+  notEqualTo: InputMaybe<Scalars['JSON']['input']>;
+  /** Not included in the specified list. */
+  notIn: InputMaybe<Array<Scalars['JSON']['input']>>;
+};
+
 export type MerkleRootInMessageQueue = Node & {
   __typename?: 'MerkleRootInMessageQueue';
   blockNumber: Scalars['BigInt']['output'];
@@ -286,6 +251,8 @@ export type MerkleRootInMessageQueue = Node & {
   merkleRoot: Scalars['String']['output'];
   /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
   nodeId: Scalars['ID']['output'];
+  submittedAtBlock: Maybe<Scalars['BigInt']['output']>;
+  submittedAtTxHash: Maybe<Scalars['String']['output']>;
 };
 
 /**
@@ -299,6 +266,10 @@ export type MerkleRootInMessageQueueCondition = {
   id: InputMaybe<Scalars['String']['input']>;
   /** Checks for equality with the object’s `merkleRoot` field. */
   merkleRoot: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `submittedAtBlock` field. */
+  submittedAtBlock: InputMaybe<Scalars['BigInt']['input']>;
+  /** Checks for equality with the object’s `submittedAtTxHash` field. */
+  submittedAtTxHash: InputMaybe<Scalars['String']['input']>;
 };
 
 /** A filter to be used against `MerkleRootInMessageQueue` object types. All fields are combined with a logical ‘and.’ */
@@ -315,6 +286,10 @@ export type MerkleRootInMessageQueueFilter = {
   not: InputMaybe<MerkleRootInMessageQueueFilter>;
   /** Checks for any expressions in this list. */
   or: InputMaybe<Array<MerkleRootInMessageQueueFilter>>;
+  /** Filter by the object’s `submittedAtBlock` field. */
+  submittedAtBlock: InputMaybe<BigIntFilter>;
+  /** Filter by the object’s `submittedAtTxHash` field. */
+  submittedAtTxHash: InputMaybe<StringFilter>;
 };
 
 /** A connection to a list of `MerkleRootInMessageQueue` values. */
@@ -350,11 +325,15 @@ export enum MerkleRootInMessageQueuesOrderBy {
   Natural = 'NATURAL',
   PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
   PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  SubmittedAtBlockAsc = 'SUBMITTED_AT_BLOCK_ASC',
+  SubmittedAtBlockDesc = 'SUBMITTED_AT_BLOCK_DESC',
+  SubmittedAtTxHashAsc = 'SUBMITTED_AT_TX_HASH_ASC',
+  SubmittedAtTxHashDesc = 'SUBMITTED_AT_TX_HASH_DESC'
 }
 
 export enum NetworkEnum {
   Ethereum = 'ETHEREUM',
-  Vara = 'VARA',
+  Vara = 'VARA'
 }
 
 /** A filter to be used against NetworkEnum fields. All fields are combined with a logical ‘and.’ */
@@ -553,31 +532,29 @@ export enum PairsOrderBy {
   VaraTokenNameAsc = 'VARA_TOKEN_NAME_ASC',
   VaraTokenNameDesc = 'VARA_TOKEN_NAME_DESC',
   VaraTokenSymbolAsc = 'VARA_TOKEN_SYMBOL_ASC',
-  VaraTokenSymbolDesc = 'VARA_TOKEN_SYMBOL_DESC',
+  VaraTokenSymbolDesc = 'VARA_TOKEN_SYMBOL_DESC'
 }
 
 /** The root query type which gives access points into the data universe. */
 export type Query = Node & {
   __typename?: 'Query';
-  /** Reads and enables pagination through a set of `CheckpointSlot`. */
-  allCheckpointSlots: Maybe<CheckpointSlotsConnection>;
   /** Reads and enables pagination through a set of `GearEthBridgeMessage`. */
   allGearEthBridgeMessages: Maybe<GearEthBridgeMessagesConnection>;
   /** Reads and enables pagination through a set of `MerkleRootInMessageQueue`. */
   allMerkleRootInMessageQueues: Maybe<MerkleRootInMessageQueuesConnection>;
   /** Reads and enables pagination through a set of `Pair`. */
   allPairs: Maybe<PairsConnection>;
+  /** Reads and enables pagination through a set of `ReceiptRelay`. */
+  allReceiptRelays: Maybe<ReceiptRelaysConnection>;
+  /** Reads and enables pagination through a set of `ReceiptSettlement`. */
+  allReceiptSettlements: Maybe<ReceiptSettlementsConnection>;
   /** Reads and enables pagination through a set of `Transfer`. */
   allTransfers: Maybe<TransfersConnection>;
-  /** Reads a single `CheckpointSlot` using its globally unique `ID`. */
-  checkpointSlot: Maybe<CheckpointSlot>;
-  checkpointSlotById: Maybe<CheckpointSlot>;
   /** Reads a single `GearEthBridgeMessage` using its globally unique `ID`. */
   gearEthBridgeMessage: Maybe<GearEthBridgeMessage>;
   gearEthBridgeMessageById: Maybe<GearEthBridgeMessage>;
   /** Reads a single `MerkleRootInMessageQueue` using its globally unique `ID`. */
   merkleRootInMessageQueue: Maybe<MerkleRootInMessageQueue>;
-  merkleRootInMessageQueueByBlockNumber: Maybe<MerkleRootInMessageQueue>;
   merkleRootInMessageQueueById: Maybe<MerkleRootInMessageQueue>;
   /** Fetches an object given its globally unique `ID`. */
   node: Maybe<Node>;
@@ -592,23 +569,18 @@ export type Query = Node & {
    * which can only query top level fields if they are in a particular form.
    */
   query: Query;
+  /** Reads a single `ReceiptRelay` using its globally unique `ID`. */
+  receiptRelay: Maybe<ReceiptRelay>;
+  receiptRelayById: Maybe<ReceiptRelay>;
+  /** Reads a single `ReceiptSettlement` using its globally unique `ID`. */
+  receiptSettlement: Maybe<ReceiptSettlement>;
+  receiptSettlementById: Maybe<ReceiptSettlement>;
   /** Reads a single `Transfer` using its globally unique `ID`. */
   transfer: Maybe<Transfer>;
   transferById: Maybe<Transfer>;
   transfers: Array<Maybe<Transfer>>;
 };
 
-/** The root query type which gives access points into the data universe. */
-export type QueryAllCheckpointSlotsArgs = {
-  after: InputMaybe<Scalars['Cursor']['input']>;
-  before: InputMaybe<Scalars['Cursor']['input']>;
-  condition: InputMaybe<CheckpointSlotCondition>;
-  filter: InputMaybe<CheckpointSlotFilter>;
-  first: InputMaybe<Scalars['Int']['input']>;
-  last: InputMaybe<Scalars['Int']['input']>;
-  offset: InputMaybe<Scalars['Int']['input']>;
-  orderBy?: InputMaybe<Array<CheckpointSlotsOrderBy>>;
-};
 
 /** The root query type which gives access points into the data universe. */
 export type QueryAllGearEthBridgeMessagesArgs = {
@@ -622,6 +594,7 @@ export type QueryAllGearEthBridgeMessagesArgs = {
   orderBy?: InputMaybe<Array<GearEthBridgeMessagesOrderBy>>;
 };
 
+
 /** The root query type which gives access points into the data universe. */
 export type QueryAllMerkleRootInMessageQueuesArgs = {
   after: InputMaybe<Scalars['Cursor']['input']>;
@@ -633,6 +606,7 @@ export type QueryAllMerkleRootInMessageQueuesArgs = {
   offset: InputMaybe<Scalars['Int']['input']>;
   orderBy?: InputMaybe<Array<MerkleRootInMessageQueuesOrderBy>>;
 };
+
 
 /** The root query type which gives access points into the data universe. */
 export type QueryAllPairsArgs = {
@@ -646,6 +620,33 @@ export type QueryAllPairsArgs = {
   orderBy?: InputMaybe<Array<PairsOrderBy>>;
 };
 
+
+/** The root query type which gives access points into the data universe. */
+export type QueryAllReceiptRelaysArgs = {
+  after: InputMaybe<Scalars['Cursor']['input']>;
+  before: InputMaybe<Scalars['Cursor']['input']>;
+  condition: InputMaybe<ReceiptRelayCondition>;
+  filter: InputMaybe<ReceiptRelayFilter>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  last: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ReceiptRelaysOrderBy>>;
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryAllReceiptSettlementsArgs = {
+  after: InputMaybe<Scalars['Cursor']['input']>;
+  before: InputMaybe<Scalars['Cursor']['input']>;
+  condition: InputMaybe<ReceiptSettlementCondition>;
+  filter: InputMaybe<ReceiptSettlementFilter>;
+  first: InputMaybe<Scalars['Int']['input']>;
+  last: InputMaybe<Scalars['Int']['input']>;
+  offset: InputMaybe<Scalars['Int']['input']>;
+  orderBy?: InputMaybe<Array<ReceiptSettlementsOrderBy>>;
+};
+
+
 /** The root query type which gives access points into the data universe. */
 export type QueryAllTransfersArgs = {
   after: InputMaybe<Scalars['Cursor']['input']>;
@@ -658,55 +659,48 @@ export type QueryAllTransfersArgs = {
   orderBy?: InputMaybe<Array<TransfersOrderBy>>;
 };
 
-/** The root query type which gives access points into the data universe. */
-export type QueryCheckpointSlotArgs = {
-  nodeId: Scalars['ID']['input'];
-};
-
-/** The root query type which gives access points into the data universe. */
-export type QueryCheckpointSlotByIdArgs = {
-  id: Scalars['String']['input'];
-};
 
 /** The root query type which gives access points into the data universe. */
 export type QueryGearEthBridgeMessageArgs = {
   nodeId: Scalars['ID']['input'];
 };
 
+
 /** The root query type which gives access points into the data universe. */
 export type QueryGearEthBridgeMessageByIdArgs = {
   id: Scalars['String']['input'];
 };
+
 
 /** The root query type which gives access points into the data universe. */
 export type QueryMerkleRootInMessageQueueArgs = {
   nodeId: Scalars['ID']['input'];
 };
 
-/** The root query type which gives access points into the data universe. */
-export type QueryMerkleRootInMessageQueueByBlockNumberArgs = {
-  blockNumber: Scalars['BigInt']['input'];
-};
 
 /** The root query type which gives access points into the data universe. */
 export type QueryMerkleRootInMessageQueueByIdArgs = {
   id: Scalars['String']['input'];
 };
 
+
 /** The root query type which gives access points into the data universe. */
 export type QueryNodeArgs = {
   nodeId: Scalars['ID']['input'];
 };
+
 
 /** The root query type which gives access points into the data universe. */
 export type QueryPairArgs = {
   nodeId: Scalars['ID']['input'];
 };
 
+
 /** The root query type which gives access points into the data universe. */
 export type QueryPairByIdArgs = {
   id: Scalars['String']['input'];
 };
+
 
 /** The root query type which gives access points into the data universe. */
 export type QueryPairsArgs = {
@@ -717,15 +711,42 @@ export type QueryPairsArgs = {
   orderBy: InputMaybe<Array<PairsOrderBy>>;
 };
 
+
+/** The root query type which gives access points into the data universe. */
+export type QueryReceiptRelayArgs = {
+  nodeId: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryReceiptRelayByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryReceiptSettlementArgs = {
+  nodeId: Scalars['ID']['input'];
+};
+
+
+/** The root query type which gives access points into the data universe. */
+export type QueryReceiptSettlementByIdArgs = {
+  id: Scalars['String']['input'];
+};
+
+
 /** The root query type which gives access points into the data universe. */
 export type QueryTransferArgs = {
   nodeId: Scalars['ID']['input'];
 };
 
+
 /** The root query type which gives access points into the data universe. */
 export type QueryTransferByIdArgs = {
   id: Scalars['String']['input'];
 };
+
 
 /** The root query type which gives access points into the data universe. */
 export type QueryTransfersArgs = {
@@ -736,11 +757,171 @@ export type QueryTransfersArgs = {
   orderBy: InputMaybe<Array<TransfersOrderBy>>;
 };
 
+export type ReceiptRelay = Node & {
+  __typename?: 'ReceiptRelay';
+  blockNumber: Scalars['BigInt']['output'];
+  id: Scalars['String']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  nodeId: Scalars['ID']['output'];
+};
+
+/**
+ * A condition to be used against `ReceiptRelay` object types. All fields are
+ * tested for equality and combined with a logical ‘and.’
+ */
+export type ReceiptRelayCondition = {
+  /** Checks for equality with the object’s `blockNumber` field. */
+  blockNumber: InputMaybe<Scalars['BigInt']['input']>;
+  /** Checks for equality with the object’s `id` field. */
+  id: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A filter to be used against `ReceiptRelay` object types. All fields are combined with a logical ‘and.’ */
+export type ReceiptRelayFilter = {
+  /** Checks for all expressions in this list. */
+  and: InputMaybe<Array<ReceiptRelayFilter>>;
+  /** Filter by the object’s `blockNumber` field. */
+  blockNumber: InputMaybe<BigIntFilter>;
+  /** Filter by the object’s `id` field. */
+  id: InputMaybe<StringFilter>;
+  /** Negates the expression. */
+  not: InputMaybe<ReceiptRelayFilter>;
+  /** Checks for any expressions in this list. */
+  or: InputMaybe<Array<ReceiptRelayFilter>>;
+};
+
+/** A connection to a list of `ReceiptRelay` values. */
+export type ReceiptRelaysConnection = {
+  __typename?: 'ReceiptRelaysConnection';
+  /** A list of edges which contains the `ReceiptRelay` and cursor to aid in pagination. */
+  edges: Array<ReceiptRelaysEdge>;
+  /** A list of `ReceiptRelay` objects. */
+  nodes: Array<ReceiptRelay>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `ReceiptRelay` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `ReceiptRelay` edge in the connection. */
+export type ReceiptRelaysEdge = {
+  __typename?: 'ReceiptRelaysEdge';
+  /** A cursor for use in pagination. */
+  cursor: Maybe<Scalars['Cursor']['output']>;
+  /** The `ReceiptRelay` at the end of the edge. */
+  node: ReceiptRelay;
+};
+
+/** Methods to use when ordering `ReceiptRelay`. */
+export enum ReceiptRelaysOrderBy {
+  BlockNumberAsc = 'BLOCK_NUMBER_ASC',
+  BlockNumberDesc = 'BLOCK_NUMBER_DESC',
+  IdAsc = 'ID_ASC',
+  IdDesc = 'ID_DESC',
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC'
+}
+
+export type ReceiptSettlement = Node & {
+  __typename?: 'ReceiptSettlement';
+  blockNumber: Scalars['BigInt']['output'];
+  deposit: Scalars['JSON']['output'];
+  id: Scalars['String']['output'];
+  matched: Scalars['Boolean']['output'];
+  /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
+  nodeId: Scalars['ID']['output'];
+  timestamp: Scalars['Datetime']['output'];
+  txHash: Scalars['String']['output'];
+};
+
+/**
+ * A condition to be used against `ReceiptSettlement` object types. All fields are
+ * tested for equality and combined with a logical ‘and.’
+ */
+export type ReceiptSettlementCondition = {
+  /** Checks for equality with the object’s `blockNumber` field. */
+  blockNumber: InputMaybe<Scalars['BigInt']['input']>;
+  /** Checks for equality with the object’s `deposit` field. */
+  deposit: InputMaybe<Scalars['JSON']['input']>;
+  /** Checks for equality with the object’s `id` field. */
+  id: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `matched` field. */
+  matched: InputMaybe<Scalars['Boolean']['input']>;
+  /** Checks for equality with the object’s `timestamp` field. */
+  timestamp: InputMaybe<Scalars['Datetime']['input']>;
+  /** Checks for equality with the object’s `txHash` field. */
+  txHash: InputMaybe<Scalars['String']['input']>;
+};
+
+/** A filter to be used against `ReceiptSettlement` object types. All fields are combined with a logical ‘and.’ */
+export type ReceiptSettlementFilter = {
+  /** Checks for all expressions in this list. */
+  and: InputMaybe<Array<ReceiptSettlementFilter>>;
+  /** Filter by the object’s `blockNumber` field. */
+  blockNumber: InputMaybe<BigIntFilter>;
+  /** Filter by the object’s `deposit` field. */
+  deposit: InputMaybe<JsonFilter>;
+  /** Filter by the object’s `id` field. */
+  id: InputMaybe<StringFilter>;
+  /** Filter by the object’s `matched` field. */
+  matched: InputMaybe<BooleanFilter>;
+  /** Negates the expression. */
+  not: InputMaybe<ReceiptSettlementFilter>;
+  /** Checks for any expressions in this list. */
+  or: InputMaybe<Array<ReceiptSettlementFilter>>;
+  /** Filter by the object’s `timestamp` field. */
+  timestamp: InputMaybe<DatetimeFilter>;
+  /** Filter by the object’s `txHash` field. */
+  txHash: InputMaybe<StringFilter>;
+};
+
+/** A connection to a list of `ReceiptSettlement` values. */
+export type ReceiptSettlementsConnection = {
+  __typename?: 'ReceiptSettlementsConnection';
+  /** A list of edges which contains the `ReceiptSettlement` and cursor to aid in pagination. */
+  edges: Array<ReceiptSettlementsEdge>;
+  /** A list of `ReceiptSettlement` objects. */
+  nodes: Array<ReceiptSettlement>;
+  /** Information to aid in pagination. */
+  pageInfo: PageInfo;
+  /** The count of *all* `ReceiptSettlement` you could get from the connection. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/** A `ReceiptSettlement` edge in the connection. */
+export type ReceiptSettlementsEdge = {
+  __typename?: 'ReceiptSettlementsEdge';
+  /** A cursor for use in pagination. */
+  cursor: Maybe<Scalars['Cursor']['output']>;
+  /** The `ReceiptSettlement` at the end of the edge. */
+  node: ReceiptSettlement;
+};
+
+/** Methods to use when ordering `ReceiptSettlement`. */
+export enum ReceiptSettlementsOrderBy {
+  BlockNumberAsc = 'BLOCK_NUMBER_ASC',
+  BlockNumberDesc = 'BLOCK_NUMBER_DESC',
+  DepositAsc = 'DEPOSIT_ASC',
+  DepositDesc = 'DEPOSIT_DESC',
+  IdAsc = 'ID_ASC',
+  IdDesc = 'ID_DESC',
+  MatchedAsc = 'MATCHED_ASC',
+  MatchedDesc = 'MATCHED_DESC',
+  Natural = 'NATURAL',
+  PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
+  PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  TimestampAsc = 'TIMESTAMP_ASC',
+  TimestampDesc = 'TIMESTAMP_DESC',
+  TxHashAsc = 'TX_HASH_ASC',
+  TxHashDesc = 'TX_HASH_DESC'
+}
+
 export enum StatusEnum {
   AwaitingPayment = 'AWAITING_PAYMENT',
   Bridging = 'BRIDGING',
   Completed = 'COMPLETED',
-  Failed = 'FAILED',
+  Failed = 'FAILED'
 }
 
 /** A filter to be used against StatusEnum fields. All fields are combined with a logical ‘and.’ */
@@ -867,13 +1048,17 @@ export type Transfer = Node & {
   ethBridgeBuiltInMsgHash: Maybe<Scalars['String']['output']>;
   ethBridgeBuiltInQueueId: Maybe<Scalars['BigInt']['output']>;
   id: Scalars['String']['output'];
+  isPriorityFeePaid: Scalars['Boolean']['output'];
   /** A globally unique identifier. Can be used in various places throughout the system to identify this single value. */
   nodeId: Scalars['ID']['output'];
   nonce: Scalars['String']['output'];
+  receiptSlot: Maybe<Scalars['BigInt']['output']>;
   receiver: Scalars['String']['output'];
   sender: Scalars['String']['output'];
   source: Scalars['String']['output'];
+  sourceLogIndex: Maybe<Scalars['BigInt']['output']>;
   sourceNetwork: NetworkEnum;
+  sourceTransactionIndex: Maybe<Scalars['BigInt']['output']>;
   status: StatusEnum;
   timestamp: Scalars['Datetime']['output'];
   txHash: Scalars['String']['output'];
@@ -908,16 +1093,24 @@ export type TransferCondition = {
   ethBridgeBuiltInQueueId: InputMaybe<Scalars['BigInt']['input']>;
   /** Checks for equality with the object’s `id` field. */
   id: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `isPriorityFeePaid` field. */
+  isPriorityFeePaid: InputMaybe<Scalars['Boolean']['input']>;
   /** Checks for equality with the object’s `nonce` field. */
   nonce: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `receiptSlot` field. */
+  receiptSlot: InputMaybe<Scalars['BigInt']['input']>;
   /** Checks for equality with the object’s `receiver` field. */
   receiver: InputMaybe<Scalars['String']['input']>;
   /** Checks for equality with the object’s `sender` field. */
   sender: InputMaybe<Scalars['String']['input']>;
   /** Checks for equality with the object’s `source` field. */
   source: InputMaybe<Scalars['String']['input']>;
+  /** Checks for equality with the object’s `sourceLogIndex` field. */
+  sourceLogIndex: InputMaybe<Scalars['BigInt']['input']>;
   /** Checks for equality with the object’s `sourceNetwork` field. */
   sourceNetwork: InputMaybe<NetworkEnum>;
+  /** Checks for equality with the object’s `sourceTransactionIndex` field. */
+  sourceTransactionIndex: InputMaybe<Scalars['BigInt']['input']>;
   /** Checks for equality with the object’s `status` field. */
   status: InputMaybe<StatusEnum>;
   /** Checks for equality with the object’s `timestamp` field. */
@@ -954,20 +1147,28 @@ export type TransferFilter = {
   ethBridgeBuiltInQueueId: InputMaybe<BigIntFilter>;
   /** Filter by the object’s `id` field. */
   id: InputMaybe<StringFilter>;
+  /** Filter by the object’s `isPriorityFeePaid` field. */
+  isPriorityFeePaid: InputMaybe<BooleanFilter>;
   /** Filter by the object’s `nonce` field. */
   nonce: InputMaybe<StringFilter>;
   /** Negates the expression. */
   not: InputMaybe<TransferFilter>;
   /** Checks for any expressions in this list. */
   or: InputMaybe<Array<TransferFilter>>;
+  /** Filter by the object’s `receiptSlot` field. */
+  receiptSlot: InputMaybe<BigIntFilter>;
   /** Filter by the object’s `receiver` field. */
   receiver: InputMaybe<StringFilter>;
   /** Filter by the object’s `sender` field. */
   sender: InputMaybe<StringFilter>;
   /** Filter by the object’s `source` field. */
   source: InputMaybe<StringFilter>;
+  /** Filter by the object’s `sourceLogIndex` field. */
+  sourceLogIndex: InputMaybe<BigIntFilter>;
   /** Filter by the object’s `sourceNetwork` field. */
   sourceNetwork: InputMaybe<NetworkEnumFilter>;
+  /** Filter by the object’s `sourceTransactionIndex` field. */
+  sourceTransactionIndex: InputMaybe<BigIntFilter>;
   /** Filter by the object’s `status` field. */
   status: InputMaybe<StatusEnumFilter>;
   /** Filter by the object’s `timestamp` field. */
@@ -1024,25 +1225,33 @@ export enum TransfersOrderBy {
   EthBridgeBuiltInQueueIdDesc = 'ETH_BRIDGE_BUILT_IN_QUEUE_ID_DESC',
   IdAsc = 'ID_ASC',
   IdDesc = 'ID_DESC',
+  IsPriorityFeePaidAsc = 'IS_PRIORITY_FEE_PAID_ASC',
+  IsPriorityFeePaidDesc = 'IS_PRIORITY_FEE_PAID_DESC',
   Natural = 'NATURAL',
   NonceAsc = 'NONCE_ASC',
   NonceDesc = 'NONCE_DESC',
   PrimaryKeyAsc = 'PRIMARY_KEY_ASC',
   PrimaryKeyDesc = 'PRIMARY_KEY_DESC',
+  ReceiptSlotAsc = 'RECEIPT_SLOT_ASC',
+  ReceiptSlotDesc = 'RECEIPT_SLOT_DESC',
   ReceiverAsc = 'RECEIVER_ASC',
   ReceiverDesc = 'RECEIVER_DESC',
   SenderAsc = 'SENDER_ASC',
   SenderDesc = 'SENDER_DESC',
   SourceAsc = 'SOURCE_ASC',
   SourceDesc = 'SOURCE_DESC',
+  SourceLogIndexAsc = 'SOURCE_LOG_INDEX_ASC',
+  SourceLogIndexDesc = 'SOURCE_LOG_INDEX_DESC',
   SourceNetworkAsc = 'SOURCE_NETWORK_ASC',
   SourceNetworkDesc = 'SOURCE_NETWORK_DESC',
+  SourceTransactionIndexAsc = 'SOURCE_TRANSACTION_INDEX_ASC',
+  SourceTransactionIndexDesc = 'SOURCE_TRANSACTION_INDEX_DESC',
   StatusAsc = 'STATUS_ASC',
   StatusDesc = 'STATUS_DESC',
   TimestampAsc = 'TIMESTAMP_ASC',
   TimestampDesc = 'TIMESTAMP_DESC',
   TxHashAsc = 'TX_HASH_ASC',
-  TxHashDesc = 'TX_HASH_DESC',
+  TxHashDesc = 'TX_HASH_DESC'
 }
 
 export type TransfersQueryQueryVariables = Exact<{
@@ -1051,439 +1260,30 @@ export type TransfersQueryQueryVariables = Exact<{
   filter: InputMaybe<TransferFilter>;
 }>;
 
-export type TransfersQueryQuery = {
-  __typename?: 'Query';
-  allTransfers: {
-    __typename?: 'TransfersConnection';
-    totalCount: number;
-    nodes: Array<{
-      __typename?: 'Transfer';
-      amount: string;
-      txHash: string;
-      destNetwork: NetworkEnum;
-      destination: string;
-      id: string;
-      receiver: string;
-      sender: string;
-      source: string;
-      sourceNetwork: NetworkEnum;
-      status: StatusEnum;
-      timestamp: string;
-      nonce: string;
-      blockNumber: string;
-    }>;
-  } | null;
-};
 
-export type PairsQueryQueryVariables = Exact<{ [key: string]: never }>;
+export type TransfersQueryQuery = { __typename?: 'Query', allTransfers: { __typename?: 'TransfersConnection', totalCount: number, nodes: Array<{ __typename?: 'Transfer', amount: string, txHash: string, destNetwork: NetworkEnum, destination: string, id: string, receiver: string, sender: string, source: string, sourceNetwork: NetworkEnum, status: StatusEnum, timestamp: string, completedAt: string | null, nonce: string, blockNumber: string }> } | null };
 
-export type PairsQueryQuery = {
-  __typename?: 'Query';
-  allPairs: {
-    __typename?: 'PairsConnection';
-    nodes: Array<{
-      __typename?: 'Pair';
-      ethToken: string;
-      ethTokenDecimals: number;
-      ethTokenName: string;
-      ethTokenSymbol: string;
-      id: string;
-      isActive: boolean;
-      tokenSupply: NetworkEnum;
-      varaToken: string;
-      varaTokenDecimals: number;
-      varaTokenName: string;
-      varaTokenSymbol: string;
-    }>;
-  } | null;
-};
+export type PairsQueryQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type PairsQueryQuery = { __typename?: 'Query', allPairs: { __typename?: 'PairsConnection', nodes: Array<{ __typename?: 'Pair', ethToken: string, ethTokenDecimals: number, ethTokenName: string, ethTokenSymbol: string, id: string, isActive: boolean, tokenSupply: NetworkEnum, varaToken: string, varaTokenDecimals: number, varaTokenName: string, varaTokenSymbol: string }> } | null };
 
 export type TransferQueryQueryVariables = Exact<{
   id: Scalars['String']['input'];
 }>;
 
-export type TransferQueryQuery = {
-  __typename?: 'Query';
-  transferById: {
-    __typename?: 'Transfer';
-    id: string;
-    txHash: string;
-    blockNumber: string;
-    timestamp: string;
-    completedAt: string | null;
-    completedAtBlock: string | null;
-    completedAtTxHash: string | null;
-    nonce: string;
-    sourceNetwork: NetworkEnum;
-    source: string;
-    destNetwork: NetworkEnum;
-    destination: string;
-    status: StatusEnum;
-    sender: string;
-    receiver: string;
-    amount: string;
-    bridgingStartedAtBlock: string | null;
-    bridgingStartedAtMessageId: string | null;
-  } | null;
-};
+
+export type TransferQueryQuery = { __typename?: 'Query', transferById: { __typename?: 'Transfer', id: string, txHash: string, blockNumber: string, timestamp: string, completedAt: string | null, completedAtBlock: string | null, completedAtTxHash: string | null, nonce: string, sourceNetwork: NetworkEnum, source: string, destNetwork: NetworkEnum, destination: string, status: StatusEnum, sender: string, receiver: string, amount: string, bridgingStartedAtBlock: string | null, bridgingStartedAtMessageId: string | null } | null };
 
 export type TransfersCountQueryQueryVariables = Exact<{
   filter: InputMaybe<TransferFilter>;
 }>;
 
-export type TransfersCountQueryQuery = {
-  __typename?: 'Query';
-  allTransfers: { __typename?: 'TransfersConnection'; totalCount: number } | null;
-};
 
-export type CheckpointSlotsQueryQueryVariables = Exact<{
-  slot: Scalars['BigInt']['input'];
-}>;
+export type TransfersCountQueryQuery = { __typename?: 'Query', allTransfers: { __typename?: 'TransfersConnection', totalCount: number } | null };
 
-export type CheckpointSlotsQueryQuery = {
-  __typename?: 'Query';
-  allCheckpointSlots: { __typename?: 'CheckpointSlotsConnection'; totalCount: number } | null;
-};
 
-export type MerkelRootInMessageQueuesQueryQueryVariables = Exact<{
-  blockNumber: Scalars['BigInt']['input'];
-}>;
-
-export type MerkelRootInMessageQueuesQueryQuery = {
-  __typename?: 'Query';
-  allMerkleRootInMessageQueues: { __typename?: 'MerkleRootInMessageQueuesConnection'; totalCount: number } | null;
-};
-
-export const TransfersQueryDocument = {
-  kind: 'Document',
-  definitions: [
-    {
-      kind: 'OperationDefinition',
-      operation: 'query',
-      name: { kind: 'Name', value: 'TransfersQuery' },
-      variableDefinitions: [
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'first' } },
-          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'Int' } } },
-        },
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'offset' } },
-          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'Int' } } },
-        },
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
-          type: { kind: 'NamedType', name: { kind: 'Name', value: 'TransferFilter' } },
-        },
-      ],
-      selectionSet: {
-        kind: 'SelectionSet',
-        selections: [
-          {
-            kind: 'Field',
-            name: { kind: 'Name', value: 'allTransfers' },
-            arguments: [
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'first' },
-                value: { kind: 'Variable', name: { kind: 'Name', value: 'first' } },
-              },
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'offset' },
-                value: { kind: 'Variable', name: { kind: 'Name', value: 'offset' } },
-              },
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'orderBy' },
-                value: { kind: 'EnumValue', value: 'TIMESTAMP_DESC' },
-              },
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'filter' },
-                value: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
-              },
-            ],
-            selectionSet: {
-              kind: 'SelectionSet',
-              selections: [
-                {
-                  kind: 'Field',
-                  name: { kind: 'Name', value: 'nodes' },
-                  selectionSet: {
-                    kind: 'SelectionSet',
-                    selections: [
-                      { kind: 'Field', name: { kind: 'Name', value: 'amount' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'txHash' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'destNetwork' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'destination' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'id' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'receiver' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'sender' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'source' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'sourceNetwork' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'status' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'timestamp' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'nonce' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'blockNumber' } },
-                    ],
-                  },
-                },
-                { kind: 'Field', name: { kind: 'Name', value: 'totalCount' } },
-              ],
-            },
-          },
-        ],
-      },
-    },
-  ],
-} as unknown as DocumentNode<TransfersQueryQuery, TransfersQueryQueryVariables>;
-export const PairsQueryDocument = {
-  kind: 'Document',
-  definitions: [
-    {
-      kind: 'OperationDefinition',
-      operation: 'query',
-      name: { kind: 'Name', value: 'PairsQuery' },
-      selectionSet: {
-        kind: 'SelectionSet',
-        selections: [
-          {
-            kind: 'Field',
-            name: { kind: 'Name', value: 'allPairs' },
-            selectionSet: {
-              kind: 'SelectionSet',
-              selections: [
-                {
-                  kind: 'Field',
-                  name: { kind: 'Name', value: 'nodes' },
-                  selectionSet: {
-                    kind: 'SelectionSet',
-                    selections: [
-                      { kind: 'Field', name: { kind: 'Name', value: 'ethToken' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'ethTokenDecimals' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'ethTokenName' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'ethTokenSymbol' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'id' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'isActive' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'tokenSupply' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'varaToken' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'varaTokenDecimals' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'varaTokenName' } },
-                      { kind: 'Field', name: { kind: 'Name', value: 'varaTokenSymbol' } },
-                    ],
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      },
-    },
-  ],
-} as unknown as DocumentNode<PairsQueryQuery, PairsQueryQueryVariables>;
-export const TransferQueryDocument = {
-  kind: 'Document',
-  definitions: [
-    {
-      kind: 'OperationDefinition',
-      operation: 'query',
-      name: { kind: 'Name', value: 'TransferQuery' },
-      variableDefinitions: [
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'id' } },
-          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'String' } } },
-        },
-      ],
-      selectionSet: {
-        kind: 'SelectionSet',
-        selections: [
-          {
-            kind: 'Field',
-            name: { kind: 'Name', value: 'transferById' },
-            arguments: [
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'id' },
-                value: { kind: 'Variable', name: { kind: 'Name', value: 'id' } },
-              },
-            ],
-            selectionSet: {
-              kind: 'SelectionSet',
-              selections: [
-                { kind: 'Field', name: { kind: 'Name', value: 'id' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'txHash' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'blockNumber' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'timestamp' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'completedAt' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'completedAtBlock' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'completedAtTxHash' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'nonce' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'sourceNetwork' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'source' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'destNetwork' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'destination' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'status' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'sender' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'receiver' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'amount' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'bridgingStartedAtBlock' } },
-                { kind: 'Field', name: { kind: 'Name', value: 'bridgingStartedAtMessageId' } },
-              ],
-            },
-          },
-        ],
-      },
-    },
-  ],
-} as unknown as DocumentNode<TransferQueryQuery, TransferQueryQueryVariables>;
-export const TransfersCountQueryDocument = {
-  kind: 'Document',
-  definitions: [
-    {
-      kind: 'OperationDefinition',
-      operation: 'query',
-      name: { kind: 'Name', value: 'TransfersCountQuery' },
-      variableDefinitions: [
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
-          type: { kind: 'NamedType', name: { kind: 'Name', value: 'TransferFilter' } },
-        },
-      ],
-      selectionSet: {
-        kind: 'SelectionSet',
-        selections: [
-          {
-            kind: 'Field',
-            name: { kind: 'Name', value: 'allTransfers' },
-            arguments: [
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'filter' },
-                value: { kind: 'Variable', name: { kind: 'Name', value: 'filter' } },
-              },
-            ],
-            selectionSet: {
-              kind: 'SelectionSet',
-              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
-            },
-          },
-        ],
-      },
-    },
-  ],
-} as unknown as DocumentNode<TransfersCountQueryQuery, TransfersCountQueryQueryVariables>;
-export const CheckpointSlotsQueryDocument = {
-  kind: 'Document',
-  definitions: [
-    {
-      kind: 'OperationDefinition',
-      operation: 'query',
-      name: { kind: 'Name', value: 'CheckpointSlotsQuery' },
-      variableDefinitions: [
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'slot' } },
-          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'BigInt' } } },
-        },
-      ],
-      selectionSet: {
-        kind: 'SelectionSet',
-        selections: [
-          {
-            kind: 'Field',
-            name: { kind: 'Name', value: 'allCheckpointSlots' },
-            arguments: [
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'filter' },
-                value: {
-                  kind: 'ObjectValue',
-                  fields: [
-                    {
-                      kind: 'ObjectField',
-                      name: { kind: 'Name', value: 'slot' },
-                      value: {
-                        kind: 'ObjectValue',
-                        fields: [
-                          {
-                            kind: 'ObjectField',
-                            name: { kind: 'Name', value: 'greaterThanOrEqualTo' },
-                            value: { kind: 'Variable', name: { kind: 'Name', value: 'slot' } },
-                          },
-                        ],
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-            selectionSet: {
-              kind: 'SelectionSet',
-              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
-            },
-          },
-        ],
-      },
-    },
-  ],
-} as unknown as DocumentNode<CheckpointSlotsQueryQuery, CheckpointSlotsQueryQueryVariables>;
-export const MerkelRootInMessageQueuesQueryDocument = {
-  kind: 'Document',
-  definitions: [
-    {
-      kind: 'OperationDefinition',
-      operation: 'query',
-      name: { kind: 'Name', value: 'MerkelRootInMessageQueuesQuery' },
-      variableDefinitions: [
-        {
-          kind: 'VariableDefinition',
-          variable: { kind: 'Variable', name: { kind: 'Name', value: 'blockNumber' } },
-          type: { kind: 'NonNullType', type: { kind: 'NamedType', name: { kind: 'Name', value: 'BigInt' } } },
-        },
-      ],
-      selectionSet: {
-        kind: 'SelectionSet',
-        selections: [
-          {
-            kind: 'Field',
-            name: { kind: 'Name', value: 'allMerkleRootInMessageQueues' },
-            arguments: [
-              {
-                kind: 'Argument',
-                name: { kind: 'Name', value: 'filter' },
-                value: {
-                  kind: 'ObjectValue',
-                  fields: [
-                    {
-                      kind: 'ObjectField',
-                      name: { kind: 'Name', value: 'blockNumber' },
-                      value: {
-                        kind: 'ObjectValue',
-                        fields: [
-                          {
-                            kind: 'ObjectField',
-                            name: { kind: 'Name', value: 'greaterThanOrEqualTo' },
-                            value: { kind: 'Variable', name: { kind: 'Name', value: 'blockNumber' } },
-                          },
-                        ],
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-            selectionSet: {
-              kind: 'SelectionSet',
-              selections: [{ kind: 'Field', name: { kind: 'Name', value: 'totalCount' } }],
-            },
-          },
-        ],
-      },
-    },
-  ],
-} as unknown as DocumentNode<MerkelRootInMessageQueuesQueryQuery, MerkelRootInMessageQueuesQueryQueryVariables>;
+export const TransfersQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TransfersQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"first"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"offset"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"Int"}}}},{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"filter"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TransferFilter"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"allTransfers"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"first"},"value":{"kind":"Variable","name":{"kind":"Name","value":"first"}}},{"kind":"Argument","name":{"kind":"Name","value":"offset"},"value":{"kind":"Variable","name":{"kind":"Name","value":"offset"}}},{"kind":"Argument","name":{"kind":"Name","value":"orderBy"},"value":{"kind":"EnumValue","value":"TIMESTAMP_DESC"}},{"kind":"Argument","name":{"kind":"Name","value":"filter"},"value":{"kind":"Variable","name":{"kind":"Name","value":"filter"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"nodes"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"amount"}},{"kind":"Field","name":{"kind":"Name","value":"txHash"}},{"kind":"Field","name":{"kind":"Name","value":"destNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"destination"}},{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"receiver"}},{"kind":"Field","name":{"kind":"Name","value":"sender"}},{"kind":"Field","name":{"kind":"Name","value":"source"}},{"kind":"Field","name":{"kind":"Name","value":"sourceNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"timestamp"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}},{"kind":"Field","name":{"kind":"Name","value":"nonce"}},{"kind":"Field","name":{"kind":"Name","value":"blockNumber"}}]}},{"kind":"Field","name":{"kind":"Name","value":"totalCount"}}]}}]}}]} as unknown as DocumentNode<TransfersQueryQuery, TransfersQueryQueryVariables>;
+export const PairsQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"PairsQuery"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"allPairs"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"nodes"},"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"ethToken"}},{"kind":"Field","name":{"kind":"Name","value":"ethTokenDecimals"}},{"kind":"Field","name":{"kind":"Name","value":"ethTokenName"}},{"kind":"Field","name":{"kind":"Name","value":"ethTokenSymbol"}},{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"isActive"}},{"kind":"Field","name":{"kind":"Name","value":"tokenSupply"}},{"kind":"Field","name":{"kind":"Name","value":"varaToken"}},{"kind":"Field","name":{"kind":"Name","value":"varaTokenDecimals"}},{"kind":"Field","name":{"kind":"Name","value":"varaTokenName"}},{"kind":"Field","name":{"kind":"Name","value":"varaTokenSymbol"}}]}}]}}]}}]} as unknown as DocumentNode<PairsQueryQuery, PairsQueryQueryVariables>;
+export const TransferQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TransferQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"id"}},"type":{"kind":"NonNullType","type":{"kind":"NamedType","name":{"kind":"Name","value":"String"}}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"transferById"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"id"},"value":{"kind":"Variable","name":{"kind":"Name","value":"id"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"id"}},{"kind":"Field","name":{"kind":"Name","value":"txHash"}},{"kind":"Field","name":{"kind":"Name","value":"blockNumber"}},{"kind":"Field","name":{"kind":"Name","value":"timestamp"}},{"kind":"Field","name":{"kind":"Name","value":"completedAt"}},{"kind":"Field","name":{"kind":"Name","value":"completedAtBlock"}},{"kind":"Field","name":{"kind":"Name","value":"completedAtTxHash"}},{"kind":"Field","name":{"kind":"Name","value":"nonce"}},{"kind":"Field","name":{"kind":"Name","value":"sourceNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"source"}},{"kind":"Field","name":{"kind":"Name","value":"destNetwork"}},{"kind":"Field","name":{"kind":"Name","value":"destination"}},{"kind":"Field","name":{"kind":"Name","value":"status"}},{"kind":"Field","name":{"kind":"Name","value":"sender"}},{"kind":"Field","name":{"kind":"Name","value":"receiver"}},{"kind":"Field","name":{"kind":"Name","value":"amount"}},{"kind":"Field","name":{"kind":"Name","value":"bridgingStartedAtBlock"}},{"kind":"Field","name":{"kind":"Name","value":"bridgingStartedAtMessageId"}}]}}]}}]} as unknown as DocumentNode<TransferQueryQuery, TransferQueryQueryVariables>;
+export const TransfersCountQueryDocument = {"kind":"Document","definitions":[{"kind":"OperationDefinition","operation":"query","name":{"kind":"Name","value":"TransfersCountQuery"},"variableDefinitions":[{"kind":"VariableDefinition","variable":{"kind":"Variable","name":{"kind":"Name","value":"filter"}},"type":{"kind":"NamedType","name":{"kind":"Name","value":"TransferFilter"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"allTransfers"},"arguments":[{"kind":"Argument","name":{"kind":"Name","value":"filter"},"value":{"kind":"Variable","name":{"kind":"Name","value":"filter"}}}],"selectionSet":{"kind":"SelectionSet","selections":[{"kind":"Field","name":{"kind":"Name","value":"totalCount"}}]}}]}}]} as unknown as DocumentNode<TransfersCountQueryQuery, TransfersCountQueryQueryVariables>;

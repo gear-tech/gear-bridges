@@ -1,4 +1,4 @@
 {
   "extends": "@gear-js/frontend-configs/tsconfig.app.json",
-  "include": ["src", "codegen.ts"]
+  "include": ["src", "codegen.ts", "test"]
 }

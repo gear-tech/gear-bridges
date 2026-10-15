@@ -81,6 +81,153 @@ function rootsFixture() {
     nonce: 0n, wait: false, deadline: Date.now() + 1000 } };
 }
 
+const rootLog = (blockNumber: bigint, merkleRoot = hash(Number(blockNumber)), removed = false) =>
+  ({ args: { blockNumber, merkleRoot }, removed });
+
+function availabilityFixture() {
+  const unwatch = vi.fn();
+  type Watch = { fromBlock: bigint; onLogs(logs: ReturnType<typeof rootLog>[]): void; onError(error: Error): void };
+  let watching!: (watch: Watch) => void;
+  const watched = new Promise<Watch>((resolve) => { watching = resolve; });
+  const client = {
+    readContract: vi.fn(async (_request: { functionName: string }) => hash(0)),
+    getBlockNumber: vi.fn(async () => 100n),
+    getLogs: vi.fn(async (_range: { fromBlock: bigint; toBlock: bigint }) => [] as ReturnType<typeof rootLog>[]),
+    watchContractEvent: vi.fn((watch: Watch) => { watching(watch); return unwatch; }),
+  };
+  return { client, unwatch, watched, queue: new MessageQueueClient(address(1), client as unknown as PublicClient) };
+}
+
+describe('SDK advisory root availability', () => {
+  test('returns the exact finalized stored root without reading history or watching', async () => {
+    const { client, queue } = availabilityFixture();
+    client.readContract.mockResolvedValue(hash(10));
+    expect(await queue.waitForMerkleRoot(10n)).toEqual(rootLog(10n).args);
+    expect(client.readContract).toHaveBeenCalledWith(expect.objectContaining({
+      functionName: 'getMerkleRoot', args: [10n], blockTag: 'finalized',
+    }));
+    expect(client.getBlockNumber).not.toHaveBeenCalled();
+    expect(client.getLogs).not.toHaveBeenCalled();
+    expect(client.watchContractEvent).not.toHaveBeenCalled();
+  });
+
+  test('returns the lowest eligible source height in the first recent page, not the global minimum', async () => {
+    const { client, queue } = availabilityFixture();
+    client.getBlockNumber.mockResolvedValue(10_000n);
+    client.getLogs.mockImplementation(async ({ fromBlock }) =>
+      fromBlock >= 8001n ? [rootLog(30n), rootLog(15n), rootLog(20n)] : [rootLog(12n)]);
+    expect(await queue.waitForMerkleRoot(10n, 500n)).toEqual(rootLog(15n).args);
+    expect(client.getLogs.mock.calls.map(([{ fromBlock, toBlock }]) => [fromBlock, toBlock]))
+      .toEqual([[8001n, 10_000n]]);
+    expect(client.watchContractEvent).not.toHaveBeenCalled();
+  });
+
+  test.each([undefined, 500n])('walks bounded recent-first pages through the inclusive floor %s', async (floor) => {
+    const { client, queue } = availabilityFixture();
+    client.getBlockNumber.mockResolvedValue(4500n);
+    client.getLogs.mockImplementation(async ({ fromBlock }) =>
+      fromBlock === (floor ?? 0n) ? [rootLog(12n)] : []);
+    expect(await queue.waitForMerkleRoot(10n, floor)).toEqual(rootLog(12n).args);
+    expect(client.getLogs.mock.calls.map(([{ fromBlock, toBlock }]) => [fromBlock, toBlock]))
+      .toEqual([[2501n, 4500n], [501n, 2500n], [floor ?? 0n, 500n]]);
+  });
+
+  test('finds a late backfill below maximum source progress without treating that maximum as a cursor', async () => {
+    const { client, queue } = availabilityFixture();
+    client.readContract.mockImplementation(async ({ functionName }) =>
+      functionName === 'getMerkleRoot' ? hash(0) : hash(100));
+    client.getLogs.mockResolvedValue([rootLog(12n)]);
+    expect(await queue.waitForMerkleRoot(10n)).toEqual(rootLog(12n).args);
+    expect(client.readContract).toHaveBeenCalledTimes(1);
+    expect(client.watchContractEvent).not.toHaveBeenCalled();
+  });
+
+  test.each([100n, 4100n])('catches handoff publication inclusively through new head %s', async (head) => {
+    const { client, queue, unwatch } = availabilityFixture();
+    client.getBlockNumber.mockResolvedValueOnce(100n).mockResolvedValueOnce(head);
+    client.getLogs.mockImplementation(async ({ fromBlock, toBlock }) =>
+      client.watchContractEvent.mock.calls.length && fromBlock <= 100n && toBlock >= 100n ? [rootLog(12n)] : []);
+    expect(await queue.waitForMerkleRoot(10n, 50n)).toEqual(rootLog(12n).args);
+    expect(client.watchContractEvent).toHaveBeenCalledWith(expect.objectContaining({ fromBlock: 100n }));
+    expect(client.getLogs.mock.calls.map(([{ fromBlock, toBlock }]) => [fromBlock, toBlock]))
+      .toEqual(head === 100n ? [[50n, 100n], [100n, 100n]] :
+        [[50n, 100n], [2101n, 4100n], [101n, 2100n], [100n, 100n]]);
+    expect(unwatch).toHaveBeenCalledTimes(1);
+  });
+
+  test('ignores removed, zero and below-target roots in history and live batches', async () => {
+    const { client, queue, watched, unwatch } = availabilityFixture();
+    const ignored = [rootLog(11n, hash(11), true), rootLog(12n, hash(0)), rootLog(9n)];
+    client.getLogs.mockResolvedValue(ignored);
+    const pending = queue.waitForMerkleRoot(10n);
+    const watch = await watched;
+    watch.onLogs(ignored);
+    expect(unwatch).not.toHaveBeenCalled();
+    watch.onLogs([...ignored, rootLog(20n), rootLog(15n)]);
+    expect(await pending).toEqual(rootLog(15n).args);
+    watch.onLogs([rootLog(10n)]);
+    watch.onError(new Error('late watcher error'));
+    expect(unwatch).toHaveBeenCalledTimes(1);
+  });
+
+  test('cleans up once when logs arrive synchronously before the unwatch function is returned', async () => {
+    const { client, queue, unwatch } = availabilityFixture();
+    client.watchContractEvent.mockImplementation((watch) => {
+      watch.onLogs([rootLog(12n)]);
+      watch.onError(new Error('later error must not replace success'));
+      return unwatch;
+    });
+    expect(await queue.waitForMerkleRoot(10n)).toEqual(rootLog(12n).args);
+    expect(unwatch).toHaveBeenCalledTimes(1);
+    expect(client.getBlockNumber).toHaveBeenCalledTimes(1);
+  });
+
+  test('a live result wins over a later failing catchup RPC without repeated cleanup', async () => {
+    const { client, queue, watched, unwatch } = availabilityFixture();
+    let started!: () => void, fail!: (error: Error) => void;
+    const admission = new Promise<void>((resolve) => { started = resolve; });
+    const catchup = new Promise<ReturnType<typeof rootLog>[]>((_, reject) => { fail = reject; });
+    client.getLogs.mockResolvedValueOnce([]).mockImplementationOnce(async () => {
+      started();
+      return catchup;
+    });
+    const pending = queue.waitForMerkleRoot(10n);
+    await admission;
+    const watch = await watched;
+    watch.onLogs([rootLog(12n)]);
+    expect(await pending).toEqual(rootLog(12n).args);
+    fail(new Error('late catchup error'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(unwatch).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(['history', 'catchup-head', 'catchup-logs', 'watch-setup', 'sync-watch', 'watch'])(
+    'keeps %s errors visible and unwatches any installed watcher exactly once', async (stage) => {
+      const { client, queue, watched, unwatch } = availabilityFixture();
+      const error = new Error(stage + ' unavailable');
+      if (stage === 'history') client.getLogs.mockRejectedValueOnce(error);
+      if (stage === 'catchup-head') client.getBlockNumber.mockResolvedValueOnce(100n).mockRejectedValueOnce(error);
+      if (stage === 'catchup-logs') client.getLogs.mockResolvedValueOnce([]).mockRejectedValueOnce(error);
+      if (stage === 'watch-setup') client.watchContractEvent.mockImplementation(() => { throw error; });
+      if (stage === 'sync-watch') client.watchContractEvent.mockImplementation((watch) => {
+        watch.onError(error);
+        watch.onLogs([rootLog(12n)]);
+        return unwatch;
+      });
+      const pending = queue.waitForMerkleRoot(10n);
+      const rejection = expect(pending).rejects.toBe(error);
+      if (stage === 'watch') {
+        const watch = await watched;
+        watch.onError(error);
+        watch.onError(error);
+        watch.onLogs([rootLog(12n)]);
+      }
+      await rejection;
+      expect(unwatch).toHaveBeenCalledTimes(stage === 'history' || stage === 'watch-setup' ? 0 : 1);
+    });
+});
+
 describe('SDK outbound acceptance', () => {
   test('decodes only the exact tagged 77-byte response, preserving nonce zero', () => {
     const bytes = new Uint8Array(77);

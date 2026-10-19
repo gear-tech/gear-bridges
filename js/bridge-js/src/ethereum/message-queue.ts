@@ -170,6 +170,7 @@ async function validateOriginalFinalizedMessageReceipt(params: FinalizedMessageR
   const input = encodeFunctionData({ abi: MessageQueueAbi, functionName: 'processMessage',
     args: getProcessMessageArgs(blockNumber, message, proof) });
   assertTokenMessage(message, params.expectedEffect);
+  let reportedReceipt: HexString | undefined, reportedFinalized: bigint | undefined;
   while (Date.now() < deadline) {
     let receipt;
     try {
@@ -180,6 +181,12 @@ async function validateOriginalFinalizedMessageReceipt(params: FinalizedMessageR
     if (receipt) {
       if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) throw new Error('Original receipt transaction hash mismatch');
       const finalized = await client.getBlock({ blockTag: 'finalized' });
+      if (receipt.blockNumber > finalized.number &&
+          (reportedReceipt !== receipt.blockHash || reportedFinalized !== finalized.number)) {
+        reportedReceipt = receipt.blockHash; reportedFinalized = finalized.number;
+        params.statusCb?.(`Original processMessage mined in block ${receipt.blockNumber}; waiting for Ethereum finality (finalized block ${finalized.number}). Finality can take several minutes.`,
+          { txHash: hash, receiptBlockNumber: receipt.blockNumber.toString(), finalizedBlockNumber: finalized.number.toString() });
+      }
       if (receipt.blockNumber <= finalized.number) {
         const canonical = await client.getBlock({ blockNumber: receipt.blockNumber });
         if (canonical.hash !== receipt.blockHash) throw new Error('Original receipt is not canonical finalized history');
@@ -433,7 +440,7 @@ export class MessageQueueClient {
         hash = await withOriginalDeadline(deadline, () => wallet.writeContract({ address: this._address,
           abi: MessageQueueAbi, functionName: 'processMessage', args, account, chain: wallet.chain }));
       }
-      statusCb('Waiting for original finalized processMessage receipt', { txHash: hash });
+      statusCb('Waiting for original processMessage transaction to be mined', { txHash: hash });
       return await validateFinalizedMessageReceipt({ ethereumPublicClient: this._client, messageQueueAddress: this._address,
         transactionHash: hash, blockNumber, message: varaMessage, proof: merkleProof, sender: account.address,
         deadline, statusCb, expectedEffect });

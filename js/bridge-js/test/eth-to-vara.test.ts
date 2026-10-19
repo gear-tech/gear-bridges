@@ -8,7 +8,7 @@ import { BeaconClient, createBeaconClient, createEthereumClient, EthereumClient 
 import { encodeEthToVaraEvent, CheckpointClient, HistoricalProxyClient, ProofResult, getPrefix } from '../src/vara/index.js';
 import { composeProof, generateMerkleProof, immutableInboundProfile, parseInboundProofProfile, immutableOwnedFixtureNetwork, checkpointNetworkMatches, validateOwnedFixtureNetwork, validateLocalFixtureBeaconSpec, InboundProofProfile } from '../src/eth-to-vara/proof-composer.js';
 import { relayEthToVara, validateFinalizedEthToVaraReply, decodeConsumerReply, assertNativePendingReply, validateFinalizedNativeReconciliationReply } from '../src/eth-to-vara/relayer.js';
-import type { ConsumerReplyContract } from '../src/eth-to-vara/relayer.js';
+import type { ConsumerReplyContract, RelayResult } from '../src/eth-to-vara/relayer.js';
 import { validateInboundTokenEffect, BridgingRequestedAbi, nativeOperationId, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption,
   VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, type NativeReceiptDeposit } from '../src/eth-to-vara/token-effect.js';
 import { encode as rlpEncode } from '@ethereumjs/rlp';
@@ -130,7 +130,7 @@ function originalReplyFixture() {
     } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
   });
 
-test('SDK final effect pin readback remains bounded by the original deadline', async () => {
+test.each(['deadline', 'funded', 'insufficient'] as const)('SDK original Gear request gas and dispatch evidence: %s', async (scenario) => {
   vi.useFakeTimers();
   const fixture = originalReplyFixture(), api = fixture.params.gearApi;
   const profile = { ...checkpointProofFixture().profile, ethereumGenesisHash: hash(8),
@@ -142,20 +142,28 @@ test('SDK final effect pin readback remains bounded by the original deadline', a
   const started = new Promise<void>(resolve => { readStarted = resolve; });
   const canonical = api.blocks.getBlockHash;
   api.blocks.getBlockHash = async (height) => {
-    if (effectVerified) { readStarted(); return new Promise<never>(() => {}); }
+    if (effectVerified && scenario === 'deadline') { readStarted(); return new Promise<never>(() => {}); }
     return canonical(height);
   };
   Object.assign(api, { blockGasLimit: { toBigInt: () => 10000n },
     programStorage: { getProgram: async () => ({ state: { isInitialized: true }, codeId: codec(profile.consumer.codeId) }) } });
   Object.assign(api.rpc, { state: { getStorage: async () => ({ isEmpty: false, toU8a: () => Uint8Array.of(1, 2, 3) }) } });
   const stop = vi.fn();
+  let gas = 100n;
+  const balance = scenario === 'insufficient' ? 50n : 200n;
+  Object.assign(api.events.system.ExtrinsicFailed, { is: (event: { method: string }) => event.method === 'ExtrinsicFailed' });
+  api.getExtrinsicFailedError = () => ({ method: 'InsufficientBalance', docs: 'Insufficient user balance.', name: 'InsufficientBalance' });
   const extrinsic = { args: [codec(hash(1)), codec(fixture.state.requestPayload)], hash: codec(hash(4)),
     signAsync: async () => extrinsic, send: async (callback: (result: unknown) => void) => {
-      callback({ events: await api.blocks.getEvents(hash(10)), status: { isInBlock: true, asInBlock: codec(hash(10)) } });
+      const events = gas > balance
+        ? [{ event: { section: 'system', method: 'ExtrinsicFailed', data: [] } }]
+        : await api.blocks.getEvents(hash(10));
+      callback({ events, status: { isInBlock: true, asInBlock: codec(hash(10)) } });
       return stop;
     } };
   const transaction = { extrinsic, gasInfo: { min_limit: { toBigInt: () => 100n } },
-    withAccount: () => transaction, calculateGas: async () => transaction, withGas: () => transaction, withValue: () => transaction };
+    withAccount: () => transaction, calculateGas: async () => transaction,
+    withGas: (limit: bigint) => { gas = limit; return transaction; }, withValue: () => transaction };
   try {
     vi.spyOn(beaconMethods, 'createBeaconClient').mockResolvedValue({ genesisBlockTime: 0 } as BeaconClient);
     vi.spyOn(proofMethods, 'composeProof').mockResolvedValue({ proofBlock: { block: { slot: 100 } }, receiptRlp: fixture.receiptRlp } as ProofResult);
@@ -170,11 +178,21 @@ test('SDK final effect pin readback remains bounded by the original deadline', a
         getBlock: async ({ blockNumber, blockTag }: { blockNumber?: bigint; blockTag?: string }) =>
           blockTag ? { number: 6n, hash: hash(5) } : { hash: blockNumber === 0n ? hash(8) : hash(5) } } as unknown as PublicClient,
     }).catch((error: Error) => error);
-    await started;
-    await vi.advanceTimersByTimeAsync(1001);
-    expect((await relay as Error).message).toContain('deadline expired');
-    expect((await relay as Error).message).toContain('HOLD: original Gear transaction ' + hash(4));
-    expect((await relay as Error).message).toContain('Reconcile the original before retrying');
+    if (scenario === 'deadline') {
+      await started;
+      await vi.advanceTimersByTimeAsync(1001);
+      expect((await relay as Error).message).toContain('deadline expired');
+      expect((await relay as Error).message).toContain('HOLD: original Gear transaction ' + hash(4));
+      expect((await relay as Error).message).toContain('Reconcile the original before retrying');
+    } else if (scenario === 'insufficient') {
+      const error = await relay as Error;
+      expect(error.message).toContain('InsufficientBalance: Insufficient user balance.');
+      expect(error.message).toContain(hash(4));
+      expect(effectVerified).toBe(false);
+    } else {
+      expect((await relay as RelayResult).clientReply).toBe(inner);
+      expect(effectVerified).toBe(true);
+    }
     expect(stop).toHaveBeenCalledOnce();
   } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
 });

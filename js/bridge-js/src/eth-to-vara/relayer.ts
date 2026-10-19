@@ -144,7 +144,7 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
   await read(() => transaction.calculateGas());
   const ceiling = api.blockGasLimit.toBigInt() / 100n * 95n;
   if (transaction.gasInfo.min_limit.toBigInt() > ceiling) throw new Error('Native reconciliation exceeds outer gas ceiling');
-  transaction.withGas(ceiling).withValue(0n);
+  transaction.withValue(0n);
   const payload = transaction.extrinsic.args[1].toHex();
   await read(() => transaction.extrinsic.signAsync(params.signer, signerOptions));
   if (Date.now() >= deadline) throw new Error('Original native settlement deadline expired before reconciliation');
@@ -156,6 +156,11 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
         if (finished) return;
         if (status.isInvalid || status.isDropped || status.isUsurped || status.isRetracted) { finished = true; reject(new Error('Original non-economic reconciliation transaction failed')); return; }
         if (!status.isInBlock) return;
+        const failed = events.find(({ event }) => api.events.system.ExtrinsicFailed.is(event));
+        if (failed) {
+          const error = api.getExtrinsicFailedError(failed.event);
+          finished = true; reject(new Error(`Original reconciliation transaction ${txHash}: ${error.method}: ${error.docs}`)); return;
+        }
         const messages = events.filter(({ event }) => api.events.gear.MessageQueued.is(event));
         if (messages.length !== 1 || !events.some(({ event }) => api.events.system.ExtrinsicSuccess.is(event)) || events.some(({ event }) => api.events.system.ExtrinsicFailed.is(event))) {
           finished = true; reject(new Error('Original reconciliation did not queue exactly one successful message')); return;
@@ -461,7 +466,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
   transaction.withAccount(params.signer, params.signerOptions);
   await withOriginalDeadline(deadline, () => transaction.calculateGas());
   if (transaction.gasInfo.min_limit.toBigInt() > gasLimit) throw new Error('Relay demand exceeds the source outer gas ceiling');
-  transaction.withGas(gasLimit).withValue(0n);
+  transaction.withValue(0n);
   const requestPayload = transaction.extrinsic.args[1].toHex();
   const sender = decodeAddress(typeof params.signer === 'string' ? params.signer : params.signer.address);
   await withOriginalDeadline(deadline, () => transaction.extrinsic.signAsync(params.signer, params.signerOptions));
@@ -477,6 +482,12 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
           return;
         }
         if (!status.isInBlock && !status.isFinalized) return;
+        const failed = events.find(({ event }) => params.gearApi.events.system.ExtrinsicFailed.is(event));
+        if (failed) {
+          const error = params.gearApi.getExtrinsicFailedError(failed.event);
+          reject(new Error(`${error.method}: ${error.docs}`));
+          return;
+        }
         const queued = events.filter(({ event }) => event.section === 'gear' && event.method === 'MessageQueued' &&
           event.data[1].toHex().toLowerCase() === sender.toLowerCase() &&
           event.data[2].toHex().toLowerCase() === params.historicalProxyId.toLowerCase());

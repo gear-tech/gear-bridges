@@ -574,6 +574,31 @@ describe('SDK outbound acceptance', () => {
       await expect(validateFinalizedMessageReceipt(fixture.params)).rejects.toThrow();
     });
 
+  test('SDK mined receipt reports advancing finality without completing before finalization', async () => {
+    vi.useFakeTimers();
+    const fixture = receiptFixture();
+    fixture.state.finalized = 3n;
+    const progress: Record<string, string>[] = [];
+    let completed = false;
+    const pending = validateFinalizedMessageReceipt({ ...fixture.params,
+      statusCb: (_status, details) => { if (details) progress.push(details); },
+    }).then(result => { completed = true; return result; });
+    try {
+      await vi.advanceTimersByTimeAsync(1);
+      expect(completed).toBe(false);
+      expect(progress[progress.length - 1]).toEqual({ txHash: hash(7), receiptBlockNumber: '5', finalizedBlockNumber: '3' });
+      fixture.state.finalized = 4n;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(completed).toBe(false);
+      expect(progress[progress.length - 1]?.finalizedBlockNumber).toBe('4');
+    } finally {
+      fixture.state.finalized = 5n;
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await pending).receiptBlockHash).toBe(hash(5));
+      vi.useRealTimers();
+    }
+  });
+
   test('a successful first-mined receipt cannot complete before original canonical finality', async () => {
     const fixture = receiptFixture();
     fixture.state.finalized = 4n;

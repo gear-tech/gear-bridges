@@ -17,3 +17,6 @@ sp-core = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio.workspace = true
 tower.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

@@ -125,6 +125,8 @@ pub struct TransactionManager {
     pub transactions: RwLock<BTreeMap<Uuid, Transaction>>,
     pub transactions_timestamp: RwLock<HashMap<Uuid, Instant>>,
     preparing_submissions: RwLock<HashSet<Uuid>>,
+    /// Round-robin across nonce allocation and economic reconciliation.
+    last_submission: RwLock<Option<Uuid>>,
 
     pub completed: RwLock<BTreeMap<Uuid, Transaction>>,
     pub failed: RwLock<BTreeMap<Uuid, String>>,
@@ -145,6 +147,7 @@ impl TransactionManager {
             transactions: RwLock::new(BTreeMap::new()),
             transactions_timestamp: RwLock::new(HashMap::with_capacity(CAPACITY)),
             preparing_submissions: RwLock::new(HashSet::new()),
+            last_submission: RwLock::new(None),
             completed: RwLock::new(BTreeMap::new()),
             failed: RwLock::new(BTreeMap::new()),
             storage,
@@ -244,17 +247,27 @@ impl TransactionManager {
         proof_composer: &mut ProofComposerIo,
     ) -> anyhow::Result<bool> {
         let transactions = self.transactions.read().await.clone();
-        // Drain already-signed, not-yet-included calls by nonce before creating
-        // any continuation. One signed owner prevents fresh nonce collisions.
+        // Only unresolved account nonces fence other receipts. An authenticated
+        // inclusion consumes the nonce even while its economic payout is pending.
         let pending_nonce = |transaction: &Transaction| {
             let signed = transaction.receipt.as_ref()?.signed_submission.as_ref()?;
-            if signed.inclusion_block_number.is_none() {
+            if signed
+                .inclusion_block_number
+                .zip(signed.inclusion_block_hash.as_ref())
+                .is_none()
+            {
                 Some(signed.nonce)
             } else {
                 signed
                     .native_reconciliation
                     .as_ref()
-                    .filter(|continuation| continuation.inclusion_block_number.is_none())
+                    .filter(|continuation| {
+                        continuation
+                            .inclusion_block_number
+                            .zip(continuation.inclusion_block_hash.as_ref())
+                            .is_none()
+                            && !continuation.has_terminal_reconciliation()
+                    })
                     .map(|continuation| continuation.nonce)
             }
         };
@@ -264,26 +277,22 @@ impl TransactionManager {
                 !matches!(
                     &transaction.status,
                     TxStatus::Failed { .. } | TxStatus::Completed
-                ) && transaction
+                ) && pending_nonce(transaction).is_some()
+            })
+            .min_by_key(|transaction| (pending_nonce(transaction), transaction.uuid))
+            .map(|transaction| transaction.uuid);
+        let has_active_signed = signed_owner.is_some();
+        let after = self.last_submission.read().await.unwrap_or(Uuid::nil());
+        for (_, tx) in transactions
+            .range((std::ops::Bound::Excluded(after), std::ops::Bound::Unbounded))
+            .chain(transactions.range(..=after))
+        {
+            if signed_owner.is_some()
+                && signed_owner != Some(tx.uuid)
+                && tx
                     .receipt
                     .as_ref()
                     .is_some_and(|receipt| receipt.signed_submission.is_some())
-            })
-            .min_by_key(|transaction| {
-                (
-                    pending_nonce(transaction).is_none(),
-                    pending_nonce(transaction).unwrap_or(u64::MAX),
-                    transaction.uuid,
-                )
-            })
-            .map(|transaction| transaction.uuid);
-        let has_active_signed = signed_owner.is_some();
-        for (_, tx) in transactions.iter() {
-            if tx
-                .receipt
-                .as_ref()
-                .is_some_and(|receipt| receipt.signed_submission.is_some())
-                && signed_owner != Some(tx.uuid)
             {
                 continue;
             }
@@ -328,6 +337,7 @@ impl TransactionManager {
                         active_tx.status = TxStatus::PreparingSubmission;
                     }
                     self.preparing_submissions.write().await.insert(tx_uuid);
+                    *self.last_submission.write().await = Some(tx_uuid);
                     self.storage.save(self).await?;
                     if !message_sender.prepare_message(tx_uuid, tx.tx.tx_hash, event) {
                         log::info!("Message sender connection closed, exiting...");
@@ -336,6 +346,9 @@ impl TransactionManager {
                     log::info!("Transaction {tx_uuid} is queued for signing only");
                 }
                 TxStatus::PreparedSubmission => {
+                    if !self.preparing_submissions.read().await.is_empty() {
+                        continue;
+                    }
                     let receipt = tx.receipt.as_ref().ok_or_else(|| {
                         anyhow::anyhow!("Prepared submission has no receipt evidence")
                     })?;
@@ -366,6 +379,8 @@ impl TransactionManager {
                             .get_or_insert_with(message_sender::now_ms);
                     }
                     self.failed.write().await.insert(tx_uuid, diagnostic);
+                    self.preparing_submissions.write().await.insert(tx_uuid);
+                    *self.last_submission.write().await = Some(tx_uuid);
                     self.storage.save(self).await?;
                     if !message_sender.submit_prepared(
                         tx_uuid,
@@ -384,6 +399,13 @@ impl TransactionManager {
                         anyhow::anyhow!("Held transaction has no original receipt evidence")
                     })?;
                     if let Some(signed) = receipt.signed_submission.clone() {
+                        // Reconciliation may prepare a fresh read-only continuation.
+                        // Hold the allocator until its response is durably recorded.
+                        if !self.preparing_submissions.read().await.is_empty() {
+                            continue;
+                        }
+                        self.preparing_submissions.write().await.insert(tx_uuid);
+                        *self.last_submission.write().await = Some(tx_uuid);
                         let event = tx.receipt_event()?;
                         if !message_sender.submit_prepared(
                             tx_uuid,
@@ -1825,6 +1847,172 @@ pub(super) mod tests {
             retained, original,
             "HOLD must preserve the original UUID, hash and proof bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn finalized_native_nonce_releases_fresh_receipts_but_unknown_nonces_fence() {
+        use subxt::config::{substrate::BlakeTwo256, Hasher};
+        use vft_manager_client::vft_manager::io::ReconcileReceipt;
+
+        for continuation in [false, true] {
+            let manager =
+                TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
+            let fixtures = receipt_fixtures();
+            let mut uuids = Vec::new();
+            for (lock, event) in &fixtures {
+                let tx = Transaction::new(lock.clone(), TxStatus::ComposeProof);
+                uuids.push(tx.uuid);
+                manager.add_transaction(tx).await;
+                manager
+                    .submit_message(*uuids.last().unwrap(), event.clone())
+                    .await
+                    .unwrap();
+            }
+            let key = (fixtures[0].0.slot_number.0, fixtures[0].1.transaction_index);
+            let mut original = signed_submission(key);
+            if continuation {
+                original.inclusion_block_number = Some(51);
+                original.inclusion_block_hash = Some("0x51".into());
+                original.message_id = Some("0x52".into());
+                original.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
+                    payload: vec![1],
+                    observation: message_sender::FinalizedReceiptObservation {
+                        finalized_block_number: Some(52),
+                        finalized_block_hash: "0x52".into(),
+                    },
+                });
+                let mut child = signed_submission(key);
+                child.nonce += 1;
+                child.prepared_finalized_number = 52;
+                child.payload_hash = format!(
+                    "{:#x}",
+                    alloy_primitives::keccak256(ReconcileReceipt::encode_call(key.0, key.1))
+                );
+                child.extrinsic_hash = format!("{:#x}", BlakeTwo256.hash(&child.raw_extrinsic));
+                original.native_reconciliation = Some(Box::new(child));
+            }
+            manager
+                .finalize_transaction(message_sender::Response {
+                    tx_uuid: uuids[0],
+                    status: MessageStatus::Prepared,
+                    submission: None,
+                    signed_submission: Some(original.clone()),
+                })
+                .await
+                .unwrap();
+            let (requests, mut sent) = unbounded_channel();
+            let (_responses, received) = unbounded_channel();
+            let mut sender = MessageSenderIo::new(requests, received);
+            let (requests, _proof_requests) = unbounded_channel();
+            let (_responses, received) = unbounded_channel();
+            let mut composer = ProofComposerIo::new(requests, received);
+            manager.resume(&mut sender, &mut composer).await.unwrap();
+            assert!(
+                matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared {
+                tx_uuid, prepared, ..
+            }) if tx_uuid == uuids[0] && prepared.1 == original)
+            );
+            manager.resume(&mut sender, &mut composer).await.unwrap();
+            assert!(
+                matches!(sent.try_recv(), Err(TryRecvError::Empty)),
+                "an in-flight original/continuation cannot allocate another nonce"
+            );
+
+            // A missing inclusion response preserves the nonce fence, even after a callback.
+            manager
+                .finalize_transaction(message_sender::Response {
+                    tx_uuid: uuids[0],
+                    status: MessageStatus::NeedsReconciliation {
+                        receipt_key: key,
+                        diagnostic: "unknown inclusion".into(),
+                        receipt_observation: None,
+                    },
+                    submission: None,
+                    signed_submission: Some(original.clone()),
+                })
+                .await
+                .unwrap();
+            manager.resume(&mut sender, &mut composer).await.unwrap();
+            assert!(
+                matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared {
+                tx_uuid, prepared, ..
+            }) if tx_uuid == uuids[0] && prepared.1 == original)
+            );
+            assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
+
+            let included = if continuation {
+                original.native_reconciliation.as_deref_mut().unwrap()
+            } else {
+                &mut original
+            };
+            included.inclusion_block_number = Some(53);
+            included.inclusion_block_hash = Some("0x53".into());
+            included.message_id = Some("0x54".into());
+            // Keep the economic outcome pending, not Processed/Completed.
+            if included.finalized_reply.is_none() {
+                included.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
+                    payload: vec![1],
+                    observation: message_sender::FinalizedReceiptObservation {
+                        finalized_block_number: Some(54),
+                        finalized_block_hash: "0x54".into(),
+                    },
+                });
+            }
+            manager
+                .finalize_transaction(message_sender::Response {
+                    tx_uuid: uuids[0],
+                    status: MessageStatus::NeedsReconciliation {
+                        receipt_key: key,
+                        diagnostic: "native payout unclaimed".into(),
+                        receipt_observation: Some(message_sender::FinalizedReceiptObservation {
+                            finalized_block_number: Some(54),
+                            finalized_block_hash: "0x54".into(),
+                        }),
+                    },
+                    submission: None,
+                    signed_submission: Some(original.clone()),
+                })
+                .await
+                .unwrap();
+            manager.resume(&mut sender, &mut composer).await.unwrap();
+            assert!(matches!(sent.try_recv(), Ok(message_sender::Request::PrepareMessage {
+                tx_uuid, payload, ..
+            }) if tx_uuid == uuids[1] && payload.encode() == fixtures[1].1.encode()),
+                "authenticated nonce consumption must not let an unclaimed payout block fresh receipts");
+            assert!(
+                matches!(sent.try_recv(), Err(TryRecvError::Empty)),
+                "native continuations and fresh originals must serialize signing"
+            );
+            assert!(manager.completed.read().await.is_empty());
+            assert_eq!(
+                manager.transactions.read().await[&uuids[0]]
+                    .receipt
+                    .as_ref()
+                    .unwrap()
+                    .signed_submission
+                    .as_ref(),
+                Some(&original)
+            );
+
+            // A failed fresh preparation releases only the volatile allocation slot.
+            manager
+                .finalize_transaction(message_sender::Response {
+                    tx_uuid: uuids[1],
+                    status: MessageStatus::PrepareFailed("RPC unavailable".into()),
+                    submission: None,
+                    signed_submission: None,
+                })
+                .await
+                .unwrap();
+            manager.resume(&mut sender, &mut composer).await.unwrap();
+            assert!(
+                matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared {
+                tx_uuid, prepared, ..
+            }) if tx_uuid == uuids[0] && prepared.1 == original),
+                "included economic obligations must remain fairly reconcilable"
+            );
+            assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
+        }
     }
 
     #[tokio::test]

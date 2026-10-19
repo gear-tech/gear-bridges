@@ -40,3 +40,11 @@ export interface ReceiptDepositSettled {
   readonly amount: string;
   readonly native: boolean;
 }
+
+export interface ReceiptDepositRefunded extends ReceiptDepositSettled {
+  readonly child: string;
+  readonly payout_child: string;
+  readonly returned_value: string;
+}
+
+export type ReceiptDepositEffect = ReceiptDepositSettled | (ReceiptDepositRefunded & { readonly outcome: 'Refunded' });

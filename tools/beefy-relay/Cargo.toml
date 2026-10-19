@@ -47,7 +47,7 @@ tokio.workspace = true
 futures.workspace = true
 url.workspace = true
 gclient = { workspace = true, optional = true }
-relayer = { path = "../../relayer", optional = true, default-features = false }
+relayer = { path = "../../relayer", optional = true }
 sails-rs = { workspace = true, features = ["gclient"], optional = true }
 historical-proxy = { workspace = true, features = ["wasm-binary"], optional = true }
 historical-proxy-client = { workspace = true, optional = true }

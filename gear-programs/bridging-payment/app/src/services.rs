@@ -7,7 +7,7 @@ use sails_rs::{gstd::msg, prelude::*};
 #[derive(Default)]
 pub struct BridgingPayment;
 
-/// Events emitted by Bridging Payment service.
+/// Payment events, including read-only historical decoder variants.
 #[event]
 #[derive(Encode, Decode, TypeInfo)]
 pub enum BridgingPaymentEvents {
@@ -17,12 +17,10 @@ pub enum BridgingPaymentEvents {
         nonce: U256,
     },
 
-    /// Fee for the message processing by relayer was paid
-    /// and priority bridging was requested.
+    /// Historical payment event retained only for decoding already-paid messages.
+    /// This program version does not emit it or offer priority processing.
     PriorityBridgingPaid {
-        /// Block at which message was queued.
-        ///
-        /// Used by merkle-root relayer to process requests faster.
+        /// Historical block at which the message was queued.
         block: H256,
         /// Nonce of the message that was paid for.
         nonce: U256,
@@ -41,7 +39,8 @@ pub struct State {
     pub admin_address: ActorId,
     /// Fee amount that will be charged from users.
     pub fee: u128,
-    /// Priority fee amount that will be charged from users.
+    /// Read-only historical field reserved in this encoded position.
+    /// New actors initialize it to zero; no priority payment product is available.
     pub priority_fee: u128,
 }
 
@@ -77,17 +76,6 @@ impl BridgingPayment {
         self.ensure_admin();
 
         self.state_mut().fee = fee;
-    }
-
-    /// Set fee that this program will take for processing priority
-    /// requests.
-    ///
-    /// This method can be called only by admin.
-    #[export]
-    pub fn set_priority_fee(&mut self, priority_fee: u128) {
-        self.ensure_admin();
-
-        self.state_mut().priority_fee = priority_fee;
     }
 
     /// Withdraw fees that were collected from user requests.
@@ -133,25 +121,6 @@ impl BridgingPayment {
         }
 
         self.emit_event(BridgingPaymentEvents::BridgingPaid { nonce })
-            .expect("Error depositing event");
-    }
-
-    /// Pay fees for priority message processing to the admin.
-    ///
-    /// This method requires that **exactly** [State::priority_fee] must be
-    /// attached as a value when sending message to this method.
-    ///
-    /// Current fee amount can be retrieved by calling `get_state`.
-    #[export]
-    pub async fn pay_priority_fees(&mut self, block: H256, nonce: U256) {
-        let fee = self.state().priority_fee;
-
-        let attached_value = msg::value();
-        if attached_value != fee {
-            panic!("Please attach exactly {} value", fee);
-        }
-
-        self.emit_event(BridgingPaymentEvents::PriorityBridgingPaid { block, nonce })
             .expect("Error depositing event");
     }
 

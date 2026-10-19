@@ -30,18 +30,10 @@ type Transaction = {
 type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
-  priorityFee: bigint | undefined;
-  shouldPayPriorityFee: boolean;
   vftManagerFee: bigint | undefined;
 };
 
-function usePrepareVaraTxs({
-  bridgingFee,
-  shouldPayBridgingFee,
-  priorityFee,
-  shouldPayPriorityFee,
-  vftManagerFee,
-}: Params) {
+function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
   const { NETWORK_PRESET } = useNetworkType();
   const { token } = useBridgeContext();
 
@@ -51,13 +43,7 @@ function usePrepareVaraTxs({
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
 
-  if (
-    isUndefined(vftManagerFee) ||
-    !token ||
-    (shouldPayBridgingFee && isUndefined(bridgingFee)) ||
-    (shouldPayPriorityFee && isUndefined(priorityFee))
-  )
-    return;
+  if (isUndefined(vftManagerFee) || !token || (shouldPayBridgingFee && isUndefined(bridgingFee))) return;
 
   return async ({ amount, accountAddress }: FormattedValues) => {
     const txs: Transaction[] = [];
@@ -119,7 +105,6 @@ function usePrepareVaraTxs({
     };
 
     if (shouldPayBridgingFee) txs.push({ ...feesTx, value: bridgingFee });
-    if (shouldPayPriorityFee) txs.push({ ...feesTx, value: priorityFee });
 
     return txs;
   };

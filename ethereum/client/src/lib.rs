@@ -1370,6 +1370,9 @@ impl EthApi {
         }
     }
 
+    /// Uses per-header deadlines and a cooperative traversal bound that retains
+    /// authenticated progress. Do not wrap the complete proof in an RPC timeout:
+    /// cancelling it can discard a partially verified ancestry frontier.
     pub async fn verified_finalized_view(&self) -> Result<FinalizedView, Error> {
         verified_finalized_view(self.raw_provider()).await
     }
@@ -2680,6 +2683,45 @@ mod tests {
         assert!(asserter.read_q().is_empty());
         Ok(())
     }
+    #[tokio::test(start_paused = true)]
+    async fn slow_bounded_ancestry_links_a_128_header_finalized_extension() -> AnyResult<()> {
+        use alloy::transports::mock::{Asserter, MockTransport};
+        let _ancestry_test_guard = ANCESTRY_TEST_LOCK.lock().await;
+        let chain = header_chain(57, 129);
+        let _owned = ClearOwnedChains([chain[0].header.hash]);
+        let asserter = Asserter::new();
+        let client = alloy::rpc::client::RpcClient::builder()
+            .layer(tower::util::MapFutureLayer::new(
+                |future| -> alloy::transports::TransportFut<'static> {
+                    Box::pin(async move {
+                        let response = future.await;
+                        tokio::time::sleep(Duration::from_secs(8)).await;
+                        response
+                    })
+                },
+            ))
+            .transport(MockTransport::new(asserter.clone()), true);
+        let provider = ProviderBuilder::new().connect_client(client);
+        asserter.push_success(&chain[1]);
+        asserter.push_success(&chain[0]);
+        assert_eq!(verified_finalized_view(&provider).await?.block_number(), 1);
+        asserter.push_success(&chain[129]);
+        asserter.push_success(&chain[0]);
+        for number in (2..=129).rev() {
+            asserter.push_success(&chain[number]);
+        }
+        let started = Instant::now();
+        let view = verified_finalized_view(&provider).await?;
+        assert!(started.elapsed() > Duration::from_secs(30));
+        assert_eq!(view.block_hash(), chain[129].header.hash);
+        let state = FINALIZED_ANCESTRY.get().unwrap().lock().unwrap();
+        let cache = &state[&chain[0].header.hash];
+        assert!(cache.required_heads.is_empty());
+        assert_eq!(cache.known.get(&1), Some(&chain[1].header.hash));
+        assert!(asserter.read_q().is_empty());
+        Ok(())
+    }
+
     #[tokio::test]
     async fn rate_limited_ancestry_resumes_only_verified_parent_links() -> AnyResult<()> {
         let _ancestry_test_guard = ANCESTRY_TEST_LOCK.lock().await;

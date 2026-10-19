@@ -2594,6 +2594,28 @@ async fn test_native_configuration_is_paused_and_gear_supply_only() {
         .send_recv(manager)
         .await
         .is_err());
+    // A preexisting nonzero-minimum Gear token must fail qualification; never
+    // lower its policy here and silently assume previously reaped dust returned.
+    service
+        .remove_vara_to_eth_address(eth_supply_vft)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    service
+        .map_vara_to_eth_address(eth_supply_vft, ERC20_TOKEN_ETH_SUPPLY, TokenSupply::Gear)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    VftAdminC::new(remoting.clone())
+        .set_minimum_balance(U256::one())
+        .send_recv(eth_supply_vft)
+        .await
+        .unwrap();
+    assert!(service
+        .configure_native_wrapper(Some(eth_supply_vft))
+        .send_recv(manager)
+        .await
+        .is_err());
     service
         .configure_native_wrapper(Some(native))
         .send_recv(manager)
@@ -2642,6 +2664,129 @@ async fn assert_native_exit_rejected(
             .await
             .unwrap(),
         supply
+    );
+}
+
+#[tokio::test]
+async fn test_native_fractional_split_preserves_aggregate_escrow() {
+    use vft_vara_client::traits::{NativeEscrow as _, VftExtension as _};
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        gear_supply_vft: native,
+        ..
+    } = setup_for_test().await;
+    let sender: ActorId = 100_105.into();
+    let recipient: ActorId = 100_106.into();
+    remoting.system().mint_to(sender, 100_000_000_000_000);
+    remoting.system().mint_to(recipient, 1_000_000_000_000);
+    let mut admin = VftManagerC::new(remoting.clone());
+    admin.pause().send_recv(manager).await.unwrap();
+    admin
+        .configure_native_wrapper(Some(native))
+        .send_recv(manager)
+        .await
+        .unwrap();
+    let mut native_admin = vft_vara_client::VftAdmin::new(remoting.clone());
+    native_admin.pause().send_recv(native).await.unwrap();
+    assert!(native_admin
+        .set_minimum_balance(U256::one())
+        .send_recv(native)
+        .await
+        .is_err());
+    vft_vara_client::NativeEscrow::new(remoting.clone())
+        .configure_manager(manager)
+        .send_recv(native)
+        .await
+        .unwrap();
+    native_admin
+        .set_burner(manager)
+        .send_recv(native)
+        .await
+        .unwrap();
+    native_admin.resume().send_recv(native).await.unwrap();
+    admin.unpause().send_recv(manager).await.unwrap();
+    assert_eq!(
+        vft_vara_client::VftExtension::new(remoting.clone())
+            .minimum_balance()
+            .recv(native)
+            .await
+            .unwrap(),
+        U256::zero()
+    );
+    let total = U256::from(1_500_000_000_000u64);
+    vft_vara_client::VftNativeExchange::new(remoting.clone().with_actor_id(sender))
+        .mint()
+        .with_value(total.as_u128())
+        .send_recv(native)
+        .await
+        .unwrap();
+    VftC::new(remoting.clone().with_actor_id(sender))
+        .transfer(manager, total)
+        .send_recv(native)
+        .await
+        .unwrap();
+    let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
+    let initial_native = remoting.system().balance_of(recipient);
+    for (index, raw) in [1_000_000_000_000u64, 500_000_000_000]
+        .into_iter()
+        .enumerate()
+    {
+        let receipt = crate::create_receipt_rlp(
+            ERC20_MANAGER_ADDRESS,
+            H160([3; 20]),
+            recipient,
+            ERC20_TOKEN_GEAR_SUPPLY,
+            U256::from(raw),
+        );
+        assert_eq!(
+            proxy
+                .submit_receipt(33, index as u64, receipt.clone())
+                .send_recv(manager)
+                .await
+                .unwrap(),
+            Err(Error::NativeSettlementPending)
+        );
+        let remaining = if index == 0 {
+            U256::from(500_000_000_000u64)
+        } else {
+            U256::zero()
+        };
+        assert_eq!(balance_of(&remoting, native, manager).await, remaining);
+        assert_eq!(
+            VftC::new(remoting.clone())
+                .total_supply()
+                .recv(native)
+                .await
+                .unwrap(),
+            remaining
+        );
+        remoting
+            .system()
+            .get_mailbox(recipient)
+            .claim_value(Log::builder().source(native).dest(recipient))
+            .unwrap();
+        remoting.system().run_next_block();
+        assert_eq!(
+            admin
+                .reconcile_receipt(33, index as u64)
+                .send_recv(manager)
+                .await
+                .unwrap(),
+            Ok(vft_manager_client::ReceiptStatus::Processed)
+        );
+        assert_eq!(
+            proxy
+                .submit_receipt(33, index as u64, receipt)
+                .send_recv(manager)
+                .await
+                .unwrap(),
+            Err(Error::AlreadyProcessed)
+        );
+    }
+    assert_eq!(
+        remoting.system().balance_of(recipient),
+        initial_native + total.as_u128()
     );
 }
 
@@ -2809,12 +2954,12 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(returned.status, PayoutStatus::Returned);
+    assert_eq!(returned.status, PayoutStatus::Refunded);
     assert_eq!(returned.returned_value, raw);
     assert_eq!(balance_of(&remoting, native, manager).await, U256::zero());
     assert_eq!(
         balance_of(&remoting, native, rejects_empty_payload).await,
-        U256::zero()
+        amount
     );
     assert_eq!(
         escrow
@@ -2826,15 +2971,15 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
     );
     assert_eq!(
         escrow.outstanding_redemptions().recv(native).await.unwrap(),
-        1
+        0
     );
     assert_native_exit_rejected(&remoting, native, inheritor).await;
     assert_eq!(
         escrow.redemption(returned_id).recv(native).await.unwrap(),
         Some(returned)
     );
-    // An authenticated success reply carrying value is not delivery evidence.
-    // Its original child remains an obligation, just like a definite return.
+    // An authenticated success reply carrying value is not delivery or refund evidence.
+    // Its original child remains an obligation.
     admin.resume().send_recv(native).await.unwrap();
     vft_vara_client::VftNativeExchange::new(remoting.clone().with_actor_id(manager))
         .mint()
@@ -2850,7 +2995,7 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
         .unwrap();
     assert_eq!(
         escrow.outstanding_redemptions().recv(native).await.unwrap(),
-        2
+        1
     );
     let ambiguous_message = Log::builder().source(native).dest(recipient);
     mailbox
@@ -2879,7 +3024,7 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
         .is_err());
     assert_eq!(
         escrow.outstanding_redemptions().recv(native).await.unwrap(),
-        2
+        1
     );
     assert_native_exit_rejected(&remoting, native, inheritor).await;
     assert_eq!(
@@ -3150,8 +3295,8 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
             .unwrap(),
         Err(Error::AlreadyProcessed)
     );
-    // A real program rejecting the original native payout retains its returned
-    // reserve obligation and cannot be treated as a fresh economic retry.
+    // A real program rejecting the original native payout receives exactly backed
+    // wrapped tokens, never another native payout or a native-delivered outcome.
     vft_vara_client::VftNativeExchange::new(remoting.clone().with_actor_id(sender))
         .mint()
         .with_value(raw)
@@ -3192,25 +3337,90 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(returned.status, vft_vara_client::PayoutStatus::Returned);
+    assert_eq!(returned.status, vft_vara_client::PayoutStatus::Refunded);
     assert_eq!(returned.returned_value, raw);
+    use sails_rs::events::EventIo;
+    use vft_manager_client::vft_manager::events::VftManagerEvents;
+    let mut refunds = 0;
     for _ in 0..2 {
+        let request = remoting
+            .system()
+            .get_program(manager)
+            .unwrap()
+            .send_bytes_with_gas(
+                sender,
+                ReconcileReceipt::encode_call(32, 1),
+                gtest::constants::MAX_USER_GAS_LIMIT,
+                0,
+            );
+        let mut reply = None;
+        for _ in 0..10 {
+            let result = remoting.system().run_next_block();
+            for entry in result.log() {
+                if entry.reply_to() == Some(request) {
+                    reply = Some(ReconcileReceipt::decode_reply(entry.payload()).unwrap());
+                }
+                if entry.source() != manager || !entry.destination().is_zero() {
+                    continue;
+                }
+                match VftManagerEvents::decode_event(entry.payload()).unwrap() {
+                    VftManagerEvents::ReceiptDepositRefunded {
+                        slot,
+                        transaction_index,
+                        log_index,
+                        deposit_count,
+                        operation_id,
+                        eth_token_id,
+                        vara_token_id,
+                        sender: eth_sender,
+                        receiver,
+                        amount: refunded_amount,
+                        native: native_outcome,
+                        child,
+                        payout_child,
+                        returned_value,
+                    } => {
+                        refunds += 1;
+                        assert_eq!(
+                            (slot, transaction_index, log_index, deposit_count),
+                            (32, 1, 0, 1)
+                        );
+                        assert_eq!(
+                            (operation_id, eth_token_id, vara_token_id),
+                            (failed_row.operation_id, ERC20_TOKEN_GEAR_SUPPLY, native)
+                        );
+                        assert_eq!(
+                            (eth_sender, receiver, refunded_amount),
+                            (H160([3; 20]), failing_recipient, amount)
+                        );
+                        assert!(native_outcome);
+                        assert_eq!(Some(child), failed_row.child);
+                        assert_eq!((payout_child, returned_value), (returned.child, raw));
+                    }
+                    VftManagerEvents::ReceiptDepositSettled { .. }
+                    | VftManagerEvents::BridgingAccepted { .. } => {
+                        std::panic!("Wrapped refund misclassified as native delivery")
+                    }
+                    _ => {}
+                }
+            }
+            if reply.is_some() {
+                break;
+            }
+        }
         assert_eq!(
-            reconciler
-                .reconcile_receipt(32, 1)
-                .send_recv(manager)
-                .await
-                .unwrap(),
-            Err(Error::NativeSettlementReturned)
+            reply,
+            Some(Ok(vft_manager_client::ReceiptStatus::Processed))
         );
     }
+    assert_eq!(refunds, 1, "Original refund event must be emitted once");
     assert_eq!(
         admin.receipt_status(32, 1).recv(manager).await.unwrap(),
-        vft_manager_client::ReceiptStatus::Reserved
+        vft_manager_client::ReceiptStatus::Processed
     );
     assert_eq!(
         admin.receipt_deposits(32, 1).recv(manager).await.unwrap()[0].outcome,
-        vft_manager_client::ReceiptDepositOutcome::Unknown
+        vft_manager_client::ReceiptDepositOutcome::Refunded
     );
     assert_eq!(
         proxy
@@ -3218,7 +3428,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
             .send_recv(manager)
             .await
             .unwrap(),
-        Err(Error::NativeSettlementReturned)
+        Err(Error::AlreadyProcessed)
     );
     assert_eq!(
         wrapper
@@ -3231,8 +3441,67 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         returned.child
     );
     assert_eq!(balance_of(&remoting, native, manager).await, U256::zero());
+    assert_eq!(
+        balance_of(&remoting, native, failing_recipient).await,
+        amount
+    );
+    assert_eq!(
+        wrapper
+            .outstanding_redemptions()
+            .recv(native)
+            .await
+            .unwrap(),
+        0
+    );
     admin.pause().send_recv(manager).await.unwrap();
-    assert_cutover_rejected(&remoting, manager, destination, native).await;
+    admin.upgrade(destination).send_recv(manager).await.unwrap();
+    assert_eq!(
+        admin.cutover_status().recv(manager).await.unwrap().phase,
+        vft_manager_client::CutoverPhase::Retired
+    );
+    native_admin.pause().send_recv(native).await.unwrap();
+    vft_vara_client::NativeEscrow::new(remoting.clone())
+        .configure_manager(destination)
+        .send_recv(native)
+        .await
+        .unwrap();
+    native_admin
+        .set_burner(destination)
+        .send_recv(native)
+        .await
+        .unwrap();
+    native_admin.resume().send_recv(native).await.unwrap();
+    admin
+        .finalize_cutover()
+        .send_recv(destination)
+        .await
+        .unwrap();
+    admin.unpause().send_recv(destination).await.unwrap();
+    assert_eq!(
+        admin
+            .cutover_status()
+            .recv(destination)
+            .await
+            .unwrap()
+            .phase,
+        vft_manager_client::CutoverPhase::Active
+    );
+    assert_eq!(
+        wrapper.manager().recv(native).await.unwrap(),
+        Some(destination)
+    );
+    assert_eq!(
+        balance_of(&remoting, native, failing_recipient).await,
+        amount
+    );
+    assert_eq!(
+        wrapper
+            .redemption(failed_row.operation_id)
+            .recv(native)
+            .await
+            .unwrap(),
+        Some(returned)
+    );
 }
 
 async fn upgrade_destination(remoting: &GTestRemoting, manager: ActorId) -> ActorId {

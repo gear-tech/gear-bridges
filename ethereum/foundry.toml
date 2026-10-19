@@ -35,6 +35,7 @@ ignored_warnings_from = [
 fs_permissions = [
     { access = "read", path = "out/" },
     { access = "read", path = "test/fixtures/" },
+    { access = "read-write", path = "broadcast/" },
 ]
 
 [dependencies]

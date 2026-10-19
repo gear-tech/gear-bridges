@@ -424,12 +424,10 @@ impl MerkleRootExtractor {
     }
 
     async fn finalized_view(&mut self) -> Result<FinalizedView> {
-        let mut view = tokio::time::timeout(
-            ETH_RPC_REQUEST_TIMEOUT,
-            self.eth_api.verified_finalized_view(),
-        )
-        .await
-        .context("Ethereum finality request timed out")??;
+        // This is a cooperative, checkpointed multi-request proof, not one RPC.
+        // The client bounds each request and the traversal; outer cancellation
+        // would discard authenticated progress before its next checkpoint.
+        let mut view = self.eth_api.verified_finalized_view().await?;
         if let Some(previous) = self.last_finalized {
             anyhow::ensure!(
                 view.block_number() >= previous.block_number,
@@ -957,12 +955,16 @@ mod tests {
         Ok((provider, server))
     }
 
+    type HistoricalRootRequest = (u64, tokio::sync::oneshot::Sender<()>);
+
     struct HttpRoots {
         api: EthApi,
         head: Arc<AtomicU64>,
         calls: Arc<Mutex<Vec<Value>>>,
         blocks: Arc<Vec<Block>>,
         birth: QueueDeployment,
+        historical_requests:
+            Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<HistoricalRootRequest>>>>,
         server: actix_web::dev::ServerHandle,
     }
 
@@ -981,7 +983,7 @@ mod tests {
             }))?;
             let mut blocks = Vec::new();
             let mut parent = B256::ZERO;
-            for number in 0..=12 {
+            for number in 0..=head.max(12) {
                 let mut block: Block = Default::default();
                 block.header.inner.number = number;
                 block.header.inner.parent_hash = parent;
@@ -1014,15 +1016,20 @@ mod tests {
             let blocks = Arc::new(blocks);
             let calls = Arc::new(Mutex::new(Vec::new()));
             let head = Arc::new(AtomicU64::new(head));
+            let historical_requests = Arc::new(Mutex::new(
+                None::<tokio::sync::mpsc::UnboundedSender<(u64, tokio::sync::oneshot::Sender<()>)>>,
+            ));
             let socket = std::net::TcpListener::bind("127.0.0.1:0")?;
             let endpoint = format!("http://{}", socket.local_addr()?);
             let server_blocks = blocks.clone();
             let server_calls = calls.clone();
             let server_head = head.clone();
+            let server_historical_requests = historical_requests.clone();
             let server = HttpServer::new(move || {
                 let blocks = server_blocks.clone();
                 let calls = server_calls.clone();
                 let head = server_head.clone();
+                let historical_requests = server_historical_requests.clone();
                 let receipt = receipt.clone();
                 App::new().route(
                     "/",
@@ -1031,6 +1038,7 @@ mod tests {
                         let calls = calls.clone();
                         let head = head.clone();
                         let receipt = receipt.clone();
+                        let historical_requests = historical_requests.clone();
                         async move {
                             calls.lock().unwrap().push(request.0.clone());
                             let params = &request["params"];
@@ -1044,6 +1052,19 @@ mod tests {
                                         u64::from_str_radix(tag.trim_start_matches("0x"), 16)
                                             .unwrap()
                                     };
+                                    let gate =
+                                        if number > 0 && !matches!(tag, "finalized" | "latest") {
+                                            historical_requests.lock().unwrap().clone()
+                                        } else {
+                                            None
+                                        };
+                                    if let Some(gate) = gate {
+                                        let (release, wait) = tokio::sync::oneshot::channel();
+                                        gate.send((number, release)).unwrap();
+                                        if wait.await.is_err() {
+                                            return HttpResponse::ServiceUnavailable().finish();
+                                        }
+                                    }
                                     json!(&blocks[number as usize])
                                 }
                                 "eth_getBlockByHash" => json!(blocks
@@ -1080,9 +1101,76 @@ mod tests {
                 calls,
                 blocks,
                 birth,
+                historical_requests,
                 server: handle,
             })
         }
+    }
+
+    #[tokio::test]
+    async fn finalized_view_allows_slow_bounded_128_header_extension() -> Result<()> {
+        let rpc = HttpRoots::new(129).await?;
+        rpc.head.store(1, Ordering::SeqCst);
+        assert_eq!(rpc.api.verified_finalized_view().await?.block_number(), 1);
+        let (provider, source) = source_provider().await?;
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut extractor = MerkleRootExtractor::new(
+            rpc.api.clone(),
+            provider.connection(),
+            1,
+            sender,
+            Arc::new(MemoryRootStorage::default()),
+        );
+        rpc.head.store(129, Ordering::SeqCst);
+        let (requests, mut historical) = tokio::sync::mpsc::unbounded_channel();
+        *rpc.historical_requests.lock().unwrap() = Some(requests);
+        tokio::time::pause();
+        // Keep virtual time from auto-advancing while real loopback I/O is pending.
+        let busy = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        let started = tokio::time::Instant::now();
+        let proof = tokio::spawn(async move {
+            let view = extractor.finalized_view().await?;
+            Ok::<_, anyhow::Error>((view, extractor.last_finalized))
+        });
+        let mut observed = Vec::new();
+        for _ in 0..4 {
+            let mut wave = Vec::new();
+            for _ in 0..32 {
+                let (number, release) = historical
+                    .recv()
+                    .await
+                    .context("ancestry traversal stopped before the next bounded request wave")?;
+                observed.push(number);
+                wave.push(release);
+            }
+            tokio::time::advance(Duration::from_secs(8)).await;
+            for release in wave {
+                let _ = release.send(());
+            }
+        }
+        let result = proof.await;
+        let elapsed = started.elapsed();
+        busy.abort();
+        tokio::time::resume();
+        rpc.server.stop(true).await;
+        source.abort();
+        let (view, pin) = result??;
+        assert!(elapsed >= Duration::from_secs(32));
+        observed.sort_unstable();
+        assert_eq!(observed, (2..=129).collect::<Vec<_>>());
+        assert_eq!(view.block_hash(), rpc.blocks[129].header.hash);
+        assert_eq!(
+            pin,
+            Some(EthereumRootCursor {
+                block_number: 129,
+                block_hash: rpc.blocks[129].header.hash,
+            })
+        );
+        Ok(())
     }
 
     #[tokio::test]

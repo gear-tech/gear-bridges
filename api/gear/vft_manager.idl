@@ -193,6 +193,8 @@ type ReceiptDepositOutcome = enum {
   Rejected,
   Unknown,
   NativeQueued,
+  /// Original native payout rejected; exact backed wrapped value credited.
+  Refunded,
 };
 
 /// Entry for a single message in [MessageTracker].
@@ -474,6 +476,23 @@ service VftManager {
       receiver: actor_id,
       amount: u256,
       native: bool,
+    };
+    /// Original native payout rejected and fully refunded as backed wrapped VARA.
+    ReceiptDepositRefunded: struct {
+      slot: u64,
+      transaction_index: u64,
+      log_index: u64,
+      deposit_count: u64,
+      operation_id: h256,
+      eth_token_id: h160,
+      vara_token_id: actor_id,
+      sender: h160,
+      receiver: actor_id,
+      amount: u256,
+      native: bool,
+      child: message_id,
+      payout_child: message_id,
+      returned_value: u128,
     };
   }
 };

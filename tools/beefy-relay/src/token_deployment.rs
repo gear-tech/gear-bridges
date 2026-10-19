@@ -45,7 +45,9 @@ use vft_manager_client::{
     Config, InitConfig, TokenSupply,
 };
 use vft_vara_client::{
-    traits::{NativeEscrow as _, VftAdmin as _, VftMetadata as _, VftVaraFactory},
+    traits::{
+        NativeEscrow as _, VftAdmin as _, VftExtension as _, VftMetadata as _, VftVaraFactory,
+    },
     Mainnet,
 };
 
@@ -754,7 +756,7 @@ pub async fn prepare(
     let initial_state = bridging_payment_client::State {
         admin_address: ActorId::from(<[u8; 32]>::from(api.account_id().clone())),
         fee: 1_000_000_000_000,
-        priority_fee: 2_000_000_000_000,
+        priority_fee: 0,
     };
     if new {
         let deployed = bridging_payment_client::BridgingPaymentFactory::new(
@@ -914,6 +916,13 @@ pub async fn prepare(
                 == 12,
         "native VFT metadata mismatch"
     );
+    ensure_native_minimum_balance(
+        vft_vara_client::VftExtension::new(remoting.clone())
+            .minimum_balance()
+            .at_block(sails_block_hash(finalized))
+            .recv(native)
+            .await?,
+    )?;
     let admin = vft_vara_client::VftAdmin::new(remoting.clone());
     ensure!(
         admin
@@ -1063,6 +1072,15 @@ const GEAR_TOKEN_SPECS: [GearTokenSpec; 6] = [
     },
 ];
 
+fn ensure_native_minimum_balance(minimum: sails_rs::prelude::U256) -> Result<()> {
+    // A nonzero minimum can burn escrow dust or prevent an exact original-recipient refund.
+    ensure!(
+        minimum.is_zero(),
+        "incompatible native wrapper: minimum VFT balance must be zero; refusing policy changes or dust repair"
+    );
+    Ok(())
+}
+
 fn authority_handoff(current: ActorId, setup: ActorId, manager: ActorId) -> Result<bool> {
     ensure!(
         setup != manager,
@@ -1167,12 +1185,7 @@ fn ensure_configuration_action(path: &Path, key: &str, intent: Value) -> Result<
     save_config_stack(path, &state)
 }
 
-fn begin_configuration_action(
-    path: &Path,
-    key: &str,
-    intent: Value,
-    _retry_safe: bool,
-) -> Result<()> {
+fn begin_configuration_action(path: &Path, key: &str, intent: Value) -> Result<()> {
     ensure_configuration_action(path, key, intent)?;
     let mut state = read_config_stack(path)?;
     let action = &mut state["configuration"]["actions"][key];
@@ -1189,13 +1202,12 @@ fn prepare_configuration_action(
     key: &str,
     intent: Value,
     already_applied: bool,
-    retry_safe: bool,
 ) -> Result<bool> {
     if already_applied {
         ensure_configuration_action(path, key, intent)?;
         Ok(false)
     } else {
-        begin_configuration_action(path, key, intent, retry_safe)?;
+        begin_configuration_action(path, key, intent)?;
         Ok(true)
     }
 }
@@ -2276,6 +2288,7 @@ async fn inspect_ethereum_configuration(
         "governancePauser": format!("{governance_pauser:#x}"),
         "governancePauserCodeHash": format!("{:#x}", alloy::primitives::keccak256(pauser_code.as_ref())),
         "messageQueue": format!("{:#x}", ethereum.queue_address),
+        "beefyRecovery": ethereum.recovery_configuration().await?,
         "vftManagers": registered_managers,
         "tokens": token_records,
         "bridgingPayments": [{
@@ -2615,8 +2628,8 @@ pub async fn configure(
     ensure!(
         payment_state.admin_address == setup
             && payment_state.fee == 1_000_000_000_000
-            && payment_state.priority_fee == 2_000_000_000_000,
-        "Gear normal/priority payment identity or fee differs from fresh setup"
+            && payment_state.priority_fee == 0,
+        "Gear payment identity, ordinary fee or reserved historical field differs from fresh setup"
     );
 
     let mut pairs = Vec::with_capacity(GEAR_TOKEN_SPECS.len());
@@ -2661,6 +2674,15 @@ pub async fn configure(
             "{} Gear peer metadata differs from expected test asset",
             spec.component
         );
+        if spec.component == "nativeVft" {
+            ensure_native_minimum_balance(
+                vft_vara_client::VftExtension::new(remoting.clone())
+                    .minimum_balance()
+                    .at_block(finalized_sails_hash)
+                    .recv(peer)
+                    .await?,
+            )?;
+        }
         let admin = vft_client::VftAdmin::new(remoting.clone());
         let minter = admin
             .minter()
@@ -2747,7 +2769,6 @@ pub async fn configure(
             &stack_path,
             &key,
             json!({"peer": format!("0x{}", hex::encode(peer.into_bytes())), "operation": "allocate-configured-shards"}),
-            true,
         )?;
         let remoting = JournaledRemoting::new(api.clone(), &stack_path, &key);
         vft_client::allocate_shards(remoting, *peer, gas)
@@ -2764,7 +2785,6 @@ pub async fn configure(
         "erc20Manager",
         manager_intent,
         current_erc20_manager.is_some(),
-        false,
     )?;
     if install_manager {
         vft_manager_client::VftManager::new(JournaledRemoting::new(
@@ -2823,7 +2843,7 @@ pub async fn configure(
             };
             let should_change = authority_handoff(current, setup, manager_id)?;
             let send_handoff =
-                prepare_configuration_action(&stack_path, &key, intent, !should_change, false)?;
+                prepare_configuration_action(&stack_path, &key, intent, !should_change)?;
             if send_handoff {
                 let mut writer = vft_client::VftAdmin::new(JournaledRemoting::new(
                     api.clone(),
@@ -2898,7 +2918,6 @@ pub async fn configure(
             &key,
             intent,
             !missing.iter().any(|(id, _, _)| id == peer),
-            false,
         )?;
         if add_mapping {
             let mut writer = vft_manager_client::VftManager::new(JournaledRemoting::new(
@@ -2979,13 +2998,7 @@ pub async fn configure(
             "manager must remain paused while binding native settlement"
         );
         let key = "native.pause";
-        if prepare_configuration_action(
-            &stack_path,
-            key,
-            native_identity.clone(),
-            native_paused,
-            false,
-        )? {
+        if prepare_configuration_action(&stack_path, key, native_identity.clone(), native_paused)? {
             vft_vara_client::VftAdmin::new(JournaledRemoting::new(api.clone(), &stack_path, key))
                 .pause()
                 .with_gas_limit(gas)
@@ -3037,7 +3050,6 @@ pub async fn configure(
             key,
             native_identity.clone(),
             current == Some(expected),
-            false,
         )? {
             if target == native_id {
                 vft_vara_client::NativeEscrow::new(JournaledRemoting::new(
@@ -3089,13 +3101,20 @@ pub async fn configure(
         }
     }
     let (at, _, _) = finalized_evidence(&source).await?;
+    ensure_native_minimum_balance(
+        vft_vara_client::VftExtension::new(remoting.clone())
+            .minimum_balance()
+            .at_block(sails_block_hash(at))
+            .recv(native_id)
+            .await?,
+    )?;
     let native_paused = native_admin
         .is_paused()
         .at_block(sails_block_hash(at))
         .recv(native_id)
         .await?;
     let key = "native.resume";
-    if prepare_configuration_action(&stack_path, key, native_identity, !native_paused, false)? {
+    if prepare_configuration_action(&stack_path, key, native_identity, !native_paused)? {
         vft_vara_client::VftAdmin::new(JournaledRemoting::new(api.clone(), &stack_path, key))
             .resume()
             .with_gas_limit(gas)
@@ -3157,6 +3176,13 @@ pub async fn configure(
         missing_token_mappings(&final_mappings, &desired)?.is_empty(),
         "Gear token mapping set is incomplete"
     );
+    ensure_native_minimum_balance(
+        vft_vara_client::VftExtension::new(remoting.clone())
+            .minimum_balance()
+            .at_block(sails_block_hash(at))
+            .recv(native_id)
+            .await?,
+    )?;
     for (spec, peer, _) in &pairs {
         let admin = vft_client::VftAdmin::new(remoting.clone());
         ensure!(
@@ -3196,7 +3222,6 @@ pub async fn configure(
         "unpause",
         unpause_intent.clone(),
         !manager_paused,
-        false,
     )?;
     if should_unpause {
         vft_manager_client::VftManager::new(JournaledRemoting::new(
@@ -3256,6 +3281,17 @@ mod configuration_recovery_tests {
     use super::*;
 
     #[test]
+    fn native_wrapper_minimum_balance_rejects_dust_policy() -> Result<()> {
+        use sails_rs::prelude::U256;
+
+        ensure_native_minimum_balance(U256::zero())?;
+        for minimum in [U256::one(), U256::from(1_000_000_000_000u64), U256::MAX] {
+            assert!(ensure_native_minimum_balance(minimum).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
     fn token_mapping_resume_preserves_origin_and_rejects_conflicts() -> Result<()> {
         let desired: Vec<_> = GEAR_TOKEN_SPECS
             .iter()
@@ -3303,7 +3339,6 @@ mod configuration_recovery_tests {
             "role",
             intent.clone(),
             false,
-            false
         )?);
         let mut state = read_config_stack(&path)?;
         state["configuration"]["actions"]["role"]["messages"] =
@@ -3318,21 +3353,18 @@ mod configuration_recovery_tests {
             "role",
             intent.clone(),
             false,
-            false
         )?);
         assert!(!prepare_configuration_action(
             &path,
             "role",
             intent.clone(),
             true,
-            false
         )?);
         assert!(prepare_configuration_action(
             &path,
             "role",
             json!({"role":"minter","authority":"replacement"}),
             true,
-            false
         )
         .is_err());
         update_configuration_message(

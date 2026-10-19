@@ -5,6 +5,7 @@ import { gearNonce } from '../../common/index.js';
 import {
   BridgingRequested,
   ReceiptDepositSettled,
+  ReceiptDepositRefunded,
   HistoricalProxyAddressChanged,
   MessageQueuedContext,
   TokenMappingAdded,
@@ -23,6 +24,11 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
     case VftManagerMethods.ReceiptDepositSettled: {
       const deposit = decoder.decodeEvent<ReceiptDepositSettled>(service, method, msg.payload);
       state.recordReceiptSettlement(deposit, new Date(blockHeader.timestamp!), blockNumber, event.extrinsic!.hash);
+      return;
+    }
+    case VftManagerMethods.ReceiptDepositRefunded: {
+      const deposit = decoder.decodeEvent<ReceiptDepositRefunded>(service, method, msg.payload);
+      state.recordReceiptRefund(deposit, new Date(blockHeader.timestamp!), blockNumber, event.extrinsic!.hash);
       return;
     }
     case VftManagerMethods.BridgingRequested: {

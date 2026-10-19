@@ -19,6 +19,9 @@ type PayoutStatus = enum {
   Delivered,
   Returned,
   Ambiguous,
+  /// The original rejected payout's full returned value backs wrapped tokens
+  /// credited exactly once to its original recipient. Not native delivery.
+  Refunded,
 };
 
 constructor {
@@ -76,6 +79,7 @@ service Vft2 {
 
 service VftAdmin {
   Exit : (inheritor: actor_id) -> null;
+  SetMinimumBalance : (value: u256) -> null;
   AppendAllowancesShard : (capacity: u32) -> null;
   AppendBalancesShard : (capacity: u32) -> null;
   ApproveFrom : (owner: actor_id, spender: actor_id, value: u256) -> bool;
@@ -87,7 +91,6 @@ service VftAdmin {
   SetAdmin : (admin: actor_id) -> null;
   SetBurner : (burner: actor_id) -> null;
   SetExpiryPeriod : (period: u32) -> null;
-  SetMinimumBalance : (value: u256) -> null;
   SetMinter : (minter: actor_id) -> null;
   SetPauser : (pauser: actor_id) -> null;
   query Admin : () -> actor_id;

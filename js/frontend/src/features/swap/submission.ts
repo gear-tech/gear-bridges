@@ -41,6 +41,24 @@ export function assertBridgeReply(value: unknown, expectedEthTokenId: `0x${strin
   return { nonce, ethTokenId: ethTokenId as `0x${string}` };
 }
 
+export async function submitVaraBridgeRequest<T extends BridgeReply & { txHash: string; messageId?: string }>(
+  request: () => Promise<T>,
+  shouldPayBridgingFee: boolean,
+  payFees: (args: { nonce: bigint }) => Promise<void>,
+): Promise<T> {
+  const original = await request();
+  if (!shouldPayBridgingFee) return original;
+
+  try {
+    await payFees({ nonce: original.nonce });
+  } catch (error) {
+    throw new Error(
+      `Source request succeeded: transaction ${original.txHash}, message ${original.messageId}, nonce ${original.nonce}. Recover fees from its history row; do not submit another bridge request. ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return original;
+}
+
 export async function waitForFinalizedReplies(
   api: GearApi,
   blockHash: HexString,

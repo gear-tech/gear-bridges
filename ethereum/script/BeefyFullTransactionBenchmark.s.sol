@@ -1,39 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.37;
 
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {ERC20Manager} from "src/ERC20Manager.sol";
-import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
-import {GovernancePauser} from "src/GovernancePauser.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
-import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
-import {WrappedVara} from "src/erc20/WrappedVara.sol";
-import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
-import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {Base} from "test/Base.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 
 /// @dev Local-only fixture broadcaster. The Python entrypoint owns the Anvil and
 /// measures mined receipts, not the script's shared/warm execution context.
-contract BeefyFullTransactionBenchmark is BeefyFixtureTest {
-    BeefyClient internal client;
-    VaraQueueRootVerifier internal verifier;
-    MessageQueue internal queue;
+contract BeefyFullTransactionBenchmark is BeefyFixtureTest, Base {
     address internal constant SENDER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
     bytes32 internal constant VFT_MANAGER = bytes32(uint256(0x909));
 
     function runCase(uint256 index) public {
         require(block.chainid == 31337, "local benchmark chain only");
         require(index >= 10 && index <= 12, "expected 59/150/256 fixture");
+        _requireOwnedRunner();
         fixtures = vm.readFile("test/fixtures/beefy-interop.json");
         _benchmarkAuthoritySet(index);
     }
 
     function run() public {
         require(block.chainid == 31337, "local benchmark chain only");
+        _requireOwnedRunner();
         fixtures = vm.readFile("test/fixtures/beefy-interop.json");
         _prepareQueue();
     }
@@ -84,59 +77,75 @@ contract BeefyFullTransactionBenchmark is BeefyFixtureTest {
         assertEq(target.latestBeefyBlock(), height);
     }
 
+    function _requireOwnedRunner() private view {
+        require(vm.envOr("BEEFY_BENCHMARK_OWNED_RUNNER", false), "owned benchmark runner required");
+        require(vm.addr(vm.envUint("PRIVATE_KEY")) == SENDER, "disposable Anvil key required");
+    }
+
     function _prepareQueue() internal {
-        address predictedQueue = vm.computeCreateAddress(SENDER, vm.getNonce(SENDER) + 5);
-        vm.startBroadcast(SENDER);
-        client = newClient(0, block.chainid, predictedQueue);
-        MessageQueue implementation = new MessageQueue();
-        GovernanceAdmin admin = new GovernanceAdmin(
-            bytes32(uint256(33)), WrappedVara(address(0)), MessageQueue(address(0)), ERC20Manager(address(0))
-        );
-        GovernancePauser pauser = new GovernancePauser(
-            bytes32(uint256(44)), WrappedVara(address(0)), MessageQueue(address(0)), ERC20Manager(address(0))
-        );
-        verifier = new VaraQueueRootVerifier(client, predictedQueue, block.chainid);
-        queue = MessageQueue(
-            address(
-                new ERC1967Proxy(
-                    address(implementation),
-                    abi.encodeCall(
-                        MessageQueue.initializeBeefy,
-                        (IGovernance(address(admin)), IGovernance(address(pauser)), SENDER, new address[](0), verifier)
-                    )
-                )
-            )
-        );
-        require(address(queue) == predictedQueue, "queue prediction mismatch");
-        CircleToken token = new CircleToken(SENDER);
-        IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](1);
-        tokens[0] = IERC20Manager.TokenInfo(address(token), IERC20Manager.TokenType.Ethereum);
-        ERC20Manager manager = ERC20Manager(
-            address(
-                new ERC1967Proxy(
-                    address(new ERC20Manager()),
-                    abi.encodeCall(
-                        ERC20Manager.initialize,
-                        (IGovernance(address(admin)), IGovernance(address(pauser)), queue, VFT_MANAGER, tokens)
-                    )
-                )
-            )
-        );
-        token.mint(SENDER, 30);
-        token.approve(address(manager), 30);
-        manager.requestBridging(address(token), 30, VFT_MANAGER);
-        VaraMessage memory message = _message(address(manager), address(token));
-        bytes32 root = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
-        QueueProof memory p = customQueueProofFor(client, 100, 103, root, 1_800_000_000_000, 1_800_000_003_000);
-        queue.submitMerkleRoot(100, root, encodeProof(p));
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+        address[] memory proposers = new address[](1);
+        proposers[0] = SENDER;
+        vm.startBroadcast(privateKey);
+        TimelockController recovery = new TimelockController(1 hours, proposers, proposers, address(0));
         vm.stopBroadcast();
-        assertEq(queue.getMerkleRoot(100), root);
-        assertEq(token.balanceOf(address(manager)), 30);
+
+        // Reuse the full environment and its guarded, client-first CREATE prediction.
+        vm.setEnv("DEPLOYMENT_MODE", "fresh-beefy");
+        vm.setEnv("DEPLOY_TEST_TOKENS", "true");
+        vm.setEnv("CIRCLE_TOKEN", vm.toString(address(0)));
+        vm.setEnv("TETHER_TOKEN", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_ETHER", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_BITCOIN", vm.toString(address(0)));
+        vm.setEnv("VFT_MANAGER", vm.toString(VFT_MANAGER));
+        vm.setEnv("GOVERNANCE_ADMIN", vm.toString(bytes32(uint256(33))));
+        vm.setEnv("GOVERNANCE_PAUSER", vm.toString(bytes32(uint256(44))));
+        vm.setEnv("EMERGENCY_STOP_ADMIN", vm.toString(SENDER));
+        vm.setEnv("EMERGENCY_STOP_OBSERVERS", vm.toString(SENDER));
+        vm.setEnv("BRIDGING_PAYMENT_FEE", "1");
+        vm.setEnv("BEEFY_RECOVERY_TIMELOCK", vm.toString(address(recovery)));
+        address predictedQueue = _predictBeefyMessageQueue(SENDER, _tokenOverridesFromEnvironment());
+        bytes32 sourceDomain = fixtureHash(0, "sourceDomain");
+        vm.setEnv("BEEFY_SOURCE_DOMAIN", vm.toString(sourceDomain));
+        vm.setEnv(
+            "BEEFY_BRIDGE_DOMAIN",
+            vm.toString(
+                keccak256(
+                    abi.encodePacked(
+                        "vara/gear-eth-bridge-domain/v2", sourceDomain, bytes32(block.chainid), predictedQueue
+                    )
+                )
+            )
+        );
+        vm.setEnv("BEEFY_MMR_START_BLOCK", vm.toString(fixtureUint(0, "mmrStartBlock")));
+        vm.setEnv("BEEFY_INITIAL_BLOCK", vm.toString(fixtureUint(0, "mmrStartBlock") + 1));
+        vm.setEnv("BEEFY_INITIAL_SOURCE_TIMESTAMP_MS", vm.toString(bootstrapTimestamp(0)));
+        vm.setEnv("BEEFY_CURRENT_ID", "0");
+        vm.setEnv("BEEFY_CURRENT_LENGTH", vm.toString(fixtureUint(0, "validatorCount")));
+        vm.setEnv("BEEFY_CURRENT_ROOT", vm.toString(fixtureHash(0, "authorityRoot")));
+        vm.setEnv("BEEFY_NEXT_ID", "1");
+        vm.setEnv("BEEFY_NEXT_LENGTH", vm.toString(fixtureUint(0, "validatorCount")));
+        vm.setEnv("BEEFY_NEXT_ROOT", vm.toString(fixtureHash(0, "authorityRoot")));
+        deployBridgeFromEnvironment();
+
+        CircleToken token = CircleToken(address(circleToken));
+        vm.startBroadcast(privateKey);
+        token.mint(SENDER, 30);
+        token.approve(address(erc20Manager), 30);
+        erc20Manager.requestBridging(address(token), 30, VFT_MANAGER);
+        VaraMessage memory message = _message(address(erc20Manager), address(token));
+        bytes32 root = keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
+        QueueProof memory p = customQueueProofFor(beefyClient, 100, 103, root, 1_800_000_000_000, 1_800_000_003_000);
+        messageQueue.submitMerkleRoot(100, root, encodeProof(p));
+        vm.stopBroadcast();
+        assertEq(messageQueue.getMerkleRoot(100), root);
+        assertEq(token.balanceOf(address(erc20Manager)), 30);
     }
 
     function executeMessage(address queueAddress, address managerAddress, address tokenAddress) public {
         require(block.chainid == 31337, "local benchmark chain only");
         MessageQueue target = MessageQueue(queueAddress);
+        _requireOwnedRunner();
         require(!target.isProcessed(702), "benchmark message already processed");
         vm.startBroadcast(SENDER);
         target.processMessage(100, 1, 0, _message(managerAddress, tokenAddress), new bytes32[](0));

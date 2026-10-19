@@ -60,7 +60,7 @@ export const MessageQueueAbi = [
   { type: 'error', name: 'EmergencyStop', inputs: [] },
   { type: 'error', name: 'MerkleRootDelayNotPassed', inputs: [] },
   { type: 'error', name: 'InvalidMerkleProof', inputs: [] },
-  { type: 'error', name: 'InvalidPlonkProof', inputs: [] },
+  { type: 'error', name: 'InvalidQueueRootProof', inputs: [] },
   {
     type: 'error',
     name: 'MerkleRootAlreadySet',

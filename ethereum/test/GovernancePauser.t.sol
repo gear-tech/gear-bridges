@@ -17,7 +17,7 @@ contract GovernancePauserTest is Test, Base {
     using GovernancePacker for PauseProxyMessage;
 
     function setUp() public {
-        deployBridgeDependsOnEnvironment();
+        deployBridgeFromConstants();
     }
 
     function test_HandleMessageWithInvalidSender() public {
@@ -38,7 +38,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -70,7 +70,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -104,7 +104,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -139,7 +139,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -177,7 +177,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -211,7 +211,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -244,7 +244,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -276,7 +276,7 @@ contract GovernancePauserTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)

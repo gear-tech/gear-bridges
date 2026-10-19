@@ -18,7 +18,7 @@ sails-rs = { workspace = true, features = ["gclient"] }
 tokio.workspace = true
 vft-manager-client.workspace = true
 cli-utils.workspace = true
-relayer = { path = "../../relayer", default-features = false }
+relayer = { path = "../../relayer" }
 ethereum-client.workspace = true
 ethereum_beacon_client.workspace = true
 ethereum-common = { workspace = true, features = ["std"] }

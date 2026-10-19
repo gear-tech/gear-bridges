@@ -606,7 +606,7 @@ fn validate_settlement_pin(
     Ok(())
 }
 
-fn native_payout_delivered(
+fn native_payout_resolved(
     row: &vft_manager_client::ReceiptDepositState,
     manager: H256,
     payout: &vft_vara_client::Redemption,
@@ -615,8 +615,26 @@ fn native_payout_delivered(
         && payout.to == row.receiver
         && payout.amount == row.amount
         && !payout.child.is_zero()
-        && payout.returned_value == 0
-        && matches!(payout.status, vft_vara_client::PayoutStatus::Delivered)
+        && row.child.is_some_and(|child| child != payout.child)
+        && match payout.status {
+            vft_vara_client::PayoutStatus::Delivered => {
+                payout.returned_value == 0
+                    && matches!(
+                        row.outcome,
+                        vft_manager_client::ReceiptDepositOutcome::Settled
+                            | vft_manager_client::ReceiptDepositOutcome::NativeQueued
+                    )
+            }
+            vft_vara_client::PayoutStatus::Refunded => {
+                sails_rs::U256::from(payout.returned_value) == row.amount
+                    && matches!(
+                        row.outcome,
+                        vft_manager_client::ReceiptDepositOutcome::Refunded
+                            | vft_manager_client::ReceiptDepositOutcome::NativeQueued
+                    )
+            }
+            _ => false,
+        }
 }
 
 pub struct MessageSender {
@@ -1437,7 +1455,7 @@ impl MessageSender {
             .recv(self.receiver_address.0.into())
             .await?;
         let mut rows_settled = matches!(status, ReceiptStatus::Processed);
-        let mut effects_delivered = true;
+        let mut effects_resolved = true;
         let mut has_native = false;
         for row in &deposits {
             anyhow::ensure!(
@@ -1452,11 +1470,16 @@ impl MessageSender {
                         && supply.encode() == row.supply.encode()),
                 "Original receipt token mapping is unavailable or changed"
             );
-            rows_settled &= matches!(row.outcome, ReceiptDepositOutcome::Settled);
+            rows_settled &= matches!(
+                row.outcome,
+                ReceiptDepositOutcome::Settled | ReceiptDepositOutcome::Refunded
+            );
             if row.native
                 && matches!(
                     row.outcome,
-                    ReceiptDepositOutcome::Settled | ReceiptDepositOutcome::NativeQueued
+                    ReceiptDepositOutcome::Settled
+                        | ReceiptDepositOutcome::Refunded
+                        | ReceiptDepositOutcome::NativeQueued
                 )
             {
                 has_native = true;
@@ -1467,11 +1490,11 @@ impl MessageSender {
                         .at_block(hash.0.into())
                         .recv(row.token_id)
                         .await?;
-                effects_delivered &= payout.as_ref().is_some_and(|payout| {
-                    native_payout_delivered(row, self.receiver_address, payout)
+                effects_resolved &= payout.as_ref().is_some_and(|payout| {
+                    native_payout_resolved(row, self.receiver_address, payout)
                 });
             } else {
-                effects_delivered &= matches!(row.outcome, ReceiptDepositOutcome::Settled);
+                effects_resolved &= matches!(row.outcome, ReceiptDepositOutcome::Settled);
             }
         }
         validate_settlement_pin(
@@ -1486,10 +1509,10 @@ impl MessageSender {
                 .await?,
         )?;
         let native_ready = has_native
-            && effects_delivered
+            && effects_resolved
             && matches!(status, ReceiptStatus::Reserved | ReceiptStatus::Processed);
         Ok((
-            if rows_settled && effects_delivered {
+            if rows_settled && effects_resolved {
                 MessageStatus::Success {
                     receipt_observation: Some(observation),
                 }
@@ -2359,14 +2382,28 @@ mod tests {
             status: vft_vara_client::PayoutStatus::Queued,
             returned_value: 0,
         };
-        assert!(!native_payout_delivered(row, manager, &payout));
+        assert!(!native_payout_resolved(row, manager, &payout));
         payout.status = vft_vara_client::PayoutStatus::Delivered;
-        assert!(native_payout_delivered(row, manager, &payout));
+        assert!(native_payout_resolved(row, manager, &payout));
         payout.returned_value = 1;
-        assert!(!native_payout_delivered(row, manager, &payout));
+        assert!(!native_payout_resolved(row, manager, &payout));
         payout.returned_value = 0;
         payout.to = ActorId::zero();
-        assert!(!native_payout_delivered(row, manager, &payout));
+        assert!(!native_payout_resolved(row, manager, &payout));
+        payout.to = row.receiver;
+        payout.status = vft_vara_client::PayoutStatus::Refunded;
+        payout.returned_value = row.amount.as_u128();
+        assert!(!native_payout_resolved(row, manager, &payout)); // Never relabel Settled as refunded.
+        let mut refunded = row.clone();
+        refunded.outcome = ReceiptDepositOutcome::Refunded;
+        assert!(native_payout_resolved(&refunded, manager, &payout));
+        payout.returned_value -= 1;
+        assert!(!native_payout_resolved(&refunded, manager, &payout));
+        payout.returned_value += 1;
+        payout.status = vft_vara_client::PayoutStatus::Returned;
+        assert!(!native_payout_resolved(&refunded, manager, &payout));
+        payout.status = vft_vara_client::PayoutStatus::Ambiguous;
+        assert!(!native_payout_resolved(&refunded, manager, &payout));
     }
 
     #[tokio::test]

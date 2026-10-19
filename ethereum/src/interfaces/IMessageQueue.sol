@@ -46,9 +46,9 @@ interface IMessageQueue is IPausable {
     error EmergencyStopNotEnabled();
 
     /**
-     * @dev The plonk proof is invalid.
+     * @dev The BEEFY-authenticated queue root proof is invalid.
      */
-    error InvalidPlonkProof();
+    error InvalidQueueRootProof();
     /**
      * @dev A zero root cannot be registered as a message root.
      */
@@ -63,6 +63,13 @@ interface IMessageQueue is IPausable {
     error InvalidBeefyVerifier();
     /// @dev Legacy state changed or the proposed BEEFY publication boundary is unsafe.
     error InvalidBeefyMigration();
+    error InvalidBeefyRecoveryTimelock();
+    error NotBeefyRecoveryTimelock();
+    error InvalidBeefyRecovery();
+
+    event BeefyVerifierRecovered(
+        address indexed previousVerifier, address indexed replacementVerifier, uint256 maxBlock
+    );
 
     /**
      * @dev Message nonce is already processed.
@@ -101,11 +108,6 @@ interface IMessageQueue is IPausable {
      * @dev Caller is not emergency stop observer.
      */
     error NotEmergencyStopObserver();
-
-    /**
-     * @dev Block number is before genesis block.
-     */
-    error BlockNumberBeforeGenesis(uint256 blockNumber, uint256 genesisBlock);
 
     /**
      * @dev Block number is too far from max block number.
@@ -296,9 +298,9 @@ interface IMessageQueue is IPausable {
      *
      * @param blockNumber Block number on Vara Network
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number
-     * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
+     * @param proof Canonical v2 BEEFY-authenticated MMR queue proof envelope.
      * @dev Reverts if emergency stop status is enabled with `EmergencyStop` error.
-     * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
+     * @dev Reverts if the queue proof is invalid or malformed with `InvalidQueueRootProof`.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external;
     /**
@@ -328,8 +330,13 @@ interface IMessageQueue is IPausable {
         IVerifier expectedLegacyVerifier,
         IVerifier beefyVerifier,
         uint256 expectedLegacyMaxBlock,
-        uint256 firstBeefyBlock
+        uint256 firstBeefyBlock,
+        address recoveryTimelock
     ) external;
+
+    /// @dev Timelocked expiry recovery does not grant upgrade authority or reset retained claims.
+    function recoverBeefyVerifier(IVerifier expectedVerifier, IVerifier replacementVerifier, uint256 expectedMaxBlock)
+        external;
 
     /**
      * @dev Verifies and processes message originated from Vara Network.

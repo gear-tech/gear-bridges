@@ -1,5 +1,5 @@
 import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
-import type { ReceiptDepositSettled } from '../../gear/types/vft-manager.js';
+import type { ReceiptDepositEffect } from '../../gear/types/vft-manager.js';
 
 @Entity({ name: 'receipt_settlement' })
 export class ReceiptSettlement {
@@ -9,7 +9,7 @@ export class ReceiptSettlement {
   id!: string;
 
   @Column('jsonb')
-  deposit!: ReceiptDepositSettled;
+  deposit!: ReceiptDepositEffect;
 
   @Column('timestamp with time zone')
   timestamp!: Date;

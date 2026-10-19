@@ -136,12 +136,6 @@ enum PaymentAction {
         #[arg(long)]
         value: Option<u128>,
     },
-    PayPriorityFees {
-        block: String,
-        nonce: String,
-        #[arg(long)]
-        value: Option<u128>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -639,26 +633,6 @@ async fn main() {
                         .await
                         .expect("Payment failed");
                     println!("paid");
-                }
-                PaymentAction::PayPriorityFees {
-                    block,
-                    nonce,
-                    value,
-                } => {
-                    let block = hex::decode(block.strip_prefix("0x").unwrap_or(&block))
-                        .expect("Invalid block hash");
-                    let block = H256::from_slice(&block);
-                    payment
-                        .pay_priority_fees(
-                            block,
-                            U256::from_dec_str(&nonce).expect("Invalid nonce"),
-                        )
-                        .with_value(value.unwrap_or(state.priority_fee))
-                        .with_gas_limit(gas_limit)
-                        .send_recv(program_id)
-                        .await
-                        .expect("Priority payment failed");
-                    println!("priority paid");
                 }
             }
         }

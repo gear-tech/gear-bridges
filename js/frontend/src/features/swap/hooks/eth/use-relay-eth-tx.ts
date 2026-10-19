@@ -2,9 +2,10 @@ import { GearApi, HexString } from '@gear-js/api';
 import {
   relayEthToVara,
   validateInboundTokenEffect,
-  validateNativePendingCohort,
-  validateNativeRedemption,
+  validateNativeTokenEffect,
   type InboundTokenEffect,
+  type NativeRedemption,
+  type RelayResult,
 } from '@gear-js/bridge';
 import { useAccount } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
@@ -19,7 +20,7 @@ import { useHistoricalProxyContractAddress, useInitArchiveApi } from '../vara';
 
 type Params = {
   onLog: (message: string) => void;
-  onFinalized: () => void;
+  onFinalized: (result: RelayResult) => void;
   onError: (error: Error) => void;
 };
 
@@ -54,7 +55,7 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
       const nativeWrapper = profile.nativeWrapper
         ? new NativeProgram(archiveApi, profile.nativeWrapper.programId)
         : undefined;
-      await relayEthToVara({
+      const result = await relayEthToVara({
         transactionHash: txHash,
         beaconRpcUrl: NETWORK_PRESET.ETH_BEACON_NODE_ADDRESS,
         ethereumPublicClient: publicClient,
@@ -82,12 +83,11 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
                     .call(),
               }
             : undefined,
-          verifyEffect: async (_value, result, proof) => {
+          verifyEffect: async (_value, settlementResult, proof) => {
             const deposits = await manager.vftManager
               .receiptDeposits(proof.proofBlock.block.slot, proof.transactionIndex)
-              .atBlock(result.effectBlockHash ?? result.replyBlockHash)
+              .atBlock(settlementResult.effectBlockHash ?? settlementResult.replyBlockHash)
               .call();
-            validateInboundTokenEffect(proof.receiptRlp, deposits, expectedEffect);
             if (deposits.some((deposit) => deposit.native)) {
               definedAssert(nativeWrapper, 'HOLD: native wrapper identity is unavailable');
               definedAssert(profile.nativeWrapper, 'HOLD: native wrapper profile is unavailable');
@@ -100,16 +100,35 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
                 receiptRlp: proof.receiptRlp,
                 expectedEffect,
               };
-              validateNativePendingCohort(identity, deposits);
+              const redemptions = new Map<HexString, NativeRedemption | null>();
               for (const deposit of deposits.filter((entry) => entry.native)) {
-                const redemption = await nativeWrapper.nativeEscrow
-                  .redemption(deposit.operation_id)
-                  .atBlock(result.effectBlockHash ?? result.replyBlockHash)
-                  .call();
-                if (!validateNativeRedemption(deposit, identity.managerId, redemption))
-                  throw new Error('HOLD: original native payout is not delivered');
+                redemptions.set(
+                  deposit.operation_id,
+                  await nativeWrapper.nativeEscrow
+                    .redemption(deposit.operation_id)
+                    .atBlock(settlementResult.effectBlockHash ?? settlementResult.replyBlockHash)
+                    .call(),
+                );
               }
-            }
+              definedAssert(
+                settlementResult.nativeSettlements,
+                'HOLD: authenticated original native settlements are missing',
+              );
+              const originals = new Map(
+                settlementResult.nativeSettlements.map((entry) => [entry.operationId, entry.redemption]),
+              );
+              const settlements = validateNativeTokenEffect(identity, deposits, redemptions, originals);
+              if (
+                settlements.length !== settlementResult.nativeSettlements.length ||
+                settlements.some(
+                  (entry) =>
+                    entry.child !==
+                    settlementResult.nativeSettlements!.find((original) => original.operationId === entry.operationId)
+                      ?.child,
+                )
+              )
+                throw new Error('HOLD: original native settlement cohort changed');
+            } else validateInboundTokenEffect(proof.receiptRlp, deposits, expectedEffect);
           },
         },
         clientId: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS,
@@ -122,7 +141,7 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
         deadline,
       });
 
-      onFinalized();
+      onFinalized(result);
     } catch (error) {
       onError(error as Error);
     } finally {

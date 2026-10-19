@@ -34,11 +34,15 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
         destinationChainId = destinationChainId_;
     }
 
-    function safeVerifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
+    function safeVerifyProof(uint256 sourceBlock, bytes32 merkleRoot, bytes calldata proof)
+        external
+        view
+        returns (bool)
+    {
         if (msg.sender != messageQueue || block.chainid != destinationChainId) {
             return false;
         }
-        try this.verifyProof(proof, publicInputs) returns (bool valid) {
+        try this.verifyProof(sourceBlock, merkleRoot, proof) returns (bool valid) {
             return valid;
         } catch {
             return false;
@@ -60,22 +64,22 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
         if (msg.sender != address(this) || sourceBlock > type(uint32).max) {
             return false;
         }
-        return _verifyProof(proof, 0, sourceBlock << 96, true);
+        return _verifyProof(proof, bytes32(0), sourceBlock, true);
     }
 
-    function verifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool) {
-        if (msg.sender != address(this) || publicInputs.length != 2) {
+    function verifyProof(uint256 sourceBlock, bytes32 merkleRoot, bytes calldata proof) external view returns (bool) {
+        if (msg.sender != address(this)) {
             return false;
         }
-        return _verifyProof(proof, publicInputs[0], publicInputs[1], false);
+        return _verifyProof(proof, merkleRoot, sourceBlock, false);
     }
 
-    function _verifyProof(bytes calldata proof, uint256 input0, uint256 input1, bool emptyProgress)
+    function _verifyProof(bytes calldata proof, bytes32 root, uint256 sourceBlock, bool emptyProgress)
         private
         view
         returns (bool)
     {
-        if (input0 >> 192 != 0 || input1 >> 192 != 0 || uint96(input1) != 0) {
+        if (sourceBlock > type(uint32).max) {
             return false;
         }
         if (proof.length < 576 || proof.length > 576 + 32 * 256 || (proof.length - 576) % 32 != 0) {
@@ -134,8 +138,6 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
             return false;
         }
 
-        bytes32 root = bytes32((input0 << 64) | (input1 >> 128));
-        uint32 sourceBlock = uint32(input1 >> 96);
         if ((emptyProgress ? root != bytes32(0) : root == bytes32(0)) || !initialized) {
             return false;
         }

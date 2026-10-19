@@ -14,9 +14,9 @@ import {
   getVaraTokenName,
   getVaraTokenSymbol,
 } from './rpc-queries.js';
-import type { Relayed, ReceiptDepositSettled } from './types/index.js';
+import type { Relayed, ReceiptDepositEffect, ReceiptDepositRefunded, ReceiptDepositSettled } from './types/index.js';
 
-function sameDeposit(a: ReceiptDepositSettled, b: ReceiptDepositSettled): boolean {
+function sameDeposit(a: ReceiptDepositEffect, b: ReceiptDepositEffect): boolean {
   return Object.keys(a).length === Object.keys(b).length &&
     Object.entries(a).every(([key, value]) => String(value) === String(b[key as keyof ReceiptDepositSettled]));
 }
@@ -177,11 +177,20 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     this._receiptRelays.set(id, relay);
   }
 
-  public recordReceiptSettlement(deposit: ReceiptDepositSettled, timestamp: Date, blockNumber: bigint, txHash: string) {
+  public recordReceiptSettlement(deposit: ReceiptDepositEffect, timestamp: Date, blockNumber: bigint, txHash: string) {
     const id = `${deposit.slot}:${deposit.transaction_index}:${deposit.log_index}`;
     const existing = this._receiptSettlements.get(id);
     if (existing && !sameDeposit(existing.deposit, deposit)) throw new Error('HOLD: conflicting receipt deposit settlement');
     if (!existing) this._receiptSettlements.set(id, new ReceiptSettlement({ id, deposit, timestamp, blockNumber, txHash, matched: false }));
+  }
+
+  public recordReceiptRefund(deposit: ReceiptDepositRefunded, timestamp: Date, blockNumber: bigint, txHash: string) {
+    const messageId = (id: string) => /^0x[0-9a-fA-F]{64}$/.test(id) && BigInt(id) !== 0n;
+    if (!deposit.native || !messageId(deposit.operation_id) || !messageId(deposit.child) || !messageId(deposit.payout_child) ||
+        deposit.child === deposit.payout_child || BigInt(deposit.returned_value) !== BigInt(deposit.amount)) {
+      throw new Error('HOLD: native refund lacks its original children or full returned backing');
+    }
+    this.recordReceiptSettlement({ ...deposit, outcome: 'Refunded' }, timestamp, blockNumber, txHash);
   }
 
   private async _saveReceiptSettlements() {
@@ -261,8 +270,12 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
         throw new Error('HOLD: original transfer already bound to another receipt slot');
       }
       transfer.receiptSlot = BigInt(d.slot);
-      if (transfer.status !== Status.Completed) {
-        transfer.status = Status.Completed;
+      const outcome = 'outcome' in d && d.outcome === 'Refunded' ? Status.Refunded : Status.Completed;
+      if ((transfer.status === Status.Completed || transfer.status === Status.Refunded) && transfer.status !== outcome) {
+        throw new Error('HOLD: original receipt terminal outcome cannot be replaced');
+      }
+      if (transfer.status !== outcome) {
+        transfer.status = outcome;
         transfer.completedAt = settlement.timestamp;
         transfer.completedAtBlock = settlement.blockNumber;
         transfer.completedAtTxHash = settlement.txHash;

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.37;
 
 import {Script} from "forge-std/Script.sol";
-import {Base, DeploymentArguments, Overrides} from "test/Base.sol";
+import {Base, DeploymentArguments} from "test/Base.sol";
 
 /**
  * @dev Isolated, message-only BEEFY deployment for Hoodi.
@@ -14,33 +14,29 @@ contract BeefyHoodi is Script, Base {
         public
         returns (address clientAddress, address verifierAddress, address queueAddress, address receiverAddress)
     {
-        if (block.chainid != HOODI_CHAIN_ID) {
-            revert("BeefyHoodi requires chain id 560048");
-        }
-
+        require(block.chainid == HOODI_CHAIN_ID, "BeefyHoodi requires chain id 560048");
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
         bytes32 deployerSource = bytes32(uint256(uint160(deployer)));
         messageOnlyBridge = true;
-        address predictedQueue = _predictBeefyMessageQueue(deployer);
+        address[] memory observers = new address[](1);
+        observers[0] = deployer;
+        DeploymentArguments memory args = DeploymentArguments({
+            privateKey: privateKey,
+            deployerAddress: deployer,
+            forkUrlOrAlias: "",
+            overrides: _tokenOverridesFromEnvironment(),
+            vftManager: bytes32(0),
+            governanceAdmin: deployerSource,
+            governancePauser: deployerSource,
+            emergencyStopAdmin: deployer,
+            emergencyStopObservers: observers,
+            bridgingPaymentFee: 0
+        });
+        _validateDeploymentArguments(args);
+        address predictedQueue = _predictBeefyMessageQueue(deployer, args.overrides);
         _deployBeefyClient(privateKey, predictedQueue);
-
-        address[] memory emergencyStopObservers = new address[](1);
-        emergencyStopObservers[0] = deployer;
-        deployBridge(
-            DeploymentArguments({
-                privateKey: privateKey,
-                deployerAddress: deployer,
-                forkUrlOrAlias: "",
-                overrides: Overrides(address(0), address(0), address(0), address(0)),
-                vftManager: bytes32(0),
-                governanceAdmin: deployerSource,
-                governancePauser: deployerSource,
-                emergencyStopAdmin: deployer,
-                emergencyStopObservers: emergencyStopObservers,
-                bridgingPaymentFee: 0
-            })
-        );
+        deployBridge(args);
         return (address(beefyClient), address(verifier), address(messageQueue), address(messageHandlerMock));
     }
 }

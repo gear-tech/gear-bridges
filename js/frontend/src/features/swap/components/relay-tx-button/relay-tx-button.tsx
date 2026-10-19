@@ -1,5 +1,5 @@
 import { HexString } from '@gear-js/api';
-import type { InboundTokenEffect } from '@gear-js/bridge';
+import type { InboundTokenEffect, RelayResult } from '@gear-js/bridge';
 import { DEFAULT_ERROR_OPTIONS, DEFAULT_SUCCESS_OPTIONS, useAlert } from '@gear-js/react-hooks';
 import { Button } from '@gear-js/vara-ui';
 import { WalletModal } from '@gear-js/wallet-connect';
@@ -79,7 +79,7 @@ function RelayVaraTxButton({ nonce, blockNumber, ...props }: VaraProps) {
 
 type EthProps = {
   txHash: HexString;
-  onFinalized: () => void;
+  onFinalized: (result: RelayResult) => void;
   expectedEffect: InboundTokenEffect;
 };
 
@@ -102,9 +102,12 @@ function RelayEthTxButton({ txHash, ...props }: EthProps) {
 
     const onLog = (message: string) => alert.update(alertId, message);
 
-    const onFinalized = () => {
-      alert.update(alertId, 'Original consumer and token effect finalized on Vara', DEFAULT_SUCCESS_OPTIONS);
-      props.onFinalized();
+    const onFinalized = (result: RelayResult) => {
+      const message = result.nativeSettlements?.some((entry) => entry.redemption.status === 'Refunded')
+        ? 'Receipt finalized; includes wrapped VARA refunded to an original native payout recipient'
+        : 'Original consumer and token effect finalized on Vara';
+      alert.update(alertId, message, DEFAULT_SUCCESS_OPTIONS);
+      props.onFinalized(result);
     };
 
     const onError = (error: Error) => {

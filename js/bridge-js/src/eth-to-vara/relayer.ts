@@ -13,8 +13,8 @@ import { encodeEthToVaraEvent, getPrefix, HistoricalProxyClient, ProxyError, Pro
 import { createBeaconClient, createEthereumClient } from '../ethereum/index.js';
 import { composeProof, InboundProofProfile, immutableInboundProfile } from './proof-composer.js';
 import { StatusCb, withOriginalDeadline } from '../util.js';
-import { VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption,
-  type NativeReceiptDeposit, type NativeRedemption, type NativeReceiptIdentity, type InboundTokenEffect } from './token-effect.js';
+import { VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
+  type NativeReceiptDeposit, type NativeRedemption, type NativeReceiptIdentity, type InboundTokenEffect, type NativeTokenSettlement } from './token-effect.js';
 
 export interface RelayResult {
   blockHash: HexString;
@@ -29,6 +29,8 @@ export interface RelayResult {
   error?: ProxyError;
   /** Original reply is retained; a native completion may have a later separately authenticated effect pin. */
   effectBlockHash?: HexString; effectBlockNumber?: bigint; nativeReconciliation?: RelayResult;
+  /** Terminal original payouts: Refunded restores wrapped tokens to the original recipient, not native delivery. */
+  nativeSettlements?: readonly NativeTokenSettlement[];
 }
 export interface ConsumerReplyContract {
   readonly registry: TypeRegistry;
@@ -87,6 +89,8 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
   const identity: NativeReceiptIdentity = { managerId: profile.consumer.programId, proxyId: profile.historicalProxyId,
     wrapperId: profile.nativeWrapper!.programId, slot: BigInt(proof.proofBlock.block.slot), transactionIndex: BigInt(proof.transactionIndex),
     receiptRlp: proof.receiptRlp, expectedEffect: contract.expectedEffect };
+  const originalWrapper = await read(() => api.programStorage.getProgram(identity.wrapperId, original.replyBlockHash));
+  if (!originalWrapper.state.isInitialized || !originalWrapper.codeId.eq(profile.nativeWrapper!.codeId)) throw new Error('HOLD: original native wrapper identity changed');
   const rows = structuredClone(await read(() => contract.readDeposits(original.replyBlockHash, proof)));
   validateNativePendingCohort(identity, rows);
   const redemptions = new Map<HexString, NativeRedemption>();
@@ -95,20 +99,26 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
     validateNativeRedemption(row, identity.managerId, value); redemptions.set(row.operation_id, structuredClone(value!));
   }
   let previous = { number: original.replyBlockNumber, hash: original.replyBlockHash };
-  const verifyDelivery = async (pin: HexString, settled: boolean) => {
-    const current = await read(() => contract.readDeposits(pin, proof));
-    validateNativeCohortContinuity(rows, current, settled);
-    let delivered = true;
+  let observedRows = rows;
+  const verifySettlement = async (pin: HexString, settled: boolean) => {
+    const current = structuredClone(await read(() => contract.readDeposits(pin, proof)));
+    validateNativeCohortContinuity(observedRows, current, settled);
+    let terminal = true;
+    const currentRedemptions = new Map<HexString, NativeRedemption>();
     for (const row of current.filter(row => row.native)) {
       const value = await read(() => contract.readRedemption(row.operation_id, pin));
-      if (!validateNativeRedemption(row, identity.managerId, value, redemptions.get(row.operation_id))) delivered = false;
+      if (validateNativeRedemption(row, identity.managerId, value, redemptions.get(row.operation_id)) === 'Queued') terminal = false;
+      currentRedemptions.set(row.operation_id, structuredClone(value!));
     }
     const wrapper = await read(() => api.programStorage.getProgram(identity.wrapperId, pin));
     const manager = await read(() => api.programStorage.getProgram(identity.managerId, pin));
     if (!wrapper.state.isInitialized || !wrapper.codeId.eq(profile.nativeWrapper!.codeId) || !manager.state.isInitialized || !manager.codeId.eq(profile.consumer.codeId)) {
       throw new Error('HOLD: native continuation actor identity changed');
     }
-    return delivered;
+    observedRows = current;
+    for (const [operation, value] of currentRedemptions) redemptions.set(operation, value);
+    if (settled) original.nativeSettlements = validateNativeTokenEffect(identity, current, currentRedemptions);
+    return terminal;
   };
   while (true) {
     const tipHash = (await read(() => api.rpc.chain.getFinalizedHead())).toHex();
@@ -120,18 +130,18 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
       previous = { number: next, hash };
     }
     if (previous.hash !== tipHash) throw new Error('HOLD: native finalized head mismatch');
-    if (await verifyDelivery(tipHash, false)) {
+    if (await verifySettlement(tipHash, false)) {
       const status = await read(() => contract.readReceiptStatus(tipHash, proof));
       if (status === 'Unknown') throw new Error('HOLD: native receipt status is unknown');
       if (status === 'Processed') {
-        if (!await verifyDelivery(tipHash, true)) throw new Error('HOLD: processed native receipt lacks actual original delivery');
+        if (!await verifySettlement(tipHash, true)) throw new Error('HOLD: processed native receipt lacks original terminal settlement');
         // The shared completion guard below authenticates this exact effect pin.
         original.effectBlockHash = tipHash; original.effectBlockNumber = number; return;
       }
       if (status !== 'Reserved') throw new Error('HOLD: unsupported native receipt status');
       break;
     }
-    params.statusCb?.('Native payout pending; original recipient must receive its original payout', { originalMessageId: original.msgId });
+    params.statusCb?.('Native payout pending; waiting for original delivery or authenticated full wrapped refund', { originalMessageId: original.msgId });
     await read(() => new Promise<void>(resolve => setTimeout(resolve, 3000)));
   }
   await read(() => authenticateEffectProfile(api, profile, previous.hash));
@@ -171,7 +181,7 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
     const reconciliation = await read(() => validateFinalizedNativeReconciliationReply({ gearApi: api, inboundProfile: profile, registry: params.consumerReply.registry,
       slot: identity.slot, transactionIndex: identity.transactionIndex, sender: decodeAddress(typeof params.signer === 'string' ? params.signer : params.signer.address),
       ...queued, txHash, requestPayload: payload, deadline, statusCb: params.statusCb }));
-    if (!await verifyDelivery(reconciliation.replyBlockHash, true)) throw new Error('HOLD: final reconciliation lacks actual native delivery');
+    if (!await verifySettlement(reconciliation.replyBlockHash, true)) throw new Error('HOLD: final reconciliation lacks original terminal settlement');
     original.nativeReconciliation = reconciliation;
     original.effectBlockHash = reconciliation.replyBlockHash; original.effectBlockNumber = reconciliation.replyBlockNumber;
   } finally { finished = true; unsubscribe?.(); }
@@ -511,7 +521,32 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
     if (!result.clientReply) throw new Error('Missing original consumer reply');
     const decoded = consumerResult(result.clientReply, params.inboundProfile, params.consumerReply);
     let value: unknown;
-    if (decoded.isOk && !decoded.isErr) { value = decoded.asOk.toJSON(); result.effectBlockHash = result.replyBlockHash; result.effectBlockNumber = result.replyBlockNumber; }
+    if (decoded.isOk && !decoded.isErr) {
+      value = decoded.asOk.toJSON(); result.effectBlockHash = result.replyBlockHash; result.effectBlockNumber = result.replyBlockNumber;
+      const native = params.consumerReply.nativeSettlement;
+      if (native) {
+        const rows = structuredClone(await withOriginalDeadline(deadline, () => native.readDeposits(result.replyBlockHash, proof)));
+        if (rows.some(row => row.native || row.outcome === 'Refunded')) {
+          if (!params.inboundProfile.nativeWrapper || params.inboundProfile.nativeWrapper.idlSha256 !== NATIVE_WRAPPER_IDL_SHA256 ||
+              params.inboundProfile.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256 ||
+              params.inboundProfile.consumer.service !== 'VftManager' || params.inboundProfile.consumer.method !== 'SubmitReceipt') {
+            throw new Error('HOLD: native completion requires the approved wrapper and manager');
+          }
+          const wrapper = await withOriginalDeadline(deadline, () => params.gearApi.programStorage.getProgram(params.inboundProfile.nativeWrapper!.programId, result.replyBlockHash));
+          if (!wrapper.state.isInitialized || !wrapper.codeId.eq(params.inboundProfile.nativeWrapper.codeId) ||
+              await withOriginalDeadline(deadline, () => native.readReceiptStatus(result.replyBlockHash, proof)) !== 'Processed') {
+            throw new Error('HOLD: original native receipt or wrapper is not authenticated');
+          }
+          const redemptions = new Map<HexString, NativeRedemption | null>();
+          for (const row of rows.filter(row => row.native)) redemptions.set(row.operation_id,
+            await withOriginalDeadline(deadline, () => native.readRedemption(row.operation_id, result.replyBlockHash)));
+          result.nativeSettlements = validateNativeTokenEffect({ managerId: params.inboundProfile.consumer.programId,
+            proxyId: params.inboundProfile.historicalProxyId, wrapperId: params.inboundProfile.nativeWrapper.programId,
+            slot: BigInt(proof.proofBlock.block.slot), transactionIndex: BigInt(proof.transactionIndex), receiptRlp: proof.receiptRlp,
+            expectedEffect: native.expectedEffect }, rows, redemptions);
+        }
+      }
+    }
     else {
       assertNativePendingReply(result.clientReply, params.inboundProfile, params.consumerReply);
       await reconcileOriginalNativeSettlement(params, proof, result, deadline);

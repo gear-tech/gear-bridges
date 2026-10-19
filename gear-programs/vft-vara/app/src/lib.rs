@@ -52,12 +52,9 @@ impl Program {
         // 24h / 3sec block
         allowances.set_expiry_period(24 * 60 * 60 / 3);
 
-        // Minimum balance is zero by default.
-        //
-        // Balance is represented as 10 bytes unsigned int.
-        // The maximum value is 1,208,925,819,614,629,174,706,175.
-        let mut balances = Balances::default();
-        balances.set_minimum_balance(1_000_000_000_000u64.into());
+        // Pooled manager escrow must retain fractional claim remainders.
+        // Awesome-sails reaps positive post-burn balances below its minimum.
+        let balances = Balances::default();
 
         let metadata = match network {
             Mainnet::Yes => Metadata::new("Wrapped Vara".into(), "WVARA".into(), 12),
@@ -97,7 +94,7 @@ impl Program {
     pub fn vft_admin(&self) -> VftAdmin<'_> {
         VftAdmin {
             base: self.base_vft_admin(),
-            authorities: &self.authorities,
+            program: self,
         }
     }
 
@@ -141,16 +138,28 @@ impl Program {
 
 pub struct VftAdmin<'a> {
     base: vft_admin::Service<'a>,
-    authorities: &'a RefCell<Authorities>,
+    program: &'a Program,
 }
 
 #[service(extends = vft_admin::Service<'a>)]
 impl<'a> VftAdmin<'a> {
     #[export]
+    pub fn set_minimum_balance(&mut self, value: U256) {
+        assert!(
+            value.is_zero(),
+            "Native escrow requires zero minimum balance"
+        );
+        self.program
+            .base_vft_admin_exposure()
+            .set_minimum_balance(value)
+            .expect("Cannot set minimum balance");
+    }
+
+    #[export]
     pub fn exit(&mut self, inheritor: ActorId) {
         assert_eq!(
             Syscall::message_source(),
-            self.authorities.borrow().admin(),
+            self.program.authorities.borrow().admin(),
             "Not admin"
         );
         let _ = inheritor;
@@ -172,6 +181,9 @@ pub enum PayoutStatus {
     Delivered,
     Returned,
     Ambiguous,
+    /// The original rejected payout's full returned value backs wrapped tokens
+    /// credited exactly once to its original recipient. Not native delivery.
+    Refunded,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, TypeInfo)]
@@ -312,11 +324,29 @@ impl NativeEscrow<'_> {
         redemption.status = match msg::reply_code() {
             Ok(ReplyCode::Success(_)) if value == 0 => PayoutStatus::Delivered,
             Ok(ReplyCode::Error(_)) if U256::from(value) == redemption.amount => {
-                PayoutStatus::Returned
+                // Only this authenticated original error/full-value return authorizes
+                // wrapped credit. Settlement must also work while new exposure is paused.
+                let paused = self.program.pause.is_paused();
+                self.program.pause.resume();
+                // SAFETY: original child, recipient, exact backing and Queued status
+                // were authenticated above; this synchronous mint cannot reenter.
+                unsafe {
+                    self.program
+                        .base_vft_admin_exposure()
+                        .do_mint(redemption.to, redemption.amount)
+                        .expect("Cannot refund returned native backing");
+                }
+                if paused {
+                    self.program.pause.pause();
+                }
+                PayoutStatus::Refunded
             }
             _ => PayoutStatus::Ambiguous,
         };
-        if redemption.status == PayoutStatus::Delivered {
+        if matches!(
+            redemption.status,
+            PayoutStatus::Delivered | PayoutStatus::Refunded
+        ) {
             self.program.outstanding_redemptions.set(
                 self.program
                     .outstanding_redemptions

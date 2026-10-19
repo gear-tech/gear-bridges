@@ -106,7 +106,7 @@ where
     });
 
     match super::deposit_status((slot, transaction_index), log_index) {
-        Some(super::DepositStatus::Processed) => Ok(()),
+        Some(super::DepositStatus::Processed | super::DepositStatus::Refunded) => Ok(()),
         Some(super::DepositStatus::NativeQueued) => Err(Error::NativeSettlementPending),
         Some(super::DepositStatus::Retryable(error) | super::DepositStatus::Ambiguous(error)) => {
             Err(error)
@@ -133,6 +133,7 @@ pub fn handle_persistent_reply() {
     if super::original_child((data.slot, data.transaction_index), data.log_index) != Some(child) {
         return;
     }
+    let mut refund = None;
     let status = (|| {
         if matches!(msg::reply_code(), Ok(ReplyCode::Error(_))) {
             return Err(Error::ReplyFailure("Reply error code received".into()));
@@ -142,20 +143,28 @@ pub fn handle_persistent_reply() {
         }
         let bytes = msg::load_bytes().map_err(|e| Error::GasForReplyTooLow(format!("{e:?}")))?;
         match data.action {
-            ChildAction::Mint => decode_complete::<Mint>(&bytes),
+            ChildAction::Mint => decode_complete::<Mint>(&bytes).map(|_| false),
             ChildAction::Unlock => decode_complete::<TransferFrom>(&bytes)?
-                .then_some(())
+                .then_some(false)
                 .ok_or(Error::InvalidReply),
             ChildAction::Native => {
                 let r = decode_complete::<RedeemEscrow>(&bytes)?;
-                if (r.from, r.to, r.amount) != (Syscall::program_id(), data.receiver, data.amount) {
+                if (r.from, r.to, r.amount) != (Syscall::program_id(), data.receiver, data.amount)
+                    || r.child.is_zero()
+                {
                     return Err(Error::InvalidReply);
                 }
                 match r.status {
-                    PayoutStatus::Delivered => Ok(()),
-                    PayoutStatus::Queued => Err(Error::NativeSettlementPending),
+                    PayoutStatus::Delivered if r.returned_value == 0 => Ok(false),
+                    PayoutStatus::Refunded if U256::from(r.returned_value) == r.amount => {
+                        refund = Some((r.child, r.returned_value));
+                        Ok(true)
+                    }
+                    PayoutStatus::Queued if r.returned_value == 0 => {
+                        Err(Error::NativeSettlementPending)
+                    }
                     PayoutStatus::Returned => Err(Error::NativeSettlementReturned),
-                    PayoutStatus::Ambiguous => Err(Error::InvalidReply),
+                    _ => Err(Error::InvalidReply),
                 }
             }
         }
@@ -169,15 +178,18 @@ pub fn handle_persistent_reply() {
     let key = (data.slot, data.transaction_index);
     let log_index = data.log_index;
     let progress = match &status {
-        Ok(()) => super::DepositStatus::Processed,
+        Ok(false) => super::DepositStatus::Processed,
+        Ok(true) => super::DepositStatus::Refunded,
         Err(Error::NativeSettlementPending) => super::DepositStatus::NativeQueued,
         Err(error @ Error::ReplyFailure(_)) => super::DepositStatus::Retryable(error.clone()),
         Err(error) => super::DepositStatus::Ambiguous(error.clone()),
     };
     super::set_deposit_status(key, log_index, progress);
-    if status.is_ok() {
+    if matches!(status, Ok(false)) {
         emit_event(data.receiver, data.erc20_sender, data.amount, data.token_id);
         super::emit_settled(key, log_index);
+    } else if let Some((payout_child, returned_value)) = refund {
+        super::emit_refunded(key, log_index, payout_child, returned_value);
     }
 }
 
@@ -286,7 +298,7 @@ pub(super) async fn reconcile_native_log(
     } = *deposit;
     if matches!(
         super::deposit_status(key, log_index),
-        Some(super::DepositStatus::Processed)
+        Some(super::DepositStatus::Processed | super::DepositStatus::Refunded)
     ) {
         return Ok(());
     }
@@ -314,14 +326,21 @@ pub(super) async fn reconcile_native_log(
     let redemption = decode_complete::<GetRedemption>(&bytes)?.ok_or(Error::InvalidReply)?;
     if (redemption.from, redemption.to, redemption.amount)
         != (Syscall::program_id(), receiver, amount)
+        || redemption.child.is_zero()
     {
         return Err(Error::InvalidReply);
     }
     match redemption.status {
-        PayoutStatus::Delivered => {
+        PayoutStatus::Delivered | PayoutStatus::Refunded => {
+            let refunded = redemption.status == PayoutStatus::Refunded;
+            if (refunded && U256::from(redemption.returned_value) != amount)
+                || (!refunded && redemption.returned_value != 0)
+            {
+                return Err(Error::InvalidReply);
+            }
             if matches!(
                 super::deposit_status(key, log_index),
-                Some(super::DepositStatus::Processed)
+                Some(super::DepositStatus::Processed | super::DepositStatus::Refunded)
             ) {
                 return Ok(());
             }
@@ -331,12 +350,24 @@ pub(super) async fn reconcile_native_log(
             ) {
                 return Err(Error::NativeSettlementPending);
             }
-            super::set_deposit_status(key, log_index, super::DepositStatus::Processed);
+            super::set_deposit_status(
+                key,
+                log_index,
+                if refunded {
+                    super::DepositStatus::Refunded
+                } else {
+                    super::DepositStatus::Processed
+                },
+            );
             if let Some(child) = super::original_child(key, log_index) {
                 children().remove(&child);
             }
-            super::emit_settled(key, log_index);
-            emit_event(receiver, erc20_sender, amount, token_id);
+            if !refunded {
+                super::emit_settled(key, log_index);
+                emit_event(receiver, erc20_sender, amount, token_id);
+            } else {
+                super::emit_refunded(key, log_index, redemption.child, redemption.returned_value);
+            }
             Ok(())
         }
         PayoutStatus::Queued => Err(Error::NativeSettlementPending),

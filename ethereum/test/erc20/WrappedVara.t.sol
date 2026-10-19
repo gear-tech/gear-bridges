@@ -25,7 +25,7 @@ contract WrappedVaraTest is Test, Base {
     using GovernancePacker for UpgradeProxyMessage;
 
     function setUp() public {
-        deployBridgeDependsOnEnvironment();
+        deployBridgeFromConstants();
     }
 
     function test_PauseWithGovernanceAdmin() public {
@@ -41,7 +41,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -83,7 +83,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -134,7 +134,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
@@ -183,6 +183,7 @@ contract WrappedVaraTest is Test, Base {
 
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
+        proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -219,7 +220,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
@@ -268,6 +269,7 @@ contract WrappedVaraTest is Test, Base {
 
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
+        proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -315,7 +317,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)

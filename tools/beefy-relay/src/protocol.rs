@@ -895,22 +895,6 @@ pub fn encode_queue_proof(
     Ok(out)
 }
 
-pub fn encode_public_inputs(queue_root: Hash32, source_block: u32) -> Result<[Hash32; 2]> {
-    let mut p0 = [0; 32];
-    p0[8..].copy_from_slice(&queue_root[..24]);
-    let mut p1 = [0; 32];
-    p1[8..16].copy_from_slice(&queue_root[24..]);
-    p1[16..20].copy_from_slice(&source_block.to_be_bytes());
-    Ok([p0, p1])
-}
-
-pub fn public_inputs_bytes(inputs: &[Hash32; 2]) -> [u8; 64] {
-    let mut out = [0; 64];
-    out[..32].copy_from_slice(&inputs[0]);
-    out[32..].copy_from_slice(&inputs[1]);
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

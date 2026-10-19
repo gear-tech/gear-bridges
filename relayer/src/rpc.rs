@@ -129,8 +129,7 @@ pub fn classify_alloy_rpc(err: &RpcError<TransportErrorKind>) -> RetryDecision {
 
 /// Retry an Ethereum operation without dropping its in-memory work item.
 ///
-/// This helper intentionally waits until a recoverable outage ends. Callers in a
-/// multiplexed event loop should use [`retry_eth_bounded`] instead.
+/// This helper intentionally waits until a recoverable outage ends.
 pub async fn retry_eth<T, F, Fut>(
     api: &mut ethereum_client::EthApi,
     operation: &'static str,
@@ -177,29 +176,6 @@ where
 pub async fn reconnect_polling_eth(api: &mut ethereum_client::PollingEthApi) -> anyhow::Result<()> {
     *api = api.reconnect().await?;
     Ok(())
-}
-
-#[cfg(feature = "legacy-prover")]
-pub(crate) async fn retry_eth_bounded<T, F, Fut>(
-    api: &mut ethereum_client::EthApi,
-    operation: &'static str,
-    max_retries: u32,
-    f: F,
-) -> Result<T, ethereum_client::Error>
-where
-    F: FnMut(ethereum_client::EthApi) -> Fut,
-    Fut: Future<Output = Result<T, ethereum_client::Error>>,
-{
-    retry(
-        api,
-        operation,
-        RetryPolicy::default(),
-        Some(max_retries),
-        f,
-        |api| async move { api.reconnect().await },
-        classify_ethereum_error,
-    )
-    .await
 }
 
 async fn retry<T, A, E, F, Fut, R, ReconnectFut, C>(

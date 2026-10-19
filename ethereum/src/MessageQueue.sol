@@ -4,6 +4,7 @@ pragma solidity ^0.8.37;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -64,32 +65,13 @@ contract MessageQueue is
 
     uint256 public beefyRootMinimum;
     mapping(uint256 blockNumber => uint256 timestamp) private _blockRootTimestamps;
+    address public beefyRecoveryTimelock;
 
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor() {
         _disableInitializers();
-    }
-
-    /**
-     * @dev Initializes the MessageQueue contract with the Verifier address.
-     *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
-     *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
-     * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
-     * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
-     * @param emergencyStopAdmin_ The address of EOA that will control `submitMerkleRoot` and `processMessage`
-     *                            in case of an emergency stop.
-     * @param verifier_ The address of the Verifier contract that will verify merkle roots.
-     */
-    function initialize(
-        IGovernance governanceAdmin_,
-        IGovernance governancePauser_,
-        address emergencyStopAdmin_,
-        address[] memory emergencyStopObservers_,
-        IVerifier verifier_
-    ) public initializer {
-        _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
     }
 
     /**
@@ -108,11 +90,13 @@ contract MessageQueue is
         IGovernance governancePauser_,
         address emergencyStopAdmin_,
         address[] memory emergencyStopObservers_,
-        IVerifier verifier_
+        IVerifier verifier_,
+        address recoveryTimelock_
     ) public initializer {
         _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
         (, uint64 mmrStartBlock) = _validateBeefyVerifier();
         beefyRootMinimum = mmrStartBlock;
+        _setBeefyRecoveryTimelock(recoveryTimelock_);
     }
 
     /// @dev Atomically switch a paused legacy proxy without resetting custody, roles, roots or replay state.
@@ -120,7 +104,8 @@ contract MessageQueue is
         IVerifier expectedLegacyVerifier,
         IVerifier beefyVerifier,
         uint256 expectedLegacyMaxBlock,
-        uint256 firstBeefyBlock
+        uint256 firstBeefyBlock,
+        address recoveryTimelock_
     ) external onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(8) {
         _requirePaused();
         if (
@@ -141,9 +126,34 @@ contract MessageQueue is
             revert InvalidBeefyMigration();
         }
         beefyRootMinimum = firstBeefyBlock;
+        _setBeefyRecoveryTimelock(recoveryTimelock_);
         emit MigratedToBeefy(
             address(expectedLegacyVerifier), address(beefyVerifier), expectedLegacyMaxBlock, firstBeefyBlock
         );
+    }
+
+    /// @dev Independently scheduled recovery only after expiry; retained claims and replay state are unchanged.
+    function recoverBeefyVerifier(IVerifier expectedVerifier, IVerifier replacementVerifier, uint256 expectedMaxBlock)
+        external
+    {
+        if (msg.sender != beefyRecoveryTimelock) revert NotBeefyRecoveryTimelock();
+        if (
+            beefyRootMinimum == 0 || address(_verifier) != address(expectedVerifier)
+                || _maxBlockNumber != expectedMaxBlock || TimelockController(payable(msg.sender)).getMinDelay() == 0
+        ) revert InvalidBeefyRecovery();
+        (BeefyClient previous, uint64 start) = _validateBeefyVerifier();
+        if (previous.isLive()) revert InvalidBeefyRecovery();
+
+        _verifier = replacementVerifier;
+        (BeefyClient replacement, uint64 replacementStart) = _validateBeefyVerifier();
+        if (
+            replacementStart != start || replacement.sourceDomain() != previous.sourceDomain() || !replacement.isLive()
+                || replacement.latestMMRRoot() == bytes32(0)
+                || replacement.latestBeefyBlock() <= previous.latestBeefyBlock()
+                || replacement.latestBeefyBlock() <= _maxBlockNumber
+        ) revert InvalidBeefyRecovery();
+        if (!paused()) _pause();
+        emit BeefyVerifierRecovered(address(expectedVerifier), address(replacementVerifier), expectedMaxBlock);
     }
 
     /**
@@ -359,11 +369,10 @@ contract MessageQueue is
      *
      * @param blockNumber Block number on Vara Network.
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number.
-     * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
+     * @param proof Canonical v2 BEEFY-authenticated MMR queue proof envelope.
      * @dev Reverts if challenging root status is enabled and caller is not emergency stop admin with `ChallengeRoot` error.
      * @dev Reverts if emergency stop status is set and caller is not emergency stop admin with `EmergencyStop` error.
-     * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
-     * @dev In legacy mode, rejects blocks before genesis with `BlockNumberBeforeGenesis`.
+     * @dev Reverts if the queue proof is invalid or malformed with `InvalidQueueRootProof`.
      * @dev Reverts if block number is too far from max block number with `BlockNumberTooFar` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
@@ -383,13 +392,8 @@ contract MessageQueue is
         bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
         _checkSubmissionBlock(blockNumber, false);
 
-        uint256[] memory publicInputs = new uint256[](2);
-        publicInputs[0] = uint256(merkleRoot) >> 64;
-        publicInputs[1] = ((uint256(merkleRoot) & uint256(type(uint64).max)) << 128)
-            | ((blockNumber & uint256(type(uint32).max)) << 96);
-
-        if (!_verifier.safeVerifyProof(proof, publicInputs)) {
-            revert InvalidPlonkProof();
+        if (!_verifier.safeVerifyProof(blockNumber, merkleRoot, proof)) {
+            revert InvalidQueueRootProof();
         }
 
         if (previousMerkleRoot != 0) {
@@ -459,6 +463,9 @@ contract MessageQueue is
     }
 
     function _checkSubmissionBlock(uint256 sourceBlock, bool emptyProgress) private view {
+        if (beefyRootMinimum == 0) {
+            revert InvalidBeefyVerifier();
+        }
         if (sourceBlock > type(uint32).max) {
             revert BlockNumberOverflow(sourceBlock);
         }
@@ -473,9 +480,6 @@ contract MessageQueue is
                 revert EmptyQueueNotInitialized();
             }
             return;
-        }
-        if (beefyRootMinimum == 0 && sourceBlock < _genesisBlock) {
-            revert BlockNumberBeforeGenesis(sourceBlock, _genesisBlock);
         }
         if (emptyProgress && sourceBlock <= _maxBlockNumber) {
             revert EmptyQueueProgressNotForward();
@@ -658,25 +662,13 @@ contract MessageQueue is
             revert InvalidBeefyVerifier();
         }
         BeefyClient client = BeefyClient(clientAddress);
-        uint64 mmrStartBlock = client.mmrStartBlock();
-        if (
-            client.sourceDomain() == bytes32(0) || client.destinationQueue() != address(this)
-                || client.destinationChainId() != block.chainid || mmrStartBlock == 0
-                || client.minNumRequiredSignatures() != 86 || client.fiatShamirRequiredSignatures() != 86
-                || client.MAX_VALIDATORS() != 256 || client.randaoCommitDelay() != 128
-                || client.randaoCommitExpiration() != 24
-                || client.bridgeDomain()
-                    != keccak256(
-                        abi.encodePacked(
-                            "vara/gear-eth-bridge-domain/v2",
-                            client.sourceDomain(),
-                            bytes32(block.chainid),
-                            address(this)
-                        )
-                    )
-        ) {
-            revert InvalidBeefyVerifier();
+        return (client, client.mmrStartBlock());
+    }
+
+    function _setBeefyRecoveryTimelock(address recoveryTimelock) private {
+        if (recoveryTimelock.code.length == 0 || TimelockController(payable(recoveryTimelock)).getMinDelay() == 0) {
+            revert InvalidBeefyRecoveryTimelock();
         }
-        return (client, mmrStartBlock);
+        beefyRecoveryTimelock = recoveryTimelock;
     }
 }

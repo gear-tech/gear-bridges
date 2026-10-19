@@ -31,6 +31,7 @@ export class Transfer {
   @Column('timestamp with time zone', { nullable: false })
   timestamp!: Date;
 
+  /** Finalized terminal resolution coordinates; Refunded is wrapped recovery, not native delivery. */
   @Column('timestamp with time zone', { nullable: true, name: 'completed_at' })
   completedAt?: Date;
 

@@ -126,23 +126,6 @@ fn bounded_scale_parsers_reject_lengths_before_decoding() {
 }
 
 #[test]
-fn full_width_public_inputs_preserve_root_and_height() {
-    let root = std::array::from_fn(|i| i as u8 + 1);
-    let [p0, p1] = encode_public_inputs(root, 0xa1b2c3d4).unwrap();
-    assert_eq!(&p0[..8], &[0; 8]);
-    assert_eq!(&p1[..8], &[0; 8]);
-    assert_eq!(&p1[20..], &[0; 12]);
-    let mut restored = [0; 32];
-    restored[..24].copy_from_slice(&p0[8..]);
-    restored[24..].copy_from_slice(&p1[8..16]);
-    assert_eq!(restored, root);
-    assert_eq!(
-        u32::from_be_bytes(p1[16..20].try_into().unwrap()),
-        0xa1b2c3d4
-    );
-}
-
-#[test]
 fn native_and_simplified_proofs_reject_corruption() {
     for case in generate_fixtures().unwrap().cases {
         let root = hash(&case.mmr_root);

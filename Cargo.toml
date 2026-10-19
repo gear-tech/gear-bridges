@@ -4,9 +4,7 @@ members = [
     "mock-contract",
     "ethereum/client",
     "gear-rpc-client",
-    "prover",
     "relayer",
-    "circuits/*",
     "ethereum_beacon_client",
     "ethereum-common",
     "gear-programs/bridging-payment",
@@ -53,12 +51,6 @@ actix-web = "4.11.0"
 mock-contract = { path = "./mock-contract" }
 relayer = { path = "./relayer" }
 gear-rpc-client = { path = "./gear-rpc-client" }
-prover = { path = "./prover" }
-plonky2_blake2b256 = { path = "./circuits/plonky2_blake2b256" }
-plonky2_sha512 = { path = "./circuits/plonky2_sha512" }
-plonky2_ed25519 = { path = "./circuits/plonky2_ed25519" }
-plonky2_ecdsa = { path = "./circuits/plonky2_ecdsa" }
-plonky2_u32 = { path = "./circuits/plonky2_u32" }
 ethereum-client = { path = "./ethereum/client" }
 ethereum_beacon_client = { path = "ethereum_beacon_client" }
 ethereum-common = { path = "ethereum-common", default-features = false }
@@ -71,7 +63,6 @@ bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
 vft-manager = { path = "gear-programs/vft-manager" }
 vft-manager-app = { path = "gear-programs/vft-manager/app" }
 vft-manager-client = { path = "gear-programs/vft-manager/client" }
-gear_proof_storage = { path = "gear-programs/proof-storage" }
 utils-prometheus = { path = "utils-prometheus" }
 checkpoint-light-client = { path = "gear-programs/checkpoint-light-client" }
 checkpoint-light-client-app = { path = "gear-programs/checkpoint-light-client/app" }
@@ -97,14 +88,6 @@ vft-vara-client = { path = "gear-programs/vft-vara/client" }
 
 # Contracts' deps
 
-plonky2 = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
-plonky2_field = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
-plonky2_util = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
-plonky2_maybe_rayon = { git = "https://github.com/gear-tech/plonky2.git", rev = "81e7273ec8bcf048c80689ee7606dcc153cb92cd" }
-
-# Coordinates of `EdwardsPoint` made public in fork.
-curve25519-dalek = { git = "https://github.com/gear-tech/curve25519-dalek", rev = "f63777fbeeb181944097bdcaeb9384ac158ec931" }
-
 ahash = "0.7.8"
 anyhow = "1.0.86"
 ark-bls12-381 = { version = "0.4.0", default-features = false }
@@ -116,7 +99,6 @@ axum = "0.7.5"
 bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
 blake2 = "0.10.6"
 bytes = "1.6.0"
-cgo_oligami = "0.3"
 circular-buffer = { version = "0.1.7", default-features = false, features = [
     "alloc",
 ] }
@@ -124,13 +106,11 @@ clap = { version = "4.5.41", features = ["derive", "env"] }
 derive_more = "0.99.17"
 dotenv = "0.15.0"
 env_logger = "0.9.0"
-humantime = "2.2.0"
 ethereum-types = { version = "0.14.1", default-features = false, features = [
     "serialize",
     "codec",
     "rlp",
 ] }
-ff = { version = "0.13.0", features = ["derive"] }
 futures = { version = "0.3.30", features = ["executor"] }
 futures-util = "0.3.28"
 getrandom = { version = "0.2", default-features = false }
@@ -139,20 +119,15 @@ hash256-std-hasher = { version = "0.15.2", default-features = false }
 hex = { version = "0.4.3", default-features = false }
 hex-literal = "0.4.1"
 itertools = "0.10.5"
-jemallocator = "0.5.0"
 keccak-hash = "0.10.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
 log = "0.4.14"
 memory-db = { version = "0.27.0", default-features = false }
 mockall = "0.12"
-num = { version = "0.4", features = ["rand"] }
-paste = "1.0.14"
 pretty_env_logger = "0.5.0"
 prometheus = { version = "0.13.0", default-features = false }
 rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
-rand_chacha = "0.3.1"
-rayon = "1.5.3"
 reqwest = { version = "0.11.24", features = ["json"] }
 ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = [
     "alloc",
@@ -169,8 +144,6 @@ serde = { version = "1.0", default-features = false, features = [
 ] }
 serde_json = "1.0"
 sha2 = "0.10"
-sled = "0.34.7"
-static_assertions = "1.1.0"
 thiserror = { version = "2.0.11", default-features = false }
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
 tokio = { version = "1.23.0", features = ["full"] }
@@ -178,7 +151,6 @@ toml = "0.9"
 tower = { version = "0.5.2", features = ["timeout", "util"] }
 tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
 tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
-unroll = "0.1.5"
 uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
 chrono = "0.4.41"
 zeroize = "1.8.1"

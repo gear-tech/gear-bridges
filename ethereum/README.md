@@ -56,31 +56,59 @@ $ anvil
 ```shell
 # deployment
 $ cp .env.example .env
-# fork testing on mainnet
+# protective retained-mainnet configuration (generic fresh deployment rejects its default mode)
 $ cp .env.example.mainnet .env
-# fork testing on sepolia
+# fresh Sepolia deployment configuration
 $ cp .env.example.sepolia .env
-# fork testing on hoodi
+# fresh Hoodi deployment configuration
 $ cp .env.example.hoodi .env
 
 $ source .env
 
-$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
-$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
-$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
-$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
+# Simulate first; --broadcast requires separate approval for the exact action.
+$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url "$LOCAL_RPC_URL" -vvvv
+$ forge script script/RetainedBridgeMigration.sol:RetainedBridgeMigrationScript --rpc-url "$RETAINED_RPC_URL" -vvvv
+$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url "$SEPOLIA_RPC_URL" -vvvv
+$ forge script script/Deployment.s.sol:DeploymentScript --rpc-url "$HOODI_RPC_URL" -vvvv
 ```
 
 ### BEEFY deployment and regression checks
 
-`BeefyLocal`, `BeefyHoodi`, and `BeefyTokens` share queue CREATE predictions in
-`test/Base.sol`, beside the deployment order: the client consumes one nonce,
-token profiles consume seven more, and governance/verifier/queue implementation
-consume four before the queue proxy. The original queue offsets remain `+12`
-for token profiles and `+5` for message-only Hoodi. Token overrides remain
-forbidden for these predictions; `BeefyTokens` also checks the expected starting
-nonce before deploying. The configured bridge domain must match the predicted
-queue and chain, and the client/verifier bind that destination immutably.
+Every fresh entrypoint uses BEEFY: `DeploymentScript`, `BeefyLocal`, `BeefyHoodi`
+and `BeefyTokens` share the existing full bridge environment and queue CREATE
+predictions in `test/Base.sol`. The generic environment entrypoint requires
+`DEPLOYMENT_MODE=fresh-beefy`; it rejects the protective
+`retained-beefy-migration` default in `.env.example.mainnet`. Retained migration
+uses the separately gated existing-proxy workflow below, never generic fresh deployment.
+Its explicit entrypoint is
+`forge script script/RetainedBridgeMigration.sol:RetainedBridgeMigrationScript --rpc-url "$RETAINED_RPC_URL"`.
+Keep broadcast disabled for preparation/readback; a write requires the independently
+approved stage/action and original-transaction reconciliation described below.
+
+
+Before any broadcast, configure source governance/manager/emergency identities,
+all required `BEEFY_*` bootstrap values in the network env example, and an existing
+positive-delay `BEEFY_RECOVERY_TIMELOCK`. The bridge domain is
+`keccak256(abi.encodePacked("vara/gear-eth-bridge-domain/v2", sourceDomain,
+bytes32(chainId), predictedQueue))`. No missing bootstrap falls back to another
+verifier. Bootstrap timestamps must be recent, and current/next validator IDs
+must be consecutive with nonempty, at-most-256-member sets.
+
+The client consumes one nonce. Generated-token profiles consume seven more
+CREATEs, complete existing-token overrides consume three, and governance,
+verifier and queue implementation consume four before the queue proxy. Thus queue
+offsets are `+12` for generated tokens, `+8` for complete token overrides and `+5`
+for message-only Hoodi. Partial, duplicate or code-less overrides fail before
+deployment. Mainnet requires all four canonical assets; test-token generation
+requires explicit `DEPLOY_TEST_TOKENS=true` on a supported test chain.
+`BeefyTokens` also checks its expected starting nonce. The configured bridge domain
+must match the predicted queue and chain; client/verifier bind that destination immutably.
+
+Full-bridge behavioral tests retain tokens, governance, custody and ordinary fees.
+Only their explicit `ForkBeefyFixture(..., true)` admits checkpoints through the
+test-only `BeefyClientMock`; queue envelopes and MMR inclusion are still verified
+by the real `VaraQueueRootVerifier`. Consensus, real deployment, migration,
+recovery and transaction smoke use signed commitment admission.
 
 The interactive and Fiat-Shamir submissions share authenticated leaf acceptance,
 authority rotation, and ECDSA verification. Ticket handling, randomness, sampling,
@@ -92,7 +120,7 @@ Run the focused checks with installed dependencies/compiler caches:
 $ forge test --offline --match-path test/BeefyInterop.t.sol
 $ forge test --offline --match-path test/BeefySubmissionParity.t.sol
 $ forge test --offline --match-path test/VaraBeefyQueue.t.sol
-$ forge test --offline --threads 1 --match-path test/script/Deployment.t.sol --match-test 'Beefy|Hoodi'
+$ forge test --offline --threads 1 --match-path 'test/script/*.t.sol'
 ```
 
 Deployment tests mutate process-wide environment variables, so run them with one
@@ -134,11 +162,23 @@ domain throughout each sequence. No proof verifier, expiry, quorum or custody
 policy is bypassed. This is a local gas benchmark, not source-runtime activation
 or production BEEFY certification.
 
+The queue/token smoke deploys through the same `Base` environment and
+`fresh-beefy` env validation, including all token registrations, governance and
+ordinary payment setup. Its recovery timelock is deployed before queue prediction.
+The runner supplies only its known disposable Anvil key and an owned-runner flag.
+
+
 `out/fulltx-benchmark/receipts.json` retains actual RPC transactions (including
 full calldata), successful mined receipts and inclusion headers, fixture/source
 SHA-256 digests, tool/compiler settings and checked post-state. Forge broadcast
 records and logs remain beside it; `--output <directory>` selects a separate
-evidence location. Existing test Anvils and public networks are not modified.
+evidence location. Compiler artifacts and cache use project-relative
+`out/fulltx-<hash>` and `cache/fulltx-<hash>`, keyed by the resolved evidence
+directory. This isolates the smoke build from full-build artifacts while retaining
+the existing filesystem allowlist and OpenZeppelin upgrade validation.
+The bridge deployment invocation uses a clean compiler batch so OpenZeppelin
+validation cannot consume overlapping build-info; fixture cases reuse the cache.
+Existing test Anvils and public networks are not modified.
 Do not run two benchmark writers against the same output directory/build cache.
 
 Measured with Forge/Anvil 1.7.1, Solc 0.8.37, optimizer + via-IR, Osaka (2026-10-15):
@@ -225,6 +265,41 @@ for the US$5,000 target, infrastructure allowances, traffic/fee conditions and
 the separately identified, not-yet-deployed queue-root coalescing design.
 
 
+### Expiry recovery and initializer scope
+
+`initializeBeefy` keeps the five legacy setup arguments and adds the approved
+`recoveryTimelock` address. Unlike `initialize`, it checks the actual proxy/chain
+binding and pins the authenticated source publication floor. These are runtime
+deployment invariants; immutable client policy remains checked once by the
+verifier constructor, not repeated by the queue or after `new BeefyClient`.
+Never use the legacy initializer to bypass BEEFY setup.
+
+Set `BEEFY_RECOVERY_TIMELOCK` to an independently reviewed, deployed positive-delay
+timelock controlled by the approved multisig, never a relay hot key. Verify its
+code, multisig owners/threshold, proposer/canceller/executor/admin roles and delay.
+`getMinDelay()` only checks a reported positive delay, not its enforcement, Safe
+identity or governance quality. The manifest binds controller address, code hash
+and delay; changed or missing evidence HOLDs.
+The local-only `LOCAL_RECOVERY_PRIVATE_KEY` option creates an explicit development
+timelock from a separate signer without changing the bridge deployer's nonce
+geometry. It is not production governance qualification.
+
+Recovery is trusted re-bootstrap authority: a compromised multisig can select
+malicious validator history and forge bridge/governance messages. Monotonic
+height/domain checks do not prove continuity with the expired validator set.
+
+After client expiry, only that timelock may execute
+`recoverBeefyVerifier(expectedVerifier, replacementVerifier, expectedMaxBlock)`.
+The replacement must retain source identity, queue/chain binding and MMR history
+start, be live with a nonzero authenticated root, and advance beyond both the
+expired checkpoint and queue maximum. Recovery preserves the publication floor,
+roots, maturity, custody and replay state and leaves claims paused. Unpause through
+a newly authenticated source-governance message; emergency-stop controls remain.
+Keep the candidate client live through the timelock delay. Requalify its bootstrap
+and deployment manifest without discarding any original transaction journals.
+This narrow recovery capability grants no UUPS upgrade or general pause role.
+
+
 ### Mainnet custody-preserving migration candidate
 
 Keep the existing queue proxy, ERC20 manager, token contracts and Vara programs.
@@ -235,12 +310,13 @@ block 26,183,239. Its authenticated runtime bytecode and real claim inputs are i
 compiler-declared implementation-address immutables substituted for comparison.
 
 The candidate exposes `migrateToBeefy(expectedLegacyVerifier, beefyVerifier,
-expectedLegacyMaxBlock, firstBeefyBlock)` as an admin-only `reinitializer(8)`.
+expectedLegacyMaxBlock, firstBeefyBlock, recoveryTimelock)` as an admin-only `reinitializer(8)`.
 Execute it atomically through the existing authority's `upgradeToAndCall` while
 paused. It preserves roles, custody, genesis, maximum progress, registered roots,
 legacy root-keyed maturity and every replay bit, including blocked nonce 836.
-It does not grant a replacement administrator. The expected verifier and maximum
-are compare-and-swap guards: root publication is not stopped by pausing claims.
+It does not grant a replacement UUPS administrator; the separately reviewed
+timelock receives only the expiry-recovery capability above. Expected verifier
+and maximum are compare-and-swap guards: pausing claims does not stop publication.
 
 The new floor must exceed the legacy maximum, be at or after MMR history start,
 fit uint32 and remain within the existing 57,600-block progress bound. The
@@ -261,11 +337,153 @@ MAINNET_MIGRATION_RPC_URL="$ARCHIVE_RPC" forge test --match-contract VaraQueueRo
 The fork pins block hash
 `0x8e462035baf49ef0bdd7ede06fb133e6aca0f34c25833387d3c87500947a7a3d`, checks deployed
 code/version, restricts queue migration writes to the implementation, initializer,
-verifier and floor slots, preserves existing custody/supply and redeems authentic
+verifier, floor and recovery-timelock slots, preserves existing custody/supply and redeems authentic
 pending claim 21 with its retained proof. It preserves replay bits 836 and 864 and
 rejects repeated redemption. It uses local authority impersonation and fixture
 BEEFY authorities, not an approved mainnet bootstrap or a source governance proof.
 Without the RPC variable, the fork test is explicitly skipped, not qualified.
+
+The shared fork path in `test/Base.sol::deployBridge` pins the mainnet block,
+legacy code and initializer, retains all existing bridge contracts, and calls the
+same typed migration validation, calldata and governance helpers as the operational
+runner. Only pause and atomic-upgrade roots are registered under the old verifier.
+The expected legacy maximum includes those two roots, not an unpause permission.
+After the paused upgrade passes retained-state readback, a fixture-signed empty
+BEEFY epoch advances the queue. Only then is a new unpause message constructed in
+a later authenticated epoch; it must wait for its own governance maturity.
+
+This remains a **fork rehearsal**, not production authorization. Synthetic legacy
+source-proof checks are scoped mocks and immediately cleared. BEEFY signatures and
+MMR proofs are real fixture-authority proofs. Finalized pins are explicitly local
+fixture evidence; the operational runner instead checks canonical RPC blocks and
+original transaction receipts. No source governance impersonation, replacement
+administrator, token replacement or broadcast key is permitted in the fork path.
+
+Run the integrated retained-state scenario explicitly:
+
+```shell
+REQUIRE_MAINNET_MIGRATION=true MAINNET_MIGRATION_RPC_URL="$ARCHIVE_RPC" forge test --match-contract MainnetBridgeMigrationTest
+```
+
+It preserves all five token addresses, custody/supplies, legacy maturity and replay
+bits; redeems pending claim 21; settles a new BEEFY-backed claim only after its own
+maturity; and verifies failed-governance rollback plus subsequent authorized
+upgrade/unpause through BEEFY roots. Empty BEEFY proofs and the placeholder admin
+are rejected. Mock-based unit suites always deploy fresh fixtures; the removed
+`FORK_URL_OR_ALIAS`/governance-address environment switches no longer turn them into
+migration tests. The dedicated CI job sets `REQUIRE_MAINNET_MIGRATION=true`, making
+a missing archive RPC fail the integrated scenario rather than silently skip it.
+An archive rejection is a failed qualification, not permission to change the pin.
+
+#### Retained migration operator inputs
+
+Use `script/RetainedBridgeMigration.sol:RetainedBridgeMigrationScript`, with
+`DEPLOYMENT_MODE=retained-beefy-migration` and `RETAINED_RPC_URL` pointing to the
+same chain as `--rpc-url`. The fresh deployment entrypoint deliberately rejects
+this mode. Preparation, verification and reconciliation do not read a signing key.
+No replacement queue, manager, token or governance authority is deployed.
+Use Foundry v1.8.5, matching CI: v1.7.1 can compile the scripts but lacks their
+required RPC cheatcode overload. Add `-vvvv` to preparation runs to inspect the
+`RetainedMigrationPrepared` event containing the migration calldata and upgrade payload.
+
+
+Keep approved inputs under `broadcast/migration-inputs/`, outside disposable
+build output. Types are declared in
+`script/RetainedBridgeMigration.sol`; encode the exact Solidity structs with
+`abi.encode`, not packed encoding or JSON object field ordering:
+
+| Input | JSON shape / approval |
+|---|---|
+| `RETAINED_PLAN` | `{"schemaVersion":1,"plan":"0x..."}` containing `MigrationPlan`; exact-file Keccak must equal independently approved `RETAINED_PLAN_HASH` |
+| `RETAINED_ACTION` | `{"schemaVersion":2,"action":"0x..."}` containing `MigrationAction`; exact-file Keccak must equal `RETAINED_ACTION_HASH`; `action.planHash` binds the approved plan file; schema-1 actions are rejected |
+| `RETAINED_SOURCE_CUT` | `queue`, `sourceDomain`, `legacyMax`, `firstBeefyBlock`, and `roots` containing ABI-encoded `LegacyRootPin[]`; file digest must equal `plan.sourceCutApproval` |
+| `RETAINED_UNPAUSE_INVENTORY` | `queue`, `sourcePauser`, `unpauseNonces` array; digest must equal `plan.outstandingUnpauseInventory`; every listed old permission must already be consumed |
+| `RETAINED_DEPLOYMENTS` | `implementation`, `client`, `verifier`, each containing ABI-encoded `OriginalTransaction`; exact-file digest must equal `RETAINED_DEPLOYMENTS_HASH` |
+| `RETAINED_FINALITY_OUTPUT` | Absent output path for the stage-9 upgrade observation or stage-10 original-transaction reconciliation; capture reserves `<path>.capture` and writes the exact observation file |
+| `RETAINED_UPGRADE_OBSERVATION` | Captured `{"schemaVersion":1,"planHash":"0x...","stage":8,"transactionHash":"0x...","observation":"0x..."}`; `observation` is ABI-encoded `FinalityObservation`, copied into `action.barrier.upgradeReadback`; exact-file Keccak must equal `RETAINED_UPGRADE_OBSERVATION_HASH` |
+| `RETAINED_BARRIER_OBSERVATION` | Same captured format with numeric `stage:10` and the original empty-progress transaction; copy the decoded observation into `action.barrier.publication`; exact-file Keccak must equal `RETAINED_BARRIER_OBSERVATION_HASH` |
+
+Review decoded fields before approving their file digests. A freshly calculated
+hash is not independent approval. The plan pins the chain/genesis, proxy and
+underlying implementation hashes, all existing contracts/source authorities,
+token/payment inventories, cut/floor, constructor bootstrap, recovery delay and
+roles, and retained-state readbacks. Include custody, supply, root/maturity,
+replay and token-policy readbacks in `retainedState`; include applicable custom
+proxy implementation slots in `retainedProxies`. Supplied roots and nonce lists
+must come from the complete independently approved liability/permission audit;
+the tool cannot infer missing historical obligations from an incomplete list.
+The RPC must support canonical finalized blocks, archival state and recovery
+timelock grant/revoke history.
+The recovery-role inventory must include every live role, including the
+timelock's implicit `CANCELLER_ROLE` grants to proposers.
+
+Each invocation handles one approved stage and at most one transaction:
+
+| Stage ordinal | Action | Required predecessor |
+|---|---|---|
+| 0 | Prepare calldata and upgrade payload | Complete approved retained plan/cut/inventory |
+| 1–3 | Deploy implementation, client, verifier | Exact planned signer/nonce/address; finalized original constructor records for prior deployments |
+| 4 | Bootstrap | All three original constructors authenticated; real BEEFY signature-entrypoint calldata |
+| 5–6 | Register pause and upgrade roots | Genuine legacy proofs; no root beyond the approved legacy ceiling |
+| 7 | Pause | Both governance roots mature; every approved liability root registered; exact approved maximum |
+| 8 | Atomic upgrade | Paused queue, live bootstrapped client, unchanged identities and complete registered cut coverage |
+| 9 | Verify and capture upgrade finality observation | Original upgrade authenticated; canonical finalized paused poststate with complete cut coverage; absent `RETAINED_FINALITY_OUTPUT` |
+| 10 | Publish empty BEEFY barrier | Independently approved upgrade observation; source timestamp later than its `observedAt` plus allowed clock skew |
+| 11 | Register new unpause root | Original empty-barrier receipt and approved barrier observation; strictly later source epoch and timestamp |
+| 12 | Process unpause | Original root-registration receipt authenticated and governance maturity passed |
+
+Bootstrap can require multiple separately approved stage-4 actions for the
+interactive signature path. It never bypasses client signature verification or
+the normal follower's pre-migration binding checks.
+Constructor history remains pinned to the original bootstrap inputs; legitimate
+native authenticated validator handovers do not require rewriting that approval.
+
+Every stage from Verify onward requires `action.upgrade`, containing the approved
+upgrade delivery and original transaction evidence. Matching state produced by
+another executor cannot substitute for an unresolved original transaction.
+Complete approved liability-root coverage is rechecked after migration as well
+as before Pause.
+
+After stage 9, independently approve the captured file and its exact Keccak before
+setting `RETAINED_UPGRADE_OBSERVATION[_HASH]` and approving a source empty epoch.
+After stage 10 is finalized, reconcile its original transaction with a new absent
+`RETAINED_FINALITY_OUTPUT`; approve that capture as
+`RETAINED_BARRIER_OBSERVATION[_HASH]` before authorizing the later unpause epoch.
+Re-encode and independently approve the schema-2 action with both observations.
+An observation contains the qualified finalized `state`, the then-current latest
+`head`, and `observedAt` in UTC seconds. Source timestamps must exceed the relevant
+`observedAt * 1000 + MAX_FUTURE_SOURCE_SKEW_MS`, not the older inclusion timestamp.
+`observedAt` is the later of the current host clock and observed head timestamp.
+The qualified RPC and host clock are explicit operator trust boundaries; this is
+**not a cryptographic proof of historical consensus-finality time**. The output's
+parent directory must exist. Keep original observation files and their `.capture`
+reservations; never overwrite them or discard a failed capture to bypass
+reconciliation. An authorized retry after a failed capture needs a distinct
+output path.
+
+For a new write, `PRIVATE_KEY` must match the action's approved signer, and both
+latest and pending nonce must equal its approved nonce. Set
+`RETAINED_BROADCAST_ARTIFACT` to an absent destination before the first attempt.
+After Foundry records the transaction, point it to the immutable original
+timestamped artifact and supply `RETAINED_BROADCAST_HASH`,
+`RETAINED_TRANSACTION_INDEX`, and `RETAINED_TRANSACTION_HASH` for reconciliation.
+Do not use a mutable `run-latest.json` as retained evidence. Keep original files
+unchanged; deployment-history records reference their exact hashes and indices.
+
+An atomic marker under `broadcast/` owns the chain/signer/nonce before an actual
+broadcast attempt. Missing receipts, pending inclusion, reverts, changed intent,
+noncanonical blocks and rival successes all HOLD; never delete the marker or
+blindly use `--resume` to create another signature. Reconciliation authenticates
+the original transaction's input, value, signer, nonce, destination/creation,
+receipt and canonical finalized inclusion before checking state.
+
+Unpause also requires `RETAINED_ROOT_ARTIFACT`, `RETAINED_ROOT_ARTIFACT_HASH`,
+`RETAINED_ROOT_TRANSACTION_INDEX` and `RETAINED_ROOT_TRANSACTION_HASH`.
+Its barrier carries the original empty-progress transaction and approved finality
+observations. Both source timestamps must exceed the relevant observed finality
+time by the client's allowed future skew; a higher message nonce is insufficient.
+Outstanding old unpause permissions remain a separate governance-reconciliation
+gate, not something this script can safely cancel or ignore.
 
 Release pipeline, in order:
 
@@ -301,11 +519,11 @@ Release pipeline, in order:
    both indexers, source governance authorization and interruption/restart against
    the exact retained-state release profile. A fresh-token deployment is not this
    acceptance test. Retain legacy claim services and historical proofs.
-6. Review implementation/verifier/client hashes, governance authority/policy,
-   expected legacy verifier/maximum, floor, calldata and pause/unpause sequencing.
-   Only separately authorized production governance may execute the upgrade.
-   Unpause after post-upgrade state checks; rehearse recovery without undoing any
-   accepted BEEFY progress or processed claims.
+6. Review implementation/verifier/client hashes, existing governance authority,
+   recovery timelock code/roles/delay and multisig policy, expected legacy
+   verifier/maximum, floor, calldata and pause/unpause sequencing. Only separately
+   authorized production governance may execute the upgrade. Rehearse expiry
+   recovery without rolling back accepted progress, custody or processed claims.
 
 Source activation, mainnet follower qualification, full accounting, end-to-end
 acceptance and governance approval remain release gates. Local fork success
@@ -336,6 +554,14 @@ transferred to this code or its deployment bytecode.
 
 
 ### Relaying
+
+Root production follows the existing commitment follower → MMR root publisher →
+unchanged individual-message delivery pipeline. `SubmitMerkleRootScript` reads
+`MMR_PROOF`, the canonical v2 queue-proof envelope (not raw sibling hashes).
+The independent observer may challenge a confirmed historical-root mismatch;
+governance response is separately authorized. The challenge pause is finite;
+persistent incidents require the existing governance pause.
+
 
 ```shell
 $ source .env
@@ -369,21 +595,6 @@ $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/MessageQueue.s.sol:MessageQueueScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
 
-$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
-$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/VerifierMock.s.sol:VerifierMockScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
-
-$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
-$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/VerifierMainnet.s.sol:VerifierMainnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
-
-$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
-$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
-$ forge script script/upgrades/VerifierTestnet.s.sol:VerifierTestnetScript --rpc-url $HOODI_RPC_URL --broadcast --verify -vvvv
-
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $LOCAL_RPC_URL --broadcast -vvvv
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $MAINNET_RPC_URL --broadcast --verify -vvvv
 $ forge script script/upgrades/WrappedVara.s.sol:WrappedVaraScript --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
@@ -396,7 +607,7 @@ After satisfying the mainnet migration gates above, use independently reviewed
 addresses and cut heights to generate calldata; this does not authorize execution.
 
 ```bash
-MIGRATION_DATA=$(cast calldata "migrateToBeefy(address,address,uint256,uint256)" "$LEGACY_VERIFIER" "$BEEFY_VERIFIER" "$LEGACY_MAX_BLOCK" "$FIRST_BEEFY_BLOCK")
+MIGRATION_DATA=$(cast calldata "migrateToBeefy(address,address,uint256,uint256,address)" "$LEGACY_VERIFIER" "$BEEFY_VERIFIER" "$LEGACY_MAX_BLOCK" "$FIRST_BEEFY_BLOCK" "$BEEFY_RECOVERY_TIMELOCK")
 cargo run --package governance-tool --release -- --ethereum-endpoint "$MAINNET_RPC_URL" GovernanceAdmin UpgradeProxy MessageQueue "$NEW_IMPLEMENTATION" "$MIGRATION_DATA"
 ```
 

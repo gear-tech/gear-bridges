@@ -9,8 +9,8 @@ import { encodeEthToVaraEvent, CheckpointClient, HistoricalProxyClient, ProofRes
 import { composeProof, generateMerkleProof, immutableInboundProfile, parseInboundProofProfile, immutableOwnedFixtureNetwork, checkpointNetworkMatches, validateOwnedFixtureNetwork, validateLocalFixtureBeaconSpec, InboundProofProfile } from '../src/eth-to-vara/proof-composer.js';
 import { relayEthToVara, validateFinalizedEthToVaraReply, decodeConsumerReply, assertNativePendingReply, validateFinalizedNativeReconciliationReply } from '../src/eth-to-vara/relayer.js';
 import type { ConsumerReplyContract, RelayResult } from '../src/eth-to-vara/relayer.js';
-import { validateInboundTokenEffect, BridgingRequestedAbi, nativeOperationId, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption,
-  VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, type NativeReceiptDeposit } from '../src/eth-to-vara/token-effect.js';
+import { validateInboundTokenEffect, BridgingRequestedAbi, nativeOperationId, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
+  VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, type NativeReceiptDeposit, type NativeRedemption } from '../src/eth-to-vara/token-effect.js';
 import { encode as rlpEncode } from '@ethereumjs/rlp';
 import { HistoricalProxy } from '../src/vara/historical-proxy.js';
 import * as beaconMethods from '../src/ethereum/beacon-client.js';
@@ -34,6 +34,7 @@ const codec = (value: HexString) => ({ toHex: () => value, toString: () => value
 async function managerRegistry() {
   const idl = fs.readFileSync(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8');
   expect(createHash('sha256').update(idl).digest('hex')).toBe(VFT_MANAGER_IDL_SHA256);
+  expect(createHash('sha256').update(fs.readFileSync(new URL('../../../api/gear/vft_vara.idl', import.meta.url))).digest('hex')).toBe(NATIVE_WRAPPER_IDL_SHA256);
   return new Sails(await SailsIdlParser.new()).parseIdl(idl).registry;
 }
 
@@ -355,7 +356,7 @@ describe('SDK finalized consumer and token effects', () => {
     expect(() => assertNativePendingReply((pending + '00') as HexString, profile, contract)).toThrow();
   });
 
-  test('reconciles exact native cohorts only after original payout delivery, preserving operation and both child identities', async () => {
+  test('authenticates delivered and refunded native cohorts while preserving operation and both child identities', async () => {
     const expected = { managerAddress: ('0x' + '12'.repeat(20)) as HexString, sourceToken: ('0x' + '13'.repeat(20)) as HexString,
       destinationToken: hash(8), sender: ('0x' + '14'.repeat(20)) as HexString, receiver: hash(9), amount: 10n };
     const logs = [10n, 20n].map(amount => ({ address: expected.managerAddress, topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
@@ -385,15 +386,128 @@ describe('SDK finalized consumer and token effects', () => {
     }
     expect(() => validateNativeCohortContinuity(rows, delivered.slice(0, 1), true)).toThrow();
     const queued = { from: identity.managerId, to: expected.receiver, amount: 10n, child: hash(50), status: 'Queued' as const, returned_value: 0n };
-    expect(validateNativeRedemption(rows[0], identity.managerId, queued)).toBe(false);
+    expect(validateNativeRedemption(rows[0], identity.managerId, queued)).toBe('Queued');
     const settled = { ...queued, status: 'Delivered' as const };
-    expect(validateNativeRedemption(delivered[0], identity.managerId, settled, queued)).toBe(true);
+    expect(validateNativeRedemption(delivered[0], identity.managerId, settled, queued)).toBe('Delivered');
     for (const change of [{ child: hash(99) }, { child: rows[0].child! }, { returned_value: 1n }, { status: 'Returned' as const }, { status: 'Ambiguous' as const },
       { to: hash(99) }, { from: hash(99) }, { amount: 11n }]) expect(() => validateNativeRedemption(delivered[0], identity.managerId, { ...settled, ...change }, queued)).toThrow();
     expect(() => validateNativeRedemption(rows[0], identity.managerId, null)).toThrow();
     expect(() => validateInboundTokenEffect(receiptRlp, rows, expected)).toThrow();
     expect(() => validateInboundTokenEffect(receiptRlp, delivered, expected)).not.toThrow();
+    const refunded = rows.map(row => ({ ...row, outcome: 'Refunded' }));
+    const refunds = new Map(rows.map(row => [row.operation_id, { ...queued, amount: row.amount, child: hash(50 + Number(row.log_index)),
+      status: 'Refunded' as const, returned_value: row.amount }]));
+    const originals = new Map([...refunds].map(([operation, value]) => [operation, { ...value, status: 'Queued' as const, returned_value: 0n }]));
+    expect(validateNativeRedemption(refunded[0], identity.managerId, refunds.get(rows[0].operation_id)!, queued)).toBe('Refunded');
+    expect(() => validateNativeCohortContinuity(rows, refunded, true)).not.toThrow();
+    const authenticated = validateNativeTokenEffect(identity, refunded, refunds, originals);
+    expect(authenticated.map(entry => entry.redemption.status)).toEqual(['Refunded', 'Refunded']);
+    expect(authenticated[0]).toEqual({ operationId: rows[0].operation_id, logIndex: 0n, child: rows[0].child, redemption: refunds.get(rows[0].operation_id) });
+    expect(() => validateInboundTokenEffect(receiptRlp, refunded, expected)).toThrow();
+    expect(() => validateNativeTokenEffect(identity, refunded, new Map(), originals)).toThrow();
+    expect(() => validateNativeTokenEffect(identity, refunded, refunds, new Map())).toThrow();
+    expect(() => validateNativeTokenEffect(identity, rows, originals)).toThrow();
+    for (const change of [{ returned_value: 9n }, { returned_value: 11n }, { returned_value: 0n }, { amount: 11n },
+      { child: hash(99) }, { child: rows[0].child! }, { to: hash(99) }, { from: hash(99) },
+      { status: 'Returned' as const }, { status: 'Ambiguous' as const }, { status: 'Queued' as const }]) {
+      const substituted = new Map<HexString, NativeRedemption>(refunds);
+      substituted.set(rows[0].operation_id, { ...refunds.get(rows[0].operation_id)!, ...change });
+      expect(() => validateNativeTokenEffect(identity, refunded, substituted, originals)).toThrow('HOLD');
+    }
+    expect(() => validateNativeCohortContinuity(refunded, delivered, true)).toThrow();
+    expect(() => validateNativeCohortContinuity(delivered, refunded, true)).toThrow();
+    expect(() => validateNativeRedemption(refunded[0], identity.managerId, refunds.get(rows[0].operation_id)!, settled)).toThrow();
+    expect(() => validateNativeRedemption(delivered[0], identity.managerId, settled, refunds.get(rows[0].operation_id)!)).toThrow();
+    expect(() => validateNativeTokenEffect(identity, [{ ...refunded[0], receiver: hash(99) }, refunded[1]], refunds, originals)).toThrow();
+    expect(() => validateNativeCohortContinuity(rows, [{ ...refunded[0], child: hash(99) }, refunded[1]], true)).toThrow();
+    const mixed = [refunded[0], delivered[1]];
+    const mixedRedemptions = new Map<HexString, NativeRedemption>(refunds);
+    mixedRedemptions.set(rows[1].operation_id, { ...refunds.get(rows[1].operation_id)!, status: 'Delivered', returned_value: 0n });
+    expect(validateNativeTokenEffect(identity, mixed, mixedRedemptions, originals).map(entry => entry.redemption.status)).toEqual(['Refunded', 'Delivered']);
   });
+
+  test.each(['refund', 'delivered', 'direct-refund', 'partial', 'amount', 'child', 'manager-child', 'recipient', 'source', 'terminal', 'ambiguous', 'pin'] as const)(
+    'qualifies original native settlement at its saved finalized pin: %s', async (scenario) => {
+      const fixture = originalReplyFixture(), api = fixture.params.gearApi, registry = await managerRegistry();
+      const profile = nativeProfile(), direct = scenario === 'direct-refund', delivered = scenario === 'delivered';
+      const expected = { managerAddress: ('0x' + '12'.repeat(20)) as HexString, sourceToken: ('0x' + '13'.repeat(20)) as HexString,
+        destinationToken: profile.nativeWrapper!.programId, sender: ('0x' + '14'.repeat(20)) as HexString, receiver: hash(9), amount: 10n };
+      const log = { address: expected.managerAddress, topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
+        args: { from: expected.sender, to: expected.receiver, token: expected.sourceToken } }), data: encodeAbiParameters(parseAbiParameters('uint256'), [10n]) };
+      const { receiptRlp } = await generateMerkleProof(0, [{ type: 'eip1559', transactionIndex: 0, status: 'success', cumulativeGasUsed: 21000n,
+        logsBloom: '0x' + '00'.repeat(256), logs: [log] } as unknown as TransactionReceipt]);
+      const identity = { managerId: profile.consumer.programId, proxyId: profile.historicalProxyId, wrapperId: expected.destinationToken,
+        slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
+      const row: NativeReceiptDeposit = { log_index: 0, sender: expected.sender, receiver: expected.receiver, eth_token_id: expected.sourceToken,
+        token_id: expected.destinationToken, amount: 10n, outcome: 'NativeQueued', native: true, supply: 'Gear',
+        operation_id: nativeOperationId(identity, 0n), child: hash(40) };
+      const queued: NativeRedemption = { from: identity.managerId, to: expected.receiver, amount: 10n, child: hash(50), status: 'Queued', returned_value: 0n };
+      const terminal: NativeRedemption = { ...queued, status: delivered ? 'Delivered' : 'Refunded', returned_value: delivered ? 0n : 10n };
+      const finalPin = direct ? hash(12) : hash(13);
+      const readDeposits = vi.fn(async (pin: HexString) => [{ ...row, outcome: pin === hash(12) && !direct ? 'NativeQueued' : delivered ? 'Settled' : 'Refunded',
+        ...(scenario === 'manager-child' && pin === hash(13) ? { child: hash(99) } : {}) }]);
+      const readRedemption = vi.fn(async (_operation: HexString, pin: HexString): Promise<NativeRedemption> => {
+        if (pin === hash(12) && !direct) return scenario === 'terminal' ? { ...queued, status: 'Delivered' } : queued;
+        return { ...terminal, ...(scenario === 'partial' ? { returned_value: 9n } : {}),
+          ...(scenario === 'amount' ? { amount: 11n } : {}), ...(scenario === 'child' ? { child: hash(99) } : {}),
+          ...(scenario === 'recipient' ? { to: hash(99) } : {}), ...(scenario === 'source' ? { from: hash(99) } : {}),
+          ...(scenario === 'ambiguous' ? { status: 'Ambiguous' as const } : {}) };
+      });
+      const inner = registry.createType('(String,String,Result<Null,Error>)', ['VftManager', 'SubmitReceipt',
+        direct ? { ok: null } : { err: { NativeSettlementPending: null } }]).toHex();
+      fixture.state.requestPayload = fixture.registry.createType('(String,String,u64,Vec<u8>,[u8;32],Vec<u8>)',
+        ['HistoricalProxy', 'Redirect', 100, '0x0102', profile.consumer.programId, getPrefix('VftManager', 'SubmitReceipt')]).toHex();
+      fixture.state.payload = fixture.registry.createType('(String,String,Result<(Vec<u8>,Vec<u8>),ProxyError>)',
+        ['HistoricalProxy', 'Redirect', { ok: [bytesToHex(receiptRlp), inner] }]).toHex();
+      fixture.state.finalized = 13;
+      vi.spyOn(api.rpc.chain, 'getFinalizedHead').mockResolvedValue(codec(hash(13)) as never);
+      let effectVerified = false, broadcasts = 0;
+      const canonical = api.blocks.getBlockHash;
+      api.blocks.getBlockHash = async (height) => scenario === 'pin' && effectVerified && BigInt(height.toString()) === 13n ? codec(hash(99)) as never : canonical(height);
+      Object.assign(api, { blockGasLimit: { toBigInt: () => 10000n },
+        programStorage: { getProgram: async (id: HexString) => ({ state: { isInitialized: true },
+          codeId: codec(id === identity.wrapperId ? profile.nativeWrapper!.codeId : profile.consumer.codeId) }) } });
+      Object.assign(api.rpc, { state: { getStorage: async () => ({ isEmpty: false, toU8a: () => Uint8Array.of(1, 2, 3) }) } });
+      const extrinsic = { args: [codec(hash(1)), codec(fixture.state.requestPayload)], hash: codec(hash(4)),
+        signAsync: async () => extrinsic, send: async (callback: (value: unknown) => void) => {
+          broadcasts++;
+          callback({ events: await api.blocks.getEvents(hash(10)), status: { isInBlock: true, asInBlock: codec(hash(10)) } });
+          return () => {};
+        } };
+      const transaction = { extrinsic, gasInfo: { min_limit: { toBigInt: () => 100n } },
+        withAccount: () => transaction, calculateGas: async () => transaction, withGas: () => transaction, withValue: () => transaction };
+      try {
+        vi.spyOn(beaconMethods, 'createBeaconClient').mockResolvedValue({ genesisBlockTime: 0 } as BeaconClient);
+        vi.spyOn(proofMethods, 'composeProof').mockResolvedValue({ proofBlock: { block: { slot: 100 } }, transactionIndex: 3, receiptRlp } as ProofResult);
+        vi.spyOn(varaCodec, 'encodeEthToVaraEvent').mockReturnValue('0x0102');
+        vi.spyOn(HistoricalProxy.prototype, 'redirect').mockReturnValue(transaction as never);
+        const verifyEffect = vi.fn(async (_value: unknown, result: RelayResult, proof: ProofResult) => {
+          expect(result.effectBlockHash).toBe(finalPin);
+          const deposits = await readDeposits(result.effectBlockHash!);
+          const redemptions = new Map([[row.operation_id, await readRedemption(row.operation_id, result.effectBlockHash!)]]);
+          expect(validateNativeTokenEffect(identity, deposits, redemptions)).toEqual(result.nativeSettlements);
+          expect(proof.receiptRlp).toEqual(receiptRlp);
+          effectVerified = true;
+        });
+        const pending = relayEthToVara({ deadline: Date.now() + 1000, gearApi: api, signer: hash(2), transactionHash: hash(4),
+          beaconRpcUrl: 'https://beacon.invalid', historicalProxyId: profile.historicalProxyId, clientId: profile.consumer.programId,
+          clientServiceName: 'VftManager', clientMethodName: 'SubmitReceipt', inboundProfile: profile,
+          consumerReply: { registry, resultType: 'Result<Null, Error>', idlSha256: VFT_MANAGER_IDL_SHA256, verifyEffect,
+            nativeSettlement: { expectedEffect: expected, readDeposits, readRedemption, readReceiptStatus: async () => 'Processed' } },
+          ethereumPublicClient: { getChainId: async () => 1, getTransactionReceipt: async () => ({ blockNumber: 5n, blockHash: hash(5) }),
+            getBlock: async ({ blockNumber, blockTag }: { blockNumber?: bigint; blockTag?: string }) =>
+              blockTag ? { number: 6n, hash: hash(5) } : { hash: blockNumber === 0n ? profile.ethereumGenesisHash : hash(5) } } as unknown as PublicClient });
+        if (['refund', 'delivered', 'direct-refund'].includes(scenario)) {
+          const result = await pending;
+          expect(result.nativeSettlements?.[0].redemption.status).toBe(delivered ? 'Delivered' : 'Refunded');
+          expect(result.clientReply).toBe(inner); expect(result.replyBlockHash).toBe(hash(12)); expect(result.effectBlockHash).toBe(finalPin);
+          expect(result.nativeReconciliation).toBeUndefined(); expect(verifyEffect).toHaveBeenCalledOnce();
+          expect(readRedemption).toHaveBeenCalledWith(row.operation_id, finalPin);
+          if (!direct) expect(readRedemption).toHaveBeenCalledWith(row.operation_id, hash(12));
+        } else await expect(pending).rejects.toThrow('HOLD');
+        expect(broadcasts).toBe(1);
+      } finally { vi.restoreAllMocks(); }
+    });
 
   test('authenticates the separately signed original ReconcileReceipt reply and exact receipt coordinates', async () => {
     const registry = await managerRegistry();
@@ -430,7 +544,7 @@ describe('SDK finalized consumer and token effects', () => {
       const identical = await generateMerkleProof(0, [{ ...receipt, logs: [receipt.logs[0], receipt.logs[0]] }]);
       expect(() => validateInboundTokenEffect(identical.receiptRlp, [rows[0], { ...rows[1], amount: 10n }], expected)).not.toThrow();
       expect(() => validateInboundTokenEffect(receiptRlp, rows, expected)).not.toThrow();
-      for (const outcome of ['Pending', 'InFlight', 'Rejected', 'Unknown', 'NativeQueued']) {
+      for (const outcome of ['Pending', 'InFlight', 'Rejected', 'Unknown', 'NativeQueued', 'Refunded']) {
         expect(() => validateInboundTokenEffect(receiptRlp, [{ ...rows[0], outcome }, rows[1]], expected)).toThrow();
       }
       for (const badRows of [rows.slice(0, 1), [rows[0], rows[0]], [{ ...rows[0], amount: 11n }, rows[1]],

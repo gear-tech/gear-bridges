@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   assertBridgeReply,
   assertSuccessfulReceipt,
+  submitVaraBridgeRequest,
   waitForFinalizedReplies,
 } from '../src/features/swap/submission.ts';
 
@@ -117,6 +118,86 @@ for (const options of [{ heads: [1n, 0n] }, { heads: [2n, 3n], changedPrevious: 
   );
 }
 await assert.rejects(waitForFinalizedReplies(finalized.api, hash(1n), queued, Date.now() - 1), /deadline expired/);
+
+const originalBridge = {
+  txHash: '0xoriginal-source',
+  messageId: '0xoriginal-message',
+  ...assertBridgeReply({ ok: [42n, token] }, token),
+};
+let sourceRequests = 0;
+let finalizeSource!: () => void;
+const sourceFinality = new Promise<void>((resolve) => {
+  finalizeSource = resolve;
+});
+let finalizeFee!: () => void;
+const feeFinality = new Promise<void>((resolve) => {
+  finalizeFee = resolve;
+});
+let startFee!: () => void;
+const feeStarted = new Promise<void>((resolve) => {
+  startFee = resolve;
+});
+const paidNonces: bigint[] = [];
+const payFees = async ({ nonce }: { nonce: bigint }) => {
+  paidNonces.push(nonce);
+  startFee();
+  await feeFinality;
+};
+const submitOriginal = async () => {
+  sourceRequests++;
+  await sourceFinality;
+  return originalBridge;
+};
+let completed = false;
+const automatic = submitVaraBridgeRequest(submitOriginal, true, payFees).then((result) => {
+  completed = true;
+  return result;
+});
+assert.equal(sourceRequests, 1);
+assert.deepEqual(paidNonces, [], 'Fee payment must wait for the finalized original nonce');
+finalizeSource();
+await feeStarted;
+assert.deepEqual(paidNonces, [42n]);
+assert.equal(completed, false, 'Automatic submission must wait for finalized fee payment');
+finalizeFee();
+assert.equal(await automatic, originalBridge);
+assert.equal(sourceRequests, 1);
+
+let failFee = true;
+const retryableFee = ({ nonce }: { nonce: bigint }) => {
+  assert.equal(nonce, originalBridge.nonce);
+  return failFee ? Promise.reject(new Error('Fee rejected')) : Promise.resolve();
+};
+await assert.rejects(submitVaraBridgeRequest(submitOriginal, true, retryableFee), (error: unknown) => {
+  assert.ok(error instanceof Error);
+  for (const evidence of [originalBridge.txHash, originalBridge.messageId, 'nonce 42', 'history row', 'Fee rejected'])
+    assert.ok(error.message.includes(evidence));
+  assert.ok(error.message.includes('do not submit another bridge request'));
+  return true;
+});
+assert.equal(sourceRequests, 2, 'Fee failure must not resubmit the source request');
+failFee = false;
+await retryableFee({ nonce: originalBridge.nonce });
+assert.equal(sourceRequests, 2, 'History fee retry must only pay the original nonce');
+assert.equal(
+  await submitVaraBridgeRequest(submitOriginal, false, () => {
+    assert.fail('Manual claim must not pay fees');
+  }),
+  originalBridge,
+);
+assert.equal(sourceRequests, 3);
+for (const failedRequest of [
+  () => Promise.reject(new Error('Original request failed')),
+  () =>
+    Promise.resolve().then(() => ({ ...originalBridge, ...assertBridgeReply({ err: 'Bridge reply failed' }, token) })),
+]) {
+  await assert.rejects(
+    submitVaraBridgeRequest(failedRequest, true, () => {
+      assert.fail('Failed source request must not pay fees');
+    }),
+    /Original request failed|Bridge reply failed/,
+  );
+}
 console.log(
-  'Submission assertions passed: original hashes, canonical delayed replies, identity conflicts and finality regression',
+  'Submission assertions passed: finalized original nonce then ordinary fees, manual claims, fee recovery, original hashes and canonical replies',
 );

@@ -112,7 +112,7 @@ function Transaction() {
   const { id } = useParams() as Params;
 
   const { getHistoryToken } = useTokens();
-  const { data } = useTransaction(id);
+  const { data, refetch } = useTransaction(id);
   const optimisticTxUpdate = useOptimisticTxUpdate(id);
   const getFullNetworkName = useGetFullNetworkName();
   const { NETWORK_PRESET } = useNetworkType();
@@ -150,6 +150,7 @@ function Transaction() {
   const formattedReceiverAddress = isVaraNetwork ? receiver : getVaraAddress(receiver);
 
   const isAwaitingPayment = status === StatusEnum.AwaitingPayment;
+  const isRefunded = status === StatusEnum.Refunded;
   const isClaimable = !completedAt && (isAwaitingPayment || status === StatusEnum.Bridging);
 
   return (
@@ -190,7 +191,7 @@ function Transaction() {
               ) : (
                 <RelayTxButton.Eth
                   txHash={txHash as HexString}
-                  onFinalized={optimisticTxUpdate}
+                  onFinalized={() => refetch()}
                   expectedEffect={{
                     managerAddress: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
                     sourceToken: sourceHex,
@@ -333,12 +334,18 @@ function Transaction() {
           <Field label="Initiated At">
             <span>{new Date(timestamp).toLocaleString()}</span>
           </Field>
+          {isRefunded && (
+            <p role="status">
+              The original native payout was rejected. Its full amount was restored as wrapped VARA to the original
+              recipient, not delivered as native VARA.
+            </p>
+          )}
 
-          <Field label="Completed At">
+          <Field label={isRefunded ? 'Refunded At' : 'Completed At'}>
             {completedAt ? <span>{new Date(completedAt).toLocaleString()}</span> : <Skeleton width="5rem" disabled />}
           </Field>
 
-          <Field label="Completed At Block">
+          <Field label={isRefunded ? 'Refunded At Block' : 'Completed At Block'}>
             {completedAtBlock ? (
               <ExplorerLink network={destNetwork} id={completedAtBlock} useUrl={useBlockUrl}>
                 #{completedAtBlock.toLocaleString()}
@@ -348,14 +355,17 @@ function Transaction() {
             )}
           </Field>
 
-          <Field label="Completed At Transaction Hash">
+          <Field label={isRefunded ? 'Refunded At Transaction Hash' : 'Completed At Transaction Hash'}>
             {completedAtTxHash ? (
               <>
                 <ExplorerLink network={destNetwork} id={completedAtTxHash} useUrl={useTxUrl}>
                   <Address value={completedAtTxHash} />
                 </ExplorerLink>
 
-                <CopyButton value={completedAtTxHash} message="Completion transaction hash copied to clipboard" />
+                <CopyButton
+                  value={completedAtTxHash}
+                  message={`${isRefunded ? 'Refund' : 'Completion'} transaction hash copied to clipboard`}
+                />
               </>
             ) : (
               <Skeleton width="5rem" disabled />

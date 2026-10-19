@@ -25,6 +25,8 @@ use std::{
 };
 use subxt::utils::H256;
 
+const ROOT_PUBLICATION_RETRY_INTERVAL: Duration = Duration::from_secs(3);
+
 fn bytes(value: impl AsRef<[u8]>) -> String {
     format!("0x{}", hex::encode(value))
 }
@@ -733,7 +735,7 @@ pub async fn audit_history(
     Ok(())
 }
 
-fn validate_root_publication_inventory(
+pub(crate) fn validate_root_publication_inventory(
     publications: &Path,
     registered_paths: &std::collections::BTreeSet<&Path>,
 ) -> Result<()> {
@@ -1471,6 +1473,34 @@ fn same_set_commitment_due(
         && root_target.is_none_or(|block| candidate_block > block)
 }
 
+fn client_commitment_due(
+    handover_only: bool,
+    checkpoint: (u64, u64),
+    candidate: (u32, u64),
+    target: u32,
+    root_target: Option<u32>,
+) -> bool {
+    candidate.1 == checkpoint.1
+        || same_set_commitment_due(
+            handover_only,
+            checkpoint.0,
+            candidate.0,
+            target,
+            root_target,
+        )
+}
+
+fn covered_root_ready_for_publication(
+    state: &Value,
+    checkpoint: u64,
+    pending: Option<u32>,
+    maintenance_elapsed: Duration,
+) -> bool {
+    pending.is_some_and(|block| u64::from(block) < checkpoint)
+        && (state["rootPublication"]["status"] != "held"
+            || maintenance_elapsed >= ROOT_PUBLICATION_RETRY_INTERVAL)
+}
+
 async fn record_mined_commitment(
     ethereum: &mut Ethereum,
     output: &Path,
@@ -1480,7 +1510,8 @@ async fn record_mined_commitment(
     hash: [u8; 32],
 ) -> Result<()> {
     if state["roots"].is_object() {
-        crate::root_publication::ensure_mined_root_publications(ethereum, &state["roots"]).await?;
+        crate::root_publication::validate_registered_root_publications(ethereum, &state["roots"])
+            .await?;
     }
     require_saved_submission(
         &state["submission"],
@@ -1899,6 +1930,7 @@ async fn advance(
     mut handover_only: bool,
     root_witness: Option<&Source>,
 ) -> Result<Option<CapturedCommitment>> {
+    let maintenance_started = std::time::Instant::now();
     'progress: loop {
         reconcile_original_submission(ethereum, output, state).await?;
         let before = ethereum.checkpoint().await?;
@@ -1923,6 +1955,18 @@ async fn advance(
                     state["follower"]["status"] = json!("catching-up");
                     state["follower"]["lastError"] = json!(error.to_string());
                     save(output, state, Some(ethereum))?;
+                    if root_witness.is_some()
+                        && handover_only
+                        && state["submission"].is_null()
+                        && covered_root_ready_for_publication(
+                            state,
+                            before.block,
+                            pending_token_root_block(state)?,
+                            maintenance_started.elapsed(),
+                        )
+                    {
+                        return Ok(None);
+                    }
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -1955,12 +1999,17 @@ async fn advance(
                 scan_token_roots(source, witness, output, state).await?;
                 let pending = pending_token_root_block(state)?;
                 if handover_only
+                    && covered_root_ready_for_publication(
+                        state,
+                        before.block,
+                        pending,
+                        maintenance_started.elapsed(),
+                    )
                     && state["submission"].is_null()
                     && candidate.current.id == before.current_id
                     && u64::from(candidate.block) > before.block
-                    && pending.is_some_and(|block| u64::from(block) < before.block)
                 {
-                    // Publish newly discovered, already-covered roots without buying a new anchor.
+                    // Retry covered roots at a safe source boundary; handovers and heartbeats retain priority.
                     return Ok(None);
                 }
                 if root_target.is_none() {
@@ -2087,15 +2136,13 @@ async fn advance(
                 continue;
             }
             // Intermediate same-set roots need not be relayed; every handover must be.
-            if candidate.current.id == before.next_id
-                || same_set_commitment_due(
-                    handover_only,
-                    before.block,
-                    candidate.block,
-                    target,
-                    root_target,
-                )
-            {
+            if client_commitment_due(
+                handover_only,
+                (before.block, before.next_id),
+                (candidate.block, candidate.current.id),
+                target,
+                root_target,
+            ) {
                 break candidate;
             }
             if candidate.block >= target.saturating_sub(2)
@@ -2114,8 +2161,11 @@ async fn advance(
         };
         promote_finality(source, ethereum, output, state).await?;
         if state["roots"].is_object() {
-            crate::root_publication::ensure_mined_root_publications(ethereum, &state["roots"])
-                .await?;
+            crate::root_publication::validate_registered_root_publications(
+                ethereum,
+                &state["roots"],
+            )
+            .await?;
         }
         if !state["submission"]["rawTransaction"].is_null()
             && state["submission"]["block"] != anchor.block
@@ -2534,6 +2584,31 @@ async fn schedule_queue_progress(
     )
 }
 
+fn record_root_publication_error(
+    output: &Path,
+    state: &mut Value,
+    key: &str,
+    error: anyhow::Error,
+) -> Result<()> {
+    let finality_pending = matches!(
+        error.downcast_ref::<ethereum_client::Error>(),
+        Some(ethereum_client::Error::FinalizedAncestryPending)
+    );
+    if !finality_pending && !error.is::<crate::root_publication::RootPublicationHeld>() {
+        return Err(error);
+    }
+    state["rootPublication"] = json!({
+        "status":"held", "root":key, "lastError":format!("{error:#}")
+    });
+    state["follower"]["status"] = json!(if finality_pending {
+        "held-finality"
+    } else {
+        "held-root"
+    });
+    state["follower"]["lastError"] = json!(format!("{error:#}"));
+    save(output, state, None)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn publish_token_roots(
     source_rpc: &str,
@@ -2605,19 +2680,10 @@ async fn publish_token_roots(
             .await
             {
                 Ok(status) => status,
-                Err(error)
-                    if error
-                        .downcast_ref::<ethereum_client::Error>()
-                        .is_some_and(|error| {
-                            matches!(error, ethereum_client::Error::FinalizedAncestryPending)
-                        }) =>
-                {
-                    state["follower"]["status"] = json!("held-finality");
-                    state["follower"]["lastError"] = json!(error.to_string());
-                    save(output, state, None)?;
+                Err(error) => {
+                    record_root_publication_error(output, state, &key, error)?;
                     return Ok(uncovered);
                 }
-                Err(error) => return Err(error),
             };
             let status = match publication_state {
                 crate::root_publication::RootPublicationState::Accepted => "accepted",
@@ -2631,6 +2697,7 @@ async fn publish_token_roots(
             max_block = max_block.max(block);
             progressed |= state["roots"][&key]["status"] != status;
             state["roots"][&key]["status"] = json!(status);
+            state["rootPublication"] = Value::Null;
             save(output, state, None)?;
         }
         if !progressed {
@@ -2664,10 +2731,13 @@ async fn record_pending_root_publication(
     if intent["observedProgress"].is_object() {
         state["follower"]["status"] = json!("catching-up");
         state["follower"]["lastError"] = Value::Null;
+        state["rootPublication"] = Value::Null;
     } else {
         state["follower"]["status"] = json!("held-root");
+        state["rootPublication"] = json!({"status":"held", "root":key,
+            "lastError":"original publication remains held; independent client maintenance continues"});
         state["follower"]["lastError"] =
-            json!("original signed root remains unmined; HOLD without advancing its anchor");
+            json!("original root remains held; retain its exact proof and anchor while following the client");
     }
     save(output, state, None)
 }
@@ -3120,13 +3190,6 @@ pub async fn follow_tokens(
                 false,
             )
             .await?;
-            if matches!(
-                state["follower"]["status"].as_str(),
-                Some("held-root" | "held-finality")
-            ) {
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                continue;
-            }
             let handover_only = !uncovered;
             if advance(
                 &mut source,
@@ -3545,6 +3608,115 @@ mod tests {
         assert!(!client_heartbeat_due(source, source + 43_199_999));
         assert!(client_heartbeat_due(source, source + 43_200_000));
         assert!(client_heartbeat_due(source, source + 86_400_000));
+    }
+
+    #[tokio::test]
+    async fn queue_publication_hold_preserves_intent_and_schedules_heartbeat_and_handover(
+    ) -> Result<()> {
+        use alloy::{
+            consensus::{SignableTransaction, TxEip1559},
+            eips::Encodable2718,
+            network::TxSigner,
+            primitives::TxKind,
+            signers::local::PrivateKeySigner,
+            sol_types::SolCall,
+        };
+        let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(7))?;
+        let mut transaction = TxEip1559 {
+            chain_id: 560_048,
+            nonce: 4,
+            gas_limit: 100_000,
+            max_fee_per_gas: 10,
+            max_priority_fee_per_gas: 1,
+            to: TxKind::Call(Address::repeat_byte(4)),
+            input: ethereum_client::abi::IMessageQueue::submitMerkleRootCall {
+                blockNumber: alloy::primitives::U256::from(99),
+                merkleRoot: B256::repeat_byte(9),
+                proof: vec![1, 2].into(),
+            }
+            .abi_encode()
+            .into(),
+            ..Default::default()
+        };
+        let signature = signer.sign_transaction(&mut transaction).await?;
+        let raw = TxEnvelope::Eip1559(transaction.into_signed(signature)).encoded_2718();
+        let directory = tempfile::tempdir()?;
+        let publication = directory.path().join("root.json");
+        let intent = json!({
+            "nonce":"4", "txHash":bytes(keccak256(&raw)), "rawTransaction":bytes(&raw),
+            "acceptedAnchorTx":bytes([2;32]), "queueProof":"0x0102",
+            "proof":{"anchorBlock":100,"anchorRoot":bytes([3;32])},
+        });
+        fs::write(&publication, serde_json::to_vec(&intent)?)?;
+        let original_bytes = fs::read(&publication)?;
+        let mut state = json!({
+            "follower":{"status":"healthy"}, "roots":{
+                "original":{"block":99,"status":"pending","publication":publication}
+            }
+        });
+        let error = anyhow::anyhow!("MessageQueue challenge prevents original submission")
+            .context(crate::root_publication::RootPublicationHeld);
+        record_root_publication_error(directory.path(), &mut state, "original", error)?;
+        let restored = read_state_file(&directory.path().join("state.json"))?;
+        assert_eq!(restored["rootPublication"]["status"], "held");
+        assert_eq!(restored["roots"]["original"]["status"], "pending");
+        let pending = pending_token_root_block(&restored)?;
+        assert!(!covered_root_ready_for_publication(
+            &restored,
+            100,
+            pending,
+            Duration::ZERO,
+        ));
+        assert!(!covered_root_ready_for_publication(
+            &restored,
+            100,
+            pending,
+            ROOT_PUBLICATION_RETRY_INTERVAL - Duration::from_nanos(1),
+        ));
+        assert!(covered_root_ready_for_publication(
+            &restored,
+            100,
+            pending,
+            ROOT_PUBLICATION_RETRY_INTERVAL,
+        ));
+        assert!(!covered_root_ready_for_publication(
+            &restored,
+            99,
+            pending,
+            ROOT_PUBLICATION_RETRY_INTERVAL,
+        ));
+        let mut unheld = restored.clone();
+        unheld["rootPublication"] = Value::Null;
+        assert!(covered_root_ready_for_publication(
+            &unheld,
+            100,
+            pending,
+            Duration::ZERO,
+        ));
+        // Ordinary same-set work stays idle, but the actual scheduler still selects
+        // the twelve-hour heartbeat and every mandatory next-set handover.
+        assert!(!client_commitment_due(true, (100, 8), (132, 7), 132, None));
+        assert!(client_commitment_due(
+            !client_heartbeat_due(1_000, 43_201_000),
+            (100, 8),
+            (132, 7),
+            132,
+            None,
+        ));
+        assert!(client_commitment_due(true, (100, 8), (101, 8), 132, None));
+        assert_eq!(fs::read(&publication)?, original_bytes);
+        assert_eq!(restored["roots"], state["roots"]);
+        // Source/proof/canonical failures are not reclassified as an ordinary queue hold.
+        let before = state.clone();
+        assert!(record_root_publication_error(
+            directory.path(),
+            &mut state,
+            "original",
+            anyhow::anyhow!("source authorities disagree on authenticated root"),
+        )
+        .is_err());
+        assert_eq!(state, before);
+        Ok(())
     }
 
     #[tokio::test]
@@ -4090,7 +4262,8 @@ mod tests {
                 "observation rewrote original {field}"
             );
         }
-        crate::root_publication::ensure_mined_root_publications(&ethereum, &state["roots"]).await?;
+        crate::root_publication::validate_registered_root_publications(&ethereum, &state["roots"])
+            .await?;
         // Replay an authentic already-public next commitment only on this owned fork.
         // This is an EVM actor/barrier regression, not fresh native-source traffic.
         let next = journal["commitments"]
@@ -4620,12 +4793,7 @@ mod tests {
             "kind":"merkleRoot", "queueRoot":bytes(expected_root)
         }});
         fs::write(&root_path, serde_json::to_vec(&root_intent)?)?;
-        ensure!(
-            crate::root_publication::ensure_mined_root_publications(&ethereum, &roots)
-                .await
-                .is_err(),
-            "signed but unmined root must hold subsequent commitments"
-        );
+        crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
         ensure!(
             root_provider.get_transaction_count(root_sender).await? == 0,
             "barrier broadcast a pending root itself"
@@ -4651,7 +4819,7 @@ mod tests {
                 .is_none(),
             "root fixture finalized before testing the mined barrier"
         );
-        crate::root_publication::ensure_mined_root_publications(&ethereum, &roots).await?;
+        crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
         ensure!(
             fs::read(&root_path)? == original_root_intent,
             "mined barrier changed original publication evidence"
@@ -4670,7 +4838,7 @@ mod tests {
                 && finalized_root.receipt.block_hash == receipt.block_hash,
             "finality replaced root identity or inclusion"
         );
-        crate::root_publication::ensure_mined_root_publications(&ethereum, &roots).await?;
+        crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
         state["roots"] = roots.clone();
 
         let snapshot: Value = provider.client().request("evm_snapshot", ()).await?;
@@ -4968,9 +5136,11 @@ mod tests {
             .await?;
         ensure!(
             reverted
-                && crate::root_publication::ensure_mined_root_publications(&ethereum, &roots)
-                    .await
-                    .is_err(),
+                && crate::root_publication::validate_registered_root_publications(
+                    &ethereum, &roots
+                )
+                .await
+                .is_err(),
             "disappeared root inclusion must hold the next commitment"
         );
         ensure!(
@@ -4988,7 +5158,7 @@ mod tests {
             .get_receipt()
             .await?;
         ensure!(
-            crate::root_publication::ensure_mined_root_publications(&ethereum, &roots)
+            crate::root_publication::validate_registered_root_publications(&ethereum, &roots)
                 .await
                 .is_err(),
             "re-included root silently changed its pinned inclusion"

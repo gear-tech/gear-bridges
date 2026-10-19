@@ -47,7 +47,7 @@ contract ERC20ManagerTest is Test, Base {
     using ERC20ManagerPacker for RegisterGearTokenMessage;
 
     function setUp() public {
-        deployBridgeDependsOnEnvironment();
+        deployBridgeFromConstants();
     }
 
     function test_InitializeWithInvalidTokenType() public {
@@ -78,7 +78,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -135,7 +135,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -201,7 +201,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
@@ -248,6 +248,7 @@ contract ERC20ManagerTest is Test, Base {
 
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
+        proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -278,7 +279,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
@@ -325,6 +326,7 @@ contract ERC20ManagerTest is Test, Base {
 
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
+        proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -366,7 +368,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -476,8 +478,6 @@ contract ERC20ManagerTest is Test, Base {
     }
 
     function test_RequestBridgingWithGearToken() public {
-        vm.startPrank(deploymentArguments.deployerAddress);
-
         address token = address(wrappedVara);
         uint256 amount = 100 * (10 ** wrappedVara.decimals());
         bytes32 to = 0;
@@ -496,7 +496,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -518,6 +518,7 @@ contract ERC20ManagerTest is Test, Base {
         assertEq(messageQueue.isProcessed(message1.nonce), true);
         assertEq(wrappedVara.balanceOf(deploymentArguments.deployerAddress), amount);
 
+        vm.startPrank(deploymentArguments.deployerAddress);
         bool success = wrappedVara.approve(address(erc20Manager), amount);
         assertTrue(success);
 
@@ -701,7 +702,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -733,7 +734,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -763,6 +764,7 @@ contract ERC20ManagerTest is Test, Base {
         IERC20Mintable(address(circleToken)).mint(address(erc20Manager), amount);
         uint256 balanceAfterMint = circleToken.balanceOf(address(erc20Manager));
         assertEq(balanceAfterMint, balanceBeforeMint + amount);
+        vm.stopPrank();
 
         VaraMessage memory message = VaraMessage({
             nonce: messageNonce++,
@@ -778,7 +780,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -795,8 +797,6 @@ contract ERC20ManagerTest is Test, Base {
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), true);
         assertEq(circleToken.balanceOf(deploymentArguments.deployerAddress), amount);
-
-        vm.stopPrank();
     }
 
     function test_HandleMessageWithGovernanceMessageAndNotEnoughPayload() public {
@@ -809,7 +809,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -838,7 +838,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -870,7 +870,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -903,7 +903,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -938,7 +938,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -961,6 +961,7 @@ contract ERC20ManagerTest is Test, Base {
         vm.startPrank(deploymentArguments.deployerAddress);
 
         TetherToken newTetherToken = new TetherToken(deploymentArguments.deployerAddress);
+        vm.stopPrank();
 
         VaraMessage memory message1 = VaraMessage({
             nonce: messageNonce++,
@@ -974,7 +975,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -1000,6 +1001,7 @@ contract ERC20ManagerTest is Test, Base {
         bytes32 to = 0;
         address bridgingPayment_ = address(bridgingPayment);
 
+        vm.startPrank(deploymentArguments.deployerAddress);
         newTetherToken.mint(deploymentArguments.deployerAddress, amount);
         bool success = newTetherToken.approve(address(erc20Manager), amount);
         assertTrue(success);
@@ -1034,7 +1036,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -1054,8 +1056,6 @@ contract ERC20ManagerTest is Test, Base {
     }
 
     function test_HandleMessageWithGovernanceMessageRegisterGearToken() public {
-        vm.startPrank(deploymentArguments.deployerAddress);
-
         // max length is 31 bytes
         string memory tokenName = "MyToken________________________";
         string memory tokenSymbol = "MTK____________________________";
@@ -1074,7 +1074,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
@@ -1119,6 +1119,7 @@ contract ERC20ManagerTest is Test, Base {
 
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
+        proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -1131,6 +1132,7 @@ contract ERC20ManagerTest is Test, Base {
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message2, proof2);
         assertEq(messageQueue.isProcessed(message2.nonce), true);
 
+        vm.startPrank(deploymentArguments.deployerAddress);
         assertEq(IERC20Metadata(token).balanceOf(deploymentArguments.deployerAddress), amount);
         bool success = IERC20Metadata(token).approve(address(erc20Manager), amount);
         assertTrue(success);
@@ -1162,7 +1164,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -1194,7 +1196,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -1226,7 +1228,7 @@ contract ERC20ManagerTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)

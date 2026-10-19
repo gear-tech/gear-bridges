@@ -1523,8 +1523,8 @@ async fn vft_burn_from() -> Result<()> {
     let balance = api.total_balance(address_receiver).await?;
     assert!(balance > DEFAULT_BALANCE);
 
-    // A rejecting program returns the original native reserve; it must not
-    // receive reminted tokens or let a replay enqueue a second payout.
+    // A rejected original payout credits exact backed wrapped value once to
+    // the original recipient, without another native payout.
     let balance_vft_native_before = api.total_balance(vft_id).await?;
     let mut listener = api.subscribe().await?;
     let receipt_rlp = crate::create_receipt_rlp(
@@ -1543,7 +1543,7 @@ async fn vft_burn_from() -> Result<()> {
             .map_err(|e| anyhow!("{e:?}"))?,
         Err(Error::NativeSettlementPending)
     );
-    // Observe the burn, not the old automatic re-mint on payout rejection.
+    // Wait for the exact wrapped refund, not merely its earlier burn.
     listener
         .proc(|event| match event {
             Event::Gear(GearEvent::UserMessageSent { message, .. })
@@ -1551,7 +1551,7 @@ async fn vft_burn_from() -> Result<()> {
             {
                 match Vft2Events::decode_event(message.payload_bytes()) {
                     Ok(Vft2Events::Transfer { from, to, value })
-                        if from == vft_manager_id && to.is_zero() =>
+                        if from.is_zero() && to == vft_id =>
                     {
                         assert_eq!(value, amount_2);
                         Some(())
@@ -1574,7 +1574,7 @@ async fn vft_burn_from() -> Result<()> {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(returned.status, PayoutStatus::Returned);
+    assert_eq!(returned.status, PayoutStatus::Refunded);
     assert_eq!(returned.returned_value, u128::try_from(amount_2).unwrap());
     for _ in 0..2 {
         assert_eq!(
@@ -1584,7 +1584,7 @@ async fn vft_burn_from() -> Result<()> {
                 .send_recv(vft_manager_id)
                 .await
                 .unwrap(),
-            Err(Error::NativeSettlementReturned)
+            Ok(ReceiptStatus::Processed)
         );
     }
     assert_eq!(
@@ -1594,14 +1594,14 @@ async fn vft_burn_from() -> Result<()> {
             .send_recv(vft_manager_id)
             .await
             .unwrap(),
-        Err(Error::NativeSettlementReturned)
+        Err(Error::AlreadyProcessed)
     );
     let retained = service
         .receipt_deposits(10, 3)
         .recv(vft_manager_id)
         .await
         .unwrap();
-    assert_eq!(retained[0].outcome, ReceiptDepositOutcome::Unknown);
+    assert_eq!(retained[0].outcome, ReceiptDepositOutcome::Refunded);
     assert_eq!(retained[0].child, rejected[0].child);
     assert_eq!(
         service
@@ -1609,7 +1609,7 @@ async fn vft_burn_from() -> Result<()> {
             .recv(vft_manager_id)
             .await
             .unwrap(),
-        ReceiptStatus::Reserved
+        ReceiptStatus::Processed
     );
     assert_eq!(
         escrow
@@ -1630,11 +1630,11 @@ async fn vft_burn_from() -> Result<()> {
     );
     assert_eq!(
         service_vft.balance_of(vft_id).recv(vft_id).await.unwrap(),
-        U256::zero()
+        amount_2
     );
     assert_eq!(
         service_vft.total_supply().recv(vft_id).await.unwrap(),
-        U256::zero()
+        amount_2
     );
     assert_eq!(api.total_balance(vft_id).await?, balance_vft_native_before);
 

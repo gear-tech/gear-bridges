@@ -4,9 +4,9 @@ This page describes the current runtime composition of the bridge. The implement
 
 ## End-to-end map
 
-### BEEFY/MMR Hoodi lane
+### BEEFY/MMR outbound lane
 
-This isolated test lane replaces the outbound ZK root-verification boundary. It retains the public legacy deployment and the separate inbound Beacon path.
+The source implementation uses BEEFY/MMR for outbound root authentication and retains the separate inbound Beacon path. Existing public deployments, custody and actor identities are not migrated by a source change; the retained Hoodi lane and qualification limits below remain distinct from public cutover approval.
 
 ~~~text
 BABE authoring + GRANDPA source finality
@@ -34,7 +34,7 @@ Hoodi ERC20 lock -> finalized EL receipt + Beacon proof
 
 #### Source commitment and wire contract
 
-The isolated [Vara runtime](../../source/vara/runtime/vara/src/lib.rs) configures `pallet_mmr` with `Keccak256`, `MmrLeaf` and `DepositBeefyDigest`; `pallet_beefy` uses `MmrLeaf` for validator updates and ancestry. [`bridge_leaf::VaraBridgeProvider`](../../source/vara/runtime/vara/src/bridge_leaf.rs) commits the parent timestamp and queue state before delayed queue clearing. BABE authors blocks and GRANDPA finalizes the source chain; BEEFY authenticates MMR commitments for the bridge.
+The native runtime used by the retained lane configures `pallet_mmr` with `Keccak256`, `MmrLeaf` and `DepositBeefyDigest`; `pallet_beefy` uses `MmrLeaf` for validator updates and ancestry. The runtime's `bridge_leaf::VaraBridgeProvider` commits the parent timestamp and queue state before delayed queue clearing. BABE authors blocks and GRANDPA finalizes the source chain; BEEFY authenticates MMR commitments for the bridge. Runtime installation and activation remain subject to the [existing qualification gates](runtime-upgrade-and-beefy-activation.md).
 
 [`QueueSnapshot`](../tools/beefy-relay/src/protocol.rs) and the runtime provider encode exactly `version=2:u8 | "vara":4 | bridgeDomain:32 | timestamp:u64LE | initialized:u8 | queueId:u64LE | root:32`: 86 bytes. The outer MMR leaf is version 0 and 113 SCALE bytes. The inherited Solidity `parachainHeadsRoot` field in [`BeefyClient`](../ethereum/src/beefy/BeefyClient.sol) contains the snapshot hash, not parachain heads.
 
@@ -48,13 +48,15 @@ Rust preflights bound SCALE lengths before decoding: at most 256 authorities, 64
 
 The [EVM relay](../tools/beefy-relay/src/ethereum.rs) calls `createFiatShamirFinalBitfield` and `submitFiatShamir`. The client also retains interactive verification. Bootstrap trusts the configured current/next authority sets. Each update authenticates the newest leaf's parent timestamp; a next-set commitment hands over authority using that leaf's next-set proof. [`VaraQueueRootVerifier`](../ethereum/src/VaraQueueRootVerifier.sol) binds queue proofs to the client's latest accepted MMR anchor and the destination-bound snapshot.
 
+`MessageQueue.submitMerkleRoot(uint256,bytes32,bytes)` passes the original height, root and canonical v2 envelope to `IVerifier.safeVerifyProof(uint256 sourceBlock, bytes32 merkleRoot, bytes proof)`. The verifier rejects heights above `uint32`, wrong queue/chain/domain, uninitialized snapshots, noncanonical encodings and stale or mismatched anchors; malformed ABI decoding returns false. Invalid root proofs revert with `InvalidQueueRootProof`. There is no field-element packing or selectable proof-system fallback. See [proof authentication](circuits-and-proofs.md).
+
 A canonically mined commitment is capacity/progress evidence, not finalized acceptance. The [follower](../tools/beefy-relay/src/follower.rs) and [root publisher](../tools/beefy-relay/src/root_publication.rs) retain original source, client, anchor, nonce, raw bytes, transaction hash and inclusion. A signed root publication cannot be reanchored; finality promotion may add evidence but cannot replace that identity. [`MessageQueue`](../ethereum/src/MessageQueue.sol) retains maturity, message inclusion, global nonce replay protection, custody dispatch and historical-root redemption. Empty initialized queue progress creates no root and does not restart maturity. Completion requires canonical finalized commitment, root and release receipt evidence.
 
 A never-mined signed commitment may resume by broadcasting its original bytes. Once an inclusion is recorded, disappearance with an unconsumed nonce is HOLD, not a broadcast trigger; retain the original inclusion until authenticated recovery qualifies it. A finalized consumed-nonce disposition can archive ownership without claiming successful delivery.
 
 The corrected common queue preserves legacy slots 0–13: block→root at 11, root→timestamp at 12 and nonce→processed at 13. Appended slot 14 holds the BEEFY root floor and slot 15 holds block→timestamp; there is no controller storage slot. `getMerkleRootTimestamp(bytes32)` remains the historical API; `getMerkleRootTimestampForBlock(uint256)` and redemption share the effective timestamp reader. Per-block time takes precedence; legacy fallback is permitted only before activation or below the floor. Missing applicable timestamps fail closed. Repeated hashes mature independently; authenticated conflicts clear only the affected block. The 300/3600-second delays and historical redemption remain intact.
 
-The immutable `beefyRootMinimum` is the admission floor, not the first publication. `genesisBlock()` records the first nonzero publication and never moves; `maxBlockNumber()` records monotonic progress. Authenticated nonzero roots may backfill any missing height at or above the floor, including below genesis or behind empty progress. Legacy mode retains its pre-genesis rejection. Forward publications remain bounded by max plus MAX_BLOCK_DISTANCE. Empty progress requires initialization and a strictly greater height, creates no root and grants no maturity. Each backfilled block starts its own destination registration delay, even if the same root hash is already mature elsewhere.
+The immutable `beefyRootMinimum` is the admission floor, not the first publication. `genesisBlock()` records the first nonzero publication and never moves; `maxBlockNumber()` records monotonic progress. Authenticated nonzero roots may backfill any missing height at or above the floor, including below genesis or behind empty progress. A zero BEEFY floor rejects new publication; it does not disable historical redemption. Forward publications remain bounded by max plus MAX_BLOCK_DISTANCE. Empty progress requires initialization and a strictly greater height, creates no root and grants no maturity. Each backfilled block starts its own destination registration delay, even if the same root hash is already mature elsewhere.
 
 Follower/root schema 4 records own versus external accepted transaction provenance. An external finalized checkpoint or root can satisfy unsigned progress, but never changes the identity or outcome of a signed original. Historical root inventory begins at the immutable floor and retains unpublished epochs behind the frontier. Distance catch-up publishes the actual initialized source/witness snapshot, including nonzero intermediate roots. Outbound discovery separately persists qualified inclusion hashes and transaction/log coordinates with one atomic cursor/root state; legacy numeric caches require a complete finalized replay before unsigned work resumes.
 
@@ -72,11 +74,45 @@ Root discovery polls authenticated finalized ranges when HTTP transport reports 
 
 The [checkpoint worker](../relayer/src/ethereum_checkpoints/) updates the [checkpoint-light-client](../gear-programs/checkpoint-light-client/) independently. The [inbound worker](../relayer/src/message_relayer/eth_to_gear/) supplies finalized receipt/Beacon proofs through [HistoricalProxy](../gear-programs/historical-proxy/app/src/service.rs) and the [Electra verifier](../gear-programs/eth-events-electra/) to the [VFT manager](../gear-programs/vft-manager/app/src/services/submit_receipt/mod.rs). This path remains separate from BEEFY. The [paid outbound worker](../relayer/src/message_relayer/gear_to_eth/) redeems verified messages for ERC20 release.
 
-Each durable follower/root journal has one supervised owner. Proof submission remains permissionless: independently funded publishers use distinct EVM signers and authenticated external progress is recorded separately from each original transaction. Do not run the legacy `gear-eth-core` ZK publisher against a BEEFY queue. Keep Gear setup/governance accounts separate from checkpoint and inbound workers. Deployment code and embedded program WASMs belong to the opt-in `beefy-deploy` target; the normal follower has no campaign supervisor or application deployment dependency.
+Each durable follower/root journal has one supervised owner. Proof submission remains permissionless: independently funded publishers use distinct EVM signers and authenticated external progress is recorded separately from each original transaction. `beefy-relay tokens-follow` owns commitment following and publication; `tokens-publish-root` is the standalone publisher. Audit/status use `tokens-history-audit`, `bridge-status` and `bridge-events`. Give every independently submitting process, including retained message delivery and the observer, a distinct EVM fee payer; never share a publisher's nonce account. Keep Gear setup/governance accounts separate from checkpoint and inbound workers. Deployment code and embedded program WASMs belong to the opt-in `beefy-deploy` target; the normal follower has no campaign supervisor or application deployment dependency.
 
 The follower journal retains completed commitments, transactions and accepted roots indefinitely and rewrites the complete JSON on save. Startup reauthenticates retained history under one 300-second deadline. Pending-queue bounds do not bound lifetime disk use or restart work; qualify history size and archive availability for the intended operating period. Never bypass authentication or delete original evidence to make startup pass.
 
 One process may own distinct bootstrap, follower and root-proof archives for the same Ethereum genesis. Owners are keyed by canonical directory and keep their exclusive locks; path aliases reuse that owner. Every attached archive retains its own witnessed finality fence. Fresh finalized ancestry must satisfy the union of those fences before any is completed, so attaching another directory cannot discard an older pin or bypass a conflict.
+
+#### Retained remote development lane
+
+The retained v2.1.0 lane runs under `/srv/vara-bridge` on `bridge@62.238.54.143`, with two original validators on the same host. This is not host-level high availability or a production-security deployment. The temporary origin is `https://bridge-62-238-54-143.sslip.io/?network=testnet`. Keep whole-origin HTTP Basic authentication: the preserved chain still has publicly known development privileges, and Safe RPC does not prevent signed Sudo calls.
+
+User units are `bridge-hoodi-{source,witness,postgres,capture,checkpoint,follower,inbound,outbound,indexer-gear,indexer-eth,api,faucet}.service`. On this host, administer them with `sudo systemctl --user --machine=bridge@.host …`; lingering provides boot persistence. Native validators use the original RocksDB bases, keystores and network identities. Rootless application containers retain the original `/Users/ukintvs/.local/share/vara-beefy-hoodi/runs/9119ee40-005f-49d9-a9f0-6142e6a3eb4e` namespace through bind mounts. Do not rewrite signed publication paths, signer ownership files, journals, or interrupted `.new`/`.tmp`/`.bak` files.
+
+Start both validators and PostgreSQL first. Confirm the pinned genesis/runtime, common finalized history and advancing finality before enabling bridge writers. Start the capture proxy before the checkpoint updater. `/srv/vara-bridge/config/checkpoint-guard` authenticates the last captured original, canonical inclusion, typed successful reply and matching source/witness state before each updater start. Missing or unresolved evidence fails closed; it never broadcasts a replacement. The updater retains `Restart=no`: reconcile the original manually after failure, preserve its bytes and nonce, then explicitly start the unit. A captured finalized status alone is not application success.
+
+Before continuous follower startup after a coordinated move or restart, stop its unit and run `/srv/vara-bridge/config/run-service follower --reconcile-once` exclusively. The migration also runs cold and warm `tokens-history-audit` passes with `/srv/vara-bridge/audit-cache`; retain its authentication checks and 300-second history deadline. Resume the original paid workers, indexers and API only after reconciliation. Readiness compares canonical cursors against configured safe heads: Gear's 10-block and Ethereum's 75-block scheduling buffers remain distinct from authenticated finality.
+
+Ethereum deposits appear in indexed history only after the 75-block ingestion buffer and authenticated finality, typically around 15 minutes after inclusion. The visible history page refreshes its transaction list every 60 seconds even when empty or when every listed transfer is complete, so newly indexed deposits are discovered without a manual reload.
+
+For Gear settlements, `completedAtTxHash` identifies the event's executing extrinsic, not necessarily the signed message-enqueue extrinsic. An unsigned `Gear.run` hash can repeat across blocks: verify it with `completedAtBlock`, the canonical block hash and the event's extrinsic phase, and verify the signed enqueue original separately. Hash reuse alone is not a stale indexer record.
+
+For a guarded stack restart, use `/srv/vara-bridge/config/guarded-restart.py`. It first publishes authenticated maintenance and stops the faucet, then stops the checkpoint updater while capture and both nodes remain available and runs its original-outcome guard. It stops the follower, paid workers, indexers and API, then capture, PostgreSQL and both validators. It restarts in the preceding order, reconciles before writers resume, and starts the faucet last. Maintenance remains until independent checks prove advancing chain/checkpoint/cursors plus unchanged original settlement; only then restore live routes. Never reboot the shared host just to exercise this sequence.
+
+Unit output is available through `sudo journalctl _SYSTEMD_USER_UNIT=bridge-hoodi-<service>.service`; paid-worker child logs and durable state remain under `run/hoodi-v210`. Protected evidence is under `/srv/vara-bridge/evidence`. The pre-start cold archive and logical database dump remain under `/srv/vara-bridge/backups`; retain them together with their recorded hashes. The local cold validators and journals remain fenced. Once remote state advances, rollback requires fencing remote writers, reconciling originals, making a fresh cold transfer and database dump back, and resuming exactly one owner. Starting the stale local snapshot is never rollback.
+
+Nginx serves only immutable static releases under `/usr/share/nginx/html/bridge-hoodi/releases`, with an atomic live-route include, uncached HTML and immutable hashed assets. Copy complete releases, set readable ownership/modes, and use `restorecon -RF` to replace preserved container SELinux labels before switching; run `nginx -t` before reload. Proxy `/vara` only to Safe RPC 52549 and `/graphql` to 5450, with upstream Host headers, exact-origin checks, HTTP/1.1 upgrades and stripped Basic credentials. `/faucet/` proxies to loopback 5485 under the same authentication, strips credentials/cookies, limits bodies to 1 KiB and disables upstream retries. All other bridge listeners remain private.
+
+Retrieve site access only over SSH with `cat /home/bridge/.config/bridge-hoodi/site-access`; do not put credentials in URLs, frontend environment variables or reports. The separate root `bridge-hoodi-cert.timer` renews through Lego state `/var/lib/lego-bridge-hoodi-temp` and `/usr/local/libexec/bridge-hoodi-cert-deploy`, preserving the existing managed certificate jobs. HTML requests the web manifest with `crossorigin="use-credentials"` so it remains protected rather than exempting it from authentication.
+
+`VITE_ISOLATED_FAUCET=true` enables the retained lane's same-origin faucet in Testnet mode. It grants **100 TVARA** or **1,000 Test USDC** per normalized address per 24 hours. USDC is the existing six-decimal ERC20 `0xd4d65b1100b522cbde9664b9ba78c8add04e5b53`, paired with six-decimal hUSDC VFT `0x4e1512f4e996cf4784d052661f38c31b39606a1716f0f735e6aec64df5249baf`. These are test-only assets with no monetary value, not real Circle USDC. The faucet transfers canonical ERC20 inventory; it never independently mints VFT.
+
+The [faucet service](../tools/test-faucet.cjs) uses two dedicated signers, with initial pools capped at 10,000 TVARA and 100,000 Test USDC plus 0.005 Hoodi ETH for gas. There are no automatic refills. Allocation ceilings are lifetime bounds; fees can exhaust funding earlier. Address limits are not person-level Sybil protection. One unresolved original holds further claims for that asset until canonical finality, including Hoodi's finality delay. The other asset remains independent.
+
+The task-owned launcher `/srv/vara-bridge/config/run-faucet` mounts only read-only application code/configuration, dedicated keys under `config/faucet-keys`, and the faucet state directory. Configuration `config/faucet.json` and key files require mode 0600; directories require 0700. Its `stateDir` maps to `run/hoodi-v210/faucet/journal`, which must not exist before first initialization. Preserve this authenticated journal and both keys together. Never restore an older journal, delete an unresolved original, rotate signers in place, or run another host against these signers. A nonce/history mismatch or interrupted journal fails closed.
+
+`GET /faucet/config` publishes the exact genesis, chain ID, asset amounts and cooldown. `POST /faucet/request` accepts only `{asset,address,genesis,chainId}` with the exact site Origin; `GET /faucet/status?asset=…&address=…` recovers an existing outcome. Originals are durably saved before one broadcast attempt. A pending repeat returns the same transaction; restart observes without rebroadcasting or replacing it. A completed daily claim returns 429. The UI requires the approved Gear genesis, additionally requires a connected Hoodi wallet for USDC, and does not treat a 202 response as finality. After a lost response, inspect status rather than blindly submitting again.
+
+Selecting Testnet changes application RPCs, not the connected wallet's chain. If Rabby or another wallet still reports Ethereum mainnet (chain 1), the USDC faucet shows that chain ID and offers **Switch wallet to Hoodi**, reusing the bridge's existing wallet-network synchronization. This action does not submit a faucet claim or sign a transaction. Claims remain disabled until the connector reports Hoodi (560048).
+
+Outside this opt-in lane, missing Turnstile configuration still disables the captcha-backed faucet instead of mounting an unconfigured widget. The independent Hoodi ETH faucet link remains available with an Ethereum account. Repeated browser authentication prompts are deferred, not fixed. Reown currently rejects the temporary origin with `3000 (Unauthorized: origin not allowed)`: the configured project's owner must authorize this exact HTTPS origin before WalletConnect can be called ready. The installed Polkadot JS injected-account path works without that external prerequisite. Mainnet's external explorer also has its own origin policy; this retained deployment is qualified in Testnet mode only.
 
 #### Snowbridge lineage and deployment boundary
 
@@ -84,143 +120,30 @@ One process may own distinct bootstrap, follower and root-proof archives for the
 
 The architectural reference for this finalization is Snowbridge `630c2081359e2417496e7f4c1a189a7eb40f7bd4`; the older interoperability-vector pin above remains distinct. Neither reference transfers an upstream audit to these adapters.
 
-`Source::connect_pair` authenticates both RPCs at one common finalized upgraded pin: runtime/API identity, separately labeled source `:code` hashes, current/next authorities, activation `G`, actual first insertion `S`, MMR root/count and destination-bound domain. The first-leaf proof establishes insertion geometry; activation is not read from block zero and missing activation is HOLD. New anchors retain `domainBindingBlock` and `sourceIdentity`; old anchors remain restricted to the explicit legacy runtime rather than silently attaching to a normal or production deployment. Public artifact, validator-roster, weight, custody and migration qualification remain separate gates. The existing UUPS admin authority is separate from relay signers. `migrateToBeefy` retains that authority and all legacy replay/root state; it does not grant a replacement administrator. See the [mainnet migration gates](../ethereum/README.md#mainnet-custody-preserving-migration-candidate).
-
-### Legacy ZK lane
-
-The legacy core Gear-to-Ethereum path is:
-
-~~~text
-finalized Gear justification
-        |
-        v
-Gear BlockListener
-        |
-        +--> MerkleRootStorage (blocks, inclusion proofs, root state)
-        |
-        +--> MerkleRootRelayer
-                |
-                +--> AuthoritySetSync -> proof storage
-                |
-                +--> FinalityProver / SharedFinalityProver
-                |
-                +--> MerkleRootSubmitter -> Ethereum MessageQueue
-                |
-                +--> authenticated HTTP proof requests
-~~~
-
-The Ethereum-to-Gear core path is separate:
-
-~~~text
-Ethereum beacon RPC
-        |
-        v
-ethereum_checkpoints::Relayer
-        |
-        v
-checkpoint-light-client program on Gear
-        |
-        v
-eth-events-* / historical-proxy consumers
-~~~
-
-Token relayers sit above these protocol primitives. They turn verified message/event evidence into token-manager calls; they are not the component that proves a Gear message-queue root.
+`Source::connect_pair` authenticates both RPCs at one common finalized upgraded pin: runtime/API identity, separately labeled source `:code` hashes, current/next authorities, activation `G`, actual first insertion `S`, MMR root/count and destination-bound domain. The first-leaf proof establishes insertion geometry; activation is not read from block zero and missing activation is HOLD. New anchors retain `domainBindingBlock` and `sourceIdentity`; old anchors remain restricted to the explicit legacy runtime. Public artifact, validator-roster, weight, custody and migration qualification remain separate gates. `migrateToBeefy` preserves existing UUPS authority and legacy replay/root state while separately binding the reviewed timelock's narrow expiry-recovery capability; relay signers receive neither. See the [recovery policy](../ethereum/README.md#expiry-recovery-and-initializer-scope) and [mainnet migration gates](../ethereum/README.md#mainnet-custody-preserving-migration-candidate).
 
 ## Process bootstrap
 
-[relayer/src/main.rs](../relayer/src/main.rs) creates:
+[relayer/src/main.rs](../relayer/src/main.rs) creates a multi-thread Tokio runtime with a bounded blocking pool, loads dotenv/logging, and dispatches the selected Clap command. It does not initialize a circuit pool or a proof-storage service. The retained commands are `eth-gear-core`, `gear-eth-tokens` and `eth-gear-tokens` (each with `all-token-transfers` and `paid-token-transfers`), `gear-eth-manual`, `eth-gear-manual`, `kill-switch`, `queue-cleaner` and `fetch-merkle-roots`.
 
-- a global Rayon pool for circuit work;
-- a multi-thread Tokio runtime with a blocking-thread limit;
-- dotenv loading and module-specific logging;
-- the Clap command dispatcher.
-
-gear-eth-core validates its command-line arguments and environment values, then starts one core relayer.
-
-For each core relayer, start_gear_eth_core_relayer:
-
-1. Connects an ApiProvider to the configured Gear endpoint.
-2. Creates the Ethereum signer client for the configured MessageQueue and fee payer.
-3. Creates either filesystem or Gear-backed proof storage.
-4. Creates MerkleRootStorage for block/root/submission state.
-5. Binds the relayer HTTP listener.
-6. Creates the finality prover and authority-set synchronizer used by the relayer.
-7. Registers Prometheus collectors.
-8. Starts the API provider and the relayer task.
-
-The expensive proof work is isolated behind channels so block listening, scheduling, proving, and submission can make progress independently. The process owns one set of clients, storage, HTTP routes, and scheduler state for this command invocation.
+The selected worker owns its configured clients, listener/channels, metrics and storage. BEEFY root production remains in the existing `beefy-relay` actor, not a replacement scheduler inside `relayer`. Shared connection and signer arguments retain dotenv/environment loading; consult each compiled command's help and the [running guide](running-the-bridge.md).
 
 ## Gear finality and block delivery
 
-[relayer/src/message_relayer/common/gear/block_listener.rs](../relayer/src/message_relayer/common/gear/block_listener.rs) consumes GRANDPA justifications rather than arbitrary best-head blocks. For each finalized block it:
+[BlockListener](../relayer/src/message_relayer/common/gear/block_listener.rs) consumes GRANDPA justifications rather than arbitrary best-head blocks. It fetches finalized block evidence, extracts queue changes and authority annotations, persists through the consumer's existing block-storage interface, and broadcasts to retained discovery workers. Storage determines whether full finality material is needed; this is not an outbound recursive proving stage.
 
-1. Fetches the block and converts it to the bridge's GearBlock representation.
-2. Extracts whether the message queue root changed and whether an authority set changed.
-3. Produces and stores the raw block-inclusion/finality material in MerkleRootStorage.
-4. Broadcasts the block to the root relayer and authority-set synchronizer.
-
-The listener has a large broadcast capacity because proving and era synchronization can lag behind block production. It replays unprocessed state at startup, detects gaps in live justifications, and replays missing ranges. On recoverable provider errors it reconnects and starts replay from the last finalized cursor.
-
-The block storage is a source of recovery, not just a cache. A consumer that falls behind can be restarted from the persisted block set. A broadcast lag warning is therefore different from a proof being lost; operators should inspect persisted state before deleting anything.
+Startup replays unprocessed ranges. Live justification gaps replay missing finalized blocks before newer observations; recoverable provider errors reconnect from the retained cursor. GRANDPA subscriptions and authority annotations remain necessary for discovery and queue cleaning even though outbound root authentication uses BEEFY/MMR. Persisted evidence is recovery state, not a disposable cache.
 
 ## Gear-to-Ethereum root flow
 
-The root relayer is implemented in [relayer/src/merkle_roots/mod.rs](../relayer/src/merkle_roots/mod.rs).
+1. The [follower](../tools/beefy-relay/src/follower.rs) authenticates the source/witness identity and ordered native BEEFY commitments, including mandatory authority handovers and freshness updates.
+2. The [source reader](../tools/beefy-relay/src/source.rs) reconstructs the exact historical queue snapshot and its MMR inclusion under an accepted covering commitment, rather than substituting the current queue root.
+3. The [root publisher](../tools/beefy-relay/src/root_publication.rs) retains the original publication identity and submits the canonical v2 envelope to `MessageQueue`; the typed [verifier](../ethereum/src/VaraQueueRootVerifier.sol) checks it against the latest live `BeefyClient` anchor.
+4. Finalized canonical acceptance is reconciled against the original transaction and on-chain root before progress is recorded. Unsigned external progress and signed-original outcomes remain distinct.
+5. The retained token/manual delivery pipeline supplies an individual-message Merkle proof against the registered historical root after its own maturity delay. A shared commitment does not merge roots, eliminate per-block publication costs or prove settlement.
 
-### 1. Detect a new root
+The demand scheduler, idle heartbeat, original-transaction fencing, bounded-distance catch-up and history-retention limits are described above. There is no priority-proof scheduler, recursive proof storage or HTTP root-proof producer.
 
-MerkleRootStorage recognizes the Gear bridge's QueueMerkleRootChanged event and records queue id and root for the block. It also records message nonces, authority-set changes, and the raw inclusion proof needed later by the circuit.
-
-The root is keyed locally by the pair of Gear block number and root hash. The block number is not sufficient by itself because a root may be retried or compared against an already stored value.
-
-### 2. Resolve the authority-set proof
-
-A final proof must show both the message-queue root and the authority set that finalized its block. The root relayer asks proof storage for the proof corresponding to the authority-set id that signed the block.
-
-If the proof is absent, the root enters WaitForAuthoritySetSync. AuthoritySetSync obtains the required finalized era transition, composes a recursive proof from the configured genesis authority set, and stores the resulting proof. Waiting blocks are released after the authority-set response arrives.
-
-GenesisConfig is a compatibility boundary: its authority-set id and hash are fixed inputs to the recursive proof chain. They must match the deployed verifier and the history from which proof storage was initialized.
-
-### 3. Schedule final proof generation
-
-Once the inner authority-set proof is available, the root is recorded as GenerateProof and sent to a finality-prover channel. The request contains:
-
-- Gear block number and hash;
-- queue id and root;
-- the authority-set proof;
-- raw block-inclusion material;
-- whether the request may be batched;
-- the relayer-specific context needed to reconnect to Gear and invoke the prover.
-
-Normal block traffic is batchable. Non-batched requests are used for catch-up, critical-threshold recovery, supervisor checks, and authenticated HTTP requests that need a specific proof quickly.
-
-### 4. Compose and generate the proof
-
-The Rust prover builds a recursive Plonky2 proof that the root is present in bridge storage and that the containing block is finalized. The relayer then passes the exported circuit data to the Go gnark wrapper, which produces the BN254 Plonk proof serialized for Solidity. See [circuits and proofs](circuits-and-proofs.md).
-
-### 5. Submit and confirm on Ethereum
-
-MerkleRootSubmitter sends submitMerkleRoot(blockNumber, merkleRoot, proof) to the configured MessageQueue. It records local submission states (pending, broadcast, confirmed, or failed), waits for the configured number of confirmations, and checks the finalized on-chain root before reporting success.
-
-The submitter reconciles recovered work against Ethereum before broadcasting again. This matters after a process crash between transaction broadcast and local state persistence: local broadcast state is not treated as proof that the root finalized.
-
-After a successful confirmation, the root transitions to Finalized; waiting HTTP requests receive the proof response. A failed transaction transitions to Failed and is surfaced in logs and metrics.
-
-## Root scheduler and priority behavior
-
-The root relayer keeps a pending batch with timestamps and message-nonce counts.
-
-- spike_window removes old queue timestamps from spike calculations.
-- spike_threshold causes immediate proof generation when the total number of message nonces in the current batch reaches the threshold.
-- spike_timeout flushes an ordinary batch after its timeout.
-- priority_spike_timeout flushes a batch containing a priority request sooner.
-- A bridging_payment_address enables priority handling for recognized priority-payment events.
-- critical_threshold forces a non-batched proof when the last confirmed root is too far behind. authority_set_change is an alternative trigger that forces a proof around an authority-set transition.
-- An authenticated /get_merkle_root_proof request is handled as a priority, non-batched request and may use a fresh justified block while the requested block is being caught up.
-
-A supervisor tick periodically reads the latest Gear queue root and the corresponding Ethereum root. If Ethereum has no matching root, or a configured critical threshold is reached, it schedules a recovery proof. It deduplicates a root while the same proof is in flight.
-
-The prover gives non-batched requests priority over ordinary batches. Batches are grouped by authority-set id and queue id, and responses are sent back through the channel associated with the originating request.
 
 ## Ethereum-to-Gear core
 
@@ -240,6 +163,15 @@ Regular updates and replay enforce `current_slot >= signature_slot > attested_sl
 Checkpoint deployment, updates and native integration tests submit with 95% of the block gas limit. Deployment and native-test gas estimates must fit that ceiling; the exact RPC minimum is not an execution budget. It can exhaust gas during queued BLS execution even when the update is valid.
 
 This process is distinct from the Ethereum token relayer: one advances the light-client state, while the other submits user/event receipts through the programs that consume that state.
+
+## Observer challenges and governance response
+
+The independent [kill switch](../relayer/src/kill_switch.rs) holds only its observer-role signer. It connects canonical destination events, including hot blocks, to a pinned finalized ancestor and verifies stored roots at the pinned head before comparing the exact finalized historical source root. The cursor advances only through finalized history, so hot blocks and their replacements are revisited. Removed/inconsistent logs, invalid source bounds/finality and unavailable historical state hold the cursor without authorizing a challenge. Once a mismatch is authenticated, later unavailable source state cannot suppress it. The operator-configured source RPC remains a trust boundary, not a second source-consensus verifier.
+
+A qualified mismatch sends `challengeRoot()` directly. Once a challenge hash exists, receipt retries retain it; RPC uncertainty never authorizes another transaction. A finalized revert requires a fresh scan before another submission. A finalized successful challenge exits for operator intervention, with no automatic root repair or unpause and no admin key or repair URL. Reconcile original evidence before restarting.
+
+The challenge pause expires after `CHALLENGE_ROOT_DELAY` (two days); it is not an indefinite incident lock. Persistent incidents require the existing separately authorized governance pause. Any emergency-admin action, authenticated root publication, challenge removal, verifier expiry recovery or governance unpause is a separate authorized response, not work performed by the observer. Recovery retains its reviewed positive-delay timelock and forward-history restrictions, and cannot reset custody, registered roots or replay state.
+
 
 ## Token-relayer internals
 
@@ -262,21 +194,34 @@ Completion requires the original signed Ethereum transaction and its canonical f
 
 ### Ethereum to Gear
 
-The implementations under [relayer/src/message_relayer/eth_to_gear/](../relayer/src/message_relayer/eth_to_gear/) monitor finalized Ethereum blocks, compose proofs and retain the original signed Gear dispatch, receipt bytes, request/reply linkage and per-log consumer effects. `Processed` alone never completes an entry. Completion requires the exact canonical finalized original proxy/consumer reply and every corresponding authenticated settlement row; missing history, unknown outcomes and arbitrary inner errors HOLD without replacing the proof transaction. An original `NativeSettlementPending` result can advance only through its original wrapper payout becoming `Delivered` with zero returned value, followed by non-economic `ReconcileReceipt` and finalized `Settled` rows/`Processed` receipt state. That continuation has its own durable signed identity; it cannot mint, transfer, redeem or rewrite the original reply.
+The implementations under [relayer/src/message_relayer/eth_to_gear/](../relayer/src/message_relayer/eth_to_gear/) retain the original signed Gear dispatch, receipt bytes, request/reply linkage and per-log effects. `Processed` alone never completes an entry. Completion requires the exact canonical finalized original proxy/consumer reply and every authenticated settlement row. An original `NativeSettlementPending` may resolve through its original payout becoming `Delivered` with zero returned value or `Refunded` with its exact full value returned and atomically credited as wrapped VARA to the original Gear recipient. Non-economic `ReconcileReceipt` authenticates distinct `Settled`/`Refunded` rows and `Processed` receipt state; it cannot mint, transfer, redeem or rewrite the original reply. Missing history, unknown outcomes and arbitrary inner errors HOLD.
+
+Finalized original/continuation inclusion releases account-nonce ownership, not
+economic evidence. Pending payouts remain fairly reconciled while unrelated fresh
+receipts progress; unknown originals and fresh continuation allocation remain
+serialized. Ethereum ancestry uses bounded per-request deadlines and a cooperative
+checkpointed traversal, not a 30-second cancellation deadline around the entire
+multi-request proof.
 
 Receipt verification consumes the complete SCALE frame and receipt RLP, requires a successful EIP-658 status, and checks exact SSZ branch depth. Historical headers must ascend within `(receipt.slot, checkpoint.slot]`, connect through parent roots and terminate at the exact authenticated checkpoint; empty ancestry is valid only at that checkpoint. Receipt endpoints enforce the immutable network fork schedule. The historical proxy authenticates the requested slot and verifier reply but preserves the consumer's raw reply bytes: outer proxy success does not establish a successful inner application result or economic settlement.
 
 Checkpoint-waiting proof work is keyed by its original transaction UUID. Repeated notifications for the same hash and slot are idempotent; conflicting identities HOLD without replacing the original. Eligible work moves to the processing queue when its checkpoint arrives, and composition failures retain that work across reconnects.
 
-Ordinary Gear-origin returns use escrow `TransferFrom`. Native policy is explicit and snapshotted per deposit: the manager-authorized wrapper burns manager escrow and dispatches native value directly, retaining the original payout child and returned-value obligation. Generation/lease ownership and per-log child outcomes prevent an expired wait from dispatching the economic effect again. Queued, returned or ambiguous native value is not settlement. Paused/admin source reconciliation also requires the original request/child/hash and an authenticated builtin outcome; it never infers “not queued” from a timeout.
+Ordinary Gear-origin returns use escrow `TransferFrom`. Native policy is explicit and snapshotted per deposit: the wrapper burns manager escrow and retains the original payout child. Zero minimum balance preserves fractional pooled escrow. Only the authenticated original recipient's full error return permits a one-time backed wrapped refund; partial returns, queued/ambiguous payouts and retained legacy Returned outcomes remain held. Generation/lease and per-log ownership prevent redispatch. Source reconciliation still requires original request/child/hash and authenticated builtin outcome, never timeout-based “not queued” inference.
 
 SDK callers supply an immutable, independently approved `InboundProofProfile` binding both network identities, the source runtime and block, actor CodeIds, exact IDL digests, endpoint framing, checkpoint network, forks and consumer route. Frontend completion uses `onFinalized`, not an outer proxy success flag. Outbound SDK callers supply the exact expected effect from the packed original source message. Missing profiles or deployment configuration render HOLD before signing.
 
-The Ethereum indexer uses cold-only ingestion with a 75-block scheduling buffer; it never switches to unfinalized hot-head batches. The handler still authenticates canonical finalized headers and the finalized anchor before effects or cursor advancement: the buffer itself is not finality evidence. Ethereum completion joins exact queue and token effects in one original receipt; Gear relay events alone are transport evidence. `ReceiptDepositSettled` rows correlate slot, transaction index and receipt-local log index, preserving the existing first-log identity and separating later deposits. Matching uses bounded batched joins and cycles through at most 1000 pending settlements per batch so counterparts arriving later remain eligible. The offline `1791244800000-receipt_identity.js` migration adds receipt identity/settlement journals; it is not executed by these source changes. Do not use legacy completion rows as new settlement evidence without requalification.
+The Ethereum indexer uses cold-only ingestion with a 75-block scheduling buffer; canonical finalized headers and anchor are still authenticated before effects/cursor commit. Ethereum completion joins exact queue and token effects in one original receipt. Gear `ReceiptDepositSettled` and distinct `ReceiptDepositRefunded` rows correlate slot, transaction index and receipt-local log index, preserving first-log identity. Refund evidence additionally binds original operation, wrapper, recipient, manager/payout children and full returned backing; it projects `Refunded`, not native `Completed`. Bounded batched joins cycle through at most 1000 pending settlements so late counterparts remain eligible. Apply `1792022400000-native_refund.js` before exposing refunds on an existing database, restart its API and regenerate frontend GraphQL types; no shared deployment migration is executed by these code changes. Legacy completion rows require original-evidence requalification.
+
+The refund down-migration refuses while either `transfer.status` or retained
+`receipt_settlement.deposit.outcome` records `Refunded`, including unmatched
+evidence whose transfer counterpart has not arrived yet.
 
 Both indexers hold the entire database callback while an otherwise valid finalized head lags the batch. They poll every 30 seconds without a five-attempt ceiling, reauthenticate the previous height/hash before replacing it, and reject regression, malformed responses, missing history or canonical conflicts. Gear also disables hot-block ingestion. Bounded RPC timeouts remain; process shutdown cancels waiting. Neither projection effects nor the processor cursor commit before the full batch and final anchor validate.
 
 Outbound queue receipts that arrive before their Vara counterpart are retained in `CompletedTransfer.outboundReceipt`, not discarded or marked complete. Migration `1791936000000-outbound_completion.js` adds this authenticated-receipt evidence and the bounded pending-match index. Each later batch rechecks the original canonical finalized inclusion, exact message identity and same-receipt token effect before completing the late counterpart. Replayed receipts compare structurally across PostgreSQL JSONB key ordering. Legacy rows without this evidence cannot authorize completion.
+
+The GraphQL `Transfer.amount` resolver emits an exact base-10 integer string, including for preserved database rows stored as hexadecimal strings. It does not rewrite historical rows or convert token amounts through JavaScript floating-point numbers.
 
 For an existing indexer database, applying the schema migration is not a data cutover:
 legacy pending rows have NULL receipt transaction/log coordinates and cannot match
@@ -297,24 +242,23 @@ The beacon/light-client path and the event/message path are complementary:
 
 The shared HTTP server in [relayer/src/server.rs](../relayer/src/server.rs) uses the X-Token header for authentication. It exposes only the routes enabled by the caller:
 
-- /get_merkle_root_proof sends block numbers to the owning root relayer;
 - /relay_messages sends Gear message descriptors to a Gear-to-Ethereum token relayer;
 - /relay_transactions sends Ethereum transaction hashes to an Ethereum-to-Gear token relayer.
 
-The server deduplicates repeated items within one request. It returns 401 for a missing or incorrect token, 200 when all items were accepted/handled, 202 for partial acceptance, and 500 when no item could be queued or a response channel failed.
+The server deduplicates repeated items within one request and retains bounded request bodies. It returns 401 for a missing or incorrect token, 200 when all items were accepted/handled, 202 for partial acceptance, and 500 when no item could be queued or a response channel failed.
 
-The selected process creates one listener and one channel for its configured relayer. The port is therefore the routing boundary; the JSON request does not carry a network name.
+Each selected paid worker creates its own listener and optional route channel; unavailable routes are not enabled. Listener endpoint identity and port isolate workers and networks; JSON requests do not choose a network. Only `/relay_messages` and `/relay_transactions` remain, not a root-proof HTTP API.
 
 ## Persistence and failure boundaries
 
 The main persistent boundaries are:
 
-- Merkle-root JSON state, including blocks, roots, and Ethereum submission states.
-- Proof storage, either filesystem files or a Gear proof-storage program/config directory.
-- Ethereum block/transaction storage for token relayers.
-- The gnark proving data directory, containing SRS and generated key material.
+- BEEFY follower and root-publication journals, original signed bytes and nonce ownership, source identity pins and authenticated finality archives.
+- Retained finalized source discovery state and queued/paid-event cursors.
+- Ethereum block/transaction and original message-delivery evidence for token/manual relayers.
+- Inbound original Gear dispatch, proof-composition work and settlement reconciliation state.
 
-The root relayer saves atomically and keeps a backup. The block listener writes block evidence before broadcasting it. The submitter checks finalized Ethereum state before retrying recovered work. These boundaries provide idempotency, but they do not make arbitrary deletion safe.
+Atomic persistence and finalized-state reconciliation provide idempotency, not permission to delete history. Root-publication holds may release independent authenticated commitment following without discarding the held original. Preserve the existing journal owners, finality fences, archive evidence and signer locks on restart.
 
 RPC errors are classified at the provider and listener boundaries. Recoverable transport/subscription errors trigger retries and reconnects; permanent errors or exhausted retry policies are returned to the owning service. When a service channel closes, the parent relayer treats that as a component failure rather than silently continuing with incomplete proof or submission state.
 
@@ -325,12 +269,11 @@ RPC errors are classified at the provider and listener boundaries. Recoverable t
 | CLI and process supervision | [relayer/src/main.rs](../relayer/src/main.rs), [relayer/src/cli/](../relayer/src/cli/) |
 | CLI and environment configuration | [relayer/src/cli/](../relayer/src/cli/) |
 | Gear finalized-block delivery | [relayer/src/message_relayer/common/gear/block_listener.rs](../relayer/src/message_relayer/common/gear/block_listener.rs) |
-| Root state machine | [relayer/src/merkle_roots/mod.rs](../relayer/src/merkle_roots/mod.rs) |
-| Root persistence | [relayer/src/merkle_roots/storage.rs](../relayer/src/merkle_roots/storage.rs) |
-| Authority-set proving | [relayer/src/merkle_roots/authority_set_sync.rs](../relayer/src/merkle_roots/authority_set_sync.rs) |
-| Final proof worker | [relayer/src/merkle_roots/prover.rs](../relayer/src/merkle_roots/prover.rs), [relayer/src/prover_interface.rs](../relayer/src/prover_interface.rs) |
-| Ethereum root submission | [relayer/src/merkle_roots/submitter.rs](../relayer/src/merkle_roots/submitter.rs) |
+| BEEFY commitment following | [tools/beefy-relay/src/follower.rs](../tools/beefy-relay/src/follower.rs) |
+| Historical source/MMR proofs | [tools/beefy-relay/src/source.rs](../tools/beefy-relay/src/source.rs), [tools/beefy-relay/src/protocol.rs](../tools/beefy-relay/src/protocol.rs) |
+| Authenticated root publication | [tools/beefy-relay/src/root_publication.rs](../tools/beefy-relay/src/root_publication.rs) |
+| Observer challenges | [relayer/src/kill_switch.rs](../relayer/src/kill_switch.rs) |
 | Ethereum beacon/light-client relay | [relayer/src/ethereum_checkpoints/](../relayer/src/ethereum_checkpoints/) |
 | Gear-to-Ethereum token relay | [relayer/src/message_relayer/gear_to_eth/](../relayer/src/message_relayer/gear_to_eth/) |
 | Ethereum-to-Gear token relay | [relayer/src/message_relayer/eth_to_gear/](../relayer/src/message_relayer/eth_to_gear/) |
-| Solidity verifier and MessageQueue | [ethereum/src/VerifierMainnet.sol](../ethereum/src/VerifierMainnet.sol), [ethereum/src/VerifierTestnet.sol](../ethereum/src/VerifierTestnet.sol), [ethereum/src/MessageQueue.sol](../ethereum/src/MessageQueue.sol) |
+| Solidity authentication and queue | [ethereum/src/beefy/BeefyClient.sol](../ethereum/src/beefy/BeefyClient.sol), [ethereum/src/VaraQueueRootVerifier.sol](../ethereum/src/VaraQueueRootVerifier.sol), [ethereum/src/MessageQueue.sol](../ethereum/src/MessageQueue.sol) |

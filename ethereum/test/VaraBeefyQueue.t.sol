@@ -3,6 +3,7 @@ pragma solidity ^0.8.37;
 
 import {BeefyFixtureTest} from "./BeefyInterop.t.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -21,10 +22,14 @@ import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
+import {GovernancePacker, UnpauseProxyMessage} from "src/libraries/packing/GovernancePacker.sol";
+import {BeefyClientMock} from "src/mocks/BeefyClientMock.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
-import {VerifierMock} from "src/mocks/VerifierMock.sol";
 
 contract VaraQueueRootVerifierTest is BeefyFixtureTest {
+    using GovernancePacker for UnpauseProxyMessage;
+
+    TimelockController internal recovery;
     BeefyClient internal client;
     VaraQueueRootVerifier internal verifier;
     MessageQueue internal queue;
@@ -32,16 +37,19 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
 
     function setUp() public {
         fixtures = vm.readFile("test/fixtures/beefy-interop.json");
+        address[] memory proposers = new address[](1);
+        proposers[0] = address(this);
+        recovery = new TimelockController(1 hours, proposers, proposers, address(0));
         uint256 startingNonce = vm.getNonce(address(this));
         address predictedQueue = vm.computeCreateAddress(address(this), startingNonce + 5);
         client = newClient(0, block.chainid, predictedQueue);
 
         MessageQueue implementation = new MessageQueue();
         GovernanceAdmin admin = new GovernanceAdmin(
-            bytes32(uint256(33)), WrappedVara(address(0)), MessageQueue(address(0)), ERC20Manager(address(0))
+            bytes32(uint256(33)), WrappedVara(address(0)), MessageQueue(predictedQueue), ERC20Manager(address(0))
         );
         GovernancePauser pauser = new GovernancePauser(
-            bytes32(uint256(44)), WrappedVara(address(0)), MessageQueue(address(0)), ERC20Manager(address(0))
+            bytes32(uint256(44)), WrappedVara(address(0)), MessageQueue(predictedQueue), ERC20Manager(address(0))
         );
         assertEq(vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1), predictedQueue);
         verifier = new VaraQueueRootVerifier(client, predictedQueue, block.chainid);
@@ -56,7 +64,8 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
                             IGovernance(address(pauser)),
                             address(this),
                             new address[](0),
-                            verifier
+                            verifier,
+                            address(recovery)
                         )
                     )
                 )
@@ -67,21 +76,15 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         receiver = new MessageHandlerMock();
     }
 
-    function inputs(uint32 source, bytes32 root) internal pure returns (uint256[] memory p) {
-        p = new uint256[](2);
-        p[0] = uint256(root) >> 64;
-        p[1] = (uint256(uint64(uint256(root))) << 128) | (uint256(source) << 96);
-    }
-
-    function verifyAsQueue(VaraQueueRootVerifier target, bytes memory proof, uint256[] memory publicInputs)
+    function verifyAsQueue(VaraQueueRootVerifier target, uint256 sourceBlock, bytes32 root, bytes memory proof)
         internal
         returns (bool valid)
     {
         vm.prank(target.messageQueue());
-        return target.safeVerifyProof(proof, publicInputs);
+        return target.safeVerifyProof(sourceBlock, root, proof);
     }
 
-    function testSharedFixturesMatchLegacyPublicInputLayout() public {
+    function testSharedFixturesVerifyTypedQueueRoots() public {
         vm.pauseGasMetering();
         for (uint256 i; i < caseCount(); i++) {
             if (isNativeOnly(i)) continue;
@@ -90,10 +93,8 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
                 new VaraQueueRootVerifier(fixtureClient, fixtureClient.destinationQueue(), block.chainid);
             QueueProof memory p = queueProof(i);
             bytes32 root = fixtureHash(i, "queueRoot");
-            uint256[] memory publicInputs = inputs(p.leaf.parentNumber, root);
-            assertEq(abi.encode(publicInputs[0], publicInputs[1]), fixtureBytes(i, "publicInputs"));
             acceptFixture(fixtureClient, i);
-            bool valid = verifyAsQueue(fixtureVerifier, fixtureBytes(i, "queueProof"), publicInputs);
+            bool valid = verifyAsQueue(fixtureVerifier, p.leaf.parentNumber, root, fixtureBytes(i, "queueProof"));
             assertEq(valid, root != bytes32(0));
         }
         vm.resumeGasMetering();
@@ -130,80 +131,59 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         }
     }
 
-    function testFreshBeefyInitializerValidatesBindingFloorAndFrozenPolicy() public {
+    function testFreshBeefyInitializerValidatesBindingFloorAndRecovery() public {
         MessageQueue fresh = MessageQueue(address(new InitializerTestProxy(address(new MessageQueue()))));
         IGovernance admin = IGovernance(queue.governanceAdmin());
         IGovernance pauser = IGovernance(queue.governancePauser());
         vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
-        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), verifier);
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), verifier, address(recovery));
         BeefyClient boundClient = newClient(0, block.chainid, address(fresh));
         VaraQueueRootVerifier boundVerifier = new VaraQueueRootVerifier(boundClient, address(fresh), block.chainid);
-        bytes4[10] memory selectors = [
-            boundClient.minNumRequiredSignatures.selector,
-            boundClient.fiatShamirRequiredSignatures.selector,
-            boundClient.MAX_VALIDATORS.selector,
-            boundClient.randaoCommitDelay.selector,
-            boundClient.randaoCommitExpiration.selector,
-            boundClient.mmrStartBlock.selector,
-            boundClient.sourceDomain.selector,
-            boundClient.destinationChainId.selector,
-            boundClient.destinationQueue.selector,
-            boundClient.bridgeDomain.selector
-        ];
-        uint256[10] memory invalid =
-            [uint256(85), 85, 257, 1, 25, 0, 0, block.chainid + 1, uint256(uint160(address(queue))), 1];
-        for (uint256 i; i < selectors.length; i++) {
-            vm.mockCall(address(boundClient), abi.encodeWithSelector(selectors[i]), abi.encode(invalid[i]));
-            vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
-            fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
-            vm.clearMockedCalls();
-        }
-        vm.mockCall(
-            address(boundVerifier),
-            abi.encodeWithSelector(boundVerifier.destinationChainId.selector),
-            abi.encode(block.chainid + 1)
-        );
-        vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
-        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
-        vm.clearMockedCalls();
-        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
+        vm.expectRevert(IMessageQueue.InvalidBeefyRecoveryTimelock.selector);
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier, address(0xBEEF));
+        address[] memory proposers = new address[](1);
+        proposers[0] = address(this);
+        TimelockController immediate = new TimelockController(0, proposers, proposers, address(0));
+        vm.expectRevert(IMessageQueue.InvalidBeefyRecoveryTimelock.selector);
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier, address(immediate));
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier, address(recovery));
         assertEq(fresh.beefyRootMinimum(), boundClient.mmrStartBlock());
         assertEq(fresh.verifier(), address(boundVerifier));
+        assertEq(fresh.beefyRecoveryTimelock(), address(recovery));
         assertTrue(fresh.hasRole(fresh.DEFAULT_ADMIN_ROLE(), address(admin)));
+        assertFalse(fresh.hasRole(fresh.DEFAULT_ADMIN_ROLE(), address(recovery)));
         vm.expectRevert();
-        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier);
+        fresh.initializeBeefy(admin, pauser, address(this), new address[](0), boundVerifier, address(recovery));
     }
 
     function testQueueAndChainBindings() public {
         bytes32 root = fixtureHash(0, "queueRoot");
         QueueProof memory p = customQueueProof(103, root);
         bytes memory proof = encodeProof(p);
-        uint256[] memory publicInputs = inputs(p.leaf.parentNumber, root);
         vm.prank(address(this));
-        assertFalse(verifier.safeVerifyProof(proof, publicInputs));
+        assertFalse(verifier.safeVerifyProof(p.leaf.parentNumber, root, proof));
         vm.prank(address(0xBEEF));
-        assertFalse(verifier.safeVerifyProof(proof, publicInputs));
+        assertFalse(verifier.safeVerifyProof(p.leaf.parentNumber, root, proof));
 
         uint256 chainId = block.chainid;
         vm.chainId(chainId + 1);
         vm.prank(address(queue));
-        assertFalse(verifier.safeVerifyProof(proof, publicInputs));
+        assertFalse(verifier.safeVerifyProof(p.leaf.parentNumber, root, proof));
         vm.chainId(chainId);
 
-        assertFalse(verifier.verifyProof(proof, publicInputs));
+        assertFalse(verifier.verifyProof(p.leaf.parentNumber, root, proof));
     }
 
     function testCanonicalBoundaryRejections() public {
         bytes32 root = fixtureHash(0, "queueRoot");
         QueueProof memory p = customQueueProof(103, root);
-        uint256[] memory publicInputs = inputs(p.leaf.parentNumber, root);
         bytes memory encoded = encodeProof(p);
         bytes memory pristine = abi.encode(p);
         uint32 sourceBlock = p.leaf.parentNumber;
-        assertFalse(verifier.safeVerifyProof(encoded, publicInputs));
-        assertTrue(verifyAsQueue(verifier, encoded, publicInputs));
+        assertFalse(verifier.safeVerifyProof(sourceBlock, root, encoded));
+        assertTrue(verifyAsQueue(verifier, sourceBlock, root, encoded));
 
-        for (uint256 mutation; mutation < 18; mutation++) {
+        for (uint256 mutation; mutation < 19; mutation++) {
             QueueProof memory bad = abi.decode(pristine, (QueueProof));
             if (mutation == 0) bad.proofVersion = 1;
             if (mutation == 1) bad.bridgeVersion = 1;
@@ -223,44 +203,62 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
             if (mutation == 15) bad.order = 1;
             if (mutation == 16) bad.proofVersion = 0;
             if (mutation == 17) bad.bridgeVersion = 0;
-            assertFalse(verifyAsQueue(verifier, encodeProof(bad), publicInputs), vm.toString(mutation));
-            vm.expectRevert(IMessageQueue.InvalidPlonkProof.selector);
+            if (mutation == 18) bad.items[0] ^= bytes32(uint256(1));
+            assertFalse(verifyAsQueue(verifier, sourceBlock, root, encodeProof(bad)), vm.toString(mutation));
+            vm.expectRevert(IMessageQueue.InvalidQueueRootProof.selector);
             queue.submitMerkleRoot(sourceBlock, root, encodeProof(bad));
             assertEq(queue.getMerkleRoot(sourceBlock), bytes32(0));
             assertEq(queue.genesisBlock(), 0);
             assertFalse(queue.isProcessed(7));
         }
-        assertFalse(verifyAsQueue(verifier, bytes.concat(encoded, hex"00"), publicInputs), "trailing byte");
-        assertFalse(verifyAsQueue(verifier, hex"00", publicInputs), "short proof");
-        assertFalse(verifyAsQueue(verifier, abi.encode(p), publicInputs), "noncanonical tuple");
-        assertFalse(verifyAsQueue(verifier, encoded, new uint256[](1)), "short inputs");
-        assertFalse(verifyAsQueue(verifier, encoded, new uint256[](3)), "long inputs");
-        assertFalse(verifyAsQueue(verifier, encoded, inputs(p.leaf.parentNumber, bytes32(0))), "zero root");
-        assertFalse(
-            verifyAsQueue(verifier, encoded, inputs(p.leaf.parentNumber, root ^ bytes32(uint256(1)))), "wrong root"
-        );
-        assertFalse(verifyAsQueue(verifier, encoded, inputs(p.leaf.parentNumber + 1, root)), "wrong block");
-        for (uint256 word; word < 2; word++) {
-            uint256[] memory padded = inputs(p.leaf.parentNumber, root);
-            padded[word] |= uint256(1) << 192;
-            assertFalse(verifyAsQueue(verifier, encoded, padded));
-        }
-        publicInputs[1] |= 1;
-        assertFalse(verifyAsQueue(verifier, encoded, publicInputs), "nonzero input padding");
-        publicInputs = inputs(p.leaf.parentNumber, root);
+        assertFalse(verifyAsQueue(verifier, sourceBlock, root, bytes.concat(encoded, hex"00")), "trailing byte");
+        assertFalse(verifyAsQueue(verifier, sourceBlock, root, hex"00"), "short proof");
+        assertFalse(verifyAsQueue(verifier, sourceBlock, root, abi.encode(p)), "noncanonical tuple");
+        assertFalse(verifyAsQueue(verifier, sourceBlock, bytes32(0), encoded), "zero root");
+        assertFalse(verifyAsQueue(verifier, sourceBlock, root ^ bytes32(uint256(1)), encoded), "wrong root");
+        assertFalse(verifyAsQueue(verifier, sourceBlock + 1, root, encoded), "wrong block");
+        assertFalse(verifyAsQueue(verifier, uint256(sourceBlock) + (uint256(1) << 32), root, encoded), "uint32 alias");
+        assertFalse(verifyAsQueue(verifier, type(uint256).max, root, encoded), "overflow");
         // Nonzero padding of a narrow ABI value and an incorrect dynamic offset.
         encoded[30] = bytes1(uint8(1));
-        assertFalse(verifyAsQueue(verifier, encoded, publicInputs), "narrow ABI padding");
+        assertFalse(verifyAsQueue(verifier, sourceBlock, root, encoded), "narrow ABI padding");
         encoded = encodeProof(p);
         encoded[511] = bytes1(uint8(0x21));
-        assertFalse(verifyAsQueue(verifier, encoded, publicInputs), "dynamic offset");
+        assertFalse(verifyAsQueue(verifier, sourceBlock, root, encoded), "dynamic offset");
         encoded = encodeProof(p);
         assembly ("memory-safe") { mstore(encoded, sub(mload(encoded), 1)) }
-        assertFalse(verifyAsQueue(verifier, encoded, publicInputs), "truncated proof");
-        assertTrue(verifyAsQueue(verifier, encodeProof(p), inputs(sourceBlock, root)));
+        assertFalse(verifyAsQueue(verifier, sourceBlock, root, encoded), "truncated proof");
+        assertTrue(verifyAsQueue(verifier, sourceBlock, root, encodeProof(p)));
         queue.submitMerkleRoot(sourceBlock, root, encodeProof(p));
         assertEq(queue.getMerkleRoot(sourceBlock), root);
         assertEq(queue.genesisBlock(), sourceBlock);
+    }
+
+    function testMockCheckpointStillRequiresExactMmrWitness() public {
+        bytes32 root = fixtureHash(0, "queueRoot");
+        QueueProof memory p = customQueueProof(103, root);
+        uint128 count = uint128(fixtureUint(0, "validatorCount"));
+        bytes32 authorityRoot = fixtureHash(0, "authorityRoot");
+        BeefyClientMock mockClient = new BeefyClientMock(
+            client.sourceDomain(),
+            block.chainid,
+            address(queue),
+            client.mmrStartBlock(),
+            client.mmrStartBlock() + 1,
+            client.lastAuthenticatedSourceTimestampMs(),
+            BeefyClient.ValidatorSet(0, count, authorityRoot),
+            BeefyClient.ValidatorSet(1, count, authorityRoot)
+        );
+        mockClient.setCheckpoint(p.anchorBlock, p.anchorRoot, client.lastAuthenticatedSourceTimestampMs());
+        VaraQueueRootVerifier mockVerifier = new VaraQueueRootVerifier(mockClient, address(queue), block.chainid);
+        uint256 sourceBlock = p.leaf.parentNumber;
+        assertTrue(verifyAsQueue(mockVerifier, sourceBlock, root, encodeProof(p)));
+        assertFalse(verifyAsQueue(mockVerifier, sourceBlock + 1, root, encodeProof(p)));
+        p.items[0] ^= bytes32(uint256(1));
+        assertFalse(verifyAsQueue(mockVerifier, sourceBlock, root, encodeProof(p)));
+        p.items[0] ^= bytes32(uint256(1));
+        p.leaf.parentNumber++;
+        assertFalse(verifyAsQueue(mockVerifier, sourceBlock + 1, root, encodeProof(p)));
     }
 
     function testAuthenticatedHistoricalLeafBelowMmrStartIsRejected() public {
@@ -275,7 +273,7 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
             uint64(block.timestamp * 1000)
         );
         assertTrue(client.verifyMMRLeafProof(keccak256(leafBytes(p.leaf)), p.items, p.order));
-        assertFalse(verifyAsQueue(verifier, encodeProof(p), inputs(belowStart, root)));
+        assertFalse(verifyAsQueue(verifier, belowStart, root, encodeProof(p)));
         vm.expectRevert(
             abi.encodeWithSelector(IMessageQueue.BlockNumberBelowMinimum.selector, belowStart, client.mmrStartBlock())
         );
@@ -401,7 +399,7 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         QueueProof memory nextProof = customQueueProof(104, nextRoot);
         vm.warp(block.timestamp + 86_407);
         assertFalse(client.isLive());
-        vm.expectRevert(IMessageQueue.InvalidPlonkProof.selector);
+        vm.expectRevert(IMessageQueue.InvalidQueueRootProof.selector);
         queue.submitMerkleRoot(nextProof.leaf.parentNumber, nextRoot, encodeProof(nextProof));
         assertEq(queue.getMerkleRoot(sourceBlock), messageHash);
 
@@ -420,13 +418,13 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
             queueRoot: bytes32(uint256(0x1234))
         });
         assertEq(VaraBridgeMetadata.hash(historical), p.leaf.parachainHeadsRoot);
-        uint256[] memory publicInputs = inputs(p.leaf.parentNumber, bytes32(uint256(0x1234)));
-        assertTrue(verifyAsQueue(verifier, encodeProof(p), publicInputs));
+        bytes32 root = bytes32(uint256(0x1234));
+        assertTrue(verifyAsQueue(verifier, p.leaf.parentNumber, root, encodeProof(p)));
         p.order = uint256(1) << 255;
-        assertFalse(verifyAsQueue(verifier, encodeProof(p), publicInputs));
+        assertFalse(verifyAsQueue(verifier, p.leaf.parentNumber, root, encodeProof(p)));
         p.order = 0;
         p.items = new bytes32[](257);
-        assertFalse(verifyAsQueue(verifier, encodeProof(p), publicInputs));
+        assertFalse(verifyAsQueue(verifier, p.leaf.parentNumber, root, encodeProof(p)));
     }
 
     function testUnchangedQueueMaturityReceiverAndReplay() public {
@@ -452,12 +450,12 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
     function testStaleAnchorFailsThenSameSourceCanBeReproved() public {
         bytes32 root = bytes32(uint256(0x1234));
         QueueProof memory oldProof = customQueueProof(103, root);
-        assertTrue(verifyAsQueue(verifier, encodeProof(oldProof), inputs(oldProof.leaf.parentNumber, root)));
+        assertTrue(verifyAsQueue(verifier, oldProof.leaf.parentNumber, root, encodeProof(oldProof)));
         QueueProof memory newer = customQueueProof(104, root);
-        vm.expectRevert(IMessageQueue.InvalidPlonkProof.selector);
+        vm.expectRevert(IMessageQueue.InvalidQueueRootProof.selector);
         queue.submitMerkleRoot(oldProof.leaf.parentNumber, root, encodeProof(oldProof));
         assertEq(queue.getMerkleRoot(oldProof.leaf.parentNumber), bytes32(0));
-        assertTrue(verifyAsQueue(verifier, encodeProof(newer), inputs(newer.leaf.parentNumber, root)));
+        assertTrue(verifyAsQueue(verifier, newer.leaf.parentNumber, root, encodeProof(newer)));
         queue.submitMerkleRoot(newer.leaf.parentNumber, root, encodeProof(newer));
         assertEq(queue.getMerkleRoot(newer.leaf.parentNumber), root);
     }
@@ -545,7 +543,7 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         assertEq(queue.maxBlockNumber(), nextRootBlock);
     }
 
-    function testAdminUpgradeRetainsEscrowAndClaims() public {
+    function testTimelockedExpiryRecoveryRetainsEscrowAndClaims() public {
         CircleToken token = new CircleToken(address(this));
         IERC20Manager.TokenInfo[] memory tokens = new IERC20Manager.TokenInfo[](1);
         tokens[0] = IERC20Manager.TokenInfo(address(token), IERC20Manager.TokenType.Ethereum);
@@ -602,38 +600,58 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         assertEq(token.balanceOf(address(manager)), 20);
         assertTrue(queue.isProcessed(processed.nonce));
         assertFalse(queue.isProcessed(retained.nonce));
-        vm.prank(queue.governancePauser());
-        queue.pause();
 
-        MessageQueue replacement = new MessageQueue();
+        MessageQueue implementation = new MessageQueue();
         bytes32 adminRole = queue.DEFAULT_ADMIN_ROLE();
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), adminRole)
         );
-        queue.upgradeToAndCall(address(replacement), "");
+        queue.upgradeToAndCall(address(implementation), "");
 
         uint256 floor = queue.beefyRootMinimum();
-        vm.prank(queue.governanceAdmin());
-        queue.upgradeToAndCall(address(replacement), "");
+        vm.warp(vm.getBlockTimestamp() + client.MAX_SOURCE_AGE_MS() / 1000 + 1);
+        assertFalse(client.isLive());
+        VaraQueueRootVerifier replacement = migrationVerifier(queue);
+        VaraMessage memory unpause = VaraMessage(
+            704,
+            GovernancePauser(queue.governancePauser()).governance(),
+            queue.governancePauser(),
+            UnpauseProxyMessage(address(queue)).pack()
+        );
+        QueueProof memory recoveryProof = customQueueProofFor(
+            replacement.beefyClient(),
+            rootBlock + 1,
+            client.latestBeefyBlock() + 2,
+            Hasher.hash(unpause),
+            uint64(vm.getBlockTimestamp() * 1000),
+            uint64(vm.getBlockTimestamp() * 1000)
+        );
+        bytes memory data =
+            abi.encodeCall(MessageQueue.recoverBeefyVerifier, (IVerifier(address(verifier)), replacement, rootBlock));
+        vm.expectRevert(IMessageQueue.NotBeefyRecoveryTimelock.selector);
+        queue.recoverBeefyVerifier(verifier, replacement, rootBlock);
+        bytes32 salt = keccak256("expired-client-recovery");
+        recovery.schedule(address(queue), 0, data, bytes32(0), salt, recovery.getMinDelay());
+        vm.expectRevert();
+        recovery.execute(address(queue), 0, data, bytes32(0), salt);
+        assertEq(queue.verifier(), address(verifier));
+        assertFalse(queue.paused());
+        vm.warp(vm.getBlockTimestamp() + recovery.getMinDelay());
+        recovery.execute(address(queue), 0, data, bytes32(0), salt);
         assertTrue(queue.hasRole(adminRole, queue.governanceAdmin()));
-        assertFalse(queue.hasRole(adminRole, address(this)));
+        assertFalse(queue.hasRole(adminRole, address(recovery)));
         assertEq(queue.beefyRootMinimum(), floor);
-        assertEq(queue.verifier(), address(verifier));
-        assertEq(queue.genesisBlock(), rootBlock);
-        assertEq(queue.maxBlockNumber(), rootBlock);
-        MessageQueue nextImplementation = new MessageQueue();
-        vm.prank(queue.governanceAdmin());
-        queue.upgradeToAndCall(address(nextImplementation), "");
-        assertEq(queue.beefyRootMinimum(), floor);
-        assertEq(queue.verifier(), address(verifier));
+        assertEq(queue.verifier(), address(replacement));
         assertEq(queue.getMerkleRoot(rootBlock), root);
         assertEq(queue.getMerkleRootTimestampForBlock(rootBlock), rootTimestamp);
         assertTrue(queue.isProcessed(processed.nonce));
         assertFalse(queue.isProcessed(retained.nonce));
         assertEq(token.balanceOf(address(manager)), 20);
         assertTrue(queue.paused());
-        vm.prank(queue.governancePauser());
-        queue.unpause();
+        queue.submitMerkleRoot(recoveryProof.leaf.parentNumber, Hasher.hash(unpause), encodeProof(recoveryProof));
+        vm.warp(vm.getBlockTimestamp() + queue.PROCESS_PAUSER_MESSAGE_DELAY());
+        queue.processMessage(recoveryProof.leaf.parentNumber, 1, 0, unpause, new bytes32[](0));
+        assertFalse(queue.paused());
         siblings[0] = firstLeaf;
         queue.processMessage(rootBlock, 2, 1, retained, siblings);
         assertEq(token.balanceOf(address(manager)), 0);
@@ -646,6 +664,33 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         queue.processMessage(rootBlock, 2, 1, retained, siblings);
     }
 
+    function testRecoveryRejectsLiveOrStaleStateWithoutChangingVerifier() public {
+        VaraQueueRootVerifier replacement = migrationVerifier(queue);
+        customQueueProofFor(
+            replacement.beefyClient(),
+            104,
+            106,
+            bytes32(uint256(1)),
+            uint64(block.timestamp * 1000),
+            uint64(block.timestamp * 1000)
+        );
+        vm.expectRevert(IMessageQueue.InvalidBeefyRecovery.selector);
+        vm.prank(address(recovery));
+        queue.recoverBeefyVerifier(verifier, replacement, 0);
+        vm.warp(block.timestamp + client.MAX_SOURCE_AGE_MS() / 1000 + 1);
+        vm.expectRevert(IMessageQueue.InvalidBeefyRecovery.selector);
+        vm.prank(address(recovery));
+        queue.recoverBeefyVerifier(IVerifier(address(1)), replacement, 0);
+        vm.expectRevert(IMessageQueue.InvalidBeefyRecovery.selector);
+        vm.prank(address(recovery));
+        queue.recoverBeefyVerifier(verifier, replacement, 1);
+        vm.expectRevert(IMessageQueue.InvalidBeefyRecovery.selector);
+        vm.prank(address(recovery));
+        queue.recoverBeefyVerifier(verifier, replacement, 0);
+        assertEq(queue.verifier(), address(verifier));
+        assertFalse(queue.paused());
+    }
+
     function legacyQueue(string memory artifact, uint256 height) internal returns (MessageQueue legacy) {
         address implementation = vm.parseJsonAddress(artifact, ".implementation");
         bytes memory code = vm.parseJsonBytes(artifact, ".deployedBytecode");
@@ -655,15 +700,13 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
             address(
                 new ERC1967Proxy(
                     implementation,
-                    abi.encodeCall(
-                        MessageQueue.initialize,
-                        (
-                            IGovernance(queue.governanceAdmin()),
-                            IGovernance(queue.governancePauser()),
-                            address(this),
-                            new address[](0),
-                            IVerifier(address(new VerifierMock(true)))
-                        )
+                    abi.encodeWithSignature(
+                        "initialize(address,address,address,address[],address)",
+                        queue.governanceAdmin(),
+                        queue.governancePauser(),
+                        address(this),
+                        new address[](0),
+                        address(0xBEEF)
                     )
                 )
             )
@@ -673,7 +716,20 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         assertTrue(ok);
         assertTrue(legacy.isProcessed(836));
         VaraMessage memory message = VaraMessage(835, bytes32(uint256(77)), address(receiver), hex"abcd");
+        // Exact frozen verifier calldata is mocked only while registering the historical claim.
+        address historicalVerifier = address(0xBEEF);
+        vm.etch(historicalVerifier, hex"00");
+        bytes32 historicalRoot = Hasher.hash(message);
+        uint256[] memory historicalInputs = new uint256[](2);
+        historicalInputs[0] = uint256(historicalRoot) >> 64;
+        historicalInputs[1] = (uint256(uint64(uint256(historicalRoot))) << 128) | (height << 96);
+        vm.mockCall(
+            historicalVerifier,
+            abi.encodeWithSignature("safeVerifyProof(bytes,uint256[])", bytes(""), historicalInputs),
+            abi.encode(true)
+        );
         legacy.submitMerkleRoot(height, Hasher.hash(message), "");
+        vm.clearMockedCalls();
     }
 
     // Fixture authorities exercise contract migration, not a production BEEFY bootstrap.
@@ -687,7 +743,7 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
             address(target),
             start,
             start + 1,
-            uint64(block.timestamp * 1000),
+            uint64(vm.getBlockTimestamp() * 1000),
             BeefyClient.ValidatorSet(0, count, authorityRoot),
             BeefyClient.ValidatorSet(1, count, authorityRoot)
         );
@@ -700,7 +756,7 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         address implementation = address(new MessageQueue());
         bytes memory data = abi.encodeCall(
             MessageQueue.migrateToBeefy,
-            (IVerifier(legacy.verifier()), IVerifier(address(next)), legacy.maxBlockNumber(), floor)
+            (IVerifier(legacy.verifier()), IVerifier(address(next)), legacy.maxBlockNumber(), floor, address(recovery))
         );
         address admin = legacy.governanceAdmin();
         vm.record();
@@ -710,13 +766,15 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         for (uint256 i; i < writes.length; ++i) {
             assertTrue(
                 writes[i] == ERC1967Utils.IMPLEMENTATION_SLOT || writes[i] == initializableSlot
-                    || writes[i] == bytes32(uint256(5)) || writes[i] == bytes32(uint256(14)),
+                    || writes[i] == bytes32(uint256(5)) || writes[i] == bytes32(uint256(14))
+                    || writes[i] == bytes32(uint256(16)),
                 "migration overwrote legacy state"
             );
         }
         assertTrue(legacy.paused());
         assertEq(legacy.verifier(), address(next));
         assertEq(legacy.beefyRootMinimum(), floor);
+        assertEq(legacy.beefyRecoveryTimelock(), address(recovery));
         assertTrue(legacy.hasRole(legacy.DEFAULT_ADMIN_ROLE(), admin));
     }
 
@@ -760,7 +818,8 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         address admin = legacy.governanceAdmin();
         address implementation = address(new MessageQueue());
         IVerifier oldVerifier = IVerifier(legacy.verifier());
-        bytes memory validData = abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 90, 100));
+        bytes memory validData =
+            abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 90, 100, address(recovery)));
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), bytes32(0))
         );
@@ -785,16 +844,20 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         uint256[5] memory invalidFloors =
             [uint256(90), 99, 103, 90 + legacy.MAX_BLOCK_DISTANCE() + 1, uint256(type(uint32).max) + 1];
         for (uint256 i; i < invalidFloors.length; ++i) {
-            bytes memory data = abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 90, invalidFloors[i]));
+            bytes memory data = abi.encodeCall(
+                MessageQueue.migrateToBeefy, (oldVerifier, next, 90, invalidFloors[i], address(recovery))
+            );
             vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
             vm.prank(admin);
             legacy.upgradeToAndCall(implementation, data);
         }
-        bytes memory staleData = abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 91, 100));
+        bytes memory staleData =
+            abi.encodeCall(MessageQueue.migrateToBeefy, (oldVerifier, next, 91, 100, address(recovery)));
         vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
         vm.prank(admin);
         legacy.upgradeToAndCall(implementation, staleData);
-        staleData = abi.encodeCall(MessageQueue.migrateToBeefy, (IVerifier(address(1)), next, 90, 100));
+        staleData =
+            abi.encodeCall(MessageQueue.migrateToBeefy, (IVerifier(address(1)), next, 90, 100, address(recovery)));
         vm.expectRevert(IMessageQueue.InvalidBeefyMigration.selector);
         vm.prank(admin);
         legacy.upgradeToAndCall(implementation, staleData);
@@ -821,6 +884,10 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         string memory artifact = vm.readFile("test/fixtures/mainnet-legacy-queue.json");
         uint256 height = vm.parseJsonUint(artifact, ".ethereumBlock");
         vm.createSelectFork(rpc, height);
+        // Contracts created by setUp are not carried into the newly selected fork.
+        address[] memory proposers = new address[](1);
+        proposers[0] = address(this);
+        recovery = new TimelockController(1 hours, proposers, proposers, address(0));
         assertEq(block.chainid, 1);
         vm.roll(height + 1);
         assertEq(blockhash(height), vm.parseJsonBytes32(artifact, ".ethereumBlockHash"));

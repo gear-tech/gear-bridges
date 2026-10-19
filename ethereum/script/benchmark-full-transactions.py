@@ -55,7 +55,14 @@ def main():
 
         assert int(rpc("eth_chainId"), 16) == 31337
         assert "anvil" in rpc("web3_clientVersion").lower()
-        env = dict(os.environ, FOUNDRY_BROADCAST=str(output / "broadcast"))
+        # OpenZeppelin requires project-relative artifacts. Keep them inside the
+        # existing read allowlist, isolated by the selected evidence directory.
+        build_id = hashlib.sha256(str(output).encode()).hexdigest()
+        env = dict(os.environ, FOUNDRY_BROADCAST=str(output / "broadcast"),
+                   FOUNDRY_OUT=f"out/fulltx-{build_id}",
+                   FOUNDRY_CACHE_PATH=f"cache/fulltx-{build_id}",
+                   PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+                   BEEFY_BENCHMARK_OWNED_RUNNER="true")
 
         proxy_functions = {}
         for signature in ("submitMerkleRoot(uint256,bytes32,bytes)",
@@ -69,10 +76,16 @@ def main():
                 record["transaction"].get("input", "")[:10], "")
 
         def broadcast(name, signature=None, parameters=()):
+            # Bound synthetic fixture construction separately from mined transactions;
+            # Anvil keeps its normal block limit and receipts provide actual gas usage.
             command = ["forge", "script", "--offline", SCRIPT, "--rpc-url", rpc_url,
+                       "--gas-limit", "10000000000",
                        "--broadcast", "--slow", "--unlocked", "--sender", SENDER]
             if signature:
                 command += ["--sig", signature, *parameters]
+            else:
+                # ponytail: clean bridge build; reuse mixed build-info when upgrade validation supports it.
+                command += ["--force"]
             with (output / f"{name}.log").open("w") as log:
                 subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
             function = signature.split("(")[0] if signature else name

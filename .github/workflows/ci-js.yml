@@ -64,11 +64,6 @@ jobs:
           wget -c https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
           sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
 
-      - name: Install golang
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.20.1'
-
       # TODO: swicth back to `arduino/setup-protoc@v3` after it supports Node 24
       #       https://github.com/arduino/setup-protoc/pull/113
       - name: Install Protoc

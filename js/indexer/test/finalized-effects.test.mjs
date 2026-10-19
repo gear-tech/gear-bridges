@@ -361,6 +361,93 @@ test('Gear proof envelope and queued native outcome remain pending until exact s
   assert.equal((await store.find(ReceiptRelay)).length, 1);
 });
 
+test('decoded original native refunds remain distinct from delivery and bind the full receipt effect', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { Sails } = await import('sails-js');
+  const { SailsIdlParser } = await import('sails-js-parser');
+  const { Decoder } = await import('../lib/gear/codec.js');
+  const { handleVftManagerEvents } = await import('../lib/gear/handlers/vft-manager.js');
+  const parser = new SailsIdlParser();
+  await parser.init();
+  const sails = new Sails(parser).parseIdl(readFileSync(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8'));
+  const decoder = new Decoder(sails);
+  const deposit = { slot: '200', transaction_index: '2', log_index: '3', deposit_count: '1',
+    operation_id: hash('88'), eth_token_id: addr('66'), vara_token_id: hash('77'), sender: addr('55'),
+    receiver: hash('44'), amount: '10', native: true, child: hash('aa'), payout_child: hash('bb'), returned_value: '10' };
+  const dispatch = async (state, value, method = 'ReceiptDepositRefunded') => {
+    const eventType = sails.services.VftManager.events[method].type;
+    const payload = sails.registry.createType(`(String,String,${JSON.stringify(eventType)})`, ['VftManager', method, value]).toHex();
+    await handleVftManagerEvents({ state, decoder, service: decoder.service(payload), method: decoder.method(payload),
+      blockHeader: { height: 300, timestamp: block.timestamp }, log: quiet,
+      event: { args: { message: { id: hash('cc'), source: process.env.GEAR_VFT_MANAGER, destination: hash('00'), payload } },
+        extrinsic: { hash: hash('dd') } } });
+  };
+  for (const mismatch of ['none', 'source', 'wrapper', 'sender', 'recipient', 'amount', 'block', 'transaction', 'log',
+    'partial', 'over-return', 'native', 'operation', 'child', 'payout-child', 'same-child']) {
+    const store = memoryStore(), state = new GearState(), ctx = { store, log: quiet };
+    const transfer = new Transfer({ id: 'original', sourceNetwork: Network.Ethereum, blockNumber: 100n,
+      sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'), destination: hash('77'),
+      sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
+    await store.save(transfer);
+    await state.new(ctx);
+    state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: 2 });
+    await state.save();
+    const value = { ...deposit };
+    if (mismatch === 'source') value.eth_token_id = addr('99');
+    if (mismatch === 'wrapper') value.vara_token_id = hash('99');
+    if (mismatch === 'sender') value.sender = addr('99');
+    if (mismatch === 'recipient') value.receiver = hash('99');
+    if (mismatch === 'amount') value.amount = value.returned_value = '11';
+    if (mismatch === 'block') transfer.blockNumber = 101n;
+    if (mismatch === 'transaction') value.transaction_index = '4';
+    if (mismatch === 'log') value.log_index = '4';
+    if (mismatch === 'partial') value.returned_value = '9';
+    if (mismatch === 'over-return') value.returned_value = '11';
+    if (mismatch === 'native') value.native = false;
+    if (mismatch === 'operation') value.operation_id = hash('00');
+    if (mismatch === 'child') value.child = hash('00');
+    if (mismatch === 'payout-child') value.payout_child = hash('00');
+    if (mismatch === 'same-child') value.payout_child = value.child;
+    await state.new(ctx);
+    if (['partial', 'over-return', 'native', 'operation', 'child', 'payout-child', 'same-child'].includes(mismatch)) {
+      await assert.rejects(dispatch(state, value), /HOLD: native refund/);
+      assert.equal(transfer.status, Status.Bridging, mismatch);
+      assert.equal((await store.find(ReceiptSettlement)).length, 0, mismatch);
+      continue;
+    }
+    await dispatch(state, value);
+    await state.save();
+    const [settlement] = await store.find(ReceiptSettlement);
+    if (mismatch !== 'none') {
+      assert.equal(transfer.status, Status.Bridging, mismatch);
+      assert.equal(settlement.matched, false, mismatch);
+      continue;
+    }
+    assert.equal(transfer.status, 'Refunded');
+    assert.notEqual(transfer.status, Status.Completed);
+    assert.equal(transfer.receiptSlot, 200n);
+    assert.equal(transfer.completedAtBlock, 300n);
+    assert.equal(transfer.completedAtTxHash, hash('dd'));
+    assert.equal(settlement.matched, true);
+    assert.equal(settlement.deposit.outcome, 'Refunded');
+    for (const field of ['operation_id', 'vara_token_id', 'child', 'payout_child', 'receiver']) {
+      assert.equal(settlement.deposit[field], deposit[field], field);
+    }
+    assert.equal(BigInt(settlement.deposit.returned_value), 10n);
+    // An authenticated terminal record cannot become delivery or another payout operation.
+    for (const change of [{ operation_id: hash('99') }, { child: hash('99') }, { payout_child: hash('99') }]) {
+      await state.new(ctx);
+      await dispatch(state, { ...deposit, ...change });
+      await assert.rejects(state.save(), /conflicting receipt deposit/);
+      assert.equal(transfer.status, Status.Refunded);
+    }
+    await state.new(ctx);
+    await dispatch(state, deposit, 'ReceiptDepositSettled');
+    await assert.rejects(state.save(), /conflicting receipt deposit/);
+    assert.equal(transfer.status, Status.Refunded);
+  }
+});
+
 test('bounded pending pages cycle and match authenticated tuples arriving in later batches', async () => {
   const store = memoryStore();
   const deposit = { slot: '200', transaction_index: '2', log_index: '3', deposit_count: '1',

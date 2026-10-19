@@ -1,17 +1,14 @@
 use clap::{Args, Parser, Subcommand};
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 mod common;
 
 pub use common::{
     BeaconRpcArgs, EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, GearArgs,
-    GearSignerArgs, GenesisConfigArgs, PrometheusArgs, ProofStorageArgs,
+    GearSignerArgs, PrometheusArgs,
 };
 
-use crate::cli::common::{BlockStorageArgs, RelayerHttpArgs};
-
 pub const DEFAULT_COUNT_CONFIRMATIONS: u64 = 8;
-pub const DEFAULT_COUNT_THREADS: usize = 24;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -24,8 +21,6 @@ pub struct Cli {
 #[allow(clippy::enum_variant_names)]
 #[derive(Subcommand)]
 pub enum CliCommands {
-    /// Start core protocol gear to ethereum relayer
-    GearEthCore(GearEthCoreArgs),
     /// Start core protocol ethereum to gear relayer
     EthGearCore(EthGearCoreArgs),
 
@@ -47,207 +42,6 @@ pub enum CliCommands {
 
     /// Fetch relayed merkle roots to Ethereum
     FetchMerkleRoots(FetchMerkleRootsArgs),
-
-    /// Regenerate PlonkVerifier.sol
-    UpdateVerifierSol(UpdateVerifierSolArgs),
-}
-
-#[derive(Args)]
-pub struct UpdateVerifierSolArgs {
-    #[clap(flatten)]
-    pub gear_args: GearArgs,
-
-    #[arg(long)]
-    pub block_number: Option<u32>,
-
-    #[arg(
-        long,
-        help = format!("Count of worker threads for generating signing proofs.\n\nNote that each thread allocates memory, which can lead to an out-of-memory error with a large number of threads.\n\nDefault is: {DEFAULT_COUNT_THREADS}. The value is safe to run the relayer on a machine with 96 CPU cores and 256GiB of RAM."),
-        value_parser = parse_thread_count,
-    )]
-    pub thread_count: Option<ThreadCount>,
-}
-
-#[derive(Args)]
-pub struct GearEthCoreArgs {
-    /// Path to gear-eth-core TOML config. When present, per-relayer settings are read from this file.
-    #[arg(long = "config", env = "RELAYER_CONFIG")]
-    pub config: Option<PathBuf>,
-
-    #[clap(flatten)]
-    pub gear_args: GearArgs,
-    #[clap(flatten)]
-    pub ethereum_args: GearEthCoreEthereumSignerArgs,
-    #[clap(flatten)]
-    pub genesis_config_args: GearEthCoreGenesisConfigArgs,
-    #[clap(flatten)]
-    pub prometheus_args: PrometheusArgs,
-    #[clap(flatten)]
-    pub proof_storage_args: ProofStorageArgs,
-    #[clap(flatten)]
-    pub block_storage_args: BlockStorageArgs,
-
-    #[arg(
-        long,
-        help = "How many confirmations until merkle-root is considered relayed. Default is: {DEFAULT_COUNT_CONFIRMATIONS}"
-    )]
-    pub confirmations_merkle_root: Option<u64>,
-    /// Authority set id to start relaying from. If not specified equals to one from the latest finalized block
-    #[arg(long, env = "START_AUTHORITY_SET_ID")]
-    pub start_authority_set_id: Option<u64>,
-
-    /// An address of bridging payment contract for priority processing of merkle-roots when needed.
-    #[arg(long, env = "BRIDGING_PAYMENT_ADDRESS")]
-    pub bridging_payment_address: Option<String>,
-    #[arg(
-        help = "Spike window used to cutoff old events to not trigger false spikes",
-        value_parser = humantime::parse_duration, default_value="15m")]
-    pub spike_window: Duration,
-    #[arg(
-        help = "Timeout after which we start processing events",
-        value_parser = humantime::parse_duration, default_value="30m"
-    )]
-    pub spike_timeout: Duration,
-    #[arg(
-        help = "Timeout after which we start processing events if there is at least one priority event",
-        value_parser = humantime::parse_duration, default_value="10m"
-    )]
-    pub priority_spike_timeout: Duration,
-
-    #[arg(
-        help = "After threshold is reached we enter \"spike\" mode
-        where events are processed immediately",
-        default_value = "8"
-    )]
-    pub spike_threshold: usize,
-
-    #[arg(
-        help = "Interval at which we save the state to disk",
-        value_parser = humantime::parse_duration, default_value="30m"
-    )]
-    pub save_interval: Duration,
-    #[arg(
-        help = "Interval at which we check for spike or timeout",
-        value_parser = humantime::parse_duration, default_value="30s"
-    )]
-    pub check_interval: Duration,
-
-    /// Authorization token for web-server
-    #[arg(long, env)]
-    pub web_server_token: Option<String>,
-
-    /// Socket address for web-server
-    #[arg(long, env, default_value = "127.0.0.1:8443")]
-    pub web_server_address: String,
-
-    #[arg(
-        long,
-        help = format!("Count of worker threads for generating signing proofs.\n\nNote that each thread allocates memory, which can lead to an out-of-memory error with a large number of threads.\n\nDefault is: {DEFAULT_COUNT_THREADS}. The value is safe to run the relayer on a machine with 96 CPU cores and 256GiB of RAM."),
-        value_parser = parse_thread_count,
-    )]
-    pub thread_count: Option<ThreadCount>,
-
-    #[arg(
-        long,
-        help = "Critical threshold after which relayer will force generate merkle-root proof",
-        value_parser = parse_critical_threshold,
-        default_value = "14h"
-    )]
-    pub critical_threshold: CriticalThreshold,
-
-    #[arg(
-        long,
-        help = "Startup sync strategy: critical-threshold (default), skip, or blocks",
-        value_parser = parse_startup_sync_strategy,
-        default_value = "critical-threshold"
-    )]
-    pub startup_sync_strategy: StartupSyncStrategy,
-
-    #[arg(
-        long,
-        value_delimiter = ',',
-        help = "Block numbers to sync at startup (used when startup-sync-strategy=blocks)"
-    )]
-    pub startup_sync_blocks: Vec<u32>,
-}
-
-#[derive(Args)]
-pub struct GearEthCoreEthereumSignerArgs {
-    /// Address of the ethereum endpoint
-    #[arg(long = "ethereum-endpoint", env = "ETH_RPC")]
-    pub ethereum_endpoint: Option<String>,
-
-    /// Number of retries for the ethereum endpoint
-    #[arg(long = "eth-max-retries", env = "ETH_RPC_MAX_RETRIES")]
-    pub max_retries: Option<u32>,
-
-    /// Interval in milliseconds between retries for the ethereum endpoint
-    #[arg(long = "eth-retry-interval-ms", env = "ETH_RPC_RETRY_INTERVAL_MS")]
-    pub retry_interval_ms: Option<u64>,
-
-    /// Max fee per gas (in wei) for transactions sent to Ethereum.
-    #[arg(long = "max-fee-per-gas", env = "ETH_MAX_FEE_PER_GAS")]
-    pub max_fee_per_gas: Option<u128>,
-
-    /// Max priority fee per gas (in wei) for transactions sent to Ethereum.
-    #[arg(
-        long = "max-priority-fee-per-gas",
-        env = "ETH_MAX_PRIORITY_FEE_PER_GAS"
-    )]
-    pub max_priority_fee_per_gas: Option<u128>,
-
-    /// Ethereum address of message queue contract
-    #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
-    pub mq_address: Option<String>,
-
-    /// Private key for fee payer
-    #[arg(long = "eth-fee-payer", env = "ETH_FEE_PAYER")]
-    pub eth_fee_payer: Option<String>,
-}
-
-#[derive(Args)]
-pub struct GearEthCoreGenesisConfigArgs {
-    /// Authority set hash used in genesis config
-    #[arg(long, env = "GENESIS_CONFIG_AUTHORITY_SET_HASH")]
-    pub authority_set_hash: Option<String>,
-    /// Authority set id used in genesis config
-    #[arg(long, env = "GENESIS_CONFIG_AUTHORITY_SET_ID")]
-    pub authority_set_id: Option<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub enum CriticalThreshold {
-    Timeout(Duration),
-    AuthoritySetChange,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StartupSyncStrategy {
-    CriticalThreshold,
-    SkipCatchUp,
-    Blocks,
-}
-
-pub fn parse_critical_threshold(s: &str) -> anyhow::Result<CriticalThreshold> {
-    if s.trim().eq_ignore_ascii_case("authority_set_change") {
-        return Ok(CriticalThreshold::AuthoritySetChange);
-    }
-
-    Ok(CriticalThreshold::Timeout(humantime::parse_duration(s)?))
-}
-
-pub fn parse_startup_sync_strategy(s: &str) -> anyhow::Result<StartupSyncStrategy> {
-    let value = s.trim().to_ascii_lowercase();
-    match value.as_str() {
-        "critical-threshold" | "critical_threshold" | "critical" => {
-            Ok(StartupSyncStrategy::CriticalThreshold)
-        }
-        "skip" | "skip-catchup" | "skip_catchup" => Ok(StartupSyncStrategy::SkipCatchUp),
-        "blocks" | "block" => Ok(StartupSyncStrategy::Blocks),
-        _ => Err(anyhow::anyhow!(
-            "Invalid startup sync strategy: {s}. Expected one of: critical-threshold, skip, blocks"
-        )),
-    }
 }
 
 #[derive(Args)]
@@ -478,9 +272,6 @@ pub struct KillSwitchArgs {
     pub from_eth_block: Option<u64>,
 
     #[clap(flatten)]
-    pub relayer_http_args: RelayerHttpArgs,
-
-    #[clap(flatten)]
     pub gear_args: GearArgs,
 
     #[clap(flatten)]
@@ -536,80 +327,5 @@ fn parse_fee_payers(s: &str) -> anyhow::Result<FeePayers> {
         Err(anyhow::anyhow!("Fee payers cannot be empty"))
     } else {
         Ok(FeePayers::ExcludedIds(ids))
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum ThreadCount {
-    /// User explicitly requests to set count of worker threads automatically.
-    Auto,
-    /// Count of worker threads set manually.
-    Manual(usize),
-}
-
-impl From<ThreadCount> for Option<usize> {
-    fn from(value: ThreadCount) -> Self {
-        match value {
-            ThreadCount::Auto => None,
-            ThreadCount::Manual(count) => Some(count),
-        }
-    }
-}
-
-fn parse_thread_count(s: &str) -> anyhow::Result<ThreadCount> {
-    if s.trim().eq_ignore_ascii_case("auto") {
-        return Ok(ThreadCount::Auto);
-    }
-
-    Ok(s.parse::<usize>().map(ThreadCount::Manual)?)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::EffectiveConfig;
-
-    #[test]
-    fn gear_eth_core_config_mode_parses_without_legacy_required_flags() {
-        let cli = Cli::try_parse_from([
-            "relayer",
-            "gear-eth-core",
-            "--config",
-            "relayer/config.toml.example",
-        ])
-        .unwrap();
-
-        match cli.command {
-            CliCommands::GearEthCore(args) => {
-                assert_eq!(
-                    args.config.unwrap(),
-                    PathBuf::from("relayer/config.toml.example")
-                );
-            }
-            _ => panic!("expected gear-eth-core command"),
-        }
-    }
-
-    #[test]
-    fn gear_eth_core_no_config_mode_keeps_runtime_required_fields() {
-        let cli = Cli::try_parse_from([
-            "relayer",
-            "gear-eth-core",
-            "--config",
-            "relayer/config.toml.example",
-        ])
-        .unwrap();
-
-        let CliCommands::GearEthCore(mut args) = cli.command else {
-            panic!("expected gear-eth-core command");
-        };
-        args.config = None;
-        args.ethereum_args.ethereum_endpoint = None;
-
-        let err = match EffectiveConfig::from_cli(&args) {
-            Ok(_) => panic!("legacy mode unexpectedly accepted missing Ethereum endpoint"),
-            Err(err) => err.to_string(),
-        };
-        assert!(err.contains("--ethereum-endpoint/ETH_RPC"));
     }
 }

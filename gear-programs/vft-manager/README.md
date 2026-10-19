@@ -35,11 +35,22 @@ order. Reserved keys are not migration records; use `ReceiptStatus` and
 is retryable for the same receipt. A successful transport reply containing
 `false` is quarantined, not redispatched.
 
-Native redemption requires configuring the manager's native wrapper and the
-wrapper's escrow manager while both are paused. A queued mailbox payout is not
-settled until the original value is claimed and its reply is reconciled. Rejected
-payouts retain their original child and returned native reserve: reconciliation
-and receipt replay must neither re-mint tokens nor enqueue a replacement payout.
+Native redemption requires configuring the manager's zero-VFT-minimum native
+wrapper and the wrapper's escrow manager while both are paused. Configuration
+rejects a nonzero minimum; it does not silently repair previously reaped escrow.
+A queued mailbox payout is not settled until its original reply is authenticated.
+An original recipient error returning the exact full payout atomically credits
+that original Gear recipient with exactly backed wrapped VARA. Reconciliation
+records `ReceiptDepositOutcome::Refunded`, not native `Settled`/`Delivered`, and
+releases the completed receipt reservation. Refunds emit the distinct
+`ReceiptDepositRefunded` event, never the native-delivery settlement or
+`BridgingAccepted` event. It binds the original receipt/log, operation, wrapper,
+recipient, amount, manager child, payout child and full returned backing. The
+finalized indexer/history outcome is `Refunded` (wrapped), not native delivered.
+Duplicate callbacks, reconciliation and receipt
+replay cannot mint again or enqueue another native payout. Partial, ambiguous
+and legacy `Returned` evidence stays held. Fully resolved wrapped refunds no
+longer veto manager/wrapper-manager cutover.
 
 ### Retained-program cutover
 

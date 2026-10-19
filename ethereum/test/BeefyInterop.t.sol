@@ -406,8 +406,10 @@ abstract contract BeefyFixtureTest is Test {
     }
 
     function stateHash(BeefyClient client) internal view returns (bytes32) {
-        (uint128 current, uint128 currentLength, bytes32 currentRoot,) = client.currentValidatorSet();
-        (uint128 next, uint128 nextLength, bytes32 nextRoot,) = client.nextValidatorSet();
+        (uint128 current, uint128 currentLength, bytes32 currentRoot, Uint16Array memory currentCounters) =
+            client.currentValidatorSet();
+        (uint128 next, uint128 nextLength, bytes32 nextRoot, Uint16Array memory nextCounters) =
+            client.nextValidatorSet();
         return keccak256(
             abi.encode(
                 client.latestMMRRoot(),
@@ -416,9 +418,11 @@ abstract contract BeefyFixtureTest is Test {
                 current,
                 currentLength,
                 currentRoot,
+                currentCounters,
                 next,
                 nextLength,
-                nextRoot
+                nextRoot,
+                nextCounters
             )
         );
     }
@@ -431,13 +435,32 @@ abstract contract BeefyFixtureTest is Test {
         uint64 historicalTimestamp,
         uint64 freshnessTimestamp
     ) internal returns (QueueProof memory p) {
+        return customQueueProofForEpoch(
+            targetClient,
+            sourceBlock,
+            anchorBlock,
+            queueRoot,
+            historicalTimestamp,
+            freshnessTimestamp,
+            uint64(vm.parseJsonUint(fixtures, ".cases[0].queueId"))
+        );
+    }
+
+    function customQueueProofForEpoch(
+        BeefyClient targetClient,
+        uint32 sourceBlock,
+        uint64 anchorBlock,
+        bytes32 queueRoot,
+        uint64 historicalTimestamp,
+        uint64 freshnessTimestamp,
+        uint64 queueId
+    ) internal returns (QueueProof memory p) {
         uint64 authenticatedTimestamp = targetClient.lastAuthenticatedSourceTimestampMs();
         if (freshnessTimestamp <= authenticatedTimestamp) freshnessTimestamp = authenticatedTimestamp + 1;
         p = queueProof(0);
         p.leaf.parentNumber = sourceBlock;
         bytes32 bridgeDomain = targetClient.bridgeDomain();
-        uint64 queueId = uint64(vm.parseJsonUint(fixtures, ".cases[0].queueId"));
-        uint64 freshnessQueueId = uint64(vm.parseJsonUint(fixtures, ".cases[0].freshnessProof.queueId"));
+        uint64 freshnessQueueId = queueId + 1;
         bytes32 freshnessRoot = fixtureHash(0, "freshnessProof.queueRoot");
         VaraBridgeMetadata.Snapshot memory historicalSnapshot = VaraBridgeMetadata.Snapshot({
             version: 2,
@@ -478,7 +501,20 @@ abstract contract BeefyFixtureTest is Test {
         p.items = new bytes32[](1);
         p.items[0] = freshnessLeafHash;
         p.order = 0;
-        BeefyClient.Commitment memory c = commitment(uint32(anchorBlock), 0, p.anchorRoot);
+        _submitQueueCheckpoint(
+            targetClient, anchorBlock, p.anchorRoot, freshnessLeaf, freshnessSnapshot, historicalLeafHash
+        );
+    }
+
+    function _submitQueueCheckpoint(
+        BeefyClient targetClient,
+        uint64 anchorBlock,
+        bytes32 anchorRoot,
+        BeefyClient.MMRLeaf memory freshnessLeaf,
+        VaraBridgeMetadata.Snapshot memory freshnessSnapshot,
+        bytes32 historicalLeafHash
+    ) internal virtual {
+        BeefyClient.Commitment memory c = commitment(uint32(anchorBlock), 0, anchorRoot);
         bytes32[] memory freshnessProof = new bytes32[](1);
         freshnessProof[0] = historicalLeafHash;
         targetClient.submitFiatShamir(
@@ -508,7 +544,7 @@ contract BeefyInteropTest is BeefyFixtureTest {
     }
 
     function testSharedSignedFixturesAndEncodings() public {
-        assertEq(vm.parseJsonUint(fixtures, ".schemaVersion"), 3);
+        assertEq(vm.parseJsonUint(fixtures, ".schemaVersion"), 4);
         vm.pauseGasMetering();
         for (uint256 i; i < caseCount(); i++) {
             QueueProof memory p = queueProof(i);
@@ -1388,6 +1424,7 @@ contract BeefyInteropTest is BeefyFixtureTest {
                         vm.prevrandao(bytes32(attempt + 1));
                         client.commitPrevRandao(client.computeCommitmentHash(c));
                     }
+                    beforeState = stateHash(client);
                     vm.expectRevert();
                     finishUpdate(mode == 1, client, c, bits, one, leaf, s, new bytes32[](0), 0);
                     assertEq(stateHash(client), beforeState);
@@ -1429,8 +1466,8 @@ contract BeefyInteropTest is BeefyFixtureTest {
             BeefyClient.ValidatorProof[] memory proofs = selectedProofs(client, c, index, 3, "");
             uint256[] memory bits = allSigners(index);
             bytes32 digest = client.computeCommitmentHash(c);
-            bytes32 beforeState = stateHash(client);
             client.submitInitial(c, bits, proofs[0]);
+            bytes32 beforeState = stateHash(client);
             vm.roll(block.number + offsets[i]);
             vm.prevrandao(bytes32(uint256(1)));
             if (offsets[i] == 127) vm.expectRevert(BeefyClient.WaitPeriodNotOver.selector);
@@ -1501,6 +1538,80 @@ contract BeefyInteropTest is BeefyFixtureTest {
             assertEq(nextCounters.length, 256);
             assertEq(nextCounters.data.length, 16);
         }
+    }
+
+    function testDistinctAuthorityTreesHandoverFiatShamir() public {
+        _distinctAuthorityTreesHandover(false);
+    }
+
+    function testDistinctAuthorityTreesHandoverInteractive() public {
+        _distinctAuthorityTreesHandover(true);
+    }
+
+    function _distinctAuthorityTreesHandover(bool interactive) internal {
+        vm.pauseGasMetering();
+        uint256[3] memory indices = [
+            caseIndex("synthetic-authorities-59"),
+            caseIndex("synthetic-authorities-150"),
+            caseIndex("synthetic-authorities-256")
+        ];
+        uint256 first = indices[0];
+        vm.warp(uint256(bootstrapTimestamp(first)) / 1000);
+        uint64 start = uint64(fixtureUint(first, "mmrStartBlock"));
+        BeefyClient client = new BeefyClient(
+            fixtureHash(first, "sourceDomain"),
+            block.chainid,
+            vm.parseJsonAddress(fixtures, fixturePath(first, "destinationQueue")),
+            start,
+            start + 1,
+            bootstrapTimestamp(first),
+            BeefyClient.ValidatorSet(0, 59, fixtureHash(first, "authorityRoot")),
+            BeefyClient.ValidatorSet(1, 150, fixtureHash(indices[1], "authorityRoot"))
+        );
+        VaraBridgeMetadata.Snapshot memory s = snapshot(first, true);
+        vm.warp(uint256(s.sourceTimestampMs) / 1000);
+        for (uint64 set; set < 3; set++) {
+            uint256 signingIndex = indices[set];
+            uint256 nextIndex = indices[(set + 1) % 3];
+            BeefyClient.MMRLeaf memory leaf = leafForSnapshot(
+                s,
+                uint32(client.latestBeefyBlock()),
+                set + 1,
+                uint32(fixtureUint(nextIndex, "validatorCount")),
+                fixtureHash(nextIndex, "authorityRoot")
+            );
+            BeefyClient.Commitment memory c =
+                commitment(signingIndex, leaf.parentNumber + 1, set, keccak256(leafBytes(leaf)));
+            BeefyClient.ValidatorProof[] memory proofs = prepareProofs(client, c, signingIndex, interactive);
+            finishUpdate(interactive, client, c, allSigners(signingIndex), proofs, leaf, s, new bytes32[](0), 0);
+            (uint128 current, uint128 count, bytes32 root,) = client.currentValidatorSet();
+            assertEq(current, set);
+            assertEq(count, fixtureUint(signingIndex, "validatorCount"));
+            assertEq(root, fixtureHash(signingIndex, "authorityRoot"));
+            assertEq(client.latestMMRRoot(), keccak256(leafBytes(leaf)));
+            (uint128 next, uint128 nextCount, bytes32 nextRoot,) = client.nextValidatorSet();
+            assertEq(next, set + 1);
+            assertEq(nextCount, fixtureUint(nextIndex, "validatorCount"));
+            assertEq(nextRoot, fixtureHash(nextIndex, "authorityRoot"));
+        }
+
+        BeefyClient.MMRLeaf memory obsoleteLeaf =
+            leafForSnapshot(s, uint32(client.latestBeefyBlock()), 3, 59, fixtureHash(first, "authorityRoot"));
+        BeefyClient.Commitment memory obsolete =
+            commitment(indices[1], obsoleteLeaf.parentNumber + 1, 1, keccak256(leafBytes(obsoleteLeaf)));
+        BeefyClient.ValidatorProof[] memory obsoleteProofs = selectedProofs(client, obsolete, indices[1], 1, "");
+        uint256[] memory obsoleteBits = allSigners(indices[1]);
+        bytes32 beforeState = stateHash(client);
+        bytes32 beforeTicket = ticketHash(client, obsolete);
+        vm.expectRevert(BeefyClient.InvalidCommitment.selector);
+        if (interactive) {
+            client.submitInitial(obsolete, obsoleteBits, obsoleteProofs[0]);
+        } else {
+            client.submitFiatShamir(obsolete, obsoleteBits, obsoleteProofs, obsoleteLeaf, s, new bytes32[](0), 0);
+        }
+        assertEq(stateHash(client), beforeState);
+        assertEq(ticketHash(client, obsolete), beforeTicket);
+        vm.resumeGasMetering();
     }
 }
 

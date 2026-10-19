@@ -134,7 +134,12 @@ pub(super) fn begin(service: &mut VftManager, destination: ActorId, boundary: u6
 }
 
 // Authenticate exact Sails 0.9.2 service/route framing for bounded cross-program queries.
-async fn query<T: Decode>(target: ActorId, service: &str, route: &str, config: &Config) -> T {
+pub(super) async fn query<T: Decode>(
+    target: ActorId,
+    service: &str,
+    route: &str,
+    config: &Config,
+) -> T {
     let payload = (service, route).encode();
     let bytes = msg::send_bytes_with_gas_for_reply(
         target,

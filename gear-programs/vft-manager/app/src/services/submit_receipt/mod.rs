@@ -42,6 +42,7 @@ pub(super) enum DepositStatus {
     InFlight,
     NativeQueued,
     Processed,
+    Refunded,
     Retryable(Error),
     Ambiguous(Error),
 }
@@ -69,6 +70,8 @@ pub enum ReceiptDepositOutcome {
     Rejected,
     Unknown,
     NativeQueued,
+    /// Original native payout rejected; exact backed wrapped value credited.
+    Refunded,
 }
 
 #[derive(Clone, Debug, Encode, Decode, TypeInfo, PartialEq, Eq)]
@@ -109,6 +112,7 @@ pub fn receipt_deposits(key: (u64, u64)) -> Vec<ReceiptDepositState> {
                             DepositStatus::Pending => ReceiptDepositOutcome::Pending,
                             DepositStatus::InFlight => ReceiptDepositOutcome::InFlight,
                             DepositStatus::Processed => ReceiptDepositOutcome::Settled,
+                            DepositStatus::Refunded => ReceiptDepositOutcome::Refunded,
                             DepositStatus::Retryable(_) => ReceiptDepositOutcome::Rejected,
                             DepositStatus::Ambiguous(_) => ReceiptDepositOutcome::Unknown,
                             DepositStatus::NativeQueued => ReceiptDepositOutcome::NativeQueued,
@@ -149,6 +153,57 @@ pub(super) fn emit_settled(key: (u64, u64), log: u64) {
             native: d.native,
         })
         .expect("Failed to emit settled deposit");
+}
+
+#[allow(unused_variables)]
+pub(super) fn emit_refunded(
+    key: (u64, u64),
+    log: u64,
+    payout_child: MessageId,
+    returned_value: u128,
+) {
+    let p = receipt_progress_mut()
+        .get(&key)
+        .expect("Original receipt missing");
+    let progress = p
+        .deposits
+        .iter()
+        .find(|p| p.deposit.log_index == log)
+        .expect("Original deposit missing");
+    let d = &progress.deposit;
+    assert!(
+        d.native && matches!(progress.status, DepositStatus::Refunded),
+        "Not a wrapped refund"
+    );
+    assert_eq!(
+        U256::from(returned_value),
+        d.amount,
+        "Incomplete returned backing"
+    );
+    let child = progress.child.expect("Original wrapper child missing");
+    assert!(
+        !payout_child.is_zero() && payout_child != child,
+        "Invalid original payout child"
+    );
+    #[cfg(target_arch = "wasm32")]
+    EventEmitter::<super::Event>::new(&[40, 86, 102, 116, 77, 97, 110, 97, 103, 101, 114])
+        .emit_event(super::Event::ReceiptDepositRefunded {
+            slot: key.0,
+            transaction_index: key.1,
+            log_index: log,
+            deposit_count: p.deposits.len() as u64,
+            operation_id: d.operation_id,
+            eth_token_id: d.eth_token_id,
+            vara_token_id: d.token_id,
+            sender: d.sender,
+            receiver: d.receiver,
+            amount: d.amount,
+            native: true,
+            child,
+            payout_child,
+            returned_value,
+        })
+        .expect("Failed to emit wrapped refund");
 }
 
 fn receipt_progress_mut() -> &'static mut BTreeMap<(u64, u64), ReceiptProgress> {
@@ -261,7 +316,7 @@ pub async fn reconcile_receipt(key: (u64, u64), config: &Config) -> Result<Recei
         !p.deposits.is_empty()
             && p.deposits
                 .iter()
-                .all(|p| matches!(p.status, DepositStatus::Processed))
+                .all(|p| matches!(p.status, DepositStatus::Processed | DepositStatus::Refunded))
     }) {
         complete_transaction(key);
     }
@@ -295,9 +350,12 @@ pub(super) fn is_quiescent() -> bool {
 pub fn complete_transaction(key: (u64, u64)) {
     if !receipt_progress_mut().get(&key).is_some_and(|p| {
         !p.deposits.is_empty()
-            && p.deposits
-                .iter()
-                .all(|log| matches!(log.status, DepositStatus::Processed))
+            && p.deposits.iter().all(|log| {
+                matches!(
+                    log.status,
+                    DepositStatus::Processed | DepositStatus::Refunded
+                )
+            })
     }) {
         return;
     }
@@ -562,7 +620,7 @@ pub async fn submit_receipt(
             return Err(Error::Internal("Receipt log progress is missing".into()));
         };
         match &status {
-            DepositStatus::Processed => continue,
+            DepositStatus::Processed | DepositStatus::Refunded => continue,
             DepositStatus::Ambiguous(error) => {
                 ambiguous_error.get_or_insert(error.clone());
                 continue;
@@ -606,7 +664,7 @@ pub async fn submit_receipt(
                 Some(DepositStatus::Ambiguous(error)) => {
                     ambiguous_error.get_or_insert(error);
                 }
-                Some(DepositStatus::Processed) => {}
+                Some(DepositStatus::Processed | DepositStatus::Refunded) => {}
                 Some(DepositStatus::NativeQueued) if error == Error::NativeSettlementPending => {}
                 Some(DepositStatus::NativeQueued) => {
                     ambiguous_error.get_or_insert(error.clone());
@@ -626,14 +684,18 @@ pub async fn submit_receipt(
     if deposits.iter().any(|deposit| {
         !matches!(
             deposit_status(key, deposit.log_index),
-            Some(DepositStatus::Processed)
+            Some(DepositStatus::Processed | DepositStatus::Refunded)
         )
     }) {
         release_receipt_lease(key, generation);
         if deposits.iter().all(|deposit| {
             matches!(
                 deposit_status(key, deposit.log_index),
-                Some(DepositStatus::Processed | DepositStatus::NativeQueued)
+                Some(
+                    DepositStatus::Processed
+                        | DepositStatus::Refunded
+                        | DepositStatus::NativeQueued
+                )
             )
         }) {
             return Err(Error::NativeSettlementPending);

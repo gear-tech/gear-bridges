@@ -2,12 +2,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 pragma solidity ^0.8.37;
 
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Test} from "forge-std/Test.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
 import {BeefyHoodi} from "script/BeefyHoodi.s.sol";
 import {BeefyLocal} from "script/BeefyLocal.s.sol";
 import {BeefyTokens} from "script/BeefyTokens.s.sol";
 import {DeploymentScript} from "script/Deployment.s.sol";
+import {ERC20Manager} from "src/ERC20Manager.sol";
+import {GovernanceAdmin} from "src/GovernanceAdmin.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
@@ -17,11 +23,52 @@ import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
+import {
+    GovernancePacker,
+    PauseProxyMessage,
+    UnpauseProxyMessage,
+    UpgradeProxyMessage
+} from "src/libraries/packing/GovernancePacker.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
+import {Base} from "test/Base.sol";
 import {BaseConstants} from "test/BaseConstants.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 
-contract DeploymentScriptTest is Test {
+contract DeploymentScriptTest is BeefyFixtureTest {
+    function setUp() public {
+        _resetDeploymentEnvironment();
+        fixtures = vm.readFile("test/fixtures/beefy-interop.json");
+        address[] memory proposers = new address[](1);
+        proposers[0] = address(this);
+        TimelockController recovery = new TimelockController(1 hours, proposers, proposers, address(0));
+        vm.setEnv("BEEFY_RECOVERY_TIMELOCK", vm.toString(address(recovery)));
+    }
+
+    function _resetDeploymentEnvironment() private {
+        string[11] memory keys = [
+            "BEEFY_SOURCE_DOMAIN",
+            "BEEFY_BRIDGE_DOMAIN",
+            "BEEFY_MMR_START_BLOCK",
+            "BEEFY_INITIAL_BLOCK",
+            "BEEFY_INITIAL_SOURCE_TIMESTAMP_MS",
+            "BEEFY_CURRENT_ID",
+            "BEEFY_CURRENT_LENGTH",
+            "BEEFY_CURRENT_ROOT",
+            "BEEFY_NEXT_ID",
+            "BEEFY_NEXT_LENGTH",
+            "BEEFY_NEXT_ROOT"
+        ];
+        for (uint256 i; i < keys.length; ++i) {
+            vm.setEnv(keys[i], "");
+        }
+        vm.setEnv("LOCAL_RECOVERY_PRIVATE_KEY", "0");
+        vm.setEnv("CIRCLE_TOKEN", vm.toString(address(0)));
+        vm.setEnv("TETHER_TOKEN", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_ETHER", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_BITCOIN", vm.toString(address(0)));
+    }
+
     function test_DeploymentBeefyLocal() public {
         BeefyLocal deployment = new BeefyLocal();
         vm.chainId(1);
@@ -55,6 +102,7 @@ contract DeploymentScriptTest is Test {
         (address client, address verifier, address queue,) = deployment.run();
         MessageQueue deployedQueue = MessageQueue(queue);
         assertEq(deployedQueue.beefyRootMinimum(), 10);
+        assertEq(deployedQueue.beefyRecoveryTimelock(), vm.envAddress("BEEFY_RECOVERY_TIMELOCK"));
         VaraQueueRootVerifier boundVerifier = VaraQueueRootVerifier(verifier);
         BeefyClient deployedClient = BeefyClient(client);
         assertEq(address(boundVerifier.beefyClient()), client);
@@ -124,6 +172,7 @@ contract DeploymentScriptTest is Test {
         VaraQueueRootVerifier verifier = VaraQueueRootVerifier(verifierAddress);
         assertEq(queueAddress, predictedQueue);
         assertEq(MessageQueue(queueAddress).beefyRootMinimum(), 10);
+        assertEq(MessageQueue(queueAddress).beefyRecoveryTimelock(), vm.envAddress("BEEFY_RECOVERY_TIMELOCK"));
         assertEq(address(verifier.beefyClient()), clientAddress);
         assertEq(verifier.messageQueue(), predictedQueue);
         assertEq(client.sourceDomain(), sourceDomain);
@@ -149,11 +198,15 @@ contract DeploymentScriptTest is Test {
         test_DeploymentBeefyTokensQueueDomainDryRun();
     }
 
-    function test_DeploymentMainnet() public {
+    function test_DeploymentMainnetRejectsPartialTokens() public {
+        _resetDeploymentEnvironment();
         vm.chainId(1);
         vm.warp(vm.unixTime() / 1000);
         // forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
+        vm.setEnv("DEPLOYMENT_MODE", "fresh-beefy");
+        vm.setEnv("DEPLOY_TEST_TOKENS", "false");
+        vm.setEnv("WRAPPED_BITCOIN", vm.toString(address(0)));
         vm.setEnv("CIRCLE_TOKEN", vm.toString(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48));
         vm.setEnv("TETHER_TOKEN", vm.toString(0xdAC17F958D2ee523a2206206994597C13D831ec7));
         vm.setEnv("WRAPPED_ETHER", vm.toString(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
@@ -172,14 +225,24 @@ contract DeploymentScriptTest is Test {
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
         // forge-lint: disable-end(unsafe-cheatcode)
         DeploymentScript deploymentScript = new DeploymentScript();
+        uint64 nonce = vm.getNonce(vm.addr(1));
+        vm.expectRevert();
         deploymentScript.run();
+        assertEq(vm.getNonce(vm.addr(1)), nonce, "preflight must not broadcast");
     }
 
     function test_DeploymentHoodi() public {
+        _resetDeploymentEnvironment();
         vm.chainId(560048);
         vm.warp(vm.unixTime() / 1000);
         // forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
+        vm.setEnv("DEPLOYMENT_MODE", "fresh-beefy");
+        vm.setEnv("DEPLOY_TEST_TOKENS", "true");
+        vm.setEnv("CIRCLE_TOKEN", vm.toString(address(0)));
+        vm.setEnv("TETHER_TOKEN", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_ETHER", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_BITCOIN", vm.toString(address(0)));
         vm.setEnv("VFT_MANAGER", vm.toString(BaseConstants.VFT_MANAGER));
         vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
         vm.setEnv("GOVERNANCE_PAUSER", vm.toString(BaseConstants.GOVERNANCE_PAUSER));
@@ -194,8 +257,134 @@ contract DeploymentScriptTest is Test {
         );
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
         // forge-lint: disable-end(unsafe-cheatcode)
+        _genericBootstrap(false);
         DeploymentScript deploymentScript = new DeploymentScript();
         deploymentScript.run();
+        _assertGenericDeployment(deploymentScript);
+    }
+
+    function test_DeploymentHoodiAtNonzeroNonce() public {
+        vm.setNonce(vm.addr(1), 37);
+        test_DeploymentHoodi();
+    }
+
+    function test_DeploymentMainnetWithCanonicalTokens() public {
+        vm.chainId(1);
+        vm.warp(vm.unixTime() / 1000);
+        _genericEnvironment(false);
+        address[4] memory canonical = [
+            0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,
+            0xdAC17F958D2ee523a2206206994597C13D831ec7,
+            0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2,
+            0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599
+        ];
+        address token = address(new ERC20GearSupply(address(this), "Existing token", "EXT", 18));
+        string[4] memory keys = ["CIRCLE_TOKEN", "TETHER_TOKEN", "WRAPPED_ETHER", "WRAPPED_BITCOIN"];
+        for (uint256 i; i < canonical.length; ++i) {
+            vm.etch(canonical[i], token.code);
+            vm.setEnv(keys[i], vm.toString(canonical[i]));
+        }
+        _genericBootstrap(true);
+        DeploymentScript deployment = new DeploymentScript();
+        deployment.run();
+        _assertGenericDeployment(deployment);
+        assertTrue(deployment.shouldUseOverrides());
+        assertEq(address(deployment.circleToken()), canonical[0]);
+        assertEq(address(deployment.tetherToken()), canonical[1]);
+        assertEq(address(deployment.wrappedEther()), canonical[2]);
+        assertEq(address(deployment.wrappedBitcoin()), canonical[3]);
+    }
+
+    function test_DeploymentMainnetAtNonzeroNonce() public {
+        vm.setNonce(vm.addr(1), 41);
+        test_DeploymentMainnetWithCanonicalTokens();
+    }
+
+    function test_DeploymentHoodiWithCompleteOverrides() public {
+        vm.chainId(560048);
+        vm.warp(vm.unixTime() / 1000);
+        _genericEnvironment(false);
+        string[4] memory keys = ["CIRCLE_TOKEN", "TETHER_TOKEN", "WRAPPED_ETHER", "WRAPPED_BITCOIN"];
+        for (uint256 i; i < keys.length; ++i) {
+            address token = address(new ERC20GearSupply(address(this), "Existing token", "EXT", 18));
+            vm.setEnv(keys[i], vm.toString(token));
+        }
+        _genericBootstrap(true);
+        DeploymentScript deployment = new DeploymentScript();
+        deployment.run();
+        _assertGenericDeployment(deployment);
+        assertTrue(deployment.shouldUseOverrides());
+    }
+
+    function _genericEnvironment(bool generateTokens) private {
+        vm.setEnv("PRIVATE_KEY", "1");
+        vm.setEnv("DEPLOYMENT_MODE", "fresh-beefy");
+        vm.setEnv("DEPLOY_TEST_TOKENS", generateTokens ? "true" : "false");
+        vm.setEnv("VFT_MANAGER", vm.toString(BaseConstants.VFT_MANAGER));
+        vm.setEnv("GOVERNANCE_ADMIN", vm.toString(BaseConstants.GOVERNANCE_ADMIN));
+        vm.setEnv("GOVERNANCE_PAUSER", vm.toString(BaseConstants.GOVERNANCE_PAUSER));
+        vm.setEnv("EMERGENCY_STOP_ADMIN", vm.toString(BaseConstants.EMERGENCY_STOP_ADMIN));
+        vm.setEnv(
+            "EMERGENCY_STOP_OBSERVERS",
+            string.concat(
+                vm.toString(BaseConstants.EMERGENCY_STOP_OBSERVER1),
+                ",",
+                vm.toString(BaseConstants.EMERGENCY_STOP_OBSERVER2)
+            )
+        );
+        vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
+    }
+
+    function _genericBootstrap(bool existingTokens) private {
+        address deployer = vm.addr(1);
+        vm.deal(deployer, 100 ether);
+        address predictedQueue = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + (existingTokens ? 8 : 12));
+        bytes32 source = fixtureHash(0, "sourceDomain");
+        vm.setEnv("BEEFY_SOURCE_DOMAIN", vm.toString(source));
+        vm.setEnv(
+            "BEEFY_BRIDGE_DOMAIN",
+            vm.toString(
+                keccak256(
+                    abi.encodePacked("vara/gear-eth-bridge-domain/v2", source, bytes32(block.chainid), predictedQueue)
+                )
+            )
+        );
+        vm.setEnv("BEEFY_MMR_START_BLOCK", "1");
+        vm.setEnv("BEEFY_INITIAL_BLOCK", "2");
+        vm.setEnv("BEEFY_INITIAL_SOURCE_TIMESTAMP_MS", vm.toString(block.timestamp * 1000));
+        vm.setEnv("BEEFY_CURRENT_ID", "0");
+        vm.setEnv("BEEFY_CURRENT_LENGTH", vm.toString(fixtureUint(0, "validatorCount")));
+        vm.setEnv("BEEFY_CURRENT_ROOT", vm.toString(fixtureHash(0, "authorityRoot")));
+        vm.setEnv("BEEFY_NEXT_ID", "1");
+        vm.setEnv("BEEFY_NEXT_LENGTH", vm.toString(fixtureUint(0, "validatorCount")));
+        vm.setEnv("BEEFY_NEXT_ROOT", vm.toString(fixtureHash(0, "authorityRoot")));
+    }
+
+    function _assertGenericDeployment(DeploymentScript deployment) private {
+        MessageQueue queue = deployment.messageQueue();
+        VaraQueueRootVerifier verifier = VaraQueueRootVerifier(address(deployment.verifier()));
+        BeefyClient client = verifier.beefyClient();
+        assertEq(client.destinationQueue(), address(queue));
+        assertEq(client.destinationChainId(), block.chainid);
+        assertEq(client.sourceDomain(), fixtureHash(0, "sourceDomain"));
+        assertEq(client.bridgeDomain(), vm.envBytes32("BEEFY_BRIDGE_DOMAIN"));
+        assertEq(verifier.messageQueue(), address(queue));
+        assertEq(queue.verifier(), address(verifier));
+        assertEq(queue.beefyRootMinimum(), 1);
+        assertEq(queue.beefyRecoveryTimelock(), vm.envAddress("BEEFY_RECOVERY_TIMELOCK"));
+        assertEq(queue.governanceAdmin(), address(deployment.governanceAdmin()));
+        assertEq(queue.governancePauser(), address(deployment.governancePauser()));
+        assertEq(deployment.governanceAdmin().governance(), BaseConstants.GOVERNANCE_ADMIN);
+        assertEq(deployment.governancePauser().governance(), BaseConstants.GOVERNANCE_PAUSER);
+        assertEq(deployment.erc20Manager().messageQueue(), address(queue));
+        assertEq(deployment.erc20Manager().totalTokens(), 5);
+        assertEq(deployment.bridgingPayment().fee(), BaseConstants.BRIDGING_PAYMENT_FEE);
+        bytes32 root = keccak256("generic real-client deployment");
+        bytes memory proof = encodeProof(
+            customQueueProofFor(client, 100, 103, root, uint64(block.timestamp * 1000), uint64(block.timestamp * 1000))
+        );
+        queue.submitMerkleRoot(100, root, proof);
+        assertEq(queue.getMerkleRoot(100), root);
     }
 }
 
@@ -204,6 +393,14 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
 
     function setUp() public {
         fixtures = vm.readFile("test/fixtures/beefy-interop.json");
+        vm.setEnv("CIRCLE_TOKEN", vm.toString(address(0)));
+        vm.setEnv("TETHER_TOKEN", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_ETHER", vm.toString(address(0)));
+        vm.setEnv("WRAPPED_BITCOIN", vm.toString(address(0)));
+        address[] memory proposers = new address[](1);
+        proposers[0] = address(this);
+        TimelockController recovery = new TimelockController(1 hours, proposers, proposers, address(0));
+        vm.setEnv("BEEFY_RECOVERY_TIMELOCK", vm.toString(address(recovery)));
     }
 
     function test_HoodiRejectsWrongNetwork() public {
@@ -278,16 +475,30 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
 
         (bool implementationInitialized,) = implementation.call(
             abi.encodeCall(
-                MessageQueue.initialize,
-                (IGovernance(address(0)), IGovernance(address(0)), unauthorized, noObservers, IVerifier(address(0)))
+                MessageQueue.initializeBeefy,
+                (
+                    IGovernance(address(0)),
+                    IGovernance(address(0)),
+                    unauthorized,
+                    noObservers,
+                    IVerifier(address(0)),
+                    address(0)
+                )
             )
         );
         assertFalse(implementationInitialized);
         (bool proxyInitialized,) = address(queue)
             .call(
                 abi.encodeCall(
-                    MessageQueue.initialize,
-                    (IGovernance(address(0)), IGovernance(address(0)), unauthorized, noObservers, IVerifier(address(0)))
+                    MessageQueue.initializeBeefy,
+                    (
+                        IGovernance(address(0)),
+                        IGovernance(address(0)),
+                        unauthorized,
+                        noObservers,
+                        IVerifier(address(0)),
+                        address(0)
+                    )
                 )
             );
         assertFalse(proxyInitialized);
@@ -313,9 +524,8 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
             keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
         QueueProof memory proof = _customQueueProof(client, messageHash);
         uint256 sourceBlock = proof.leaf.parentNumber;
-        uint256[] memory publicInputs = _publicInputs(proof.leaf.parentNumber, messageHash);
         vm.prank(address(queue));
-        assertTrue(verifier.safeVerifyProof(encodeProof(proof), publicInputs));
+        assertTrue(verifier.safeVerifyProof(sourceBlock, messageHash, encodeProof(proof)));
         queue.submitMerkleRoot(sourceBlock, messageHash, encodeProof(proof));
 
         vm.expectRevert(IMessageQueue.MerkleRootDelayNotPassed.selector);
@@ -419,10 +629,174 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
         vm.setEnv("BEEFY_NEXT_LENGTH", vm.toString(fixtureUint(index, "validatorCount")));
         vm.setEnv("BEEFY_NEXT_ROOT", vm.toString(fixtureHash(index, "authorityRoot")));
     }
+}
 
-    function _publicInputs(uint32 source, bytes32 root) internal pure returns (uint256[] memory inputs) {
-        inputs = new uint256[](2);
-        inputs[0] = uint256(root) >> 64;
-        inputs[1] = (uint256(uint64(uint256(root))) << 128) | (uint256(source) << 96);
+contract MainnetBridgeMigrationTest is Test, Base {
+    using Hasher for VaraMessage;
+    using GovernancePacker for UpgradeProxyMessage;
+    using GovernancePacker for PauseProxyMessage;
+    using GovernancePacker for UnpauseProxyMessage;
+
+    // Fixture JSON materialization and the multi-transaction scenario are not a gas benchmark.
+    function test_DeploymentMainnetBeefyMigration() public noGasMetering {
+        string memory rpc = vm.envOr("MAINNET_MIGRATION_RPC_URL", string(""));
+        require(
+            bytes(rpc).length != 0 || !vm.envOr("REQUIRE_MAINNET_MIGRATION", false), "migration archive RPC required"
+        );
+        if (bytes(rpc).length == 0) {
+            vm.skip(true);
+            return;
+        }
+        string memory artifact = vm.readFile("test/fixtures/mainnet-legacy-queue.json");
+        vm.createSelectFork(rpc, vm.parseJsonUint(artifact, ".ethereumBlock"));
+        MessageQueue legacy = MessageQueue(vm.parseJsonAddress(artifact, ".queue"));
+        address manager = address(GovernanceAdmin(legacy.governanceAdmin()).erc20Manager());
+        address oldVerifier = legacy.verifier();
+        bytes32 oldVerifierCodeHash = oldVerifier.codehash;
+        uint256 oldMax = legacy.maxBlockNumber();
+        uint256 genesis = legacy.genesisBlock();
+        address[] memory tokens = ERC20Manager(manager).tokens();
+        uint256[] memory balances = new uint256[](tokens.length);
+        uint256[] memory supplies = new uint256[](tokens.length);
+        for (uint256 i; i < tokens.length; ++i) {
+            balances[i] = IERC20Metadata(tokens[i]).balanceOf(manager);
+            supplies[i] = IERC20Metadata(tokens[i]).totalSupply();
+        }
+        VaraMessage memory claim = VaraMessage(
+            vm.parseJsonUint(artifact, ".claims.pending21.nonce"),
+            vm.parseJsonBytes32(artifact, ".claims.pending21.source"),
+            vm.parseJsonAddress(artifact, ".claims.pending21.destination"),
+            vm.parseJsonBytes(artifact, ".claims.pending21.payload")
+        );
+        uint256 claimBlock = vm.parseJsonUint(artifact, ".claims.pending21.sourceBlock");
+        bytes32 claimRoot = legacy.getMerkleRoot(claimBlock);
+        uint256 timestamp = uint256(vm.load(address(legacy), keccak256(abi.encode(claimRoot, uint256(12)))));
+        assertFalse(legacy.isProcessed(claim.nonce));
+        assertTrue(legacy.isProcessed(836));
+        assertTrue(legacy.isProcessed(864));
+
+        // Exercises the same deployBridge branch as the fork deployment, not an impersonated upgrade.
+        deployBridgeFromConstants(BaseConstants.DEPLOYER_ADDRESS, rpc);
+        assertEq(address(messageQueue), address(legacy));
+        assertEq(address(erc20Manager), manager);
+        assertEq(oldVerifier.codehash, oldVerifierCodeHash);
+        assertEq(messageQueue.genesisBlock(), genesis);
+        assertEq(messageQueue.maxBlockNumber(), oldMax + 4);
+        assertEq(messageQueue.beefyRootMinimum(), oldMax + 3);
+        assertEq(messageQueue.getMerkleRoot(claimBlock), claimRoot);
+        assertEq(messageQueue.getMerkleRootTimestampForBlock(claimBlock), timestamp);
+        assertTrue(messageQueue.isProcessed(836));
+        assertTrue(messageQueue.isProcessed(864));
+        assertFalse(messageQueue.paused());
+        for (uint256 i; i < tokens.length; ++i) {
+            assertEq(erc20Manager.tokens(i, 1)[0], tokens[i]);
+            assertEq(IERC20Metadata(tokens[i]).balanceOf(manager), balances[i]);
+            assertEq(IERC20Metadata(tokens[i]).totalSupply(), supplies[i]);
+        }
+        assertEq(
+            uint64(uint256(vm.load(address(messageQueue), vm.parseJsonBytes32(artifact, ".initializableSlot")))), 8
+        );
+        address placeholder = 0x1111111111111111111111111111111111111111;
+        address replacement = address(new MessageQueue());
+        bytes32 adminRole = messageQueue.DEFAULT_ADMIN_ROLE();
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, placeholder, adminRole)
+        );
+        vm.prank(placeholder);
+        messageQueue.upgradeToAndCall(replacement, "");
+
+        IERC20Metadata token = IERC20Metadata(vm.parseJsonAddress(artifact, ".claims.pending21.token"));
+        address recipient = vm.parseJsonAddress(artifact, ".claims.pending21.recipient");
+        uint256 amount = vm.parseUint(vm.parseJsonString(artifact, ".claims.pending21.amount"));
+        uint256 beforeBalance = token.balanceOf(recipient);
+        uint256 beforeSupply = token.totalSupply();
+        messageQueue.processMessage(claimBlock, 1, 0, claim, new bytes32[](0));
+        assertEq(token.balanceOf(recipient), beforeBalance + amount);
+        assertEq(token.totalSupply(), beforeSupply + amount);
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, claim.nonce));
+        messageQueue.processMessage(claimBlock, 1, 0, claim, new bytes32[](0));
+
+        // The first new claim requires a genuine fixture-signed BEEFY proof and its own maturity.
+        VaraMessage memory nextClaim =
+            VaraMessage(messageNonce++, deploymentArguments.vftManager, claim.destination, claim.payload);
+        uint256 nextBlock = currentBlockNumber++;
+        bytes32 nextRoot = nextClaim.hash();
+        bytes memory proof = forkBeefy.rootProof(uint32(nextBlock), nextRoot);
+        vm.expectRevert(IMessageQueue.InvalidQueueRootProof.selector);
+        messageQueue.submitMerkleRoot(nextBlock, nextRoot, "");
+        messageQueue.submitMerkleRoot(nextBlock, nextRoot, proof);
+        vm.expectRevert(IMessageQueue.MerkleRootDelayNotPassed.selector);
+        messageQueue.processMessage(nextBlock, 1, 0, nextClaim, new bytes32[](0));
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
+        messageQueue.processMessage(nextBlock, 1, 0, nextClaim, new bytes32[](0));
+        assertEq(token.balanceOf(recipient), beforeBalance + 2 * amount);
+        assertEq(token.totalSupply(), beforeSupply + 2 * amount);
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.MessageAlreadyProcessed.selector, nextClaim.nonce));
+        messageQueue.processMessage(nextBlock, 1, 0, nextClaim, new bytes32[](0));
+        _assertPostMigrationGovernance(replacement);
+    }
+
+    function _assertPostMigrationGovernance(address replacement) private {
+        bytes32 implementation = vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT);
+        uint256 floor = messageQueue.beefyRootMinimum();
+        VaraMessage[4] memory messages;
+        messages[0] = VaraMessage(
+            messageNonce++,
+            governancePauser.governance(),
+            address(governancePauser),
+            PauseProxyMessage(address(messageQueue)).pack()
+        );
+        messages[1] = VaraMessage(
+            messageNonce++,
+            governanceAdmin.governance(),
+            address(governanceAdmin),
+            UpgradeProxyMessage(
+                    address(messageQueue),
+                    replacement,
+                    abi.encodeCall(
+                        MessageQueue.migrateToBeefy,
+                        (verifier, verifier, messageQueue.maxBlockNumber(), floor, beefyRecoveryTimelock)
+                    )
+                )
+                .pack()
+        );
+        messages[2] = VaraMessage(
+            messageNonce++,
+            governanceAdmin.governance(),
+            address(governanceAdmin),
+            UpgradeProxyMessage(address(messageQueue), replacement, "").pack()
+        );
+        messages[3] = VaraMessage(
+            messageNonce++,
+            governancePauser.governance(),
+            address(governancePauser),
+            UnpauseProxyMessage(address(messageQueue)).pack()
+        );
+        uint256 firstBlock = currentBlockNumber;
+        for (uint256 i; i < messages.length; ++i) {
+            uint256 height = currentBlockNumber++;
+            bytes32 root = messages[i].hash();
+            bytes memory proof = forkBeefy.rootProof(uint32(height), root);
+            messageQueue.submitMerkleRoot(height, root, proof);
+        }
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
+        messageQueue.processMessage(firstBlock, 1, 0, messages[0], new bytes32[](0));
+        assertTrue(messageQueue.paused());
+        // A failed governance upgrade must roll back BOTH the implementation and its consumed nonce.
+        vm.expectRevert(bytes4(keccak256("InvalidInitialization()")));
+        messageQueue.processMessage(firstBlock + 1, 1, 0, messages[1], new bytes32[](0));
+        assertEq(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT), implementation);
+        assertFalse(messageQueue.isProcessed(messages[1].nonce));
+        assertEq(messageQueue.verifier(), address(verifier));
+        assertEq(messageQueue.beefyRootMinimum(), floor);
+        messageQueue.processMessage(firstBlock + 2, 1, 0, messages[2], new bytes32[](0));
+        assertEq(
+            vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT), bytes32(uint256(uint160(replacement)))
+        );
+        assertTrue(messageQueue.hasRole(messageQueue.DEFAULT_ADMIN_ROLE(), address(governanceAdmin)));
+        assertEq(messageQueue.verifier(), address(verifier));
+        assertEq(messageQueue.beefyRootMinimum(), floor);
+        messageQueue.processMessage(firstBlock + 3, 1, 0, messages[3], new bytes32[](0));
+        assertFalse(messageQueue.paused());
     }
 }

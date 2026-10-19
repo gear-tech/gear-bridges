@@ -15,19 +15,10 @@ type Params = {
   formValues: FormattedValues | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
-  priorityFee: bigint | undefined;
-  shouldPayPriorityFee: boolean;
   vftManagerFee: bigint | undefined;
 };
 
-function useVaraTxsEstimate({
-  formValues,
-  bridgingFee,
-  shouldPayBridgingFee,
-  priorityFee,
-  shouldPayPriorityFee,
-  vftManagerFee,
-}: Params) {
+function useVaraTxsEstimate({ formValues, bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
   const { api } = useApi();
   const { account, isAccountReady } = useAccount();
   const { NETWORK_PRESET } = useNetworkType();
@@ -37,8 +28,6 @@ function useVaraTxsEstimate({
   const prepareTxs = usePrepareVaraTxs({
     bridgingFee,
     shouldPayBridgingFee,
-    priorityFee,
-    shouldPayPriorityFee,
     vftManagerFee,
   });
 
@@ -70,11 +59,9 @@ function useVaraTxsEstimate({
       NETWORK_PRESET.BRIDGING_PAYMENT_CONTRACT_ADDRESS,
       vftManagerFee?.toString(),
       shouldPayBridgingFee ? bridgingFee?.toString() : undefined,
-      shouldPayPriorityFee ? priorityFee?.toString() : undefined,
       debouncedAmount,
       debouncedAccountAddress,
       shouldPayBridgingFee,
-      shouldPayPriorityFee,
       token?.address,
       account?.address,
     ],
@@ -84,7 +71,6 @@ function useVaraTxsEstimate({
     enabled:
       (!shouldPayBridgingFee || !isUndefined(bridgingFee)) &&
       !isUndefined(vftManagerFee) &&
-      (!shouldPayPriorityFee || !isUndefined(priorityFee)) &&
       Boolean(api && formValues && token && prepareTxs) &&
       isAccountReady,
   });

@@ -168,6 +168,23 @@ pub enum Event {
         amount: U256,
         native: bool,
     },
+    /// Original native payout rejected and fully refunded as backed wrapped VARA.
+    ReceiptDepositRefunded {
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        deposit_count: u64,
+        operation_id: H256,
+        eth_token_id: H160,
+        vara_token_id: ActorId,
+        sender: H160,
+        receiver: ActorId,
+        amount: U256,
+        native: bool,
+        child: MessageId,
+        payout_child: MessageId,
+        returned_value: u128,
+    },
 }
 
 static mut STATE: Option<State> = None;
@@ -319,7 +336,7 @@ impl VftManager {
 
     /// Settlement policy is explicit, and only changes at a paused boundary.
     #[export]
-    pub fn configure_native_wrapper(&mut self, wrapper: Option<ActorId>) {
+    pub async fn configure_native_wrapper(&mut self, wrapper: Option<ActorId>) {
         self.ensure_admin();
         self.ensure_economic_mutable();
         assert!(self.state().is_paused, "Not paused");
@@ -329,6 +346,25 @@ impl VftManager {
                 self.state().token_map.get_supply_type(&wrapper),
                 Ok(TokenSupply::Gear),
                 "Native wrapper must have Gear supply"
+            );
+            let revision = self.state().economic_revision;
+            let minimum: U256 =
+                cutover::query(wrapper, "VftExtension", "MinimumBalance", self.config()).await;
+            assert!(
+                minimum.is_zero(),
+                "Native wrapper requires zero minimum balance"
+            );
+            self.ensure_admin();
+            assert!(self.state().is_paused, "Not paused");
+            assert_eq!(
+                self.state().cutover.phase,
+                CutoverPhase::Active,
+                "Economic configuration frozen"
+            );
+            assert_eq!(
+                self.state().economic_revision,
+                revision,
+                "Configuration changed while qualifying wrapper"
             );
         }
         self.state_mut().native_wrapper = wrapper;

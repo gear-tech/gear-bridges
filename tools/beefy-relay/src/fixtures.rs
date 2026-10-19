@@ -10,9 +10,8 @@ use std::{collections::BTreeMap, path::Path};
 use crate::{
     protocol::{
         authority_addresses, authority_root, convert_mmr_proof, encode_outer_leaf,
-        encode_public_inputs, encode_queue_proof, keccak256, public_inputs_bytes,
-        verify_native_mmr_proof, verify_simplified_mmr, Hash32, KeccakHasher, QueueSnapshot,
-        RuntimeLeafProof, MAX_MMR_PROOF_ITEMS, MAX_VALIDATORS,
+        encode_queue_proof, keccak256, verify_native_mmr_proof, verify_simplified_mmr, Hash32,
+        KeccakHasher, QueueSnapshot, RuntimeLeafProof, MAX_MMR_PROOF_ITEMS, MAX_VALIDATORS,
     },
     validate_signed_commitment,
 };
@@ -144,8 +143,6 @@ pub struct InteropCase {
     pub commitment_hash: String,
     #[serde(rename = "queueProof")]
     pub queue_proof: String,
-    #[serde(rename = "publicInputs")]
-    pub public_inputs: String,
     #[serde(rename = "freshnessProof")]
     pub freshness_proof: FreshnessProof,
 }
@@ -494,7 +491,6 @@ fn make_case(
         &historical_simplified.items,
         historical_simplified.proof_order,
     )?;
-    let public_inputs = encode_public_inputs(queue_root, source)?;
     let authority_proofs = addresses
         .iter()
         .enumerate()
@@ -576,14 +572,13 @@ fn make_case(
         commitment_bytes: hex0x(&commitment_bytes),
         commitment_hash: hex0x(&commitment_hash),
         queue_proof: hex0x(&queue_proof),
-        public_inputs: hex0x(&public_inputs_bytes(&public_inputs)),
         freshness_proof: freshness,
     })
 }
 
 pub fn generate_fixtures() -> Result<InteropFixture> {
     Ok(InteropFixture {
-        schema_version: 3,
+        schema_version: 4,
         gear_baseline_commit: GEAR_BASELINE_COMMIT.into(),
         snowbridge_baseline_commit: SNOWBRIDGE_BASELINE_COMMIT.into(),
         cases: vec![
@@ -728,7 +723,7 @@ mod tests {
     #[test]
     fn synthetic_fixtures_cover_required_shapes() {
         let fixture = generate_fixtures().expect("fixtures");
-        assert_eq!(fixture.schema_version, 3);
+        assert_eq!(fixture.schema_version, 4);
         assert_eq!(fixture.cases[0].name, "synthetic-mmr-3-primary");
         assert!(
             fixture.cases[0].freshness_proof.source_timestamp_ms

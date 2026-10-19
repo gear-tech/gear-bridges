@@ -3,4 +3,5 @@ export enum Status {
   Bridging = 'Bridging',
   Completed = 'Completed',
   Failed = 'Failed',
+  Refunded = 'Refunded',
 }

@@ -448,7 +448,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn completed_nonce_later_normal_and_priority_fees_do_not_recreate_paid_backlog() {
+    async fn completed_nonce_later_normal_and_historical_priority_fees_do_not_recreate_paid_backlog(
+    ) {
         use crate::message_relayer::gear_to_eth::tx_manager::TransactionManager;
         use std::sync::Arc;
 
@@ -481,7 +482,7 @@ mod tests {
                 .await
                 .unwrap();
             let initial = fee_event(nonce, first_priority);
-            record_paid_events(
+            let discovered = record_paid_events(
                 storage.as_ref(),
                 10,
                 first_hash,
@@ -489,6 +490,12 @@ mod tests {
             )
             .await
             .unwrap();
+            assert_eq!(discovered, vec![nonce.to_big_endian()]);
+            let pairs = storage.pending_event_pairs().await.unwrap();
+            assert_eq!(pairs.len(), 1);
+            assert_eq!(pairs[0].message, queued);
+            assert_eq!(pairs[0].paid_block, 10);
+            assert_eq!(pairs[0].paid_block_hash, first_hash);
             let manager = TransactionManager::new(storage.clone());
             let tx = completed_tx(queued.clone()).await;
             let uuid = tx.uuid;
@@ -608,7 +615,7 @@ mod tests {
                 .unwrap();
             assert!(storage.pending_event_pairs().await.unwrap().is_empty());
             let duplicate = fee_event(unpaired, repeated_priority);
-            let distinct = fee_event(later, false);
+            let distinct = fee_event(later, first_priority);
             let discovered = record_paid_events(
                 &storage,
                 11,
@@ -618,8 +625,8 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(discovered, vec![later.to_big_endian()]);
-            let escalate = fee_event(later, true);
-            record_paid_events(&storage, 12, third_hash, [escalate.as_slice()].into_iter())
+            let repeated = fee_event(later, !first_priority);
+            record_paid_events(&storage, 12, third_hash, [repeated.as_slice()].into_iter())
                 .await
                 .unwrap();
             let restored = JSONStorage::new(&path);

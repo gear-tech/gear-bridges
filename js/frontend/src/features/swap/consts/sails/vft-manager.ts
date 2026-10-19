@@ -21,7 +21,7 @@ export class SailsProgram {
       CustodyTransferAttempt: {"token":"[u8;32]","amount":"U256","child":"[u8;32]","outcome":"CustodyTransferOutcome"},
       CustodyTransferOutcome: {"_enum":["InFlight","Completed","Rejected","Ambiguous"]},
       ReceiptDepositState: {"log_index":"u64","sender":"H160","receiver":"[u8;32]","token_id":"[u8;32]","eth_token_id":"H160","amount":"U256","supply":"TokenSupply","native":"bool","operation_id":"H256","child":"Option<[u8;32]>","outcome":"ReceiptDepositOutcome"},
-      ReceiptDepositOutcome: {"_enum":["Pending","InFlight","Settled","Rejected","Unknown","NativeQueued"]},
+      ReceiptDepositOutcome: {"_enum":["Pending","InFlight","Settled","Rejected","Unknown","NativeQueued","Refunded"]},
       MessageInfo: {"status":"MessageStatus","details":"TxDetails"},
       MessageStatus: {"_enum":{"SendingMessageToDepositTokens":"Null","TokenDepositCompleted":"bool","SendingMessageToBridgeBuiltin":"Null","BridgeResponseReceived":"Option<(U256, H256, u64)>","SendingMessageToReturnTokens":"Null","TokensReturnComplete":"bool"}},
       TxDetails: {"vara_token_id":"[u8;32]","sender":"[u8;32]","amount":"U256","receiver":"H160","token_supply":"TokenSupply"},
@@ -1113,6 +1113,22 @@ export class VftManager {
       }
     });
   }
+
+  /**
+   * Original native payout rejected and fully refunded as backed wrapped VARA.
+   */
+  public subscribeToReceiptDepositRefundedEvent(callback: (data: { slot: number | string | bigint; transaction_index: number | string | bigint; log_index: number | string | bigint; deposit_count: number | string | bigint; operation_id: H256; eth_token_id: H160; vara_token_id: ActorId; sender: H160; receiver: ActorId; amount: number | string | bigint; native: boolean; child: MessageId; payout_child: MessageId; returned_value: number | string | bigint }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'VftManager' && getFnNamePrefix(payload) === 'ReceiptDepositRefunded') {
+        callback(this._program.registry.createType('(String, String, {"slot":"u64","transaction_index":"u64","log_index":"u64","deposit_count":"u64","operation_id":"H256","eth_token_id":"H160","vara_token_id":"[u8;32]","sender":"H160","receiver":"[u8;32]","amount":"U256","native":"bool","child":"[u8;32]","payout_child":"[u8;32]","returned_value":"u128"})', message.payload)[2].toJSON() as unknown as { slot: number | string | bigint; transaction_index: number | string | bigint; log_index: number | string | bigint; deposit_count: number | string | bigint; operation_id: H256; eth_token_id: H160; vara_token_id: ActorId; sender: H160; receiver: ActorId; amount: number | string | bigint; native: boolean; child: MessageId; payout_child: MessageId; returned_value: number | string | bigint });
+      }
+    });
+  }
 }
 /**
  * Config that should be provided to this service on initialization.
@@ -1330,7 +1346,10 @@ export interface ReceiptDepositState {
   outcome: ReceiptDepositOutcome;
 }
 
-export type ReceiptDepositOutcome = "Pending" | "InFlight" | "Settled" | "Rejected" | "Unknown" | "NativeQueued";
+/**
+ * Refunded is an authenticated full wrapped refund, distinct from native Settled.
+ */
+export type ReceiptDepositOutcome = "Pending" | "InFlight" | "Settled" | "Rejected" | "Unknown" | "NativeQueued" | "Refunded";
 
 /**
  * Entry for a single message in [MessageTracker].
@@ -1412,4 +1431,4 @@ export interface SourceRequestEvidence {
 
 export type Order = "Direct" | "Reverse";
 
-export const IDL_SHA256 = 'dd3fd53597a7225b3a5cfdf57ca2b60f3b6d0aaef846de8eaca3e247354d6e9e';
+export const IDL_SHA256 = '14f42d4ede5182f38e3fd5059bff97a877c02877c3892a9494152f7c48fcc698';

@@ -921,7 +921,8 @@ export enum StatusEnum {
   AwaitingPayment = 'AWAITING_PAYMENT',
   Bridging = 'BRIDGING',
   Completed = 'COMPLETED',
-  Failed = 'FAILED'
+  Failed = 'FAILED',
+  Refunded = 'REFUNDED'
 }
 
 /** A filter to be used against StatusEnum fields. All fields are combined with a logical ‘and.’ */

@@ -762,6 +762,11 @@ sol! {
         function verifier() external view returns (address);
         function maxBlockNumber() external view returns (uint256);
         function beefyRootMinimum() external view returns (uint256);
+        function beefyRecoveryTimelock() external view returns (address);
+    }
+    #[sol(rpc)]
+    interface RecoveryTimelockBinding {
+        function getMinDelay() external view returns (uint256);
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -875,6 +880,10 @@ impl Ethereum {
             .current_dir(&root)
             .env("FOUNDRY_BROADCAST", &broadcast_dir)
             .env("PRIVATE_KEY", &private_key)
+            .env(
+                "LOCAL_RECOVERY_PRIVATE_KEY",
+                format!("0x{}", hex::encode(anvil.keys()[1].to_bytes())),
+            )
             .env("BEEFY_SOURCE_DOMAIN", bytes(source_domain))
             .env("BEEFY_BRIDGE_DOMAIN", bytes(snapshot.bridge_domain))
             .env("BEEFY_MMR_START_BLOCK", mmr_start_block.to_string())
@@ -1391,6 +1400,32 @@ impl Ethereum {
         self.receiver_address.into()
     }
 
+    pub async fn recovery_configuration(&self) -> Result<Value> {
+        let provider = self.api.raw_provider().clone();
+        let address = TokenQueueBinding::new(self.queue_address, provider.clone())
+            .beefyRecoveryTimelock()
+            .call()
+            .await?;
+        let code = provider.get_code_at(address).await?;
+        ensure!(
+            address != Address::ZERO && !code.is_empty(),
+            "BEEFY recovery timelock has no code"
+        );
+        let delay = RecoveryTimelockBinding::new(address, provider)
+            .getMinDelay()
+            .call()
+            .await?;
+        ensure!(
+            delay > U256::ZERO,
+            "BEEFY recovery timelock must retain a positive delay"
+        );
+        Ok(json!({
+            "address": address_string(address),
+            "codeHash": format!("0x{}", hex::encode(keccak256(code.as_ref()))),
+            "minDelay": delay.to_string(),
+        }))
+    }
+
     pub async fn manifest(&self) -> Result<Value> {
         let mut bytecode_hashes = serde_json::Map::new();
         for (name, address) in [
@@ -1439,6 +1474,7 @@ impl Ethereum {
             "verifier": address_string(self.verifier_address),
             "queue": address_string(self.queue_address),
             "receiver": address_string(self.receiver_address),
+            "recovery": self.recovery_configuration().await?,
             "bindings": {
                 "beefyClient": address_string(verifier.beefyClient().call().await?),
                 "messageQueue": address_string(verifier.messageQueue().call().await?),
@@ -2086,6 +2122,10 @@ async fn verify_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<()> {
     ensure!(
         provider.get_chain_id().await? == ethereum.expected_chain_id(),
         "connected Ethereum endpoint has unexpected approved chain id"
+    );
+    ensure!(
+        manifest["recovery"] == ethereum.recovery_configuration().await?,
+        "BEEFY recovery timelock address, code or delay differs from the saved manifest"
     );
     let bridge_domain = manifest_b256(manifest, "bridgeDomain")?;
     let source_domain = manifest_b256(manifest, "sourceDomain")?;

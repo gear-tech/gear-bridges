@@ -117,7 +117,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     for (const [nonce, status] of this._statuses.entries()) {
       const transfer = this._transfers.get(nonce);
       if (transfer) {
-        if (transfer.status !== Status.Completed) {
+        if (transfer.status !== Status.Completed && transfer.status !== Status.Refunded) {
           transfer.status = status;
         }
       } else {
@@ -130,7 +130,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
         where: { nonce: In(notUpdatedTransfers), sourceNetwork: this._network },
       });
 
-      const notCompletedTransfers = transfers.filter(({ status }) => status !== Status.Completed);
+      const notCompletedTransfers = transfers.filter(({ status }) => status !== Status.Completed && status !== Status.Refunded);
 
       for (const t of notCompletedTransfers) {
         this._log.error(
@@ -189,7 +189,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
     if (notCachedNonces.length > 0) {
       const transfers = await this._ctx.store.find(Transfer, {
-        where: { nonce: In(notCachedNonces), sourceNetwork: this._network, status: Not(Status.Completed) },
+        where: { nonce: In(notCachedNonces), sourceNetwork: this._network, status: Not(In([Status.Completed, Status.Refunded])) },
       });
       for (const transfer of transfers) {
         this._transfers.set(transfer.nonce, transfer);

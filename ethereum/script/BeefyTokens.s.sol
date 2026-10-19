@@ -2,10 +2,10 @@
 pragma solidity ^0.8.37;
 
 import {Script} from "forge-std/Script.sol";
-import {Base, DeploymentArguments, Overrides} from "test/Base.sol";
+import {Base, DeploymentArguments} from "test/Base.sol";
 
 /**
- * @dev Fresh, queue-bound token bridge. Never points at the message-only deployment.
+ * @dev Fresh, queue-bound token test bridge. Never points at the message-only deployment.
  */
 contract BeefyTokens is Script, Base {
     function run()
@@ -15,44 +15,32 @@ contract BeefyTokens is Script, Base {
         require(block.chainid == 31337 || block.chainid == 560048, "unsupported token test chain");
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
-        bytes32 manager = vm.envBytes32("GEAR_VFT_MANAGER");
-        bytes32 admin = vm.envBytes32("GEAR_GOVERNANCE_ADMIN");
-        bytes32 pauser = vm.envBytes32("GEAR_GOVERNANCE_PAUSER");
-        require(manager != bytes32(0) && admin != bytes32(0) && pauser != bytes32(0), "missing Gear identities");
-        // A partial broadcast changes Base.deployBridge's CREATE-address predictions.
-        // Inspect broadcast receipts and deployed contracts; never simply rerun.
-        uint256 startingNonce = vm.getNonce(deployer);
+        // A partial broadcast changes CREATE predictions. Reconcile it; never simply rerun.
         require(
-            startingNonce == _envUint64("EXPECTED_DEPLOYER_NONCE"),
+            vm.getNonce(deployer) == _envUint64("EXPECTED_DEPLOYER_NONCE"),
             "deployer nonce changed; reconcile partial broadcast"
         );
-        includeOrdinaryGearToken = true;
-        address predictedQueue = _predictBeefyMessageQueue(deployer);
-        uint256 fee = vm.envUint("BRIDGING_PAYMENT_FEE");
-        require(fee > 0, "missing payment fee");
-        _deployBeefyClient(privateKey, predictedQueue);
-
         address[] memory observers = new address[](1);
         observers[0] = vm.envAddress("EMERGENCY_STOP_OBSERVER");
-        deployBridge(
-            DeploymentArguments({
-                privateKey: privateKey,
-                deployerAddress: deployer,
-                forkUrlOrAlias: "",
-                overrides: Overrides({
-                    circleToken: address(0),
-                    tetherToken: address(0),
-                    wrappedEther: address(0),
-                    wrappedBitcoin: address(0)
-                }),
-                vftManager: manager,
-                governanceAdmin: admin,
-                governancePauser: pauser,
-                emergencyStopAdmin: vm.envAddress("EMERGENCY_STOP_ADMIN"),
-                emergencyStopObservers: observers,
-                bridgingPaymentFee: fee
-            })
-        );
+        DeploymentArguments memory args = DeploymentArguments({
+            privateKey: privateKey,
+            deployerAddress: deployer,
+            forkUrlOrAlias: "",
+            overrides: _tokenOverridesFromEnvironment(),
+            vftManager: vm.envBytes32("GEAR_VFT_MANAGER"),
+            governanceAdmin: vm.envBytes32("GEAR_GOVERNANCE_ADMIN"),
+            governancePauser: vm.envBytes32("GEAR_GOVERNANCE_PAUSER"),
+            emergencyStopAdmin: vm.envAddress("EMERGENCY_STOP_ADMIN"),
+            emergencyStopObservers: observers,
+            bridgingPaymentFee: vm.envUint("BRIDGING_PAYMENT_FEE")
+        });
+        require(args.bridgingPaymentFee > 0, "missing payment fee");
+        includeOrdinaryGearToken = true;
+        deployTestTokenProfile = true; // Explicit test-token profile on the two allowed test chains.
+        _validateDeploymentArguments(args);
+        address predictedQueue = _predictBeefyMessageQueue(deployer, args.overrides);
+        _deployBeefyClient(privateKey, predictedQueue);
+        deployBridge(args);
         require(address(messageQueue) == predictedQueue, "deployed queue differs from prediction");
         return (address(beefyClient), address(verifier), address(messageQueue), address(erc20Manager));
     }

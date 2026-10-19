@@ -1,9 +1,7 @@
-pub mod common;
 pub mod ethereum;
 pub mod gear;
 pub mod prometheus;
 
-pub use common::*;
 pub use ethereum::*;
 pub use gear::*;
 pub use prometheus::*;

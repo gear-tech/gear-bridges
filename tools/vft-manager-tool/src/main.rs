@@ -26,9 +26,6 @@ struct Cli {
 #[allow(clippy::enum_variant_names)]
 #[derive(Subcommand)]
 enum CliCommands {
-    /// Alias for preparing cutover to an independently approved, existing paused replacement.
-    /// Does not deploy, copy replay keys, transfer custody, or activate a successor.
-    DeployUpgraded(cutover::PrepareCutover),
     /// Authenticate boundary, cover every receipt, and drain original pre-boundary work.
     PrepareCutover(cutover::PrepareCutover),
     /// Resume custody/role handoff, seal originals, initialize successor lanes, and activate.
@@ -156,7 +153,7 @@ async fn main() -> AnyResult<()> {
         .context("Failed to initialize GearApi")?;
 
     match cli.command {
-        CliCommands::PrepareCutover(args) | CliCommands::DeployUpgraded(args) => {
+        CliCommands::PrepareCutover(args) => {
             cutover::prepare(&cli.gear.connection, &gear_api, &args).await?
         }
         CliCommands::FinalizeCutover(args) => {

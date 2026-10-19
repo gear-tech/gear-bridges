@@ -19,7 +19,7 @@ export class SailsProgram {
     const types: Record<string, any> = {
       Mainnet: {"_enum":["Yes","No"]},
       Redemption: {"from":"[u8;32]","to":"[u8;32]","amount":"U256","child":"[u8;32]","status":"PayoutStatus","returned_value":"u128"},
-      PayoutStatus: {"_enum":["Queued","Delivered","Returned","Ambiguous"]},
+      PayoutStatus: {"_enum":["Queued","Delivered","Returned","Ambiguous","Refunded"]},
     }
 
     this.registry = new TypeRegistry();
@@ -1187,6 +1187,7 @@ export interface Redemption {
   returned_value: number | string | bigint;
 }
 
-export type PayoutStatus = "Queued" | "Delivered" | "Returned" | "Ambiguous";
-
-export const IDL_SHA256 = '43a04afd82b782b4a4e238cf95bf556e73a39866f2defbb11ad3fafd98cab8f2';
+/**
+ * Refunded restores exactly backed wrapped tokens to the original recipient; it is not native delivery.
+ */
+export type PayoutStatus = "Queued" | "Delivered" | "Returned" | "Ambiguous" | "Refunded";

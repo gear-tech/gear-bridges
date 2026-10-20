@@ -524,6 +524,31 @@ pub(super) fn decode_complete_reply<I: ActionIo>(reply: &[u8]) -> anyhow::Result
     Ok(decoded)
 }
 
+// Custom consumers explicitly return SCALE Result<T, E>. Their bodies are opaque;
+// only the authenticated application's result is qualified, never token settlement.
+fn custom_consumer_status(
+    route: &[u8],
+    reply: &[u8],
+    receipt_key: (u64, u64),
+    observation: FinalizedReceiptObservation,
+) -> MessageStatus {
+    let result = reply.strip_prefix(route).and_then(|body| body.first());
+    if route != SubmitReceipt::ROUTE && result == Some(&0) {
+        MessageStatus::Success {
+            receipt_observation: Some(observation),
+        }
+    } else {
+        MessageStatus::NeedsReconciliation {
+            receipt_key,
+            diagnostic: format!(
+                "Custom consumer did not return an authenticated Result::Ok for its exact route; opaque reply: 0x{}",
+                hex::encode(reply)
+            ),
+            receipt_observation: Some(observation),
+        }
+    }
+}
+
 fn validate_deposit_evidence(
     receipt_rlp: &[u8],
     receipt_key: (u64, u64),
@@ -883,12 +908,14 @@ impl MessageSender {
         gear_api: &GearApi,
         payload: &EthToVaraEvent,
     ) -> anyhow::Result<SignedSubmission> {
-        super::cutover::ensure_receipt_domain(
-            gear_api,
-            self.receiver_address,
-            payload.proof_block.block.slot,
-        )
-        .await?;
+        if self.receiver_route == SubmitReceipt::ROUTE {
+            super::cutover::ensure_receipt_domain(
+                gear_api,
+                self.receiver_address,
+                payload.proof_block.block.slot,
+            )
+            .await?;
+        }
         let proof = payload.encode();
         let payload_hash = format!("{:#x}", alloy_primitives::keccak256(&proof));
         let call_payload = Redirect::encode_call(
@@ -1156,84 +1183,103 @@ impl MessageSender {
                 ));
             }
         };
-        let status = match decode_complete_reply::<SubmitReceipt>(&receiver_reply) {
-            Ok(Ok(())) | Ok(Err(vft_manager_client::Error::NativeSettlementPending)) => {
-                let (status, native_ready) = self
-                    .settlement_status(gear_api, payload, settlement_pin)
-                    .await?;
-                if let Some(continuation) = signed.native_reconciliation.as_mut() {
-                    anyhow::ensure!(native_ready,
-                        "Original native payout or sibling deposits no longer authorize reconciliation");
-                    let completed = self
-                        .reconcile_native_continuation(
-                            gear_api,
-                            receipt_key,
-                            signed.nonce,
-                            continuation,
-                            settlement_pin.is_some(),
-                        )
+        let status = if self.receiver_route != SubmitReceipt::ROUTE {
+            anyhow::ensure!(
+                signed.native_reconciliation.is_none()
+                    && signed.native_reconciliation_attempts.is_empty(),
+                "HOLD: custom consumer cannot authorize manager reconciliation"
+            );
+            anyhow::ensure!(
+                settlement_pin.is_none_or(|pin| pin == &observation),
+                "HOLD: custom consumer completion differs from its original finalized reply pin"
+            );
+            custom_consumer_status(
+                &self.receiver_route,
+                &receiver_reply,
+                receipt_key,
+                observation,
+            )
+        } else {
+            match decode_complete_reply::<SubmitReceipt>(&receiver_reply) {
+                Ok(Ok(())) | Ok(Err(vft_manager_client::Error::NativeSettlementPending)) => {
+                    let (status, native_ready) = self
+                        .settlement_status(gear_api, payload, settlement_pin)
                         .await?;
-                    if completed {
-                        self.settlement_status(gear_api, payload, settlement_pin)
-                            .await?
-                            .0
-                    } else {
+                    if let Some(continuation) = signed.native_reconciliation.as_mut() {
+                        anyhow::ensure!(native_ready,
+                        "Original native payout or sibling deposits no longer authorize reconciliation");
+                        let completed = self
+                            .reconcile_native_continuation(
+                                gear_api,
+                                receipt_key,
+                                signed.nonce,
+                                continuation,
+                                settlement_pin.is_some(),
+                            )
+                            .await?;
+                        if completed {
+                            self.settlement_status(gear_api, payload, settlement_pin)
+                                .await?
+                                .0
+                        } else {
+                            anyhow::ensure!(
+                                settlement_pin.is_none(),
+                                "HOLD: saved completion has a failed original continuation"
+                            );
+                            let archived = *signed
+                                .native_reconciliation
+                                .take()
+                                .expect("continuation was present");
+                            anyhow::ensure!(
+                                archived.has_terminal_reconciliation(),
+                                "HOLD: unknown continuation outcome"
+                            );
+                            signed.native_reconciliation_attempts.push(archived);
+                            // Persist terminal bytes/evidence before signing the next read-only attempt.
+                            MessageStatus::Prepared
+                        }
+                    } else if native_ready && !matches!(status, MessageStatus::Success { .. }) {
                         anyhow::ensure!(
                             settlement_pin.is_none(),
-                            "HOLD: saved completion has a failed original continuation"
+                            "HOLD: historical completion cannot create a continuation"
                         );
-                        let archived = *signed
-                            .native_reconciliation
-                            .take()
-                            .expect("continuation was present");
+                        let call = ReconcileReceipt::encode_call(receipt_key.0, receipt_key.1);
+                        let hash = format!("{:#x}", alloy_primitives::keccak256(&call));
+                        let continuation = self
+                            .prepare_call(gear_api, receipt_key, self.receiver_address, call, hash)
+                            .await?;
                         anyhow::ensure!(
-                            archived.has_terminal_reconciliation(),
-                            "HOLD: unknown continuation outcome"
+                            continuation.nonce
+                                > signed
+                                    .native_reconciliation_attempts
+                                    .last()
+                                    .map_or(signed.nonce, |attempt| attempt.nonce),
+                            "Native reconciliation nonce must follow the original finalized proof"
                         );
-                        signed.native_reconciliation_attempts.push(archived);
-                        // Persist terminal bytes/evidence before signing the next read-only attempt.
+                        signed.native_reconciliation = Some(Box::new(continuation));
+                        // Existing Prepared handshake persists the separate raw call before broadcast.
                         MessageStatus::Prepared
+                    } else {
+                        status
                     }
-                } else if native_ready && !matches!(status, MessageStatus::Success { .. }) {
-                    anyhow::ensure!(
-                        settlement_pin.is_none(),
-                        "HOLD: historical completion cannot create a continuation"
-                    );
-                    let call = ReconcileReceipt::encode_call(receipt_key.0, receipt_key.1);
-                    let hash = format!("{:#x}", alloy_primitives::keccak256(&call));
-                    let continuation = self
-                        .prepare_call(gear_api, receipt_key, self.receiver_address, call, hash)
-                        .await?;
-                    anyhow::ensure!(
-                        continuation.nonce
-                            > signed
-                                .native_reconciliation_attempts
-                                .last()
-                                .map_or(signed.nonce, |attempt| attempt.nonce),
-                        "Native reconciliation nonce must follow the original finalized proof"
-                    );
-                    signed.native_reconciliation = Some(Box::new(continuation));
-                    // Existing Prepared handshake persists the separate raw call before broadcast.
-                    MessageStatus::Prepared
-                } else {
-                    status
                 }
-            }
-            Ok(Err(vft_manager_client::Error::UnsupportedEthEvent)) => MessageStatus::Failure(
-                "VFT manager rejected an unsupported Ethereum event before processing it".into(),
-            ),
-            Ok(Err(error)) => MessageStatus::NeedsReconciliation {
-                receipt_key,
-                diagnostic: format!(
-                    "VFT manager returned an unresolved finalized error: {error:?}"
+                Ok(Err(vft_manager_client::Error::UnsupportedEthEvent)) => MessageStatus::Failure(
+                    "VFT manager rejected an unsupported Ethereum event before processing it"
+                        .into(),
                 ),
-                receipt_observation: Some(observation),
-            },
-            Err(error) => MessageStatus::NeedsReconciliation {
-                receipt_key,
-                diagnostic: format!("Could not decode finalized VFT manager reply: {error}"),
-                receipt_observation: Some(observation),
-            },
+                Ok(Err(error)) => MessageStatus::NeedsReconciliation {
+                    receipt_key,
+                    diagnostic: format!(
+                        "VFT manager returned an unresolved finalized error: {error:?}"
+                    ),
+                    receipt_observation: Some(observation),
+                },
+                Err(error) => MessageStatus::NeedsReconciliation {
+                    receipt_key,
+                    diagnostic: format!("Could not decode finalized VFT manager reply: {error}"),
+                    receipt_observation: Some(observation),
+                },
+            }
         };
         if let MessageStatus::Success {
             receipt_observation: Some(observation),
@@ -2239,6 +2285,41 @@ mod tests {
             decode_complete_reply::<SubmitReceipt>(&bytes),
             Ok(Err(vft_manager_client::Error::Paused))
         ));
+    }
+
+    #[test]
+    fn custom_consumer_requires_exact_route_and_successful_result_not_manager_settlement() {
+        let route = ("Ping", "SubmitReceipt").encode();
+        let observation = FinalizedReceiptObservation {
+            finalized_block_number: Some(20),
+            finalized_block_hash: format!("{:#x}", H256::repeat_byte(20)),
+        };
+        // Ping returns a Delivery, not the manager's Result<(), Error>.
+        let delivery = (H256::repeat_byte(7), vec![1u8, 2, 3]);
+        let mut reply = route.clone();
+        reply.extend(Result::<_, u8>::Ok(delivery).encode());
+        assert!(matches!(
+            custom_consumer_status(&route, &reply, (17, 4), observation.clone()),
+            MessageStatus::Success { receipt_observation: Some(pin) } if pin == observation
+        ));
+        let mut rejected = route.clone();
+        rejected.extend(Result::<(), u8>::Err(7).encode());
+        let mut invalid_result = route.clone();
+        invalid_result.push(2);
+        let mut manager_reply = SubmitReceipt::ROUTE.to_vec();
+        manager_reply.extend(Result::<(), u8>::Ok(()).encode());
+        for (expected, bytes) in [
+            (route.as_slice(), rejected.as_slice()),
+            (route.as_slice(), invalid_result.as_slice()),
+            (route.as_slice(), route.as_slice()),
+            (route.as_slice(), manager_reply.as_slice()),
+            (SubmitReceipt::ROUTE, manager_reply.as_slice()),
+        ] {
+            assert!(matches!(
+                custom_consumer_status(expected, bytes, (17, 4), observation.clone()),
+                MessageStatus::NeedsReconciliation { .. }
+            ));
+        }
     }
 
     #[test]

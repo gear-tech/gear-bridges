@@ -63,7 +63,7 @@ impl Program {
         };
 
         Self {
-            authorities: RefCell::new(Authorities::from_one(msg::source())),
+            authorities: RefCell::new(Authorities::from_one(Syscall::message_source())),
             allowances: Pausable::new(&pause, RefCell::new(allowances)),
             balances: Pausable::new(&pause, RefCell::new(balances)),
             metadata: RefCell::new(metadata),
@@ -247,12 +247,34 @@ impl NativeEscrow<'_> {
             "Not manager"
         );
         assert_eq!(from, Syscall::message_source(), "Not manager escrow");
-        if let Some(existing) = self.program.redemptions.borrow().get(&operation_id) {
+        if let Some(existing) = self.program.redemptions.borrow_mut().get_mut(&operation_id) {
             assert_eq!(
                 (existing.from, existing.to, existing.amount),
                 (from, to, amount),
                 "Conflicting operation"
             );
+            // Only the authenticated original error/full-value reply records this
+            // pending credit. Never mint in handle_reply: a trapped reply is consumed.
+            if existing.status == PayoutStatus::Queued
+                && U256::from(existing.returned_value) == existing.amount
+            {
+                let paused = self.program.pause.is_paused();
+                self.program.pause.resume();
+                // SAFETY: the immutable original payout and full returned backing
+                // authorize only its recipient. Failure rolls back this command,
+                // not the already committed original reply.
+                unsafe {
+                    self.program
+                        .base_vft_admin_exposure()
+                        .do_mint(existing.to, existing.amount)
+                        .expect("Cannot refund returned native backing");
+                }
+                if paused {
+                    self.program.pause.pause();
+                }
+                existing.status = PayoutStatus::Refunded;
+                self.complete_obligation();
+            }
             return existing.clone();
         }
         assert!(!self.program.pause.is_paused(), "Paused");
@@ -305,7 +327,7 @@ impl NativeEscrow<'_> {
 
 impl NativeEscrow<'_> {
     fn handle_payout_reply(&self) -> bool {
-        let Ok(child) = msg::reply_to() else {
+        let Ok(child) = Syscall::reply_to() else {
             return false;
         };
         let Some(operation) = self.program.payout_children.borrow().get(&child).copied() else {
@@ -316,45 +338,159 @@ impl NativeEscrow<'_> {
             .get_mut(&operation)
             .expect("Original payout missing");
         // Exact original child and recipient, including late and duplicate replies.
-        if Syscall::message_source() != redemption.to || redemption.status != PayoutStatus::Queued {
+        if Syscall::message_source() != redemption.to
+            || redemption.status != PayoutStatus::Queued
+            || redemption.returned_value != 0
+        {
             return true;
         }
         let value = Syscall::message_value();
         redemption.returned_value = value;
-        redemption.status = match msg::reply_code() {
+        redemption.status = match Syscall::reply_code() {
             Ok(ReplyCode::Success(_)) if value == 0 => PayoutStatus::Delivered,
+            // Persist the authenticated backing before attempting wrapped credit
+            // in a separate retryable RedeemEscrow command. Capacity exhaustion
+            // (or an event-emission failure after mint) must not lose this reply.
             Ok(ReplyCode::Error(_)) if U256::from(value) == redemption.amount => {
-                // Only this authenticated original error/full-value return authorizes
-                // wrapped credit. Settlement must also work while new exposure is paused.
-                let paused = self.program.pause.is_paused();
-                self.program.pause.resume();
-                // SAFETY: original child, recipient, exact backing and Queued status
-                // were authenticated above; this synchronous mint cannot reenter.
-                unsafe {
-                    self.program
-                        .base_vft_admin_exposure()
-                        .do_mint(redemption.to, redemption.amount)
-                        .expect("Cannot refund returned native backing");
-                }
-                if paused {
-                    self.program.pause.pause();
-                }
-                PayoutStatus::Refunded
+                PayoutStatus::Queued
             }
             _ => PayoutStatus::Ambiguous,
         };
-        if matches!(
-            redemption.status,
-            PayoutStatus::Delivered | PayoutStatus::Refunded
-        ) {
-            self.program.outstanding_redemptions.set(
-                self.program
-                    .outstanding_redemptions
-                    .get()
-                    .checked_sub(1)
-                    .expect("Native obligation underflow"),
-            );
+        if redemption.status == PayoutStatus::Delivered {
+            self.complete_obligation();
         }
         true
+    }
+
+    fn complete_obligation(&self) {
+        self.program.outstanding_redemptions.set(
+            self.program
+                .outstanding_redemptions
+                .get()
+                .checked_sub(1)
+                .expect("Native obligation underflow"),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::*;
+    use awesome_sails_services::vft::utils::Balance;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn full_return_survives_balance_capacity_failure_and_retries_once() {
+        let manager = ActorId::from(1_000u64);
+        let recipient = ActorId::from(2_000u64);
+        let operation = H256([7; 32]);
+        let child = MessageId::from([8; 32]);
+        let amount = U256::from(5u64);
+        Syscall::with_message_source(manager);
+        let mut program = Program::new(Mainnet::No);
+        let mut balances = Balances::try_new(vec![1], Balance::from(0u64)).unwrap();
+        balances.allocate_next_shard();
+        // Fill the actual allocated shard, then partially burn manager escrow:
+        // the burn leaves no free holder slot for the rejected payout's recipient.
+        for index in 0..balances.capacity() {
+            balances
+                .mint(
+                    ActorId::from(1_000 + index as u64).try_into().unwrap(),
+                    Balance::from(10u64).try_into().unwrap(),
+                )
+                .unwrap();
+        }
+        balances
+            .burn(
+                manager.try_into().unwrap(),
+                Balance::from(5u64).try_into().unwrap(),
+            )
+            .unwrap();
+        program.balances = Pausable::new(&program.pause, RefCell::new(balances));
+        *program.escrow_manager.borrow_mut() = Some(manager);
+        program.redemptions.borrow_mut().insert(
+            operation,
+            Redemption {
+                from: manager,
+                to: recipient,
+                amount,
+                child,
+                status: PayoutStatus::Queued,
+                returned_value: 0,
+            },
+        );
+        program
+            .payout_children
+            .borrow_mut()
+            .insert(child, operation);
+        program.outstanding_redemptions.set(1);
+        Syscall::with_reply_to(Ok(child));
+        Syscall::with_reply_code(Ok(ReplyCode::Error(ErrorReplyReason::Execution(
+            SimpleExecutionError::UserspacePanic,
+        ))));
+        Syscall::with_message_value(5);
+        // A forged source cannot authorize credit.
+        assert!(program.native_escrow().handle_payout_reply());
+        assert_eq!(
+            program
+                .native_escrow()
+                .redemption(operation)
+                .unwrap()
+                .returned_value,
+            0
+        );
+        Syscall::with_message_source(recipient);
+        assert!(program.native_escrow().handle_payout_reply());
+        let pending = program.native_escrow().redemption(operation).unwrap();
+        assert_eq!(pending.status, PayoutStatus::Queued);
+        assert_eq!(pending.returned_value, 5);
+        assert_eq!(program.native_escrow().outstanding_redemptions(), 1);
+        // Even a contradictory duplicate of the original callback cannot erase backing.
+        Syscall::with_reply_code(Ok(ReplyCode::Success(SuccessReplyReason::Auto)));
+        Syscall::with_message_value(0);
+        assert!(program.native_escrow().handle_payout_reply());
+        assert_eq!(
+            program.native_escrow().redemption(operation),
+            Some(pending.clone())
+        );
+        Syscall::with_message_source(manager);
+        let supply = program.vft2().total_supply().unwrap();
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            program
+                .native_escrow()
+                .redeem_escrow(operation, manager, recipient, amount);
+        }))
+        .is_err());
+        assert_eq!(program.native_escrow().redemption(operation), Some(pending));
+        assert_eq!(program.native_escrow().outstanding_redemptions(), 1);
+        assert_eq!(program.vft2().total_supply().unwrap(), supply);
+        assert_eq!(program.vft2().balance_of(recipient).unwrap(), U256::zero());
+        program
+            .base_vft_admin_exposure()
+            .append_balances_shard(1)
+            .unwrap();
+        program
+            .vft_extension()
+            .allocate_next_balances_shard()
+            .unwrap();
+        program.pause.pause();
+        let refunded = program
+            .native_escrow()
+            .redeem_escrow(operation, manager, recipient, amount);
+        assert_eq!(refunded.status, PayoutStatus::Refunded);
+        assert!(program.pause.is_paused());
+        assert_eq!(program.native_escrow().outstanding_redemptions(), 0);
+        assert_eq!(program.vft2().balance_of(recipient).unwrap(), amount);
+        assert_eq!(program.vft2().total_supply().unwrap(), supply + amount);
+        assert_eq!(
+            program
+                .native_escrow()
+                .redeem_escrow(operation, manager, recipient, amount),
+            refunded,
+        );
+        assert_eq!(program.vft2().total_supply().unwrap(), supply + amount);
+        assert_eq!(program.payout_children.borrow().len(), 1);
     }
 }

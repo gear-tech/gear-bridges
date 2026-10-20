@@ -112,10 +112,10 @@ impl PingService {
         transaction_index: u64,
         receipt_rlp: Vec<u8>,
     ) -> Result<Delivery, PingError> {
+        assert_eq!(msg::value(), 0, "Receipt submission must not attach value");
         if msg::source() != self.state.borrow().historical_proxy {
             return Err(PingError::NotHistoricalProxy);
         }
-        assert_eq!(msg::value(), 0, "Receipt submission must not attach value");
         let delivery = {
             let state = self.state.borrow();
             decode_delivery(&state, &receipt_rlp)?
@@ -166,11 +166,11 @@ impl PingService {
         &mut self,
         application_id: H256,
         payload: Vec<u8>,
-    ) -> Result<QueuedDelivery, PingError> {
+    ) -> CommandReply<Result<QueuedDelivery, PingError>> {
         let (config, receiver) = {
             let state = self.state.borrow();
             if msg::source() != state.owner {
-                return Err(PingError::NotOwner);
+                return CommandReply::new(Err(PingError::NotOwner)).with_value(msg::value());
             }
             // A runtime error reply rolls back attached value before any dispatch/state effect.
             assert_eq!(
@@ -178,12 +178,29 @@ impl PingService {
                 state.bridge_config.fee_bridge,
                 "Incorrect bridge fee"
             );
-            validate_payload(application_id, payload.len())?;
+            if let Err(error) = validate_payload(application_id, payload.len()) {
+                return CommandReply::new(Err(error)).with_value(msg::value());
+            }
             if state.outbound.contains_key(&application_id) {
-                return Err(PingError::AlreadyRequested);
+                return CommandReply::new(Err(PingError::AlreadyRequested))
+                    .with_value(msg::value());
             }
             (state.bridge_config, state.ethereum_receiver)
         };
+        // Only pre-dispatch rejections refund. The combined send/reply-deposit API can fail
+        // after sending, so dispatch errors must retain the original and never refund.
+        self.dispatch_message(application_id, payload, config, receiver)
+            .await
+            .into()
+    }
+
+    async fn dispatch_message(
+        &mut self,
+        application_id: H256,
+        payload: Vec<u8>,
+        config: BridgeConfig,
+        receiver: H160,
+    ) -> Result<QueuedDelivery, PingError> {
         let request_message_id = msg::id();
         self.state.borrow_mut().outbound.insert(
             application_id,

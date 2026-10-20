@@ -108,6 +108,12 @@ pub(crate) fn classify_gear_transport_error(err: &anyhow::Error) -> RetryDecisio
         }
     }
 
+    if let Some(err) = err.downcast_ref::<gsdk::ext::subxt_rpcs::Error>() {
+        if is_recoverable_gear_rpc(err) {
+            return RetryDecision::Retry;
+        }
+    }
+
     RetryDecision::Fail
 }
 
@@ -305,18 +311,83 @@ fn is_recoverable_subxt(err: &subxt::Error) -> bool {
         return true;
     }
 
-    matches!(
-        err,
-        subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped)
-            | subxt::Error::Rpc(subxt::error::RpcError::ClientError(
-                gsdk::ext::subxt_rpcs::Error::DisconnectedWillReconnect(_)
-            ))
-    )
+    match err {
+        subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped) => true,
+        subxt::Error::Rpc(subxt::error::RpcError::ClientError(err)) => is_recoverable_gear_rpc(err),
+        _ => false,
+    }
+}
+
+fn is_recoverable_gear_rpc(err: &gsdk::ext::subxt_rpcs::Error) -> bool {
+    use gsdk::ext::{jsonrpsee::core::client::Error as ClientError, subxt_rpcs::Error};
+    match err {
+        Error::DisconnectedWillReconnect(_) => true,
+        Error::Client(err) => matches!(
+            err.downcast_ref::<ClientError>(),
+            Some(
+                ClientError::Transport(_)
+                    | ClientError::RestartNeeded(_)
+                    | ClientError::RequestTimeout
+            )
+        ),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_raw_and_wrapped_gear_disconnects_but_not_semantic_errors() {
+        use gsdk::ext::{jsonrpsee::core::client::Error as ClientError, subxt_rpcs::Error};
+        let recoverable: [fn() -> Error; 4] = [
+            || Error::DisconnectedWillReconnect("disconnected".into()),
+            || {
+                Error::Client(Box::new(ClientError::Transport(Box::new(
+                    std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+                ))))
+            },
+            || {
+                Error::Client(Box::new(ClientError::RestartNeeded(std::sync::Arc::new(
+                    ClientError::RequestTimeout,
+                ))))
+            },
+            || Error::Client(Box::new(ClientError::RequestTimeout)),
+        ];
+        let permanent: [fn() -> Error; 2] = [
+            || Error::Client(Box::new(ClientError::Custom("restart required".into()))),
+            || {
+                Error::User(
+                    serde_json::from_str(r#"{"code":-32000,"message":"request timed out"}"#)
+                        .unwrap(),
+                )
+            },
+        ];
+        for (factories, expected) in [
+            (recoverable.as_slice(), RetryDecision::Retry),
+            (permanent.as_slice(), RetryDecision::Fail),
+        ] {
+            for make_error in factories {
+                for wrapper in 0..4 {
+                    let raw = make_error();
+                    let error: anyhow::Error = if wrapper == 0 {
+                        raw.into()
+                    } else {
+                        let subxt = subxt::Error::Rpc(subxt::error::RpcError::ClientError(raw));
+                        match wrapper {
+                            1 => subxt.into(),
+                            2 => gsdk::Error::Subxt(Box::new(subxt)).into(),
+                            _ => {
+                                gclient::Error::GearSDK(gsdk::Error::Subxt(Box::new(subxt))).into()
+                            }
+                        }
+                    };
+                    assert_eq!(classify_anyhow(&error.context("source query")), expected);
+                }
+            }
+        }
+    }
 
     #[test]
     fn does_not_classify_untyped_disconnect_text_as_rpc() {

@@ -91,14 +91,28 @@ impl State {
         &mut self,
         result: Result<TxHash, ethereum_client::Error>,
     ) -> Result<(), ethereum_client::Error> {
-        // A send error may follow broadcast. Without a hash, only an operator
-        // can resolve that uncertainty; never blindly submit another challenge.
-        *self = Self::Exit;
-        let tx_hash = result?;
-        *self = Self::ChallengeRoot {
-            tx_hash: Some(tx_hash),
-        };
-        Ok(())
+        match result {
+            Ok(tx_hash) => {
+                *self = Self::ChallengeRoot {
+                    tx_hash: Some(tx_hash),
+                };
+                Ok(())
+            }
+            Err(error) => {
+                // Only typed, transient estimation failures prove no send was
+                // attempted. Rescan first: a hot mismatching root may have reorged.
+                *self = if matches!(&error, ethereum_client::Error::ChallengeRootPreBroadcast(_))
+                    && ethereum_client::error::is_transient_rpc_cause(&error)
+                {
+                    Self::ScanForEvents
+                } else {
+                    // An ambiguous send requires operator reconciliation, never
+                    // a blind second challenge without the original hash.
+                    Self::Exit
+                };
+                Err(error)
+            }
+        }
     }
 
     fn record_receipt(
@@ -177,7 +191,12 @@ impl KillSwitchRelayer {
                         Error::ScanForEvents(ScanForEventsError::EthApi(
                             ethereum_client::Error::ErrorInHTTPTransport(err),
                         ))
-                        | Error::ChallengeRoot(ethereum_client::Error::ErrorInHTTPTransport(err)) => {
+                        | Error::ChallengeRoot(ethereum_client::Error::ErrorInHTTPTransport(err))
+                        | Error::ChallengeRoot(
+                            ethereum_client::Error::ChallengeRootPreBroadcast(
+                                alloy::contract::Error::TransportError(err),
+                            ),
+                        ) => {
                             if is_rpc_transport_error_recoverable(&err) {
                                 match self.eth_observer_api.reconnect().await {
                                     Ok(reconnected) => self.eth_observer_api = reconnected,
@@ -616,16 +635,122 @@ mod tests {
     }
 
     #[test]
-    fn finalized_revert_requires_fresh_scan_and_uncertain_send_stops() {
+    fn transient_prebroadcast_failure_rescans_original_cursor_before_retry() {
+        let mut cursor = Some(10);
+        let mut state = State::ScanForEvents;
+        state.complete_scan(&mut cursor, 12, Ok(true)).unwrap();
+        let unavailable = ethereum_client::Error::ChallengeRootPreBroadcast(
+            alloy::contract::Error::TransportError(
+                alloy::transports::TransportErrorKind::http_error(503, String::new()),
+            ),
+        );
+        assert!(state.record_submission(Err(unavailable)).is_err());
+        assert_eq!(state, State::ScanForEvents);
+        assert_eq!(cursor, Some(10));
+        // A replacement branch with no mismatch must not receive a challenge.
+        state.complete_scan(&mut cursor, 12, Ok(false)).unwrap();
+        assert_eq!(state, State::ScanForEvents);
+        assert_eq!(cursor, Some(13));
+        // A mismatch still present after a fresh scan permits a new attempt.
+        state.complete_scan(&mut cursor, 13, Ok(true)).unwrap();
+        let hash = TxHash::repeat_byte(4);
+        state.record_submission(Ok(hash)).unwrap();
+        assert_eq!(
+            state,
+            State::ChallengeRoot {
+                tx_hash: Some(hash)
+            }
+        );
+    }
+
+    #[test]
+    fn ambiguous_send_and_permanent_prebroadcast_failures_require_operator() {
+        let transport = || {
+            alloy::contract::Error::TransportError(
+                alloy::transports::TransportErrorKind::http_error(503, String::new()),
+            )
+        };
+        let rejected =
+            alloy::contract::Error::TransportError(alloy::transports::RpcError::ErrorResp(
+                serde_json::from_str(r#"{"code":-32603,"message":"timeout"}"#).unwrap(),
+            ));
+        for error in [
+            ethereum_client::Error::ErrorSendingTransaction(transport()),
+            ethereum_client::Error::ChallengeRootPreBroadcast(rejected),
+            ethereum_client::Error::ErrorFetchingBlock,
+        ] {
+            let mut state = State::ChallengeRoot { tx_hash: None };
+            assert!(state.record_submission(Err(error)).is_err());
+            assert_eq!(state, State::Exit);
+        }
+    }
+
+    #[test]
+    fn finalized_revert_requires_fresh_scan() {
         let mut state = State::ChallengeRoot {
             tx_hash: Some(TxHash::repeat_byte(3)),
         };
         assert!(!state.record_receipt(Ok(TxStatus::Failed)).unwrap());
         assert_eq!(state, State::ScanForEvents);
-        assert!(state
-            .record_submission(Err(ethereum_client::Error::ErrorFetchingBlock))
-            .is_err());
-        assert_eq!(state, State::Exit);
+    }
+
+    #[tokio::test]
+    async fn loopback_challenge_estimation_outage_rescans_without_broadcast() {
+        use actix_web::{web, App, HttpResponse, HttpServer};
+        use serde_json::{json, Value};
+        use std::{
+            net::TcpListener,
+            sync::{Arc, Mutex},
+        };
+
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let server_requests = requests.clone();
+        let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", socket.local_addr().unwrap());
+        let server = HttpServer::new(move || {
+            let requests = server_requests.clone();
+            App::new().route(
+                "/",
+                web::post().to(move |request: web::Json<Value>| {
+                    let requests = requests.clone();
+                    async move {
+                        let method = request["method"].as_str().unwrap();
+                        requests.lock().unwrap().push(method.to_owned());
+                        match method {
+                            "eth_chainId" => HttpResponse::Ok().json(json!({
+                                "jsonrpc": "2.0", "id": request["id"], "result": "0x88bb0"
+                            })),
+                            _ => HttpResponse::ServiceUnavailable().finish(),
+                        }
+                    }
+                }),
+            )
+        })
+        .workers(1)
+        .listen(socket)
+        .unwrap()
+        .disable_signals()
+        .run();
+        let handle = server.handle();
+        tokio::spawn(server);
+        let queue = Address::repeat_byte(1);
+        let api = EthApi::new(&endpoint, &format!("{queue:#x}"), None, None, None)
+            .await
+            .unwrap();
+        let result = api.send_challenge_root().await;
+        handle.stop(true).await;
+
+        assert!(matches!(
+            &result,
+            Err(ethereum_client::Error::ChallengeRootPreBroadcast(_))
+        ));
+        let mut state = State::ChallengeRoot { tx_hash: None };
+        assert!(state.record_submission(result).is_err());
+        assert_eq!(state, State::ScanForEvents);
+        assert_eq!(
+            *requests.lock().unwrap(),
+            ["eth_chainId", "eth_estimateGas"]
+        );
     }
 
     #[tokio::test]

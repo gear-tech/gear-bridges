@@ -117,7 +117,7 @@ After delivery, authenticate the original canonical finalized receipt, exact eve
 
 It authenticates canonical Ethereum root events, including hot blocks connected to pinned finalized ancestry, and stored roots at the pinned head, then compares the exact historical finalized source root. Hot blocks are revisited until finalized. Missing/pruned source state alone cannot trigger a challenge; source bounds/finality failures and removed/inconsistent destination logs hold the cursor. The source RPC remains an operator-configured trust boundary.
 
-Challenge receipt retries retain the same sent hash. An uncertain send requires original-transaction reconciliation, not another signature. A finalized revert requires a fresh scan before another submission. Once a challenge succeeds and finalizes, the watchdog exits for separately authorized operator intervention; it never repairs a root or unpauses the queue. The challenge pause is finite (currently two days), so persistent incidents require the existing governance pause before expiry. Use the [existing administration/recovery procedure](running-the-bridge.md#beefy-expiry-and-existing-administration) under its separate authorities; do not turn supervisor restarts into automatic repair.
+Typed transient failures during challenge gas estimation reconnect and rescan without broadcasting. Challenge receipt retries retain the same sent hash. An uncertain send requires original-transaction reconciliation, not another signature. A finalized revert requires a fresh scan before another submission. Once a challenge succeeds and finalizes, the watchdog exits for separately authorized operator intervention; it never repairs a root or unpauses the queue. The challenge pause is finite (currently two days), so persistent incidents require the existing governance pause before expiry. Use the [existing administration/recovery procedure](running-the-bridge.md#beefy-expiry-and-existing-administration) under its separate authorities; do not turn supervisor restarts into automatic repair.
 
 ## Queue cleaning
 
@@ -125,7 +125,7 @@ Challenge receipt retries retain the same sent hash. An uncertain send requires 
 
 ## Root inspection and publication recovery
 
-`fetch-merkle-roots` reads already-published Ethereum roots starting at `--from-eth-block`, with the configured Ethereum/queue and Gear connections. It uses finalized destination inclusion/stored-root checks; it neither fetches a proof from an HTTP server nor creates one.
+`fetch-merkle-roots` reads already-published Ethereum roots starting at `--from-eth-block`, with the configured Ethereum/queue and Gear connections. Log queries use inclusive pages of at most 100,000 blocks while retaining the original finalized destination view and inclusion/stored-root checks. It neither fetches a proof from an HTTP server nor creates one.
 
 Use `beefy-relay tokens-history-audit` to authenticate retained follower history without a signer, with the original manifest/state and a separately owned proof directory. `bridge-status --source-rpc <source> [--at-block <height>]` and `bridge-events --source-rpc <source> --at-block <height> [--full]` inspect source observations; matching endpoint values alone are not trust approval.
 

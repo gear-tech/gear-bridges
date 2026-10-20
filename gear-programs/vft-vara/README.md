@@ -19,13 +19,20 @@ same wrapper.
 
 `NativeEscrow::OutstandingRedemptions()` is a constant-time count, initially zero.
 Each new redemption increments it once. An authenticated original payout
-child/recipient reply settles it only as `Delivered` (success, zero returned value)
-or `Refunded` (error, exactly the full original amount returned). In the latter
-case the wrapper atomically mints exactly backed wrapped VARA to the **original
-Gear recipient**, never to the manager or another destination. It does not send
-a second native payout. `Refunded` is not native delivery. Duplicate calls/replies
-cannot mint again or decrement again; retained legacy `Returned`, `Queued` and
-`Ambiguous` remain obligations. Paused `ConfigureManager` requires zero
+child/recipient reply settles it as `Delivered` only on success with zero
+returned value. An error returning exactly the full original amount commits
+`Queued` with that full `returned_value`: backed wrapped credit is still owed.
+The callback never mints, so a capacity failure cannot consume the only reply
+and roll back its evidence. An identical manager `RedeemEscrow` retries the
+credit in a separate command, including while paused, and only then records
+`Refunded` and decrements the obligation. A failed credit rolls back only that
+retry; allocate additional balance storage (or resolve the recipient balance
+limit) and retry the same operation. The recipient is always the **original
+Gear recipient**, never the manager or another destination, with no second
+native payout. `Refunded` is not native delivery. Duplicate calls/replies cannot
+mint again, decrement again or replace committed returned backing; legacy
+`Returned`, unreturned `Queued` and `Ambiguous` remain held obligations.
+Paused `ConfigureManager` requires zero
 outstanding obligations and a zero VFT minimum. Rotation never rewrites the
 original operation, from, amount, recipient, child or reply records.
 
@@ -38,12 +45,15 @@ exposure**; they cannot patch an old deployed wrapper or reconstruct already
 reaped dust. An existing exposed wrapper needs an independently qualified,
 liability-preserving migration; manager cutover alone cannot replace it.
 
-Manager ReconcileReceipt only queries the wrapper's existing Redemption; it
-does not burn, mint, unlock or send a replacement native payout. Query gas,
-reply deposit and timeout use the manager's existing configuration. A send,
-timeout or decode failure leaves NativeQueued and original operation/child
-identities unchanged. A later bounded query may settle the original delivered
-or wrapped-refunded payout; missing or ambiguous economic evidence remains held.
+Manager ReconcileReceipt first queries the wrapper's existing Redemption.
+Only an original `Queued` record with exactly full returned backing allows it
+to repeat the identical `RedeemEscrow` for wrapped credit; it never creates a
+missing redemption, burns again or sends a replacement native payout. Query
+and retry gas, reply deposit and timeout use the manager's existing
+configuration. A send, timeout, decode or credit failure leaves NativeQueued
+and original operation/child identities unchanged. A later bounded recovery
+may settle the original delivered or wrapped-refunded payout; missing or
+ambiguous economic evidence remains held.
 Separately signed read-only continuation replacement requires durable exact-byte archival and
 authenticated terminal no-effect evidence, never merely a missing reply.
 

@@ -16,7 +16,8 @@ pub fn is_transient_rpc_cause(error: &(dyn StdError + 'static)) -> bool {
                 return Some(match error {
                     Error::ErrorInHTTPTransport(error) => transient_alloy_rpc(error),
                     Error::ErrorDuringContractExecution(error)
-                    | Error::ErrorQueryingEvent(error) => transient_contract(error),
+                    | Error::ErrorQueryingEvent(error)
+                    | Error::ChallengeRootPreBroadcast(error) => transient_contract(error),
                     _ => false,
                 });
             }
@@ -129,6 +130,9 @@ pub enum Error {
     WrongPrivateKey,
     #[error("Error during contract execution: {0}")]
     ErrorDuringContractExecution(alloy::contract::Error),
+    /// Challenge gas estimation failed before any send was attempted.
+    #[error("Challenge failed before broadcast: {0}")]
+    ChallengeRootPreBroadcast(alloy::contract::Error),
     #[error("Error sending transaction: {0}")]
     ErrorSendingTransaction(alloy::contract::Error),
     #[error("Error querying event: {0}")]
@@ -228,6 +232,28 @@ mod tests {
         assert!(!is_transient_rpc_error(
             &Error::FinalizedAncestryConflict.into()
         ));
+    }
+
+    #[test]
+    fn challenge_prebroadcast_transience_does_not_authorize_send_retries() {
+        let transport = || {
+            alloy::contract::Error::TransportError(TransportErrorKind::http_error(
+                503,
+                "temporarily unavailable".into(),
+            ))
+        };
+        assert!(is_transient_rpc_cause(&Error::ChallengeRootPreBroadcast(
+            transport()
+        )));
+        assert!(!is_transient_rpc_cause(&Error::ErrorSendingTransaction(
+            transport()
+        )));
+        let rejection = alloy::contract::Error::TransportError(RpcError::ErrorResp(
+            serde_json::from_str(r#"{"code":-32603,"message":"timeout"}"#).unwrap(),
+        ));
+        assert!(!is_transient_rpc_cause(&Error::ChallengeRootPreBroadcast(
+            rejection
+        )));
     }
 
     #[tokio::test]

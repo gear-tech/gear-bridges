@@ -305,6 +305,9 @@ async fn reconcile_publication_owners(
 ) -> Result<()> {
     for (path, intent) in publications.iter_mut() {
         validate_root_publication(ethereum, path, intent).await?;
+        if !intent["observedProgress"].is_null() && adopt_authenticated_progress(intent)? {
+            persist_root_intent(path, intent)?;
+        }
         if path.as_path() == output {
             continue;
         }
@@ -831,6 +834,28 @@ async fn validate_observed_progress(
     Ok(())
 }
 
+// Call only after authenticating observedProgress, including on restart.
+fn adopt_authenticated_progress(intent: &mut Value) -> Result<bool> {
+    ensure!(
+        intent["observedProgress"].is_object(),
+        "authenticated external progress is missing; HOLD"
+    );
+    if !intent["txHash"].is_null() {
+        return Ok(false);
+    }
+    ensure!(
+        intent["rawTransaction"].is_null() && intent["publicationReceipt"].is_null(),
+        "external progress cannot replace an original signed transaction or receipt; HOLD"
+    );
+    let changed = !intent["nonce"].is_null()
+        || intent["status"] != "observed"
+        || intent["finalityStatus"] != "finalized";
+    intent["nonce"] = Value::Null;
+    intent["status"] = json!("observed");
+    intent["finalityStatus"] = json!("finalized");
+    Ok(changed)
+}
+
 async fn observe_finalized_progress(
     ethereum: &crate::ethereum::Ethereum,
     output: &Path,
@@ -845,13 +870,7 @@ async fn observe_finalized_progress(
     };
     if !intent["observedProgress"].is_null() {
         validate_observed_progress(ethereum, output, intent).await?;
-        if intent["txHash"].is_null() {
-            ensure!(
-                intent["publicationReceipt"].is_null(),
-                "external progress cannot replace original receipt; HOLD"
-            );
-            intent["status"] = json!("observed");
-            intent["finalityStatus"] = json!("finalized");
+        if adopt_authenticated_progress(intent)? {
             persist_root_intent(output, intent)?;
         }
         return Ok(true);
@@ -988,14 +1007,7 @@ async fn observe_finalized_progress(
         );
     }
     revalidate_root_finalized_pin(ethereum, finalized_block, finalized_hash).await?;
-    if intent["txHash"].is_null() {
-        ensure!(
-            intent["publicationReceipt"].is_null(),
-            "external progress cannot replace original receipt; HOLD"
-        );
-        intent["status"] = json!("observed");
-        intent["finalityStatus"] = json!("finalized");
-    }
+    adopt_authenticated_progress(intent)?;
     persist_root_intent(output, intent)?;
     Ok(true)
 }
@@ -2367,6 +2379,33 @@ mod root_publication_tests {
             ensure_no_competing_publication(&inventory, &a)?;
             assert_eq!(fs::read(&a)?, before);
             assert_eq!(serde_json::from_slice::<Value>(&fs::read(&b)?)?, next);
+            // The authenticated-adoption writer releases only unsigned
+            // reservations. Signed ambiguity must survive adoption and restart.
+            owner["observedProgress"] = json!({"authenticated":"external progress"});
+            if !signed {
+                let mut mixed = owner.clone();
+                mixed["rawTransaction"] = original["rawTransaction"].clone();
+                let mixed_before = mixed.clone();
+                assert!(adopt_authenticated_progress(&mut mixed).is_err());
+                assert_eq!(mixed, mixed_before);
+            }
+            let before_adoption = owner.clone();
+            adopt_authenticated_progress(&mut owner)?;
+            persist_root_intent(&a, &owner)?;
+            let inventory =
+                registered_publications(&restored, &manifest, &publisher_state, signer.address())?;
+            if signed {
+                assert_eq!(owner, before_adoption);
+                assert!(ensure_no_competing_publication(&inventory, &b).is_err());
+            } else {
+                assert!(owner["nonce"].is_null());
+                assert_eq!(owner["status"], "observed");
+                assert_eq!(owner["finalityStatus"], "finalized");
+                ensure_no_competing_publication(&inventory, &b)?;
+                let mut restarted = inventory[0].1.clone();
+                assert!(!adopt_authenticated_progress(&mut restarted)?);
+                assert_eq!(restarted["observedProgress"], owner["observedProgress"]);
+            }
         }
         // The same production disposition writer releases a finalized original, not a mined one.
         let mut owner = original.clone();
@@ -2445,6 +2484,40 @@ mod root_publication_tests {
         ] {
             assert_eq!(finalized[field], before[field]);
         }
+        ensure_no_competing_publication(&publications, &b)?;
+        // A reservation made before an independently authenticated publication
+        // must not fence the next root, either now or after a legacy restart.
+        let mut unsigned = before.clone();
+        unsigned["schemaVersion"] = json!(4);
+        for field in [
+            "txHash",
+            "rawTransaction",
+            "publicationReceipt",
+            "observedProgress",
+        ] {
+            unsigned[field] = Value::Null;
+        }
+        let target = unsigned["sourceBlock"]
+            .as_u64()
+            .context("source block")?
+            .try_into()?;
+        let kind = unsigned["kind"].as_str().unwrap_or("merkleRoot").to_owned();
+        let root = decode_hash(&unsigned["root"], "root")?;
+        let path = publications[0].0.clone();
+        persist_root_intent(&path, &unsigned)?;
+        assert!(
+            observe_finalized_progress(&ethereum, &path, &mut unsigned, target, &kind, root)
+                .await?
+        );
+        assert!(unsigned["nonce"].is_null());
+        assert_eq!(unsigned["status"], "observed");
+        unsigned["nonce"] = before["nonce"].clone();
+        persist_root_intent(&path, &unsigned)?;
+        let restarted = serde_json::from_slice(&fs::read(&path)?)?;
+        let mut publications = vec![(path, restarted)];
+        assert!(ensure_no_competing_publication(&publications, &b).is_err());
+        reconcile_publication_owners(&ethereum, &mut publications, &b).await?;
+        assert!(publications[0].1["nonce"].is_null());
         ensure_no_competing_publication(&publications, &b)?;
         Ok(())
     }

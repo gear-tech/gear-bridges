@@ -366,19 +366,16 @@ pub async fn completion_evidence(
         .block(pin)
         .call()
         .await?;
-    anyhow::ensure!(
-        manager != Address::ZERO,
-        "HOLD: original queue has no authenticated token destination"
-    );
-    let token_delivery = if manager == Address::from(message.destination) {
-        IERC20Manager::new(manager, api.raw_provider())
-            .isVftManager(B256::from(message.source))
-            .block(pin)
-            .call()
-            .await?
-    } else {
-        false
-    };
+    let token_delivery =
+        if manager != Address::ZERO && manager == Address::from(message.destination) {
+            IERC20Manager::new(manager, api.raw_provider())
+                .isVftManager(B256::from(message.source))
+                .block(pin)
+                .call()
+                .await?
+        } else {
+            false
+        };
     let evidence = CompletionEvidence {
         receipt: finalized.receipt,
         finalized_block_number: finalized.finalized_block_number,
@@ -745,6 +742,7 @@ pub(crate) mod tests {
         head: AtomicU64,
         finalized_height: AtomicU64,
         receipt: Mutex<Value>,
+        manager: Mutex<Address>,
         fault: Mutex<RpcFault>,
         calls: Mutex<Vec<Value>>,
     }
@@ -865,7 +863,7 @@ pub(crate) mod tests {
                             hex::encode(QueueGovernance::erc20ManagerCall::SELECTOR)
                         )
                     {
-                        return json!({"jsonrpc":"2.0", "id":request["id"], "result":format!("0x{:064x}", U256::from_be_slice(Address::from([5; 20]).as_slice()))});
+                        return json!({"jsonrpc":"2.0", "id":request["id"], "result":format!("0x{:064x}", U256::from_be_slice(self.manager.lock().unwrap().as_slice()))});
                     }
                     if data.starts_with(&format!(
                         "0x{}",
@@ -961,6 +959,7 @@ pub(crate) mod tests {
             finalized_height: AtomicU64::new(100),
             receipt: Mutex::new(Value::Null),
             fault: Mutex::new(RpcFault::None),
+            manager: Mutex::new(Address::from([5; 20])),
             calls: Mutex::new(Vec::new()),
         });
         let server_state = state.clone();
@@ -1136,6 +1135,62 @@ pub(crate) mod tests {
         }
         Ok(())
     }
+    #[tokio::test]
+    async fn application_receipt_completes_without_a_token_manager() -> anyhow::Result<()> {
+        let rpc = watch_rpc(true).await?;
+        *rpc.state.manager.lock().unwrap() = Address::ZERO;
+        rpc.state.finalized_height.store(107, Ordering::SeqCst);
+        let request = rpc.state.request.clone();
+        let signed = request.submission.as_ref().unwrap();
+        // Token-shaped application payloads remain applications without a token lane.
+        let mut receipt = serde_json::to_value(evidence(&request.message, signed, false).receipt)?;
+        receipt["blockHash"] = json!(rpc.state.chain[100].header.hash);
+        receipt["logs"][0]["blockHash"] = json!(rpc.state.chain[100].header.hash);
+        for case in ["valid", "missing", "wrong-message", "other-receipt"] {
+            let mut candidate = receipt.clone();
+            match case {
+                "missing" => candidate["logs"] = json!([]),
+                "wrong-message" => {
+                    candidate["logs"][0]["data"] = json!(format!("0x{}", "00".repeat(128)));
+                }
+                "other-receipt" => {
+                    candidate["logs"][0]["transactionHash"] = json!(B256::ZERO);
+                }
+                _ => {}
+            }
+            *rpc.state.receipt.lock().unwrap() = candidate;
+            let (_, outcome) = tokio::time::timeout(
+                Duration::from_secs(2),
+                watch_tx(rpc.api.clone(), request.clone(), 8),
+            )
+            .await?;
+            if case == "valid" {
+                assert!(!expect_completed(outcome)?.token_delivery);
+            } else {
+                assert!(
+                    matches!(outcome, SubmissionOutcome::NeedsReconciliation { .. }),
+                    "{case}"
+                );
+            }
+        }
+        let calls = rpc.state.calls.lock().unwrap();
+        assert!(!calls.iter().any(|call| {
+            call["method"].as_str().unwrap().starts_with("eth_send")
+                || (call["method"] == "eth_call"
+                    && call["params"][0]
+                        .get("input")
+                        .or_else(|| call["params"][0].get("data"))
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .starts_with(&format!(
+                            "0x{}",
+                            hex::encode(IERC20Manager::isVftManagerCall::SELECTOR)
+                        )))
+        }));
+        Ok(())
+    }
+
     #[tokio::test]
     async fn transient_receipt_observations_preserve_original_submission() -> anyhow::Result<()> {
         for fault in [

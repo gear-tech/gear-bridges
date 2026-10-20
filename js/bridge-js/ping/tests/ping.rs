@@ -7,6 +7,7 @@ use gtest::{CoreLog, Log, Program, System, WasmProgram};
 use parity_scale_codec::DecodeAll;
 use ping::{BridgeConfig, Delivery, OutboundStatus, PingError, QueuedDelivery};
 use sails_rs::prelude::{ActorId, Decode, Encode, MessageId, H160, H256, U256};
+use std::{cell::Cell, rc::Rc};
 
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
@@ -33,14 +34,20 @@ fn config(fee_bridge: u128) -> BridgeConfig {
 }
 
 fn original_reply(system: &System, id: MessageId) -> CoreLog {
+    original_reply_with_spent_value(system, id).0
+}
+
+fn original_reply_with_spent_value(system: &System, id: MessageId) -> (CoreLog, u128) {
+    let mut spent_value = 0;
     for _ in 0..120 {
-        if let Some(log) = system
-            .run_next_block()
+        let result = system.run_next_block();
+        spent_value += result.spent_value();
+        if let Some(log) = result
             .log
             .into_iter()
             .find(|log| log.reply_to() == Some(id))
         {
-            return log;
+            return (log, spent_value);
         }
     }
     panic!("Missing original reply to {id:?}");
@@ -97,6 +104,32 @@ fn call<T: Decode>(
         "Unexpected runtime error: {reply:?}"
     );
     decode_reply(reply.payload(), method)
+}
+
+fn assert_refunded(
+    system: &System,
+    program: &Program<'_>,
+    source: u64,
+    method: &str,
+    args: impl Encode,
+    value: u128,
+    error: PingError,
+) {
+    let source_before = system.balance_of(source);
+    let program_before = program.balance();
+    let builtin_before = system.balance_of(BUILTIN);
+    let id = program.send_bytes_with_value(source, ("Ping", method, args).encode(), value);
+    let (reply, spent_value) = original_reply_with_spent_value(system, id);
+    assert!(reply.reply_code().unwrap().is_success());
+    assert_eq!(reply.source(), program.id());
+    assert_eq!(reply.destination(), ActorId::from(source));
+    assert_eq!(
+        decode_reply::<Result<QueuedDelivery, PingError>>(reply.payload(), method),
+        Err(error)
+    );
+    assert_eq!(system.balance_of(source), source_before - spent_value);
+    assert_eq!(program.balance(), program_before);
+    assert_eq!(system.balance_of(BUILTIN), builtin_before);
 }
 
 fn query<T: Decode>(system: &System, program: &Program<'_>, method: &str, args: impl Encode) -> T {
@@ -161,6 +194,19 @@ fn receipt_authentication_exact_payload_and_two_replay_keys() {
         ),
         Err(PingError::NotHistoricalProxy)
     );
+    for source in [OWNER, PROXY] {
+        let source_before = system.balance_of(source);
+        let program_before = program.balance();
+        let request = program.send_bytes_with_value(
+            source,
+            ("Ping", "SubmitReceipt", key.0, key.1, valid.clone()).encode(),
+            FEE,
+        );
+        let (reply, spent_value) = original_reply_with_spent_value(&system, request);
+        assert!(!reply.reply_code().unwrap().is_success());
+        assert_eq!(system.balance_of(source), source_before - spent_value);
+        assert_eq!(program.balance(), program_before);
+    }
 
     let mut trailing_receipt = valid.clone();
     trailing_receipt.push(0);
@@ -370,6 +416,7 @@ fn queued_bytes() -> Vec<u8> {
 struct BuiltinReply {
     expected_payload: Vec<u8>,
     response: Result<Vec<u8>, &'static str>,
+    requests: Rc<Cell<u32>>,
 }
 
 impl WasmProgram for BuiltinReply {
@@ -377,6 +424,7 @@ impl WasmProgram for BuiltinReply {
         Ok(None)
     }
     fn handle(&mut self, payload: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
+        self.requests.set(self.requests.get() + 1);
         let request = gbuiltin_eth_bridge::Request::decode_all(&mut &payload[..]).unwrap();
         assert_eq!(
             request,
@@ -402,12 +450,14 @@ fn builtin_original_reply_nonce_zero_value_and_dispatch_replay() {
     system.mint_to(OWNER, 100_000_000_000_000_000);
     let payload = vec![255, 0, 2, 112, 105, 110, 103, 0];
     let expected_payload = [id.as_bytes(), &payload].concat();
+    let requests = Rc::new(Cell::new(0));
     let builtin = Program::mock_with_id(
         &system,
         BUILTIN,
         BuiltinReply {
             expected_payload,
             response: Ok(queued_bytes()),
+            requests: requests.clone(),
         },
     );
     builtin.send_bytes(OWNER, b"INIT");
@@ -425,61 +475,58 @@ fn builtin_original_reply_nonce_zero_value_and_dispatch_replay() {
         Ok(queued())
     );
     assert_eq!(builtin.balance(), before + FEE);
+    assert_eq!(requests.get(), 1);
     assert_eq!(
         query::<Option<OutboundStatus>>(&system, &program, "Outbound", id),
         Some(OutboundStatus::Queued(queued()))
     );
-    assert_eq!(
-        call::<Result<QueuedDelivery, PingError>>(
+    assert_refunded(
+        &system,
+        &program,
+        OWNER,
+        "SendMessage",
+        (id, payload),
+        FEE,
+        PingError::AlreadyRequested,
+    );
+    assert_eq!(builtin.balance(), before + FEE);
+    assert_refunded(
+        &system,
+        &program,
+        PROXY,
+        "SendMessage",
+        (H256([4; 32]), vec![1_u8]),
+        FEE * 2,
+        PingError::NotOwner,
+    );
+    for (id, payload) in [(H256::zero(), vec![1_u8]), (H256([4; 32]), vec![0; 1025])] {
+        assert_refunded(
             &system,
             &program,
             OWNER,
             "SendMessage",
             (id, payload),
-            FEE
-        ),
-        Err(PingError::AlreadyRequested)
-    );
-    assert_eq!(builtin.balance(), before + FEE);
-    assert_eq!(
-        call::<Result<QueuedDelivery, PingError>>(
-            &system,
-            &program,
-            PROXY,
-            "SendMessage",
-            (H256([4; 32]), vec![1_u8]),
-            0
-        ),
-        Err(PingError::NotOwner)
-    );
-    for (id, payload) in [(H256::zero(), vec![1_u8]), (H256([4; 32]), vec![0; 1025])] {
-        assert_eq!(
-            call::<Result<QueuedDelivery, PingError>>(
-                &system,
-                &program,
-                OWNER,
-                "SendMessage",
-                (id, payload),
-                FEE
-            ),
-            Err(PingError::InvalidPayload)
+            FEE,
+            PingError::InvalidPayload,
         );
         assert_eq!(
             query::<Option<OutboundStatus>>(&system, &program, "Outbound", id),
             None
         );
     }
+    assert_eq!(requests.get(), 1);
     let mismatch_id = H256([5; 32]);
     let before = program.balance();
+    let owner_before = system.balance_of(OWNER);
     let request = program.send_bytes_with_value(
         OWNER,
         ("Ping", "SendMessage", mismatch_id, vec![1_u8]).encode(),
         FEE * 2,
     );
-    assert!(!original_reply(&system, request)
-        .reply_code()
-        .unwrap()
-        .is_success());
+    let (reply, spent_value) = original_reply_with_spent_value(&system, request);
+    assert!(!reply.reply_code().unwrap().is_success());
+    assert_eq!(system.balance_of(OWNER), owner_before - spent_value);
+    assert_eq!(requests.get(), 1);
     assert_eq!(program.balance(), before);
     assert_eq!(
         query::<Option<OutboundStatus>>(&system, &program, "Outbound", mismatch_id),
@@ -504,6 +551,7 @@ fn malformed_or_failed_builtin_reply_never_reopens_original_dispatch() {
             BuiltinReply {
                 expected_payload: [id.as_bytes(), &[1_u8]].concat(),
                 response,
+                requests: Rc::new(Cell::new(0)),
             },
         );
         builtin.send_bytes(OWNER, b"INIT");
@@ -540,22 +588,31 @@ fn malformed_or_failed_builtin_reply_never_reopens_original_dispatch() {
 #[test]
 fn late_original_builtin_reply_reconciles_pending_after_timeout() {
     let system = System::new();
-    let program = initialize(&system, config(0));
+    let program = initialize(&system, config(FEE));
     let id = H256([3; 32]);
+    let program_before = program.balance();
+    let builtin_before = system.balance_of(BUILTIN);
+    let request =
+        program.send_bytes_with_value(OWNER, ("Ping", "SendMessage", id, vec![1_u8]).encode(), FEE);
+    let reply = original_reply(&system, request);
+    assert!(reply.reply_code().unwrap().is_success());
     assert_eq!(
-        call::<Result<QueuedDelivery, PingError>>(
-            &system,
-            &program,
-            OWNER,
-            "SendMessage",
-            (id, vec![1_u8]),
-            0
-        ),
+        decode_reply::<Result<QueuedDelivery, PingError>>(reply.payload(), "SendMessage"),
         Err(PingError::BuiltinFailure)
     );
+    assert_eq!(program.balance(), program_before);
     assert_eq!(
         query::<Option<OutboundStatus>>(&system, &program, "Outbound", id),
         Some(OutboundStatus::Pending)
+    );
+    assert_refunded(
+        &system,
+        &program,
+        OWNER,
+        "SendMessage",
+        (id, vec![1_u8]),
+        FEE,
+        PingError::AlreadyRequested,
     );
     let original = Log::builder()
         .source(program.id())
@@ -573,20 +630,19 @@ fn late_original_builtin_reply_reconciles_pending_after_timeout() {
     for _ in 0..3 {
         system.run_next_block();
     }
+    assert_eq!(system.balance_of(BUILTIN), builtin_before + FEE);
     assert_eq!(
         query::<Option<OutboundStatus>>(&system, &program, "Outbound", id),
         Some(OutboundStatus::Queued(queued()))
     );
-    assert_eq!(
-        call::<Result<QueuedDelivery, PingError>>(
-            &system,
-            &program,
-            OWNER,
-            "SendMessage",
-            (id, vec![1_u8]),
-            0
-        ),
-        Err(PingError::AlreadyRequested)
+    assert_refunded(
+        &system,
+        &program,
+        OWNER,
+        "SendMessage",
+        (id, vec![1_u8]),
+        FEE,
+        PingError::AlreadyRequested,
     );
 }
 

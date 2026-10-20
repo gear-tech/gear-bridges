@@ -83,7 +83,7 @@ const handler = async (ctx: ProcessorContext) => {
   for (const block of ctx.blocks) {
     for (const event of block.events) {
       if (isProgramChanged(event)) {
-        handleProgramChangedEvent({
+        await handleProgramChangedEvent({
           state,
           blockHeader: block.header,
           event,

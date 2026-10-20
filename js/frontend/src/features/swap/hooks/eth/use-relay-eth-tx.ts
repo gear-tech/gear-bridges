@@ -43,8 +43,8 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
       if (!profile) throw new Error(NETWORK_PRESET.INBOUND_PROOF_PROFILE.hold);
       if (
         profile.ethereumChainId !== BigInt(NETWORK_PRESET.ETH_CHAIN_ID) ||
-        profile.consumer.programId !== NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS ||
-        expectedEffect.managerAddress !== NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS
+        profile.consumer.programId.toLowerCase() !== NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS.toLowerCase() ||
+        expectedEffect.managerAddress.toLowerCase() !== NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS.toLowerCase()
       ) {
         throw new Error('HOLD: approved profile and configured token lane disagree');
       }

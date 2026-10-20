@@ -54,6 +54,15 @@ struct ScanJournal {
     delivered: Option<(u32, Vec<u8>)>,
 }
 
+impl ScanJournal {
+    fn rewind_to(&mut self, accepted: u32, hash: Hash32) {
+        // GRANDPA finality does not freeze BEEFY justifications: missing proofs
+        // may have been appended behind the saved scan cursor while offline.
+        self.scanned_through = accepted;
+        self.scanned_hash = hash;
+    }
+}
+
 fn commitment_identity(raw: &[u8]) -> Result<Hash32> {
     Ok(keccak256(
         &decode_versioned_finality_proof(raw)?.commitment.encode(),
@@ -247,6 +256,7 @@ impl Source {
 
     /// The cursor and every undispatched original justification commit together.
     /// A returned-but-not-journaled handover is requeued on restart.
+    /// Rescan after the accepted BEEFY checkpoint: finalized blocks may gain proofs later.
     pub async fn enable_scan_journal(
         &mut self,
         path: &Path,
@@ -258,7 +268,7 @@ impl Source {
             "source scan journal already configured"
         );
         if path.exists() {
-            let saved: ScanJournal = serde_json::from_slice(&fs::read(path)?)
+            let mut saved: ScanJournal = serde_json::from_slice(&fs::read(path)?)
                 .context("invalid source scan journal; HOLD")?;
             ensure!(
                 saved.genesis == self.source_genesis
@@ -287,29 +297,31 @@ impl Source {
                 first.0 == saved.scanned_hash && second == first,
                 "source cursor changed canonical history; HOLD"
             );
-            if saved.scanned_through >= resume_from {
+            ensure!(
+                saved.pending.len() <= MAX_PENDING_JUSTIFICATIONS,
+                "oversized pending source scan journal; HOLD"
+            );
+            saved.rewind_to(
+                resume_from,
+                self.api.block_number_to_hash(resume_from).await?.0,
+            );
+            self.scanned_through = saved.scanned_through;
+            self.scanned_hash = saved.scanned_hash;
+            for (block, raw) in saved.pending.into_iter().chain(saved.delivered.into_iter()) {
                 ensure!(
-                    saved.pending.len() <= MAX_PENDING_JUSTIFICATIONS,
-                    "oversized pending source scan journal; HOLD"
+                    decode_versioned_finality_proof(&raw)?
+                        .commitment
+                        .block_number
+                        == block,
+                    "source cursor justification identity changed; HOLD"
                 );
-                self.scanned_through = saved.scanned_through;
-                self.scanned_hash = saved.scanned_hash;
-                for (block, raw) in saved.pending.into_iter().chain(saved.delivered.into_iter()) {
-                    ensure!(
-                        decode_versioned_finality_proof(&raw)?
-                            .commitment
-                            .block_number
-                            == block,
-                        "source cursor justification identity changed; HOLD"
-                    );
-                    if block > resume_from {
-                        self.queue_justification(raw).await?;
-                    }
+                if block > resume_from {
+                    self.queue_justification(raw).await?;
                 }
-                let (current, _) = self.checkpoint_at(resume_from).await?;
-                self.last_block = Some(resume_from);
-                self.last_set_id = Some(current.id);
             }
+            let (current, _) = self.checkpoint_at(resume_from).await?;
+            self.last_block = Some(resume_from);
+            self.last_set_id = Some(current.id);
         }
         if self.scanned_hash == [0; 32] {
             self.scanned_hash = self.api.block_number_to_hash(self.scanned_through).await?.0;
@@ -386,8 +398,8 @@ impl Source {
         Ok(())
     }
 
-    /// Drain durable originals before fetching later history, so a saturated
-    /// restart backlog cannot block reconciliation of an already-signed submission.
+    /// Replay archived history before draining later durable originals, so late
+    /// justifications cannot hide an authority transition behind the scan cursor.
     pub async fn next_commitment(&mut self) -> Result<CapturedCommitment> {
         timeout(MAX_WAIT, self.next_commitment_inner())
             .await
@@ -404,6 +416,18 @@ impl Source {
                 .range(..=finalized.min(self.scanned_through))
                 .next()
                 .map(|(&block, raw)| (block, raw.clone()));
+            let next = if next.is_some() {
+                next
+            } else if self.scanned_through < finalized {
+                // New archive proofs go directly to durable delivery, not into a
+                // possibly saturated retained backlog of original justifications.
+                let Some(next) = self.scan_range(finalized).await? else {
+                    continue;
+                };
+                Some(next)
+            } else {
+                None
+            };
             if let Some((block, raw)) = next {
                 let captured = self.capture(block, raw.clone(), finalized, true).await?;
                 // Commit the original delivered proof before advancing memory.
@@ -420,10 +444,6 @@ impl Source {
                 return Ok(captured);
             }
 
-            if self.scanned_through < finalized {
-                self.scan_range(finalized).await?;
-                continue;
-            }
             match timeout(Duration::from_secs(3), self.subscription.next()).await {
                 Err(_) => {}
                 Ok(None) => {
@@ -442,12 +462,12 @@ impl Source {
         }
     }
 
-    async fn scan_range(&mut self, finalized: u32) -> Result<()> {
+    async fn scan_range(&mut self, finalized: u32) -> Result<Option<(u32, Vec<u8>)>> {
         let Some(start) = self.scanned_through.checked_add(1) else {
-            return Ok(());
+            return Ok(None);
         };
         if start > finalized {
-            return Ok(());
+            return Ok(None);
         }
         let end = finalized.min(start.saturating_add(63));
         for block in start..=end {
@@ -459,20 +479,32 @@ impl Source {
                 .request::<JsonValue>("chain_getBlock", rpc_params![hash])
                 .await
                 .with_context(|| format!("read block {block} for BEEFY catch-up"))?;
-            if let Some(bytes) = justification_bytes(&raw)? {
-                self.queue_justification(bytes).await?;
-            }
+            let bytes = justification_bytes(&raw)?;
             self.scanned_through = block;
             self.scanned_hash = hash.0;
+            if let Some(bytes) = bytes {
+                let proof_block = decode_versioned_finality_proof(&bytes)?
+                    .commitment
+                    .block_number;
+                ensure!(proof_block > 0, "genesis BEEFY commitment is not usable");
+                if self.last_block.is_none_or(|last| proof_block > last)
+                    && !self.pending.contains_key(&proof_block)
+                    && proof_block <= block
+                {
+                    return Ok(Some((proof_block, bytes)));
+                }
+                self.queue_justification(bytes).await?;
+            }
             if self.pending.range(..=block).next().is_some() {
                 self.persist_scan_journal(None)?;
-                return Ok(());
+                return Ok(None);
             }
             if block % 32 == 0 {
                 self.persist_scan_journal(None)?;
             }
         }
-        self.persist_scan_journal(None)
+        self.persist_scan_journal(None)?;
+        Ok(None)
     }
     async fn queue_justification(&mut self, bytes: Vec<u8>) -> Result<()> {
         let signed =
@@ -1496,6 +1528,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn restart_rewinds_proofless_scan_without_losing_pending_or_delivered_originals() -> Result<()>
+    {
+        let pending = (101..100 + MAX_PENDING_JUSTIFICATIONS as u32)
+            .map(|block| (block, block.to_le_bytes().to_vec()))
+            .collect();
+        let saved = ScanJournal {
+            genesis: [1; 32],
+            bridge_domain: [2; 32],
+            scanned_through: 2_000,
+            scanned_hash: [3; 32],
+            pending,
+            delivered: Some((100, vec![4; 32])),
+        };
+        let mut restored: ScanJournal = serde_json::from_slice(&serde_json::to_vec(&saved)?)?;
+        restored.rewind_to(50, [5; 32]);
+        assert_eq!(restored.scanned_through, 50);
+        assert_eq!(restored.scanned_hash, [5; 32]);
+        assert_eq!(restored.pending, saved.pending);
+        assert_eq!(restored.delivered, saved.delivered);
+        // Both transitions appended after the old scan must be visited before
+        // the later retained originals can be delivered.
+        let replay = restored.scanned_through + 1..=saved.scanned_through;
+        assert!(replay.contains(&60) && replay.contains(&80));
+        Ok(())
+    }
+
+    #[test]
     fn native_destination_binding_authenticates_genesis_chain_id_queue_and_domain() -> Result<()> {
         let genesis = [0x22; 32];
         let queue = [0x33; 20];
@@ -1858,25 +1917,37 @@ mod tests {
             assert_eq!(source.source_genesis, genesis);
             assert_eq!(witness.source_genesis, genesis);
             assert_eq!(source.bridge_domain, witness.bridge_domain);
+            if original_cursor.is_none() {
+                // Reproduce a cursor persisted while GRANDPA-finalized history
+                // still had no BEEFY proofs. The archive now contains them.
+                let saved = ScanJournal {
+                    genesis: source.source_genesis,
+                    bridge_domain: source.bridge_domain,
+                    scanned_through: source.identity.finalized_height,
+                    scanned_hash: source.identity.finalized_hash,
+                    pending: Default::default(),
+                    delivered: None,
+                };
+                fs::write(&path, serde_json::to_vec(&saved)?)?;
+            }
             source.seek_from(resume.checked_add(1).context("resume height overflow")?)?;
             source.enable_scan_journal(&path, resume, &witness).await?;
+            assert_eq!(source.scanned_through, resume);
             let first = source.next_commitment().await?;
             assert_eq!(
                 first.block, expected_first,
                 "catch-up must return the original earliest commitment"
             );
-            if let Some(cursor) = original_cursor {
-                assert_eq!(
-                    source.scanned_through, cursor,
-                    "restored originals must drain before fetching later source history"
-                );
-                let saved: ScanJournal = serde_json::from_slice(&fs::read(&path)?)?;
-                assert_eq!(saved.scanned_through, cursor);
-                assert_eq!(
-                    saved.delivered.as_ref().map(|(block, _)| *block),
-                    Some(expected_first)
-                );
-            }
+            assert_eq!(
+                source.scanned_through, expected_first,
+                "restart must rescan earlier history before draining later originals"
+            );
+            let saved: ScanJournal = serde_json::from_slice(&fs::read(&path)?)?;
+            assert_eq!(saved.scanned_through, expected_first);
+            assert_eq!(
+                saved.delivered.as_ref().map(|(block, _)| *block),
+                Some(expected_first)
+            );
             assert!(
                 first.block < first.finalized_height,
                 "fixture must retain historical backlog"

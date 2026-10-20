@@ -15,7 +15,6 @@ use anyhow::{Context, Result};
 use ethereum_client::{EthApi, FinalizedView, MerkleRootObservation, QueueDeployment};
 use futures::StreamExt;
 use gear_common::api_provider::ApiProviderConnection;
-use gear_rpc_client::GearApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
 use serde::{Deserialize, Serialize};
@@ -466,7 +465,7 @@ impl MerkleRootExtractor {
         })
     }
 
-    async fn authenticate_state(&self, view: &mut FinalizedView, events: bool) -> Result<()> {
+    async fn authenticate_state(&mut self, view: &mut FinalizedView, events: bool) -> Result<()> {
         let state = self
             .state
             .as_ref()
@@ -517,7 +516,13 @@ impl MerkleRootExtractor {
                         .iter()
                         .find(|observation| observation.log_index == root.inclusion.log_index)
                         .context("HOLD: saved root event is absent from its authenticated block")?;
-                    let qualified = self.qualify_observation(observation, view).await?;
+                    let qualified = Self::qualify_observation(
+                        &self.eth_api,
+                        &mut self.api_provider,
+                        observation,
+                        view,
+                    )
+                    .await?;
                     anyhow::ensure!(
                         qualified == *root,
                         "HOLD: saved root event/source/timestamp identity changed"
@@ -571,7 +576,8 @@ impl MerkleRootExtractor {
     }
 
     async fn qualify_observation(
-        &self,
+        eth_api: &EthApi,
+        api_provider: &mut ApiProviderConnection,
         observation: &MerkleRootObservation,
         view: &FinalizedView,
     ) -> Result<QualifiedMerkleRoot> {
@@ -581,17 +587,15 @@ impl MerkleRootExtractor {
         );
         let source = u32::try_from(observation.entry.block_number)
             .context("HOLD: source root height exceeds u32")?;
-        let queue_root = self.eth_api.read_merkle_root_in_view(source, view).await?;
+        let queue_root = eth_api.read_merkle_root_in_view(source, view).await?;
         anyhow::ensure!(
             queue_root == Some(observation.entry.merkle_root.0),
             "HOLD: observed root differs from finalized queue state"
         );
-        let timestamp = self
-            .eth_api
+        let timestamp = eth_api
             .get_block_timestamp_by_hash(observation.block_number, observation.block_hash)
             .await?;
-        let (block_hash, authority_set_id) =
-            fetch_hash_auth_id(&self.api_provider.client(), source).await?;
+        let (block_hash, authority_set_id) = fetch_hash_auth_id(api_provider, source).await?;
         Ok(QualifiedMerkleRoot {
             root: RelayedMerkleRoot {
                 block: GearBlockNumber(source),
@@ -630,7 +634,10 @@ impl MerkleRootExtractor {
             .await?;
         let mut batch = Vec::with_capacity(observations.len());
         for observation in &observations {
-            batch.push(self.qualify_observation(observation, view).await?);
+            batch.push(
+                Self::qualify_observation(&self.eth_api, &mut self.api_provider, observation, view)
+                    .await?,
+            );
         }
         let mut pending = self.state.as_ref().expect("qualified state").clone();
         let mut roots = MerkleRoots::from_qualified(&pending.roots, ROOT_CAPACITY)?;
@@ -773,10 +780,21 @@ fn confirmed_block(finalized: u64, confirmations: u64) -> Option<u64> {
     finalized.checked_sub(confirmations.saturating_sub(1))
 }
 
-async fn fetch_hash_auth_id(gear_api: &GearApi, number: u32) -> Result<(H256, AuthoritySetId)> {
-    let hash = gear_api.block_number_to_hash(number).await?;
-    let authority = AuthoritySetId(gear_api.signed_by_authority_set_id(hash).await?);
-    Ok((hash, authority))
+async fn fetch_hash_auth_id(
+    api_provider: &mut ApiProviderConnection,
+    number: u32,
+) -> Result<(H256, AuthoritySetId)> {
+    crate::rpc::retry_gear(
+        api_provider,
+        "qualify root source identity",
+        move |gear_api| async move {
+            let hash = gear_api.block_number_to_hash(number).await?;
+            let authority = AuthoritySetId(gear_api.signed_by_authority_set_id(hash).await?);
+            Ok((hash, authority))
+        },
+    )
+    .await
+    .context("HOLD: cannot qualify root source identity")
 }
 
 async fn task(mut this: MerkleRootExtractor) {
@@ -887,6 +905,12 @@ mod tests {
     // No source state is fabricated: these Ethereum fixtures have no root events.
     // The live provider service is retained; unexpected source RPCs fail the test.
     async fn source_provider() -> Result<(ApiProvider, tokio::task::JoinHandle<()>)> {
+        source_provider_with_queries(None).await
+    }
+
+    async fn source_provider_with_queries(
+        queries: Option<Arc<AtomicU64>>,
+    ) -> Result<(ApiProvider, tokio::task::JoinHandle<()>)> {
         use subxt::ext::frame_metadata::{
             v15, RuntimeMetadata, RuntimeMetadataPrefixed, META_RESERVED,
         };
@@ -919,40 +943,108 @@ mod tests {
         let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = format!("ws://{}", socket.local_addr()?);
         let server = tokio::spawn(async move {
-            let (socket, _) = socket.accept().await.unwrap();
-            let mut ws = tokio_tungstenite::accept_async(socket).await.unwrap();
-            while let Some(Ok(message)) = ws.next().await {
-                if !message.is_text() {
-                    continue;
+            let mut clients = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = socket.accept() => {
+                        let (socket, _) = accepted.unwrap();
+                        let metadata = metadata.clone();
+                        let queries = queries.clone();
+                        clients.spawn(async move {
+                            let mut ws = tokio_tungstenite::accept_async(socket).await.unwrap();
+                            while let Some(Ok(message)) = ws.next().await {
+                                if !message.is_text() {
+                                    continue;
+                                }
+                                let request: Value =
+                                    serde_json::from_str(message.to_text().unwrap()).unwrap();
+                                let result = match request["method"].as_str().unwrap() {
+                                    "chain_getBlockHash" if request["params"][0] == 43 => {
+                                        let attempt = queries.as_ref().expect("unexpected source query")
+                                            .fetch_add(1, Ordering::SeqCst);
+                                        if attempt == 0 {
+                                            ws.close(None).await.unwrap();
+                                            break;
+                                        }
+                                        Value::Null
+                                    }
+                                    "chain_getFinalizedHead" | "chain_getBlockHash" => {
+                                        json!(H256::repeat_byte(1))
+                                    }
+                                    "state_getRuntimeVersion" => {
+                                        json!({ "specVersion": 1, "transactionVersion": 1 })
+                                    }
+                                    "state_getMetadata" => json!(format!("0x{}", hex::encode(&metadata))),
+                                    "state_call" => {
+                                        assert_eq!(request["params"][0], "Metadata_metadata_at_version");
+                                        json!(format!(
+                                            "0x{}",
+                                            hex::encode(Some(metadata.clone()).encode())
+                                        ))
+                                    }
+                                    method => panic!("unexpected source RPC in empty-root fixture: {method}"),
+                                };
+                                if ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                                    json!({"jsonrpc":"2.0", "id":request["id"], "result":result})
+                                        .to_string()
+                                        .into(),
+                                )).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                    joined = clients.join_next(), if !clients.is_empty() => {
+                        joined.unwrap().unwrap();
+                    }
                 }
-                let request: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-                let result = match request["method"].as_str().unwrap() {
-                    "chain_getFinalizedHead" | "chain_getBlockHash" => json!(H256::repeat_byte(1)),
-                    "state_getRuntimeVersion" => {
-                        json!({ "specVersion": 1, "transactionVersion": 1 })
-                    }
-                    "state_getMetadata" => json!(format!("0x{}", hex::encode(&metadata))),
-                    "state_call" => {
-                        assert_eq!(request["params"][0], "Metadata_metadata_at_version");
-                        json!(format!(
-                            "0x{}",
-                            hex::encode(Some(metadata.clone()).encode())
-                        ))
-                    }
-                    method => panic!("unexpected source RPC in empty-root fixture: {method}"),
-                };
-                ws.send(tokio_tungstenite::tungstenite::Message::Text(
-                    json!({"jsonrpc":"2.0", "id":request["id"], "result":result})
-                        .to_string()
-                        .into(),
-                ))
-                .await
-                .unwrap();
             }
         });
         let provider = ApiProvider::new(endpoint, 0).await?;
         assert!(provider.connection().is_alive());
         Ok((provider, server))
+    }
+
+    #[tokio::test]
+    async fn source_disconnect_reconnects_without_advancing_cursor_or_retrying_semantic_errors(
+    ) -> Result<()> {
+        let rpc = HttpRoots::new(8).await?;
+        let queries = Arc::new(AtomicU64::new(0));
+        let (provider, source) = source_provider_with_queries(Some(queries.clone())).await?;
+        let connection = provider.connection();
+        provider.spawn();
+        let storage = Arc::new(MemoryRootStorage::default());
+        let mut state = EthereumRootState::rebuilding(cursor(8));
+        state.cursor = Some(cursor(4));
+        storage.save_root_state(&state).await?;
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut extractor =
+            MerkleRootExtractor::new(rpc.api.clone(), connection, 1, sender, storage.clone());
+        extractor.state = Some(state.clone());
+        let error = tokio::time::timeout(
+            Duration::from_secs(10),
+            fetch_hash_auth_id(&mut extractor.api_provider, 43),
+        )
+        .await?
+        .unwrap_err();
+        assert!(qualification_holds(&error));
+        assert!(format!("{error:#}").contains("Block #43 not present"));
+        assert_eq!(queries.load(Ordering::SeqCst), 2);
+        // A missing source block is semantic, not another transport reconnect.
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            fetch_hash_auth_id(&mut extractor.api_provider, 43),
+        )
+        .await?
+        .unwrap_err();
+        assert!(qualification_holds(&error));
+        assert_eq!(queries.load(Ordering::SeqCst), 3);
+        assert_eq!(extractor.state, Some(state.clone()));
+        assert_eq!(storage.load_root_state().await?, Some(state));
+        assert_eq!(storage.states.lock().unwrap().len(), 1);
+        source.abort();
+        rpc.server.stop(false).await;
+        Ok(())
     }
 
     type HistoricalRootRequest = (u64, tokio::sync::oneshot::Sender<()>);

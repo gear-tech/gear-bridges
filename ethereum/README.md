@@ -407,9 +407,16 @@ Review decoded fields before approving their file digests. A freshly calculated
 hash is not independent approval. The plan pins the chain/genesis, proxy and
 underlying implementation hashes, all existing contracts/source authorities,
 token/payment inventories, cut/floor, constructor bootstrap, recovery delay and
-roles, and retained-state readbacks. Include custody, supply, root/maturity,
+roles, and retained-state readbacks. Include bridge custody, root/maturity,
 replay and token-policy readbacks in `retainedState`; include applicable custom
-proxy implementation slots in `retainedProxies`. Supplied roots and nonce lists
+proxy implementation slots in `retainedProxies`. These pins are checked at each
+stage and against the archived upgrade poststate, so do not pin globally mutable
+canonical-token `totalSupply` across stages: unrelated WETH wrapping or USDC
+issuance must not invalidate a migration. Keep supply-preservation evidence
+transaction-local (for example, an upgrade trace proving no token mint/burn),
+separate from the immutable cross-stage pins; refreshing a supply pin would
+conflict with the archived poststate. Custody, roles, configuration and inventory
+checks remain mandatory. Supplied roots and nonce lists
 must come from the complete independently approved liability/permission audit;
 the tool cannot infer missing historical obligations from an incomplete list.
 The RPC must support canonical finalized blocks, archival state and recovery

@@ -8,6 +8,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { prepareVaraToEthRelay } from '../src/vara-to-eth/relayer.js';
 import { MessageQueueClient, type FinalizedMessageProcessResult } from '../src/ethereum/message-queue.js';
 import { withOriginalDeadline } from '../src/util.js';
+import { relayFailure } from './relay-failure.js';
 
 interface Intent {
   nonce: string; blockNumber: string; applicationId: HexString; payload: HexString; deadline: number;
@@ -21,10 +22,14 @@ const handlerAbi = parseAbi([
   'event MessageHandled(bytes32 indexed source, bytes32 indexed applicationId, bytes payload)',
 ]);
 
+const original: { ethereumTransactionHash?: HexString; nonce?: string; sourceBlockNumber?: string } = {};
+
 async function main() {
   assert(process.argv.length === 3, 'Usage: example:vara-to-eth /absolute/path/original-intent.json');
   const intent: Intent = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   assert(/^[0-9]+$/.test(intent.nonce) && /^[0-9]+$/.test(intent.blockNumber), 'Original decimal nonce/block required; nonce zero is valid');
+  original.nonce = intent.nonce;
+  original.sourceBlockNumber = intent.blockNumber;
   assert(/^0x[0-9a-fA-F]{64}$/.test(intent.applicationId) && BigInt(intent.applicationId) !== 0n, 'Nonzero application ID required');
   assert(/^0x(?:[0-9a-fA-F]{2}){0,1024}$/.test(intent.payload), 'Expected original payload required');
   assert(Number.isSafeInteger(intent.deadline) && Date.now() < intent.deadline, 'Original deadline expired or absent');
@@ -68,7 +73,8 @@ async function main() {
     assert.equal(bytesToHex(prepared.message.payload), (intent.applicationId + intent.payload.slice(2)).toLowerCase(), 'Original packed message differs');
     const result = await new MessageQueueClient(intent.messageQueueAddress, ethereumPublicClient, ethereumWalletClient, account)
       .processMessage(prepared.blockNumber, prepared.message, prepared.proof, { kind: 'application' }, undefined, intent.deadline, { wait: true });
-    assert(result.success, 'Original queue transaction not proven finalized');
+    original.ethereumTransactionHash = result.transactionHash;
+    if (!result.success) throw new Error(result.error);
     const evidence = result as FinalizedMessageProcessResult;
     const receipt = await read(() => ethereumPublicClient.getTransactionReceipt({ hash: result.transactionHash }));
     assert.equal(receipt.blockHash, evidence.receiptBlockHash, 'Original receipt pin changed');
@@ -86,7 +92,8 @@ async function main() {
   } finally { await gearApi.disconnect(); }
 }
 
-main().catch(() => {
-  console.error('HOLD: original intent not proven delivered. Reconcile it before any retry; do not replace its transaction or deadline.');
+main().catch((error) => {
+  console.error('HOLD: original intent not proven delivered. Reconcile it before any retry; do not replace its transaction or deadline.',
+    relayFailure(error, original));
   process.exitCode = 1;
 });

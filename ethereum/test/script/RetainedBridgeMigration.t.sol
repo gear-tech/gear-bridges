@@ -9,6 +9,7 @@ import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 import {
@@ -390,6 +391,47 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         assertTrue(messageQueue.paused());
         vm.expectRevert();
         migration.execute(approved, upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
+    }
+
+    function testExternalSupplyChangesPreserveMigrationButCustodyChangesReject() public {
+        RetainedBridgeMigration.MigrationPlan memory forkPlan = _forkMigrationPlan(
+            approved.legacyImplementation.account,
+            approved.implementation.account,
+            IVerifier(approved.verifier.account),
+            approved.legacyMax,
+            approved.firstBeefyBlock
+        );
+        // Use the shared custody pins with this fixture's actual retained root/replay coordinates.
+        uint256 count = forkPlan.retainedState.length;
+        forkPlan.retainedState[count - 2] = approved.retainedState[0];
+        forkPlan.retainedState[count - 1] = approved.retainedState[1];
+        approved.retainedState = forkPlan.retainedState;
+        migration.validate(approved, false);
+
+        uint256 supply = circleToken.totalSupply();
+        uint256 custody = circleToken.balanceOf(address(erc20Manager));
+        vm.prank(deploymentArguments.deployerAddress);
+        IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, 7);
+        assertEq(circleToken.totalSupply(), supply + 7);
+        assertEq(circleToken.balanceOf(address(erc20Manager)), custody);
+        RetainedBridgeMigration.GovernanceDelivery memory upgrade = _registerAndPause();
+        migration.execute(approved, upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
+        migration.validate(approved, true);
+        // Supply preservation is local to the upgrade, not a promise about unrelated future issuance.
+        assertEq(circleToken.totalSupply(), supply + 7);
+
+        vm.prank(deploymentArguments.deployerAddress);
+        IERC20Mintable(address(circleToken)).mint(deploymentArguments.deployerAddress, 1);
+        migration.validate(approved, true);
+        assertEq(circleToken.totalSupply(), supply + 8);
+        vm.prank(deploymentArguments.deployerAddress);
+        assertTrue(circleToken.transfer(address(erc20Manager), 1));
+        assertEq(circleToken.totalSupply(), supply + 8);
+        assertEq(circleToken.balanceOf(address(erc20Manager)), custody + 1);
+        vm.expectRevert(
+            abi.encodeWithSelector(RetainedBridgeMigration.RetainedMigrationHold.selector, "retained state changed")
+        );
+        migration.validate(approved, true);
     }
 
     function testInterveningRootRejectsStaleApprovedMaximum() public {

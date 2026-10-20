@@ -2801,7 +2801,7 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
     } = setup_for_test().await;
     let manager: ActorId = 100_005.into();
     let recipient: ActorId = 100_006.into();
-    remoting.system().mint_to(manager, 100_000_000_000_000);
+    remoting.system().mint_to(manager, 1_000_000_000_000_000);
     remoting.system().mint_to(recipient, 1_000_000_000_000);
     let inheritor: ActorId = 100_099.into();
     remoting.system().mint_to(inheritor, 1_000_000_000_000);
@@ -2954,7 +2954,31 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(returned.status, PayoutStatus::Refunded);
+    assert_eq!(returned.status, PayoutStatus::Queued);
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(native).await.unwrap(),
+        1
+    );
+    assert_eq!(
+        balance_of(&remoting, native, rejects_empty_payload).await,
+        U256::zero()
+    );
+    // The callback commits backing independently of credit. Recovery may mint
+    // only in a separate retryable command, including while paused.
+    admin.pause().send_recv(native).await.unwrap();
+    assert!(escrow_admin
+        .configure_manager(recipient)
+        .send_recv(native)
+        .await
+        .is_err());
+    let refunded = escrow
+        .redeem_escrow(returned_id, manager, rejects_empty_payload, amount)
+        .send_recv(native)
+        .await
+        .unwrap();
+    assert_eq!(refunded.status, PayoutStatus::Refunded);
+    assert_eq!(refunded.child, returned.child);
+    assert!(admin.is_paused().recv(native).await.unwrap());
     assert_eq!(returned.returned_value, raw);
     assert_eq!(balance_of(&remoting, native, manager).await, U256::zero());
     assert_eq!(
@@ -2967,7 +2991,7 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
             .send_recv(native)
             .await
             .unwrap(),
-        returned
+        refunded
     );
     assert_eq!(
         escrow.outstanding_redemptions().recv(native).await.unwrap(),
@@ -2976,7 +3000,7 @@ async fn test_native_wrapper_wasm_escrow_idempotency_mailbox_and_returned_value(
     assert_native_exit_rejected(&remoting, native, inheritor).await;
     assert_eq!(
         escrow.redemption(returned_id).recv(native).await.unwrap(),
-        Some(returned)
+        Some(refunded)
     );
     // An authenticated success reply carrying value is not delivery or refund evidence.
     // Its original child remains an obligation.
@@ -3337,7 +3361,11 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(returned.status, vft_vara_client::PayoutStatus::Refunded);
+    assert_eq!(returned.status, vft_vara_client::PayoutStatus::Queued);
+    assert_eq!(
+        balance_of(&remoting, native, failing_recipient).await,
+        U256::zero()
+    );
     assert_eq!(returned.returned_value, raw);
     use sails_rs::events::EventIo;
     use vft_manager_client::vft_manager::events::VftManagerEvents;
@@ -3500,7 +3528,10 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
             .recv(native)
             .await
             .unwrap(),
-        Some(returned)
+        Some(vft_vara_client::Redemption {
+            status: vft_vara_client::PayoutStatus::Refunded,
+            ..returned
+        })
     );
 }
 

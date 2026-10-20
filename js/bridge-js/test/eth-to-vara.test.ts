@@ -131,11 +131,15 @@ function originalReplyFixture() {
     } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
   });
 
-test.each(['deadline', 'funded', 'insufficient'] as const)('SDK original Gear request gas and dispatch evidence: %s', async (scenario) => {
+test.each(['deadline', 'funded', 'insufficient', 'case-profile'] as const)('SDK original Gear request gas and dispatch evidence: %s', async (scenario) => {
   vi.useFakeTimers();
   const fixture = originalReplyFixture(), api = fixture.params.gearApi;
   const profile = { ...checkpointProofFixture().profile, ethereumGenesisHash: hash(8),
     consumer: { ...checkpointProofFixture().profile.consumer, programId: hash(5) } };
+  const inboundProfile = scenario === 'case-profile' ? parseInboundProofProfile(JSON.stringify({
+    ...profile, sourceRuntimeCodeHash: '0x' + profile.sourceRuntimeCodeHash.slice(2).toUpperCase(),
+  }, (_, value) => typeof value === 'bigint' ? value.toString() : value)) : profile;
+  if (scenario === 'case-profile') expect(inboundProfile.sourceRuntimeCodeHash).not.toBe(profile.sourceRuntimeCodeHash);
   const inner = getPrefix('Ping', 'SubmitReceipt') + '00';
   fixture.state.payload = fixture.registry.createType('(String,String,Result<(Vec<u8>,Vec<u8>),ProxyError>)',
     ['HistoricalProxy', 'Redirect', { ok: [bytesToHex(fixture.receiptRlp), inner] }]).toHex();
@@ -172,7 +176,7 @@ test.each(['deadline', 'funded', 'insufficient'] as const)('SDK original Gear re
     vi.spyOn(HistoricalProxy.prototype, 'redirect').mockReturnValue(transaction as unknown as ReturnType<HistoricalProxy['redirect']>);
     const relay = relayEthToVara({ deadline: Date.now() + 1000, gearApi: api, signer: hash(2),
       transactionHash: hash(4), beaconRpcUrl: 'https://beacon.invalid', historicalProxyId: hash(1),
-      clientId: hash(5), clientServiceName: 'Ping', clientMethodName: 'SubmitReceipt', inboundProfile: profile,
+      clientId: hash(5), clientServiceName: 'Ping', clientMethodName: 'SubmitReceipt', inboundProfile,
       consumerReply: { registry: fixture.registry, resultType: 'Result<Null,String>', idlSha256: profile.consumer.idlSha256,
         verifyEffect: async () => { effectVerified = true; } },
       ethereumPublicClient: { getChainId: async () => 1, getTransactionReceipt: async () => ({ blockNumber: 5n, blockHash: hash(5) }),

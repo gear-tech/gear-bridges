@@ -39,9 +39,11 @@ Native redemption requires configuring the manager's zero-VFT-minimum native
 wrapper and the wrapper's escrow manager while both are paused. Configuration
 rejects a nonzero minimum; it does not silently repair previously reaped escrow.
 A queued mailbox payout is not settled until its original reply is authenticated.
-An original recipient error returning the exact full payout atomically credits
-that original Gear recipient with exactly backed wrapped VARA. Reconciliation
-records `ReceiptDepositOutcome::Refunded`, not native `Settled`/`Delivered`, and
+An original recipient error returning the exact full payout first records durable
+backing in the wrapper. Reconciliation retries wrapped credit for that original
+recipient; capacity failure retains the backing and outstanding obligation for
+another retry, without another native payout. Only successful credit records
+`ReceiptDepositOutcome::Refunded`, not native `Settled`/`Delivered`, and
 releases the completed receipt reservation. Refunds emit the distinct
 `ReceiptDepositRefunded` event, never the native-delivery settlement or
 `BridgingAccepted` event. It binds the original receipt/log, operation, wrapper,

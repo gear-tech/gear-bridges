@@ -7,6 +7,7 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { createPublicClient, http } from 'viem';
 import { parseInboundProofProfile, relayEthToVara } from '../src/index.js';
 import { PingClient, type Delivery } from './lib.js';
+import { relayFailure } from './relay-failure.js';
 
 // The caller records and approves this original intent before running the example.
 interface Intent {
@@ -14,10 +15,13 @@ interface Intent {
   profile: unknown;
 }
 
+const original: { ethereumTransactionHash?: HexString; gearTransactionHash?: HexString } = {};
+
 async function main() {
   assert(process.argv.length === 3, 'Usage: example:eth-to-vara /absolute/path/original-intent.json');
   const intent: Intent = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   assert(/^0x[0-9a-fA-F]{64}$/.test(intent.transactionHash), 'Original Ethereum transaction hash required');
+  original.ethereumTransactionHash = intent.transactionHash;
   assert(/^0x[0-9a-fA-F]{64}$/.test(intent.applicationId) && BigInt(intent.applicationId) !== 0n, 'Nonzero application ID required');
   assert(/^0x(?:[0-9a-fA-F]{2}){0,1024}$/.test(intent.payload), 'Expected original payload required');
   assert(Number.isSafeInteger(intent.deadline) && Date.now() < intent.deadline, 'Original deadline expired or absent');
@@ -54,12 +58,14 @@ async function main() {
         },
       },
     });
+    original.gearTransactionHash = result.txHash;
     assert(!result.error && await result.isFinalized, 'Original relay did not finalize');
     console.log('Verified original application delivery', { txHash: result.txHash, replyBlockHash: result.replyBlockHash });
   } finally { await gearApi.disconnect(); }
 }
 
-main().catch(() => {
-  console.error('HOLD: original intent not proven delivered. Reconcile it before any retry; do not replace its transaction or deadline.');
+main().catch((error) => {
+  console.error('HOLD: original intent not proven delivered. Reconcile it before any retry; do not replace its transaction or deadline.',
+    relayFailure(error, original));
   process.exitCode = 1;
 });

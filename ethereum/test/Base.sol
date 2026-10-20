@@ -646,22 +646,20 @@ abstract contract Base is RetainedBridgeMigration, StdAssertions, StdChains, Std
         p.wrappedVara = Identity(address(wrappedVara), address(wrappedVara).codehash);
         address[] memory tokens = erc20Manager.tokens();
         p.tokens = new Identity[](tokens.length);
-        p.retainedState = new StatePin[](tokens.length * 2 + 2);
+        p.retainedState = new StatePin[](tokens.length + 2);
         for (uint256 i; i < tokens.length; ++i) {
             p.tokens[i] = Identity(tokens[i], tokens[i].codehash);
             IERC20Metadata token = IERC20Metadata(tokens[i]);
-            p.retainedState[2 * i] = StatePin(
+            p.retainedState[i] = StatePin(
                 tokens[i],
                 abi.encodeCall(token.balanceOf, (address(erc20Manager))),
                 keccak256(abi.encode(token.balanceOf(address(erc20Manager))))
             );
-            p.retainedState[2 * i + 1] =
-                StatePin(tokens[i], abi.encodeCall(token.totalSupply, ()), keccak256(abi.encode(token.totalSupply())));
         }
-        p.retainedState[tokens.length * 2] = StatePin(
+        p.retainedState[tokens.length] = StatePin(
             address(messageQueue), abi.encodeCall(messageQueue.isProcessed, (836)), keccak256(abi.encode(true))
         );
-        p.retainedState[tokens.length * 2 + 1] = StatePin(
+        p.retainedState[tokens.length + 1] = StatePin(
             address(messageQueue), abi.encodeCall(messageQueue.isProcessed, (864)), keccak256(abi.encode(true))
         );
         address[] memory payments = erc20Manager.bridgingPayments();

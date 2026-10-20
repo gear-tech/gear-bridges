@@ -822,6 +822,92 @@ async fn verify_activation(
     );
     Ok(true)
 }
+
+fn activation_recovered(call: &mut FinalizedCutoverCall) -> Result<bool> {
+    if no_effect(&call.original) {
+        call.archived_no_effect = true;
+        return Ok(false);
+    }
+    ensure!(
+        complete(&call.original) && !call.archived_no_effect,
+        "HOLD: original activation remains unresolved; reconcile without resending"
+    );
+    validate_call_reply(call)?;
+    Ok(true)
+}
+
+async fn reconcile_retained_activation(
+    api: &GearApi,
+    scanner: &MessageSender,
+    path: &Path,
+) -> Result<bool> {
+    let mut work = read_work(path)?;
+    let Some(index) = work
+        .calls
+        .iter()
+        .rposition(|call| call.step == CutoverStep::DestinationUnpause && !call.archived_no_effect)
+    else {
+        return Ok(false);
+    };
+    let call = &mut work.calls[index];
+    validate_fixed_intent(&work.intent, call)?;
+    // The successor may already be live. Persist the original's read-only reconciliation
+    // before inspecting its journals; never initialize or rebroadcast an ambiguous activation.
+    let result = reconcile_call(api, &scanner_for(scanner, call.target), call, false)
+        .await
+        .and_then(|()| activation_recovered(call));
+    save(path, &work)?;
+    result
+}
+
+fn validate_successor_journals(
+    identity: &InboundRuntimeIdentity,
+    predecessor: &seal::PredecessorCutover,
+    boundary_hash: H256,
+    transactions: &Path,
+    discovery: &Path,
+) -> Result<()> {
+    let journal = seal::read_original_journal(transactions)?;
+    ensure!(
+        journal.schema_version == 7
+            && journal.runtime_identity.as_ref() == Some(identity)
+            && journal.predecessor_cutover.as_ref() == Some(predecessor),
+        "HOLD: activated successor journal binding changed"
+    );
+    let blocks_path = transactions.join("blocks.json");
+    for path in [blocks_path.as_path(), discovery] {
+        for pending in [
+            PathBuf::from(format!("{}.new", path.display())),
+            PathBuf::from(format!("{}.tmp", path.display())),
+            path.with_extension("tmp"),
+        ] {
+            ensure!(
+                fs::symlink_metadata(&pending)
+                    .is_err_and(|error| { error.kind() == std::io::ErrorKind::NotFound }),
+                "HOLD: successor journal has uncommitted evidence"
+            );
+        }
+        ensure!(
+            fs::symlink_metadata(path)?.file_type().is_file(),
+            "HOLD: successor snapshot is not a regular committed file"
+        );
+    }
+    let _: std::collections::BTreeMap<
+        relayer::message_relayer::common::EthereumSlotNumber,
+        relayer::message_relayer::eth_to_gear::storage::Block,
+    > = serde_json::from_slice(&fs::read(&blocks_path)?)?;
+    let state: relayer::message_relayer::common::ethereum::block_storage::DiscoveryState =
+        serde_json::from_slice(&fs::read(discovery)?)?;
+    state.validate()?;
+    ensure!(
+        state.schema_version == 2
+            && &state.identity == identity
+            && state.predecessor_cutover.as_ref() == Some(predecessor)
+            && state.start_parent_hash == Some(boundary_hash),
+        "HOLD: activated successor discovery binding changed"
+    );
+    Ok(())
+}
 async fn reconcile_call(
     api: &GearApi,
     scanner: &MessageSender,
@@ -2561,6 +2647,57 @@ async fn drain(
     Ok(())
 }
 
+fn validate_source_emitter(
+    identity: &InboundRuntimeIdentity,
+    payment_manager: Option<H160>,
+    source_manager: H160,
+) -> Result<()> {
+    let bound_manager = match (
+        identity.erc20_manager_address,
+        identity.bridging_payment_address,
+        payment_manager,
+    ) {
+        (Some(manager), None, None) => manager,
+        (None, Some(payment), Some(manager)) if !payment.is_zero() => manager,
+        _ => bail!("HOLD: original journal has an invalid emitter routing identity"),
+    };
+    ensure!(
+        !bound_manager.is_zero() && bound_manager == source_manager,
+        "HOLD: original journal ERC20 emitter differs from source manager configuration"
+    );
+    Ok(())
+}
+
+async fn authenticate_source_emitter(
+    eth: &PollingEthApi,
+    identity: &InboundRuntimeIdentity,
+    source_manager: H160,
+) -> Result<()> {
+    let payment_manager = if let Some(payment) = identity.bridging_payment_address {
+        let finalized = eth.finalized_block().await?;
+        let payment = BridgingPayment::new(
+            alloy_primitives::Address::from_slice(payment.as_bytes()),
+            &**eth,
+        );
+        let manager = payment
+            .erc20Manager()
+            .block(BlockId::hash_canonical(finalized.header.hash))
+            .call()
+            .await?;
+        ensure!(
+            finalized.header.inner.hash_slow() == finalized.header.hash
+                && eth
+                    .is_finalized_block(finalized.header.number, H256(finalized.header.hash.0))
+                    .await?,
+            "HOLD: paid lane emitter routing anchor is not canonical finalized"
+        );
+        Some(H160::from_slice(manager.as_slice()))
+    } else {
+        None
+    };
+    validate_source_emitter(identity, payment_manager, source_manager)
+}
+
 pub async fn prepare(
     connection: &GearConnectionArgs,
     api: &GearApi,
@@ -2642,6 +2779,7 @@ pub async fn prepare(
         .recv(args.old_vft_manager)
         .await?
         .context("HOLD: source ERC20 manager missing")?;
+    authenticate_source_emitter(&eth, &old_identity, H160(erc20_manager.0)).await?;
     let native_wrapper = manager
         .native_wrapper()
         .at_block(pin)
@@ -3745,34 +3883,33 @@ pub async fn finalize(
         let (sealed, _) = seal::verify_markers(&seal_path)?;
         seal::verify_originals_read_only(&seal_path, activation_scanner.api_provider.clone(), api)
             .await?;
-        let new_journal = seal::read_original_journal(&transactions)?;
-        ensure!(
-            new_journal.runtime_identity == Some(work.intent.new_identity.clone())
-                && new_journal.predecessor_cutover
-                    == Some(sealed.predecessor(seal::load_seal(&seal_path)?.1)),
-            "HOLD: activated successor journal binding changed"
-        );
-        ensure!(
-            !discovery.with_extension("tmp").exists()
-                && !PathBuf::from(format!("{}.new", discovery.display())).exists(),
-            "HOLD: successor discovery has uncommitted evidence"
-        );
-        let discovery_state:relayer::message_relayer::common::ethereum::block_storage::DiscoveryState=serde_json::from_slice(&fs::read(&discovery)?)?;
-        discovery_state.validate()?;
-        ensure!(
-            discovery_state.schema_version == 2
-                && discovery_state.identity == work.intent.new_identity
-                && discovery_state.predecessor_cutover == new_journal.predecessor_cutover
-                && discovery_state.start_parent_hash == Some(work.intent.boundary.execution_hash),
-            "HOLD: activated successor discovery binding changed"
-        );
+        validate_successor_journals(
+            &work.intent.new_identity,
+            &sealed.predecessor(seal::load_seal(&seal_path)?.1),
+            work.intent.boundary.execution_hash,
+            &transactions,
+            &discovery,
+        )?;
         verify_current_registrations(&eth, &work.intent).await?;
         release_owned_signers(api, &path, &_signer, &_other_signers)?;
         println!("Cutover already activated; verified original activation without resetting successor journals.");
         return Ok(());
     }
+    let recovered_activation =
+        reconcile_retained_activation(api, &activation_scanner, &path).await?;
     verify_current_registrations(&eth, &work.intent).await?;
-    seal::initialize_successor(&seal_path, &transactions, &discovery).await?;
+    if recovered_activation {
+        let (sealed, digest) = seal::verify_markers(&seal_path)?;
+        validate_successor_journals(
+            &work.intent.new_identity,
+            &sealed.predecessor(digest),
+            work.intent.boundary.execution_hash,
+            &transactions,
+            &discovery,
+        )?;
+    } else {
+        seal::initialize_successor(&seal_path, &transactions, &discovery).await?;
+    }
     seal::authenticate_startup(
         &work.intent.new_identity,
         Some(&seal_path),
@@ -3781,14 +3918,16 @@ pub async fn finalize(
         &eth,
     )
     .await?;
-    run_cutover_call(
-        api,
-        &path,
-        CutoverStep::DestinationUnpause,
-        actor(work.intent.new_identity.vft_manager_address),
-        &io::Unpause::encode_call(),
-    )
-    .await?;
+    if !recovered_activation {
+        run_cutover_call(
+            api,
+            &path,
+            CutoverStep::DestinationUnpause,
+            actor(work.intent.new_identity.vft_manager_address),
+            &io::Unpause::encode_call(),
+        )
+        .await?;
+    }
     let (destination, active_pin) =
         status(api, work.intent.new_identity.vft_manager_address).await?;
     ensure!(
@@ -3999,6 +4138,172 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cutover_identity() -> InboundRuntimeIdentity {
+        InboundRuntimeIdentity {
+            ethereum_chain_id: 1,
+            ethereum_genesis_hash: H256::repeat_byte(1),
+            ethereum_start_block: 101,
+            erc20_manager_address: Some(H160::repeat_byte(2)),
+            bridging_payment_address: None,
+            gear_genesis_hash: H256::repeat_byte(3),
+            vft_manager_address: H256::repeat_byte(4),
+            checkpoint_light_client_address: H256::repeat_byte(5),
+            historical_proxy_address: H256::repeat_byte(6),
+            gear_sender: [7; 32],
+        }
+    }
+
+    #[test]
+    fn preparation_rejects_rotated_emitter_for_direct_and_paid_lanes() {
+        let mut identity = cutover_identity();
+        let bound = identity.erc20_manager_address.unwrap();
+        let rotated = H160::repeat_byte(9);
+        assert!(validate_source_emitter(&identity, None, bound).is_ok());
+        assert!(validate_source_emitter(&identity, None, rotated).is_err());
+        identity.erc20_manager_address = None;
+        identity.bridging_payment_address = Some(H160::repeat_byte(8));
+        // Paid discovery binds the payment contract, not the actual receipt emitter.
+        assert!(validate_source_emitter(&identity, Some(bound), bound).is_ok());
+        assert!(validate_source_emitter(&identity, Some(bound), rotated).is_err());
+        assert!(validate_source_emitter(&identity, Some(rotated), bound).is_err());
+        assert!(validate_source_emitter(&identity, None, bound).is_err());
+        identity.erc20_manager_address = Some(bound);
+        assert!(validate_source_emitter(&identity, Some(bound), bound).is_err());
+    }
+
+    #[test]
+    fn ambiguous_activation_holds_until_original_reply_is_reconciled() {
+        let mut call = FinalizedCutoverCall {
+            step: CutoverStep::DestinationUnpause,
+            attempt: 0,
+            target: H256::repeat_byte(4),
+            payload: io::Unpause::encode_call(),
+            gas: 1,
+            value: 0,
+            original: original_with_reply(None),
+            archived_no_effect: false,
+        };
+        let original = serde_json::to_vec(&call).unwrap();
+        assert!(activation_recovered(&mut call).is_err());
+        assert_eq!(serde_json::to_vec(&call).unwrap(), original);
+        call.original.finalized_reply = original_with_reply(Some(vec![])).finalized_reply;
+        assert!(activation_recovered(&mut call).unwrap());
+        let saved = call.original.clone();
+        let mut recovered: FinalizedCutoverCall =
+            serde_json::from_slice(&serde_json::to_vec(&call).unwrap()).unwrap();
+        assert!(activation_recovered(&mut recovered).unwrap());
+        assert!(recovered.original.same_request(&saved));
+        recovered.original.finalized_reply_error = Some("failed".into());
+        assert!(activation_recovered(&mut recovered).is_err());
+        call.original.finalized_reply = None;
+        call.original.message_id = None;
+        call.original.finalized_dispatch_error = Some("definite pre-enqueue rejection".into());
+        assert!(!activation_recovered(&mut call).unwrap());
+        assert!(call.archived_no_effect);
+    }
+
+    #[test]
+    fn missing_activation_marker_preserves_populated_bound_successor_journals() {
+        use relayer::message_relayer::{
+            common::{
+                ethereum::block_storage::{BlockCursor, DiscoveryState},
+                EthereumBlockNumber, EthereumSlotNumber, TxHashWithSlot,
+            },
+            eth_to_gear::{storage::Block, tx_manager::TxStatus},
+        };
+        let directory =
+            std::env::temp_dir().join(format!("cutover-activation-recovery-{}", Uuid::now_v7()));
+        let transactions = directory.join("transactions");
+        fs::create_dir_all(&transactions).unwrap();
+        let discovery = directory.join("discovery.json");
+        let identity = cutover_identity();
+        let mut old_identity = identity.clone();
+        old_identity.vft_manager_address = H256::repeat_byte(10);
+        let predecessor = seal::PredecessorCutover {
+            manifest_digest: H256::repeat_byte(11),
+            predecessor_identity: old_identity,
+        };
+        let boundary_hash = H256::repeat_byte(12);
+        let tx = Transaction::new(
+            TxHashWithSlot {
+                tx_hash: B256::repeat_byte(13),
+                slot_number: EthereumSlotNumber(33),
+            },
+            TxStatus::ComposeProof,
+        );
+        let journal = seal::OriginalJournal {
+            schema_version: 7,
+            runtime_identity: Some(identity.clone()),
+            predecessor_cutover: Some(predecessor.clone()),
+            transactions: [(tx.uuid, tx)].into(),
+            completed: Default::default(),
+            failed: Default::default(),
+        };
+        atomic_json(&transactions.join("state.json"), &journal, false).unwrap();
+        let blocks: std::collections::BTreeMap<_, _> = [(
+            EthereumSlotNumber(33),
+            Block {
+                number: EthereumBlockNumber(101),
+                hash: Some(H256::repeat_byte(14)),
+                transactions: [B256::repeat_byte(13)].into(),
+            },
+        )]
+        .into();
+        atomic_json(&transactions.join("blocks.json"), &blocks, false).unwrap();
+        let state = DiscoveryState {
+            schema_version: 2,
+            identity: identity.clone(),
+            predecessor_cutover: Some(predecessor.clone()),
+            start_parent_hash: Some(boundary_hash),
+            discovered: Some(BlockCursor {
+                number: 102,
+                hash: H256::repeat_byte(15),
+            }),
+            extracted: Some(BlockCursor {
+                number: 101,
+                hash: H256::repeat_byte(14),
+            }),
+            pending: [(102, H256::repeat_byte(15))].into(),
+        };
+        atomic_json(&discovery, &state, false).unwrap();
+        let paths = [
+            transactions.join("state.json"),
+            transactions.join("blocks.json"),
+            discovery.clone(),
+        ];
+        let before = paths.each_ref().map(|path| fs::read(path).unwrap());
+        assert!(!directory.join("cutover-activation.json").exists());
+        validate_successor_journals(
+            &identity,
+            &predecessor,
+            boundary_hash,
+            &transactions,
+            &discovery,
+        )
+        .unwrap();
+        assert_eq!(paths.each_ref().map(|path| fs::read(path).unwrap()), before);
+        let mut changed = predecessor.clone();
+        changed.manifest_digest = H256::repeat_byte(16);
+        assert!(validate_successor_journals(
+            &identity,
+            &changed,
+            boundary_hash,
+            &transactions,
+            &discovery,
+        )
+        .is_err());
+        assert!(validate_successor_journals(
+            &identity,
+            &predecessor,
+            H256::repeat_byte(17),
+            &transactions,
+            &discovery,
+        )
+        .is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn external_fulfillment_cannot_hide_a_legacy_handoff_or_completion() {
         use relayer::message_relayer::{

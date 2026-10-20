@@ -14,6 +14,8 @@ Use authenticated deployment identities, not RPC URLs alone: Ethereum chain ID/g
 
 The native-capable token frontend also requires approved `nativeWrapper.programId`, `nativeWrapper.codeId` and `nativeWrapper.idlSha256`; missing native pins HOLD before signing. Generic SDK/Ping profiles without native settlement may omit that binding.
 
+Accepted `0x`-prefixed profile hashes, program IDs, CodeIds and fork versions are byte identities: hexadecimal letter case does not change approval. Preparation and finalized-effect authentication compare those bytes consistently, and the frontend applies the same rule when matching its configured token lane. IDL SHA-256 fields retain their required lowercase format.
+
 Inbound `wait: false` requires the checkpoint already applied at the supplied finalized preparation pin. `wait: true` retries only `NotPresent`, polling later canonical finalized source pins while preparation is still unsigned. Each pin must preserve the original and previously observed finalized history and the exact runtime, proxy, slot-selected endpoint, checkpoint and deployed CodeIds. `OutDated`, unknown failures, changed bindings and unsupported forks HOLD. Polling and proof I/O share the same absolute original deadline; a timeout never resets it or permits later signing.
 
 ## Quick Start
@@ -122,6 +124,8 @@ Intent file fields (names match the entrypoint interfaces):
 `deadline` is an absolute Unix millisecond integer retained from the original attempt, never recomputed on retry. `applicationId` is a nonzero 32-byte ID and `payload` is 0–1024 arbitrary bytes in even-length hex. Inbound accepts only the exact finalized consumer Ok and verifies the original receipt coordinates, application ID and persisted payload at the authenticated finalized effect pin. Outbound checks the exact original source, destination and packed payload before signing, then requires the original canonical finalized queue transaction, one same-receipt `MessageHandled` and matching same-pin application state. Simulation, signing, submission and readback share the original deadline. Inclusion, a queued response, proxy `Relayed`, a processed nonce or a reverted replay alone never establish delivery.
 
 Missing inputs or mismatched evidence exit nonzero with HOLD. After any admitted request with an unresolved outcome, reconcile its original signer/account/nonce and transaction before signing again; these commands do not retain signed bytes or safely resume a pending transaction. The old campaign app, its test ownership and campaign docs were snapshotted outside the repository at `../review-campaign-archive/sdk` before removal; they are not SDK example commands or published package artifacts. `build:examples` clears only its generated demo output, and the package whitelist includes only ESM, CJS and declaration outputs.
+
+On failure, the example commands report validated known original Ethereum/Gear transaction hashes and outbound source nonce/block coordinates, plus a fixed reconciliation-reason category. Arbitrary provider errors, URLs, signer material and supplied payloads are never echoed. An unresolved wallet call without a known hash stays explicitly unknown; this diagnostic output is not a journal or permission to replace a transaction or its deadline.
 
 ### Indexer cutover prerequisite
 

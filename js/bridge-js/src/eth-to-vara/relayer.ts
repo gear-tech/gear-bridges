@@ -64,7 +64,7 @@ export function decodeConsumerReply(payload: HexString, profile: InboundProofPro
 async function authenticateEffectProfile(api: GearApi, profile: InboundProofProfile, pin: HexString): Promise<void> {
   const code = await api.rpc.state.getStorage<Bytes>(':code', pin);
   const consumer = await api.programStorage.getProgram(profile.consumer.programId, pin);
-  if (code.isEmpty || blake2AsHex(code.toU8a(true), 256) !== profile.sourceRuntimeCodeHash || !consumer.state.isInitialized || !consumer.codeId.eq(profile.consumer.codeId)) {
+  if (code.isEmpty || blake2AsHex(code.toU8a(true), 256) !== profile.sourceRuntimeCodeHash.toLowerCase() || !consumer.state.isInitialized || !consumer.codeId.eq(profile.consumer.codeId)) {
     throw new Error('HOLD: finalized effect runtime or consumer differs from immutable approval');
   }
 }

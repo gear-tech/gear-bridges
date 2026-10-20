@@ -225,6 +225,171 @@ impl Storage for TestStorage {
 }
 
 #[tokio::test]
+async fn custom_consumer_preserves_authenticated_original_result() {
+    use crate::{connect_to_node, DEFAULT_BALANCE};
+    use eth_events_electra_client::traits::EthEventsElectraFactory;
+    use gclient::{Event, EventProcessor, GearEvent};
+    use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
+    use primitive_types::H256;
+    use sails_rs::{
+        calls::{ActionIo, Activation},
+        Decode,
+    };
+
+    let fixture = TRANSACTIONS.values().next().unwrap();
+    let proof = fixture.event();
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "custom inbound consumer",
+        &[
+            historical_proxy::WASM_BINARY,
+            eth_events_electra::WASM_BINARY,
+            mock_contract::WASM_BINARY,
+        ],
+    )
+    .await;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let consumer = conn.accounts[0].0;
+    let (_, checkpoint, _) = api
+        .create_program_bytes(conn.code_ids[2], conn.salt, [], conn.gas_limit, 0)
+        .await
+        .unwrap();
+    let remoting = GClientRemoting::new(api.clone());
+    let endpoint = eth_events_electra_client::EthEventsElectraFactory::new(remoting.clone())
+        .new(checkpoint)
+        .send_recv(conn.code_ids[1], conn.salt)
+        .await
+        .unwrap();
+    let proxy = historical_proxy_client::HistoricalProxyFactory::new(remoting.clone())
+        .new()
+        .send_recv(conn.code_ids[0], conn.salt)
+        .await
+        .unwrap();
+    historical_proxy_client::HistoricalProxy::new(remoting)
+        .add_endpoint(fixture.slot_number, endpoint)
+        .send_recv(proxy)
+        .await
+        .unwrap();
+    let provider = ApiProvider::new("ws://127.0.0.1:9944".into(), 2)
+        .await
+        .unwrap();
+    let route = ("Ping", "SubmitReceipt").encode();
+    let sender = MessageSender::new(
+        consumer.into_bytes().into(),
+        route.clone(),
+        proxy.into_bytes().into(),
+        provider.connection(),
+        conn.accounts[0].2.clone(),
+        None,
+    );
+    // This account has no VFT-manager query interface. Only the manager route
+    // may require its domain/economic queries; generic preparation must work.
+    let manager_sender = MessageSender::new(
+        consumer.into_bytes().into(),
+        vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec(),
+        proxy.into_bytes().into(),
+        provider.connection(),
+        conn.accounts[0].2.clone(),
+        None,
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        assert!(manager_sender
+            .prepare_submission(&api, &proof)
+            .await
+            .is_err());
+        for accepted in [false, true] {
+            let mut signed = sender.prepare_submission(&api, &proof).await.unwrap();
+            let mut listener = api.subscribe().await.unwrap();
+            let mut receiver_reply = route.clone();
+            if accepted {
+                // Ping's non-unit Delivery body must remain intact.
+                receiver_reply
+                    .extend(Result::<_, u8>::Ok((H256::repeat_byte(7), vec![1u8, 2, 3])).encode());
+            } else {
+                receiver_reply.extend(Result::<(), u8>::Err(7).encode());
+            }
+            let consumer_reply = async {
+                let message_id = listener
+                    .proc(|event| match event {
+                        Event::Gear(GearEvent::UserMessageSent { message, .. })
+                            if message.source() == proxy
+                                && message.destination() == consumer
+                                && message.details().is_none()
+                                && message.payload_bytes().starts_with(&route) =>
+                        {
+                            let mut params = &message.payload_bytes()[route.len()..];
+                            let (slot, index, receipt) =
+                                <(u64, u64, Vec<u8>)>::decode(&mut params).unwrap();
+                            assert!(params.is_empty());
+                            assert_eq!(
+                                (slot, index),
+                                (fixture.slot_number, proof.transaction_index)
+                            );
+                            assert_eq!(receipt, proof.receipt_rlp);
+                            Some(message.id())
+                        }
+                        _ => None,
+                    })
+                    .await
+                    .unwrap();
+                api.send_reply_bytes(
+                    message_id,
+                    receiver_reply.clone(),
+                    conn.gas_limit / 100 * 95,
+                    0,
+                )
+                .await
+                .unwrap();
+            };
+            let submission = sender.reconcile_signed_submission(&api, &proof, &mut signed, None);
+            let (_, submitted) = tokio::join!(consumer_reply, submission);
+            submitted.unwrap();
+            let (status, outcome) = loop {
+                let result = sender
+                    .reconcile_signed_submission(&api, &proof, &mut signed, None)
+                    .await
+                    .unwrap();
+                if signed.finalized_reply.is_some() {
+                    break result;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            };
+            assert_eq!(outcome, Some(Ok(receiver_reply)));
+            assert!(signed.native_reconciliation.is_none());
+            if accepted {
+                assert!(matches!(status, MessageStatus::Success { .. }));
+                let pin = &signed.finalized_reply.as_ref().unwrap().observation;
+                sender
+                    .verify_saved_completion(&api, &proof, &signed, pin)
+                    .await
+                    .unwrap();
+            } else {
+                assert!(matches!(status, MessageStatus::NeedsReconciliation { .. }));
+            }
+            let id = signed.message_id.as_deref().unwrap().parse().unwrap();
+            assert!(sender
+                .find_finalized_reply(&mut signed.clone(), id, H256::zero())
+                .await
+                .is_err());
+            let changed_route = MessageSender::new(
+                consumer.into_bytes().into(),
+                ("Other", "SubmitReceipt").encode(),
+                proxy.into_bytes().into(),
+                provider.connection(),
+                conn.accounts[0].2.clone(),
+                None,
+            );
+            assert!(changed_route
+                .reconcile_signed_submission(&api, &proof, &mut signed.clone(), None)
+                .await
+                .is_err());
+        }
+    })
+    .await
+    .expect("custom consumer original-result qualification exceeded 120 seconds");
+}
+
+#[tokio::test]
 async fn test_tx_manager() {
     let _ = pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)

@@ -1607,6 +1607,8 @@ impl EthApi {
             .await
     }
 
+    /// Submit a challenge once. Only a transient `ChallengeRootPreBroadcast`
+    /// error permits a fresh scan and retry; all other errors require a hold.
     pub async fn send_challenge_root(&self) -> Result<TxHash, Error> {
         let _submission_guard = self.submission_lock.lock().await;
         self.contracts.challenge_root().await
@@ -1920,6 +1922,8 @@ impl Contracts {
         }
     }
 
+    /// Estimation failures are typed as `ChallengeRootPreBroadcast` (or a decoded
+    /// permanent `MessageQueue` error); send failures never authorize a retry.
     pub async fn challenge_root(&self) -> Result<TxHash, Error> {
         match self
             .message_queue_instance
@@ -1951,7 +1955,7 @@ impl Contracts {
                     return Err(Error::MessageQueue(e));
                 }
 
-                Err(Error::ErrorDuringContractExecution(e))
+                Err(Error::ChallengeRootPreBroadcast(e))
             }
         }
     }
@@ -1978,21 +1982,26 @@ impl Contracts {
         from: u64,
         to: u64,
     ) -> Result<Vec<MerkleRootObservation>, Error> {
-        let filter = Filter::new()
-            .address(*self.message_queue_instance.address())
-            .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH)
-            .from_block(from)
-            .to_block(to);
-
-        let event: Event<ProviderType, MerkleRoot, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-
-        let logs = event.query().await.map_err(Error::ErrorQueryingEvent)?;
-
-        let mut observations = logs
-            .iter()
-            .map(|(event, log)| merkle_root_observation(event, log, from, to))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut observations = Vec::new();
+        let mut page_from = from;
+        while page_from <= to {
+            // Inclusive ranges stay within providers' 100,000-block log-query limit.
+            let page_to = page_from.saturating_add(99_999).min(to);
+            let filter = Filter::new()
+                .address(*self.message_queue_instance.address())
+                .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH)
+                .from_block(page_from)
+                .to_block(page_to);
+            let event: Event<ProviderType, MerkleRoot, Ethereum> =
+                Event::new(self.provider.clone(), filter);
+            for (event, log) in event.query().await.map_err(Error::ErrorQueryingEvent)? {
+                observations.push(merkle_root_observation(&event, &log, page_from, page_to)?);
+            }
+            if page_to == to {
+                break;
+            }
+            page_from = page_to + 1;
+        }
         observations.sort_unstable_by_key(|observation| {
             (
                 observation.block_number,
@@ -2179,6 +2188,49 @@ impl Contracts {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn root_scan_retains_both_sides_of_page_boundary() -> AnyResult<()> {
+        use alloy::transports::mock::Asserter;
+        let asserter = Asserter::new();
+        let contracts = mocked_ancestry_api(asserter.clone())?.contracts;
+        for (height, source, hash) in [(100_006u64, 12u64, 1u8), (100_007, 13, 2)] {
+            let event = MerkleRoot {
+                blockNumber: U256::from(source),
+                merkleRoot: B256::from([hash; 32]),
+            };
+            let data = event.encode_log_data();
+            let log: RpcLog = serde_json::from_value(serde_json::json!({
+                "address": Address::from([9; 20]),
+                "topics": data.topics(), "data": data.data,
+                "blockNumber": format!("0x{height:x}"), "blockHash": B256::from([hash; 32]),
+                "transactionHash": B256::from([hash + 10; 32]), "transactionIndex": "0x0",
+                "logIndex": "0x0", "removed": false
+            }))?;
+            asserter.push_success(&vec![log]);
+        }
+        let roots = contracts.fetch_merkle_roots_in_range(7, 100_007).await?;
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| (root.block_number, root.entry.block_number))
+                .collect::<Vec<_>>(),
+            vec![(100_006, 12), (100_007, 13)]
+        );
+        assert!(asserter.read_q().is_empty());
+        // An inclusive page ending at the integer limit must terminate without overflow.
+        asserter.push_success(&Vec::<RpcLog>::new());
+        assert!(contracts
+            .fetch_merkle_roots_in_range(u64::MAX - 99_999, u64::MAX)
+            .await?
+            .is_empty());
+        assert!(asserter.read_q().is_empty());
+        assert!(contracts
+            .fetch_merkle_roots_in_range(9, 8)
+            .await?
+            .is_empty());
+        Ok(())
+    }
+
     #[test]
     fn merkle_root_metadata_is_required_and_source_height_is_checked() {
         let event = MerkleRoot {
@@ -2360,6 +2412,30 @@ mod tests {
             ws_retry_interval: None,
             submission_lock: submission_lock(560048, public_key),
         })
+    }
+
+    #[tokio::test]
+    async fn challenge_submission_distinguishes_estimation_from_send_failure() -> AnyResult<()> {
+        use alloy::transports::mock::Asserter;
+
+        let asserter = Asserter::new();
+        let api = mocked_ancestry_api(asserter.clone())?;
+        asserter.push_failure_msg("estimate rejected");
+        asserter.push_success(&"0x5208");
+        assert!(matches!(
+            api.send_challenge_root().await,
+            Err(Error::ChallengeRootPreBroadcast(_))
+        ));
+        assert_eq!(asserter.read_q().len(), 1, "estimation must not send");
+
+        // The remaining successful estimate gets as far as send. Its missing
+        // RPC replies must not be mistaken for a retryable estimation error.
+        assert!(matches!(
+            api.send_challenge_root().await,
+            Err(Error::ErrorSendingTransaction(_))
+        ));
+        assert!(asserter.read_q().is_empty());
+        Ok(())
     }
 
     #[test]

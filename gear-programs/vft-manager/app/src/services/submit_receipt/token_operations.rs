@@ -160,7 +160,9 @@ pub fn handle_persistent_reply() {
                         refund = Some((r.child, r.returned_value));
                         Ok(true)
                     }
-                    PayoutStatus::Queued if r.returned_value == 0 => {
+                    PayoutStatus::Queued
+                        if r.returned_value == 0 || U256::from(r.returned_value) == r.amount =>
+                    {
                         Err(Error::NativeSettlementPending)
                     }
                     PayoutStatus::Returned => Err(Error::NativeSettlementReturned),
@@ -281,7 +283,7 @@ pub(super) async fn redeem_native_log(
     }
 }
 
-/// Query the immutable original payout only: this path cannot dispatch an economic effect.
+/// Reconcile the immutable original payout; retry backed wrapped credit, never a new payout.
 pub(super) async fn reconcile_native_log(
     key: (u64, u64),
     deposit: &super::ReceiptDeposit,
@@ -323,12 +325,43 @@ pub(super) async fn reconcile_native_log(
         GStdError::Timeout(..) => Error::ReplyTimeout(format!("{e:?}")),
         _ => Error::Internal(format!("{e:?}")),
     })?;
-    let redemption = decode_complete::<GetRedemption>(&bytes)?.ok_or(Error::InvalidReply)?;
+    let mut redemption = decode_complete::<GetRedemption>(&bytes)?.ok_or(Error::InvalidReply)?;
     if (redemption.from, redemption.to, redemption.amount)
         != (Syscall::program_id(), receiver, amount)
         || redemption.child.is_zero()
     {
         return Err(Error::InvalidReply);
+    }
+    // A committed original full-value rejection may still await wrapped credit.
+    // Query first: recovery must never create a missing operation/native payout.
+    if redemption.status == PayoutStatus::Queued && U256::from(redemption.returned_value) == amount
+    {
+        let payout_child = redemption.child;
+        let bytes = msg::send_bytes_with_gas_for_reply(
+            token_id,
+            RedeemEscrow::encode_call(operation_id, Syscall::program_id(), receiver, amount),
+            config.gas_for_token_ops,
+            0,
+            config.gas_for_reply_deposit,
+        )
+        .map_err(|e| Error::Internal(format!("{e:?}")))?
+        .up_to(Some(config.reply_timeout))
+        .map_err(|e| Error::Internal(format!("{e:?}")))?
+        .await
+        .map_err(|e| match e {
+            GStdError::Timeout(..) => Error::ReplyTimeout(format!("{e:?}")),
+            _ => Error::Internal(format!("{e:?}")),
+        })?;
+        redemption = decode_complete::<RedeemEscrow>(&bytes)?;
+        if (
+            redemption.from,
+            redemption.to,
+            redemption.amount,
+            redemption.child,
+        ) != (Syscall::program_id(), receiver, amount, payout_child)
+        {
+            return Err(Error::InvalidReply);
+        }
     }
     match redemption.status {
         PayoutStatus::Delivered | PayoutStatus::Refunded => {

@@ -8,6 +8,7 @@ const addr = (byte) => `0x${byte.repeat(20)}`;
 const hash = (byte) => `0x${byte.repeat(32)}`;
 Object.assign(process.env, {
   ETH_API_PATH: fileURLToPath(new URL('../../../api/ethereum', import.meta.url)),
+  GEAR_API_PATH: fileURLToPath(new URL('../../../api/gear', import.meta.url)),
   ETH_RPC_URL: 'http://127.0.0.1:1', ETH_ERC20_MANAGER: addr('11'), ETH_MSQ_QUEUE: addr('22'),
   ETH_BRIDGING_PAYMENT: addr('33'), ETH_SQUID_API_KEY: 'local-test',
   GEAR_VFT_MANAGER: hash('11'), GEAR_HISTORICAL_PROXY: hash('22'), GEAR_BRIDGING_PAYMENT: hash('33'),
@@ -564,4 +565,98 @@ test('RPC-only ingestion is explicit and preserves default gateway credentials',
     assert.equal(local.status, 0, local.stderr);
     assert.deepEqual(JSON.parse(local.stdout.trim().split('\n').at(-1)), { rpcOnly: true });
   }
+});
+
+test('authenticated Gear program rotations survive sequential dispatch, reload and restart with stale configuration', async (t) => {
+  const { default: pg } = await import('pg');
+  const ids = await import('../lib/gear/programIds.js');
+  const { getProcessor } = await import('../lib/gear/processor.js');
+  const { readFileSync } = await import('node:fs');
+  const { Sails } = await import('sails-js');
+  const { SailsIdlParser } = await import('sails-js-parser');
+  // Each client shares durable rows, not canned SELECT responses or the initializer's input.
+  const rows = new Map();
+  let tableExists = false;
+  t.mock.method(pg.Client.prototype, 'connect', async () => {});
+  t.mock.method(pg.Client.prototype, 'end', async () => {});
+  t.mock.method(pg.Client.prototype, 'query', async (sql, params) => {
+    const query = sql.replace(/\s+/g, ' ').trim();
+    if (query.startsWith('SELECT EXISTS')) return { rows: [{ exists: tableExists }] };
+    if (query.startsWith('CREATE TABLE gear_programs')) {
+      assert.equal(tableExists, false);
+      tableExists = true;
+      return { rows: [] };
+    }
+    assert.equal(tableExists, true);
+    if (query.startsWith('INSERT INTO gear_programs')) {
+      const [name, program_id] = params;
+      if (!rows.has(name) || query.includes('DO UPDATE')) rows.set(name, program_id);
+      return { rows: [] };
+    }
+    if (query.startsWith('UPDATE gear_programs')) {
+      const [program_id, name] = params;
+      if (rows.has(name)) rows.set(name, program_id);
+      return { rows: [] };
+    }
+    if (query.startsWith('SELECT name, program_id FROM gear_programs')) {
+      return { rows: [...rows].filter(([name]) => params[0].includes(name))
+        .map(([name, program_id]) => ({ name, program_id })) };
+    }
+    throw new Error(`Unexpected program ID query: ${query}`);
+  });
+  let receiveHandler;
+  const ready = new Promise((resolve) => { receiveHandler = resolve; });
+  t.mock.method(getProcessor(), 'run', (_db, handler) => { receiveHandler(handler); });
+  await import('../lib/gear/main.js');
+  const handleGearBatch = await ready;
+  assert.deepEqual([...rows.values()].sort(), [hash('11'), hash('22'), hash('33')].sort());
+
+  const parser = new SailsIdlParser();
+  await parser.init();
+  const sails = new Sails(parser).parseIdl(readFileSync(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8'));
+  const method = 'HistoricalProxyAddressChanged';
+  const eventType = sails.services.VftManager.events[method].type;
+  const managerId = hash('55'), proxyId = hash('66');
+  const proxyEvent = (source, next) => ({
+    name: 'Gear.UserMessageSent', extrinsic: { hash: hash('dd') },
+    args: { message: { id: hash('cc'), source, destination: hash('00'),
+      payload: sails.registry.createType(`(String,String,${JSON.stringify(eventType)})`,
+        ['VftManager', method, { old: hash('22'), new: next }]).toHex() } },
+  });
+  const ctx = finalityContext('Gear', [11]);
+  Object.assign(ctx, { store: memoryStore(), log: quiet, isHead: false });
+  ctx.blocks[0].header._runtime = { decodeStorageValue(name, data) {
+    assert.equal(name, 'GearProgram.ProgramStorage');
+    assert.equal(data, 'exited-manager');
+    return { __kind: 'Exited', value: managerId };
+  } };
+  const call = ctx._chain.rpc.call;
+  ctx._chain.rpc.call = async (method, params) => {
+    if (method !== 'state_getStorage') return call(method, params);
+    assert.ok(params[0].endsWith(hash('11').slice(2)));
+    assert.equal(params[1], ctx.blocks[0].header.hash);
+    return 'exited-manager';
+  };
+  ctx.blocks[0].events = [
+    { name: 'Gear.ProgramChanged', args: { id: hash('11'), change: { __kind: 'Inactive' } } },
+    proxyEvent(managerId, proxyId),
+    proxyEvent(hash('11'), hash('99')), // The old source must no longer be trusted.
+  ];
+  await handleGearBatch(ctx);
+  assert.equal(rows.get('vft_manager'), managerId);
+  assert.equal(rows.get('historical_proxy'), proxyId);
+  const expected = new Map([[managerId, 'vft_manager'], [proxyId, 'historical_proxy'], [hash('33'), 'bridging_payment']]);
+  assert.deepEqual(ids.programs, expected);
+  await ids.setPrograms();
+  assert.deepEqual(ids.programs, expected);
+
+  // A new module has no in-memory registry; existing rows win and missing roles are seeded.
+  rows.delete('bridging_payment');
+  rows.set('retired_role', hash('88'));
+  const restarted = await import('../lib/gear/programIds.js?rotation-restart');
+  assert.equal(restarted.programs, undefined);
+  await restarted.setPrograms();
+  assert.deepEqual(restarted.programs, expected);
+  assert.equal(rows.get('bridging_payment'), hash('33'));
+  assert.equal(rows.get('retired_role'), hash('88'));
 });

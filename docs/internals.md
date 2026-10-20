@@ -204,7 +204,7 @@ Completion requires the original signed Ethereum transaction and its canonical f
 
 ### Ethereum to Gear
 
-The implementations under [relayer/src/message_relayer/eth_to_gear/](../relayer/src/message_relayer/eth_to_gear/) retain the original signed Gear dispatch, receipt bytes, request/reply linkage and per-log effects. `Processed` alone never completes an entry. Completion requires the exact canonical finalized original proxy/consumer reply and every authenticated settlement row. An original `NativeSettlementPending` may resolve through its original payout becoming `Delivered` with zero returned value or `Refunded` with its exact full value returned and atomically credited as wrapped VARA to the original Gear recipient. Non-economic `ReconcileReceipt` authenticates distinct `Settled`/`Refunded` rows and `Processed` receipt state; it cannot mint, transfer, redeem or rewrite the original reply. Missing history, unknown outcomes and arbitrary inner errors HOLD.
+The implementations under [relayer/src/message_relayer/eth_to_gear/](../relayer/src/message_relayer/eth_to_gear/) retain the original signed Gear dispatch, receipt bytes, request/reply linkage and per-log effects. `Processed` alone never completes an entry. Completion requires the exact canonical finalized original proxy/consumer reply and every authenticated settlement row. An original `NativeSettlementPending` may resolve through its original payout becoming `Delivered` with zero returned value or `Refunded` with its exact full value returned and atomically credited as wrapped VARA to the original Gear recipient. A `Queued` payout with its exact full backing returned authorizes a separate zero-value `ReconcileReceipt`: the manager continues the same `RedeemEscrow` operation to credit the wrapped refund, without sending another native payout or resubmitting the original proof. Both the Rust relayer and SDK distinguish this continuation-ready state from completion, which still requires the terminal payout, matching `Settled`/`Refunded` rows and `Processed` receipt state. Reconciliation never rewrites the original reply. Missing history, unknown outcomes and arbitrary inner errors HOLD.
 
 Finalized original/continuation inclusion releases account-nonce ownership, not
 economic evidence. Pending payouts remain fairly reconciled while unrelated fresh
@@ -217,7 +217,7 @@ Receipt verification consumes the complete SCALE frame and receipt RLP, requires
 
 Checkpoint-waiting proof work is keyed by its original transaction UUID. Repeated notifications for the same hash and slot are idempotent; conflicting identities HOLD without replacing the original. Eligible work moves to the processing queue when its checkpoint arrives, and composition failures retain that work across reconnects.
 
-Ordinary Gear-origin returns use escrow `TransferFrom`. Native policy is explicit and snapshotted per deposit: the wrapper burns manager escrow and retains the original payout child. Zero minimum balance preserves fractional pooled escrow. Only the authenticated original recipient's full error return permits a one-time backed wrapped refund; partial returns, queued/ambiguous payouts and retained legacy Returned outcomes remain held. Generation/lease and per-log ownership prevent redispatch. Source reconciliation still requires original request/child/hash and authenticated builtin outcome, never timeout-based “not queued” inference.
+Ordinary Gear-origin returns use escrow `TransferFrom`. Native policy is explicit and snapshotted per deposit: the wrapper burns manager escrow and retains the original payout child. Zero minimum balance preserves fractional pooled escrow. Only the authenticated original recipient's full error return permits a one-time backed wrapped refund; partial returns, queued payouts without returned backing, ambiguous payouts and retained legacy Returned outcomes remain held. A full return alone is not a completed refund. Generation/lease and per-log ownership prevent redispatch. Source reconciliation still requires original request/child/hash and authenticated builtin outcome, never timeout-based “not queued” inference.
 
 SDK callers supply an immutable, independently approved `InboundProofProfile` binding both network identities, the source runtime and block, actor CodeIds, exact IDL digests, endpoint framing, checkpoint network, forks and consumer route. Frontend completion uses `onFinalized`, not an outer proxy success flag. Outbound SDK callers supply the exact expected effect from the packed original source message. Missing profiles or deployment configuration render HOLD before signing.
 
@@ -241,6 +241,28 @@ perform an independently verified backfill of the original receipt slot, transac
 index and receipt-local log index before switching readers. Preserve original transfer
 identities and requalify completion from authenticated settlement; never derive these
 coordinates from concatenated nonces or manufacture Settled rows.
+
+Retained Gear manager routing requires migration `1792454400000-retained_manager_handoff.js`
+before starting the updated indexer (`yarn workspace indexer migration:run` against
+the approved database). Set `GEAR_RETAINED_CUTOVER_FROM_BLOCK` to an approved Gear
+block where the persisted manager supports the current `CutoverStatus` query,
+after any legacy exit/inheritor rotation and before the first retained handoff.
+Leave it unset only for legacy exit-based routing. The RPC must support historical
+`gear_calculateReplyForHandle` at finalized block hashes, and `GEAR_API_PATH` must
+contain the current manager IDL; query failures at or after activation HOLD the
+batch rather than silently falling back to legacy behavior.
+
+The existing `gear_programs` manager role remains the trusted lineage root;
+changing `GEAR_VFT_MANAGER` does not replace it. The indexer authenticates reciprocal
+source/successor state, receipt boundaries, custody completion and matching
+fingerprints before admitting the successor, without requiring the retired source
+to exit. Handoff evidence, projected effects and the processor cursor share one
+database transaction. Predecessor history remains routable within its receipt
+domain, and replay cannot use a successor authenticated only at a later block.
+Once handoff evidence exists, changing or removing the activation boundary fails
+closed. If an older indexer already skipped successor events, use an approved
+reindex/backfill from before the handoff; restarting at its advanced cursor or
+changing the configured manager ID cannot recover missing history.
 
 The beacon/light-client path and the event/message path are complementary:
 

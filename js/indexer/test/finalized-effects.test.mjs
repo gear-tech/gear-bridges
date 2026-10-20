@@ -659,4 +659,149 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
   assert.deepEqual(restarted.programs, expected);
   assert.equal(rows.get('bridging_payment'), hash('33'));
   assert.equal(rows.get('retired_role'), hash('88'));
+
+  const { config: gearConfig } = await import('../lib/gear/config.js');
+  const { GearManagerHandoff, Pair } = await import('../lib/model/index.js');
+  gearConfig.retainedCutoverFromBlock = 12;
+  t.after(() => { gearConfig.retainedCutoverFromBlock = undefined; });
+  const successor = hash('77'), third = hash('88'), fingerprint = hash('ab');
+  const active = { phase: 'Active', predecessor: null, successor: null, minimum_receipt_slot: '0',
+    last_receipt_slot: null, config_fingerprint: null, transfer_count: 0, completed_transfer_count: 0,
+    in_flight_transfer_count: 0 };
+  const retired = { ...active, phase: 'Retired', successor, last_receipt_slot: '200',
+    config_fingerprint: fingerprint, transfer_count: 1, completed_transfer_count: 1 };
+  const prepared = { ...active, phase: 'AwaitingSource', predecessor: managerId, minimum_receipt_slot: '201',
+    config_fingerprint: fingerprint };
+  const managerEvent = (source, method, value, id = hash('cc')) => ({
+    name: 'Gear.UserMessageSent', extrinsic: { hash: hash('dd') },
+    args: { message: { id, source, destination: hash('00'),
+      payload: sails.registry.createType(`(String,String,${JSON.stringify(sails.services.VftManager.events[method].type)})`,
+        ['VftManager', method, value]).toHex() } },
+  });
+  const requests = [];
+  const batch = (height, store, statuses, events = []) => {
+    const result = finalityContext('Gear', [height]);
+    Object.assign(result, { store, log: quiet, isHead: false });
+    Object.assign(result.blocks[0], { events, header: { ...block, height, hash: hash(height.toString(16).padStart(2, '0')) } });
+    const original = result._chain.rpc.call;
+    result._chain.rpc.call = async (method, params) => {
+      if (method !== 'gear_calculateReplyForHandle') return original(method, params);
+      assert.equal(params[5], result.blocks[0].header.hash, 'queries must authenticate the exact finalized batch block');
+      requests.push(params[1]);
+      const status = statuses[params[1]];
+      if (status instanceof Error) throw status;
+      assert.ok(status, `Unexpected query to ${params[1]}`);
+      return { code: { Success: {} }, payload: sails.registry.createType(
+        `(String,String,${sails.services.VftManager.queries.CutoverStatus.returnType})`,
+        ['VftManager', 'CutoverStatus', status]).toHex() };
+    };
+    return result;
+  };
+
+  // No capability query before the explicit boundary, including immutable old programs.
+  await handleGearBatch(batch(11, memoryStore(), { [managerId]: new Error('unsupported legacy query') }));
+  for (const [name, badSource, badDestination] of [
+    ['predecessor', retired, { ...prepared, phase: 'Active', predecessor: hash('99') }],
+    ['floor', retired, { ...prepared, phase: 'Active', minimum_receipt_slot: '200' }],
+    ['fingerprint', retired, { ...prepared, phase: 'Active', config_fingerprint: hash('99') }],
+    ['custody', { ...retired, completed_transfer_count: 0 }, { ...prepared, phase: 'Active' }],
+    ['unresolved', { ...retired, in_flight_transfer_count: 1 }, { ...prepared, phase: 'Active' }],
+    ['cycle', { ...retired, successor: managerId }, prepared],
+  ]) {
+    const store = memoryStore();
+    await assert.rejects(handleGearBatch(batch(12, store, { [managerId]: badSource, [successor]: badDestination })), /HOLD:/, name);
+    assert.equal((await store.find(GearManagerHandoff)).length, 0, name);
+    assert.equal((await store.find(Transfer)).length, 0, name);
+  }
+  await assert.rejects(handleGearBatch(batch(12, memoryStore(), { [managerId]: new Error('archive RPC unavailable') })),
+    /archive RPC unavailable/);
+
+  const store = memoryStore();
+  await store.save([new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'), isRemoved: false }),
+    ...['predecessor-deposit', 'successor-deposit', 'successor-refund'].map((id, index) => new Transfer({
+      id, sourceNetwork: Network.Ethereum, destNetwork: Network.Vara, blockNumber: 100n,
+      sourceTransactionIndex: 2n, sourceLogIndex: BigInt(index + 3), source: addr('66'), destination: hash('77'),
+      sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging,
+    })),
+    new ReceiptRelay({ id: '200:2', blockNumber: 100n }), new ReceiptRelay({ id: '201:2', blockNumber: 100n })]);
+  const deposit = { slot: '200', transaction_index: '2', log_index: '3', deposit_count: '1',
+    operation_id: hash('98'), eth_token_id: addr('66'), vara_token_id: hash('77'), sender: addr('55'),
+    receiver: hash('44'), amount: '10', native: true };
+  const outgoing = (nonce) => ({ nonce, queue_id: nonce, hash: hash('ac'), vara_token_id: hash('77'),
+    amount: '10', sender: hash('44'), receiver: addr('55') });
+  // Source stays runtime-Active/contract-Retired, with no ProgramChanged/Inactive event.
+  // The normal AwaitingSource interval neither admits successor effects nor stalls history.
+  await handleGearBatch(batch(12, store, { [managerId]: retired, [successor]: prepared }, [
+    managerEvent(managerId, 'ReceiptDepositSettled', deposit),
+    managerEvent(managerId, 'BridgingRequested', outgoing('1'), hash('c1')),
+    managerEvent(successor, 'BridgingRequested', outgoing('2'), hash('c2')),
+  ]));
+  assert.equal((await store.find(GearManagerHandoff)).length, 0);
+  assert.equal((await store.find(Transfer)).find(({ id }) => id === 'predecessor-deposit').status, Status.Completed);
+  assert.equal((await store.find(Transfer)).some(({ id }) => id === hash('c2')), false);
+
+  const refund = { ...deposit, slot: '201', log_index: '5', operation_id: hash('99'),
+    child: hash('aa'), payout_child: hash('bb'), returned_value: '10' };
+  const live = batch(13, store, { [managerId]: retired, [successor]: { ...prepared, phase: 'Active' } }, [
+    managerEvent(successor, 'BridgingRequested', outgoing('2'), hash('c2')),
+    managerEvent(successor, 'ReceiptDepositSettled', { ...deposit, slot: '201', log_index: '4' }),
+    managerEvent(successor, 'ReceiptDepositRefunded', refund),
+  ]);
+  await handleGearBatch(live);
+  assert.equal(rows.get('vft_manager'), managerId, 'the durable original role remains the authenticated trust anchor');
+  const [handoff] = await store.find(GearManagerHandoff);
+  assert.equal(handoff.id, managerId);
+  assert.equal(handoff.successor, successor);
+  assert.equal(handoff.minimumReceiptSlot, '0');
+  assert.equal(handoff.lastReceiptSlot, '200');
+  assert.equal(handoff.blockNumber, 13n);
+  const projected = await store.find(Transfer);
+  assert.equal(projected.find(({ id }) => id === 'successor-deposit').status, Status.Completed);
+  assert.equal(projected.find(({ id }) => id === 'successor-refund').status, Status.Refunded);
+  assert.ok(projected.some(({ id }) => id === hash('c1')));
+  assert.ok(projected.some(({ id }) => id === hash('c2')));
+
+  // Rehydration uses committed links, not stale config or an in-memory discovery cache.
+  await ids.setPrograms();
+  const restartReady = new Promise((resolve) => {
+    t.mock.method(getProcessor(), 'run', (_db, handler) => resolve(handler));
+  });
+  await import('../lib/gear/main.js?retained-restart');
+  const handleRestartedBatch = await restartReady;
+  requests.length = 0;
+  await handleRestartedBatch(batch(14, store, { [successor]: { ...prepared, phase: 'Draining', successor: third,
+    last_receipt_slot: '300' } }));
+  assert.deepEqual(requests, [successor], 'do not requery every retained ancestor on every block');
+  assert.equal((await store.find(GearManagerHandoff)).length, 1);
+  for (const status of [prepared, { ...prepared, phase: 'Active', predecessor: hash('99') }]) {
+    await assert.rejects(handleRestartedBatch(batch(14, store, { [successor]: status })),
+      /readiness or predecessor changed/);
+  }
+  for (const [source, value] of [[managerId, { ...deposit, slot: '201' }],
+    [successor, { ...deposit, slot: '200' }]]) {
+    await assert.rejects(handleGearBatch(batch(14, store, { [successor]: { ...prepared, phase: 'Active' } },
+      [managerEvent(source, 'ReceiptDepositSettled', value)])), /outside authenticated manager deployment domain/);
+  }
+  // Historical replay ignores a persisted future link and reauthenticates at its original block.
+  await handleGearBatch(batch(12, store, { [managerId]: retired, [successor]: prepared },
+    [managerEvent(managerId, 'BridgingRequested', outgoing('1'), hash('c1'))]));
+  assert.equal((await store.find(GearManagerHandoff)).length, 1);
+  const secondRetired = { ...prepared, phase: 'Retired', successor: third, last_receipt_slot: '300',
+    transfer_count: 1, completed_transfer_count: 1 };
+  await handleGearBatch(batch(15, store, { [successor]: secondRetired,
+    [third]: { ...active, predecessor: successor, minimum_receipt_slot: '301', config_fingerprint: fingerprint } }));
+  assert.equal((await store.find(GearManagerHandoff)).length, 2);
+  for (const changed of [undefined, 13]) {
+    gearConfig.retainedCutoverFromBlock = changed;
+    await assert.rejects(handleGearBatch(batch(16, store, {})), /capability boundary changed or removed/);
+  }
+  gearConfig.retainedCutoverFromBlock = 12;
+  for (const invalid of ['-1', '1.5', 'no', '', '9007199254740992']) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./lib/gear/config.js')"], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: { ...process.env, GEAR_RETAINED_CUTOVER_FROM_BLOCK: invalid }, encoding: 'utf8',
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Invalid GEAR_RETAINED_CUTOVER_FROM_BLOCK/);
+  }
 });

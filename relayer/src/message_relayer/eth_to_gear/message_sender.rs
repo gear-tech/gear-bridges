@@ -726,17 +726,27 @@ fn validate_settlement_pin(
     Ok(())
 }
 
-fn native_payout_resolved(
+fn native_payout_reconciliation_ready(
     row: &vft_manager_client::ReceiptDepositState,
     manager: H256,
     payout: &vft_vara_client::Redemption,
 ) -> bool {
-    payout.from == sails_rs::ActorId::from(manager.0)
+    !row.amount.is_zero()
+        && payout.from == sails_rs::ActorId::from(manager.0)
         && payout.to == row.receiver
         && payout.amount == row.amount
         && !payout.child.is_zero()
         && row.child.is_some_and(|child| child != payout.child)
         && match payout.status {
+            // The original rejection has returned all backing, but wrapped credit
+            // still requires ReconcileReceipt -> the same RedeemEscrow operation.
+            vft_vara_client::PayoutStatus::Queued => {
+                sails_rs::U256::from(payout.returned_value) == row.amount
+                    && matches!(
+                        row.outcome,
+                        vft_manager_client::ReceiptDepositOutcome::NativeQueued
+                    )
+            }
             vft_vara_client::PayoutStatus::Delivered => {
                 payout.returned_value == 0
                     && matches!(
@@ -1603,7 +1613,7 @@ impl MessageSender {
                         .recv(row.token_id)
                         .await?;
                 effects_resolved &= payout.as_ref().is_some_and(|payout| {
-                    native_payout_resolved(row, self.receiver_address, payout)
+                    native_payout_reconciliation_ready(row, self.receiver_address, payout)
                 });
             } else {
                 effects_resolved &= matches!(row.outcome, ReceiptDepositOutcome::Settled);
@@ -2446,28 +2456,70 @@ mod tests {
             status: vft_vara_client::PayoutStatus::Queued,
             returned_value: 0,
         };
-        assert!(!native_payout_resolved(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
         payout.status = vft_vara_client::PayoutStatus::Delivered;
-        assert!(native_payout_resolved(row, manager, &payout));
+        assert!(native_payout_reconciliation_ready(row, manager, &payout));
         payout.returned_value = 1;
-        assert!(!native_payout_resolved(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
         payout.returned_value = 0;
         payout.to = ActorId::zero();
-        assert!(!native_payout_resolved(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
         payout.to = row.receiver;
         payout.status = vft_vara_client::PayoutStatus::Refunded;
         payout.returned_value = row.amount.as_u128();
-        assert!(!native_payout_resolved(row, manager, &payout)); // Never relabel Settled as refunded.
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout)); // Never relabel Settled as refunded.
         let mut refunded = row.clone();
         refunded.outcome = ReceiptDepositOutcome::Refunded;
-        assert!(native_payout_resolved(&refunded, manager, &payout));
+        assert!(native_payout_reconciliation_ready(&refunded, manager, &payout));
         payout.returned_value -= 1;
-        assert!(!native_payout_resolved(&refunded, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
         payout.returned_value += 1;
         payout.status = vft_vara_client::PayoutStatus::Returned;
-        assert!(!native_payout_resolved(&refunded, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
         payout.status = vft_vara_client::PayoutStatus::Ambiguous;
-        assert!(!native_payout_resolved(&refunded, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
+        // An authenticated full return is continuation-ready, not Refunded:
+        // only the original operation can restore wrapped credit.
+        let mut pending = row.clone();
+        pending.native = true;
+        pending.outcome = ReceiptDepositOutcome::NativeQueued;
+        payout.status = vft_vara_client::PayoutStatus::Queued;
+        payout.returned_value = 0;
+        assert!(!native_payout_reconciliation_ready(&pending, manager, &payout));
+        payout.returned_value = pending.amount.as_u128();
+        assert!(native_payout_reconciliation_ready(&pending, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
+        let original_child = payout.child;
+        for field in ["partial", "excess", "from", "to", "amount", "child", "manager-child", "ambiguous", "returned"] {
+            let mut invalid = payout.clone();
+            match field {
+                "partial" => invalid.returned_value -= 1,
+                "excess" => invalid.returned_value += 1,
+                "from" => invalid.from = ActorId::zero(),
+                "to" => invalid.to = ActorId::zero(),
+                "amount" => invalid.amount += 1.into(),
+                "child" => invalid.child = MessageId::zero(),
+                "manager-child" => invalid.child = pending.child.unwrap(),
+                "ambiguous" => invalid.status = vft_vara_client::PayoutStatus::Ambiguous,
+                "returned" => invalid.status = vft_vara_client::PayoutStatus::Returned,
+                _ => unreachable!(),
+            }
+            assert!(!native_payout_reconciliation_ready(&pending, manager, &invalid), "{field}");
+        }
+        // Even a falsely terminal manager row cannot complete before the actual
+        // wrapper refund. Then the same payout child qualifies that wrapped effect.
+        payout.status = vft_vara_client::PayoutStatus::Refunded;
+        assert!(native_payout_reconciliation_ready(&pending, manager, &payout));
+        pending.outcome = ReceiptDepositOutcome::Refunded;
+        assert!(native_payout_reconciliation_ready(&pending, manager, &payout));
+        assert_eq!(payout.child, original_child);
+        pending.amount = 0.into();
+        payout.amount = 0.into();
+        payout.returned_value = 0;
+        payout.status = vft_vara_client::PayoutStatus::Queued;
+        pending.outcome = ReceiptDepositOutcome::NativeQueued;
+        assert!(!native_payout_reconciliation_ready(&pending, manager, &payout));
     }
 
     #[tokio::test]

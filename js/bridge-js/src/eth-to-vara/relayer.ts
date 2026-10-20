@@ -144,11 +144,12 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
   const verifySettlement = async (pin: HexString, settled: boolean) => {
     const current = structuredClone(await read(() => contract.readDeposits(pin, proof)));
     validateNativeCohortContinuity(observedRows, current, settled);
-    let terminal = true;
+    let ready = true;
     const currentRedemptions = new Map<HexString, NativeRedemption>();
     for (const row of current.filter(row => row.native)) {
       const value = await read(() => contract.readRedemption(row.operation_id, pin));
-      if (validateNativeRedemption(row, identity.managerId, value, redemptions.get(row.operation_id)) === 'Queued') terminal = false;
+      const status = validateNativeRedemption(row, identity.managerId, value, redemptions.get(row.operation_id));
+      if (status === 'Queued' && BigInt(value!.returned_value) === 0n) ready = false;
       currentRedemptions.set(row.operation_id, structuredClone(value!));
     }
     const wrapper = await read(() => api.programStorage.getProgram(identity.wrapperId, pin));
@@ -159,7 +160,7 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
     observedRows = current;
     for (const [operation, value] of currentRedemptions) redemptions.set(operation, value);
     if (settled) original.nativeSettlements = validateNativeTokenEffect(identity, current, currentRedemptions);
-    return terminal;
+    return ready;
   };
   while (true) {
     const tipHash = (await read(() => api.rpc.chain.getFinalizedHead())).toHex();
@@ -182,7 +183,7 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
       if (status !== 'Reserved') throw new Error('HOLD: unsupported native receipt status');
       break;
     }
-    params.statusCb?.('Native payout pending; waiting for original delivery or authenticated full wrapped refund', { originalMessageId: original.msgId });
+    params.statusCb?.('Native payout pending; waiting for original delivery or authenticated full return before reconciliation', { originalMessageId: original.msgId });
     await read(() => new Promise<void>(resolve => setTimeout(resolve, 3000)));
   }
   await read(() => authenticateEffectProfile(api, profile, previous.hash));

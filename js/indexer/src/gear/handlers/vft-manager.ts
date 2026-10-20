@@ -23,11 +23,13 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
   switch (method) {
     case VftManagerMethods.ReceiptDepositSettled: {
       const deposit = decoder.decodeEvent<ReceiptDepositSettled>(service, method, msg.payload);
+      requireReceiptDomain(ctx, deposit.slot);
       state.recordReceiptSettlement(deposit, new Date(blockHeader.timestamp!), blockNumber, event.extrinsic!.hash);
       return;
     }
     case VftManagerMethods.ReceiptDepositRefunded: {
       const deposit = decoder.decodeEvent<ReceiptDepositRefunded>(service, method, msg.payload);
+      requireReceiptDomain(ctx, deposit.slot);
       state.recordReceiptRefund(deposit, new Date(blockHeader.timestamp!), blockNumber, event.extrinsic!.hash);
       return;
     }
@@ -96,6 +98,14 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
       }
       return;
     }
+  }
+}
+
+function requireReceiptDomain(ctx: UserMessageSentHandlerContext, receiptSlot: string | number) {
+  if (!ctx.receiptDomain) return;
+  const slot = BigInt(receiptSlot);
+  if (slot < ctx.receiptDomain.minimum || (ctx.receiptDomain.last !== undefined && slot > ctx.receiptDomain.last)) {
+    throw new Error('HOLD: receipt event outside authenticated manager deployment domain');
   }
 }
 

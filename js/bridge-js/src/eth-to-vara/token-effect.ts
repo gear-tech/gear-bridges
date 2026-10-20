@@ -82,15 +82,18 @@ export function validateNativeCohortContinuity(original: readonly NativeReceiptD
   });
 }
 
-/** Manager->wrapper child and wrapper->recipient payout child are different immutable identities. */
+/** Queued/full return authorizes reconciliation only, never wrapped-refund completion. Both child identities remain immutable. */
 export function validateNativeRedemption(row: NativeReceiptDeposit, managerId: HexString, value: NativeRedemption | null, original?: NativeRedemption): 'Queued' | 'Delivered' | 'Refunded' {
-  if (!value || !row.native || value.from !== managerId || value.to !== row.receiver || BigInt(value.amount) !== BigInt(row.amount) ||
+  if (!value || !row.native || BigInt(row.amount) <= 0n || value.from !== managerId || value.to !== row.receiver || BigInt(value.amount) !== BigInt(row.amount) ||
       !messageId(value.child) || value.child === row.child ||
       (value.status !== 'Queued' && value.status !== 'Delivered' && value.status !== 'Refunded') ||
-      BigInt(value.returned_value) !== (value.status === 'Refunded' ? BigInt(row.amount) : 0n) ||
+      (value.status === 'Queued' ? BigInt(value.returned_value) !== 0n && BigInt(value.returned_value) !== BigInt(row.amount) :
+        BigInt(value.returned_value) !== (value.status === 'Refunded' ? BigInt(row.amount) : 0n)) ||
       (original && (value.from !== original.from || value.to !== original.to || BigInt(value.amount) !== BigInt(original.amount) ||
         value.child !== original.child || (original.status !== 'Queued' &&
-          (value.status !== original.status || BigInt(value.returned_value) !== BigInt(original.returned_value))))) ||
+          (value.status !== original.status || BigInt(value.returned_value) !== BigInt(original.returned_value))) ||
+        (original.status === 'Queued' && BigInt(original.returned_value) !== 0n &&
+          (BigInt(value.returned_value) !== BigInt(original.returned_value) || value.status === 'Delivered')))) ||
       (row.outcome === 'Settled' ? value.status !== 'Delivered' : row.outcome === 'Refunded' ? value.status !== 'Refunded' : row.outcome !== 'NativeQueued')) {
     throw new Error('HOLD: native payout missing, partially returned, ambiguous or substituted');
   }

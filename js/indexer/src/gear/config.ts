@@ -4,9 +4,15 @@ let apiPath = getEnv('GEAR_API_PATH', './api/gear');
 
 apiPath = apiPath.endsWith('/') ? apiPath.slice(0, -1) : apiPath;
 const rpcOnly = getEnv('GEAR_RPC_ONLY', 'false') === 'true';
+const retainedCutoverBlock = process.env.GEAR_RETAINED_CUTOVER_FROM_BLOCK;
+if (retainedCutoverBlock !== undefined &&
+    (!/^\d+$/.test(retainedCutoverBlock) || !Number.isSafeInteger(Number(retainedCutoverBlock)))) {
+  throw new Error('Invalid GEAR_RETAINED_CUTOVER_FROM_BLOCK: expected a nonnegative safe integer');
+}
 
 export const config = {
   rpcOnly,
+  retainedCutoverFromBlock: retainedCutoverBlock === undefined ? undefined : Number(retainedCutoverBlock),
   archiveUrl: getEnv('GEAR_ARCHIVE_URL', 'https://v2.archive.subsquid.io/network/vara-testnet'),
   rpcUrl: getEnv('GEAR_RPC_URL', 'wss://testnet.vara.network'),
   vftManager: getEnv('GEAR_VFT_MANAGER'),

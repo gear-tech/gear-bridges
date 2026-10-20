@@ -391,6 +391,16 @@ describe('SDK finalized consumer and token effects', () => {
     expect(() => validateNativeCohortContinuity(rows, delivered.slice(0, 1), true)).toThrow();
     const queued = { from: identity.managerId, to: expected.receiver, amount: 10n, child: hash(50), status: 'Queued' as const, returned_value: 0n };
     expect(validateNativeRedemption(rows[0], identity.managerId, queued)).toBe('Queued');
+    const returned = { ...queued, returned_value: 10n };
+    expect(validateNativeRedemption(rows[0], identity.managerId, returned, queued)).toBe('Queued');
+    expect(() => validateNativeTokenEffect(identity, rows, new Map([[rows[0].operation_id, returned]]))).toThrow('HOLD');
+    for (const change of [{ returned_value: 1n }, { returned_value: 11n }, { child: hash(99) }, { child: rows[0].child! },
+      { to: hash(99) }, { from: hash(99) }, { amount: 11n }, { status: 'Ambiguous' as const }, { status: 'Returned' as const }]) {
+      expect(() => validateNativeRedemption(rows[0], identity.managerId, { ...returned, ...change }, queued)).toThrow('HOLD');
+    }
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, queued, returned)).toThrow('HOLD');
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, { ...queued, status: 'Delivered' }, returned)).toThrow('HOLD');
+    expect(() => validateNativeRedemption({ ...rows[0], amount: 0n }, identity.managerId, { ...queued, amount: 0n })).toThrow('HOLD');
     const settled = { ...queued, status: 'Delivered' as const };
     expect(validateNativeRedemption(delivered[0], identity.managerId, settled, queued)).toBe('Delivered');
     for (const change of [{ child: hash(99) }, { child: rows[0].child! }, { returned_value: 1n }, { status: 'Returned' as const }, { status: 'Ambiguous' as const },
@@ -403,6 +413,7 @@ describe('SDK finalized consumer and token effects', () => {
       status: 'Refunded' as const, returned_value: row.amount }]));
     const originals = new Map([...refunds].map(([operation, value]) => [operation, { ...value, status: 'Queued' as const, returned_value: 0n }]));
     expect(validateNativeRedemption(refunded[0], identity.managerId, refunds.get(rows[0].operation_id)!, queued)).toBe('Refunded');
+    expect(validateNativeRedemption(refunded[0], identity.managerId, refunds.get(rows[0].operation_id)!, returned)).toBe('Refunded');
     expect(() => validateNativeCohortContinuity(rows, refunded, true)).not.toThrow();
     const authenticated = validateNativeTokenEffect(identity, refunded, refunds, originals);
     expect(authenticated.map(entry => entry.redemption.status)).toEqual(['Refunded', 'Refunded']);
@@ -430,10 +441,12 @@ describe('SDK finalized consumer and token effects', () => {
     expect(validateNativeTokenEffect(identity, mixed, mixedRedemptions, originals).map(entry => entry.redemption.status)).toEqual(['Refunded', 'Delivered']);
   });
 
-  test.each(['refund', 'delivered', 'direct-refund', 'partial', 'amount', 'child', 'manager-child', 'recipient', 'source', 'terminal', 'ambiguous', 'pin'] as const)(
+  test.each(['refund', 'delivered', 'direct-refund', 'partial', 'amount', 'child', 'manager-child', 'recipient', 'source', 'terminal', 'ambiguous', 'pin',
+    'reconcile-refund', 'reconcile-uncredited', 'queued-wait', 'queued-partial', 'queued-child', 'queued-recipient', 'queued-source', 'queued-amount', 'queued-ambiguous'] as const)(
     'qualifies original native settlement at its saved finalized pin: %s', async (scenario) => {
       const fixture = originalReplyFixture(), api = fixture.params.gearApi, registry = await managerRegistry();
       const profile = nativeProfile(), direct = scenario === 'direct-refund', delivered = scenario === 'delivered';
+      const reconcile = scenario.startsWith('reconcile-') || scenario.startsWith('queued-');
       const expected = { managerAddress: ('0x' + '12'.repeat(20)) as HexString, sourceToken: ('0x' + '13'.repeat(20)) as HexString,
         destinationToken: profile.nativeWrapper!.programId, sender: ('0x' + '14'.repeat(20)) as HexString, receiver: hash(9), amount: 10n };
       const log = { address: expected.managerAddress, topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
@@ -447,11 +460,16 @@ describe('SDK finalized consumer and token effects', () => {
         operation_id: nativeOperationId(identity, 0n), child: hash(40) };
       const queued: NativeRedemption = { from: identity.managerId, to: expected.receiver, amount: 10n, child: hash(50), status: 'Queued', returned_value: 0n };
       const terminal: NativeRedemption = { ...queued, status: delivered ? 'Delivered' : 'Refunded', returned_value: delivered ? 0n : 10n };
-      const finalPin = direct ? hash(12) : hash(13);
-      const readDeposits = vi.fn(async (pin: HexString) => [{ ...row, outcome: pin === hash(12) && !direct ? 'NativeQueued' : delivered ? 'Settled' : 'Refunded',
+      const finalPin = direct ? hash(12) : reconcile ? hash(15) : hash(13);
+      const readDeposits = vi.fn(async (pin: HexString) => [{ ...row,
+        outcome: (pin === hash(12) && !direct) || (reconcile && pin === hash(13)) || scenario === 'reconcile-uncredited' ? 'NativeQueued' : delivered ? 'Settled' : 'Refunded',
         ...(scenario === 'manager-child' && pin === hash(13) ? { child: hash(99) } : {}) }]);
       const readRedemption = vi.fn(async (_operation: HexString, pin: HexString): Promise<NativeRedemption> => {
         if (pin === hash(12) && !direct) return scenario === 'terminal' ? { ...queued, status: 'Delivered' } : queued;
+        if (reconcile && (pin === hash(13) || scenario === 'reconcile-uncredited')) return { ...queued, returned_value: scenario === 'queued-wait' ? 0n : 10n,
+          ...(scenario === 'queued-partial' ? { returned_value: 9n } : {}), ...(scenario === 'queued-child' ? { child: hash(99) } : {}),
+          ...(scenario === 'queued-recipient' ? { to: hash(99) } : {}), ...(scenario === 'queued-source' ? { from: hash(99) } : {}),
+          ...(scenario === 'queued-amount' ? { amount: 11n } : {}), ...(scenario === 'queued-ambiguous' ? { status: 'Ambiguous' as const } : {}) };
         return { ...terminal, ...(scenario === 'partial' ? { returned_value: 9n } : {}),
           ...(scenario === 'amount' ? { amount: 11n } : {}), ...(scenario === 'child' ? { child: hash(99) } : {}),
           ...(scenario === 'recipient' ? { to: hash(99) } : {}), ...(scenario === 'source' ? { from: hash(99) } : {}),
@@ -464,8 +482,8 @@ describe('SDK finalized consumer and token effects', () => {
       fixture.state.payload = fixture.registry.createType('(String,String,Result<(Vec<u8>,Vec<u8>),ProxyError>)',
         ['HistoricalProxy', 'Redirect', { ok: [bytesToHex(receiptRlp), inner] }]).toHex();
       fixture.state.finalized = 13;
-      vi.spyOn(api.rpc.chain, 'getFinalizedHead').mockResolvedValue(codec(hash(13)) as never);
-      let effectVerified = false, broadcasts = 0;
+      vi.spyOn(api.rpc.chain, 'getFinalizedHead').mockImplementation(async () => codec(hash(fixture.state.finalized)) as never);
+      let effectVerified = false, broadcasts = 0, reconciliations = 0;
       const canonical = api.blocks.getBlockHash;
       api.blocks.getBlockHash = async (height) => scenario === 'pin' && effectVerified && BigInt(height.toString()) === 13n ? codec(hash(99)) as never : canonical(height);
       Object.assign(api, { blockGasLimit: { toBigInt: () => 10000n },
@@ -480,6 +498,49 @@ describe('SDK finalized consumer and token effects', () => {
         } };
       const transaction = { extrinsic, gasInfo: { min_limit: { toBigInt: () => 100n } },
         withAccount: () => transaction, calculateGas: async () => transaction, withGas: () => transaction, withValue: () => transaction };
+      // Exercise the real TransactionBuilder and finalized request/reply scanner for
+      // the separate ReconcileReceipt, not a mocked terminal-status shortcut.
+      const originalBlock = api.blocks.get, originalEvents = api.blocks.getEvents;
+      const phase = { isApplyExtrinsic: true, asApplyExtrinsic: { toNumber: () => 0 } };
+      const reconcileEvents = [
+        { phase, event: { section: 'gear', method: 'MessageQueued', data: [codec(hash(70)), codec(hash(2)), codec(identity.managerId)] } },
+        { phase, event: { section: 'system', method: 'ExtrinsicSuccess', data: [] } },
+      ];
+      let reconciliationExtrinsic: unknown;
+      interface TxArg { toHex(): HexString; toString(): string }
+      const sendMessage = (...args: TxArg[]) => {
+        const tx = { args, hash: codec(hash(71)), isSigned: true, signer: codec(hash(2)),
+          method: { section: 'gear', method: 'sendMessage', args },
+          signAsync: vi.fn(async (_signer: unknown, options: { nonce: number }) => { expect(options.nonce).toBe(-1); return tx; }),
+          send: async (callback: (value: unknown) => void) => {
+            reconciliations++;
+            expect(effectVerified).toBe(false);
+            const request = registry.createType('(String,String,u64,u64)', args[1].toHex());
+            expect(request.toJSON()).toEqual(['VftManager', 'ReconcileReceipt', 100, 3]);
+            expect(args[0].toHex()).toBe(identity.managerId);
+            expect(args[3].toString()).toBe('0');
+            fixture.state.finalized = 15;
+            callback({ events: reconcileEvents, status: { isInBlock: true, asInBlock: codec(hash(14)) } });
+            return () => {};
+          } };
+        reconciliationExtrinsic = tx;
+        return tx;
+      };
+      Object.assign(api, {
+        message: { send: ({ destination, payload }: { destination: HexString; payload: Uint8Array }) =>
+          sendMessage(codec(destination), registry.createType('Bytes', bytesToHex(payload)), registry.createType('u64', 0), registry.createType('u128', 0)) },
+        tx: { gear: { sendMessage } },
+        program: { calculateGas: { handle: async () => ({ min_limit: registry.createType('u64', 100) }) } },
+      });
+      api.blocks.get = async (pin) => pin === hash(14) ? { block: {
+        header: { number: { toBigInt: () => 14n }, parentHash: codec(hash(13)) }, extrinsics: [reconciliationExtrinsic] } } as never : originalBlock(pin);
+      api.blocks.getEvents = async (pin) => pin === hash(14) ? reconcileEvents as never : pin === hash(15) ? [{
+        phase: { isApplyExtrinsic: false }, event: { section: 'gear', method: 'UserMessageSent', data: [{
+          id: codec(hash(72)), source: codec(identity.managerId), destination: codec(hash(2)),
+          details: { isNone: false, unwrap: () => ({ to: codec(hash(70)), code: { isSuccess: true } }) },
+          payload: registry.createType('Bytes', registry.createType('(String,String,Result<ReceiptStatus,Error>)',
+            ['VftManager', 'ReconcileReceipt', { ok: 'Processed' }]).toHex()),
+        }] } }] as never : originalEvents(pin);
       try {
         vi.spyOn(beaconMethods, 'createBeaconClient').mockResolvedValue({ genesisBlockTime: 0 } as BeaconClient);
         vi.spyOn(proofMethods, 'composeProof').mockResolvedValue({ proofBlock: { block: { slot: 100 } }, transactionIndex: 3, receiptRlp } as ProofResult);
@@ -496,20 +557,33 @@ describe('SDK finalized consumer and token effects', () => {
         const pending = relayEthToVara({ deadline: Date.now() + 1000, gearApi: api, signer: hash(2), transactionHash: hash(4),
           beaconRpcUrl: 'https://beacon.invalid', historicalProxyId: profile.historicalProxyId, clientId: profile.consumer.programId,
           clientServiceName: 'VftManager', clientMethodName: 'SubmitReceipt', inboundProfile: profile,
+          statusCb: (status) => {
+            if (scenario === 'queued-wait' && status.startsWith('Native payout pending')) throw new Error('HOLD: original payout is still waiting');
+          },
           consumerReply: { registry, resultType: 'Result<Null, Error>', idlSha256: VFT_MANAGER_IDL_SHA256, verifyEffect,
-            nativeSettlement: { expectedEffect: expected, readDeposits, readRedemption, readReceiptStatus: async () => 'Processed' } },
+            nativeSettlement: { expectedEffect: expected, readDeposits, readRedemption,
+              readReceiptStatus: async (pin) => reconcile && pin === hash(13) ? 'Reserved' : 'Processed' } },
           ethereumPublicClient: { getChainId: async () => 1, getTransactionReceipt: async () => ({ blockNumber: 5n, blockHash: hash(5) }),
             getBlock: async ({ blockNumber, blockTag }: { blockNumber?: bigint; blockTag?: string }) =>
               blockTag ? { number: 6n, hash: hash(5) } : { hash: blockNumber === 0n ? profile.ethereumGenesisHash : hash(5) } } as unknown as PublicClient });
-        if (['refund', 'delivered', 'direct-refund'].includes(scenario)) {
+        if (['refund', 'delivered', 'direct-refund', 'reconcile-refund'].includes(scenario)) {
           const result = await pending;
           expect(result.nativeSettlements?.[0].redemption.status).toBe(delivered ? 'Delivered' : 'Refunded');
           expect(result.clientReply).toBe(inner); expect(result.replyBlockHash).toBe(hash(12)); expect(result.effectBlockHash).toBe(finalPin);
-          expect(result.nativeReconciliation).toBeUndefined(); expect(verifyEffect).toHaveBeenCalledOnce();
+          if (reconcile) expect(result.nativeReconciliation?.msgId).toBe(hash(70));
+          else expect(result.nativeReconciliation).toBeUndefined();
+          expect(verifyEffect).toHaveBeenCalledOnce();
           expect(readRedemption).toHaveBeenCalledWith(row.operation_id, finalPin);
           if (!direct) expect(readRedemption).toHaveBeenCalledWith(row.operation_id, hash(12));
-        } else await expect(pending).rejects.toThrow('HOLD');
+        } else {
+          await expect(pending).rejects.toThrow(scenario === 'reconcile-uncredited' ? 'original native cohort identity or outcome changed' : 'HOLD');
+          // This case changes canonical history inside the effect verifier; the
+          // post-readback guard must reject it rather than return that result.
+          if (scenario === 'pin') expect(effectVerified).toBe(true);
+          else expect(verifyEffect).not.toHaveBeenCalled();
+        }
         expect(broadcasts).toBe(1);
+        expect(reconciliations).toBe(scenario === 'reconcile-refund' || scenario === 'reconcile-uncredited' ? 1 : 0);
       } finally { vi.restoreAllMocks(); }
     });
 

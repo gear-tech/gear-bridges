@@ -2,6 +2,16 @@
 
 This page describes the current runtime composition of the bridge. The implementation is split into asynchronous services connected by channels; most services persist a cursor or work item before handing it to the next stage.
 
+## Shared off-chain mechanisms
+
+- `ethereum-client::inclusion` owns execution-block/receipt authentication and retained transaction/receipt inclusion proofs. Queue creation and BEEFY callers keep their own identity checks, validation order and archive ownership.
+- `ethereum-client::signed_transaction` checks signed-envelope hashes, complete decoding, nonce/destination, chain and signer constraints. Each lane still validates its typed calldata and owns signing, persistence and broadcast recovery.
+- `gear-rpc-client::observation` shares finalized-range extrinsic discovery and reply-to scanning. Callers qualify the range and retained pins, authenticate dispatch/reply identities, and persist their own cursors and outcomes. Deployment keeps its full-range inclusion uniqueness check.
+- `gear-common::{durable, signer_ownership}` owns durable immutable writes and per-genesis/account signer exclusion, including cutover ownership. Deployment tooling no longer depends on the relayer actor for those mechanisms.
+- The SDK owns the standard VFT-manager settlement adapter and shared Gear reply traversal; the frontend supplies generated pinned readers. Subscription handling, original-request authentication and arbitrary consumer effect policies remain explicit.
+
+These are shared evidence mechanisms, not a shared recovery state machine. Journal schemas, save-before-broadcast boundaries, native refund-versus-delivery semantics, and independent lane ownership remain unchanged.
+
 ## End-to-end map
 
 ### BEEFY/MMR outbound lane

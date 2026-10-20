@@ -156,17 +156,6 @@ impl MerkleRoots {
         }
     }
 
-    fn compare(
-        authority_set_id: AuthoritySetId,
-        block_number: GearBlockNumber,
-        authority_set_id_new: AuthoritySetId,
-        block_number_new: GearBlockNumber,
-    ) -> Ordering {
-        authority_set_id_new
-            .cmp(&authority_set_id)
-            .then_with(|| block_number_new.cmp(&block_number))
-    }
-
     pub fn find(
         &self,
         authority_set_id: AuthoritySetId,
@@ -175,12 +164,7 @@ impl MerkleRoots {
         delay: u64,
     ) -> Option<&RelayedMerkleRoot> {
         let end = match self.roots.binary_search_by(|root| {
-            Self::compare(
-                root.authority_set_id,
-                root.block,
-                authority_set_id,
-                block_number,
-            )
+            (authority_set_id, block_number).cmp(&(root.authority_set_id, root.block))
         }) {
             Ok(i) => i + 1,
             Err(i) => i,
@@ -225,12 +209,7 @@ impl MerkleRoots {
 
     pub fn add(&mut self, root_new: QualifiedMerkleRoot) -> Result<Added, RootAddError> {
         let i = match self.roots.binary_search_by(|root| {
-            Self::compare(
-                root.authority_set_id,
-                root.block,
-                root_new.authority_set_id,
-                root_new.block,
-            )
+            (root_new.authority_set_id, root_new.block).cmp(&(root.authority_set_id, root.block))
         }) {
             Ok(i) => {
                 return Err(if self.roots[i] == root_new {

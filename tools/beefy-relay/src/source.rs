@@ -434,7 +434,8 @@ impl Source {
                 // An I/O failure leaves it pending and cannot lose a handover.
                 self.persist_scan_journal(Some((block, &raw)))?;
                 self.pending.remove(&block);
-                self.accepted.insert(block, commitment_identity(&raw)?);
+                self.accepted
+                    .insert(block, captured.validated.commitment_hash);
                 while self.accepted.len() > MAX_ACCEPTED_IDENTITIES {
                     self.accepted.pop_first();
                 }
@@ -511,7 +512,7 @@ impl Source {
             decode_versioned_finality_proof(&bytes).context("decode BEEFY justification")?;
         let block = signed.commitment.block_number;
         ensure!(block > 0, "genesis BEEFY commitment is not usable");
-        let identity = commitment_identity(&bytes)?;
+        let identity = keccak256(&signed.commitment.encode());
         if let Some(existing) = self.accepted.get(&block) {
             ensure!(
                 *existing == identity,

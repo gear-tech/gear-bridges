@@ -75,9 +75,27 @@ async fn task(
 ) {
     let mut current = None;
     loop {
-        match task_inner(&mut this, &mut requests, &responses, &mut current).await {
-            Ok(_) => break,
-
+        let api_provider = &mut this.api_provider;
+        match deliver_next(
+            &mut current,
+            &mut requests,
+            &responses,
+            move |block_hash, message_hash| {
+                rpc::retry_gear(
+                    api_provider,
+                    "message inclusion merkle proof",
+                    move |gear_api| async move {
+                        gear_api
+                            .fetch_message_inclusion_merkle_proof(block_hash, message_hash.into())
+                            .await
+                    },
+                )
+            },
+        )
+        .await
+        {
+            Ok(true) => continue,
+            Ok(false) => break,
             Err(e) => {
                 log::error!("{e:?}");
 
@@ -93,37 +111,6 @@ async fn task(
                     }
                 }
             }
-        }
-    }
-}
-
-async fn task_inner(
-    this: &mut MerkleProofFetcher,
-    requests: &mut UnboundedReceiver<Request>,
-    responses: &UnboundedSender<Response>,
-    current: &mut Option<Request>,
-) -> anyhow::Result<()> {
-    loop {
-        let api_provider = &mut this.api_provider;
-        if !deliver_next(
-            current,
-            requests,
-            responses,
-            move |block_hash, message_hash| {
-                rpc::retry_gear(
-                    api_provider,
-                    "message inclusion merkle proof",
-                    move |gear_api| async move {
-                        gear_api
-                            .fetch_message_inclusion_merkle_proof(block_hash, message_hash.into())
-                            .await
-                    },
-                )
-            },
-        )
-        .await?
-        {
-            return Ok(());
         }
     }
 }

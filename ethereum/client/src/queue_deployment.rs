@@ -1,14 +1,15 @@
-use crate::{EthApi, FinalizedView};
+use crate::{
+    inclusion::{authenticated_receipt_block, ReceiptBlockErrors},
+    EthApi, FinalizedView,
+};
 use alloy::{
     consensus::{
-        proofs::{calculate_receipt_root, calculate_transaction_root},
         transaction::SignerRecoverable,
         Transaction, TxEnvelope,
     },
     eips::{Decodable2718, Encodable2718},
     primitives::{keccak256, Address, Bytes, B256},
     providers::Provider,
-    rpc::types::BlockId,
 };
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -90,63 +91,30 @@ impl EthApi {
         let index = receipt
             .transaction_index
             .context("HOLD: queue deployment receipt lacks transaction index")?;
-        let (block, receipts) = tokio::try_join!(
-            async {
-                provider
-                    .get_block_by_hash(block_hash)
-                    .full()
-                    .await?
-                    .context("queue creation full block unavailable")
+        let (_, transactions, envelopes) = authenticated_receipt_block(
+            provider,
+            number,
+            block_hash,
+            ReceiptBlockErrors {
+                block: "queue creation full block unavailable",
+                receipts: "queue creation receipt set unavailable",
+                header: "HOLD: queue creation header differs from finalized inclusion",
+                transactions: "HOLD: queue creation full transactions missing",
+                transaction_root: Some(
+                    "HOLD: queue creation transaction trie differs from authenticated header",
+                ),
+                count: "HOLD: incomplete queue creation receipt set",
+                coordinates: "HOLD: queue creation receipt coordinates conflict",
+                root: "HOLD: queue creation receipt trie differs from authenticated header",
             },
-            async {
-                provider
-                    .get_block_receipts(BlockId::hash_canonical(block_hash))
-                    .await?
-                    .context("queue creation receipt set unavailable")
-            },
-        )?;
-        ensure!(
-            block.header.number == number
-                && block.header.hash == block_hash
-                && block.header.inner.hash_slow() == block_hash,
-            "HOLD: queue creation header differs from finalized inclusion"
-        );
-        let transactions = block
-            .transactions
-            .try_into_transactions()
-            .map_err(|_| anyhow::anyhow!("HOLD: queue creation full transactions missing"))?
-            .into_iter()
-            .map(|tx| tx.into_inner())
-            .collect::<Vec<_>>();
-        ensure!(
-            calculate_transaction_root(&transactions) == block.header.transactions_root,
-            "HOLD: queue creation transaction trie differs from authenticated header"
-        );
-        ensure!(
-            receipts.len() == transactions.len(),
-            "HOLD: incomplete queue creation receipt set"
-        );
-        let mut envelopes = Vec::with_capacity(receipts.len());
-        for (i, item) in receipts.into_iter().enumerate() {
-            ensure!(
-                item.transaction_index == Some(i as u64)
-                    && item.block_number == Some(number)
-                    && item.block_hash == Some(block_hash)
-                    && item.transaction_hash == keccak256(transactions[i].encoded_2718()),
-                "HOLD: queue creation receipt coordinates conflict"
-            );
-            envelopes.push(item.into_primitives_receipt().inner);
-        }
-        ensure!(
-            calculate_receipt_root(&envelopes) == block.header.receipts_root,
-            "HOLD: queue creation receipt trie differs from authenticated header"
-        );
+        )
+        .await?;
         let index_usize = usize::try_from(index).context("HOLD: invalid queue creation index")?;
         let tx = transactions
             .get(index_usize)
             .context("HOLD: queue creation transaction absent")?;
         ensure!(
-            envelopes[index_usize].status(),
+            envelopes[index_usize].1.status(),
             "HOLD: queue creation reverted"
         );
         let deployment = QueueDeployment {

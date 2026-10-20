@@ -7,29 +7,6 @@ use vft_vara_client::{
     PayoutStatus,
 };
 
-trait Params {
-    fn receiver(&self) -> ActorId;
-    fn amount(&self) -> U256;
-}
-
-impl Params for (ActorId, U256) {
-    fn receiver(&self) -> ActorId {
-        self.0
-    }
-    fn amount(&self) -> U256 {
-        self.1
-    }
-}
-
-impl Params for (ActorId, ActorId, U256) {
-    fn receiver(&self) -> ActorId {
-        self.1
-    }
-    fn amount(&self) -> U256 {
-        self.2
-    }
-}
-
 #[derive(Clone)]
 struct TxDetails {
     slot: u64,
@@ -60,25 +37,24 @@ pub(super) fn is_quiescent() -> bool {
 
 async fn send<Action>(
     (slot, transaction_index): (u64, u64),
-    erc20_sender: H160,
-    token_id: ActorId,
+    deposit: &super::ReceiptDeposit,
     params: &Action::Params,
     config: &Config,
-    log_index: u64,
     action: ChildAction,
 ) -> Result<(), Error>
 where
     Action: ActionIo,
-    Action::Params: Params,
 {
+    let token_id = deposit.token_id;
+    let log_index = deposit.log_index;
     let payload = Action::encode_call(params);
     let tx_details = TxDetails {
         slot,
         transaction_index,
-        erc20_sender,
-        receiver: params.receiver(),
+        erc20_sender: deposit.sender,
+        receiver: deposit.receiver,
         token_id,
-        amount: params.amount(),
+        amount: deposit.amount,
         log_index,
         action,
         terminal: false,
@@ -218,11 +194,9 @@ pub(super) async fn mint_log(
 ) -> Result<(), Error> {
     send::<Mint>(
         key,
-        deposit.sender,
-        deposit.token_id,
+        deposit,
         &(deposit.receiver, deposit.amount),
         config,
-        deposit.log_index,
         ChildAction::Mint,
     )
     .await
@@ -235,23 +209,12 @@ pub(super) async fn unlock_log(
 ) -> Result<(), Error> {
     send::<TransferFrom>(
         key,
-        deposit.sender,
-        deposit.token_id,
+        deposit,
         &(Syscall::program_id(), deposit.receiver, deposit.amount),
         config,
-        deposit.log_index,
         ChildAction::Unlock,
     )
     .await
-}
-
-impl Params for (H256, ActorId, ActorId, U256) {
-    fn receiver(&self) -> ActorId {
-        self.2
-    }
-    fn amount(&self) -> U256 {
-        self.3
-    }
 }
 
 pub(super) async fn redeem_native_log(
@@ -267,8 +230,7 @@ pub(super) async fn redeem_native_log(
     } else {
         send::<RedeemEscrow>(
             key,
-            deposit.sender,
-            deposit.token_id,
+            deposit,
             &(
                 deposit.operation_id,
                 Syscall::program_id(),
@@ -276,7 +238,6 @@ pub(super) async fn redeem_native_log(
                 deposit.amount,
             ),
             config,
-            deposit.log_index,
             ChildAction::Native,
         )
         .await

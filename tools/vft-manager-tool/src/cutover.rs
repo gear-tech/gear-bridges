@@ -17,7 +17,10 @@ use ethereum_client::{
 };
 use ethereum_common::tree_hash::TreeHash;
 use gclient::GearApi;
-use gear_common::api_provider::{ApiProvider, ApiProviderConnection};
+use gear_common::{
+    api_provider::{ApiProvider, ApiProviderConnection},
+    signer_ownership,
+};
 use gear_core::{
     ids::{ActorId, CodeId},
     program::ProgramState,
@@ -256,6 +259,36 @@ async fn read_role_pin(
         paused,
     })
 }
+
+async fn initial_role_pin(
+    api: &GearApi,
+    path: &Path,
+    token: H256,
+    wrapper: bool,
+    current: H256,
+    changed: &'static str,
+) -> Result<RolePin> {
+    let previous = if path.exists() {
+        read_work(path)?
+            .intent
+            .initial_role_pins
+            .into_iter()
+            .find(|pin| pin.token == token)
+    } else {
+        None
+    };
+    let hash = previous.as_ref().map_or(current, |pin| pin.block_hash);
+    let roles = read_role_pin(api, token, wrapper, Some(hash)).await?;
+    if let Some(previous) = previous {
+        ensure!(
+            roles == previous
+                && api.get_block_hash(previous.block_number).await?.as_ref()
+                    == previous.block_hash.as_bytes(),
+            "{changed}"
+        );
+    }
+    Ok(roles)
+}
 async fn record_role_pin(api: &GearApi, path: &Path, token: H256, wrapper: bool) -> Result<()> {
     let mut work = read_work(path)?;
     if let Some(previous) = work.role_pins.iter().find(|pin| pin.token == token) {
@@ -340,9 +373,13 @@ fn lock_other_signers(
         .map(|sender| {
             let durable = lifecycle_senders.contains(&sender);
             let file = if durable {
-                seal::lock_cutover_signer(intent.old_identity.gear_genesis_hash, sender, path)?
+                signer_ownership::lock_cutover_signer(
+                    intent.old_identity.gear_genesis_hash,
+                    sender,
+                    path,
+                )?
             } else {
-                seal::lock_signer(intent.old_identity.gear_genesis_hash, sender)?
+                signer_ownership::lock_signer(intent.old_identity.gear_genesis_hash, sender)?
             };
             Ok((sender, file, durable))
         })
@@ -369,7 +406,7 @@ fn release_owned_signers(
     );
     for (sender, file, durable) in others {
         if *durable {
-            seal::release_cutover_signer(
+            signer_ownership::release_cutover_signer(
                 work.intent.old_identity.gear_genesis_hash,
                 *sender,
                 path,
@@ -377,7 +414,7 @@ fn release_owned_signers(
             )?;
         }
     }
-    seal::release_cutover_signer(
+    signer_ownership::release_cutover_signer(
         work.intent.old_identity.gear_genesis_hash,
         api.account_id().clone().into(),
         path,
@@ -507,7 +544,7 @@ fn lock_work(directory: &Path) -> Result<File> {
     Ok(file)
 }
 fn lock_signer(path: &Path, api: &GearApi, genesis: H256) -> Result<File> {
-    seal::lock_cutover_signer(genesis, api.account_id().clone().into(), path)
+    signer_ownership::lock_cutover_signer(genesis, api.account_id().clone().into(), path)
 }
 async fn provider(connection: &GearConnectionArgs) -> Result<ApiProviderConnection> {
     let provider = ApiProvider::new(
@@ -708,7 +745,7 @@ async fn verify_lifecycle_original(
     }
     reconcile_call(
         api,
-        &scanner_for(scanner, original.target),
+        scanner,
         &mut observed,
         false,
     )
@@ -853,7 +890,7 @@ async fn reconcile_retained_activation(
     validate_fixed_intent(&work.intent, call)?;
     // The successor may already be live. Persist the original's read-only reconciliation
     // before inspecting its journals; never initialize or rebroadcast an ambiguous activation.
-    let result = reconcile_call(api, &scanner_for(scanner, call.target), call, false)
+    let result = reconcile_call(api, scanner, call, false)
         .await
         .and_then(|()| activation_recovered(call));
     save(path, &work)?;
@@ -951,8 +988,8 @@ async fn reconcile_call(
     if found {
         if let Some(id) = &call.original.message_id {
             let id = H256::from_str(id)?;
-            scanner
-                .find_finalized_reply(&mut call.original, id, call.target)
+            call.original
+                .observe_reply(&chain, id, call.target)
                 .await?;
         }
     } else {
@@ -994,10 +1031,16 @@ fn definite_refund_rejection(call: &FinalizedCutoverCall) -> bool {
             )
         })
 }
-fn validate_fixed_intent(intent: &Intent, call: &FinalizedCutoverCall) -> Result<()> {
+fn lifecycle_request(intent: &Intent, step: &CutoverStep) -> Result<(ActorId, Vec<u8>)> {
     let old = actor(intent.old_identity.vft_manager_address);
     let new = actor(intent.new_identity.vft_manager_address);
-    let (target, payload) = match call.step {
+    let wrapper = || {
+        intent
+            .native_wrapper
+            .map(actor)
+            .context("HOLD: missing native policy")
+    };
+    Ok(match *step {
         CutoverStep::BeginCutover => (
             old,
             io::BeginCutover::encode_call(new, intent.boundary.slot),
@@ -1014,60 +1057,47 @@ fn validate_fixed_intent(intent: &Intent, call: &FinalizedCutoverCall) -> Result
             old,
             io::HandleRequestBridgingInterruptedTransfer::encode_call(request.0.into()),
         ),
-        CutoverStep::TokenMinter(token) => {
-            ensure!(
-                intent.native_wrapper == Some(token)
-                    || intent.mappings.iter().any(|(id, _, _)| *id == token),
-                "HOLD: unbound token role"
-            );
-            (
-                actor(token),
-                vft_client::vft_admin::io::SetMinter::encode_call(new),
-            )
-        }
-        CutoverStep::TokenBurner(token) => {
-            ensure!(
-                intent.mappings.iter().any(|(id, _, _)| *id == token),
-                "HOLD: unbound token role"
-            );
-            (
-                actor(token),
-                vft_client::vft_admin::io::SetBurner::encode_call(new),
-            )
-        }
+        CutoverStep::TokenMinter(token) => (
+            actor(token),
+            vft_client::vft_admin::io::SetMinter::encode_call(new),
+        ),
+        CutoverStep::TokenBurner(token) => (
+            actor(token),
+            vft_client::vft_admin::io::SetBurner::encode_call(new),
+        ),
         CutoverStep::WrapperPause => (
-            actor(
-                intent
-                    .native_wrapper
-                    .context("HOLD: missing native policy")?,
-            ),
+            wrapper()?,
             vft_vara_client::vft_admin::io::Pause::encode_call(),
         ),
         CutoverStep::WrapperConfigureManager => (
-            actor(
-                intent
-                    .native_wrapper
-                    .context("HOLD: missing native policy")?,
-            ),
+            wrapper()?,
             vft_vara_client::native_escrow::io::ConfigureManager::encode_call(new),
         ),
         CutoverStep::WrapperSetBurner => (
-            actor(
-                intent
-                    .native_wrapper
-                    .context("HOLD: missing native policy")?,
-            ),
+            wrapper()?,
             vft_vara_client::vft_admin::io::SetBurner::encode_call(new),
         ),
         CutoverStep::WrapperResume => (
-            actor(
-                intent
-                    .native_wrapper
-                    .context("HOLD: missing native policy")?,
-            ),
+            wrapper()?,
             vft_vara_client::vft_admin::io::Resume::encode_call(),
         ),
-    };
+    })
+}
+
+fn validate_fixed_intent(intent: &Intent, call: &FinalizedCutoverCall) -> Result<()> {
+    match call.step {
+        CutoverStep::TokenMinter(token) => ensure!(
+            intent.native_wrapper == Some(token)
+                || intent.mappings.iter().any(|(id, _, _)| *id == token),
+            "HOLD: unbound token role"
+        ),
+        CutoverStep::TokenBurner(token) => ensure!(
+            intent.mappings.iter().any(|(id, _, _)| *id == token),
+            "HOLD: unbound token role"
+        ),
+        _ => {}
+    }
+    let (target, payload) = lifecycle_request(intent, &call.step)?;
     ensure!(
         call.target == hash_actor(target)
             && call.payload == payload
@@ -1077,18 +1107,24 @@ fn validate_fixed_intent(intent: &Intent, call: &FinalizedCutoverCall) -> Result
     );
     Ok(())
 }
+fn receipt_call(
+    scanner: &MessageSender,
+    proof: &eth_events_electra_client::EthToVaraEvent,
+) -> Vec<u8> {
+    historical_proxy_client::historical_proxy::io::Redirect::encode_call(
+        proof.proof_block.block.slot,
+        proof.encode(),
+        actor(scanner.receiver_address),
+        scanner.receiver_route.clone(),
+    )
+}
+
 async fn verify_proof_attempt(
     scanner: &MessageSender,
     proof: &eth_events_electra_client::EthToVaraEvent,
     signed: &SignedSubmission,
 ) -> Result<()> {
-    use historical_proxy_client::historical_proxy::io::Redirect;
-    let call = Redirect::encode_call(
-        proof.proof_block.block.slot,
-        proof.encode(),
-        actor(scanner.receiver_address),
-        scanner.receiver_route.clone(),
-    );
+    let call = receipt_call(scanner, proof);
     let mut observed = signed.clone();
     if signed.inclusion_block_number.is_none() {
         observed.scanned_finalized_number = signed.prepared_finalized_number;
@@ -1136,13 +1172,7 @@ async fn reconcile_original(
             .reconcile_signed_submission(api, proof, signed, pin)
             .await;
     }
-    use historical_proxy_client::historical_proxy::io::Redirect;
-    let payload = Redirect::encode_call(
-        proof.proof_block.block.slot,
-        proof.encode(),
-        actor(scanner.receiver_address),
-        scanner.receiver_route.clone(),
-    );
+    let payload = receipt_call(scanner, proof);
     let found = scanner
         .find_signed_extrinsic(signed, scanner.historical_proxy_address, &payload)
         .await?;
@@ -1207,6 +1237,47 @@ async fn bind_original_storage(
     Ok(())
 }
 
+async fn reconcile_original_response(
+    api: &GearApi,
+    scanner: &MessageSender,
+    identity: &InboundRuntimeIdentity,
+    transaction: &Transaction,
+    proof: &eth_events_electra_client::EthToVaraEvent,
+    mut signed: SignedSubmission,
+) -> Response {
+    let (status, outcome) = reconcile_original(
+        api,
+        scanner,
+        proof,
+        &mut signed,
+        transaction.saved_settlement_observation.as_ref(),
+    )
+    .await
+    .unwrap_or_else(|error| {
+        (
+            MessageStatus::NeedsReconciliation {
+                receipt_key: signed.receipt_key,
+                diagnostic: format!("HOLD: {error:#}"),
+                receipt_observation: None,
+            },
+            None,
+        )
+    });
+    Response {
+        tx_uuid: transaction.uuid,
+        status,
+        submission: outcome.map(|reply| SubmissionEvidence {
+            observed_at_ms: relayer::message_relayer::eth_to_gear::message_sender::now_ms(),
+            manager: identity.vft_manager_address,
+            historical_proxy: identity.historical_proxy_address,
+            sender: signed.sender.clone(),
+            manager_reply: reply.ok(),
+            error: None,
+        }),
+        signed_submission: Some(signed),
+    }
+}
+
 async fn settle_original_nonces(
     api: &GearApi,
     scanner: &MessageSender,
@@ -1236,48 +1307,25 @@ async fn settle_original_nonces(
     storage.load(&manager).await?;
     for transaction in originals {
         let proof = transaction.receipt_event()?;
-        let mut signed = transaction
+        let signed = transaction
             .receipt
             .as_ref()
             .and_then(|receipt| receipt.signed_submission.clone())
             .context("Missing original")?;
-        let result = reconcile_original(
+        let response = reconcile_original_response(
             api,
             scanner,
+            &intent.old_identity,
+            &transaction,
             &proof,
-            &mut signed,
-            transaction.saved_settlement_observation.as_ref(),
+            signed,
         )
         .await;
-        let (status, outcome) = result.unwrap_or_else(|error| {
-            (
-                MessageStatus::NeedsReconciliation {
-                    receipt_key: signed.receipt_key,
-                    diagnostic: format!("HOLD: {error:#}"),
-                    receipt_observation: None,
-                },
-                None,
-            )
-        });
         let settled = matches!(
-            status,
+            response.status,
             MessageStatus::Success { .. } | MessageStatus::RetryableNoop { .. }
         );
-        manager
-            .finalize_transaction(Response {
-                tx_uuid: transaction.uuid,
-                status,
-                submission: outcome.map(|reply| SubmissionEvidence {
-                    observed_at_ms: relayer::message_relayer::eth_to_gear::message_sender::now_ms(),
-                    manager: intent.old_identity.vft_manager_address,
-                    historical_proxy: intent.old_identity.historical_proxy_address,
-                    sender: signed.sender.clone(),
-                    manager_reply: reply.ok(),
-                    error: None,
-                }),
-                signed_submission: Some(signed),
-            })
-            .await?;
+        manager.finalize_transaction(response).await?;
         ensure!(
             settled,
             "HOLD: drain original account nonce ownership before lifecycle signing"
@@ -1363,6 +1411,16 @@ async fn run_cutover_call(
     api: &GearApi,
     work_path: &Path,
     step: CutoverStep,
+    intent: &Intent,
+) -> Result<FinalizedCutoverCall> {
+    let (target, payload) = lifecycle_request(intent, &step)?;
+    run_cutover_request(api, work_path, step, target, &payload).await
+}
+
+async fn run_cutover_request(
+    api: &GearApi,
+    work_path: &Path,
+    step: CutoverStep,
     target: ActorId,
     payload: &[u8],
 ) -> Result<FinalizedCutoverCall> {
@@ -1389,7 +1447,7 @@ async fn run_cutover_call(
     for index in 0..work.calls.len() {
         let call = &mut work.calls[index];
         validate_fixed_intent(&work.intent, call)?;
-        let result = reconcile_call(api, &scanner_for(&scanner, call.target), call, false).await;
+        let result = reconcile_call(api, &scanner, call, false).await;
         if no_effect(&call.original) {
             call.archived_no_effect = true;
         }
@@ -1464,16 +1522,6 @@ async fn run_cutover_call(
         tokio::time::sleep(Duration::from_secs(30)).await;
     }
     bail!("HOLD: original lifecycle outcome pending; resume same cutover work")
-}
-fn scanner_for(scanner: &MessageSender, target: H256) -> MessageSender {
-    MessageSender::new(
-        target,
-        scanner.receiver_route.clone(),
-        scanner.historical_proxy_address,
-        scanner.api_provider.clone(),
-        String::new(),
-        None,
-    )
 }
 
 fn validate_covered_block(block: &CoveredBlock) -> Result<()> {
@@ -1607,24 +1655,31 @@ fn belongs_to_source(intent: &Intent, timestamp: u64) -> Result<bool> {
     Ok(true)
 }
 
-fn accepted_external_parent(proof: &[u8], signed: &SignedSubmission) -> bool {
+fn external_parent_result(
+    proof: &[u8],
+    signed: &SignedSubmission,
+) -> Option<Result<(), vft_manager_client::Error>> {
     let mut bytes = proof;
-    let Ok(event) = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes) else {
-        return false;
-    };
-    bytes.is_empty()
-        && complete(signed)
-        && signed.finalized_reply.as_ref().is_some_and(|reply| {
-            match exact_reply::<historical_proxy_client::historical_proxy::io::Redirect>(
-                &reply.payload,
-            ) {
-                Ok(Ok((receipt, reply))) if receipt == event.receipt_rlp => matches!(
-                    exact_reply::<io::SubmitReceipt>(&reply),
-                    Ok(Ok(())) | Ok(Err(vft_manager_client::Error::NativeSettlementPending))
-                ),
-                _ => false,
-            }
-        })
+    let event = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes).ok()?;
+    if !bytes.is_empty() || !complete(signed) {
+        return None;
+    }
+    let (receipt, reply) = exact_reply::<historical_proxy_client::historical_proxy::io::Redirect>(
+        &signed.finalized_reply.as_ref()?.payload,
+    )
+    .ok()?
+    .ok()?;
+    if receipt != event.receipt_rlp {
+        return None;
+    }
+    exact_reply::<io::SubmitReceipt>(&reply).ok()
+}
+
+fn accepted_external_parent(proof: &[u8], signed: &SignedSubmission) -> bool {
+    matches!(
+        external_parent_result(proof, signed),
+        Some(Ok(()) | Err(vft_manager_client::Error::NativeSettlementPending))
+    )
 }
 fn refresh_pending_external_original(
     previous: &mut seal::CanonicalExternalOriginal,
@@ -1667,7 +1722,6 @@ struct ExternalReceiptCandidate {
     proof: Option<Vec<u8>>,
     receipt_key: (u64, u64),
     destination: H256,
-    is_continuation: bool,
 }
 fn external_receipt_candidate(
     destination: H256,
@@ -1694,7 +1748,6 @@ fn external_receipt_candidate(
             proof: Some(proof),
             receipt_key: (slot, event.transaction_index),
             destination: proxy,
-            is_continuation: false,
         })
     } else if destination == receiver {
         let mut payload = payload.strip_prefix(io::ReconcileReceipt::ROUTE)?;
@@ -1703,7 +1756,6 @@ fn external_receipt_candidate(
             proof: None,
             receipt_key: key,
             destination: receiver,
-            is_continuation: true,
         })
     } else {
         None
@@ -1714,18 +1766,10 @@ fn attach_external_native_continuations(
     original: &mut SignedSubmission,
     continuations: &[SignedSubmission],
 ) -> Result<()> {
-    let pending_native = accepted_external_parent(proof, original)
-        && original.finalized_reply.as_ref().is_some_and(|reply| {
-            match exact_reply::<historical_proxy_client::historical_proxy::io::Redirect>(
-                &reply.payload,
-            ) {
-                Ok(Ok((_, reply))) => matches!(
-                    exact_reply::<io::SubmitReceipt>(&reply),
-                    Ok(Err(vft_manager_client::Error::NativeSettlementPending))
-                ),
-                _ => false,
-            }
-        });
+    let pending_native = matches!(
+        external_parent_result(proof, original),
+        Some(Err(vft_manager_client::Error::NativeSettlementPending))
+    );
     let mut native = continuations
         .iter()
         .filter(|continuation| {
@@ -1794,7 +1838,6 @@ async fn discover_external_originals(
                 proof,
                 receipt_key: key,
                 destination,
-                is_continuation,
             }) = external_receipt_candidate(
                 H256::from_slice(call.destination.as_ref()),
                 &call.payload,
@@ -1837,8 +1880,8 @@ async fn discover_external_originals(
                 nonce,
                 extrinsic_hash: format!("{:#x}", extrinsic.hash()),
                 raw_extrinsic: extrinsic.bytes().to_vec(),
-                prepared_finalized_number: if is_continuation { number - 1 } else { 0 },
-                prepared_finalized_hash: if is_continuation {
+                prepared_finalized_number: if proof.is_none() { number - 1 } else { 0 },
+                prepared_finalized_hash: if proof.is_none() {
                     format!("{previous:#x}")
                 } else {
                     format!("{genesis:#x}")
@@ -1876,12 +1919,12 @@ async fn discover_external_originals(
                     reply?;
                 }
             }
-            if is_continuation {
-                continuations.push(original);
-            } else if let Some(proof) = proof {
+            if let Some(proof) = proof {
                 if original.message_id.is_some() {
                     proofs.push((proof, original));
                 }
+            } else {
+                continuations.push(original);
             }
         }
         ensure!(
@@ -1944,12 +1987,7 @@ async fn qualify_external_original(
             .await?;
         return Ok(saved.clone());
     }
-    let payload = historical_proxy_client::historical_proxy::io::Redirect::encode_call(
-        proof.proof_block.block.slot,
-        proof.encode(),
-        actor(scanner.receiver_address),
-        scanner.receiver_route.clone(),
-    );
+    let payload = receipt_call(scanner, proof);
     ensure!(
         scanner
             .find_signed_extrinsic(
@@ -2401,7 +2439,7 @@ async fn drain(
             .cloned()
             .context("Original admission vanished")?;
         let proof = transaction.receipt_event()?;
-        let mut signed = match transaction
+        let signed = match transaction
             .receipt
             .as_ref()
             .and_then(|receipt| receipt.signed_submission.clone())
@@ -2424,41 +2462,17 @@ async fn drain(
                 signed
             }
         };
-        let result = reconcile_original(
+        let response = reconcile_original_response(
             api,
             &sender,
+            &work.intent.old_identity,
+            &transaction,
             &proof,
-            &mut signed,
-            transaction.saved_settlement_observation.as_ref(),
+            signed,
         )
         .await;
-        let (status, outcome) = match result {
-            Ok(result) => result,
-            Err(error) => (
-                MessageStatus::NeedsReconciliation {
-                    receipt_key: signed.receipt_key,
-                    diagnostic: format!("HOLD: {error:#}"),
-                    receipt_observation: None,
-                },
-                None,
-            ),
-        };
-        let done = matches!(status, MessageStatus::Success { .. });
-        manager
-            .finalize_transaction(Response {
-                tx_uuid: id,
-                status,
-                submission: outcome.map(|outcome| SubmissionEvidence {
-                    observed_at_ms: relayer::message_relayer::eth_to_gear::message_sender::now_ms(),
-                    manager: work.intent.old_identity.vft_manager_address,
-                    historical_proxy: work.intent.old_identity.historical_proxy_address,
-                    sender: signed.sender.clone(),
-                    manager_reply: outcome.ok(),
-                    error: None,
-                }),
-                signed_submission: Some(signed),
-            })
-            .await?;
+        let done = matches!(response.status, MessageStatus::Success { .. });
+        manager.finalize_transaction(response).await?;
         ensure!(
             done,
             "HOLD: original lane admission {id} remains unresolved; resume original bytes"
@@ -2567,10 +2581,7 @@ async fn drain(
                 "HOLD: original historical settlement no longer authenticates"
             );
             admission.original_lane_uuid = Some(transaction.uuid);
-            admission.settlement = transaction
-                .saved_settlement_observation
-                .clone()
-                .or(transaction.receipt_observation.clone());
+            admission.settlement = Some(original_pin.clone());
             save(path, &work)?;
             continue;
         }
@@ -2826,33 +2837,15 @@ pub async fn prepare(
         .context("Boundary overflow")?;
     let mut initial_role_pins = Vec::with_capacity(mappings.len());
     for (token, _, supply) in &mappings {
-        let previous = if path.exists() {
-            read_work(&path)?
-                .intent
-                .initial_role_pins
-                .into_iter()
-                .find(|roles| roles.token == hash_actor(*token))
-        } else {
-            None
-        };
-        let role_hash = previous
-            .as_ref()
-            .map_or(H256::from_slice(at.as_ref()), |roles| roles.block_hash);
-        let roles = read_role_pin(
+        let roles = initial_role_pin(
             api,
+            &path,
             hash_actor(*token),
             native_wrapper == Some(*token),
-            Some(role_hash),
+            H256::from_slice(at.as_ref()),
+            "HOLD: original authority pin changed",
         )
         .await?;
-        if let Some(previous) = previous {
-            ensure!(
-                roles == previous
-                    && H256::from_slice(api.get_block_hash(previous.block_number).await?.as_ref())
-                        == previous.block_hash,
-                "HOLD: original authority pin changed"
-            );
-        }
         if *supply == TokenSupply::Ethereum {
             ensure!(
                 roles.minter == hash_actor(args.old_vft_manager)
@@ -2873,27 +2866,15 @@ pub async fn prepare(
         .map(hash_actor)
         .filter(|wrapper| !initial_role_pins.iter().any(|pin| pin.token == *wrapper))
     {
-        let previous = if path.exists() {
-            read_work(&path)?
-                .intent
-                .initial_role_pins
-                .into_iter()
-                .find(|pin| pin.token == wrapper)
-        } else {
-            None
-        };
-        let role_hash = previous
-            .as_ref()
-            .map_or(H256::from_slice(at.as_ref()), |pin| pin.block_hash);
-        let roles = read_role_pin(api, wrapper, true, Some(role_hash)).await?;
-        if let Some(previous) = previous {
-            ensure!(
-                roles == previous
-                    && api.get_block_hash(previous.block_number).await?.as_ref()
-                        == previous.block_hash.as_bytes(),
-                "HOLD: native authority pin changed"
-            );
-        }
+        let roles = initial_role_pin(
+            api,
+            &path,
+            wrapper,
+            true,
+            H256::from_slice(at.as_ref()),
+            "HOLD: native authority pin changed",
+        )
+        .await?;
         ensure!(
             roles.manager == Some(hash_actor(args.old_vft_manager))
                 && roles.burner == hash_actor(args.old_vft_manager),
@@ -2961,14 +2942,7 @@ pub async fn prepare(
     let _other_signers = lock_other_signers(api, &resumed.intent, &resumed, &path)?;
     let result: Result<()> = async {
         authenticate_environment(api, &eth, &intent).await?;
-        run_cutover_call(
-            api,
-            &path,
-            CutoverStep::BeginCutover,
-            args.old_vft_manager,
-            &io::BeginCutover::encode_call(args.new_vft_manager, args.boundary_slot),
-        )
-        .await?;
+        run_cutover_call(api, &path, CutoverStep::BeginCutover, &intent).await?;
         let (source, _) = status(api, intent.old_identity.vft_manager_address).await?;
         ensure!(
             source.phase == CutoverPhase::Draining
@@ -3049,7 +3023,7 @@ async fn drain_source(api: &GearApi, path: &Path) -> Result<()> {
                 SourceStatus::TokenDepositCompleted(true) | SourceStatus::TokensReturnComplete(false) | SourceStatus::BridgeResponseReceived(None) => {
                     let key=H256(request.into_bytes());
                     let ordinal=u32::try_from(read_work(path)?.calls.iter().filter(|call|matches!(call.step,CutoverStep::SourceRefund(previous,_) if previous==key) && definite_refund_rejection(call)).count())?;
-                    run_cutover_call(api,path,CutoverStep::SourceRefund(key,ordinal),source,&io::HandleRequestBridgingInterruptedTransfer::encode_call(*request)).await?;
+                    run_cutover_call(api, path, CutoverStep::SourceRefund(key, ordinal), &work.intent).await?;
                 }
                 _ => bail!("HOLD: original outgoing request {request:?} or deposit/refund child remains unresolved"),
             }
@@ -3386,7 +3360,7 @@ async fn reconcile_retained_role_calls(api: &GearApi, path: &Path) -> Result<()>
         }
         let call = &mut work.calls[index];
         validate_fixed_intent(&work.intent, call)?;
-        let result = reconcile_call(api, &scanner_for(&scanner, call.target), call, false).await;
+        let result = reconcile_call(api, &scanner, call, false).await;
         let reply = if complete(&call.original) {
             validate_call_reply(call)
         } else {
@@ -3438,18 +3412,16 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
             .iter()
             .find(|pin| pin.token == *token)
             .context("HOLD: initial token roles missing")?;
-        for (role, initial, step, payload) in [
+        for (role, initial, step) in [
             (
                 minter,
                 actor(original.minter),
                 CutoverStep::TokenMinter(*token),
-                vft_client::vft_admin::io::SetMinter::encode_call(new),
             ),
             (
                 burner,
                 actor(original.burner),
                 CutoverStep::TokenBurner(*token),
-                vft_client::vft_admin::io::SetBurner::encode_call(new),
             ),
         ] {
             if initial != old {
@@ -3465,7 +3437,7 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
                             .any(|call| call.step == step && complete(&call.original))),
                 "HOLD: token role points to unexpected identity or unjournaled handoff"
             );
-            run_cutover_call(api, path, step, actor(*token), &payload).await?;
+            run_cutover_call(api, path, step, &work.intent).await?;
         }
         let at = api.last_block_hash().await?;
         let pin = sails_rs::H256::from_slice(at.as_ref());
@@ -3540,44 +3512,20 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
                                 && complete(&call.original))),
                 "HOLD: native minter unexpected/unrecorded"
             );
-            run_cutover_call(
-                api,
-                path,
-                CutoverStep::TokenMinter(wrapper),
-                actor(wrapper),
-                &vft_client::vft_admin::io::SetMinter::encode_call(new),
-            )
-            .await?;
+            run_cutover_call(api, path, CutoverStep::TokenMinter(wrapper), &work.intent).await?;
         } else {
             ensure!(
                 minter == actor(initial.minter),
                 "HOLD: preserved native minter changed"
             );
         }
-        run_cutover_call(
-            api,
-            path,
+        for step in [
             CutoverStep::WrapperPause,
-            actor(wrapper),
-            &vft_vara_client::vft_admin::io::Pause::encode_call(),
-        )
-        .await?;
-        run_cutover_call(
-            api,
-            path,
             CutoverStep::WrapperConfigureManager,
-            actor(wrapper),
-            &vft_vara_client::native_escrow::io::ConfigureManager::encode_call(new),
-        )
-        .await?;
-        run_cutover_call(
-            api,
-            path,
             CutoverStep::WrapperSetBurner,
-            actor(wrapper),
-            &vft_vara_client::vft_admin::io::SetBurner::encode_call(new),
-        )
-        .await?;
+        ] {
+            run_cutover_call(api, path, step, &work.intent).await?;
+        }
         let at = api.last_block_hash().await?;
         let pin = sails_rs::H256::from_slice(at.as_ref());
         ensure!(
@@ -3591,14 +3539,7 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
                     == 0,
             "HOLD: wrapper handoff readback differs"
         );
-        run_cutover_call(
-            api,
-            path,
-            CutoverStep::WrapperResume,
-            actor(wrapper),
-            &vft_vara_client::vft_admin::io::Resume::encode_call(),
-        )
-        .await?;
+        run_cutover_call(api, path, CutoverStep::WrapperResume, &work.intent).await?;
         record_role_pin(api, path, wrapper, true).await?;
     }
     Ok(())
@@ -3715,22 +3656,8 @@ pub async fn finalize(
         let new = actor(work.intent.new_identity.vft_manager_address);
         let (source, _) = status(api, hash_actor(old)).await?;
         if source.phase == CutoverPhase::Draining {
-            run_cutover_call(
-                api,
-                &path,
-                CutoverStep::SourcePause,
-                old,
-                &io::Pause::encode_call(),
-            )
-            .await?;
-            run_cutover_call(
-                api,
-                &path,
-                CutoverStep::PrepareCutover,
-                new,
-                &io::PrepareCutover::encode_call(old, work.intent.boundary.slot),
-            )
-            .await?;
+            run_cutover_call(api, &path, CutoverStep::SourcePause, &work.intent).await?;
+            run_cutover_call(api, &path, CutoverStep::PrepareCutover, &work.intent).await?;
         }
         let (source, _) = status(api, hash_actor(old)).await?;
         if source.phase != CutoverPhase::Retired {
@@ -3744,14 +3671,7 @@ pub async fn finalize(
                     })
                     .count(),
             )?;
-            run_cutover_call(
-                api,
-                &path,
-                CutoverStep::Upgrade(ordinal),
-                old,
-                &io::Upgrade::encode_call(new),
-            )
-            .await?;
+            run_cutover_call(api, &path, CutoverStep::Upgrade(ordinal), &work.intent).await?;
         }
         let (source, retirement) = status(api, hash_actor(old)).await?;
         ensure!(
@@ -3797,7 +3717,7 @@ pub async fn finalize(
                     .await?,
             "HOLD: original authorized EVM registration history changed"
         );
-        run_cutover_call(
+        run_cutover_request(
             api,
             &path,
             CutoverStep::FinalizeCutover,
@@ -3919,14 +3839,7 @@ pub async fn finalize(
     )
     .await?;
     if !recovered_activation {
-        run_cutover_call(
-            api,
-            &path,
-            CutoverStep::DestinationUnpause,
-            actor(work.intent.new_identity.vft_manager_address),
-            &io::Unpause::encode_call(),
-        )
-        .await?;
+        run_cutover_call(api, &path, CutoverStep::DestinationUnpause, &work.intent).await?;
     }
     let (destination, active_pin) =
         status(api, work.intent.new_identity.vft_manager_address).await?;
@@ -4031,7 +3944,7 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
             "HOLD: sealed canonical coverage changed"
         );
     }
-    let mut scanner = sender(
+    let scanner = sender(
         provider,
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
@@ -4039,7 +3952,6 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     for original in &work.calls {
         verify_lifecycle_original(&api, &scanner, &work.intent, original).await?;
     }
-    scanner.receiver_address = work.intent.old_identity.vft_manager_address;
     for admission in &work.admissions {
         let block = work
             .blocks

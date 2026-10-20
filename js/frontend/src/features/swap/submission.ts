@@ -1,4 +1,5 @@
 import type { GearApi, HexString, MessageQueuedData, GearCoreMessageUserUserMessage } from '@gear-js/api';
+import { GearClient } from '@gear-js/bridge';
 
 export type BridgeReply = { nonce: bigint; ethTokenId: `0x${string}` };
 
@@ -69,6 +70,8 @@ export async function waitForFinalizedReplies(
   const replies = new Map<string, GearCoreMessageUserUserMessage>();
   const expected = new Map(queued.map((message) => [message.id.toHex(), message]));
   if (!queued.length || expected.size !== queued.length) throw new Error('Invalid original queued message identities');
+  const gearClient = new GearClient(api);
+  const messageIds = new Set(expected.keys());
   let next = original.number.toBigInt();
   let previousHash: string | undefined;
   let previousFinalized: { height: bigint; hash: string } | undefined;
@@ -85,20 +88,12 @@ export async function waitForFinalizedReplies(
       throw new Error('Previous finalized source anchor changed');
     if ((await api.blocks.getBlockHash(original.number.toBigInt())).toHex() !== blockHash)
       throw new Error('Original source inclusion is no longer canonical');
-    for (; next <= height; next++) {
-      if (Date.now() >= deadline)
-        throw new Error('Original finalized reply deadline expired; reconcile before retrying');
-      const hash = (await api.blocks.getBlockHash(next)).toHex();
-      const header = await api.rpc.chain.getHeader(hash);
-      if (header.number.toBigInt() !== next || (previousHash && header.parentHash.toHex() !== previousHash))
-        throw new Error('Finalized source reply history changed or has a gap');
-      for (const { event } of await api.blocks.getEvents(hash)) {
-        if (!api.events.gear.UserMessageSent.is(event)) continue;
-        const message = event.data[0] as unknown as GearCoreMessageUserUserMessage;
-        if (message.details.isNone) continue;
+    for await (const block of gearClient.finalizedReplyBlocks(next, height, messageIds, deadline, previousHash)) {
+      const { number, hash } = block;
+      next = number;
+      for (const message of block.replies()) {
         const replyTo = message.details.unwrap().to.toHex();
-        const request = expected.get(replyTo);
-        if (!request) continue;
+        const request = expected.get(replyTo)!;
         if (replies.has(replyTo) || !message.source.eq(request.destination) || !message.destination.eq(request.source))
           throw new Error('Original reply identity is conflicting');
         replies.set(replyTo, message);
@@ -106,6 +101,7 @@ export async function waitForFinalizedReplies(
       if ((await api.blocks.getBlockHash(next)).toHex() !== hash) throw new Error('Finalized reply pin changed');
       previousHash = hash;
       if (replies.size === queued.length) break;
+      next++;
     }
     if ((await api.blocks.getBlockHash(height)).toHex() !== headHash) throw new Error('Finalized reply anchor changed');
     previousFinalized = { height, hash: headHash };

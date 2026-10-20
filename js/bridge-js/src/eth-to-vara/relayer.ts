@@ -1,6 +1,6 @@
 import { KeyringPair } from '@polkadot/keyring/types';
 import { SignerOptions } from '@polkadot/api/types';
-import { GearApi, HexString, decodeAddress, GearCoreMessageUserUserMessage } from '@gear-js/api';
+import { GearApi, HexString, decodeAddress } from '@gear-js/api';
 import { Header } from '@polkadot/types/interfaces';
 import type { Bytes, Enum } from '@polkadot/types';
 import { blake2AsHex } from '@polkadot/util-crypto';
@@ -9,11 +9,11 @@ import type { ITuple } from '@polkadot/types/types';
 import { getServiceNamePrefix, getFnNamePrefix, TransactionBuilder } from 'sails-js';
 import { PublicClient, bytesToHex } from 'viem';
 
-import { encodeEthToVaraEvent, getPrefix, HistoricalProxyClient, ProxyError, ProofResult } from '../vara/index.js';
+import { encodeEthToVaraEvent, getPrefix, GearClient, HistoricalProxyClient, ProxyError, ProofResult } from '../vara/index.js';
 import { createBeaconClient, createEthereumClient } from '../ethereum/index.js';
 import { composeProof, InboundProofProfile, immutableInboundProfile } from './proof-composer.js';
 import { StatusCb, withOriginalDeadline } from '../util.js';
-import { VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
+import { VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, validateInboundTokenEffect, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
   type NativeReceiptDeposit, type NativeRedemption, type NativeReceiptIdentity, type InboundTokenEffect, type NativeTokenSettlement } from './token-effect.js';
 
 export interface RelayResult {
@@ -44,6 +44,49 @@ export interface ConsumerReplyContract {
   readonly idlSha256: string;
   /** Must verify exact application/economic state at result.effectBlockHash (or original reply pin). */
   readonly verifyEffect: (value: unknown, result: RelayResult, proof: ProofResult) => Promise<void>;
+}
+
+function nativeReceiptIdentity(profile: InboundProofProfile, proof: ProofResult, expectedEffect: InboundTokenEffect): NativeReceiptIdentity {
+  return { managerId: profile.consumer.programId, proxyId: profile.historicalProxyId,
+    wrapperId: profile.nativeWrapper!.programId, slot: BigInt(proof.proofBlock.block.slot),
+    transactionIndex: BigInt(proof.transactionIndex), receiptRlp: proof.receiptRlp, expectedEffect };
+}
+
+async function readNativeRedemptions(rows: readonly NativeReceiptDeposit[], pin: HexString,
+  readRedemption: NonNullable<ConsumerReplyContract['nativeSettlement']>['readRedemption']) {
+  const redemptions = new Map<HexString, NativeRedemption | null>();
+  for (const row of rows.filter(row => row.native)) {
+    redemptions.set(row.operation_id, await readRedemption(row.operation_id, pin));
+  }
+  return redemptions;
+}
+
+/** Standard manager adapter; arbitrary consumers must still supply their own verifyEffect. */
+export function createVftManagerReplyContract(profile: InboundProofProfile,
+  adapter: Pick<ConsumerReplyContract, 'registry' | 'idlSha256'> & NonNullable<ConsumerReplyContract['nativeSettlement']>): ConsumerReplyContract {
+  const { registry, idlSha256, ...settlement } = adapter;
+  return {
+    registry, idlSha256, resultType: 'Result<Null, Error>',
+    nativeSettlement: profile.nativeWrapper ? settlement : undefined,
+    verifyEffect: async (_value, result, proof) => {
+      const pin = result.effectBlockHash ?? result.replyBlockHash;
+      const deposits = await settlement.readDeposits(pin, proof);
+      if (!deposits.some(deposit => deposit.native)) {
+        validateInboundTokenEffect(proof.receiptRlp, deposits, settlement.expectedEffect);
+        return;
+      }
+      if (!profile.nativeWrapper) throw new Error('HOLD: native wrapper identity is unavailable is not defined');
+      const identity = nativeReceiptIdentity(profile, proof, settlement.expectedEffect);
+      const redemptions = await readNativeRedemptions(deposits, pin, settlement.readRedemption);
+      if (!result.nativeSettlements) throw new Error('HOLD: authenticated original native settlements are missing is not defined');
+      const originals = new Map(result.nativeSettlements.map(entry => [entry.operationId, entry.redemption]));
+      const settlements = validateNativeTokenEffect(identity, deposits, redemptions, originals);
+      if (settlements.length !== result.nativeSettlements.length ||
+          settlements.some(entry => entry.child !== result.nativeSettlements!.find(original => original.operationId === entry.operationId)?.child)) {
+        throw new Error('HOLD: original native settlement cohort changed');
+      }
+    },
+  };
 }
 
 function consumerResult(payload: HexString, profile: InboundProofProfile, contract: Pick<ConsumerReplyContract, 'registry' | 'resultType' | 'idlSha256'>) {
@@ -86,9 +129,7 @@ export function assertNativePendingReply(payload: HexString, profile: InboundPro
 async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, proof: ProofResult, original: RelayResult, deadline: number): Promise<void> {
   const api = params.gearApi, profile = params.inboundProfile, contract = params.consumerReply.nativeSettlement!;
   const read = <T>(operation: () => Promise<T>) => withOriginalDeadline(deadline, operation);
-  const identity: NativeReceiptIdentity = { managerId: profile.consumer.programId, proxyId: profile.historicalProxyId,
-    wrapperId: profile.nativeWrapper!.programId, slot: BigInt(proof.proofBlock.block.slot), transactionIndex: BigInt(proof.transactionIndex),
-    receiptRlp: proof.receiptRlp, expectedEffect: contract.expectedEffect };
+  const identity = nativeReceiptIdentity(profile, proof, contract.expectedEffect);
   const originalWrapper = await read(() => api.programStorage.getProgram(identity.wrapperId, original.replyBlockHash));
   if (!originalWrapper.state.isInitialized || !originalWrapper.codeId.eq(profile.nativeWrapper!.codeId)) throw new Error('HOLD: original native wrapper identity changed');
   const rows = structuredClone(await read(() => contract.readDeposits(original.replyBlockHash, proof)));
@@ -347,6 +388,8 @@ async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVar
     throw new Error('Invalid original ' + service + '/' + method + ' request');
   }
   const originalBlock = await api.blocks.get(blockHash);
+  const gearClient = new GearClient(api);
+  const messageIds = new Set([msgId.toLowerCase()]);
   let next = originalBlock.block.header.number.toBigInt();
   let previousHash: HexString | undefined;
 
@@ -367,14 +410,12 @@ async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVar
     const scan = async (head: Header) => {
       if (finished) return;
       const tip = head.number.toBigInt();
-      for (; next <= tip && !finished; next++) {
-        if (Date.now() >= deadline) throw new Error('Original relay deadline expired');
-        const hash = (await api.blocks.getBlockHash(next)).toHex();
-        const header = await api.rpc.chain.getHeader(hash);
-        if (header.number.toBigInt() !== next || (previousHash && header.parentHash.toHex() !== previousHash)) {
-          throw new Error('Finalized source history changed or has a gap');
-        }
-        const events = await api.blocks.getEvents(hash);
+      for await (const block of gearClient.finalizedReplyBlocks(next, tip, messageIds, deadline, previousHash, {
+        deadline: 'Original relay deadline expired', history: 'Finalized source history changed or has a gap',
+      })) {
+        if (finished) return;
+        const { number, hash, events } = block;
+        next = number;
         if (previousHash === undefined) {
           if (hash !== blockHash.toLowerCase()) throw new Error('Original request inclusion is not canonical finalized history');
           const extrinsics = originalBlock.block.extrinsics;
@@ -399,12 +440,7 @@ async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVar
             throw new Error('Original MessageQueued sender or proxy mismatch');
           }
         }
-        const replies = events.flatMap(({ event }) => {
-          if (!api.events.gear.UserMessageSent.is(event)) return [];
-          const message = event.data[0] as unknown as GearCoreMessageUserUserMessage;
-          if (message.details.isNone || !message.details.unwrap().to.eq(msgId)) return [];
-          return [message];
-        });
+        const replies = [...block.replies()];
         if (replies.length > 1) throw new Error('Ambiguous original proxy reply');
         if (replies.length === 1) {
           const [message] = replies;
@@ -446,6 +482,7 @@ async function validateOriginalFinalizedEthToVaraReply(params: FinalizedEthToVar
           return;
         }
         previousHash = hash;
+        next++;
       }
     };
     const enqueue = (head: Header) => {
@@ -537,13 +574,9 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
               await withOriginalDeadline(deadline, () => native.readReceiptStatus(result.replyBlockHash, proof)) !== 'Processed') {
             throw new Error('HOLD: original native receipt or wrapper is not authenticated');
           }
-          const redemptions = new Map<HexString, NativeRedemption | null>();
-          for (const row of rows.filter(row => row.native)) redemptions.set(row.operation_id,
-            await withOriginalDeadline(deadline, () => native.readRedemption(row.operation_id, result.replyBlockHash)));
-          result.nativeSettlements = validateNativeTokenEffect({ managerId: params.inboundProfile.consumer.programId,
-            proxyId: params.inboundProfile.historicalProxyId, wrapperId: params.inboundProfile.nativeWrapper.programId,
-            slot: BigInt(proof.proofBlock.block.slot), transactionIndex: BigInt(proof.transactionIndex), receiptRlp: proof.receiptRlp,
-            expectedEffect: native.expectedEffect }, rows, redemptions);
+          const redemptions = await readNativeRedemptions(rows, result.replyBlockHash,
+            (operationId, pin) => withOriginalDeadline(deadline, () => native.readRedemption(operationId, pin)));
+          result.nativeSettlements = validateNativeTokenEffect(nativeReceiptIdentity(params.inboundProfile, proof, native.expectedEffect), rows, redemptions);
         }
       }
     }

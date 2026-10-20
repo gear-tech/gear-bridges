@@ -9,7 +9,7 @@ path = "src/lib.rs"
 [features]
 default = []
 test-support = []
-deployment = ["dep:gclient", "dep:sails-rs", "dep:historical-proxy", "dep:historical-proxy-client", "dep:eth-events-electra", "dep:eth-events-electra-client", "dep:vft-manager", "dep:vft-manager-client", "dep:vft", "dep:vft-client", "dep:vft-vara", "dep:vft-vara-client", "dep:gear-core", "dep:checkpoint-light-client-client", "dep:bridging-payment", "dep:bridging-payment-client", "dep:relayer"]
+deployment = ["dep:gclient", "dep:sails-rs", "dep:historical-proxy", "dep:historical-proxy-client", "dep:eth-events-electra", "dep:eth-events-electra-client", "dep:vft-manager", "dep:vft-manager-client", "dep:vft", "dep:vft-client", "dep:vft-vara", "dep:vft-vara-client", "dep:gear-core", "dep:checkpoint-light-client-client", "dep:bridging-payment", "dep:bridging-payment-client", "dep:gear-common"]
 
 [[bin]]
 name = "beefy-relay"
@@ -47,7 +47,7 @@ tokio.workspace = true
 futures.workspace = true
 url.workspace = true
 gclient = { workspace = true, optional = true }
-relayer = { path = "../../relayer", optional = true }
+gear-common = { workspace = true, optional = true }
 sails-rs = { workspace = true, features = ["gclient"], optional = true }
 historical-proxy = { workspace = true, features = ["wasm-binary"], optional = true }
 historical-proxy-client = { workspace = true, optional = true }

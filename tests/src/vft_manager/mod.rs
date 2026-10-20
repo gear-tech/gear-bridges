@@ -16,6 +16,22 @@ use vft_vara::WASM_BINARY as WASM_VFT_VARA;
 
 pub mod gtest;
 
+fn manager_init_config() -> InitConfig {
+    InitConfig {
+        gear_bridge_builtin: Default::default(),
+        historical_proxy_address: Default::default(),
+        config: Config {
+            gas_for_token_ops: 20_000_000_000,
+            gas_for_reply_deposit: 10_000_000_000,
+            gas_to_send_request_to_builtin: 20_000_000_000,
+            gas_for_swap_token_maps: 1_500_000_000,
+            reply_timeout: 100,
+            fee_bridge: 0,
+            fee_incoming: 0,
+        },
+    }
+}
+
 async fn calculate_reply_gas(
     api: &GearApi,
     service: &mut vft_manager_client::VftManager<GClientRemoting>,
@@ -274,19 +290,7 @@ async fn bench_gas_for_reply() -> Result<()> {
     let slot_start = 2_000;
     let vft_manager_id = factory
         .gas_calculation(
-            InitConfig {
-                gear_bridge_builtin: Default::default(),
-                historical_proxy_address: Default::default(),
-                config: Config {
-                    gas_for_token_ops: 20_000_000_000,
-                    gas_for_reply_deposit: 10_000_000_000,
-                    gas_to_send_request_to_builtin: 20_000_000_000,
-                    gas_for_swap_token_maps: 1_500_000_000,
-                    reply_timeout: 100,
-                    fee_bridge: 0,
-                    fee_incoming: 0,
-                },
-            },
+            manager_init_config(),
             slot_start,
             None,
         )
@@ -399,19 +403,7 @@ async fn getter_transactions() -> Result<()> {
     let slot_start = 2_000;
     let vft_manager_id = factory
         .gas_calculation(
-            InitConfig {
-                gear_bridge_builtin: Default::default(),
-                historical_proxy_address: Default::default(),
-                config: Config {
-                    gas_for_token_ops: 20_000_000_000,
-                    gas_for_reply_deposit: 10_000_000_000,
-                    gas_to_send_request_to_builtin: 20_000_000_000,
-                    gas_for_swap_token_maps: 1_500_000_000,
-                    reply_timeout: 100,
-                    fee_bridge: 0,
-                    fee_incoming: 0,
-                },
-            },
+            manager_init_config(),
             slot_start,
             Some(CAPACITY as u32),
         )
@@ -490,19 +482,7 @@ async fn msg_tracker_state() -> Result<()> {
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
     let vft_manager_id = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
+        .new(manager_init_config())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -568,19 +548,7 @@ async fn upgrade() -> Result<()> {
     let remoting = GClientRemoting::new(api.clone());
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
+        .new(manager_init_config())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -724,19 +692,7 @@ async fn upgrade() -> Result<()> {
     // deploy another VftManager
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager2_id = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
+        .new(manager_init_config())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, [salt, salt].concat())
         .await
@@ -877,19 +833,7 @@ async fn bench_gas_for_token_map_swap() -> Result<()> {
     // deploy VFT-manager
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
     let vft_manager_id = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
+        .new(manager_init_config())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -978,19 +922,7 @@ async fn update_vfts() -> Result<()> {
     let remoting = GClientRemoting::new(api.clone());
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
+        .new(manager_init_config())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -1149,19 +1081,7 @@ async fn init() -> Result<()> {
     let remoting = GClientRemoting::new(api.clone());
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
+        .new(manager_init_config())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -1258,19 +1178,7 @@ async fn vft_burn_from() -> Result<()> {
     let remoting = GClientRemoting::new(api.clone());
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager_id = factory
-        .new(InitConfig {
-            gear_bridge_builtin: Default::default(),
-            historical_proxy_address: Default::default(),
-            config: Config {
-                gas_for_token_ops: 20_000_000_000,
-                gas_for_reply_deposit: 10_000_000_000,
-                gas_to_send_request_to_builtin: 20_000_000_000,
-                gas_for_swap_token_maps: 1_500_000_000,
-                reply_timeout: 100,
-                fee_bridge: 0,
-                fee_incoming: 0,
-            },
-        })
+        .new(manager_init_config())
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await

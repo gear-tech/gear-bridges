@@ -6,7 +6,7 @@ use super::{
 };
 use crate::message_relayer::common::{
     ethereum::{
-        self, block_listener::BlockListener as EthereumBlockListener,
+        block_listener::BlockListener as EthereumBlockListener,
         message_paid_event_extractor::MessagePaidEventExtractor,
         transaction_data_extractor::TransactionDataExtractor,
     },
@@ -126,46 +126,19 @@ impl Relayer {
             historical_proxy_address,
             gear_sender: client.account_id().clone().into(),
         };
-        let signer_ownership =
-            cutover::lock_signer(identity.gear_genesis_hash, identity.gear_sender)?;
-        eth_api
-            .enable_finality_archive(
-                &std::path::Path::new(&storage_path).join("ethereum-finality"),
-                alloy::primitives::B256::from(identity.ethereum_genesis_hash.0),
+        let (block_storage, signer_ownership, minimum_receipt_slot, last_receipt_slot) =
+            super::bind_runtime(
+                identity,
+                &storage,
+                &storage_path,
+                eth_unprocessed_block_storage_path,
+                &journal_ownership,
+                &eth_api,
+                &client,
+                cutover_seal.as_deref(),
+                approved_manager_code,
             )
             .await?;
-        let predecessor = cutover::authenticate_startup(
-            &identity,
-            cutover_seal.as_deref(),
-            approved_manager_code,
-            &client,
-            &eth_api,
-        )
-        .await?;
-        log::info!(
-            "Authenticated inbound runtime: {}; predecessor_cutover: {}",
-            serde_json::to_string(&identity)?,
-            serde_json::to_string(&predecessor)?
-        );
-        let (minimum_receipt_slot, last_receipt_slot) =
-            cutover::receipt_domain(&client, vft_manager_address).await?;
-        log::info!("Authenticated inbound receipt domain: minimum={minimum_receipt_slot}; last={last_receipt_slot:?}; independently approved successor CodeId={approved_manager_code:?}");
-        let block_storage = Arc::new(
-            ethereum::block_storage::JSONBlockStorage::new_bound(
-                eth_unprocessed_block_storage_path.into(),
-                identity.clone(),
-                predecessor.clone(),
-            )
-            .await?
-            .with_journal_ownership(journal_ownership.clone()),
-        );
-        if let Some(predecessor) = predecessor {
-            storage
-                .bind_successor_identity(identity, predecessor)
-                .await?;
-        } else {
-            storage.bind_runtime_identity(identity).await?;
-        }
         let ethereum_block_listener =
             EthereumBlockListener::new(eth_api.clone(), block_storage.clone())
                 .with_last_receipt_slot(genesis_time, last_receipt_slot);

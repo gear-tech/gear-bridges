@@ -107,7 +107,8 @@ pub async fn relay(
         historical_proxy_address,
         gear_sender: client.account_id().clone().into(),
     };
-    let _signer_lock = super::cutover::lock_signer(runtime.gear_genesis_hash, runtime.gear_sender)?;
+    let _signer_lock =
+        gear_common::signer_ownership::lock_signer(runtime.gear_genesis_hash, runtime.gear_sender)?;
     let predecessor = if receiver_route == vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE
     {
         super::cutover::ensure_receipt_domain(&client, receiver_address, slot_number.0).await?;
@@ -338,86 +339,15 @@ mod tests {
     use super::{
         super::{
             message_sender::{MessageStatus, Request, Response, SignedSubmission},
-            tx_manager::{ReceiptEvidence, Transaction},
+            tx_manager::{
+                tests::{receipt_fixtures, signed_submission},
+                ReceiptEvidence, Transaction,
+            },
         },
         *,
     };
     use sails_rs::{calls::ActionIo, Encode};
-    use serde::Deserialize;
-    use std::io::Read;
     use subxt::config::{substrate::BlakeTwo256, Hasher};
-
-    fn original_receipt() -> (TxHashWithSlot, eth_events_electra_client::EthToVaraEvent) {
-        use alloy_rlp::Encodable;
-        use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof};
-        use ethereum_common::{
-            beacon::electra::Block,
-            utils::{self, BeaconBlockHeaderResponse, BeaconBlockResponse},
-        };
-        #[derive(Deserialize)]
-        struct Receipts {
-            result: Vec<alloy::rpc::types::TransactionReceipt>,
-        }
-        #[derive(Deserialize)]
-        struct Fixture {
-            tx_hash: TxHash,
-            tx_index: u64,
-            slot_number: u64,
-            receipts: Receipts,
-            block: BeaconBlockResponse<Block>,
-            headers: Vec<BeaconBlockHeaderResponse>,
-        }
-        let bytes: &[u8] = include_bytes!("../../../../tests/src/relayer/transactions.json.zst");
-        let mut decoder = ruzstd::StreamingDecoder::new(bytes).unwrap();
-        let mut decoded = Vec::new();
-        decoder.read_to_end(&mut decoded).unwrap();
-        let fixtures: Vec<Fixture> = serde_json::from_slice(&decoded).unwrap();
-        let fixture = fixtures
-            .into_iter()
-            .min_by_key(|fixture| fixture.tx_hash)
-            .unwrap();
-        let receipts = fixture
-            .receipts
-            .result
-            .iter()
-            .map(|receipt| {
-                (
-                    receipt.transaction_index.unwrap(),
-                    utils::map_receipt_envelope(receipt.as_ref()),
-                )
-            })
-            .collect::<Vec<_>>();
-        let proof = utils::generate_merkle_proof(fixture.tx_index, &receipts).unwrap();
-        let mut receipt_rlp = Vec::new();
-        Encodable::encode(&proof.receipt, &mut receipt_rlp);
-        let block = fixture.block.data.message;
-        let event = eth_events_electra_client::EthToVaraEvent {
-            proof_block: BlockInclusionProof {
-                block: BlockGenericForBlockBody {
-                    slot: block.slot,
-                    proposer_index: block.proposer_index,
-                    parent_root: block.parent_root,
-                    state_root: block.state_root,
-                    body: block.body.into(),
-                },
-                headers: fixture
-                    .headers
-                    .into_iter()
-                    .map(|header| header.data.header.message)
-                    .collect(),
-            },
-            proof: proof.proof,
-            transaction_index: fixture.tx_index,
-            receipt_rlp,
-        };
-        (
-            TxHashWithSlot {
-                slot_number: EthereumSlotNumber(fixture.slot_number),
-                tx_hash: fixture.tx_hash,
-            },
-            event,
-        )
-    }
 
     #[tokio::test]
     async fn manual_restart_holds_changed_targets_and_reconciles_original_signed_attempt() {
@@ -427,7 +357,7 @@ mod tests {
             lock_journal(&path).is_err(),
             "a second owner must not reach signing"
         );
-        let (original, event) = original_receipt();
+        let (original, event) = receipt_fixtures().next().unwrap();
         let execution = &event.proof_block.block.body.execution_payload;
         let runtime = InboundRuntimeIdentity {
             ethereum_chain_id: 560048,
@@ -477,26 +407,10 @@ mod tests {
             manager: format!("{:#x}", runtime.vft_manager_address),
             historical_proxy: format!("{:#x}", runtime.historical_proxy_address),
             sender: AccountId32::from(runtime.gear_sender).to_string(),
-            receipt_key: (target.slot_number.0, target.transaction_index),
             payload_hash: format!("{:#x}", alloy_primitives::keccak256(event.encode())),
             nonce: 53,
             extrinsic_hash: format!("{:#x}", BlakeTwo256.hash(&[1, 2, 3, 4])),
-            raw_extrinsic: vec![1, 2, 3, 4],
-            prepared_finalized_number: 50,
-            prepared_finalized_hash: "0x06".into(),
-            scanned_finalized_number: 50,
-            scanned_finalized_hash: "0x06".into(),
-            reply_scanned_finalized_number: 50,
-            reply_scanned_finalized_hash: "0x06".into(),
-            inclusion_block_number: None,
-            inclusion_block_hash: None,
-            message_id: None,
-            finalized_dispatch_error: None,
-            finalized_reply: None,
-            native_reconciliation: None,
-            native_reconciliation_attempts: Vec::new(),
-            finalized_nonce_consumed: None,
-            finalized_reply_error: None,
+            ..signed_submission((target.slot_number.0, target.transaction_index))
         };
         let mut tx = Transaction::new(original.clone(), TxStatus::PreparedSubmission);
         let uuid = tx.uuid;

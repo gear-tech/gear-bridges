@@ -144,7 +144,7 @@ impl HeaderArchive {
 
     /// Read at most one bounded chunk. Corrupt header material is ignored as a
     /// hint and reconstructed by hash; its old file is preserved for diagnosis.
-    pub(crate) fn read(&self, number: u64, expected: B256) -> Result<Option<Vec<Header>>> {
+    pub(crate) fn read(&self, number: u64, expected: B256) -> Option<Vec<Header>> {
         let chunks = self
             .chunks
             .lock()
@@ -171,11 +171,11 @@ impl HeaderArchive {
                     .iter()
                     .position(|header| header.number == number && header.hash_slow() == expected)
                 {
-                    return Ok(Some(headers.into_iter().skip(index).collect()));
+                    return Some(headers.into_iter().skip(index).collect());
                 }
             }
         }
-        Ok(None)
+        None
     }
 
     pub(crate) fn save(&self, headers: &[Header]) -> Result<()> {

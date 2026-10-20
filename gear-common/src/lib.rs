@@ -1,4 +1,6 @@
 pub mod api_provider;
+pub mod durable;
+pub mod signer_ownership;
 
 use anyhow::anyhow;
 use api_provider::ApiProviderConnection;

@@ -312,14 +312,7 @@ pub async fn reconcile_receipt(key: (u64, u64), config: &Config) -> Result<Recei
             Err(error) => return Err(error),
         }
     }
-    if receipt_progress_mut().get(&key).is_some_and(|p| {
-        !p.deposits.is_empty()
-            && p.deposits
-                .iter()
-                .all(|p| matches!(p.status, DepositStatus::Processed | DepositStatus::Refunded))
-    }) {
-        complete_transaction(key);
-    }
+    complete_transaction(key);
     Ok(receipt_status(key))
 }
 

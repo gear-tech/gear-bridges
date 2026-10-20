@@ -144,6 +144,28 @@ async fn calculate_gas<T: ActionIo>(
     Ok(gas_limit)
 }
 
+async fn initialize(
+    network: Network,
+    update: Update,
+    bootstrap: Bootstrap,
+    account_prefix: &str,
+) -> Result<(GearApi, ActorId, u64)> {
+    let conn = connect_to_node(&[DEFAULT_BALANCE], account_prefix, &[WASM_BINARY]).await;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
+        GClientRemoting::new(api.clone()),
+    );
+    let init = construct_init(network, update, bootstrap);
+    let gas_limit = calculate_upload_gas(&api, conn.code_ids[0], &init).await?;
+    let program_id = factory
+        .init(init)
+        .with_gas_limit(gas_limit)
+        .send_recv(conn.code_ids[0], conn.salt)
+        .await
+        .unwrap();
+    Ok((api, program_id, gas_limit))
+}
+
 #[tokio::test]
 async fn init_hoodi_with_distinct_epoch_checkpoint_and_signed_update() -> Result<()> {
     let BootstrapResponse { data: bootstrap } =
@@ -156,24 +178,13 @@ async fn init_hoodi_with_distinct_epoch_checkpoint_and_signed_update() -> Result
         update.finalized_header.tree_hash_root()
     );
 
-    let conn = connect_to_node(
-        &[DEFAULT_BALANCE],
+    initialize(
+        Network::Hoodi,
+        update,
+        bootstrap,
         "checkpoint-light-client-hoodi",
-        &[WASM_BINARY],
     )
-    .await;
-    let api = conn.api.with(&conn.accounts[0].2).unwrap();
-    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
-        GClientRemoting::new(api.clone()),
-    );
-    let init = construct_init(Network::Hoodi, update, bootstrap);
-    let gas_limit = calculate_upload_gas(&api, conn.code_ids[0], &init).await?;
-    factory
-        .init(init)
-        .with_gas_limit(gas_limit)
-        .send_recv(conn.code_ids[0], conn.salt)
-        .await
-        .unwrap();
+    .await?;
 
     Ok(())
 }
@@ -182,28 +193,8 @@ async fn init_hoodi_with_distinct_epoch_checkpoint_and_signed_update() -> Result
 async fn init_holesky() -> Result<()> {
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let conn = connect_to_node(
-        &[DEFAULT_BALANCE],
-        "checkpoint-light-client",
-        &[WASM_BINARY],
-    )
-    .await;
-    let api = conn.api;
-    let api = api.with(&conn.accounts[0].2).unwrap();
-    let code_id = conn.code_ids[0];
-    let salt = conn.salt;
-    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
-        GClientRemoting::new(api.clone()),
-    );
-
-    let init = construct_init(Network::Holesky, update, bootstrap);
-    let gas_limit = calculate_upload_gas(&api, code_id, &init).await?;
-    let program_id = factory
-        .init(init)
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt)
-        .await
-        .unwrap();
+    let (_api, program_id, gas_limit) =
+        initialize(Network::Holesky, update, bootstrap, "checkpoint-light-client").await?;
 
     println!(
         "program_id = {:?}, gas_limit = {gas_limit}",
@@ -235,27 +226,8 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         _ => unreachable!("Requested single update"),
     };
 
-    let conn = connect_to_node(
-        &[DEFAULT_BALANCE],
-        "checkpoint-light-client",
-        &[WASM_BINARY],
-    )
-    .await;
-    let api = conn.api.with(&conn.accounts[0].2).unwrap();
-    let code_id = conn.code_ids[0];
-    let salt = conn.salt;
-    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
-        GClientRemoting::new(api.clone()),
-    );
-
-    let init = construct_init(Network::Sepolia, update, bootstrap);
-    let gas_limit = calculate_upload_gas(&api, code_id, &init).await?;
-    let program_id = factory
-        .init(init)
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt)
-        .await
-        .unwrap();
+    let (api, program_id, gas_limit) =
+        initialize(Network::Sepolia, update, bootstrap, "checkpoint-light-client").await?;
 
     println!(
         "program_id = {:?}, gas_limit = {gas_limit}",
@@ -312,29 +284,8 @@ async fn replay_back_and_updating() -> Result<()> {
 
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let conn = connect_to_node(
-        &[DEFAULT_BALANCE],
-        "checkpoint-light-client",
-        &[WASM_BINARY],
-    )
-    .await;
-
-    let api = conn.api.with(&conn.accounts[0].2).unwrap();
-    let code_id = conn.code_ids[0];
-    let salt = conn.salt;
-
-    let factory = checkpoint_light_client_client::CheckpointLightClientFactory::new(
-        GClientRemoting::new(api.clone()),
-    );
-
-    let init = construct_init(Network::Holesky, update, bootstrap);
-    let gas_limit = calculate_upload_gas(&api, code_id, &init).await?;
-    let program_id = factory
-        .init(init)
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id, salt)
-        .await
-        .unwrap();
+    let (api, program_id, gas_limit) =
+        initialize(Network::Holesky, update, bootstrap, "checkpoint-light-client").await?;
 
     println!(
         "program_id = {:?}, gas_limit = {gas_limit}",

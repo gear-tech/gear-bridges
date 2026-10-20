@@ -1,4 +1,5 @@
 use alloy::primitives::{Address, B256, U256};
+use alloy::sol_types::SolEvent;
 use anyhow::{anyhow, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::{
@@ -382,11 +383,7 @@ fn signed_publication_identity(
     intent: &Value,
     queue: Address,
 ) -> Result<ethereum_client::TransactionIdentity> {
-    use alloy::{
-        consensus::{Transaction as _, TxEnvelope},
-        eips::Decodable2718,
-        sol_types::SolCall,
-    };
+    use alloy::{consensus::Transaction as _, sol_types::SolCall};
     let hash = B256::from(decode_hash(
         &intent["txHash"],
         "saved root transaction hash",
@@ -397,7 +394,7 @@ fn signed_publication_identity(
             .context("saved root transaction bytes missing")?
             .trim_start_matches("0x"),
     )?;
-    let identity = crate::ethereum::signed_transaction_identity(
+    let (signed, identity) = crate::ethereum::signed_transaction(
         &raw,
         hash,
         saved_publication_nonce(intent)?,
@@ -411,7 +408,6 @@ fn signed_publication_identity(
         identity.from == sender,
         "saved root signature differs from original publisher"
     );
-    let signed = TxEnvelope::decode_2718(&mut raw.as_slice())?;
     {
         let chain = intent["sourceIdentity"]["destinationChainId"]
             .as_u64()
@@ -585,7 +581,7 @@ async fn authenticated_root_receipt(
     hash: B256,
     included: (u64, B256),
     finalized: (u64, B256),
-) -> Result<crate::ethereum::RecordedReceiptProof> {
+) -> Result<ethereum_client::inclusion::RecordedReceiptProof> {
     ensure!(
         finalized.0 >= included.0,
         "root finalized pin precedes original inclusion; HOLD"
@@ -607,8 +603,8 @@ async fn authenticated_root_receipt(
     }
     view.verify_blocks(ethereum.api.raw_provider(), &targets)
         .await?;
-    crate::ethereum::authenticate_transaction_receipt(
-        ethereum,
+    ethereum_client::inclusion::authenticate_transaction_receipt(
+        ethereum.api.raw_provider(),
         &view,
         included.0,
         included.1,
@@ -619,7 +615,7 @@ async fn authenticated_root_receipt(
 }
 
 fn accepted_root_transaction(
-    proof: &crate::ethereum::RecordedReceiptProof,
+    proof: &ethereum_client::inclusion::RecordedReceiptProof,
     chain: u64,
 ) -> Result<Value> {
     use alloy::{
@@ -636,7 +632,7 @@ fn accepted_root_transaction(
         .to()
         .context("accepted root transaction has no destination; HOLD")?;
     let hash = B256::from(crate::keccak256(&proof.raw_transaction));
-    let identity = crate::ethereum::signed_transaction_identity(
+    let (_, identity) = crate::ethereum::signed_transaction(
         &proof.raw_transaction,
         hash,
         signed.nonce(),
@@ -657,8 +653,8 @@ fn queue_progress_event(
     }
     let topics = log.data.topics();
     let data = log.data.data.as_ref();
-    let merkle = B256::from(crate::keccak256(b"MerkleRoot(uint256,bytes32)"));
-    let empty = B256::from(crate::keccak256(b"EmptyQueueProgress(uint256)"));
+    let merkle = ethereum_client::abi::IMessageQueue::MerkleRoot::SIGNATURE_HASH;
+    let empty = ethereum_client::abi::IMessageQueue::EmptyQueueProgress::SIGNATURE_HASH;
     if topics.first() == Some(&merkle) {
         ensure!(
             topics.len() == 1 && data.len() == 64,
@@ -685,7 +681,7 @@ fn queue_progress_event(
 }
 
 fn authenticated_publication_matches(
-    proof: &crate::ethereum::RecordedReceiptProof,
+    proof: &ethereum_client::inclusion::RecordedReceiptProof,
     queue: Address,
     target: u32,
     kind: &str,
@@ -895,19 +891,19 @@ async fn observe_finalized_progress(
     } else if queue.maxBlockNumber().block(at).call().await? < U256::from(target) {
         return Ok(false);
     }
-    let signatures = if kind == "emptyProgress" {
-        vec![
-            B256::from(crate::keccak256(b"MerkleRoot(uint256,bytes32)")),
-            B256::from(crate::keccak256(b"EmptyQueueProgress(uint256)")),
+    let signatures: &[B256] = if kind == "emptyProgress" {
+        &[
+            ethereum_client::abi::IMessageQueue::MerkleRoot::SIGNATURE_HASH,
+            ethereum_client::abi::IMessageQueue::EmptyQueueProgress::SIGNATURE_HASH,
         ]
     } else {
-        vec![B256::from(crate::keccak256(b"MerkleRoot(uint256,bytes32)"))]
+        &[ethereum_client::abi::IMessageQueue::MerkleRoot::SIGNATURE_HASH]
     };
     let mut candidates = Vec::new();
     let mut end = finalized_block;
     loop {
         let start = end.saturating_sub(1_999);
-        for &signature in &signatures {
+        for &signature in signatures {
             let logs = provider
                 .get_logs(
                     &Filter::new()
@@ -1411,26 +1407,20 @@ async fn canonical_root_inclusion(
                 && recorded["kind"] == kind),
         "saved root receipt moved or changed; hold original signed intent"
     );
-    let event = if kind == "emptyProgress" {
-        B256::from(crate::keccak256(b"EmptyQueueProgress(uint256)"))
+    let event_kind = if kind == "emptyProgress" {
+        kind
     } else {
-        B256::from(crate::keccak256(b"MerkleRoot(uint256,bytes32)"))
+        "merkleRoot"
     };
-    let block_bytes = U256::from(source_block).to_be_bytes::<32>();
+    let event_root = if kind == "emptyProgress" {
+        [0; 32]
+    } else {
+        expected_root
+    };
     ensure!(
         receipt.as_ref().logs().iter().any(|log| {
-            let topics = log.topics();
-            let data = log.data().data.as_ref();
-            log.address() == ethereum.queue_address
-                && topics.first() == Some(&event)
-                && if kind == "emptyProgress" {
-                    topics.len() == 2 && topics[1] == B256::from(block_bytes) && data.is_empty()
-                } else {
-                    topics.len() == 1
-                        && data.len() == 64
-                        && data[..32] == block_bytes
-                        && data[32..] == expected_root
-                }
+            queue_progress_event(&log.inner, ethereum.queue_address)
+                .is_ok_and(|event| event == Some((event_kind, source_block, event_root)))
         }),
         "canonical root receipt does not record the expected queue progress"
     );
@@ -1541,22 +1531,7 @@ pub(crate) async fn wait_for_root_receipt(
     let deadline = Instant::now() + Duration::from_secs(30);
     let observation = tokio::time::timeout_at(deadline.into(), async {
         loop {
-            if reconcile_root_original(ethereum, output, intent).await? {
-                let observed = observe_finalized_progress(
-                    ethereum,
-                    output,
-                    intent,
-                    source_block,
-                    kind,
-                    expected_root,
-                )
-                .await?;
-                return Ok(if observed {
-                    RootPublicationState::Observed
-                } else {
-                    RootPublicationState::Pending
-                });
-            }
+            let archived = reconcile_root_original(ethereum, output, intent).await?;
             let observed = observe_finalized_progress(
                 ethereum,
                 output,
@@ -1566,6 +1541,13 @@ pub(crate) async fn wait_for_root_receipt(
                 expected_root,
             )
             .await?;
+            if archived {
+                return Ok(if observed {
+                    RootPublicationState::Observed
+                } else {
+                    RootPublicationState::Pending
+                });
+            }
             if let Some((block, hash)) =
                 canonical_root_inclusion(ethereum, intent, source_block, kind, expected_root)
                     .await?
@@ -2289,10 +2271,7 @@ mod root_publication_tests {
     #[tokio::test]
     async fn restart_inventory_fences_signed_and_unsigned_owners_without_a_mempool() -> Result<()> {
         use alloy::{
-            consensus::{SignableTransaction, TxEip1559, TxEnvelope},
             eips::Encodable2718,
-            network::TxSigner,
-            primitives::TxKind,
             signers::local::PrivateKeySigner,
             sol_types::SolCall,
         };
@@ -2323,24 +2302,15 @@ mod root_publication_tests {
             }
         });
         persist_root_intent(&publisher_state, &journal)?;
-        let mut transaction = TxEip1559 {
-            chain_id: 560_048,
-            nonce: 4,
-            gas_limit: 100_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(queue),
-            input: ethereum_client::abi::IMessageQueue::submitMerkleRootCall {
-                blockNumber: U256::from(21),
-                merkleRoot: B256::repeat_byte(9),
-                proof: vec![1, 2].into(),
-            }
-            .abi_encode()
-            .into(),
-            ..Default::default()
-        };
-        let signature = signer.sign_transaction(&mut transaction).await?;
-        let raw = TxEnvelope::Eip1559(transaction.into_signed(signature)).encoded_2718();
+        let input = ethereum_client::abi::IMessageQueue::submitMerkleRootCall {
+            blockNumber: U256::from(21),
+            merkleRoot: B256::repeat_byte(9),
+            proof: vec![1, 2].into(),
+        }
+        .abi_encode();
+        let raw = crate::ethereum::signed_test_transaction(&signer, 4, queue, 100_000, input)
+            .await?
+            .encoded_2718();
         let original = json!({
             "schemaVersion":4,"sourceBlock":21,"root":B256::repeat_byte(9),"kind":"merkleRoot",
             "localRehearsal":true,"acceptedAnchorClient":client,"acceptedAnchorTx":B256::repeat_byte(11),
@@ -2525,10 +2495,7 @@ mod root_publication_tests {
     #[tokio::test]
     async fn mined_root_precedes_acceptance_and_keeps_the_original_signed_intent() -> Result<()> {
         use alloy::{
-            consensus::{SignableTransaction, TxEip1559, TxEnvelope},
             eips::Encodable2718,
-            network::TxSigner,
-            primitives::TxKind,
             signers::local::PrivateKeySigner,
             sol_types::SolCall,
         };
@@ -2543,18 +2510,9 @@ mod root_publication_tests {
             proof: vec![1, 2].into(),
         }
         .abi_encode();
-        let mut transaction = TxEip1559 {
-            input: input.into(),
-            chain_id: 560_048,
-            nonce: 4,
-            gas_limit: 21_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(queue),
-            ..Default::default()
-        };
-        let signature = wallet.sign_transaction(&mut transaction).await?;
-        let raw = TxEnvelope::Eip1559(transaction.into_signed(signature)).encoded_2718();
+        let raw = crate::ethereum::signed_test_transaction(&wallet, 4, queue, 21_000, input)
+            .await?
+            .encoded_2718();
         let hash = alloy::primitives::keccak256(&raw);
         let mut intent = json!({
             "schemaVersion":4,"root":format!("{root:#x}"),"kind":"merkleRoot",

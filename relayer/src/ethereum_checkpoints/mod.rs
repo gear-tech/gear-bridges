@@ -230,6 +230,7 @@ async fn send_checkpoint_message(
     log::info!("Checkpoint original {original_hash:#x} finalized at {included_hash:#x}, message {id:?}");
 
 
+        let chain = gear_rpc_client::GearApi::from(signer.api().clone());
         let mut next = included_number;
         let mut previous = (included_number, included_hash);
         loop {
@@ -241,32 +242,32 @@ async fn send_checkpoint_message(
                     && api.get_block_hash(included_number).await? == included_hash,
                 "Checkpoint finalized history changed; HOLD"
             );
-            for number in next..=finalized_number {
-                let block_hash = api.get_block_hash(number).await?;
-                let events = signer.api().blocks().at(block_hash).await?.events().await?;
-                for event in events.iter() {
-                    let event = event?;
-                    let Some(gear::gear::events::UserMessageSent { message, .. }) =
-                        event.as_event::<gear::gear::events::UserMessageSent>()?
-                    else { continue };
-                    let Some(details) = message.details() else { continue };
-                    if details.to_message_id() != id { continue; }
-                    ensure!(
-                        message.source() == target
-                            && message.destination().as_ref() == sender,
-                        "Original checkpoint reply actor or recipient changed; HOLD"
-                    );
-                    ensure!(
-                        api.get_block_hash(number).await? == block_hash
-                            && api.get_block_hash(finalized_number).await? == finalized_hash,
-                        "Original checkpoint reply finalized pin changed; HOLD"
-                    );
-                    ensure!(details.to_reply_code().is_success(),
-                        "Original checkpoint terminal reply failed: {:?}, payload=0x{}; HOLD",
-                        details.to_reply_code(), hex::encode(message.payload_bytes()));
-                    log::info!("Checkpoint original {original_hash:#x} reply finalized at {block_hash:#x}");
-                    return Ok(message.payload_bytes().to_vec());
-                }
+            if let Some(found) = gear_rpc_client::observation::find_reply(
+                &chain,
+                next..=finalized_number,
+                id.into_bytes().into(),
+                |_, _| {},
+            )
+            .await?
+            {
+                let number = found.number;
+                let block_hash = found.block_hash;
+                let message = found.event.message;
+                let details = message.details().expect("discovered reply has details");
+                ensure!(
+                    message.source() == target && message.destination().as_ref() == sender,
+                    "Original checkpoint reply actor or recipient changed; HOLD"
+                );
+                ensure!(
+                    api.get_block_hash(number).await? == block_hash
+                        && api.get_block_hash(finalized_number).await? == finalized_hash,
+                    "Original checkpoint reply finalized pin changed; HOLD"
+                );
+                ensure!(details.to_reply_code().is_success(),
+                    "Original checkpoint terminal reply failed: {:?}, payload=0x{}; HOLD",
+                    details.to_reply_code(), hex::encode(message.payload_bytes()));
+                log::info!("Checkpoint original {original_hash:#x} reply finalized at {block_hash:#x}");
+                return Ok(message.payload_bytes().to_vec());
             }
             ensure!(api.get_block_hash(finalized_number).await? == finalized_hash,
                 "Checkpoint finality changed while waiting for original reply; HOLD");

@@ -28,6 +28,7 @@ use subxt_rpcs::rpc_params;
 use trie_db::{node::NodeHandle, ChildReference};
 
 pub mod dto;
+pub mod observation;
 
 pub use gsdk::{ext, gp};
 

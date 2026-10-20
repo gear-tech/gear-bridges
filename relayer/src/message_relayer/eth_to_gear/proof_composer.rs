@@ -1,7 +1,4 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    ops::ControlFlow,
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{
     message_relayer::common::{EthereumSlotNumber, TxHashWithSlot},
@@ -715,20 +712,13 @@ fn authenticate_beacon_block(
         previous_slot == checkpoint_slot,
         "Missing checkpoint Beacon header"
     );
-    let ControlFlow::Continue(selected_root) =
-        headers
-            .iter()
-            .rev()
-            .try_fold(checkpoint, |block_root_parent, header| {
-                if header.tree_hash_root() == block_root_parent {
-                    ControlFlow::Continue(header.parent_root)
-                } else {
-                    ControlFlow::Break(())
-                }
-            })
-    else {
-        return Err(anyhow::anyhow!("Invalid block proof"));
-    };
+    let selected_root = headers
+        .iter()
+        .rev()
+        .try_fold(checkpoint, |expected_root, header| {
+            (header.tree_hash_root() == expected_root).then_some(header.parent_root)
+        })
+        .context("Invalid block proof")?;
     // The full body (including raw transactions) is still available at this trust boundary.
     anyhow::ensure!(
         block.tree_hash_root() == selected_root,

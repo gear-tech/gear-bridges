@@ -342,6 +342,101 @@ impl SignedSubmission {
         H256::from_str(&self.extrinsic_hash).ok()
             == Some(H256::from(BlakeTwo256.hash(&self.raw_extrinsic).0))
     }
+
+    /// Observe original dispatch evidence without interpreting its economic outcome.
+    pub async fn observe_reply(
+        &mut self,
+        chain: &gear_rpc_client::GearApi,
+        message_id: H256,
+        expected_source: H256,
+    ) -> anyhow::Result<Option<(Vec<u8>, FinalizedReceiptObservation)>> {
+        let signed = self;
+        let inclusion_number = signed
+            .inclusion_block_number
+            .ok_or_else(|| anyhow::anyhow!("Gear message has no finalized inclusion block"))?;
+        let cursor_hash = H256::from_str(&signed.reply_scanned_finalized_hash)?;
+        anyhow::ensure!(
+            chain
+                .block_number_to_hash(signed.reply_scanned_finalized_number)
+                .await?
+                == cursor_hash,
+            "Finalized Gear reply scan checkpoint changed"
+        );
+        let finalized = chain
+            .block_hash_to_number(chain.latest_finalized_block().await?)
+            .await?;
+        // Older journals could advance past an original inner-error reply. Scan
+        // from its immutable inclusion without rewinding the discovery cursor.
+        let (start, end) = if let Some(reply) = &signed.finalized_reply {
+            let number = reply
+                .observation
+                .finalized_block_number
+                .ok_or_else(|| anyhow::anyhow!("Original reply has no finalized height"))?;
+            anyhow::ensure!(
+                number >= inclusion_number
+                    && number <= finalized
+                    && reply.observation.finalized_block_hash
+                        == format!("{:#x}", chain.block_number_to_hash(number).await?),
+                "Original reply is not in its canonical finalized block"
+            );
+            (number, number)
+        } else {
+            (inclusion_number, finalized)
+        };
+        if let Some(found) = gear_rpc_client::observation::find_reply(
+            chain,
+            start..=end,
+            message_id,
+            |number, block_hash| {
+                if number >= signed.reply_scanned_finalized_number {
+                    signed.reply_scanned_finalized_number = number;
+                    signed.reply_scanned_finalized_hash = format!("{block_hash:#x}");
+                }
+            },
+        )
+        .await?
+        {
+            let number = found.number;
+            let block_hash = found.block_hash;
+            let message = found.event.message;
+            let details = message.details().expect("discovered reply has details");
+            let sender = signed.sender.parse::<subxt::utils::AccountId32>()?;
+            anyhow::ensure!(message.source().as_ref() == expected_source.as_bytes()
+                && message.destination().as_ref() == sender.0,
+                "Original reply source/destination differs from its authenticated actor and signer");
+            let reply_error = (!details.to_reply_code().is_success())
+                .then(|| format!("{:?}", details.to_reply_code()));
+            let evidence = FinalizedReplyEvidence {
+                payload: message.payload_bytes().to_vec(),
+                observation: FinalizedReceiptObservation {
+                    finalized_block_number: Some(number),
+                    finalized_block_hash: format!("{block_hash:#x}"),
+                },
+            };
+            anyhow::ensure!(
+                signed
+                    .finalized_reply
+                    .as_ref()
+                    .is_none_or(|previous| previous == &evidence),
+                "Original finalized reply bytes or identity changed"
+            );
+            anyhow::ensure!(
+                signed
+                    .finalized_reply_error
+                    .as_ref()
+                    .is_none_or(|previous| Some(previous) == reply_error.as_ref()),
+                "HOLD: original reply code changed"
+            );
+            signed.finalized_reply = Some(evidence.clone());
+            signed.finalized_reply_error = reply_error;
+            return Ok(Some((evidence.payload, evidence.observation)));
+        }
+        anyhow::ensure!(
+            signed.finalized_reply.is_none(),
+            "Original finalized reply is absent from its recorded block"
+        );
+        Ok(None)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -788,14 +883,7 @@ impl MessageSender {
         gear_api: &GearApi,
         request: &Request,
     ) -> anyhow::Result<bool> {
-        if matches!(
-            request,
-            Request::PrepareMessage { .. } | Request::SubmitPrepared { .. }
-        ) {
-            self.update_balance_metric(gear_api).await?;
-        }
-
-        match request {
+        let response = match request {
             Request::ReceiptStatus {
                 tx_uuid,
                 receipt_key,
@@ -804,20 +892,19 @@ impl MessageSender {
                     *receipt_key,
                     self.query_receipt_status(gear_api, *receipt_key).await,
                 );
-                Ok(responses
-                    .send(Response {
-                        tx_uuid: *tx_uuid,
-                        status,
-                        submission: None,
-                        signed_submission: None,
-                    })
-                    .is_ok())
+                Response {
+                    tx_uuid: *tx_uuid,
+                    status,
+                    submission: None,
+                    signed_submission: None,
+                }
             }
             Request::PrepareMessage {
                 tx_uuid,
                 payload,
                 tx_hash,
             } => {
+                self.update_balance_metric(gear_api).await?;
                 let (status, signed_submission) =
                     match self.prepare_submission(gear_api, payload).await {
                         Ok(signed_submission) => (MessageStatus::Prepared, Some(signed_submission)),
@@ -828,14 +915,12 @@ impl MessageSender {
                             None,
                         ),
                     };
-                Ok(responses
-                    .send(Response {
-                        tx_uuid: *tx_uuid,
-                        status,
-                        submission: None,
-                        signed_submission,
-                    })
-                    .is_ok())
+                Response {
+                    tx_uuid: *tx_uuid,
+                    status,
+                    submission: None,
+                    signed_submission,
+                }
             }
             Request::SubmitPrepared {
                 tx_uuid,
@@ -843,6 +928,7 @@ impl MessageSender {
                 tx_hash,
                 settlement_pin,
             } => {
+                self.update_balance_metric(gear_api).await?;
                 let (payload, signed_submission) = prepared.as_ref();
                 let mut signed_submission = signed_submission.clone();
                 let receipt_key = (payload.proof_block.block.slot, payload.transaction_index);
@@ -891,16 +977,15 @@ impl MessageSender {
                     }
                     Err(error) => self.submission_evidence(gear_api, Some(error), None),
                 });
-                Ok(responses
-                    .send(Response {
-                        tx_uuid: *tx_uuid,
-                        status,
-                        submission,
-                        signed_submission: Some(signed_submission),
-                    })
-                    .is_ok())
+                Response {
+                    tx_uuid: *tx_uuid,
+                    status,
+                    submission,
+                    signed_submission: Some(signed_submission),
+                }
             }
-        }
+        };
+        Ok(responses.send(response).is_ok())
     }
 
     pub async fn prepare_submission(
@@ -1286,25 +1371,6 @@ impl MessageSender {
         } = &status
         {
             signed.validate_settlement_order(observation)?;
-            let minimum = signed
-                .finalized_reply
-                .as_ref()
-                .and_then(|reply| reply.observation.finalized_block_number)
-                .into_iter()
-                .chain(
-                    signed
-                        .native_reconciliation
-                        .as_ref()
-                        .and_then(|continuation| continuation.finalized_reply.as_ref())
-                        .and_then(|reply| reply.observation.finalized_block_number),
-                )
-                .max();
-            anyhow::ensure!(
-                minimum.is_some_and(|minimum| observation
-                    .finalized_block_number
-                    .is_some_and(|number| number >= minimum)),
-                "Settlement pin predates an original finalized request/reply; HOLD"
-            );
         }
         let status = if settlement_pin.is_some() && !matches!(status, MessageStatus::Success { .. })
         {
@@ -1513,7 +1579,7 @@ impl MessageSender {
                     .iter()
                     .any(|(token, eth, supply)| *token == row.token_id
                         && *eth == row.eth_token_id
-                        && supply.encode() == row.supply.encode()),
+                        && supply == &row.supply),
                 "Original receipt token mapping is unavailable or changed"
             );
             rows_settled &= matches!(
@@ -1692,7 +1758,6 @@ impl MessageSender {
         let finalized = chain
             .block_hash_to_number(chain.latest_finalized_block().await?)
             .await?;
-        let sender = signed.sender.parse::<subxt::utils::AccountId32>()?;
         let (start, end) = if let Some(number) = signed.inclusion_block_number {
             anyhow::ensure!(
                 number > signed.prepared_finalized_number && number <= finalized,
@@ -1710,76 +1775,80 @@ impl MessageSender {
             };
             (start, finalized)
         };
-        for number in start..=end {
-            let block_hash = chain.block_number_to_hash(number).await?;
-            let block = chain.api.blocks().at(block_hash).await?;
-            for extrinsic in block.extrinsics().await?.iter() {
-                if format!("{:#x}", extrinsic.hash()) != signed.extrinsic_hash {
-                    continue;
-                }
-                let call = extrinsic
-                    .as_extrinsic::<gear::gear::calls::types::SendMessage>()?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("Original signed extrinsic is not Gear.send_message")
-                    })?;
-                anyhow::ensure!(call.destination.as_ref() == expected_destination.as_bytes()
-                    && call.payload == expected_payload && call.value == 0,
-                    "Original finalized extrinsic dispatch differs from the original receipt/proxy/consumer");
-                let mut message_id = None;
-                let mut dispatch_error = None;
-                let mut dispatch_success = false;
-                for event in extrinsic.events().await?.iter() {
-                    let event = event?;
-                    if let Some(queued) = event.as_event::<gear::gear::events::MessageQueued>()? {
-                        anyhow::ensure!(queued.source == sender
-                            && queued.destination.as_ref() == expected_destination.as_bytes()
-                            && matches!(queued.entry, MessageEntry::Handle)
-                            && message_id.is_none(),
-                            "Original queued message source/destination is not the original signer/proxy");
-                        message_id = Some(queued.id.to_string());
-                    }
-                    if let Some(error) = gear_rpc_client::extrinsic_failure(&event)? {
-                        anyhow::ensure!(
-                            dispatch_error.is_none(),
-                            "Duplicate original dispatch failure"
-                        );
-                        dispatch_error = Some(error);
-                    }
-                    if event.pallet_name() == "System" && event.variant_name() == "ExtrinsicSuccess"
-                    {
-                        anyhow::ensure!(!dispatch_success, "Duplicate original dispatch success");
-                        dispatch_success = true;
-                    }
-                }
-                anyhow::ensure!(
-                    dispatch_success != dispatch_error.is_some()
-                        && dispatch_success == message_id.is_some(),
-                    "Original finalized dispatch has missing or conflicting success/failure/queued evidence"
-                );
-                anyhow::ensure!(
-                    signed
-                        .message_id
-                        .as_ref()
-                        .is_none_or(|id| Some(id) == message_id.as_ref()),
-                    "Original signed message identity changed"
-                );
-                anyhow::ensure!(
-                    signed
-                        .finalized_dispatch_error
-                        .as_ref()
-                        .is_none_or(|previous| Some(previous) == dispatch_error.as_ref()),
-                    "Original finalized dispatch failure changed"
-                );
-                signed.inclusion_block_number = Some(number);
-                signed.inclusion_block_hash = Some(format!("{block_hash:#x}"));
-                signed.message_id = message_id;
-                signed.finalized_dispatch_error = dispatch_error;
+        let hash = H256::from_str(&signed.extrinsic_hash)?;
+        if let Some(found) = gear_rpc_client::observation::find_extrinsic(
+            &chain,
+            start..=end,
+            hash,
+            |number, block_hash| {
                 signed.scanned_finalized_number = number;
                 signed.scanned_finalized_hash = format!("{block_hash:#x}");
-                return Ok(true);
+            },
+        )
+        .await?
+        {
+            let number = found.number;
+            let block_hash = found.block_hash;
+            let extrinsic = found.extrinsic;
+            let call = extrinsic
+                .as_extrinsic::<gear::gear::calls::types::SendMessage>()?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Original signed extrinsic is not Gear.send_message")
+                })?;
+            anyhow::ensure!(call.destination.as_ref() == expected_destination.as_bytes()
+                && call.payload == expected_payload && call.value == 0,
+                "Original finalized extrinsic dispatch differs from the original receipt/proxy/consumer");
+            let mut message_id = None;
+            let mut dispatch_error = None;
+            let mut dispatch_success = false;
+            for event in extrinsic.events().await?.iter() {
+                let event = event?;
+                if let Some(queued) = event.as_event::<gear::gear::events::MessageQueued>()? {
+                    anyhow::ensure!(queued.source == sender
+                        && queued.destination.as_ref() == expected_destination.as_bytes()
+                        && matches!(queued.entry, MessageEntry::Handle)
+                        && message_id.is_none(),
+                        "Original queued message source/destination is not the original signer/proxy");
+                    message_id = Some(queued.id.to_string());
+                }
+                if let Some(error) = gear_rpc_client::extrinsic_failure(&event)? {
+                    anyhow::ensure!(
+                        dispatch_error.is_none(),
+                        "Duplicate original dispatch failure"
+                    );
+                    dispatch_error = Some(error);
+                }
+                if event.pallet_name() == "System" && event.variant_name() == "ExtrinsicSuccess" {
+                    anyhow::ensure!(!dispatch_success, "Duplicate original dispatch success");
+                    dispatch_success = true;
+                }
             }
+            anyhow::ensure!(
+                dispatch_success != dispatch_error.is_some()
+                    && dispatch_success == message_id.is_some(),
+                "Original finalized dispatch has missing or conflicting success/failure/queued evidence"
+            );
+            anyhow::ensure!(
+                signed
+                    .message_id
+                    .as_ref()
+                    .is_none_or(|id| Some(id) == message_id.as_ref()),
+                "Original signed message identity changed"
+            );
+            anyhow::ensure!(
+                signed
+                    .finalized_dispatch_error
+                    .as_ref()
+                    .is_none_or(|previous| Some(previous) == dispatch_error.as_ref()),
+                "Original finalized dispatch failure changed"
+            );
+            signed.inclusion_block_number = Some(number);
+            signed.inclusion_block_hash = Some(format!("{block_hash:#x}"));
+            signed.message_id = message_id;
+            signed.finalized_dispatch_error = dispatch_error;
             signed.scanned_finalized_number = number;
             signed.scanned_finalized_hash = format!("{block_hash:#x}");
+            return Ok(true);
         }
         anyhow::ensure!(
             signed.inclusion_block_number.is_none(),
@@ -1794,104 +1863,18 @@ impl MessageSender {
         message_id: H256,
         expected_source: H256,
     ) -> anyhow::Result<Option<(Vec<u8>, FinalizedReceiptObservation)>> {
-        let inclusion_number = signed
-            .inclusion_block_number
-            .ok_or_else(|| anyhow::anyhow!("Gear message has no finalized inclusion block"))?;
-        let chain = self.api_provider.client();
-        let cursor_hash = H256::from_str(&signed.reply_scanned_finalized_hash)?;
-        anyhow::ensure!(
-            chain
-                .block_number_to_hash(signed.reply_scanned_finalized_number)
-                .await?
-                == cursor_hash,
-            "Finalized Gear reply scan checkpoint changed"
-        );
-        let finalized = chain
-            .block_hash_to_number(chain.latest_finalized_block().await?)
+        let reply = signed
+            .observe_reply(&self.api_provider.client(), message_id, expected_source)
             .await?;
-        // Older journals could advance past an original inner-error reply. Scan
-        // from its immutable inclusion without rewinding the discovery cursor.
-        let (start, end) = if let Some(reply) = &signed.finalized_reply {
-            let number = reply
-                .observation
-                .finalized_block_number
-                .ok_or_else(|| anyhow::anyhow!("Original reply has no finalized height"))?;
+        if reply.is_some() && expected_source != self.receiver_address {
             anyhow::ensure!(
-                number >= inclusion_number
-                    && number <= finalized
-                    && reply.observation.finalized_block_hash
-                        == format!("{:#x}", chain.block_number_to_hash(number).await?),
-                "Original reply is not in its canonical finalized block"
+                signed.finalized_reply_error.is_none(),
+                "HOLD: original proof reply has a failure code"
             );
-            (number, number)
-        } else {
-            (inclusion_number, finalized)
-        };
-        for number in start..=end {
-            let block_hash = chain.block_number_to_hash(number).await?;
-            for event in chain.metadata_events_at(block_hash).await?.iter() {
-                let Some(gear::gear::events::UserMessageSent { message, .. }) =
-                    event?.as_event::<gear::gear::events::UserMessageSent>()?
-                else {
-                    continue;
-                };
-                let Some(details) = message.details() else {
-                    continue;
-                };
-                if H256::from_slice(details.to_message_id().as_ref()) == message_id {
-                    if number >= signed.reply_scanned_finalized_number {
-                        signed.reply_scanned_finalized_number = number;
-                        signed.reply_scanned_finalized_hash = format!("{block_hash:#x}");
-                    }
-                    let sender = signed.sender.parse::<subxt::utils::AccountId32>()?;
-                    anyhow::ensure!(message.source().as_ref() == expected_source.as_bytes()
-                        && message.destination().as_ref() == sender.0,
-                        "Original reply source/destination differs from its authenticated actor and signer");
-                    let reply_error = (!details.to_reply_code().is_success())
-                        .then(|| format!("{:?}", details.to_reply_code()));
-                    let evidence = FinalizedReplyEvidence {
-                        payload: message.payload_bytes().to_vec(),
-                        observation: FinalizedReceiptObservation {
-                            finalized_block_number: Some(number),
-                            finalized_block_hash: format!("{block_hash:#x}"),
-                        },
-                    };
-                    anyhow::ensure!(
-                        signed
-                            .finalized_reply
-                            .as_ref()
-                            .is_none_or(|previous| previous == &evidence),
-                        "Original finalized reply bytes or identity changed"
-                    );
-                    anyhow::ensure!(
-                        signed
-                            .finalized_reply_error
-                            .as_ref()
-                            .is_none_or(|previous| Some(previous) == reply_error.as_ref()),
-                        "HOLD: original reply code changed"
-                    );
-                    signed.finalized_reply = Some(evidence.clone());
-                    signed.finalized_reply_error = reply_error;
-                    if expected_source != self.receiver_address {
-                        anyhow::ensure!(
-                            signed.finalized_reply_error.is_none(),
-                            "HOLD: original proof reply has a failure code"
-                        );
-                    }
-                    return Ok(Some((evidence.payload, evidence.observation)));
-                }
-            }
-            if number >= signed.reply_scanned_finalized_number {
-                signed.reply_scanned_finalized_number = number;
-                signed.reply_scanned_finalized_hash = format!("{block_hash:#x}");
-            }
         }
-        anyhow::ensure!(
-            signed.finalized_reply.is_none(),
-            "Original finalized reply is absent from its recorded block"
-        );
-        Ok(None)
+        Ok(reply)
     }
+
     fn submission_evidence(
         &self,
         gear_api: &GearApi,
@@ -2540,7 +2523,8 @@ mod tests {
         let tx_uuid = Uuid::now_v7();
         // The injected balance error must occur before any proof processing or signing.
         let payload = super::super::tx_manager::tests::receipt_fixtures()
-            .remove(0)
+            .next()
+            .unwrap()
             .1;
         requests_tx.send(Request::PrepareMessage {
             tx_uuid,

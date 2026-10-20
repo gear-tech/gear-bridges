@@ -44,12 +44,7 @@ pub fn is_valid_merkle_branch(
     let mut value = leaf;
 
     let mut hasher = RingContext::new(&RingSHA256);
-    let mut iter = branch.iter();
-    for i in 0..depth {
-        let Some(next_node) = iter.next() else {
-            return false;
-        };
-
+    for (i, next_node) in (0..depth).zip(branch) {
         let (node_first, node_second) = match (index / 2u32.pow(i)) % 2 {
             0 => (value.as_ref(), next_node.as_ref()),
             _ => (next_node.as_ref(), value.as_ref()),

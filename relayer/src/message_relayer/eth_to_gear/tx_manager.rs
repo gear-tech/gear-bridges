@@ -537,15 +537,12 @@ impl TransactionManager {
             log::warn!("Received response for unknown transaction {tx_uuid}");
             return Ok(());
         };
-        let receipt_key = tx
-            .receipt
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Response arrived before its original receipt evidence for {tx_uuid}"
-                )
-            })?
-            .receipt_key;
+        let receipt = tx.receipt.as_mut().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Response arrived before its original receipt evidence for {tx_uuid}"
+            )
+        })?;
+        let receipt_key = receipt.receipt_key;
         match &status {
             MessageStatus::NeedsReconciliation {
                 receipt_key: response_key,
@@ -568,11 +565,7 @@ impl TransactionManager {
                 "Signed submission receipt identity changed for {tx_uuid}"
             );
             signed.validate_native_reconciliation()?;
-            if let Some(previous) = tx
-                .receipt
-                .as_ref()
-                .and_then(|receipt| receipt.signed_submission.as_ref())
-            {
+            if let Some(previous) = &receipt.signed_submission {
                 anyhow::ensure!(
                     previous.same_request(signed)
                         && previous
@@ -614,26 +607,16 @@ impl TransactionManager {
             }
         }
         if let Some(evidence) = &submission {
-            tx.receipt
-                .as_mut()
-                .expect("receipt was validated above")
-                .initial_response
-                .get_or_insert_with(|| evidence.clone());
+            receipt.initial_response.get_or_insert_with(|| evidence.clone());
         }
         if let Some(signed) = signed_submission {
-            tx.receipt
-                .as_mut()
-                .expect("receipt was validated above")
-                .signed_submission = Some(signed);
+            receipt.signed_submission = Some(signed);
         }
         if let MessageStatus::Success {
             receipt_observation,
         } = &status
         {
-            let original = tx
-                .receipt
-                .as_ref()
-                .and_then(|receipt| receipt.signed_submission.as_ref());
+            let original = receipt.signed_submission.as_ref();
             if receipt_observation.as_ref().is_none_or(|observation| observation.finalized_block_number.is_none())
                 || original.is_none_or(|signed| !signed.has_finalized_dispatch_reply()
                     || signed.native_reconciliation.as_ref().is_some_and(|continuation|
@@ -758,27 +741,14 @@ impl TransactionManager {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::super::storage::tests::runtime_identity;
     use super::*;
     use crate::message_relayer::common::EthereumSlotNumber;
     use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel};
 
-    fn runtime_identity() -> super::super::storage::InboundRuntimeIdentity {
-        use primitive_types::{H160, H256};
-        super::super::storage::InboundRuntimeIdentity {
-            ethereum_chain_id: 560048,
-            ethereum_genesis_hash: H256::repeat_byte(1),
-            ethereum_start_block: 70,
-            erc20_manager_address: Some(H160::repeat_byte(2)),
-            bridging_payment_address: None,
-            gear_genesis_hash: H256::repeat_byte(3),
-            vft_manager_address: H256::repeat_byte(4),
-            checkpoint_light_client_address: H256::repeat_byte(5),
-            historical_proxy_address: H256::repeat_byte(6),
-            gear_sender: [7; 32],
-        }
-    }
-
-    fn signed_submission(receipt_key: (u64, u64)) -> message_sender::SignedSubmission {
+    pub(in crate::message_relayer::eth_to_gear) fn signed_submission(
+        receipt_key: (u64, u64),
+    ) -> message_sender::SignedSubmission {
         message_sender::SignedSubmission {
             finalized_dispatch_error: None,
             finalized_reply: None,
@@ -912,7 +882,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let manager = TransactionManager::new(storage.clone());
-        let (lock, event) = receipt_fixtures().remove(0);
+        let (lock, event) = receipt_fixtures().next().unwrap();
         // Use the same receipt identity for the existing original and archived continuation.
         let mut previous = previous;
         previous.receipt_key = (lock.slot_number.0, event.transaction_index);
@@ -1001,7 +971,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let manager = TransactionManager::new(storage.clone());
-        let (lock, event) = receipt_fixtures().remove(0);
+        let (lock, event) = receipt_fixtures().next().unwrap();
         let mut signed = signed_submission((lock.slot_number.0, event.transaction_index));
         signed.inclusion_block_number = Some(18);
         signed.inclusion_block_hash = Some("0x18".into());
@@ -1114,7 +1084,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let manager = TransactionManager::new(storage.clone());
-        let (lock, event) = receipt_fixtures().remove(0);
+        let (lock, event) = receipt_fixtures().next().unwrap();
         let key = (lock.slot_number.0, event.transaction_index);
         let mut original = signed_submission(key);
         original.inclusion_block_number = Some(51);
@@ -1432,7 +1402,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn held_unsigned_processed_receipt_never_completes_or_resubmits() {
         let manager = TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
-        let (lock, event) = receipt_fixtures().remove(0);
+        let (lock, event) = receipt_fixtures().next().unwrap();
         let receipt_key = (lock.slot_number.0, event.transaction_index);
         let payload = event.encode();
         let failure = message_sender::SubmissionEvidence {
@@ -1732,7 +1702,7 @@ pub(super) mod tests {
         tokio::fs::remove_dir_all(path).await.unwrap();
     }
     pub(in crate::message_relayer::eth_to_gear) fn receipt_fixtures(
-    ) -> Vec<(TxHashWithSlot, EthToVaraEvent)> {
+    ) -> impl Iterator<Item = (TxHashWithSlot, EthToVaraEvent)> {
         use alloy_rlp::Encodable;
         use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof};
         use ethereum_common::{
@@ -1805,7 +1775,6 @@ pub(super) mod tests {
                     event,
                 )
             })
-            .collect()
     }
 
     #[tokio::test]
@@ -1818,7 +1787,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let manager = TransactionManager::new(storage.clone());
-        let (lock, event) = receipt_fixtures().remove(0);
+        let (lock, event) = receipt_fixtures().next().unwrap();
         let transaction = Transaction::new(lock, TxStatus::ComposeProof);
         let uuid = transaction.uuid;
         manager.add_transaction(transaction).await;
@@ -1857,7 +1826,7 @@ pub(super) mod tests {
         for continuation in [false, true] {
             let manager =
                 TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
-            let fixtures = receipt_fixtures();
+            let fixtures = receipt_fixtures().collect::<Vec<_>>();
             let mut uuids = Vec::new();
             for (lock, event) in &fixtures {
                 let tx = Transaction::new(lock.clone(), TxStatus::ComposeProof);
@@ -2025,7 +1994,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let manager = TransactionManager::new(storage.clone());
-        let fixtures = receipt_fixtures();
+        let fixtures = receipt_fixtures().collect::<Vec<_>>();
         assert_eq!(fixtures.len(), 2);
         let mut uuids = Vec::new();
         for (lock, event) in &fixtures {
@@ -2182,7 +2151,7 @@ pub(super) mod tests {
             .await
             .unwrap();
         let manager = TransactionManager::new(storage.clone());
-        let (lock, event) = receipt_fixtures().remove(0);
+        let (lock, event) = receipt_fixtures().next().unwrap();
         let receipt_key = (lock.slot_number.0, event.transaction_index);
         let transaction = Transaction::new(lock, TxStatus::ComposeProof);
         let uuid = transaction.uuid;
@@ -2265,7 +2234,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn queued_proof_identity_and_scale_tail_are_checked_before_new_signing() {
         use super::super::storage::JSONStorage;
-        let (lock, event) = receipt_fixtures().remove(0);
+        let (lock, event) = receipt_fixtures().next().unwrap();
         for mutation in [
             "trailing SCALE",
             "receipt key",

@@ -89,11 +89,7 @@ impl MessageSenderIo {
         let mut matches = true;
         self.original_registrations.send_modify(|originals| {
             if let Some(original) = originals.values().find(|original| original.uuid == uuid) {
-                matches = original.submission == submission
-                    && original.message.nonce_be == message.nonce_be
-                    && original.message.source == message.source
-                    && original.message.destination == message.destination
-                    && original.message.payload == message.payload;
+                matches = original.submission == submission && original.message == message;
             } else if originals
                 .keys()
                 .any(|(nonce, _)| *nonce == submission.nonce)
@@ -393,16 +389,8 @@ async fn wait_for_original_completion(
 
 /// Authenticate the saved message/domain without requiring discarded discovery proof state.
 fn validate_original(api: &EthApi, original: &Original) -> anyhow::Result<()> {
-    use alloy::{
-        consensus::{Transaction, TxEnvelope},
-        eips::Decodable2718,
-        sol_types::SolCall,
-    };
     let signed = &original.submission;
-    super::status_fetcher::validate_original_submission(&original.message, signed)?;
-    let transaction = TxEnvelope::decode_2718(&mut signed.raw_transaction.as_slice())?;
-    let call =
-        ethereum_client::abi::IMessageQueue::processMessageCall::abi_decode(transaction.input())?;
+    let call = super::status_fetcher::original_call(&original.message, signed)?;
     api.validate_prepared_content_message(
         signed,
         call.blockNumber.try_into()?,

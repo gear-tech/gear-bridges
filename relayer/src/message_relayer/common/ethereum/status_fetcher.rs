@@ -192,17 +192,12 @@ async fn task(
     }
 }
 
-fn original_call(
+pub(super) fn original_call(
     message: &Message,
     signed: &PreparedContentMessage,
 ) -> anyhow::Result<IMessageQueue::processMessageCall> {
-    use alloy::{
-        consensus::{Transaction, TxEnvelope},
-        eips::Decodable2718,
-    };
-    ethereum_client::prepared_content_message_identity(signed)?;
-    let mut raw = signed.raw_transaction.as_slice();
-    let envelope = TxEnvelope::decode_2718(&mut raw)?;
+    use alloy::consensus::Transaction;
+    let (envelope, _) = ethereum_client::prepared_content_message_transaction(signed)?;
     let call = IMessageQueue::processMessageCall::abi_decode_validate(envelope.input())?;
     anyhow::ensure!(
         envelope.value() == U256::ZERO
@@ -424,10 +419,6 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
             return (request, hold(error.to_string()));
         }
         loop {
-            let signed = request
-                .submission
-                .as_ref()
-                .expect("original validated above");
             match api.get_finalized_receipt(request.tx_hash).await {
                 Ok(Some(receipt)) => {
                     if finalized_receipt_has_required_confirmations(

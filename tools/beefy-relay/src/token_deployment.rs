@@ -45,9 +45,7 @@ use vft_manager_client::{
     Config, InitConfig, TokenSupply,
 };
 use vft_vara_client::{
-    traits::{
-        NativeEscrow as _, VftAdmin as _, VftExtension as _, VftMetadata as _, VftVaraFactory,
-    },
+    traits::{NativeEscrow as _, VftAdmin as _, VftExtension as _, VftVaraFactory},
     Mainnet,
 };
 
@@ -394,11 +392,10 @@ fn lock_token_stack(path: &Path) -> Result<File> {
 // Reload before every mutation: signed message records must survive status changes.
 fn intent(
     output: &Path,
-    state: &mut Value,
     component: &str,
     binary: &[u8],
 ) -> Result<(ActorId, bool, Vec<u8>)> {
-    *state = read_config_stack(&output.join("token-stack.json"))?;
+    let mut state = read_config_stack(&output.join("token-stack.json"))?;
     let genesis = state["sourceGenesis"]
         .as_str()
         .ok_or_else(|| anyhow!("source genesis missing"))?;
@@ -429,7 +426,7 @@ fn intent(
         "active" | "initializing" => false,
         _ => anyhow::bail!("{component} unknown constructor status; HOLD"),
     };
-    save(output, state)?;
+    save(output, &state)?;
     Ok((id, activate, salt))
 }
 
@@ -517,7 +514,7 @@ pub async fn prepare(
     );
     let checkpoint = actor(checkpoint)?;
     ensure!(genesis == expected_genesis, "wrong source genesis");
-    let _signer_owner = relayer::message_relayer::eth_to_gear::cutover::lock_signer(
+    let _signer_owner = gear_common::signer_ownership::lock_signer(
         decode_hash(&json!(genesis), "source genesis")?.into(),
         <[u8; 32]>::from(api.account_id().clone()),
     )?;
@@ -543,7 +540,7 @@ pub async fn prepare(
         on_chain.0 == slot && on_chain.1.as_ref() == expected_hash,
         "checkpoint trust anchor does not match live Gear state"
     );
-    let mut state: Value = if path.exists() {
+    if path.exists() {
         let state: Value = serde_json::from_slice(&fs::read(&path)?)?;
         ensure!(
             state["lane"] == "beefy-token-hoodi"
@@ -553,24 +550,17 @@ pub async fn prepare(
                 && state["checkpointHash"] == format!("0x{}", hex::encode(&expected_hash)),
             "token manifest conflicts with source or checkpoint"
         );
-        state
     } else {
         let state = json!({"lane": "beefy-token-hoodi", "sourceGenesis": genesis,
             "checkpoint": format!("0x{}", hex::encode(checkpoint.into_bytes())), "checkpointSlot": slot,
             "checkpointHash": format!("0x{}", hex::encode(&expected_hash)), "programs": {}});
         save(output, &state)?;
-        state
-    };
+    }
     reconcile_saved_setup(&api, &path).await?;
     let gas = api.block_gas_limit()?;
 
     let proxy_code = code(&api, historical_proxy::WASM_BINARY).await?;
-    let (proxy, new, salt) = intent(
-        output,
-        &mut state,
-        "historicalProxy",
-        historical_proxy::WASM_BINARY,
-    )?;
+    let (proxy, new, salt) = intent(output, "historicalProxy", historical_proxy::WASM_BINARY)?;
     if new {
         let result = historical_proxy_client::HistoricalProxyFactory::new(JournaledRemoting::new(
             api.clone(),
@@ -603,12 +593,7 @@ pub async fn prepare(
     set_program_status(output, "historicalProxy", "active")?;
 
     let events_code = code(&api, eth_events_electra::WASM_BINARY).await?;
-    let (events, new, salt) = intent(
-        output,
-        &mut state,
-        "ethEventsElectra",
-        eth_events_electra::WASM_BINARY,
-    )?;
+    let (events, new, salt) = intent(output, "ethEventsElectra", eth_events_electra::WASM_BINARY)?;
     if new {
         let result = eth_events_electra_client::EthEventsElectraFactory::new(
             JournaledRemoting::new(api.clone(), &path, "constructor.ethEventsElectra"),
@@ -674,7 +659,7 @@ pub async fn prepare(
 
     let config = expected_config();
     let manager_code = code(&api, vft_manager::WASM_BINARY).await?;
-    let (manager, new, salt) = intent(output, &mut state, "vftManager", vft_manager::WASM_BINARY)?;
+    let (manager, new, salt) = intent(output, "vftManager", vft_manager::WASM_BINARY)?;
     if new {
         let result = vft_manager_client::VftManagerFactory::new(JournaledRemoting::new(
             api.clone(),
@@ -734,25 +719,13 @@ pub async fn prepare(
         .await
         .map_err(|e| anyhow!("manager config unreadable: {e:?}"))?;
     ensure!(
-        actual_config.fee_bridge == config.fee_bridge
-            && actual_config.fee_incoming == config.fee_incoming
-            && actual_config.gas_for_token_ops == config.gas_for_token_ops
-            && actual_config.gas_for_reply_deposit == config.gas_for_reply_deposit
-            && actual_config.gas_to_send_request_to_builtin
-                == config.gas_to_send_request_to_builtin
-            && actual_config.gas_for_swap_token_maps == config.gas_for_swap_token_maps
-            && actual_config.reply_timeout == config.reply_timeout,
+        configuration_matches(&actual_config, &config),
         "manager configuration mismatch"
     );
     set_program_status(output, "vftManager", "active")?;
 
     let payment_code = code(&api, bridging_payment::WASM_BINARY).await?;
-    let (payment, new, salt) = intent(
-        output,
-        &mut state,
-        "bridgingPayment",
-        bridging_payment::WASM_BINARY,
-    )?;
+    let (payment, new, salt) = intent(output, "bridgingPayment", bridging_payment::WASM_BINARY)?;
     let initial_state = bridging_payment_client::State {
         admin_address: ActorId::from(<[u8; 32]>::from(api.account_id().clone())),
         fee: 1_000_000_000_000,
@@ -788,32 +761,44 @@ pub async fn prepare(
     );
     set_program_status(output, "bridgingPayment", "active")?;
     let vft_code = code(&api, vft::WASM_BINARY).await?;
-    for (component, name, symbol, decimals) in [
-        ("circleVft", "Hoodi Circle", "hUSDC", 6),
-        ("tetherVft", "Hoodi Tether", "hUSDT", 6),
-        ("bitcoinVft", "Hoodi Bitcoin", "hWBTC", 8),
-        ("etherVft", "Hoodi Ether", "hWETH", 18),
-        ("gearOriginVft", "Gear Origin Test", "GOT", 12),
-    ] {
-        let (token, new, salt) = intent(output, &mut state, component, vft::WASM_BINARY)?;
+    for spec in GEAR_TOKEN_SPECS {
+        let component = spec.component;
+        let native = component == "nativeVft";
+        let label = if native { "native VFT" } else { component };
+        let (binary, token_code) = if native {
+            (vft_vara::WASM_BINARY, code(&api, vft_vara::WASM_BINARY).await?)
+        } else {
+            (vft::WASM_BINARY, vft_code)
+        };
+        let (token, new, salt) = intent(output, component, binary)?;
         if new {
-            let deployed = vft_client::VftFactory::new(JournaledRemoting::new(
+            let remoting = JournaledRemoting::new(
                 api.clone(),
                 &path,
                 &format!("constructor.{component}"),
-            ))
-            .new(name.into(), symbol.into(), decimals)
-            .with_gas_limit(gas)
-            .send_recv(vft_code, salt)
-            .await
-            .map_err(|e| anyhow!("{component} constructor: {e:?}"))?;
+            );
+            let deployed = if native {
+                vft_vara_client::VftVaraFactory::new(remoting)
+                    .new(Mainnet::No)
+                    .with_gas_limit(gas)
+                    .send_recv(token_code, salt)
+                    .await
+            } else {
+                vft_client::VftFactory::new(remoting)
+                    .new(spec.name.into(), spec.symbol.into(), spec.decimals)
+                    .with_gas_limit(gas)
+                    .send_recv(token_code, salt)
+                    .await
+            }
+            .map_err(|e| anyhow!("{label} constructor: {e:?}"))?;
             ensure!(
                 deployed == token,
-                "{component} constructor returned wrong program ID"
+                "{label} constructor returned wrong program ID"
             );
         }
-        finalized = verify_prepared_constructor(&api, &path, component, token, vft_code).await?;
+        finalized = verify_prepared_constructor(&api, &path, component, token, token_code).await?;
         set_program_status(output, component, "initializing")?;
+        // Both token programs expose the same VftMetadata and VftAdmin routes.
         let metadata = vft_client::VftMetadata::new(remoting.clone());
         ensure!(
             metadata
@@ -821,41 +806,44 @@ pub async fn prepare(
                 .at_block(sails_block_hash(finalized))
                 .recv(token)
                 .await
-                .map_err(|e| anyhow!("{component} name: {e:?}"))?
-                == name
+                .map_err(|e| anyhow!("{label} name: {e:?}"))?
+                == spec.name
                 && metadata
                     .symbol()
                     .at_block(sails_block_hash(finalized))
                     .recv(token)
                     .await
-                    .map_err(|e| anyhow!("{component} symbol: {e:?}"))?
-                    == symbol
+                    .map_err(|e| anyhow!("{label} symbol: {e:?}"))?
+                    == spec.symbol
                 && metadata
                     .decimals()
                     .at_block(sails_block_hash(finalized))
                     .recv(token)
                     .await
-                    .map_err(|e| anyhow!("{component} decimals: {e:?}"))?
-                    == decimals,
-            "{component} metadata mismatch"
+                    .map_err(|e| anyhow!("{label} decimals: {e:?}"))?
+                    == spec.decimals,
+            "{label} metadata mismatch"
         );
-        let admin = vft_client::VftAdmin::new(remoting.clone());
-        ensure!(
-            admin
-                .minter()
-                .at_block(sails_block_hash(finalized))
-                .recv(token)
-                .await
-                .map_err(|e| anyhow!("{component} minter: {e:?}"))?
-                == initial_state.admin_address
-                && admin
-                    .burner()
+        if native {
+            ensure_native_minimum_balance(
+                vft_vara_client::VftExtension::new(remoting.clone())
+                    .minimum_balance()
                     .at_block(sails_block_hash(finalized))
                     .recv(token)
+                    .await?,
+            )?;
+        }
+        let admin = vft_client::VftAdmin::new(remoting.clone());
+        ensure!(
+            token_authority(&admin, finalized, token, "minter")
+                .await
+                .map_err(|e| anyhow!("{label} minter: {e:?}"))?
+                == initial_state.admin_address
+                && token_authority(&admin, finalized, token, "burner")
                     .await
-                    .map_err(|e| anyhow!("{component} burner: {e:?}"))?
+                    .map_err(|e| anyhow!("{label} burner: {e:?}"))?
                     == initial_state.admin_address,
-            "{component} initial authority mismatch"
+            "{label} initial authority mismatch"
         );
         ensure_configuration_action(
             &path,
@@ -868,92 +856,9 @@ pub async fn prepare(
             gas,
         )
         .await
-        .map_err(|e| anyhow!("{component} storage initialization: {e:?}"))?;
+        .map_err(|e| anyhow!("{label} storage initialization: {e:?}"))?;
         set_program_status(output, component, "active")?;
     }
-    let native_code = code(&api, vft_vara::WASM_BINARY).await?;
-    let (native, new, salt) = intent(output, &mut state, "nativeVft", vft_vara::WASM_BINARY)?;
-    if new {
-        let deployed = vft_vara_client::VftVaraFactory::new(JournaledRemoting::new(
-            api.clone(),
-            &path,
-            "constructor.nativeVft",
-        ))
-        .new(Mainnet::No)
-        .with_gas_limit(gas)
-        .send_recv(native_code, salt)
-        .await
-        .map_err(|e| anyhow!("native VFT constructor: {e:?}"))?;
-        ensure!(
-            deployed == native,
-            "native VFT constructor returned wrong program ID"
-        );
-    }
-    finalized = verify_prepared_constructor(&api, &path, "nativeVft", native, native_code).await?;
-    set_program_status(output, "nativeVft", "initializing")?;
-    let metadata = vft_vara_client::VftMetadata::new(remoting.clone());
-    ensure!(
-        metadata
-            .name()
-            .at_block(sails_block_hash(finalized))
-            .recv(native)
-            .await
-            .map_err(|e| anyhow!("native VFT name: {e:?}"))?
-            == "Wrapped Testnet Vara"
-            && metadata
-                .symbol()
-                .at_block(sails_block_hash(finalized))
-                .recv(native)
-                .await
-                .map_err(|e| anyhow!("native VFT symbol: {e:?}"))?
-                == "WTVARA"
-            && metadata
-                .decimals()
-                .at_block(sails_block_hash(finalized))
-                .recv(native)
-                .await
-                .map_err(|e| anyhow!("native VFT decimals: {e:?}"))?
-                == 12,
-        "native VFT metadata mismatch"
-    );
-    ensure_native_minimum_balance(
-        vft_vara_client::VftExtension::new(remoting.clone())
-            .minimum_balance()
-            .at_block(sails_block_hash(finalized))
-            .recv(native)
-            .await?,
-    )?;
-    let admin = vft_vara_client::VftAdmin::new(remoting.clone());
-    ensure!(
-        admin
-            .minter()
-            .at_block(sails_block_hash(finalized))
-            .recv(native)
-            .await
-            .map_err(|e| anyhow!("native VFT minter: {e:?}"))?
-            == initial_state.admin_address
-            && admin
-                .burner()
-                .at_block(sails_block_hash(finalized))
-                .recv(native)
-                .await
-                .map_err(|e| anyhow!("native VFT burner: {e:?}"))?
-                == initial_state.admin_address,
-        "native VFT initial authority mismatch"
-    );
-    ensure_configuration_action(
-        &path,
-        "prepare.shards.nativeVft",
-        json!({"token":format!("{native:?}")}),
-    )?;
-    vft_client::allocate_shards(
-        JournaledRemoting::new(api.clone(), &path, "prepare.shards.nativeVft"),
-        native,
-        gas,
-    )
-    .await
-    .map_err(|e| anyhow!("native VFT storage initialization: {e:?}"))?;
-    set_program_status(output, "nativeVft", "active")?;
     println!("Isolated VFT constructors verified; roles and mappings remain unset, manager paused");
     println!(
         "Isolated Gear token stack prepared and paused: proxy={} events={} manager={}",
@@ -1094,6 +999,27 @@ fn authority_handoff(current: ActorId, setup: ActorId, manager: ActorId) -> Resu
         Err(anyhow!(
             "VFT authority is neither the setup signer nor the intended manager"
         ))
+    }
+}
+
+async fn token_authority(
+    admin: &vft_client::VftAdmin<GClientRemoting>,
+    at: GearHash,
+    peer: ActorId,
+    role: &str,
+) -> SailsResult<ActorId> {
+    if role == "minter" {
+        admin
+            .minter()
+            .at_block(sails_block_hash(at))
+            .recv(peer)
+            .await
+    } else {
+        admin
+            .burner()
+            .at_block(sails_block_hash(at))
+            .recv(peer)
+            .await
     }
 }
 
@@ -1300,14 +1226,14 @@ fn update_configuration_message(path: &Path, key: &str, index: usize, fields: Va
         .as_array_mut()
         .and_then(|messages| messages.get_mut(index))
         .ok_or_else(|| anyhow!("original setup message missing"))?;
-    let fields = fields
-        .as_object()
-        .ok_or_else(|| anyhow!("invalid message update"))?;
+    let Value::Object(fields) = fields else {
+        anyhow::bail!("invalid message update");
+    };
     if fields.iter().all(|(name, value)| message[name] == *value) {
         return Ok(());
     }
     for (name, value) in fields {
-        message[name] = value.clone();
+        message[name] = value;
     }
     save_config_stack(path, &state)
 }
@@ -1514,6 +1440,7 @@ async fn reconcile_setup_message(
         .await?;
     }
     let mut inclusion: Option<(u32, GearHash, [u8; 32])> = None;
+    let chain = gear_rpc_client::GearApi::from(signer.api().clone());
     for number in setup_evidence_range(
         api,
         &message["inclusionEvidence"],
@@ -1524,10 +1451,9 @@ async fn reconcile_setup_message(
     {
         let block_hash = api.get_block_hash(number).await?;
         let block = signer.api().blocks().at(block_hash).await?;
-        for extrinsic in block.extrinsics().await?.iter() {
-            if extrinsic.hash().0 != hash {
-                continue;
-            }
+        let extrinsics = block.extrinsics().await?;
+        for extrinsic in extrinsics.iter().filter(|extrinsic| extrinsic.hash() == GearHash(hash))
+        {
             ensure!(
                 inclusion.is_none() && extrinsic.bytes() == raw,
                 "original setup inclusion changed; HOLD"
@@ -1605,55 +1531,45 @@ async fn reconcile_setup_message(
         json!({"observedFinality":{"blockNumber":finalized_number,"blockHash":format!("{finalized_hash:#x}")}}),
     )?;
     if let Some((included, _, id)) = inclusion {
-        for number in
-            setup_evidence_range(api, &message["replyEvidence"], included, finalized_number).await?
+        let range =
+            setup_evidence_range(api, &message["replyEvidence"], included, finalized_number).await?;
+        if let Some(found) =
+            gear_rpc_client::observation::find_reply(&chain, range, GearHash(id), |_, _| {}).await?
         {
-            let block_hash = api.get_block_hash(number).await?;
-            let events = signer.api().blocks().at(block_hash).await?.events().await?;
-            for event in events.iter() {
-                let event = event?;
-                let Some(gear::gear::events::UserMessageSent { message: reply, .. }) =
-                    event.as_event::<gear::gear::events::UserMessageSent>()?
-                else {
-                    continue;
-                };
-                let Some(details) = reply.details() else {
-                    continue;
-                };
-                if details.to_message_id().as_ref() != id {
-                    continue;
-                }
-                ensure!(
-                    reply.source().as_ref() == target.into_bytes().as_slice()
-                        && reply.destination().as_ref() == sender,
-                    "original reply actor/sender changed; HOLD"
-                );
-                let bytes = reply.payload_bytes().to_vec();
-                let evidence = json!({"blockNumber":number,"blockHash":format!("{block_hash:#x}"),"messageId":format!("0x{}",hex::encode(reply.id().as_ref())),"payload":format!("0x{}",hex::encode(&bytes)),"code":format!("{:?}",details.to_reply_code())});
-                ensure!(
-                    message["replyEvidence"].is_null() || message["replyEvidence"] == evidence,
-                    "original finalized reply changed; HOLD"
-                );
-                ensure!(
-                    message["replyPayload"].is_null()
-                        || message["replyPayload"] == evidence["payload"],
-                    "original reply bytes changed; HOLD"
-                );
-                ensure!(
-                    api.get_block_hash(number).await? == block_hash
-                        && api.get_block_hash(finalized_number).await? == finalized_hash,
-                    "original reply canonical pin changed; HOLD"
-                );
-                let success = details.to_reply_code().is_success();
-                update_configuration_message(
-                    stack_path,
-                    action_key,
-                    message_index,
-                    json!({"status":if success {"reply_received"} else {"reply_error"},"replyEvidence":evidence,"replyPayload":format!("0x{}",hex::encode(&bytes))}),
-                )?;
-                ensure!(success, "original setup terminal reply failed; HOLD");
-                return Ok(Some(bytes));
-            }
+            let number = found.number;
+            let block_hash = found.block_hash;
+            let reply = found.event.message;
+            let details = reply.details().expect("discovered reply has details");
+            ensure!(
+                reply.source().as_ref() == target.into_bytes().as_slice()
+                    && reply.destination().as_ref() == sender,
+                "original reply actor/sender changed; HOLD"
+            );
+            let bytes = reply.payload_bytes().to_vec();
+            let evidence = json!({"blockNumber":number,"blockHash":format!("{block_hash:#x}"),"messageId":format!("0x{}",hex::encode(reply.id().as_ref())),"payload":format!("0x{}",hex::encode(&bytes)),"code":format!("{:?}",details.to_reply_code())});
+            ensure!(
+                message["replyEvidence"].is_null() || message["replyEvidence"] == evidence,
+                "original finalized reply changed; HOLD"
+            );
+            ensure!(
+                message["replyPayload"].is_null()
+                    || message["replyPayload"] == evidence["payload"],
+                "original reply bytes changed; HOLD"
+            );
+            ensure!(
+                api.get_block_hash(number).await? == block_hash
+                    && api.get_block_hash(finalized_number).await? == finalized_hash,
+                "original reply canonical pin changed; HOLD"
+            );
+            let success = details.to_reply_code().is_success();
+            update_configuration_message(
+                stack_path,
+                action_key,
+                message_index,
+                json!({"status":if success {"reply_received"} else {"reply_error"},"replyEvidence":evidence,"replyPayload":format!("0x{}",hex::encode(&bytes))}),
+            )?;
+            ensure!(success, "original setup terminal reply failed; HOLD");
+            return Ok(Some(bytes));
         }
         ensure!(
             message["replyEvidence"].is_null(),
@@ -1710,7 +1626,7 @@ async fn reconcile_setup_message(
                     &gear::tx().gear().create_program(
                         code,
                         salt,
-                        payload.clone(),
+                        payload,
                         gas,
                         value,
                         false,
@@ -1726,7 +1642,7 @@ async fn reconcile_setup_message(
                 .create_partial(
                     &gear::tx()
                         .gear()
-                        .send_message(target, payload.clone(), gas, value, false),
+                        .send_message(target, payload, gas, value, false),
                     signer.account_id(),
                     params,
                 )
@@ -1806,7 +1722,7 @@ async fn reconcile_saved_setup(api: &GearApi, path: &Path) -> Result<()> {
                 let nonce = message["submission"]["nonce"]
                     .as_u64()
                     .ok_or_else(|| anyhow!("legacy setup original nonce missing; HOLD"))?;
-                originals.push((nonce, key.clone(), index));
+                originals.push((nonce, key.as_str(), index));
             }
         }
         originals.sort_by_key(|original| original.0);
@@ -1815,7 +1731,7 @@ async fn reconcile_saved_setup(api: &GearApi, path: &Path) -> Result<()> {
             "setup originals share a nonce; HOLD"
         );
         for (_, key, index) in originals {
-            wait_setup_message(api, path, &key, index).await?;
+            wait_setup_message(api, path, key, index).await?;
         }
     }
     Ok(())
@@ -1870,18 +1786,18 @@ impl JournaledRemoting {
             let nonce = signer.api().tx().account_nonce(signer.account_id()).await?;
             let at = self.api.last_block_hash().await?;
             let scan_number = self.api.block_number_at(at).await?;
-            let signed = if let Some((code, salt)) = &constructor {
+            let signed = if let Some((code, salt)) = constructor {
                 signer
                     .api()
-                    .original_code_storage_at(*code, Some(at))
+                    .original_code_storage_at(code, Some(at))
                     .await?;
                 signer
                     .api()
                     .tx()
                     .create_signed(
                         &gear::tx().gear().create_program(
-                            *code,
-                            salt.clone(),
+                            code,
+                            salt,
                             payload,
                             gas,
                             value,
@@ -2152,6 +2068,16 @@ fn expected_config() -> Config {
     }
 }
 
+fn configuration_matches(actual: &Config, expected: &Config) -> bool {
+    actual.fee_bridge == expected.fee_bridge
+        && actual.fee_incoming == expected.fee_incoming
+        && actual.gas_for_token_ops == expected.gas_for_token_ops
+        && actual.gas_for_reply_deposit == expected.gas_for_reply_deposit
+        && actual.gas_to_send_request_to_builtin == expected.gas_to_send_request_to_builtin
+        && actual.gas_for_swap_token_maps == expected.gas_for_swap_token_maps
+        && actual.reply_timeout == expected.reply_timeout
+}
+
 async fn inspect_ethereum_configuration(
     ethereum: &beefy_relay::ethereum::Ethereum,
     gear_manager: [u8; 32],
@@ -2277,9 +2203,6 @@ async fn inspect_ethereum_configuration(
             && !payment_code.is_empty(),
         "EVM bridging-payment identity, owner, fee, or manager binding is invalid"
     );
-    let mut registered_managers: Vec<String> =
-        vft_managers.iter().map(|id| format!("{id:#x}")).collect();
-    registered_managers.sort();
     Ok(json!({
         "manager": format!("{:#x}", ethereum.receiver_address),
         "managerCodeHash": format!("{:#x}", alloy::primitives::keccak256(manager_code.as_ref())),
@@ -2289,7 +2212,7 @@ async fn inspect_ethereum_configuration(
         "governancePauserCodeHash": format!("{:#x}", alloy::primitives::keccak256(pauser_code.as_ref())),
         "messageQueue": format!("{:#x}", ethereum.queue_address),
         "beefyRecovery": ethereum.recovery_configuration().await?,
-        "vftManagers": registered_managers,
+        "vftManagers": [format!("{expected_gear_manager:#x}")],
         "tokens": token_records,
         "bridgingPayments": [{
             "address": format!("{payment_address:#x}"),
@@ -2423,7 +2346,7 @@ pub async fn configure(
         signer_genesis.0 == source.source_genesis,
         "Gear signer is connected to a different genesis"
     );
-    let _signer_owner = relayer::message_relayer::eth_to_gear::cutover::lock_signer(
+    let _signer_owner = gear_common::signer_ownership::lock_signer(
         source.source_genesis.into(),
         <[u8; 32]>::from(api.account_id().clone()),
     )?;
@@ -2590,14 +2513,7 @@ pub async fn configure(
         .await?;
     let wanted_config = expected_config();
     ensure!(
-        config.gas_for_token_ops == wanted_config.gas_for_token_ops
-            && config.gas_for_reply_deposit == wanted_config.gas_for_reply_deposit
-            && config.gas_to_send_request_to_builtin
-                == wanted_config.gas_to_send_request_to_builtin
-            && config.gas_for_swap_token_maps == wanted_config.gas_for_swap_token_maps
-            && config.reply_timeout == wanted_config.reply_timeout
-            && config.fee_bridge == wanted_config.fee_bridge
-            && config.fee_incoming == wanted_config.fee_incoming,
+        configuration_matches(&config, &wanted_config),
         "fresh Gear manager configuration differs"
     );
     let was_ready = stack["configuration"]["status"] == "ready";
@@ -2684,16 +2600,8 @@ pub async fn configure(
             )?;
         }
         let admin = vft_client::VftAdmin::new(remoting.clone());
-        let minter = admin
-            .minter()
-            .at_block(finalized_sails_hash)
-            .recv(peer)
-            .await?;
-        let burner = admin
-            .burner()
-            .at_block(finalized_sails_hash)
-            .recv(peer)
-            .await?;
+        let minter = token_authority(&admin, finalized_hash, peer, "minter").await?;
+        let burner = token_authority(&admin, finalized_hash, peer, "burner").await?;
         let ethereum_supply = spec.supply == TokenSupply::Ethereum;
         if ethereum_supply {
             authority_handoff(minter, setup, manager_id)?;
@@ -2739,7 +2647,7 @@ pub async fn configure(
         "gearPrograms": programs,
         "checkpoint": {"id": format!("0x{}", hex::encode(checkpoint_id.into_bytes())), "slot": checkpoint_slot, "hash": format!("0x{}", hex::encode(checkpoint_hash))},
         "gearPayment": {"id": format!("0x{}", hex::encode(payment_id.into_bytes())), "fee": payment_state.fee.to_string(), "priorityFee": payment_state.priority_fee.to_string(), "admin": format!("0x{}", hex::encode(setup.into_bytes()))},
-        "ethereum": evm_configuration.clone(),
+        "ethereum": evm_configuration,
         "gearTokenPeers": pairs.iter().map(|(spec, peer, address)| json!({
             "component": spec.component,
             "id": format!("0x{}", hex::encode(peer.into_bytes())),
@@ -2828,19 +2736,7 @@ pub async fn configure(
             let intent = json!({"peer": format!("0x{}", hex::encode(peer.into_bytes())), "role": role, "authority": format!("0x{}", hex::encode(manager_id.into_bytes()))});
             let (current_at, _, _) = finalized_evidence(&source).await?;
             let admin = vft_client::VftAdmin::new(remoting.clone());
-            let current = if role == "minter" {
-                admin
-                    .minter()
-                    .at_block(sails_block_hash(current_at))
-                    .recv(*peer)
-                    .await?
-            } else {
-                admin
-                    .burner()
-                    .at_block(sails_block_hash(current_at))
-                    .recv(*peer)
-                    .await?
-            };
+            let current = token_authority(&admin, current_at, *peer, role).await?;
             let should_change = authority_handoff(current, setup, manager_id)?;
             let send_handoff =
                 prepare_configuration_action(&stack_path, &key, intent, !should_change)?;
@@ -2867,20 +2763,7 @@ pub async fn configure(
                 }
             }
             let (at, _, evidence) = finalized_evidence(&source).await?;
-            let admin = vft_client::VftAdmin::new(remoting.clone());
-            let readback = if role == "minter" {
-                admin
-                    .minter()
-                    .at_block(sails_block_hash(at))
-                    .recv(*peer)
-                    .await?
-            } else {
-                admin
-                    .burner()
-                    .at_block(sails_block_hash(at))
-                    .recv(*peer)
-                    .await?
-            };
+            let readback = token_authority(&admin, at, *peer, role).await?;
             ensure!(
                 readback == manager_id,
                 "{} {role} authority did not move to the manager",
@@ -3186,21 +3069,13 @@ pub async fn configure(
     for (spec, peer, _) in &pairs {
         let admin = vft_client::VftAdmin::new(remoting.clone());
         ensure!(
-            admin
-                .minter()
-                .at_block(sails_block_hash(at))
-                .recv(*peer)
-                .await?
+            token_authority(&admin, at, *peer, "minter").await?
                 == if spec.supply == TokenSupply::Ethereum {
                     manager_id
                 } else {
                     setup
                 }
-                && admin
-                    .burner()
-                    .at_block(sails_block_hash(at))
-                    .recv(*peer)
-                    .await?
+                && token_authority(&admin, at, *peer, "burner").await?
                     == if spec.supply == TokenSupply::Ethereum || spec.component == "nativeVft" {
                         manager_id
                     } else {
@@ -3256,7 +3131,7 @@ pub async fn configure(
         mark_configuration_action_verified(
             &stack_path,
             "unpause",
-            json!({"finalized": ready_evidence.clone(), "paused": false}),
+            json!({"finalized": ready_evidence, "paused": false}),
         )?;
     }
     let mut final_stack = read_config_stack(&stack_path)?;
@@ -3427,10 +3302,9 @@ mod configuration_recovery_tests {
             &directory,
             &json!({"sourceGenesis":format!("0x{}",hex::encode([1;32])),"programs":{}}),
         )?;
-        let mut stale = Value::Null;
-        let (id, new, salt) = intent(&directory, &mut stale, "test", &[1, 2, 3])?;
+        let (id, new, salt) = intent(&directory, "test", &[1, 2, 3])?;
         assert!(new);
-        assert!(intent(&directory, &mut stale, "test", &[1, 2, 3])?.1);
+        assert!(intent(&directory, "test", &[1, 2, 3])?.1);
         let constructor = setup_message_intent(
             id,
             &[4],
@@ -3444,21 +3318,21 @@ mod configuration_recovery_tests {
         current["configuration"]["actions"]["constructor.test"]["messages"] =
             json!([{"submission":{"rawExtrinsic":"0xoriginal"}}]);
         save_config_stack(&path, &current)?;
-        assert!(intent(&directory, &mut stale, "test", &[1, 2, 3])?.1);
+        assert!(intent(&directory, "test", &[1, 2, 3])?.1);
         set_program_status(&directory, "test", "initializing")?;
         assert_eq!(
             read_config_stack(&path)?["configuration"]["actions"]["constructor.test"]["messages"]
                 [0]["submission"]["rawExtrinsic"],
             "0xoriginal"
         );
-        assert!(!intent(&directory, &mut stale, "test", &[1, 2, 3])?.1);
+        assert!(!intent(&directory, "test", &[1, 2, 3])?.1);
         current = read_config_stack(&path)?;
         current["programs"]["test"]["status"] = json!("pending");
         current["configuration"]["actions"]["constructor.test"]["messages"] = json!([]);
         save_config_stack(&path, &current)?;
         // Legacy pending does not authorize another constructor; only exact finalized adoption may finish it.
-        assert!(!intent(&directory, &mut stale, "test", &[1, 2, 3])?.1);
-        assert!(intent(&directory, &mut stale, "test", &[9]).is_err());
+        assert!(!intent(&directory, "test", &[1, 2, 3])?.1);
+        assert!(intent(&directory, "test", &[9]).is_err());
         assert!(read_config_stack(&path)?["configuration"]["identity"].is_null());
         fs::remove_dir_all(directory)?;
         Ok(())

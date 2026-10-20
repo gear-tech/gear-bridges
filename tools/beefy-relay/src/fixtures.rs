@@ -21,12 +21,10 @@ const SNOWBRIDGE_BASELINE_COMMIT: &str = "1201293e482ef052b9c3989dcf680046704fef
 const BASE_SOURCE_TIMESTAMP_MS: u64 = 1_800_000_000_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct InteropFixture {
-    #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
-    #[serde(rename = "gearBaselineCommit")]
     pub gear_baseline_commit: String,
-    #[serde(rename = "snowbridgeBaselineCommit")]
     pub snowbridge_baseline_commit: String,
     pub cases: Vec<InteropCase>,
 }
@@ -39,111 +37,64 @@ pub struct PayloadItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct FreshnessProof {
-    #[serde(rename = "sourceGenesis")]
     pub source_genesis: String,
-    #[serde(rename = "bridgeDomain")]
     pub bridge_domain: String,
-    #[serde(rename = "sourceTimestampMs")]
     pub source_timestamp_ms: u64,
     pub initialized: bool,
-    #[serde(rename = "queueId")]
     pub queue_id: u64,
-    #[serde(rename = "queueRoot")]
     pub queue_root: String,
-    #[serde(rename = "snapshotPreimage")]
     pub snapshot_preimage: String,
-    #[serde(rename = "bridgeCommitment")]
     pub bridge_commitment: String,
-    #[serde(rename = "outerLeaf")]
     pub outer_leaf: String,
-    #[serde(rename = "outerLeafHash")]
     pub outer_leaf_hash: String,
-    #[serde(rename = "leafIndex")]
     pub leaf_index: u64,
-    #[serde(rename = "leafCount")]
     pub leaf_count: u64,
-    #[serde(rename = "mmrItems")]
     pub mmr_items: Vec<String>,
-    #[serde(rename = "simplifiedItems")]
     pub simplified_items: Vec<String>,
-    #[serde(rename = "proofOrder")]
     pub proof_order: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct InteropCase {
     pub name: String,
-    #[serde(rename = "nativeOnly")]
     pub native_only: bool,
-    #[serde(rename = "mmrStartBlock")]
     pub mmr_start_block: u64,
-    #[serde(rename = "sourceBlock")]
     pub source_block: u32,
-    #[serde(rename = "insertionBlock")]
     pub insertion_block: u64,
-    #[serde(rename = "anchorBlock")]
     pub anchor_block: u64,
-    #[serde(rename = "queueId")]
     pub queue_id: u64,
-    #[serde(rename = "bridgeVersion")]
     pub bridge_version: u8,
-    #[serde(rename = "sourceGenesis")]
     pub source_genesis: String,
-    #[serde(rename = "sourceDomain")]
     pub source_domain: String,
-    #[serde(rename = "destinationChainId")]
     pub destination_chain_id: u64,
-    #[serde(rename = "destinationQueue")]
     pub destination_queue: String,
-    #[serde(rename = "bridgeDomain")]
     pub bridge_domain: String,
-    #[serde(rename = "sourceTimestampMs")]
     pub source_timestamp_ms: u64,
     pub initialized: bool,
-    #[serde(rename = "queueRoot")]
     pub queue_root: String,
-    #[serde(rename = "snapshotPreimage")]
     pub snapshot_preimage: String,
-    #[serde(rename = "bridgeCommitment")]
     pub bridge_commitment: String,
-    #[serde(rename = "outerLeaf")]
     pub outer_leaf: String,
-    #[serde(rename = "outerLeafHash")]
     pub outer_leaf_hash: String,
-    #[serde(rename = "leafIndex")]
     pub leaf_index: u64,
-    #[serde(rename = "leafCount")]
     pub leaf_count: u64,
-    #[serde(rename = "mmrItems")]
     pub mmr_items: Vec<String>,
-    #[serde(rename = "simplifiedItems")]
     pub simplified_items: Vec<String>,
-    #[serde(rename = "proofOrder")]
     pub proof_order: String,
-    #[serde(rename = "mmrRoot")]
     pub mmr_root: String,
-    #[serde(rename = "validatorCount")]
     pub validator_count: u16,
-    #[serde(rename = "authorityKeys")]
     pub authority_keys: Vec<String>,
-    #[serde(rename = "authorityAddresses")]
     pub authority_addresses: Vec<String>,
-    #[serde(rename = "authorityRoot")]
     pub authority_root: String,
-    #[serde(rename = "authorityProofs")]
     pub authority_proofs: Vec<Vec<String>>,
-    #[serde(rename = "payloadItems")]
     pub payload_items: Vec<PayloadItem>,
-    #[serde(rename = "signedCommitment")]
     pub signed_commitment: String,
-    #[serde(rename = "commitmentBytes")]
     pub commitment_bytes: String,
-    #[serde(rename = "commitmentHash")]
     pub commitment_hash: String,
-    #[serde(rename = "queueProof")]
     pub queue_proof: String,
-    #[serde(rename = "freshnessProof")]
     pub freshness_proof: FreshnessProof,
 }
 
@@ -226,17 +177,14 @@ fn native_items(leaf_index: u64, leaf_count: u64, nodes: &BTreeMap<u64, Hash32>)
     items
 }
 
-fn deterministic_root(label: &str, force_gear_root: bool) -> Hash32 {
-    if force_gear_root {
-        return [0x11; 32];
-    }
+fn deterministic_root(label: &str) -> Hash32 {
     let mut bytes = Vec::with_capacity(label.len() + 8);
     bytes.extend_from_slice(label.as_bytes());
     bytes.extend_from_slice(&0u64.to_le_bytes());
     keccak256(&bytes)
 }
 
-fn signing_key(value: u16) -> SigningKey {
+pub(crate) fn signing_key(value: u16) -> SigningKey {
     let mut scalar = [0; 32];
     scalar[30..].copy_from_slice(&value.to_be_bytes());
     SigningKey::from_bytes((&scalar).into()).expect("development scalar is valid")
@@ -366,7 +314,7 @@ fn make_case(
     } else if golden_snapshot {
         [0x11; 32]
     } else {
-        deterministic_root(name, false)
+        deterministic_root(name)
     };
     let historical_timestamp = if golden_snapshot {
         BASE_SOURCE_TIMESTAMP_MS

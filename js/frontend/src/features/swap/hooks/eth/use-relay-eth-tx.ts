@@ -1,10 +1,8 @@
 import { GearApi, HexString } from '@gear-js/api';
 import {
   relayEthToVara,
-  validateInboundTokenEffect,
-  validateNativeTokenEffect,
+  createVftManagerReplyContract,
   type InboundTokenEffect,
-  type NativeRedemption,
   type RelayResult,
 } from '@gear-js/bridge';
 import { useAccount } from '@gear-js/react-hooks';
@@ -62,75 +60,16 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
         gearApi: archiveApi,
         historicalProxyId: historicalProxyContractAddress,
         inboundProfile: profile,
-        consumerReply: {
+        consumerReply: createVftManagerReplyContract(profile, {
           registry: manager.registry,
-          resultType: 'Result<Null, Error>',
           idlSha256: IDL_SHA256,
-          nativeSettlement: profile.nativeWrapper
-            ? {
-                expectedEffect,
-                readDeposits: (pin, proof) =>
-                  manager.vftManager
-                    .receiptDeposits(proof.proofBlock.block.slot, proof.transactionIndex)
-                    .atBlock(pin)
-                    .call(),
-                readRedemption: (operationId, pin) =>
-                  nativeWrapper!.nativeEscrow.redemption(operationId).atBlock(pin).call(),
-                readReceiptStatus: (pin, proof) =>
-                  manager.vftManager
-                    .receiptStatus(proof.proofBlock.block.slot, proof.transactionIndex)
-                    .atBlock(pin)
-                    .call(),
-              }
-            : undefined,
-          verifyEffect: async (_value, settlementResult, proof) => {
-            const deposits = await manager.vftManager
-              .receiptDeposits(proof.proofBlock.block.slot, proof.transactionIndex)
-              .atBlock(settlementResult.effectBlockHash ?? settlementResult.replyBlockHash)
-              .call();
-            if (deposits.some((deposit) => deposit.native)) {
-              definedAssert(nativeWrapper, 'HOLD: native wrapper identity is unavailable');
-              definedAssert(profile.nativeWrapper, 'HOLD: native wrapper profile is unavailable');
-              const identity = {
-                managerId: profile.consumer.programId,
-                proxyId: profile.historicalProxyId,
-                wrapperId: profile.nativeWrapper.programId,
-                slot: BigInt(proof.proofBlock.block.slot),
-                transactionIndex: BigInt(proof.transactionIndex),
-                receiptRlp: proof.receiptRlp,
-                expectedEffect,
-              };
-              const redemptions = new Map<HexString, NativeRedemption | null>();
-              for (const deposit of deposits.filter((entry) => entry.native)) {
-                redemptions.set(
-                  deposit.operation_id,
-                  await nativeWrapper.nativeEscrow
-                    .redemption(deposit.operation_id)
-                    .atBlock(settlementResult.effectBlockHash ?? settlementResult.replyBlockHash)
-                    .call(),
-                );
-              }
-              definedAssert(
-                settlementResult.nativeSettlements,
-                'HOLD: authenticated original native settlements are missing',
-              );
-              const originals = new Map(
-                settlementResult.nativeSettlements.map((entry) => [entry.operationId, entry.redemption]),
-              );
-              const settlements = validateNativeTokenEffect(identity, deposits, redemptions, originals);
-              if (
-                settlements.length !== settlementResult.nativeSettlements.length ||
-                settlements.some(
-                  (entry) =>
-                    entry.child !==
-                    settlementResult.nativeSettlements!.find((original) => original.operationId === entry.operationId)
-                      ?.child,
-                )
-              )
-                throw new Error('HOLD: original native settlement cohort changed');
-            } else validateInboundTokenEffect(proof.receiptRlp, deposits, expectedEffect);
-          },
-        },
+          expectedEffect,
+          readDeposits: (pin, proof) =>
+            manager.vftManager.receiptDeposits(proof.proofBlock.block.slot, proof.transactionIndex).atBlock(pin).call(),
+          readRedemption: (operationId, pin) => nativeWrapper!.nativeEscrow.redemption(operationId).atBlock(pin).call(),
+          readReceiptStatus: (pin, proof) =>
+            manager.vftManager.receiptStatus(proof.proofBlock.block.slot, proof.transactionIndex).atBlock(pin).call(),
+        }),
         clientId: NETWORK_PRESET.VFT_MANAGER_CONTRACT_ADDRESS,
         clientServiceName: 'VftManager',
         clientMethodName: 'SubmitReceipt',

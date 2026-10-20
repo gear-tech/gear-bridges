@@ -81,6 +81,65 @@ struct Fixture {
     eth_supply_vft: ActorId,
 }
 
+fn deposit_receipt(receiver: ActorId, token: H160, amount: U256) -> Vec<u8> {
+    crate::create_receipt_rlp(
+        ERC20_MANAGER_ADDRESS,
+        H160([3; 20]),
+        receiver,
+        token,
+        amount,
+    )
+}
+
+async fn deploy_vft(
+    remoting: &GTestRemoting,
+    name: &str,
+    symbol: &str,
+    decimals: u8,
+    salt: &[u8],
+) -> ActorId {
+    let code = remoting.system().submit_code(vft::WASM_BINARY);
+    let token = VftFactoryC::new(remoting.clone())
+        .new(name.into(), symbol.into(), decimals)
+        .send_recv(code, salt)
+        .await
+        .unwrap();
+    vft_client::allocate_shards(
+        remoting.clone(),
+        token,
+        gtest::constants::MAX_USER_GAS_LIMIT,
+    )
+    .await
+    .unwrap();
+    token
+}
+
+async fn receipt_status(
+    service: &VftManagerC<GTestRemoting>,
+    manager: ActorId,
+    slot: u64,
+    index: u64,
+) -> vft_manager_client::ReceiptStatus {
+    service
+        .receipt_status(slot, index)
+        .recv(manager)
+        .await
+        .unwrap()
+}
+
+async fn receipt_deposits(
+    service: &VftManagerC<GTestRemoting>,
+    manager: ActorId,
+    slot: u64,
+    index: u64,
+) -> Vec<vft_manager_client::ReceiptDepositState> {
+    service
+        .receipt_deposits(slot, index)
+        .recv(manager)
+        .await
+        .unwrap()
+}
+
 async fn mint_eth_supply_tokens(
     remoting: &GTestRemoting,
     vft_manager_program_id: ActorId,
@@ -89,13 +148,7 @@ async fn mint_eth_supply_tokens(
     amount: U256,
     transaction_index: u64,
 ) {
-    let receipt_rlp = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3u8; 20].into(),
-        account_id,
-        ERC20_TOKEN_ETH_SUPPLY,
-        amount,
-    );
+    let receipt_rlp = deposit_receipt(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
         .submit_receipt(0, transaction_index, receipt_rlp)
         .send_recv(vft_manager_program_id)
@@ -156,11 +209,7 @@ async fn benchmark_reply(
         .payload_bytes(call);
     if mailbox.contains(&token_call) {
         let mut service = VftManagerC::new(manual.clone());
-        let progress = service
-            .receipt_deposits(key.0, key.1)
-            .recv(manager)
-            .await
-            .unwrap();
+        let progress = receipt_deposits(&service, manager, key.0, key.1).await;
         assert_eq!(
             progress.len(),
             1,
@@ -180,11 +229,7 @@ async fn benchmark_reply(
         assert!(!deposit.native);
         assert_ne!(deposit.operation_id, H256::zero());
         assert_eq!(
-            service
-                .receipt_status(key.0, key.1)
-                .recv(manager)
-                .await
-                .unwrap(),
+            receipt_status(&service, manager, key.0, key.1).await,
             vft_manager_client::ReceiptStatus::Reserved,
         );
         // A concurrent sample cannot replace the progress used by the reply hook.
@@ -203,11 +248,7 @@ async fn benchmark_reply(
             Err(Error::AlreadyProcessed),
         );
         assert_eq!(
-            service
-                .receipt_deposits(key.0, key.1)
-                .recv(manager)
-                .await
-                .unwrap(),
+            receipt_deposits(&service, manager, key.0, key.1).await,
             progress,
         );
         mailbox.reply_bytes(token_call, reply, 0).unwrap();
@@ -293,20 +334,7 @@ async fn setup_for_test_with_builtin(
     .await
     .unwrap();
 
-    let vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
-    let eth_supply_vft = VftFactoryC::new(remoting.clone())
-        .new("Token".into(), "Token".into(), 18)
-        .send_recv(vft_code_id, b"salt1")
-        .await
-        .unwrap();
-
-    vft_client::allocate_shards(
-        remoting.clone(),
-        eth_supply_vft,
-        gtest::constants::MAX_USER_GAS_LIMIT,
-    )
-    .await
-    .unwrap();
+    let eth_supply_vft = deploy_vft(&remoting, "Token", "Token", 18, b"salt1").await;
 
     let mut vft = VftAdminC::new(remoting.clone());
     vft.set_minter(vft_manager_program_id)
@@ -388,11 +416,7 @@ async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
             "non-admin completed benchmark receipt: {result:?}"
         );
         assert_eq!(
-            admin
-                .receipt_status(10, index as u64)
-                .recv(manager)
-                .await
-                .unwrap(),
+            receipt_status(&admin, manager, 10, index as u64).await,
             vft_manager_client::ReceiptStatus::Unknown,
         );
     }
@@ -423,13 +447,7 @@ async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
     );
 
     // The attack must not preempt the authenticated deposit for the same key.
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3_u8; 20].into(),
-        caller,
-        ERC20_TOKEN_ETH_SUPPLY,
-        U256::from(11_u64),
-    );
+    let receipt = deposit_receipt(caller, ERC20_TOKEN_ETH_SUPPLY, U256::from(11_u64));
     assert_eq!(
         VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
             .submit_receipt(10, 0, receipt)
@@ -470,19 +488,11 @@ async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
             Ok(()),
         );
         assert_eq!(
-            outsider
-                .receipt_status(20, index as u64)
-                .recv(manager)
-                .await
-                .unwrap(),
+            receipt_status(&outsider, manager, 20, index as u64).await,
             vft_manager_client::ReceiptStatus::Processed,
         );
         let key = (20, index as u64);
-        let progress = outsider
-            .receipt_deposits(key.0, key.1)
-            .recv(manager)
-            .await
-            .unwrap();
+        let progress = receipt_deposits(&outsider, manager, key.0, key.1).await;
         assert_eq!(progress.len(), 1);
         assert_eq!(
             progress[0].outcome,
@@ -496,11 +506,7 @@ async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
             Err(Error::AlreadyProcessed),
         );
         assert_eq!(
-            outsider
-                .receipt_deposits(key.0, key.1)
-                .recv(manager)
-                .await
-                .unwrap(),
+            receipt_deposits(&outsider, manager, key.0, key.1).await,
             progress,
         );
     }
@@ -511,7 +517,7 @@ async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
         .await
         .unwrap());
     assert_eq!(
-        outsider.receipt_status(21, 0).recv(manager).await.unwrap(),
+        receipt_status(&outsider, manager, 21, 0).await,
         vft_manager_client::ReceiptStatus::Processed,
     );
     outsider
@@ -552,11 +558,7 @@ async fn test_reply_benchmark_preserves_ambiguous_progress_and_original_child() 
                 .unwrap(),
             Err(Error::InvalidReply),
         );
-        let progress = service
-            .receipt_deposits(key.0, key.1)
-            .recv(manager)
-            .await
-            .unwrap();
+        let progress = receipt_deposits(&service, manager, key.0, key.1).await;
         assert_eq!(progress.len(), 1);
         assert_eq!(
             progress[0].outcome,
@@ -564,11 +566,7 @@ async fn test_reply_benchmark_preserves_ambiguous_progress_and_original_child() 
         );
         assert!(progress[0].child.is_some());
         assert_eq!(
-            service
-                .receipt_status(key.0, key.1)
-                .recv(manager)
-                .await
-                .unwrap(),
+            receipt_status(&service, manager, key.0, key.1).await,
             vft_manager_client::ReceiptStatus::Reserved,
         );
         assert_eq!(
@@ -578,11 +576,7 @@ async fn test_reply_benchmark_preserves_ambiguous_progress_and_original_child() 
             Err(Error::AlreadyProcessed),
         );
         assert_eq!(
-            service
-                .receipt_deposits(key.0, key.1)
-                .recv(manager)
-                .await
-                .unwrap(),
+            receipt_deposits(&service, manager, key.0, key.1).await,
             progress,
         );
     }
@@ -660,11 +654,7 @@ async fn test_eth_supply_token() {
 
     let manager = VftManagerC::new(remoting.clone());
     assert_eq!(
-        manager
-            .receipt_status(0, 0)
-            .recv(vft_manager_program_id)
-            .await
-            .unwrap(),
+        receipt_status(&manager, vft_manager_program_id, 0, 0).await,
         vft_manager_client::ReceiptStatus::Processed,
     );
     assert_eq!(
@@ -675,13 +665,7 @@ async fn test_eth_supply_token() {
             .unwrap(),
         vec![(0, 0)],
     );
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3u8; 20].into(),
-        account_id,
-        ERC20_TOKEN_ETH_SUPPLY,
-        amount,
-    );
+    let receipt = deposit_receipt(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
     assert_eq!(
         VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
             .submit_receipt(0, 0, receipt)
@@ -812,13 +796,7 @@ async fn test_submit_receipt_concurrent_replay_prevents_double_mint() {
         .system()
         .mint_to(account_id, 100_000_000_000_000_000);
     let amount = U256::from(10_000_000_000_u64);
-    let receipt_rlp = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3u8; 20].into(),
-        account_id,
-        ERC20_TOKEN_ETH_SUPPLY,
-        amount,
-    );
+    let receipt_rlp = deposit_receipt(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
 
     // Queue two identical submissions in the same block to verify the receipt
     // reservation is visible before the first asynchronous VFT call yields.
@@ -869,13 +847,7 @@ async fn test_failed_mint_releases_receipt_for_retry() {
         .system()
         .mint_to(account_id, 100_000_000_000_000_000);
     let amount = U256::from(10_000_000_000_u64);
-    let receipt_rlp = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3u8; 20].into(),
-        account_id,
-        ERC20_TOKEN_ETH_SUPPLY,
-        amount,
-    );
+    let receipt_rlp = deposit_receipt(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
 
     let mut vft = VftAdminC::new(remoting.clone());
     vft.set_minter(REMOTING_ACTOR_ID.into())
@@ -953,11 +925,7 @@ async fn test_submit_receipt_processes_every_deposit_log_and_rejects_replay() {
         first + second
     );
     assert_eq!(
-        manager
-            .receipt_status(4, 2)
-            .recv(vft_manager_program_id)
-            .await
-            .unwrap(),
+        receipt_status(&manager, vft_manager_program_id, 4, 2).await,
         vft_manager_client::ReceiptStatus::Processed,
     );
     assert_eq!(
@@ -986,19 +954,8 @@ async fn test_partial_receipt_retry_skips_completed_deposit_logs() {
     remoting
         .system()
         .mint_to(account_id, 100_000_000_000_000_000);
-    let second_vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
-    let second_vft = VftFactoryC::new(remoting.clone())
-        .new("Second token".into(), "SEC".into(), 18)
-        .send_recv(second_vft_code_id, b"receipt-second-token")
-        .await
-        .unwrap();
-    vft_client::allocate_shards(
-        remoting.clone(),
-        second_vft,
-        gtest::constants::MAX_USER_GAS_LIMIT,
-    )
-    .await
-    .unwrap();
+    let second_vft =
+        deploy_vft(&remoting, "Second token", "SEC", 18, b"receipt-second-token").await;
     let second_erc20 = H160([18; 20]);
     VftManagerC::new(remoting.clone())
         .map_vara_to_eth_address(second_vft, second_erc20, TokenSupply::Ethereum)
@@ -1036,11 +993,7 @@ async fn test_partial_receipt_retry_skips_completed_deposit_logs() {
         .await
         .is_zero());
     assert_eq!(
-        manager
-            .receipt_status(7, 3)
-            .recv(vft_manager_program_id)
-            .await
-            .unwrap(),
+        receipt_status(&manager, vft_manager_program_id, 7, 3).await,
         vft_manager_client::ReceiptStatus::Reserved,
     );
 
@@ -1064,11 +1017,7 @@ async fn test_partial_receipt_retry_skips_completed_deposit_logs() {
         second_amount
     );
     assert_eq!(
-        manager
-            .receipt_status(7, 3)
-            .recv(vft_manager_program_id)
-            .await
-            .unwrap(),
+        receipt_status(&manager, vft_manager_program_id, 7, 3).await,
         vft_manager_client::ReceiptStatus::Processed,
     );
     assert_eq!(
@@ -1168,19 +1117,8 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
         first + second
     );
 
-    let second_vft_code_id = remoting.system().submit_code(vft::WASM_BINARY);
-    let second_vft = VftFactoryC::new(remoting.clone())
-        .new("Retry token".into(), "RET".into(), 18)
-        .send_recv(second_vft_code_id, b"gear-receipt-retry-token")
-        .await
-        .unwrap();
-    vft_client::allocate_shards(
-        remoting.clone(),
-        second_vft,
-        gtest::constants::MAX_USER_GAS_LIMIT,
-    )
-    .await
-    .unwrap();
+    let second_vft =
+        deploy_vft(&remoting, "Retry token", "RET", 18, b"gear-receipt-retry-token").await;
     let second_erc20 = H160([19; 20]);
     VftManagerC::new(remoting.clone())
         .map_vara_to_eth_address(second_vft, second_erc20, TokenSupply::Ethereum)
@@ -1218,11 +1156,7 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
         if attempt == 0 {
             assert!(first_mailbox.contains(&first_return));
             assert!(second_mailbox.contains(&second_return));
-            let states = admin
-                .receipt_deposits(9, 3)
-                .recv(vft_manager_program_id)
-                .await
-                .unwrap();
+            let states = receipt_deposits(&admin, vft_manager_program_id, 9, 3).await;
             assert_eq!(states.len(), 3);
             assert!(states[0].native && states[2].native);
             assert_eq!(
@@ -1298,11 +1232,7 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
             U256::zero()
         );
         assert_eq!(
-            manager
-                .receipt_status(9, 3)
-                .recv(vft_manager_program_id)
-                .await
-                .unwrap(),
+            receipt_status(&manager, vft_manager_program_id, 9, 3).await,
             vft_manager_client::ReceiptStatus::Reserved
         );
     }
@@ -1350,22 +1280,14 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
         balance_of(&remoting, second_vft, receiver).await,
         eth_amount
     );
-    let settled = admin
-        .receipt_deposits(9, 3)
-        .recv(vft_manager_program_id)
-        .await
-        .unwrap();
+    let settled = receipt_deposits(&admin, vft_manager_program_id, 9, 3).await;
     assert_eq!(settled.len(), 3);
     assert!(settled
         .iter()
         .all(|log| log.outcome == vft_manager_client::ReceiptDepositOutcome::Settled));
     assert!(settled[0].native && settled[2].native);
     assert_eq!(
-        manager
-            .receipt_status(9, 3)
-            .recv(vft_manager_program_id)
-            .await
-            .unwrap(),
+        receipt_status(&manager, vft_manager_program_id, 9, 3).await,
         vft_manager_client::ReceiptStatus::Processed
     );
     assert_eq!(
@@ -1520,13 +1442,7 @@ async fn test_withdraw_fails_with_bad_origin() {
     let mut vft_manager = VftManagerC::new(remoting.clone());
 
     let account_id: ActorId = 42.into();
-    let receipt_rlp = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        [3u8; 20].into(),
-        account_id,
-        ERC20_TOKEN_GEAR_SUPPLY,
-        U256::zero(),
-    );
+    let receipt_rlp = deposit_receipt(account_id, ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
     let result = vft_manager
         .submit_receipt(0, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
@@ -2518,19 +2434,7 @@ async fn test_ordinary_gear_vft_returns_without_native_burn() {
         vft_manager_program_id: manager,
         ..
     } = setup_for_test().await;
-    let code = remoting.system().submit_code(vft::WASM_BINARY);
-    let token = VftFactoryC::new(remoting.clone())
-        .new("Ordinary Gear".into(), "GEAR".into(), 12)
-        .send_recv(code, b"ordinary-gear")
-        .await
-        .unwrap();
-    vft_client::allocate_shards(
-        remoting.clone(),
-        token,
-        gtest::constants::MAX_USER_GAS_LIMIT,
-    )
-    .await
-    .unwrap();
+    let token = deploy_vft(&remoting, "Ordinary Gear", "GEAR", 12, b"ordinary-gear").await;
     let recipient: ActorId = 100_004.into();
     remoting.system().mint_to(recipient, 1_000_000_000_000);
     let amount = U256::from(2_000_000_000_000u128);
@@ -2545,13 +2449,7 @@ async fn test_ordinary_gear_vft_returns_without_native_burn() {
         .send_recv(manager)
         .await
         .unwrap();
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        H160([3; 20]),
-        recipient,
-        erc20,
-        amount,
-    );
+    let receipt = deposit_receipt(recipient, erc20, amount);
     let native_before = remoting.system().balance_of(recipient);
     let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
     proxy
@@ -2732,13 +2630,7 @@ async fn test_native_fractional_split_preserves_aggregate_escrow() {
         .into_iter()
         .enumerate()
     {
-        let receipt = crate::create_receipt_rlp(
-            ERC20_MANAGER_ADDRESS,
-            H160([3; 20]),
-            recipient,
-            ERC20_TOKEN_GEAR_SUPPLY,
-            U256::from(raw),
-        );
+        let receipt = deposit_receipt(recipient, ERC20_TOKEN_GEAR_SUPPLY, U256::from(raw));
         assert_eq!(
             proxy
                 .submit_receipt(33, index as u64, receipt.clone())
@@ -3117,13 +3009,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         .await
         .unwrap()
         .unwrap();
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        H160([3; 20]),
-        recipient,
-        ERC20_TOKEN_GEAR_SUPPLY,
-        amount,
-    );
+    let receipt = deposit_receipt(recipient, ERC20_TOKEN_GEAR_SUPPLY, amount);
     let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
     // Reply funding happens after send in gstd: setup failure must roll back that
     // send, not classify it as an economic retry while an untracked child runs.
@@ -3134,7 +3020,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         .await
         .is_err());
     assert_eq!(
-        admin.receipt_status(31, 1).recv(manager).await.unwrap(),
+        receipt_status(&admin, manager, 31, 1).await,
         vft_manager_client::ReceiptStatus::Unknown
     );
     assert_eq!(balance_of(&remoting, native, manager).await, amount);
@@ -3174,7 +3060,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
     assert!(SubmitReceipt::decode_reply(original_reply.payload())
         .unwrap()
         .is_err());
-    let before = admin.receipt_deposits(31, 1).recv(manager).await.unwrap();
+    let before = receipt_deposits(&admin, manager, 31, 1).await;
     assert_eq!(before.len(), 1);
     assert_eq!(
         before[0].outcome,
@@ -3203,7 +3089,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
             .unwrap(),
         Err(Error::NativeSettlementPending)
     );
-    let resumed = admin.receipt_deposits(31, 1).recv(manager).await.unwrap();
+    let resumed = receipt_deposits(&admin, manager, 31, 1).await;
     assert_eq!(resumed[0].child, Some(original_child));
     // Withhold the real wrapper's read-only query until its configured deadline.
     // A failed query must leave both original economic children untouched.
@@ -3244,7 +3130,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         Err(Error::ReplyTimeout(_))
     ));
     assert_eq!(
-        admin.receipt_deposits(31, 1).recv(manager).await.unwrap(),
+        receipt_deposits(&admin, manager, 31, 1).await,
         resumed
     );
     assert_eq!(
@@ -3307,7 +3193,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
     );
     admin.unpause().send_recv(manager).await.unwrap();
     assert_eq!(
-        admin.receipt_deposits(31, 1).recv(manager).await.unwrap()[0].outcome,
+        receipt_deposits(&admin, manager, 31, 1).await[0].outcome,
         vft_manager_client::ReceiptDepositOutcome::Settled
     );
     assert!(mailbox.claim_value(message).is_err());
@@ -3334,13 +3220,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         .send_recv(native)
         .await
         .unwrap();
-    let failed_receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        H160([3; 20]),
-        failing_recipient,
-        ERC20_TOKEN_GEAR_SUPPLY,
-        amount,
-    );
+    let failed_receipt = deposit_receipt(failing_recipient, ERC20_TOKEN_GEAR_SUPPLY, amount);
     assert_eq!(
         proxy
             .submit_receipt(32, 1, failed_receipt.clone())
@@ -3349,11 +3229,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
             .unwrap(),
         Err(Error::NativeSettlementPending)
     );
-    let failed_row = admin
-        .receipt_deposits(32, 1)
-        .recv(manager)
-        .await
-        .unwrap()
+    let failed_row = receipt_deposits(&admin, manager, 32, 1).await
         .remove(0);
     let returned = wrapper
         .redemption(failed_row.operation_id)
@@ -3443,11 +3319,11 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
     }
     assert_eq!(refunds, 1, "Original refund event must be emitted once");
     assert_eq!(
-        admin.receipt_status(32, 1).recv(manager).await.unwrap(),
+        receipt_status(&admin, manager, 32, 1).await,
         vft_manager_client::ReceiptStatus::Processed
     );
     assert_eq!(
-        admin.receipt_deposits(32, 1).recv(manager).await.unwrap()[0].outcome,
+        receipt_deposits(&admin, manager, 32, 1).await[0].outcome,
         vft_manager_client::ReceiptDepositOutcome::Refunded
     );
     assert_eq!(
@@ -3623,7 +3499,7 @@ async fn assert_cutover_rejected(
         vft_manager_client::CutoverPhase::Draining
     );
     assert_eq!(
-        admin.receipt_status(999, 0).recv(manager).await.unwrap(),
+        receipt_status(&admin, manager, 999, 0).await,
         vft_manager_client::ReceiptStatus::Unknown
     );
 }
@@ -3643,13 +3519,7 @@ async fn test_upgrade_rejects_pending_receipt_and_retains_original_evidence() {
         .send_recv(token)
         .await
         .unwrap();
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        H160([3; 20]),
-        recipient,
-        ERC20_TOKEN_ETH_SUPPLY,
-        U256::from(11u32),
-    );
+    let receipt = deposit_receipt(recipient, ERC20_TOKEN_ETH_SUPPLY, U256::from(11u32));
     assert!(
         VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
             .submit_receipt(1, 0, receipt)
@@ -3663,7 +3533,7 @@ async fn test_upgrade_rejects_pending_receipt_and_retains_original_evidence() {
     admin.pause().send_recv(manager).await.unwrap();
     assert_cutover_rejected(&remoting, manager, destination, token).await;
     assert_eq!(
-        admin.receipt_status(1, 0).recv(manager).await.unwrap(),
+        receipt_status(&admin, manager, 1, 0).await,
         vft_manager_client::ReceiptStatus::Reserved
     );
     for order in [Order::Direct, Order::Reverse] {
@@ -3742,11 +3612,7 @@ async fn test_cutover_retains_custody_domains_and_retired_program_queries() {
         vec![(0, 10)]
     );
     assert_eq!(
-        admin
-            .receipt_deposits(0, 10)
-            .recv(manager)
-            .await
-            .unwrap()
+        receipt_deposits(&admin, manager, 0, 10).await
             .len(),
         1
     );
@@ -3788,13 +3654,7 @@ async fn test_cutover_retains_custody_domains_and_retired_program_queries() {
     assert_eq!(active.phase, CutoverPhase::Active);
     assert_eq!(active.predecessor, Some(manager));
     assert_eq!(active.minimum_receipt_slot, 33);
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        H160([3; 20]),
-        sender,
-        ERC20_TOKEN_ETH_SUPPLY,
-        U256::from(11u32),
-    );
+    let receipt = deposit_receipt(sender, ERC20_TOKEN_ETH_SUPPLY, U256::from(11u32));
     let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
     for slot in [0, 32] {
         assert_eq!(
@@ -4020,13 +3880,7 @@ async fn test_cutover_draining_slot_boundary_and_economic_freeze() {
         Err(Error::CutoverNotReady)
     );
     let recipient: ActorId = 100_100.into();
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        H160([3; 20]),
-        recipient,
-        ERC20_TOKEN_ETH_SUPPLY,
-        U256::from(17u32),
-    );
+    let receipt = deposit_receipt(recipient, ERC20_TOKEN_ETH_SUPPLY, U256::from(17u32));
     let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
     assert_eq!(
         proxy
@@ -4135,13 +3989,7 @@ async fn test_begin_cutover_rejects_boundary_below_processed_or_reserved_high_wa
                 .await
                 .unwrap();
         }
-        let receipt = crate::create_receipt_rlp(
-            ERC20_MANAGER_ADDRESS,
-            H160([3; 20]),
-            100_101.into(),
-            ERC20_TOKEN_ETH_SUPPLY,
-            U256::from(17u32),
-        );
+        let receipt = deposit_receipt(100_101.into(), ERC20_TOKEN_ETH_SUPPLY, U256::from(17u32));
         let result = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
             .submit_receipt(101, 0, receipt)
             .send_recv(manager)
@@ -4264,13 +4112,7 @@ async fn test_prepare_cutover_rejects_mismatched_fingerprint_and_used_destinatio
         .send_recv(token)
         .await
         .unwrap();
-    let receipt = crate::create_receipt_rlp(
-        ERC20_MANAGER_ADDRESS,
-        H160([3; 20]),
-        100_102.into(),
-        ERC20_TOKEN_ETH_SUPPLY,
-        U256::one(),
-    );
+    let receipt = deposit_receipt(100_102.into(), ERC20_TOKEN_ETH_SUPPLY, U256::one());
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
         .submit_receipt(0, 0, receipt)
         .send_recv(destination)
@@ -4974,17 +4816,9 @@ async fn test_mock_receipt_admission_preserves_typed_cutover_domain_errors() {
             .unwrap(),
         Err(Error::Retired)
     );
-    assert!(admin
-        .receipt_deposits(32, 0)
-        .recv(source)
-        .await
-        .unwrap()
+    assert!(receipt_deposits(&admin, source, 32, 0).await
         .is_empty());
-    assert!(admin
-        .receipt_deposits(33, 0)
-        .recv(destination)
-        .await
-        .unwrap()
+    assert!(receipt_deposits(&admin, destination, 33, 0).await
         .is_empty());
 }
 

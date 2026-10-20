@@ -900,10 +900,7 @@ mod tests {
     use super::*;
 
     fn scalar_key(value: u16) -> [u8; 33] {
-        let mut scalar = [0; 32];
-        scalar[30..].copy_from_slice(&value.to_be_bytes());
-        k256::ecdsa::SigningKey::from_bytes((&scalar).into())
-            .expect("valid scalar")
+        crate::fixtures::signing_key(value)
             .verifying_key()
             .to_encoded_point(true)
             .as_bytes()

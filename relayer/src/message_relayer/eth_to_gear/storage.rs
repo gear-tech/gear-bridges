@@ -710,18 +710,28 @@ impl JSONStorage {
             "HOLD: inbound transaction UUID is owned by both active and completed journals"
         );
         let mut failed = state.failed;
-        for mut tx in state.transactions.into_values() {
-            if !matches!(tx.status, TxStatus::ComposeProof) {
+        for (mut tx, completed) in state
+            .transactions
+            .into_values()
+            .map(|tx| (tx, false))
+            .chain(state.completed.into_values().map(|tx| (tx, true)))
+        {
+            if completed {
+                anyhow::ensure!(
+                    tx.receipt.is_some(),
+                    "Completed transaction {} has no original receipt evidence",
+                    tx.uuid
+                );
+            } else if !matches!(tx.status, TxStatus::ComposeProof) {
                 anyhow::ensure!(
                     tx.receipt.is_some(),
                     "Transaction {} has no original receipt evidence",
                     tx.uuid
                 );
             }
-            if matches!(
-                tx.status,
-                TxStatus::SubmitMessage | TxStatus::PreparingSubmission
-            ) {
+            if !completed
+                && matches!(tx.status, TxStatus::SubmitMessage | TxStatus::PreparingSubmission)
+            {
                 let receipt = tx.receipt.as_ref().expect("receipt evidence was validated");
                 anyhow::ensure!(
                     receipt.submission_attempts.iter().all(|attempt| {
@@ -749,7 +759,7 @@ impl JSONStorage {
                     tx.receipt_event()?;
                 }
             }
-            if matches!(tx.status, TxStatus::Completed) {
+            if completed || matches!(tx.status, TxStatus::Completed) {
                 tx.saved_settlement_observation = Some(
                     tx.saved_settlement_observation
                         .take()
@@ -765,30 +775,6 @@ impl JSONStorage {
                 };
                 failed.insert(tx.uuid, diagnostic);
             }
-            tx_manager.add_transaction(tx).await;
-        }
-        for mut tx in state.completed.into_values() {
-            anyhow::ensure!(
-                tx.receipt.is_some(),
-                "Completed transaction {} has no original receipt evidence",
-                tx.uuid
-            );
-            tx.saved_settlement_observation = Some(
-                tx.saved_settlement_observation
-                    .take()
-                    .or_else(|| tx.receipt_observation.clone())
-                    .unwrap_or(super::message_sender::FinalizedReceiptObservation {
-                        finalized_block_number: None,
-                        finalized_block_hash: String::new(),
-                    }),
-            );
-            // Earlier completions could be Processed-only. Requalify the exact
-            // original dispatch/reply/effects without resetting discovery or bytes.
-            let diagnostic = "Saved completion requires original finalized dispatch/reply and per-log settlement reconciliation".to_owned();
-            tx.status = TxStatus::NeedsReconciliation {
-                diagnostic: diagnostic.clone(),
-            };
-            failed.insert(tx.uuid, diagnostic);
             tx_manager.add_transaction(tx).await;
         }
         tx_manager.failed.write().await.extend(failed);
@@ -955,7 +941,7 @@ impl Storage for JSONStorage {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     fn tx_hash(value: u8) -> TxHash {
@@ -969,7 +955,7 @@ mod tests {
         }
     }
 
-    fn runtime_identity() -> InboundRuntimeIdentity {
+    pub(in crate::message_relayer::eth_to_gear) fn runtime_identity() -> InboundRuntimeIdentity {
         InboundRuntimeIdentity {
             ethereum_chain_id: 560048,
             ethereum_genesis_hash: H256::repeat_byte(1),

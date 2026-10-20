@@ -33,50 +33,32 @@ pub use alloy::primitives::TxHash;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 mod finality_archive;
+pub mod inclusion;
 mod queue_deployment;
+pub mod signed_transaction;
 pub use queue_deployment::QueueDeployment;
 use tokio::time::{timeout, Instant};
 
 const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-async fn connect_ws(ws: WsConnect) -> Result<alloy::rpc::client::RpcClient, TransportError> {
-    timeout(
-        RPC_REQUEST_TIMEOUT,
-        alloy::rpc::client::RpcClient::builder()
-            .layer(tower::util::MapFutureLayer::new(
-                |future| -> alloy::transports::TransportFut<'static> { Box::pin(future) },
-            ))
-            .layer(tower::util::MapErrLayer::new(
-                |error: tower::BoxError| match error.downcast::<TransportError>() {
-                    Ok(error) => *error,
-                    Err(error) => RpcError::Transport(TransportErrorKind::Custom(error)),
-                },
-            ))
-            .layer(tower::timeout::TimeoutLayer::new(RPC_REQUEST_TIMEOUT))
-            .ws(ws),
-    )
-    .await
-    .map_err(TransportErrorKind::custom)?
-}
 
 async fn connect_rpc(
     url: &Url,
     ws_max_retry: Option<u32>,
     ws_retry_interval: Option<Duration>,
 ) -> Result<alloy::rpc::client::RpcClient, Error> {
+    let builder = alloy::rpc::client::RpcClient::builder()
+        .layer(tower::util::MapFutureLayer::new(
+            |future| -> alloy::transports::TransportFut<'static> { Box::pin(future) },
+        ))
+        .layer(tower::util::MapErrLayer::new(
+            |error: tower::BoxError| match error.downcast::<TransportError>() {
+                Ok(error) => *error,
+                Err(error) => RpcError::Transport(TransportErrorKind::Custom(error)),
+            },
+        ))
+        .layer(tower::timeout::TimeoutLayer::new(RPC_REQUEST_TIMEOUT));
     match url.scheme() {
-        "http" | "https" => Ok(alloy::rpc::client::RpcClient::builder()
-            .layer(tower::util::MapFutureLayer::new(
-                |future| -> alloy::transports::TransportFut<'static> { Box::pin(future) },
-            ))
-            .layer(tower::util::MapErrLayer::new(
-                |error: tower::BoxError| match error.downcast::<TransportError>() {
-                    Ok(error) => *error,
-                    Err(error) => RpcError::Transport(TransportErrorKind::Custom(error)),
-                },
-            ))
-            .layer(tower::timeout::TimeoutLayer::new(RPC_REQUEST_TIMEOUT))
-            .http(url.clone())),
+        "http" | "https" => Ok(builder.http(url.clone())),
         "ws" | "wss" => {
             let mut ws = WsConnect::new(url.clone());
             if let Some(retries) = ws_max_retry {
@@ -85,7 +67,9 @@ async fn connect_rpc(
             if let Some(interval) = ws_retry_interval {
                 ws = ws.with_retry_interval(interval);
             }
-            Ok(connect_ws(ws).await?)
+            Ok(timeout(RPC_REQUEST_TIMEOUT, builder.ws(ws))
+                .await
+                .map_err(TransportErrorKind::custom)??)
         }
         _ => Err(Error::WrongNodeUrl),
     }
@@ -201,38 +185,34 @@ pub struct PreparedContentMessage {
 pub fn prepared_content_message_identity(
     prepared: &PreparedContentMessage,
 ) -> AnyResult<TransactionIdentity> {
-    use alloy::{
-        consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope},
-        eips::Decodable2718,
+    prepared_content_message_transaction(prepared).map(|(_, identity)| identity)
+}
+
+/// Validate original signed bytes once and retain the decoded envelope for typed calldata checks.
+pub fn prepared_content_message_transaction(
+    prepared: &PreparedContentMessage,
+) -> AnyResult<(alloy::consensus::TxEnvelope, TransactionIdentity)> {
+    use signed_transaction::{
+        decode_signed_transaction, SignedTransactionErrors, SignedTransactionExpected,
     };
-    ensure!(
-        alloy::primitives::keccak256(&prepared.raw_transaction) == prepared.hash,
-        "prepared transaction hash changed"
-    );
-    let mut raw = prepared.raw_transaction.as_slice();
-    let transaction =
-        TxEnvelope::decode_2718(&mut raw).context("invalid prepared signed transaction")?;
-    ensure!(
-        raw.is_empty()
-            && transaction.nonce() == prepared.nonce
-            && transaction.to() == Some(prepared.contract)
-            && transaction.chain_id() == Some(prepared.chain_id),
-        "prepared transaction nonce, chain or contract changed"
-    );
-    let from = transaction
-        .recover_signer()
-        .context("invalid prepared transaction signature")?;
-    ensure!(
-        from == prepared.sender,
-        "prepared transaction signer changed"
-    );
-    Ok(TransactionIdentity {
-        hash: prepared.hash,
-        from,
-        nonce: prepared.nonce,
-        to: Some(prepared.contract),
-        block_number: None,
-    })
+    decode_signed_transaction(
+        &prepared.raw_transaction,
+        SignedTransactionExpected {
+            hash: prepared.hash,
+            nonce: prepared.nonce,
+            destination: prepared.contract,
+            chain_id: Some(prepared.chain_id),
+            signer: Some(prepared.sender),
+        },
+        SignedTransactionErrors {
+            hash: "prepared transaction hash changed",
+            decode: "invalid prepared signed transaction",
+            trailing: None,
+            identity: "prepared transaction nonce, chain or contract changed",
+            signature: "invalid prepared transaction signature",
+            signer: "prepared transaction signer changed",
+        },
+    )
 }
 
 // Every EthApi for the same signer and chain coordinates nonce allocation, including
@@ -741,10 +721,7 @@ async fn walk_ancestors(
     while number > target && started.elapsed() < MAX_PROOF_DURATION {
         if local.is_empty() {
             for candidate in archives {
-                let stored = candidate
-                    .read(number, hash)
-                    .map_err(|_| Error::FinalizedAncestryPending)?
-                    .unwrap_or_default();
+                let stored = candidate.read(number, hash).unwrap_or_default();
                 if !stored.is_empty() {
                     // A local chunk can jump past every speculative numbered
                     // hint. Cancel them before opening another bounded window.
@@ -844,8 +821,6 @@ async fn walk_ancestors(
         if local.is_empty() && next_request > number {
             next_request = number;
         }
-        // Discard obsolete hints if local material jumped over their range.
-        ready.retain(|height, _| *height <= number);
     }
     if let Some(archive) = archive {
         archive
@@ -1492,20 +1467,14 @@ impl EthApi {
         payload: Vec<u8>,
         proof: Vec<[u8; 32]>,
     ) -> AnyResult<()> {
-        use alloy::{
-            consensus::{Transaction, TxEnvelope},
-            eips::Decodable2718,
-            sol_types::SolCall,
-        };
-        prepared_content_message_identity(prepared)?;
+        use alloy::{consensus::Transaction, sol_types::SolCall};
+        let (transaction, _) = prepared_content_message_transaction(prepared)?;
         ensure!(
             prepared.contract == Address::from(self.message_queue_address().0)
                 && prepared.sender == self.public_key
                 && prepared.chain_id == self.chain_id,
             "prepared transaction belongs to another lane or signer"
         );
-        let mut raw = prepared.raw_transaction.as_slice();
-        let transaction = TxEnvelope::decode_2718(&mut raw)?;
         let calldata = IMessageQueue::processMessageCall {
             blockNumber: U256::from(block_number),
             totalLeaves: U256::from(total_leaves),

@@ -349,7 +349,7 @@ impl MerkleRootExtractor {
                 "HOLD: queue deployment hint changed"
             );
         }
-        let deployment =
+        let mut deployment =
             if let Some(hash) = hint.or_else(|| saved_birth.map(|birth| birth.transaction_hash)) {
                 Some(
                     self.eth_api
@@ -376,7 +376,7 @@ impl MerkleRootExtractor {
             )
             .await?;
             let mut state = EthereumRootState::rebuilding(target);
-            if let Some(deployment) = deployment.clone() {
+            if let Some(deployment) = deployment.take() {
                 state.bind_deployment(deployment)?;
             }
             self.cursor_storage

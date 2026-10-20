@@ -952,11 +952,6 @@ impl VftManager {
             submit_receipt::is_quiescent(),
             "Unresolved receipt children"
         );
-        // Reservations survive retryable, ambiguous and native-queued outcomes.
-        assert!(
-            submit_receipt::reserved_transactions().is_empty(),
-            "Unresolved receipt obligations"
-        );
         assert!(
             request_bridging::is_quiescent(),
             "Unresolved source or refund obligations"

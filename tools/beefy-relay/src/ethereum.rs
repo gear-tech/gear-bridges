@@ -11,7 +11,14 @@ use alloy::{
     sol,
 };
 use anyhow::{ensure, Context, Result};
-use ethereum_client::{transaction_identity, EthApi, PollingEthApi, TransactionIdentity};
+use ethereum_client::{
+    inclusion::{
+        authenticated_receipt_block, transaction_proof, ReceiptBlockErrors, RecordedReceiptProof,
+    },
+    transaction_identity, EthApi, PollingEthApi, TransactionIdentity,
+};
+#[cfg(test)]
+use ethereum_client::inclusion::verify_indexed_value;
 use parity_scale_codec::{Decode, Encode};
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, fs, path::Path, str::FromStr, time::Duration};
@@ -33,36 +40,33 @@ fn bytes(bytes: impl AsRef<[u8]>) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
-pub(crate) fn signed_transaction_identity(
+pub(crate) fn signed_transaction(
     raw: &[u8],
     hash: B256,
     nonce: u64,
     destination: Address,
-) -> Result<TransactionIdentity> {
-    ensure!(
-        B256::from(keccak256(raw)) == hash,
-        "saved signed transaction bytes do not match their hash"
-    );
-    let mut encoded = raw;
-    let signed =
-        TxEnvelope::decode_2718(&mut encoded).context("invalid saved signed transaction")?;
-    ensure!(
-        encoded.is_empty(),
-        "saved signed transaction has trailing bytes"
-    );
-    ensure!(
-        signed.nonce() == nonce && signed.to() == Some(destination),
-        "saved signed transaction nonce or destination changed"
-    );
-    Ok(TransactionIdentity {
-        hash,
-        from: signed
-            .recover_signer()
-            .context("invalid saved transaction signature")?,
-        nonce,
-        to: Some(destination),
-        block_number: None,
-    })
+) -> Result<(TxEnvelope, TransactionIdentity)> {
+    use ethereum_client::signed_transaction::{
+        decode_signed_transaction, SignedTransactionErrors, SignedTransactionExpected,
+    };
+    decode_signed_transaction(
+        raw,
+        SignedTransactionExpected {
+            hash,
+            nonce,
+            destination,
+            chain_id: None,
+            signer: None,
+        },
+        SignedTransactionErrors {
+            hash: "saved signed transaction bytes do not match their hash",
+            decode: "invalid saved signed transaction",
+            trailing: Some("saved signed transaction has trailing bytes"),
+            identity: "saved signed transaction nonce or destination changed",
+            signature: "invalid saved transaction signature",
+            signer: "saved signed transaction signer changed",
+        },
+    )
 }
 pub(crate) fn ensure_same_submission(
     observed: TransactionIdentity,
@@ -133,17 +137,25 @@ pub(crate) struct OriginalCommitmentReceipt {
     pub client: Address,
 }
 
-pub(crate) fn validate_recorded_commitment_transaction(
+pub(crate) fn recorded_commitment_transaction(
     raw: &[u8],
     source_raw: &[u8],
-) -> Result<()> {
-    use alloy::sol_types::{SolCall, SolValue};
+) -> Result<TxEnvelope> {
     let mut encoded = raw;
     let signed = TxEnvelope::decode_2718(&mut encoded)?;
     ensure!(
         encoded.is_empty(),
         "original commitment transaction has trailing bytes; HOLD"
     );
+    validate_commitment_call(&signed, source_raw)?;
+    Ok(signed)
+}
+
+pub(crate) fn validate_commitment_call(
+    signed: &TxEnvelope,
+    source_raw: &[u8],
+) -> Result<BeefyClient::submitFiatShamirCall> {
+    use alloy::sol_types::{SolCall, SolValue};
     let call = BeefyClient::submitFiatShamirCall::abi_decode(signed.input())
         .context("original transaction is not the saved Fiat-Shamir submission; HOLD")?;
     let original = crate::decode_versioned_finality_proof(source_raw)?;
@@ -156,278 +168,34 @@ pub(crate) fn validate_recorded_commitment_transaction(
         call.commitment.abi_encode() == expected.abi_encode(),
         "original signed transaction changed source commitment semantics; HOLD"
     );
-    Ok(())
+    Ok(call)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct RecordedReceiptProof {
-    genesis: B256,
-    pub(crate) header: alloy::consensus::Header,
-    pub(crate) index: u64,
-    pub(crate) raw_transaction: Vec<u8>,
-    pub(crate) receipt: alloy::consensus::ReceiptEnvelope,
-    transaction_proof: Vec<Vec<u8>>,
-    receipt_proof: Vec<Vec<u8>>,
-}
-
-fn verify_indexed_value(root: B256, index: u64, value: &[u8], proof: &[Vec<u8>]) -> Result<()> {
-    use ethereum_common::{
-        hash_db, memory_db,
-        patricia_trie::TrieDB,
-        trie_db::{HashDB, Trie},
-        utils,
-    };
-    let mut database = memory_db::new();
-    for node in proof {
-        database.insert(hash_db::EMPTY_PREFIX, node);
-    }
-    let root = ethereum_common::H256(root.0);
-    let trie = TrieDB::new(&database, &root)
-        .map_err(|_| anyhow::anyhow!("invalid original inclusion proof database; HOLD"))?;
-    let key = utils::rlp_encode_transaction_index(&index);
-    ensure!(
-        trie.get(&key)
-            .map_err(|_| anyhow::anyhow!("unavailable original inclusion proof node; HOLD"))?
-            .as_deref()
-            == Some(value),
-        "original transaction/receipt inclusion proof is invalid; HOLD"
-    );
-    Ok(())
-}
-
-fn transaction_proof(
-    transactions: &[TxEnvelope],
-    index: u64,
-    expected_root: B256,
-) -> Result<Vec<Vec<u8>>> {
-    use ethereum_common::{
-        memory_db,
-        patricia_trie::{TrieDB, TrieDBMut},
-        trie_db::{Recorder, Trie, TrieMut},
-        utils,
-    };
-    let mut database = memory_db::new();
-    let mut root = ethereum_common::H256::zero();
-    {
-        let mut trie = TrieDBMut::new(&mut database, &mut root);
-        for (index, transaction) in transactions.iter().enumerate() {
-            trie.insert(
-                &utils::rlp_encode_transaction_index(&(index as u64)),
-                &transaction.encoded_2718(),
-            )
-            .map_err(|_| {
-                anyhow::anyhow!("original transaction trie reconstruction failed; HOLD")
-            })?;
-        }
-        ensure!(
-            trie.root().as_bytes() == expected_root.as_slice(),
-            "full block transactions do not match the authenticated header root; HOLD"
-        );
-    }
-    let trie = TrieDB::new(&database, &root)
-        .map_err(|_| anyhow::anyhow!("invalid original transaction trie; HOLD"))?;
-    let mut recorder = Recorder::new();
-    let expected = transactions
-        .get(usize::try_from(index)?)
-        .context("original transaction index is absent")?
-        .encoded_2718();
-    ensure!(
-        trie.get_with(&utils::rlp_encode_transaction_index(&index), &mut recorder)
-            .map_err(|_| anyhow::anyhow!("original transaction trie proof failed; HOLD"))?
-            .as_deref()
-            == Some(expected.as_slice()),
-        "original transaction trie returned different bytes; HOLD"
-    );
-    Ok(recorder
-        .drain()
-        .into_iter()
-        .map(|record| record.data)
-        .collect())
-}
-
-impl RecordedReceiptProof {
-    pub(crate) fn verify_inclusion(
-        &self,
-        view: &ethereum_client::FinalizedView,
-        hash: B256,
-    ) -> Result<()> {
-        ensure!(
-            self.genesis == view.genesis_hash()
-                && view.contains(self.header.number, self.header.hash_slow()),
-            "receipt proof is not bound to authenticated finalized history; HOLD"
-        );
-        ensure!(
-            B256::from(keccak256(&self.raw_transaction)) == hash,
-            "receipt proof transaction hash changed; HOLD"
-        );
-        verify_indexed_value(
-            self.header.transactions_root,
-            self.index,
-            &self.raw_transaction,
-            &self.transaction_proof,
-        )?;
-        verify_indexed_value(
-            self.header.receipts_root,
-            self.index,
-            &self.receipt.encoded_2718(),
-            &self.receipt_proof,
-        )
-    }
-    fn verify(
-        &self,
-        view: &ethereum_client::FinalizedView,
-        original: &OriginalCommitmentReceipt,
-    ) -> Result<()> {
-        let raw = original.raw.as_slice();
-        let hash = original.hash;
-        let header_hash = self.header.hash_slow();
-        ensure!(
-            self.genesis == view.genesis_hash() && view.contains(self.header.number, header_hash),
-            "original receipt proof is not bound to this authenticated finalized history; HOLD"
-        );
-        ensure!(
-            self.raw_transaction == raw && B256::from(keccak256(raw)) == hash,
-            "original receipt proof changed signed transaction identity; HOLD"
-        );
-        verify_indexed_value(
-            self.header.transactions_root,
-            self.index,
-            raw,
-            &self.transaction_proof,
-        )?;
-        verify_indexed_value(
-            self.header.receipts_root,
-            self.index,
-            &self.receipt.encoded_2718(),
-            &self.receipt_proof,
-        )?;
-        ensure!(
-            self.receipt.status(),
-            "original commitment transaction reverted; HOLD"
-        );
-        let event = B256::from(keccak256(b"NewMMRRoot(bytes32,uint64)"));
-        ensure!(
-            self.receipt
-                .logs()
-                .iter()
-                .any(|log| log.address == original.client
-                    && log.data.topics() == [event]
-                    && log.data.data.len() == 64
-                    && log.data.data[..32] == original.mmr_root
-                    && U256::from_be_slice(&log.data.data[32..])
-                        == U256::from(original.source_block)),
-            "original authenticated receipt did not accept its source MMR commitment; HOLD"
-        );
-        Ok(())
-    }
-}
-
-/// Authenticate arbitrary signed transaction and receipt bytes; policy belongs to the caller.
-pub(crate) async fn authenticate_transaction_receipt(
-    ethereum: &Ethereum,
+fn verify_recorded_receipt(
+    proof: &ethereum_client::inclusion::RecordedReceiptProof,
     view: &ethereum_client::FinalizedView,
-    block_number: u64,
-    block_hash: B256,
-    hash: B256,
-    directory: &Path,
-) -> Result<RecordedReceiptProof> {
-    fs::create_dir_all(directory)?;
-    let path = directory.join(format!("{hash:x}.json"));
-    if let Ok(saved) = fs::read(&path) {
-        let proof: RecordedReceiptProof = serde_json::from_slice(&saved)?;
-        ensure!(
-            proof.header.number == block_number && proof.header.hash_slow() == block_hash,
-            "saved receipt inclusion changed; HOLD"
-        );
-        proof.verify_inclusion(view, hash)?;
-        return Ok(proof);
-    }
+    original: &OriginalCommitmentReceipt,
+) -> Result<()> {
+    proof.verify_original_inclusion(view, &original.raw, original.hash)?;
     ensure!(
-        view.contains(block_number, block_hash),
-        "receipt block is not authenticated; HOLD"
+        proof.receipt.status(),
+        "original commitment transaction reverted; HOLD"
     );
-    let (block, receipts) = tokio::try_join!(
-        async {
-            ethereum
-                .api
-                .raw_provider()
-                .get_block_by_hash(block_hash)
-                .full()
-                .await?
-                .context("full inclusion block unavailable; HOLD")
-        },
-        async {
-            ethereum
-                .api
-                .raw_provider()
-                .get_block_receipts(BlockId::hash_canonical(block_hash))
-                .await?
-                .context("inclusion receipts unavailable; HOLD")
-        },
-    )?;
+    let event = B256::from(keccak256(b"NewMMRRoot(bytes32,uint64)"));
     ensure!(
-        block.header.number == block_number
-            && block.header.hash == block_hash
-            && block.header.inner.hash_slow() == block_hash,
-        "inclusion header changed; HOLD"
+        proof
+            .receipt
+            .logs()
+            .iter()
+            .any(|log| log.address == original.client
+                && log.data.topics() == [event]
+                && log.data.data.len() == 64
+                && log.data.data[..32] == original.mmr_root
+                && U256::from_be_slice(&log.data.data[32..])
+                    == U256::from(original.source_block)),
+        "original authenticated receipt did not accept its source MMR commitment; HOLD"
     );
-    let transactions = block
-        .transactions
-        .try_into_transactions()
-        .map_err(|_| anyhow::anyhow!("full transactions missing; HOLD"))?
-        .into_iter()
-        .map(|tx| tx.into_inner())
-        .collect::<Vec<_>>();
-    ensure!(
-        receipts.len() == transactions.len(),
-        "incomplete receipt set; HOLD"
-    );
-    let mut envelopes = Vec::with_capacity(receipts.len());
-    for (index, receipt) in receipts.into_iter().enumerate() {
-        ensure!(
-            receipt.transaction_index == Some(index as u64)
-                && receipt.block_number == Some(block_number)
-                && receipt.block_hash == Some(block_hash)
-                && receipt.transaction_hash
-                    == B256::from(keccak256(&transactions[index].encoded_2718())),
-            "receipt coordinates changed; HOLD"
-        );
-        envelopes.push((index as u64, receipt.into_primitives_receipt().inner));
-    }
-    ensure!(
-        alloy::consensus::proofs::calculate_receipt_root(
-            &envelopes
-                .iter()
-                .map(|(_, receipt)| receipt)
-                .collect::<Vec<_>>()
-        ) == block.header.receipts_root,
-        "receipt trie differs from authenticated header; HOLD"
-    );
-    let index = transactions
-        .iter()
-        .position(|tx| B256::from(keccak256(&tx.encoded_2718())) == hash)
-        .context("signed transaction absent from inclusion; HOLD")? as u64;
-    let receipt = ethereum_common::utils::generate_merkle_proof(index, &envelopes)?;
-    let proof = RecordedReceiptProof {
-        genesis: view.genesis_hash(),
-        header: block.header.inner.clone(),
-        index,
-        raw_transaction: transactions[index as usize].encoded_2718(),
-        receipt: receipt.receipt,
-        receipt_proof: receipt.proof,
-        transaction_proof: transaction_proof(&transactions, index, block.header.transactions_root)?,
-    };
-    proof.verify_inclusion(view, hash)?;
-    let temporary = path.with_extension("json.tmp");
-    use std::io::Write;
-    let mut file = std::io::BufWriter::new(fs::File::create(&temporary)?);
-    serde_json::to_writer(&mut file, &proof)?;
-    file.flush()?;
-    file.get_ref().sync_all()?;
-    fs::rename(temporary, path)?;
-    fs::File::open(directory)?.sync_all()?;
-    Ok(proof)
+    Ok(())
 }
 
 /// Fetch a block once for every distinct original inclusion, then retain compact
@@ -452,7 +220,7 @@ pub(crate) async fn authenticate_recorded_receipts(
         if stored.as_ref().is_some_and(|proof| {
             proof.header.number == block_number
                 && proof.header.hash_slow() == block_hash
-                && proof.verify(view, original).is_ok()
+                && verify_recorded_receipt(proof, view, original).is_ok()
         }) {
             continue;
         }
@@ -465,63 +233,22 @@ pub(crate) async fn authenticate_recorded_receipts(
         view.contains(block_number, block_hash),
         "original receipt inclusion has not been authenticated; HOLD"
     );
-    let (block, receipts) = tokio::try_join!(
-        async {
-            ethereum
-                .api
-                .raw_provider()
-                .get_block_by_hash(block_hash)
-                .full()
-                .await?
-                .context("original full block is unavailable; HOLD")
+    let (header, transactions, envelopes) = authenticated_receipt_block(
+        ethereum.api.raw_provider(),
+        block_number,
+        block_hash,
+        ReceiptBlockErrors {
+            block: "original full block is unavailable; HOLD",
+            receipts: "original block receipts are unavailable; HOLD",
+            header: "original full block changed its authenticated header; HOLD",
+            transactions: "original block omitted full transactions; HOLD",
+            transaction_root: None,
+            count: "original block omitted transaction receipts; HOLD",
+            coordinates: "original receipt block/index/transaction identity changed; HOLD",
+            root: "original block receipt trie does not match its authenticated header; HOLD",
         },
-        async {
-            ethereum
-                .api
-                .raw_provider()
-                .get_block_receipts(BlockId::hash_canonical(block_hash))
-                .await?
-                .context("original block receipts are unavailable; HOLD")
-        },
-    )?;
-    ensure!(
-        block.header.number == block_number
-            && block.header.hash == block_hash
-            && block.header.inner.hash_slow() == block_hash,
-        "original full block changed its authenticated header; HOLD"
-    );
-    let transactions = block
-        .transactions
-        .try_into_transactions()
-        .map_err(|_| anyhow::anyhow!("original block omitted full transactions; HOLD"))?
-        .into_iter()
-        .map(|transaction| transaction.into_inner())
-        .collect::<Vec<_>>();
-    ensure!(
-        receipts.len() == transactions.len(),
-        "original block omitted transaction receipts; HOLD"
-    );
-    let mut envelopes = Vec::with_capacity(receipts.len());
-    for (index, receipt) in receipts.into_iter().enumerate() {
-        ensure!(
-            receipt.transaction_index == Some(index as u64)
-                && receipt.block_number == Some(block_number)
-                && receipt.block_hash == Some(block_hash)
-                && receipt.transaction_hash
-                    == B256::from(keccak256(&transactions[index].encoded_2718())),
-            "original receipt block/index/transaction identity changed; HOLD"
-        );
-        envelopes.push((index as u64, receipt.into_primitives_receipt().inner));
-    }
-    ensure!(
-        alloy::consensus::proofs::calculate_receipt_root(
-            &envelopes
-                .iter()
-                .map(|(_, receipt)| receipt)
-                .collect::<Vec<_>>()
-        ) == block.header.receipts_root,
-        "original block receipt trie does not match its authenticated header; HOLD"
-    );
+    )
+    .await?;
     for (original, path) in missing {
         let index = transactions
             .iter()
@@ -532,18 +259,14 @@ pub(crate) async fn authenticate_recorded_receipts(
         let receipt = ethereum_common::utils::generate_merkle_proof(index, &envelopes)?;
         let proof = RecordedReceiptProof {
             genesis: view.genesis_hash(),
-            header: block.header.inner.clone(),
+            header: header.clone(),
             index,
             raw_transaction: original.raw.clone(),
             receipt: receipt.receipt,
             receipt_proof: receipt.proof,
-            transaction_proof: transaction_proof(
-                &transactions,
-                index,
-                block.header.transactions_root,
-            )?,
+            transaction_proof: transaction_proof(&transactions, index, header.transactions_root)?,
         };
-        proof.verify(view, original)?;
+        verify_recorded_receipt(&proof, view, original)?;
         if path.exists() {
             let held = path.with_extension(format!(
                 "held-{}.json",
@@ -1085,21 +808,12 @@ impl Ethereum {
         let queue_address = manifest_address(manifest, "queue")?;
         let receiver_address = manifest_address(manifest, "receiver")?;
         let endpoint = hoodi_rpc_endpoint(endpoint)?;
-        if let Some(network) = fixture {
-            ensure_ethereum_network(
-                &endpoint,
-                network.ethereum_chain_id,
-                network.ethereum_genesis_hash,
-            )
-            .await?;
-        } else {
-            ensure_ethereum_network(
-                &endpoint,
-                public_network.chain_id(),
-                public_network.genesis(),
-            )
-            .await?;
-        }
+        ensure_ethereum_network(
+            &endpoint,
+            chain_id,
+            fixture.map_or(public_network.genesis(), |network| network.ethereum_genesis_hash),
+        )
+        .await?;
         let private_key = wallet
             .map(read_hoodi_wallet)
             .transpose()?
@@ -1290,8 +1004,8 @@ impl Ethereum {
             &std::collections::BTreeMap::from([(number, hash)]),
         )
         .await?;
-        let proof = authenticate_transaction_receipt(
-            self,
+        let proof = ethereum_client::inclusion::authenticate_transaction_receipt(
+            self.api.raw_provider(),
             &view,
             number,
             hash,
@@ -1599,15 +1313,14 @@ impl Ethereum {
             .context("accepted signed transaction unavailable; HOLD")?
             .into_inner();
         let raw = signed.encoded_2718();
-        let identity =
-            signed_transaction_identity(&raw, tx_hash, signed.nonce(), self.client_address)?;
+        let (_, identity) =
+            signed_transaction(&raw, tx_hash, signed.nonce(), self.client_address)?;
         ensure!(
             signed.chain_id() == Some(self.api.raw_provider().get_chain_id().await?)
                 && identity.from == receipt.from,
             "accepted signed transaction changed sender or chain; HOLD"
         );
-        validate_recorded_commitment_transaction(&raw, &anchor.raw)?;
-        let call = BeefyClient::submitFiatShamirCall::abi_decode(signed.input())?;
+        let call = validate_commitment_call(&signed, &anchor.raw)?;
         ensure!(
             call.snapshot.abi_encode() == to_sol_snapshot(snapshot).abi_encode()
                 && call.leaf.parentNumber.checked_add(1) == Some(anchor.block)
@@ -1890,11 +1603,9 @@ impl Ethereum {
             .as_u64()
             .context("saved commitment nonce missing")?;
         let provider = self.api.raw_provider();
-        let signed = signed_transaction_identity(&raw, hash, nonce, self.client_address)?;
-        let mut encoded = raw.as_slice();
+        let (transaction, signed) = signed_transaction(&raw, hash, nonce, self.client_address)?;
         ensure!(
-            TxEnvelope::decode_2718(&mut encoded)?.chain_id()
-                == Some(provider.get_chain_id().await?),
+            transaction.chain_id() == Some(provider.get_chain_id().await?),
             "saved commitment belongs to another Ethereum chain; HOLD"
         );
         ensure!(
@@ -2367,10 +2078,37 @@ fn redact_process_output(bytes: &[u8], private_key: &str) -> String {
     output
 }
 #[cfg(test)]
+pub(crate) async fn signed_test_transaction(
+    signer: &PrivateKeySigner,
+    nonce: u64,
+    destination: Address,
+    gas_limit: u64,
+    input: Vec<u8>,
+) -> Result<TxEnvelope> {
+    use alloy::{
+        consensus::{SignableTransaction, TxEip1559},
+        network::TxSigner,
+        primitives::TxKind,
+    };
+    let mut transaction = TxEip1559 {
+        chain_id: HOODI_CHAIN_ID,
+        nonce,
+        gas_limit,
+        max_fee_per_gas: 10,
+        max_priority_fee_per_gas: 1,
+        to: TxKind::Call(destination),
+        input: input.into(),
+        ..Default::default()
+    };
+    let signature = signer.sign_transaction(&mut transaction).await?;
+    Ok(TxEnvelope::Eip1559(transaction.into_signed(signature)))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use alloy::{
-        consensus::{SignableTransaction, TxEip1559, TxLegacy},
+        consensus::{SignableTransaction, TxLegacy},
         network::TxSigner,
         primitives::TxKind,
     };
@@ -2844,17 +2582,8 @@ mod tests {
             Receipt, ReceiptEnvelope,
         };
         let signer = PrivateKeySigner::from_bytes(&B256::from([17; 32]))?;
-        let mut tx = TxEip1559 {
-            chain_id: HOODI_CHAIN_ID,
-            nonce: 7,
-            gas_limit: 21_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(Address::from([18; 20])),
-            ..Default::default()
-        };
-        let signature = signer.sign_transaction(&mut tx).await?;
-        let transaction = TxEnvelope::Eip1559(tx.into_signed(signature));
+        let transaction =
+            signed_test_transaction(&signer, 7, Address::from([18; 20]), 21_000, vec![]).await?;
         let raw = transaction.encoded_2718();
         let root = calculate_transaction_root(std::slice::from_ref(&transaction));
         let nodes = transaction_proof(&[transaction], 0, root)?;
@@ -2895,33 +2624,49 @@ mod tests {
     ) -> Result<()> {
         let signer = PrivateKeySigner::from_bytes(&B256::from([7; 32]))?;
         let destination = Address::from([3; 20]);
-        let mut tx = TxEip1559 {
-            chain_id: HOODI_CHAIN_ID,
-            nonce: 36,
-            gas_limit: 21_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(destination),
-            ..Default::default()
-        };
-        let signature = signer.sign_transaction(&mut tx).await?;
-        let raw = TxEnvelope::Eip1559(tx.into_signed(signature)).encoded_2718();
+        let raw = signed_test_transaction(&signer, 36, destination, 21_000, vec![])
+            .await?
+            .encoded_2718();
         let hash = B256::from(keccak256(&raw));
-        let signed = signed_transaction_identity(&raw, hash, 36, destination)?;
+        let (_, signed) = signed_transaction(&raw, hash, 36, destination)?;
         assert_eq!(signed.from, signer.address());
-        assert!(signed_transaction_identity(&raw, B256::ZERO, 36, destination).is_err());
-        assert!(signed_transaction_identity(&raw, hash, 37, destination).is_err());
-        assert!(signed_transaction_identity(&raw, hash, 36, Address::from([4; 20])).is_err());
+        let prepared = ethereum_client::PreparedContentMessage {
+            chain_id: HOODI_CHAIN_ID,
+            contract: destination,
+            sender: signer.address(),
+            nonce: 36,
+            raw_transaction: raw.clone(),
+            hash,
+        };
+        let (envelope, prepared_identity) =
+            ethereum_client::prepared_content_message_transaction(&prepared)?;
+        assert_eq!(envelope.encoded_2718(), raw);
+        assert_eq!(prepared_identity, signed);
+        let mut changed = prepared.clone();
+        changed.chain_id += 1;
+        assert_eq!(
+            ethereum_client::prepared_content_message_identity(&changed).unwrap_err().to_string(),
+            "prepared transaction nonce, chain or contract changed"
+        );
+        changed = prepared.clone();
+        changed.sender = Address::from([4; 20]);
+        assert_eq!(
+            ethereum_client::prepared_content_message_identity(&changed).unwrap_err().to_string(),
+            "prepared transaction signer changed"
+        );
+        assert!(signed_transaction(&raw, B256::ZERO, 36, destination).is_err());
+        assert!(signed_transaction(&raw, hash, 37, destination).is_err());
+        assert!(signed_transaction(&raw, hash, 36, Address::from([4; 20])).is_err());
         let mut trailing = raw.clone();
         trailing.push(0);
-        assert!(signed_transaction_identity(
+        assert!(signed_transaction(
             &trailing,
             B256::from(keccak256(&trailing)),
             36,
             destination
         )
         .is_err());
-        assert!(signed_transaction_identity(
+        assert!(signed_transaction(
             &[0xff],
             B256::from(keccak256(&[0xff])),
             36,
@@ -2959,8 +2704,8 @@ mod tests {
         let signature = signer.sign_transaction(&mut legacy).await?;
         let legacy = TxEnvelope::Legacy(legacy.into_signed(signature)).encoded_2718();
         assert_eq!(
-            signed_transaction_identity(&legacy, B256::from(keccak256(&legacy)), 0, destination)?
-                .from,
+            signed_transaction(&legacy, B256::from(keccak256(&legacy)), 0, destination)?
+                .1.from,
             signer.address()
         );
         Ok(())
@@ -2971,19 +2716,11 @@ mod tests {
         use alloy::{providers::ProviderBuilder, transports::mock::Asserter};
         let signer = PrivateKeySigner::from_bytes(&B256::from([9; 32]))?;
         let destination = Address::from([8; 20]);
-        let mut tx = TxEip1559 {
-            chain_id: HOODI_CHAIN_ID,
-            nonce: 36,
-            gas_limit: 21_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(destination),
-            ..Default::default()
-        };
-        let signature = signer.sign_transaction(&mut tx).await?;
-        let raw = TxEnvelope::Eip1559(tx.into_signed(signature)).encoded_2718();
+        let raw = signed_test_transaction(&signer, 36, destination, 21_000, vec![])
+            .await?
+            .encoded_2718();
         let hash = B256::from(keccak256(&raw));
-        let signed = signed_transaction_identity(&raw, hash, 36, destination)?;
+        let (_, signed) = signed_transaction(&raw, hash, 36, destination)?;
         let asserter = Asserter::new();
         let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
         let seen = json!({"hash": format!("{hash:#x}"), "from": format!("{:#x}", signed.from),

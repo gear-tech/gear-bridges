@@ -1,5 +1,7 @@
-use crate::{fixtures::generate_fixtures, protocol::*};
-use k256::ecdsa::SigningKey;
+use crate::{
+    fixtures::{generate_fixtures, signing_key},
+    protocol::*,
+};
 use parity_scale_codec::{Decode, Encode};
 use sp_consensus_beefy::{Payload, VersionedFinalityProof};
 use sp_core::crypto::UncheckedFrom;
@@ -10,12 +12,6 @@ fn bytes(hex: &str) -> Vec<u8> {
 
 fn hash(hex: &str) -> Hash32 {
     bytes(hex).try_into().unwrap()
-}
-
-fn scalar_key(value: u16) -> SigningKey {
-    let mut scalar = [0; 32];
-    scalar[30..].copy_from_slice(&value.to_be_bytes());
-    SigningKey::from_bytes((&scalar).into()).expect("valid scalar")
 }
 
 fn resign(
@@ -30,7 +26,7 @@ fn resign(
     let validator_count = signed.signatures.len() as u16;
     signed.signatures = (1..=validator_count)
         .map(|value| {
-            let (signature, recovery_id) = scalar_key(value)
+            let (signature, recovery_id) = signing_key(value)
                 .sign_prehash_recoverable(&digest)
                 .expect("signature");
             let mut raw = [0; 65];
@@ -113,7 +109,7 @@ fn bounded_scale_parsers_reject_lengths_before_decoding() {
     ] {
         assert!(decode_versioned_finality_proof(&raw).is_err());
     }
-    let key: [u8; 33] = scalar_key(1)
+    let key: [u8; 33] = signing_key(1)
         .verifying_key()
         .to_encoded_point(true)
         .as_bytes()

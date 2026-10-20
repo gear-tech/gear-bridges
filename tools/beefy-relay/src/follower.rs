@@ -96,14 +96,12 @@ pub fn commitment_transaction(entry: &Value) -> Result<&Value> {
         .or_else(|| entry["clientAddress"].as_str())
         .context("transaction client missing; HOLD")?
         .parse()?;
-    let identity = crate::ethereum::signed_transaction_identity(
+    let (signed, identity) = crate::ethereum::signed_transaction(
         &raw,
         hash,
         number(&transaction["nonce"])?,
         client,
     )?;
-    let mut encoded = raw.as_slice();
-    let signed = TxEnvelope::decode_2718(&mut encoded)?;
     if entry["origin"] == "external" || !transaction["sender"].is_null() {
         ensure!(
             transaction["sender"] == format!("{:#x}", identity.from),
@@ -171,14 +169,12 @@ pub(crate) fn migrate_commitment_journal(state: &mut Value) -> Result<()> {
             "commitment identity conflicts; HOLD"
         );
         let raw = decode(&transaction["rawTransaction"])?;
-        let identity = crate::ethereum::signed_transaction_identity(
+        let (signed, identity) = crate::ethereum::signed_transaction(
             &raw,
             B256::from(array::<32>(&entry["txHash"])?),
             number(&transaction["nonce"])?,
             client,
         )?;
-        let mut encoded = raw.as_slice();
-        let signed = TxEnvelope::decode_2718(&mut encoded)?;
         ensure!(
             signed.chain_id() == Some(chain),
             "commitment transaction chain differs; HOLD"
@@ -195,8 +191,8 @@ pub(crate) fn migrate_commitment_journal(state: &mut Value) -> Result<()> {
                 "commitment chain metadata differs; HOLD"
             );
         }
-        crate::ethereum::validate_recorded_commitment_transaction(
-            &raw,
+        crate::ethereum::validate_commitment_call(
+            &signed,
             &decode(&entry["rawScale"])?,
         )?;
         if legacy || entry["origin"] == "own" {
@@ -413,24 +409,26 @@ pub(super) fn require_saved_submission(
         "original commitment nonce, signed bytes, or identity is missing; refusing a replacement transaction"
     );
     let raw = decode(&submission["rawTransaction"])?;
-    ensure!(
-        keccak256(&raw) == tx_hash,
-        "saved commitment bytes do not match their hash"
-    );
-    let mut encoded = raw.as_slice();
-    let signed =
-        TxEnvelope::decode_2718(&mut encoded).context("invalid saved commitment transaction")?;
-    ensure!(
-        encoded.is_empty()
-            && signed.nonce() == number(&submission["nonce"])?
-            && signed.to() == Some(expected_client),
-        "saved commitment nonce or destination differs from signed bytes"
-    );
-    let identity = crate::ethereum::signed_transaction_identity(
+    use ethereum_client::signed_transaction::{
+        decode_signed_transaction, SignedTransactionErrors, SignedTransactionExpected,
+    };
+    let (signed, identity) = decode_signed_transaction(
         &raw,
-        tx_hash.into(),
-        number(&submission["nonce"])?,
-        expected_client,
+        SignedTransactionExpected {
+            hash: tx_hash.into(),
+            nonce: number(&submission["nonce"])?,
+            destination: expected_client,
+            chain_id: None,
+            signer: None,
+        },
+        SignedTransactionErrors {
+            hash: "saved commitment bytes do not match their hash",
+            decode: "invalid saved commitment transaction",
+            trailing: None,
+            identity: "saved commitment nonce or destination differs from signed bytes",
+            signature: "invalid saved transaction signature",
+            signer: "saved sender conflicts with signed bytes; HOLD",
+        },
     )?;
     if !submission["sender"].is_null() {
         ensure!(
@@ -555,10 +553,9 @@ async fn revalidate_finalized_commitments(
                 deployment_client(state)?,
             )?;
             let raw = decode(&submission["rawTransaction"])?;
-            crate::ethereum::validate_recorded_commitment_transaction(&raw, &anchor.raw)?;
-            let mut encoded = raw.as_slice();
+            let signed = crate::ethereum::recorded_commitment_transaction(&raw, &anchor.raw)?;
             ensure!(
-                TxEnvelope::decode_2718(&mut encoded)?.chain_id() == Some(journal_chain_id(state)?),
+                signed.chain_id() == Some(journal_chain_id(state)?),
                 "active original chain changed; HOLD"
             );
         } else {
@@ -591,10 +588,8 @@ async fn revalidate_finalized_commitments(
             require_submission_client(recorded_transaction, client, legacy)?;
             let hash = B256::from(array::<32>(&entry["txHash"])?);
             let raw = decode(&recorded_transaction["rawTransaction"])?;
-            let identity = crate::ethereum::signed_transaction_identity(&raw, hash, number(&recorded_transaction["nonce"])?, client)?;
+            let (transaction, identity) = crate::ethereum::signed_transaction(&raw, hash, number(&recorded_transaction["nonce"])?, client)?;
             if entry["origin"] == "own" && !state["followerSigner"].is_null() {ensure!(state["followerSigner"] == format!("{:#x}",identity.from), "own finalized transaction changed follower signer; HOLD");}
-            let mut encoded = raw.as_slice();
-            let transaction = TxEnvelope::decode_2718(&mut encoded)?;
             ensure!(transaction.chain_id() == Some(journal_chain_id(state)?)
                 && recorded_transaction["txHash"] == entry["txHash"] && identity.to == Some(client),
                 "original finalized signed transaction changed chain, hash or client binding; HOLD");
@@ -610,7 +605,7 @@ async fn revalidate_finalized_commitments(
                 ensure!(previous["rawScale"] == entry["rawScale"] && previous["current"] == entry["current"] && previous["next"] == entry["next"],
                     "duplicate original source proof identity changed; HOLD");
             }
-            crate::ethereum::validate_recorded_commitment_transaction(&raw, &decode(&entry["rawScale"] )?)?;
+            crate::ethereum::validate_commitment_call(&transaction, &decode(&entry["rawScale"] )?)?;
             if entry["finalized"] != true {continue;}
             let original = crate::ethereum::OriginalCommitmentReceipt { hash, raw, source_block,
                 mmr_root: array::<32>(&recorded_transaction["root"] )?, client };
@@ -872,19 +867,17 @@ async fn authenticate_reinclusion(
         }
         validate_root_publication_inventory(&publications, &registered_paths)?;
         let raw = decode(&submission["rawTransaction"])?;
-        crate::ethereum::signed_transaction_identity(
+        let (signed, _) = crate::ethereum::signed_transaction(
             &raw,
             hash,
             number(&submission["nonce"])?,
             ethereum.client_address,
         )?;
-        let mut encoded = raw.as_slice();
-        let signed = TxEnvelope::decode_2718(&mut encoded)?;
         ensure!(
             signed.chain_id() == Some(number(&state["deployment"]["ethereum"]["chainId"])?),
             "reincluded transaction changed chain; HOLD"
         );
-        crate::ethereum::validate_recorded_commitment_transaction(&raw, &anchor.raw)?;
+        crate::ethereum::validate_commitment_call(&signed, &anchor.raw)?;
         let original = crate::ethereum::OriginalCommitmentReceipt {
             hash,
             raw,
@@ -893,25 +886,7 @@ async fn authenticate_reinclusion(
             client: ethereum.client_address,
         };
         let directory = output.join("finality-history");
-        let mut view = ethereum
-            .api
-            .verified_finalized_view_with_archive(
-                &directory.join("headers"),
-                ethereum.finality_genesis().await?,
-            )
-            .await?;
-        let targets = std::collections::BTreeMap::from([
-            (
-                finalized.included_block_number,
-                finalized.included_block_hash,
-            ),
-            (
-                finalized.finalized_block_number,
-                finalized.finalized_block_hash,
-            ),
-        ]);
-        view.verify_blocks(ethereum.api.raw_provider(), &targets)
-            .await?;
+        let view = finalized_receipt_view(ethereum, &directory, finalized).await?;
         crate::ethereum::authenticate_recorded_receipts(
             ethereum,
             &view,
@@ -926,6 +901,29 @@ async fn authenticate_reinclusion(
     .context(
         "reinclusion authentication did not finish within 300 seconds; HOLD original evidence",
     )?
+}
+
+async fn finalized_receipt_view(
+    ethereum: &Ethereum,
+    directory: &Path,
+    finalized: &ethereum_client::FinalizedTransactionReceipt,
+) -> Result<ethereum_client::FinalizedView> {
+    let mut view = ethereum
+        .api
+        .verified_finalized_view_with_archive(
+            &directory.join("headers"),
+            ethereum.finality_genesis().await?,
+        )
+        .await?;
+    view.verify_blocks(
+        ethereum.api.raw_provider(),
+        &std::collections::BTreeMap::from([
+            (finalized.included_block_number, finalized.included_block_hash),
+            (finalized.finalized_block_number, finalized.finalized_block_hash),
+        ]),
+    )
+    .await?;
+    Ok(view)
 }
 
 async fn promote_finality(
@@ -971,9 +969,8 @@ async fn promote_finality(
                     )?;
                     let saved_transaction = commitment_transaction(entry)?;
                     let raw = decode(&saved_transaction["rawTransaction"])?;
-                    let identity = crate::ethereum::signed_transaction_identity(&raw,hash.into(),number(&saved_transaction["nonce"])?,ethereum.client_address)?;
-                    let mut encoded = raw.as_slice();
-                    ensure!(TxEnvelope::decode_2718(&mut encoded)?.chain_id() == Some(chain_id), "pending commitment chain changed; HOLD");
+                    let (signed, identity) = crate::ethereum::signed_transaction(&raw,hash.into(),number(&saved_transaction["nonce"])?,ethereum.client_address)?;
+                    ensure!(signed.chain_id() == Some(chain_id), "pending commitment chain changed; HOLD");
                     let receipt = match ethereum.api.raw_provider().get_transaction_receipt(hash.into()).await? {
                         Some(receipt) => receipt,
                         None => {
@@ -1040,7 +1037,7 @@ async fn promote_finality(
         return Ok(());
     }
     // Stage only mutable journal sections: failed originals and removed ownership commit together.
-    let mut staged = json!({"commitments":state["commitments"].clone(),"follower":state["follower"].clone(),"transactions":state["transactions"].clone(),"terminalSubmissions":state["terminalSubmissions"].clone()});
+    let mut staged = json!({"commitments":state["commitments"],"follower":state["follower"],"transactions":state["transactions"],"terminalSubmissions":state["terminalSubmissions"]});
     let previous_transactions = ethereum.transactions.clone();
     let result = async {
     let mut last_finalized = None;
@@ -1050,46 +1047,38 @@ async fn promote_finality(
             continue;
         };
         let entry = &staged["commitments"][index];
-        let Some(finalized) = finalized else {
-            ensure!(entry["origin"] == "own", "external accepted checkpoint lost canonical receipt; HOLD");
-            let terminal = json!({"submission":commitment_transaction(entry)?,"outcome":"held-consumed-nonce","nonceDisposition":nonce_disposition,"minedObservation":entry});
-            archive_terminal_submission(&mut staged,terminal)?;
-            if let Some(accepted) = accepted_tx(state,ethereum,&anchor).await? {
-                ensure!(accepted != hash, "failed original conflicts with accepted commitment identity; HOLD");
-                let proof = source.proof(block-1,&anchor).await?;
-                let external = authenticate_external_commitment(ethereum,output,state,&anchor,&proof,accepted).await?;
-                staged["commitments"][index] = external;
-                let previous = staged["follower"]["lastObservedFinalizedUpdate"].as_u64().unwrap_or(0);
-                staged["follower"]["lastObservedFinalizedUpdate"] = json!(u64::from(block).max(previous));
-                last_finalized = Some(json!(block));
-            } else {failed.push(index);}
-            continue;
+        let finalized = match finalized {
+            Some(finalized) if finalized.receipt.status() => finalized,
+            finalized => {
+                let terminal = if let Some(finalized) = finalized {
+                    ensure!(entry["origin"] == "own", "external accepted checkpoint reverted; HOLD");
+                    let submission = commitment_transaction(entry)?.clone();
+                    let raw = decode(&submission["rawTransaction"])?;
+                    let (_, identity) = crate::ethereum::signed_transaction(&raw,hash.into(),number(&submission["nonce"])?,ethereum.client_address)?;
+                    ensure!(finalized.receipt.from == identity.from && finalized.receipt.to == identity.to, "failed reincluded original identity changed; HOLD");
+                    let directory = output.join("finality-history");
+                    let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
+                    let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(ethereum.api.raw_provider(), &view,finalized.included_block_number,finalized.included_block_hash,hash.into(),&directory.join("receipts")).await?;
+                    ensure!(receipt.raw_transaction == raw && !receipt.receipt.status(), "failed reincluded original proof changed; HOLD");
+                    json!({"submission":submission,"outcome":"finalized-revert","minedObservation":entry,
+                        "failureEvidence":{"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash)}})
+                } else {
+                    ensure!(entry["origin"] == "own", "external accepted checkpoint lost canonical receipt; HOLD");
+                    json!({"submission":commitment_transaction(entry)?,"outcome":"held-consumed-nonce","nonceDisposition":nonce_disposition,"minedObservation":entry})
+                };
+                archive_terminal_submission(&mut staged,terminal)?;
+                if let Some(accepted) = accepted_tx(state,ethereum,&anchor).await? {
+                    ensure!(accepted != hash, "failed original conflicts with accepted commitment identity; HOLD");
+                    let proof = source.proof(block-1,&anchor).await?;
+                    let external = authenticate_external_commitment(ethereum,output,state,&anchor,&proof,accepted).await?;
+                    staged["commitments"][index] = external;
+                    let previous = staged["follower"]["lastObservedFinalizedUpdate"].as_u64().unwrap_or(0);
+                    staged["follower"]["lastObservedFinalizedUpdate"] = json!(u64::from(block).max(previous));
+                    last_finalized = Some(json!(block));
+                } else {failed.push(index);}
+                continue;
+            }
         };
-        if !finalized.receipt.status() {
-            ensure!(entry["origin"] == "own", "external accepted checkpoint reverted; HOLD");
-            let submission = commitment_transaction(entry)?.clone();
-            let raw = decode(&submission["rawTransaction"])?;
-            let identity = crate::ethereum::signed_transaction_identity(&raw,hash.into(),number(&submission["nonce"])?,ethereum.client_address)?;
-            ensure!(finalized.receipt.from == identity.from && finalized.receipt.to == identity.to, "failed reincluded original identity changed; HOLD");
-            let directory = output.join("finality-history");
-            let mut view = ethereum.api.verified_finalized_view_with_archive(&directory.join("headers"),ethereum.finality_genesis().await?).await?;
-            view.verify_blocks(ethereum.api.raw_provider(), &std::collections::BTreeMap::from([(finalized.included_block_number,finalized.included_block_hash),(finalized.finalized_block_number,finalized.finalized_block_hash)])).await?;
-            let receipt = crate::ethereum::authenticate_transaction_receipt(ethereum,&view,finalized.included_block_number,finalized.included_block_hash,hash.into(),&directory.join("receipts")).await?;
-            ensure!(receipt.raw_transaction == raw && !receipt.receipt.status(), "failed reincluded original proof changed; HOLD");
-            let terminal = json!({"submission":submission,"outcome":"finalized-revert","minedObservation":entry,
-                "failureEvidence":{"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash)}});
-            archive_terminal_submission(&mut staged,terminal)?;
-            if let Some(accepted) = accepted_tx(state,ethereum,&anchor).await? {
-                ensure!(accepted != hash, "failed original conflicts with accepted commitment identity; HOLD");
-                let proof = source.proof(block-1,&anchor).await?;
-                let external = authenticate_external_commitment(ethereum,output,state,&anchor,&proof,accepted).await?;
-                staged["commitments"][index] = external;
-                let previous = staged["follower"]["lastObservedFinalizedUpdate"].as_u64().unwrap_or(0);
-                staged["follower"]["lastObservedFinalizedUpdate"] = json!(u64::from(block).max(previous));
-                last_finalized = Some(json!(block));
-            } else {failed.push(index);}
-            continue;
-        }
         let proof = source.proof(block - 1, &anchor).await?;
         let destination = ethereum
             .verify_accepted_commitment(hash.into(), &anchor, &proof.snapshot)
@@ -1111,10 +1100,9 @@ async fn promote_finality(
             .await?;
         }
         let raw = decode(&commitment_transaction(entry)?["rawTransaction"])?;
-        crate::ethereum::validate_recorded_commitment_transaction(&raw,&anchor.raw)?;
+        crate::ethereum::recorded_commitment_transaction(&raw,&anchor.raw)?;
         let directory = output.join("finality-history");
-        let mut view = ethereum.api.verified_finalized_view_with_archive(&directory.join("headers"),ethereum.finality_genesis().await?).await?;
-        view.verify_blocks(ethereum.api.raw_provider(), &std::collections::BTreeMap::from([(finalized.included_block_number,finalized.included_block_hash),(finalized.finalized_block_number,finalized.finalized_block_hash)])).await?;
+        let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
         let original = crate::ethereum::OriginalCommitmentReceipt {hash:hash.into(),raw,source_block:anchor.block,mmr_root:anchor.validated.mmr_root,client:ethereum.client_address};
         crate::ethereum::authenticate_recorded_receipts(ethereum,&view,finalized.included_block_number,finalized.included_block_hash,&[original],&directory.join("receipts")).await?;
         let first_inclusion = record_recovered_receipt(&mut staged, ethereum, &finalized)?;
@@ -1319,29 +1307,9 @@ async fn authenticate_external_commitment(
 ) -> Result<Value> {
     let finalized = wait_for_finalized_receipt(ethereum, hash).await?;
     let directory = output.join("finality-history");
-    let mut view = ethereum
-        .api
-        .verified_finalized_view_with_archive(
-            &directory.join("headers"),
-            ethereum.finality_genesis().await?,
-        )
-        .await?;
-    view.verify_blocks(
+    let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
+    let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(
         ethereum.api.raw_provider(),
-        &std::collections::BTreeMap::from([
-            (
-                finalized.included_block_number,
-                finalized.included_block_hash,
-            ),
-            (
-                finalized.finalized_block_number,
-                finalized.finalized_block_hash,
-            ),
-        ]),
-    )
-    .await?;
-    let receipt = crate::ethereum::authenticate_transaction_receipt(
-        ethereum,
         &view,
         finalized.included_block_number,
         finalized.included_block_hash,
@@ -1351,7 +1319,7 @@ async fn authenticate_external_commitment(
     .await?;
     let mut encoded = receipt.raw_transaction.as_slice();
     let signed = TxEnvelope::decode_2718(&mut encoded)?;
-    let identity = crate::ethereum::signed_transaction_identity(
+    let (_, identity) = crate::ethereum::signed_transaction(
         &receipt.raw_transaction,
         hash.into(),
         signed.nonce(),
@@ -1364,8 +1332,8 @@ async fn authenticate_external_commitment(
             && receipt.receipt.status(),
         "external signed receipt domain or status changed; HOLD"
     );
-    crate::ethereum::validate_recorded_commitment_transaction(
-        &receipt.raw_transaction,
+    crate::ethereum::validate_commitment_call(
+        &signed,
         &anchor.raw,
     )?;
     let original = crate::ethereum::OriginalCommitmentReceipt {
@@ -1660,7 +1628,7 @@ async fn reconcile_original_submission(
     let submission = state["submission"].clone();
     let hash = B256::from(array::<32>(&submission["txHash"])?);
     let raw = decode(&submission["rawTransaction"])?;
-    let identity = crate::ethereum::signed_transaction_identity(
+    let (signed, identity) = crate::ethereum::signed_transaction(
         &raw,
         hash,
         number(&submission["nonce"])?,
@@ -1672,9 +1640,8 @@ async fn reconcile_original_submission(
             "active original follower signer changed; HOLD"
         );
     }
-    let mut encoded = raw.as_slice();
     ensure!(
-        TxEnvelope::decode_2718(&mut encoded)?.chain_id() == Some(journal_chain_id(state)?),
+        signed.chain_id() == Some(journal_chain_id(state)?),
         "original submission chain changed; HOLD"
     );
     let directory = output.join("finality-history");
@@ -1710,8 +1677,8 @@ async fn reconcile_original_submission(
             ]),
         )
         .await?;
-        let receipt = crate::ethereum::authenticate_transaction_receipt(
-            ethereum,
+        let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(
+            ethereum.api.raw_provider(),
             &view,
             finalized.included_block_number,
             finalized.included_block_hash,
@@ -1772,7 +1739,7 @@ async fn revalidate_terminal_submissions(
             "original terminal ownership duplicated; HOLD"
         );
         let raw = decode(&submission["rawTransaction"])?;
-        let identity = crate::ethereum::signed_transaction_identity(
+        let (signed, identity) = crate::ethereum::signed_transaction(
             &raw,
             hash,
             number(&submission["nonce"])?,
@@ -1784,13 +1751,12 @@ async fn revalidate_terminal_submissions(
                 "terminal original follower signer changed; HOLD"
             );
         }
-        let mut encoded = raw.as_slice();
         ensure!(
-            TxEnvelope::decode_2718(&mut encoded)?.chain_id() == Some(journal_chain_id(state)?),
+            signed.chain_id() == Some(journal_chain_id(state)?),
             "terminal submission chain changed; HOLD"
         );
-        crate::ethereum::validate_recorded_commitment_transaction(
-            &raw,
+        crate::ethereum::validate_commitment_call(
+            &signed,
             &decode(&submission["rawScale"])?,
         )?;
         let block: u32 = number(&submission["block"])?.try_into()?;
@@ -1836,8 +1802,8 @@ async fn revalidate_terminal_submissions(
                     ]),
                 )
                 .await?;
-                let receipt = crate::ethereum::authenticate_transaction_receipt(
-                    ethereum,
+                let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(
+                    ethereum.api.raw_provider(),
                     &view,
                     included,
                     block_hash,
@@ -1901,8 +1867,8 @@ async fn revalidate_terminal_submissions(
                         ]),
                     )
                     .await?;
-                    let proof = crate::ethereum::authenticate_transaction_receipt(
-                        ethereum,
+                    let proof = ethereum_client::inclusion::authenticate_transaction_receipt(
+                        ethereum.api.raw_provider(),
                         &view,
                         receipt.included_block_number,
                         receipt.included_block_hash,
@@ -3614,32 +3580,22 @@ mod tests {
     async fn queue_publication_hold_preserves_intent_and_schedules_heartbeat_and_handover(
     ) -> Result<()> {
         use alloy::{
-            consensus::{SignableTransaction, TxEip1559},
             eips::Encodable2718,
-            network::TxSigner,
-            primitives::TxKind,
             signers::local::PrivateKeySigner,
             sol_types::SolCall,
         };
         let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(7))?;
-        let mut transaction = TxEip1559 {
-            chain_id: 560_048,
-            nonce: 4,
-            gas_limit: 100_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(Address::repeat_byte(4)),
-            input: ethereum_client::abi::IMessageQueue::submitMerkleRootCall {
-                blockNumber: alloy::primitives::U256::from(99),
-                merkleRoot: B256::repeat_byte(9),
-                proof: vec![1, 2].into(),
-            }
-            .abi_encode()
-            .into(),
-            ..Default::default()
-        };
-        let signature = signer.sign_transaction(&mut transaction).await?;
-        let raw = TxEnvelope::Eip1559(transaction.into_signed(signature)).encoded_2718();
+        let input = ethereum_client::abi::IMessageQueue::submitMerkleRootCall {
+            blockNumber: alloy::primitives::U256::from(99),
+            merkleRoot: B256::repeat_byte(9),
+            proof: vec![1, 2].into(),
+        }
+        .abi_encode();
+        let raw = crate::ethereum::signed_test_transaction(
+            &signer, 4, Address::repeat_byte(4), 100_000, input,
+        )
+        .await?
+        .encoded_2718();
         let directory = tempfile::tempdir()?;
         let publication = directory.path().join("root.json");
         let intent = json!({
@@ -3723,25 +3679,14 @@ mod tests {
     async fn provenance_accessor_preserves_original_and_rejects_mixed_external_identity(
     ) -> Result<()> {
         use alloy::{
-            consensus::{SignableTransaction, TxEip1559},
             eips::Encodable2718,
-            network::TxSigner,
-            primitives::TxKind,
             signers::local::PrivateKeySigner,
         };
         let signer = PrivateKeySigner::from_bytes(&B256::from([7; 32]))?;
         let client = Address::from([3; 20]);
-        let mut tx = TxEip1559 {
-            chain_id: 560_048,
-            nonce: 36,
-            gas_limit: 21_000,
-            max_fee_per_gas: 10,
-            max_priority_fee_per_gas: 1,
-            to: TxKind::Call(client),
-            ..Default::default()
-        };
-        let signature = signer.sign_transaction(&mut tx).await?;
-        let raw = TxEnvelope::Eip1559(tx.into_signed(signature)).encoded_2718();
+        let raw = crate::ethereum::signed_test_transaction(&signer, 36, client, 21_000, vec![])
+            .await?
+            .encoded_2718();
         let original = json!({"clientAddress":format!("{client:#x}"),"block":420,"blockHash":bytes([8;32]),"root":bytes([9;32]),"txHash":bytes(keccak256(&raw)),"nonce":36,"rawTransaction":bytes(&raw),"sender":format!("{:#x}",signer.address()),"chainId":560_048});
         let directory = tempfile::tempdir()?;
         let mut state = json!({"submission":original,"follower":{}});
@@ -3756,7 +3701,7 @@ mod tests {
             async move {
                 let retained = read_state_file(&directory.join("state.json"))?;
                 assert_eq!(&retained["submission"], original);
-                crate::ethereum::signed_transaction_identity(
+                crate::ethereum::signed_transaction(
                     &decode(&retained["submission"]["rawTransaction"])?,
                     B256::from(array::<32>(&retained["submission"]["txHash"])?),
                     number(&retained["submission"]["nonce"])?,

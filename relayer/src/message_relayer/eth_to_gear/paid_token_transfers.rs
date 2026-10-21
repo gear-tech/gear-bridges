@@ -114,9 +114,10 @@ impl Relayer {
             |api| async move { api.block_number_to_hash(0).await },
         )
         .await?;
+        let (ethereum_chain_id, ethereum_genesis_hash) = eth_api.finality_identity()?;
         let identity = InboundRuntimeIdentity {
-            ethereum_chain_id: eth_api.chain_id().await?,
-            ethereum_genesis_hash: eth_api.get_block(0).await?.header.hash.0.into(),
+            ethereum_chain_id,
+            ethereum_genesis_hash: ethereum_genesis_hash.0.into(),
             ethereum_start_block: from_eth_block,
             erc20_manager_address: None,
             bridging_payment_address: Some(bridging_payment_address),

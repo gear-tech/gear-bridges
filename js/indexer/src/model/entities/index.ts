@@ -11,3 +11,4 @@ export * from './merkleRoot.js';
 export * from './receiptSettlement.model.js';
 export * from './receiptRelay.model.js';
 export * from './gearManagerHandoff.model.js';
+export * from './ethereumFinalityCheckpoint.model.js';

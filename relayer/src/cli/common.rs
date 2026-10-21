@@ -1,7 +1,7 @@
 use clap::Args;
 pub use cli_utils::{
-    BeaconConnectionArgs, EthereumConnectionArgs, EthereumTxArgs, GearConnectionArgs,
-    GearSignerArgs, PrometheusArgs,
+    BeaconConnectionArgs, EthereumChainIdentityArgs, EthereumConnectionArgs,
+    EthereumFinalityArgs, EthereumTxArgs, GearConnectionArgs, GearSignerArgs, PrometheusArgs,
 };
 use std::path::PathBuf;
 
@@ -29,6 +29,11 @@ pub struct EthereumKillSwitchArgs {
 pub struct EthereumArgs {
     #[clap(flatten)]
     pub connection: EthereumConnectionArgs,
+
+    #[clap(flatten)]
+    pub finality: EthereumFinalityArgs,
+    #[clap(flatten)]
+    pub identity: EthereumChainIdentityArgs,
 
     #[clap(flatten)]
     pub tx: EthereumTxArgs,

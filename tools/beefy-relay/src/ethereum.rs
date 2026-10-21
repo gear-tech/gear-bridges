@@ -267,25 +267,51 @@ pub(crate) async fn authenticate_recorded_receipts(
             transaction_proof: transaction_proof(&transactions, index, header.transactions_root)?,
         };
         verify_recorded_receipt(&proof, view, original)?;
-        if path.exists() {
-            let held = path.with_extension(format!(
-                "held-{}.json",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_nanos()
-            ));
-            fs::rename(&path, held)?;
-            fs::File::open(directory)?.sync_all()?;
+        store_receipt_proof(directory, &path, &proof)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn retain_finalized_receipt(
+    finalized: &ethereum_client::FinalizedTransactionReceipt,
+    view: &ethereum_client::FinalizedView,
+    original: &OriginalCommitmentReceipt,
+    directory: &Path,
+) -> Result<()> {
+    verify_recorded_receipt(&finalized.inclusion, view, original)?;
+    fs::create_dir_all(directory)?;
+    let path = directory.join(format!("{:x}.json", original.hash));
+    if let Ok(bytes) = fs::read(&path) {
+        if serde_json::from_slice::<RecordedReceiptProof>(&bytes).is_ok_and(|saved|
+            saved.genesis == finalized.inclusion.genesis
+                && saved.header == finalized.inclusion.header
+                && saved.index == finalized.inclusion.index
+                && saved.raw_transaction == finalized.inclusion.raw_transaction
+                && saved.receipt == finalized.inclusion.receipt
+                && saved.receipt_proof == finalized.inclusion.receipt_proof
+                && saved.transaction_proof == finalized.inclusion.transaction_proof)
+        {
+            return Ok(());
         }
-        let temporary = path.with_extension("json.tmp");
-        let mut file = std::io::BufWriter::new(fs::File::create(&temporary)?);
-        serde_json::to_writer(&mut file, &proof)?;
-        use std::io::Write;
-        file.flush()?;
-        file.get_ref().sync_all()?;
-        fs::rename(temporary, &path)?;
+    }
+    store_receipt_proof(directory, &path, &finalized.inclusion)
+}
+
+fn store_receipt_proof(directory: &Path, path: &Path, proof: &RecordedReceiptProof) -> Result<()> {
+    if path.exists() {
+        let held = path.with_extension(format!("held-{}.json",
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos()));
+        fs::rename(path, held)?;
         fs::File::open(directory)?.sync_all()?;
     }
+    let temporary = path.with_extension("json.tmp");
+    let mut file = std::io::BufWriter::new(fs::File::create(&temporary)?);
+    serde_json::to_writer(&mut file, proof)?;
+    use std::io::Write;
+    file.flush()?;
+    file.get_ref().sync_all()?;
+    fs::rename(temporary, path)?;
+    fs::File::open(directory)?.sync_all()?;
     Ok(())
 }
 
@@ -665,6 +691,8 @@ impl Ethereum {
         )
         .await
         .context("connect Ethereum client to Anvil")?;
+        let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
+        let api = api.with_finality_witness(&anvil.endpoint(), 31_337, genesis).await?;
         let transactions = deployment_transactions(&deployment)?;
         for address in [
             client_address,
@@ -735,13 +763,14 @@ impl Ethereum {
 
     pub async fn connect(
         endpoint: &str,
+        witness_endpoint: &str,
         wallet: &Path,
         manifest: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
         public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
         let ethereum =
-            Self::connect_addresses(endpoint, Some(wallet), manifest, fixture, public_network)
+            Self::connect_addresses(endpoint, witness_endpoint, Some(wallet), manifest, fixture, public_network)
                 .await?;
         verify_manifest(&ethereum, manifest).await?;
         Ok(ethereum)
@@ -750,12 +779,14 @@ impl Ethereum {
     /// Read the deployment only after independently approved network authentication.
     pub async fn token_manifest(
         endpoint: &str,
+        witness_endpoint: &str,
         wallet: &Path,
         addresses: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
     ) -> Result<Value> {
         let ethereum = Self::connect_addresses(
             endpoint,
+            witness_endpoint,
             Some(wallet),
             addresses,
             fixture,
@@ -778,6 +809,7 @@ impl Ethereum {
 
     async fn connect_addresses(
         endpoint: &str,
+        witness_endpoint: &str,
         wallet: Option<&Path>,
         manifest: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
@@ -802,6 +834,7 @@ impl Ethereum {
         );
         if let Some(network) = fixture {
             network.validate_endpoint(endpoint)?;
+            network.validate_endpoint(witness_endpoint)?;
         }
         let client_address = manifest_address(manifest, "client")?;
         let verifier_address = manifest_address(manifest, "verifier")?;
@@ -826,7 +859,13 @@ impl Ethereum {
             None,
         )
         .await
-        .context("connect Ethereum deployment")?;
+        .context("connect Ethereum deployment")?
+        .with_finality_witness(
+            witness_endpoint,
+            chain_id,
+            fixture.map_or(public_network.genesis(), |network| network.ethereum_genesis_hash),
+        )
+        .await?;
         Ok(Self {
             _anvil: None,
             owned_fixture_network: fixture.cloned(),
@@ -842,12 +881,13 @@ impl Ethereum {
 
     pub(crate) async fn connect_readonly(
         endpoint: &str,
+        witness_endpoint: &str,
         manifest: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
         public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
         let ethereum =
-            Self::connect_addresses(endpoint, None, manifest, fixture, public_network).await?;
+            Self::connect_addresses(endpoint, witness_endpoint, None, manifest, fixture, public_network).await?;
         verify_manifest(&ethereum, manifest).await?;
         Ok(ethereum)
     }
@@ -861,36 +901,18 @@ impl Ethereum {
     }
 
     pub(crate) async fn finality_genesis(&self) -> Result<B256> {
-        if let Some(network) = &self.owned_fixture_network {
-            return Ok(network.ethereum_genesis_hash);
-        }
-        // The synthetic Anvil rehearsal exists only inside the pre-existing unit fixtures.
-        #[cfg(test)]
-        if self._anvil.is_some() {
-            let genesis = self
-                .api
-                .raw_provider()
-                .get_block_by_number(0u64.into())
-                .await?
-                .context("owned rehearsal genesis is missing")?;
-            ensure!(
-                genesis.header.number == 0
-                    && genesis.header.inner.hash_slow() == genesis.header.hash,
-                "owned rehearsal genesis is not canonical RLP; HOLD"
-            );
-            return Ok(genesis.header.hash);
-        }
-        Ok(self.public_network.genesis())
+        Ok(self.api.finality_identity()?.1)
     }
 
     pub(crate) async fn queue_root_minimum(&self) -> Result<u64> {
-        Ok(
-            TokenQueueBinding::new(self.queue_address, self.api.raw_provider().clone())
-                .beefyRootMinimum()
-                .call()
-                .await?
-                .try_into()?,
-        )
+        let view = self.api.verified_finalized_view().await?;
+        let primary = TokenQueueBinding::new(self.queue_address, self.api.raw_provider().clone());
+        let witness = TokenQueueBinding::new(self.queue_address, self.api.raw_witness_provider()?.clone());
+        let value = primary.beefyRootMinimum().block(view.block_id()).call().await?;
+        ensure!(value == witness.beefyRootMinimum().block(view.block_id()).call().await?,
+            "HOLD: Ethereum providers disagree on queue root minimum");
+        view.recheck(self.api.raw_provider()).await?;
+        Ok(value.try_into()?)
     }
 
     /// Recover immutable constructor evidence, not the advancing latest checkpoint.
@@ -1066,17 +1088,52 @@ impl Ethereum {
     }
 
     pub(crate) async fn queue_max_block_number(&self) -> Result<u64> {
-        let provider = self.api.raw_provider().clone();
-        let finalized = provider
-            .get_block_by_number(BlockNumberOrTag::Finalized)
-            .await?
-            .context("finalized queue-progress block is missing")?;
-        let value = TokenQueueBinding::new(self.queue_address, provider)
-            .maxBlockNumber()
-            .block(BlockId::hash(finalized.header.hash))
-            .call()
-            .await?;
-        value.try_into().context("queue maxBlockNumber exceeds u64")
+        let view = self.api.verified_finalized_view().await?;
+        self.queue_max_block_at(view.block_hash()).await?
+            .try_into().context("queue maxBlockNumber exceeds u64")
+    }
+
+    pub(crate) async fn queue_max_block_at(&self, hash: B256) -> Result<U256> {
+        let view = self.qualified_state_view(hash).await?;
+        let primary = TokenQueueBinding::new(self.queue_address, self.api.raw_provider().clone());
+        let witness = TokenQueueBinding::new(self.queue_address, self.api.raw_witness_provider()?.clone());
+        let at = BlockId::hash_canonical(hash);
+        let value = primary.maxBlockNumber().block(at).call().await?;
+        ensure!(value == witness.maxBlockNumber().block(at).call().await?,
+            "HOLD: Ethereum providers disagree on queue progress");
+        view.recheck(self.api.raw_provider()).await?;
+        Ok(value)
+    }
+
+    pub(crate) async fn queue_root_at(&self, source_block: U256, hash: B256) -> Result<B256> {
+        let view = self.qualified_state_view(hash).await?;
+        let primary = ethereum_client::abi::IMessageQueue::new(self.queue_address, self.api.raw_provider().clone());
+        let witness = ethereum_client::abi::IMessageQueue::new(self.queue_address, self.api.raw_witness_provider()?.clone());
+        let at = BlockId::hash_canonical(hash);
+        let value = primary.getMerkleRoot(source_block).block(at).call().await?;
+        ensure!(value == witness.getMerkleRoot(source_block).block(at).call().await?,
+            "HOLD: Ethereum providers disagree on queue root");
+        view.recheck(self.api.raw_provider()).await?;
+        Ok(value)
+    }
+
+    pub(crate) async fn account_nonce_at(&self, address: Address, hash: B256) -> Result<u64> {
+        let view = self.qualified_state_view(hash).await?;
+        let at = BlockId::hash_canonical(hash);
+        let value = self.api.raw_provider().get_transaction_count(address).block_id(at).await?;
+        ensure!(value == self.api.raw_witness_provider()?.get_transaction_count(address).block_id(at).await?,
+            "HOLD: Ethereum providers disagree on account nonce");
+        view.recheck(self.api.raw_provider()).await?;
+        Ok(value)
+    }
+
+    async fn qualified_state_view(&self, hash: B256) -> Result<ethereum_client::FinalizedView> {
+        let mut view = self.api.verified_finalized_view().await?;
+        let header = self.api.raw_provider().get_block_by_hash(hash).await?
+            .context("HOLD: historical state header missing")?;
+        view.verify_blocks(self.api.raw_provider(),
+            &std::collections::BTreeMap::from([(header.header.number, hash)])).await?;
+        Ok(view)
     }
 
     pub async fn verify_token_bindings(&self, gear_manager: [u8; 32]) -> Result<()> {
@@ -2137,6 +2194,8 @@ mod tests {
             None,
         )
         .await?;
+        let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
+        let api = api.with_finality_witness(&anvil.endpoint(), 31_337, genesis).await?;
         let provider = api.raw_provider().clone();
         let arguments = (
             B256::from([1; 32]),
@@ -2494,7 +2553,9 @@ mod tests {
                 .is_err(),
             "mainnet endpoint was admitted as Hoodi"
         );
-        let api = EthApi::new(&endpoint, &address_string(Address::ZERO), None, None, None).await?;
+        let api = EthApi::new(&endpoint, &address_string(Address::ZERO), None, None, None).await?
+            .with_finality_witness(&std::env::var("BEEFY_TEST_MAINNET_WITNESS_RPC")?,
+                network.chain_id(), network.genesis()).await?;
         let directory = tempfile::tempdir()?;
         let view = api
             .verified_finalized_view_with_archive(directory.path(), network.genesis())
@@ -2544,6 +2605,7 @@ mod tests {
         }
         assert!(Ethereum::connect_readonly(
             "ws://127.0.0.1:1",
+            "ws://127.0.0.1:2",
             &json!({"chainId":31337}),
             None,
             PublicEthereumNetwork::Hoodi
@@ -2768,7 +2830,9 @@ mod tests {
     async fn original_hoodi_hash_has_canonical_signed_identity() -> Result<()> {
         let endpoint = std::env::var("BEEFY_TEST_HOODI_RPC")
             .unwrap_or_else(|_| "https://rpc.sentio.xyz/hoodi".to_owned());
-        let api = PollingEthApi::new(&endpoint).await?;
+        let api = PollingEthApi::new(&endpoint).await?
+            .with_finality_witness(&std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?,
+                HOODI_CHAIN_ID, HOODI_GENESIS_BLOCK).await?;
         let hash: B256 =
             "0x3ab31061459478dd7625369532a2cf5e4c79204d7345ccca094290be8c7c1946".parse()?;
         let identity = transaction_identity(&*api, hash)

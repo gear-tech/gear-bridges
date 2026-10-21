@@ -37,6 +37,7 @@ tiny-keccak.workspace = true
 alloy.workspace = true
 alloy-consensus = { workspace = true, features = ["k256"] }
 clap.workspace = true
+cli-utils.workspace = true
 ethereum-client.workspace = true
 ethereum-common = { workspace = true, features = ["std"] }
 gear-rpc-client.workspace = true

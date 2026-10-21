@@ -19,6 +19,8 @@ enum Command {
         witness_rpc: String,
         #[arg(long, default_value = "https://hoodi.drpc.org")]
         ethereum_rpc: String,
+        #[command(flatten)]
+        finality: cli_utils::EthereumFinalityArgs,
         #[arg(long)]
         wallet: PathBuf,
         #[arg(long)]
@@ -39,6 +41,8 @@ enum Command {
         witness_rpc: String,
         #[arg(long)]
         ethereum_rpc: String,
+        #[command(flatten)]
+        finality: cli_utils::EthereumFinalityArgs,
         #[arg(long)]
         deployment_manifest: PathBuf,
         #[arg(long)]
@@ -56,6 +60,8 @@ enum Command {
         witness_rpc: String,
         #[arg(long, default_value = "https://hoodi.drpc.org")]
         ethereum_rpc: String,
+        #[command(flatten)]
+        finality: cli_utils::EthereumFinalityArgs,
         #[arg(long)]
         wallet: PathBuf,
         #[arg(long)]
@@ -98,6 +104,7 @@ async fn main() -> Result<()> {
             source_rpc,
             witness_rpc,
             ethereum_rpc,
+            finality,
             wallet,
             deployment_manifest,
             publisher_state,
@@ -109,6 +116,7 @@ async fn main() -> Result<()> {
                 &source_rpc,
                 &witness_rpc,
                 &ethereum_rpc,
+                &finality.ethereum_witness_rpc,
                 &wallet,
                 &deployment_manifest,
                 &publisher_state,
@@ -123,6 +131,7 @@ async fn main() -> Result<()> {
             source_rpc,
             witness_rpc,
             ethereum_rpc,
+            finality,
             deployment_manifest,
             follower_state,
             proof_dir,
@@ -131,6 +140,7 @@ async fn main() -> Result<()> {
             follower::audit_history(
                 (&source_rpc, &witness_rpc),
                 &ethereum_rpc,
+                &finality.ethereum_witness_rpc,
                 &deployment_manifest,
                 &follower_state,
                 &proof_dir,
@@ -143,6 +153,7 @@ async fn main() -> Result<()> {
             source_rpc,
             witness_rpc,
             ethereum_rpc,
+            finality,
             wallet,
             root_wallet,
             deployment_manifest,
@@ -156,6 +167,7 @@ async fn main() -> Result<()> {
                 &source_rpc,
                 &witness_rpc,
                 &ethereum_rpc,
+                &finality.ethereum_witness_rpc,
                 &wallet,
                 &root_wallet,
                 &deployment_manifest,

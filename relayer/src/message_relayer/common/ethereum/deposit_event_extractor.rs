@@ -221,6 +221,8 @@ mod tests {
     async fn transport_failure_retains_replayed_and_live_blocks() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let witness = TcpListener::bind("127.0.0.1:0").unwrap();
+        let witness_endpoint = format!("http://{}", witness.local_addr().unwrap());
         let server = HttpServer::new(|| {
             App::new().route(
                 "/",
@@ -229,6 +231,8 @@ mod tests {
         })
         .workers(1)
         .listen(listener)
+        .unwrap()
+        .listen(witness)
         .unwrap()
         .disable_signals()
         .run();
@@ -242,7 +246,10 @@ mod tests {
                 .unwrap(),
         );
         let extractor = DepositEventExtractor::new(
-            PollingEthApi::new(&endpoint).await.unwrap(),
+            PollingEthApi::new(&endpoint).await.unwrap()
+                .with_finality_witness(&witness_endpoint, 560048,
+                    super::super::block_storage::tests::identity().ethereum_genesis_hash.0.into())
+                .await.unwrap(),
             H160::zero(),
             Arc::new(NoStorage::new()),
             0,

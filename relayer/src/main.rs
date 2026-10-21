@@ -65,9 +65,13 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to connect to Gear API");
 
-            let eth_observer_api = create_eth_killswitch_client(&args.ethereum_args)
-                .await
-                .expect("Failed to create Ethereum client");
+            let eth_observer_api = create_eth_killswitch_client(&args.ethereum_args).await?;
+            eth_observer_api
+                .enable_finality_archive(
+                    &args.ethereum_finality_dir,
+                    eth_observer_api.finality_identity()?.1,
+                )
+                .await?;
 
             let metrics = MetricsBuilder::new();
 
@@ -100,7 +104,7 @@ async fn run() -> AnyResult<()> {
         }
 
         CliCommands::GearEthTokens(args) => {
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await?;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
                 vara_endpoint: args.gear_args.get_endpoint()?,
@@ -281,6 +285,8 @@ async fn run() -> AnyResult<()> {
             vft_manager_address,
             gear_args,
             ethereum_rpc,
+            finality,
+            identity,
             beacon_rpc,
             prometheus_args,
             storage_path,
@@ -289,7 +295,14 @@ async fn run() -> AnyResult<()> {
             cutover_seal,
             successor_manager_code_id,
         }) => {
-            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
+            let eth_api = PollingEthApi::new(&ethereum_rpc)
+                .await?
+                .with_finality_witness(
+                    &finality.ethereum_witness_rpc,
+                    identity.ethereum_chain_id,
+                    identity.ethereum_genesis_hash.parse()?,
+                )
+                .await?;
             let approved_manager_code = successor_manager_code_id
                 .as_deref()
                 .map(hex_utils::decode_h256)
@@ -421,7 +434,7 @@ async fn run() -> AnyResult<()> {
             let nonce =
                 hex_utils::decode_byte_vec(&args.nonce).expect("Failed to parse message nonce");
             let nonce = U256::from_big_endian(&nonce[..]);
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await?;
             let api_provider = ApiProvider::new(
                 args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
@@ -467,6 +480,8 @@ async fn run() -> AnyResult<()> {
             receiver_route,
             gear_args,
             ethereum_rpc,
+            finality,
+            identity,
             beacon_args,
         }) => {
             use sails_rs::calls::ActionIo;
@@ -474,7 +489,14 @@ async fn run() -> AnyResult<()> {
             let gear_client_args = message_relayer::common::GSdkArgs {
                 vara_endpoint: gear_args.connection.get_endpoint()?,
             };
-            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
+            let eth_api = PollingEthApi::new(&ethereum_rpc)
+                .await?
+                .with_finality_witness(
+                    &finality.ethereum_witness_rpc,
+                    identity.ethereum_chain_id,
+                    identity.ethereum_genesis_hash.parse()?,
+                )
+                .await?;
             let beacon_client = create_beacon_client(&beacon_args).await;
             let provider = ApiProvider::new(
                 gear_client_args.vara_endpoint.clone(),
@@ -582,15 +604,17 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
         .expect("GearApi client should be created")
 }
 
-async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
+async fn create_eth_signer_client(args: &EthereumSignerArgs) -> AnyResult<EthApi> {
     let EthereumArgs {
         connection,
+        finality,
+        identity,
         tx,
         mq_address,
         queue_deployment_transaction,
     } = &args.ethereum_args;
 
-    EthApi::new_with_retries(
+    Ok(EthApi::new_with_retries(
         &connection.ethereum_endpoint,
         mq_address,
         Some(&args.eth_fee_payer),
@@ -599,9 +623,14 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         tx.max_fee_per_gas,
         tx.max_priority_fee_per_gas,
     )
-    .await
-    .expect("Error while creating ethereum client")
-    .with_queue_deployment_transaction(*queue_deployment_transaction)
+    .await?
+    .with_finality_witness(
+        &finality.ethereum_witness_rpc,
+        identity.ethereum_chain_id,
+        identity.ethereum_genesis_hash.parse()?,
+    )
+    .await?
+    .with_queue_deployment_transaction(*queue_deployment_transaction))
 }
 
 async fn create_eth_killswitch_client(args: &EthereumKillSwitchArgs) -> AnyResult<EthApi> {
@@ -629,22 +658,27 @@ async fn create_eth_killswitch_client(args: &EthereumKillSwitchArgs) -> AnyResul
         ethereum_args: args.ethereum_args.clone(),
         eth_fee_payer: observer_pk_str,
     })
-    .await;
+    .await?;
 
     Ok(observer_api)
 }
 
-async fn create_eth_client(args: &EthereumArgs) -> EthApi {
-    EthApi::new(
+async fn create_eth_client(args: &EthereumArgs) -> AnyResult<EthApi> {
+    Ok(EthApi::new(
         &args.connection.ethereum_endpoint,
         &args.mq_address,
         None,
         args.tx.max_fee_per_gas,
         args.tx.max_priority_fee_per_gas,
     )
-    .await
-    .expect("Error while creating ethereum client")
-    .with_queue_deployment_transaction(args.queue_deployment_transaction)
+    .await?
+    .with_finality_witness(
+        &args.finality.ethereum_witness_rpc,
+        args.identity.ethereum_chain_id,
+        args.identity.ethereum_genesis_hash.parse()?,
+    )
+    .await?
+    .with_queue_deployment_transaction(args.queue_deployment_transaction))
 }
 
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
@@ -656,7 +690,7 @@ async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
 }
 
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
-    let eth_api = create_eth_client(&args.ethereum_args).await;
+    let eth_api = create_eth_client(&args.ethereum_args).await?;
     let mut view = eth_api.verified_finalized_view().await?;
     let block_finalized = view.block_number();
 

@@ -141,6 +141,11 @@ pub struct EthGearTokensArgs {
     pub ethereum_rpc: String,
 
     #[clap(flatten)]
+    pub finality: cli_utils::EthereumFinalityArgs,
+    #[clap(flatten)]
+    pub identity: cli_utils::EthereumChainIdentityArgs,
+
+    #[clap(flatten)]
     pub beacon_rpc: BeaconRpcArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
@@ -262,6 +267,11 @@ pub struct EthGearManualArgs {
     pub ethereum_rpc: String,
 
     #[clap(flatten)]
+    pub finality: cli_utils::EthereumFinalityArgs,
+    #[clap(flatten)]
+    pub identity: cli_utils::EthereumChainIdentityArgs,
+
+    #[clap(flatten)]
     pub beacon_args: BeaconRpcArgs,
 }
 
@@ -270,6 +280,10 @@ pub struct KillSwitchArgs {
     /// Eth block number to start kill switch relayer read events from. If not specified equals to the latest finalized block
     #[arg(long = "from-eth-block")]
     pub from_eth_block: Option<u64>,
+
+    /// Durable finality history owned exclusively by this observer.
+    #[arg(long)]
+    pub ethereum_finality_dir: PathBuf,
 
     #[clap(flatten)]
     pub gear_args: GearArgs,

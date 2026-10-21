@@ -170,16 +170,12 @@ fn decode_transaction_journal(contents: &str) -> anyhow::Result<Transaction> {
         object.insert("journal_version".into(), serde_json::json!(2));
         object.insert("legacy_evidence".into(), original);
     }
-    let mut tx: Transaction = serde_json::from_value(value)?;
+    let tx: Transaction = serde_json::from_value(value)?;
     anyhow::ensure!(
         !legacy || !matches!(&tx.status, super::tx_manager::TxStatus::PrepareMessage(..)),
         "HOLD: unversioned outbound journal claims an unsigned handoff guarantee"
     );
     tx.validate_journal()?;
-    // Validate legacy completion semantics before migrating; never alter signatures or evidence.
-    if matches!(tx.journal_version, 2 | 3) {
-        tx.journal_version = 4;
-    }
     Ok(tx)
 }
 
@@ -2514,10 +2510,10 @@ pub(crate) mod tests {
         restored.update_storage().await.unwrap();
         let upgraded: serde_json::Value =
             serde_json::from_slice(&tokio::fs::read(&journal).await.unwrap()).unwrap();
-        assert_eq!(upgraded["journal_version"], 4);
+        assert_eq!(upgraded["journal_version"], 2);
         assert_eq!(upgraded["legacy_evidence"], original);
         for corrupt in [
-            serde_json::json!({"journal_version": 5}),
+            serde_json::json!({"journal_version": 6}),
             serde_json::json!({"unexpected_field": 1}),
         ] {
             let mut invalid = upgraded.clone();

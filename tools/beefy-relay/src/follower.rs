@@ -657,6 +657,7 @@ async fn revalidate_finalized_commitments(
 pub async fn audit_history(
     source_rpcs: (&str, &str),
     ethereum_rpc: &str,
+    ethereum_witness_rpc: &str,
     deployment_manifest: &Path,
     state_path: &Path,
     proof_directory: &Path,
@@ -690,6 +691,7 @@ pub async fn audit_history(
         },
         Ethereum::connect_readonly(
             ethereum_rpc,
+            ethereum_witness_rpc,
             &state["activeEthereum"],
             fixture.as_ref(),
             public_network
@@ -887,15 +889,7 @@ async fn authenticate_reinclusion(
         };
         let directory = output.join("finality-history");
         let view = finalized_receipt_view(ethereum, &directory, finalized).await?;
-        crate::ethereum::authenticate_recorded_receipts(
-            ethereum,
-            &view,
-            finalized.included_block_number,
-            finalized.included_block_hash,
-            &[original],
-            &directory.join("receipts"),
-        )
-        .await
+        crate::ethereum::retain_finalized_receipt(finalized, &view, &original, &directory.join("receipts"))
     })
     .await
     .context(
@@ -975,7 +969,7 @@ async fn promote_finality(
                         Some(receipt) => receipt,
                         None => {
                             let view = ethereum.api.verified_finalized_view_with_archive(&output.join("finality-history/headers"),ethereum.finality_genesis().await?).await?;
-                            let account_nonce = ethereum.api.raw_provider().get_transaction_count(identity.from).block_id(view.block_id()).await?;
+                            let account_nonce = ethereum.account_nonce_at(identity.from, view.block_hash()).await?;
                             if account_nonce > identity.nonce {
                                 let pin = json!({"block":view.block_number(),"blockHash":bytes(view.block_hash()),"accountNonce":account_nonce,"pinnedNonceConsumed":true});
                                 return Ok(Some((index,block,hash,anchor,None,false,pin)));
@@ -1057,11 +1051,11 @@ async fn promote_finality(
                     let (_, identity) = crate::ethereum::signed_transaction(&raw,hash.into(),number(&submission["nonce"])?,ethereum.client_address)?;
                     ensure!(finalized.receipt.from == identity.from && finalized.receipt.to == identity.to, "failed reincluded original identity changed; HOLD");
                     let directory = output.join("finality-history");
-                    let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
-                    let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(ethereum.api.raw_provider(), &view,finalized.included_block_number,finalized.included_block_hash,hash.into(),&directory.join("receipts")).await?;
+                    finalized_receipt_view(ethereum, &directory, &finalized).await?;
+                    let receipt = &finalized.inclusion;
                     ensure!(receipt.raw_transaction == raw && !receipt.receipt.status(), "failed reincluded original proof changed; HOLD");
                     json!({"submission":submission,"outcome":"finalized-revert","minedObservation":entry,
-                        "failureEvidence":{"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash)}})
+                        "failureEvidence":{"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash),"inclusion":finalized.inclusion,"checkpoint":finalized.checkpoint}})
                 } else {
                     ensure!(entry["origin"] == "own", "external accepted checkpoint lost canonical receipt; HOLD");
                     json!({"submission":commitment_transaction(entry)?,"outcome":"held-consumed-nonce","nonceDisposition":nonce_disposition,"minedObservation":entry})
@@ -1104,7 +1098,7 @@ async fn promote_finality(
         let directory = output.join("finality-history");
         let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
         let original = crate::ethereum::OriginalCommitmentReceipt {hash:hash.into(),raw,source_block:anchor.block,mmr_root:anchor.validated.mmr_root,client:ethereum.client_address};
-        crate::ethereum::authenticate_recorded_receipts(ethereum,&view,finalized.included_block_number,finalized.included_block_hash,&[original],&directory.join("receipts")).await?;
+        crate::ethereum::retain_finalized_receipt(&finalized, &view, &original, &directory.join("receipts"))?;
         let first_inclusion = record_recovered_receipt(&mut staged, ethereum, &finalized)?;
         let destination_hash: [u8; 32] = finalized.included_block_hash.into();
         let finalized_hash: [u8; 32] = finalized.finalized_block_hash.into();
@@ -1308,15 +1302,7 @@ async fn authenticate_external_commitment(
     let finalized = wait_for_finalized_receipt(ethereum, hash).await?;
     let directory = output.join("finality-history");
     let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
-    let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(
-        ethereum.api.raw_provider(),
-        &view,
-        finalized.included_block_number,
-        finalized.included_block_hash,
-        hash.into(),
-        &directory.join("receipts"),
-    )
-    .await?;
+    let receipt = &finalized.inclusion;
     let mut encoded = receipt.raw_transaction.as_slice();
     let signed = TxEnvelope::decode_2718(&mut encoded)?;
     let (_, identity) = crate::ethereum::signed_transaction(
@@ -1343,15 +1329,7 @@ async fn authenticate_external_commitment(
         mmr_root: anchor.validated.mmr_root,
         client: ethereum.client_address,
     };
-    crate::ethereum::authenticate_recorded_receipts(
-        ethereum,
-        &view,
-        finalized.included_block_number,
-        finalized.included_block_hash,
-        &[original],
-        &directory.join("receipts"),
-    )
-    .await?;
+    crate::ethereum::retain_finalized_receipt(&finalized, &view, &original, &directory.join("receipts"))?;
     let destination = ethereum
         .verify_accepted_commitment(hash.into(), anchor, &proof.snapshot)
         .await?;
@@ -1677,28 +1655,15 @@ async fn reconcile_original_submission(
             ]),
         )
         .await?;
-        let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(
-            ethereum.api.raw_provider(),
-            &view,
-            finalized.included_block_number,
-            finalized.included_block_hash,
-            hash,
-            &directory.join("receipts"),
-        )
-        .await?;
+        let receipt = &finalized.inclusion;
         ensure!(
             receipt.raw_transaction == raw && !receipt.receipt.status(),
             "original failed receipt proof differs; HOLD"
         );
         terminal["outcome"] = json!("finalized-revert");
-        terminal["failureEvidence"] = json!({"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash)});
+        terminal["failureEvidence"] = json!({"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash),"inclusion":finalized.inclusion,"checkpoint":finalized.checkpoint});
     } else {
-        let account_nonce = ethereum
-            .api
-            .raw_provider()
-            .get_transaction_count(identity.from)
-            .block_id(view.block_id())
-            .await?;
+        let account_nonce = ethereum.account_nonce_at(identity.from, view.block_hash()).await?;
         if account_nonce <= identity.nonce {
             return Ok(());
         }
@@ -1841,12 +1806,7 @@ async fn revalidate_terminal_submissions(
                     &std::collections::BTreeMap::from([(block, hash)]),
                 )
                 .await?;
-                let nonce = ethereum
-                    .api
-                    .raw_provider()
-                    .get_transaction_count(identity.from)
-                    .block_id(alloy::rpc::types::BlockId::hash_canonical(hash))
-                    .await?;
+                let nonce = ethereum.account_nonce_at(identity.from, hash).await?;
                 ensure!(
                     nonce > identity.nonce
                         && pin["accountNonce"] == nonce
@@ -2580,6 +2540,7 @@ async fn publish_token_roots(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
+    ethereum_witness_rpc: &str,
     wallet: &Path,
     source: &mut Source,
     witness: &mut Source,
@@ -2635,6 +2596,7 @@ async fn publish_token_roots(
                 source_rpc,
                 witness_rpc,
                 ethereum_rpc,
+                ethereum_witness_rpc,
                 wallet,
                 deployment_manifest,
                 &output.join("state.json"),
@@ -2821,6 +2783,7 @@ pub async fn follow_tokens(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
+    ethereum_witness_rpc: &str,
     wallet: &Path,
     root_wallet: &Path,
     deployment_manifest: &Path,
@@ -2938,12 +2901,16 @@ pub async fn follow_tokens(
     let anchor_block = anchor.block;
     let mut ethereum = Ethereum::connect(
         ethereum_rpc,
+        ethereum_witness_rpc,
         wallet,
         selected_ethereum_manifest,
         fixture.as_ref(),
         public_network,
     )
     .await?;
+    ethereum.api.enable_finality_archive(
+        &output.join("finality-history/headers"), ethereum.api.finality_identity()?.1,
+    ).await?;
     ensure!(
         decode(&deployment["manager"])?.as_slice() == ethereum.receiver_address.as_slice(),
         "declared ERC20 manager differs from client receiver"
@@ -3095,6 +3062,7 @@ pub async fn follow_tokens(
                     source_rpc,
                     witness_rpc,
                     ethereum_rpc,
+                    ethereum_witness_rpc,
                     root_wallet,
                     &mut source,
                     &mut witness,
@@ -3122,6 +3090,7 @@ pub async fn follow_tokens(
             source_rpc,
             witness_rpc,
             ethereum_rpc,
+            ethereum_witness_rpc,
             root_wallet,
             &mut source,
             &mut witness,
@@ -3146,6 +3115,7 @@ pub async fn follow_tokens(
                 source_rpc,
                 witness_rpc,
                 ethereum_rpc,
+                ethereum_witness_rpc,
                 root_wallet,
                 &mut source,
                 &mut witness,
@@ -4006,6 +3976,7 @@ mod tests {
         let mut source = Source::connect(GearApi::new(&rpc, 3).await?).await?;
         let mut ethereum = Ethereum::connect_readonly(
             &ethereum_rpc,
+            &std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?,
             &state["activeEthereum"],
             None,
             crate::ethereum::PublicEthereumNetwork::Hoodi,
@@ -4092,6 +4063,7 @@ mod tests {
             serde_json::from_slice(&fs::read(fixture.join("published-root.json"))?)?;
         let ethereum = Ethereum::connect_readonly(
             &rpc,
+            &std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?,
             &manifest["ethereum"],
             None,
             crate::ethereum::PublicEthereumNetwork::Hoodi,

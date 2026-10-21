@@ -147,6 +147,10 @@ pub enum Error {
     ErrorFetchingTransactionReceipt,
     #[error("Error fetching block")]
     ErrorFetchingBlock,
+    #[error("HOLD: independent Ethereum finality witness is not configured")]
+    FinalityWitnessNotConfigured,
+    #[error("HOLD: invalid authenticated Ethereum evidence: {0}")]
+    InvalidFinalityEvidence(String),
     #[error("Finalized ancestry is not yet verified")]
     FinalizedAncestryPending,
     #[error("Authenticated finalized ancestry conflicts with the original witnessed branch")]

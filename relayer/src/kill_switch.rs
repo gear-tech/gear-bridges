@@ -297,6 +297,8 @@ async fn scan_roots(
         )));
     }
     if from > head.number {
+        require_canonical_head(api, head.number, head.hash).await?;
+        view.recheck(api.raw_provider()).await?;
         return Ok(false);
     }
     let start = ethereum_client::get_block(api.raw_provider(), from)
@@ -318,10 +320,15 @@ async fn scan_roots(
     let head_number = head.number;
     let head_hash = head.hash;
     verify_hot_ancestry(api, view, head, &targets).await?;
+    require_canonical_head(api, head_number, head_hash).await?;
 
     let queue = IMessageQueue::new(
         Address::from_slice(api.message_queue_address().as_bytes()),
         api.raw_provider(),
+    );
+    let witness_queue = IMessageQueue::new(
+        Address::from_slice(api.message_queue_address().as_bytes()),
+        api.raw_witness_provider().map_err(ScanForEventsError::Other)?,
     );
     for observation in &events {
         let source = u32::try_from(observation.entry.block_number)
@@ -334,6 +341,18 @@ async fn scan_roots(
             .await
             .map_err(ethereum_client::Error::ErrorDuringContractExecution)?
             .0;
+        let witnessed_root = witness_queue
+            .getMerkleRoot(U256::from(source))
+            .block(BlockId::hash_canonical(head_hash))
+            .call()
+            .await
+            .map_err(ethereum_client::Error::ErrorDuringContractExecution)?
+            .0;
+        if stored_root != witnessed_root {
+            return Err(ScanForEventsError::Other(anyhow::anyhow!(
+                "HOLD: Ethereum providers disagree on hot queue root"
+            )));
+        }
         validate_destination_root(
             observation,
             true, // Inclusion was authenticated against the pinned ancestry above.
@@ -344,6 +363,7 @@ async fn scan_roots(
         metrics.merkle_roots_discovered_cnt.inc();
         if !matches {
             require_canonical_head(api, head_number, head_hash).await?;
+            view.recheck(api.raw_provider()).await?;
             log::error!("Canonical queue root mismatch: {:?}", observation.entry);
             metrics.merkle_root_mismatch_cnt.inc();
             // A later unavailable root cannot revoke this authenticated mismatch.
@@ -351,6 +371,7 @@ async fn scan_roots(
         }
     }
     require_canonical_head(api, head_number, head_hash).await?;
+    view.recheck(api.raw_provider()).await?;
     Ok(false)
 }
 
@@ -402,12 +423,21 @@ async fn require_canonical_head(
     let current = ethereum_client::get_block(api.raw_provider(), number)
         .await
         .map_err(downcast_anyhow_to_ethereum_client)?;
+    let witness = ethereum_client::get_block(
+        api.raw_witness_provider().map_err(ScanForEventsError::Other)?, number,
+    )
+    .await
+    .map_err(downcast_anyhow_to_ethereum_client)?;
     if current.header.number != number
         || current.header.hash != hash
         || current.header.inner.hash_slow() != hash
+        || witness.header.number != number
+        || witness.header.hash != hash
+        || witness.header.inner.hash_slow() != hash
+        || witness.header.inner != current.header.inner
     {
         return Err(ScanForEventsError::Other(anyhow::anyhow!(
-            "HOLD: root scan head was reorganized"
+            "HOLD: root scan head was reorganized or differs between providers"
         )));
     }
     Ok(())
@@ -761,7 +791,7 @@ mod tests {
         use std::{
             net::TcpListener,
             sync::{
-                atomic::{AtomicBool, Ordering},
+                atomic::{AtomicBool, AtomicUsize, Ordering},
                 Arc,
             },
         };
@@ -788,21 +818,29 @@ mod tests {
         }
         let chains = Arc::new([chain, fork]);
         let reorganized = Arc::new(AtomicBool::new(false));
+        let witness_fault = Arc::new(AtomicUsize::new(0));
+        let server_witness_fault = witness_fault.clone();
         let server_chains = chains.clone();
         let server_reorganized = reorganized.clone();
         let queue = Address::repeat_byte(1);
         let socket = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", socket.local_addr().unwrap());
+        let witness_socket = TcpListener::bind("127.0.0.1:0").unwrap();
+        let witness_endpoint = format!("http://{}/witness", witness_socket.local_addr().unwrap());
         let server = HttpServer::new(move || {
             let chains = server_chains.clone();
             let reorganized = server_reorganized.clone();
+            let witness_fault = server_witness_fault.clone();
             App::new().route(
-                "/",
-                web::post().to(move |request: web::Json<Value>| {
+                "/{tail:.*}",
+                web::post().to(move |http: actix_web::HttpRequest, request: web::Json<Value>| {
                     let chains = chains.clone();
                     let reorganized = reorganized.clone();
+                    let witness_fault = witness_fault.clone();
+                    let is_witness = http.path() == "/witness";
                     async move {
                         let is_fork = reorganized.load(Ordering::SeqCst);
+                        let fault = if is_witness { witness_fault.load(Ordering::SeqCst) } else { 0 };
                         let chain = &chains[usize::from(is_fork)];
                         let params = &request["params"];
                         let root = |source| {
@@ -817,7 +855,16 @@ mod tests {
                                     "latest" => 4,
                                     _ => usize::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap(),
                                 };
-                                json!(chain[number])
+                                if fault == 2 && number == 4 {
+                                    json!(chains[0][number])
+                                } else if fault == 3 && number == 1 {
+                                    let mut changed = chain[number].clone();
+                                    changed.header.inner.extra_data = vec![9].into();
+                                    changed.header.hash = changed.header.inner.hash_slow();
+                                    json!(changed)
+                                } else {
+                                    json!(chain[number])
+                                }
                             }
                             "eth_getBlockByHash" => chains.iter().flatten()
                                 .find(|block| json!(block.header.hash) == params[0])
@@ -846,7 +893,7 @@ mod tests {
                                 let input = params[0].get("input").or_else(|| params[0].get("data"))
                                     .unwrap().as_str().unwrap();
                                 let source = u64::from_str_radix(&input[input.len() - 16..], 16).unwrap();
-                                json!(root(source))
+                                json!(if fault == 1 { TxHash::repeat_byte(9) } else { root(source) })
                             }
                             method => panic!("unexpected observer fixture RPC: {method}"),
                         };
@@ -858,13 +905,17 @@ mod tests {
         .workers(1)
         .listen(socket)
         .unwrap()
+        .listen(witness_socket)
+        .unwrap()
         .disable_signals()
         .run();
         let handle = server.handle();
         tokio::spawn(server);
         let api = EthApi::new(&endpoint, &format!("{queue:#x}"), None, None, None)
             .await
-            .unwrap();
+            .unwrap()
+            .with_finality_witness(&witness_endpoint, 560048, chains[0][0].header.hash)
+            .await.unwrap();
         let mut view = api.verified_finalized_view().await.unwrap();
         let metrics = Metrics::new();
         let mut state = State::ScanForEvents;
@@ -877,6 +928,31 @@ mod tests {
             .complete_scan(&mut cursor, view.block_number(), matched)
             .unwrap();
         assert_eq!((state, cursor), (State::ScanForEvents, Some(2)));
+
+        // A primary-only hot fork or state answer must never authorize a challenge.
+        reorganized.store(true, Ordering::SeqCst);
+        for fault in [1, 2] {
+            witness_fault.store(fault, Ordering::SeqCst);
+            state = State::ScanForEvents;
+            let disagreement = scan_roots(&api, &mut view, cursor.unwrap(), &metrics, async |entry| {
+                compare_source_root(entry, 50, Ok((42, [7; 32].into())))
+            }).await;
+            assert!(state.complete_scan(&mut cursor, view.block_number(), disagreement).is_err());
+            assert_eq!((state, cursor), (State::ScanForEvents, Some(2)));
+        }
+        witness_fault.store(0, Ordering::SeqCst);
+
+        // Recheck the common pin before either a challenge or a clean cursor advance.
+        for mismatch in [false, true] {
+            state = State::ScanForEvents;
+            let changed_pin = scan_roots(&api, &mut view, cursor.unwrap(), &metrics, async |_| {
+                witness_fault.store(3, Ordering::SeqCst);
+                Ok(!mismatch)
+            }).await;
+            assert!(state.complete_scan(&mut cursor, view.block_number(), changed_pin).is_err());
+            assert_eq!((state, cursor), (State::ScanForEvents, Some(2)));
+            witness_fault.store(0, Ordering::SeqCst);
+        }
 
         // Finality is still block 1. Revisit the replacement hot blocks, and do
         // not let unavailable state for the second root suppress the first.

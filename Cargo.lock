@@ -1987,6 +1987,7 @@ dependencies = [
  "bridging-payment-client",
  "checkpoint-light-client-client",
  "clap",
+ "cli-utils",
  "eth-events-electra",
  "eth-events-electra-client",
  "ethereum-client",

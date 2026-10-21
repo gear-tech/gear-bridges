@@ -1,15 +1,40 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, beforeEach, after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { syncBuiltinESMExports } from 'node:module';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+
+// Real loopback transports exercise ethers without weakening production qualification.
+let primaryRpc, witnessRpc;
+async function serveRpc(dispatch) {
+  const server = createServer(async (request, response) => {
+    try {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      const execute = async ({ id, method, params }) => {
+        try { return { jsonrpc: '2.0', id, result: await dispatch(method, params) }; }
+        catch (error) { return { jsonrpc: '2.0', id, error: { code: -32000, message: error.message } }; }
+      };
+      const input = JSON.parse(body);
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify(Array.isArray(input) ? await Promise.all(input.map(execute)) : await execute(input)));
+    } catch (error) { response.writeHead(500).end(error.message); }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
+  return `http://127.0.0.1:${server.address().port}`;
+}
+const primaryUrl = await serveRpc((method, params) => primaryRpc(method, params));
+const witnessUrl = await serveRpc((method, params) => witnessRpc(method, params));
 
 const addr = (byte) => `0x${byte.repeat(20)}`;
 const hash = (byte) => `0x${byte.repeat(32)}`;
 Object.assign(process.env, {
   ETH_API_PATH: fileURLToPath(new URL('../../../api/ethereum', import.meta.url)),
   GEAR_API_PATH: fileURLToPath(new URL('../../../api/gear', import.meta.url)),
-  ETH_RPC_URL: 'http://127.0.0.1:1', ETH_ERC20_MANAGER: addr('11'), ETH_MSQ_QUEUE: addr('22'),
+  ETH_RPC_URL: primaryUrl, ETH_WITNESS_RPC: witnessUrl, ETH_CHAIN_ID: '1', ETH_GENESIS_HASH: hash('00'),
+  ETH_ERC20_MANAGER: addr('11'), ETH_MSQ_QUEUE: addr('22'),
   ETH_BRIDGING_PAYMENT: addr('33'), ETH_SQUID_API_KEY: 'local-test',
   GEAR_VFT_MANAGER: hash('11'), GEAR_HISTORICAL_PROXY: hash('22'), GEAR_BRIDGING_PAYMENT: hash('33'),
   GEAR_CHECKPOINT_CLIENT: hash('44'), GEAR_SQUID_API_KEY: 'local-test', ETH_HTTP_RPC_URL: 'http://127.0.0.1:1',
@@ -17,10 +42,14 @@ Object.assign(process.env, {
 const { handleBatch } = await import('../lib/eth/handler.js');
 const manager = await import('../lib/eth/abi/erc20-manager.js');
 const queue = await import('../lib/eth/abi/message-queue.js');
+const payment = await import('../lib/eth/abi/bridging-payment.js');
 const { BatchState: GearState } = await import('../lib/gear/batch-state.js');
-const { requireFinalizedBatch: requireEthFinality } = await import('../lib/eth/finality.js');
+const { requireFinalizedBatch: requireEthFinality, createEthereumEvidenceClients, qualifyFinality,
+  createReceiptAuthenticator } = await import('../lib/eth/finality.js');
+const { authenticateSourceReceipt } = await import('../lib/eth/completion.js');
+const { reconcileReceiptSettlements } = await import('../lib/gear/receipt-reconciliation.js');
 const { requireFinalizedBatch: requireGearFinality } = await import('../lib/gear/finality.js');
-const { Transfer, CompletedTransfer, MerkleRootInMessageQueue, Network, Status, ReceiptRelay, ReceiptSettlement } = await import('../lib/model/index.js');
+const { Transfer, CompletedTransfer, MerkleRootInMessageQueue, EthereumFinalityCheckpoint, Pair, Network, Status, ReceiptRelay, ReceiptSettlement } = await import('../lib/model/index.js');
 const quiet = { child() { return this; }, info() {}, debug() {}, warn() {}, error() {} };
 const block = { height: 11, hash: hash('aa'), timestamp: 1_700_000_000_000 };
 function memoryStore() {
@@ -45,10 +74,20 @@ function memoryStore() {
       if (options?.take != null) result = result.slice(0, options.take);
       return result;
     },
-    async findOneBy() { throw new Error('Receipt reconciliation must use batched queries'); },
+    async findOneBy(entity, where) {
+      assert.equal(entity, EthereumFinalityCheckpoint, 'receipt reconciliation must keep batched joins');
+      return [...(rows.get(entity)?.values() ?? [])].find((row) => matches(row, where));
+    },
     async save(items) {
       saves.push(items);
       for (const row of Array.isArray(items) ? items : [items]) {
+        if (!rows.has(row.constructor)) rows.set(row.constructor, new Map());
+        rows.get(row.constructor).set(row.id, row);
+      }
+    },
+    async insert(items) {
+      for (const row of Array.isArray(items) ? items : [items]) {
+        assert.equal(rows.get(row.constructor)?.has(row.id) ?? false, false, 'checkpoint insertion must not overwrite');
         if (!rows.has(row.constructor)) rows.set(row.constructor, new Map());
         rows.get(row.constructor).set(row.id, row);
       }
@@ -61,37 +100,318 @@ function memoryStore() {
 const txHash = hash('bb');
 function event(abi, name, args, address, index) {
   return { ...abi.encodeEventLog(abi.getEvent(name), args), address, logIndex: `0x${index.toString(16)}`,
-    transactionHash: txHash, blockHash: block.hash, transactionIndex: '0x0' };
+    transactionHash: txHash, blockHash: block.hash, blockNumber: '0xb', transactionIndex: '0x0' };
 }
 function outbound(effect = [hash('44'), addr('55'), addr('66'), 10n]) {
   const logs = [event(manager.abi, 'Bridged', effect, addr('11'), 0),
     event(queue.abi, 'MessageProcessed', [9n, hash('77'), 8n, addr('11')], addr('22'), 1)];
-  const receipt = { transactionHash: txHash, blockHash: block.hash, blockNumber: '0xb', status: '0x1', logs };
+  const receipt = fullReceipt(logs);
   const transfer = new Transfer({ id: 'original', nonce: '8', sourceNetwork: Network.Vara,
     status: Status.Bridging, bridgingStartedAtBlock: 9n, ethBridgeBuiltInMsgHash: hash('77'),
     sender: hash('44'), receiver: addr('55'), destination: addr('66'), amount: '10' });
   return { receipt, transfer };
 }
-function context(receipt, transfer, canonicalHash = block.hash, finalizedHeight = '0xb') {
-  const saved = [];
-  const rpc = {
-    async call(method, params) {
-      if (method === 'eth_getTransactionReceipt') return receipt;
-      return { number: params[0] === 'finalized' ? finalizedHeight : '0xb', hash: block.hash };
-    },
-    async batchCall() { return [{ number: '0xb', hash: canonicalHash }]; },
-  };
-  return { _chain: { client: rpc }, log: quiet, saved,
-    blocks: [{ header: block, logs: [receipt.logs.at(-1)].map((l) => ({ ...l, logIndex: Number(BigInt(l.logIndex)) })) }],
-    store: { async find() { return []; }, async findOneBy() { return transfer; }, async save(rows) { saved.push(...(Array.isArray(rows) ? rows : [rows])); } },
+function fullReceipt(logs, height = 11, transactionIndex = 0, transactionHash = txHash) {
+  return { transactionHash, blockHash: header(height).hash, blockNumber: `0x${height.toString(16)}`,
+    transactionIndex: `0x${transactionIndex.toString(16)}`, status: '0x1', type: '0x2',
+    cumulativeGasUsed: '0x5208', logsBloom: `0x${'00'.repeat(256)}`, logs };
+}
+function header(height) {
+  const identity = (n) => n === 11 ? block.hash : `0x${n.toString(16).padStart(64, '0')}`;
+  return { number: `0x${height.toString(16)}`, hash: identity(height),
+    parentHash: identity(Math.max(0, height - 1)), stateRoot: hash('01'),
+    transactionsRoot: hash('02'), receiptsRoot: hash('03'), timestamp: '0x6553f100' };
+}
+function evidenceRpc(receipts, finalizedHeight = 11, canonicalHash) {
+  return async (method, params) => {
+    if (method === 'eth_chainId') return '0x1';
+    if (method === 'eth_getTransactionReceipt') return receipts.find((r) => r.transactionHash === params[0]) ?? null;
+    if (method === 'eth_getBlockByNumber') {
+      const height = params[0] === 'finalized' ? finalizedHeight : Number(BigInt(params[0]));
+      const result = header(height);
+      if (height === 11 && canonicalHash) result.hash = canonicalHash;
+      result.transactions = [];
+      for (const receipt of receipts.filter((r) => BigInt(r.blockNumber) === BigInt(height))) {
+        const index = Number(BigInt(receipt.transactionIndex));
+        while (result.transactions.length < index) result.transactions.push(hash('ff'));
+        result.transactions[index] = receipt.transactionHash;
+      }
+      return result;
+    }
+    throw new Error(`Unexpected RPC method ${method}`);
   };
 }
+function context(receipt, transfer, canonicalHash = block.hash, finalizedHeight = '0xb') {
+  const store = memoryStore();
+  store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
+  if (transfer) store.rows.set(Transfer, new Map([[transfer.id, transfer]]));
+  primaryRpc = evidenceRpc([receipt], Number(BigInt(finalizedHeight)), canonicalHash);
+  witnessRpc = evidenceRpc([receipt], Number(BigInt(finalizedHeight)));
+  const rpc = { call: (method, params) => primaryRpc(method, params),
+    batchCall: (calls) => Promise.all(calls.map(({ method, params }) => primaryRpc(method, params))) };
+  return { _chain: { client: rpc }, log: quiet, store,
+    get saved() { return store.saves.flat(); },
+    blocks: [{ header: block, logs: [receipt.logs.at(-1)].map((l) => ({ ...l,
+      logIndex: Number(BigInt(l.logIndex)), transactionIndex: Number(BigInt(l.transactionIndex)) })) }],
+  };
+}
+function stored(store, original) { return store.rows.get(original.constructor)?.get(original.id) ?? original; }
+function inboundReceipt(height = 100, transactionHash = hash('bc')) {
+  const logs = Array.from({ length: 6 }, (_, index) => ({
+    ...event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11'), index + 20),
+    transactionHash, blockHash: header(height).hash, blockNumber: `0x${height.toString(16)}`, transactionIndex: '0x2',
+  }));
+  return fullReceipt(logs, height, 2, transactionHash);
+}
+beforeEach(() => {
+  primaryRpc = evidenceRpc([inboundReceipt(), inboundReceipt(101, hash('bd'))], 101);
+  witnessRpc = primaryRpc;
+});
+test('matching finalized headers cannot authorize different primary and witness receipts', async () => {
+  const { receipt, transfer } = outbound();
+  const ctx = context(receipt, transfer);
+  const witnessReceipt = structuredClone(receipt);
+  witnessReceipt.logs[0] = { ...witnessReceipt.logs[0],
+    ...manager.abi.encodeEventLog(manager.abi.getEvent('Bridged'), [hash('44'), addr('55'), addr('66'), 11n]) };
+  primaryRpc = evidenceRpc([receipt]);
+  witnessRpc = evidenceRpc([witnessReceipt]);
+  await assert.rejects(handleBatch(ctx), /HOLD:/);
+  assert.equal(transfer.status, Status.Bridging);
+  assert.equal(transfer.completedAt, undefined);
+  assert.equal(ctx.saved.length, 0);
+});
+
+test('malformed original log coordinates HOLD rather than becoming unmatched success', async () => {
+  for (const mutate of [
+    (receipt) => { receipt.logs[0].transactionHash = hash('cc'); },
+    (receipt) => { receipt.logs[0].blockNumber = '0xa'; },
+    (receipt) => { receipt.logs[0].transactionIndex = '0x1'; },
+    (receipt) => { receipt.logs[0].removed = true; },
+    (receipt) => { receipt.logs[1].logIndex = '0x0'; },
+  ]) {
+    const { receipt, transfer } = outbound();
+    mutate(receipt);
+    const ctx = context(receipt, transfer);
+    await assert.rejects(handleBatch(ctx), /HOLD:/);
+    assert.equal(transfer.status, Status.Bridging);
+    assert.equal(ctx.saved.length, 0);
+  }
+});
+
+test('deferred completion rereads both receipts, not merely their matching header', async () => {
+  const { receipt, transfer } = outbound();
+  const ctx = context(receipt);
+  await handleBatch(ctx);
+  const retained = [...ctx.store.rows.get(CompletedTransfer).values()][0];
+  const original = structuredClone(retained);
+  await ctx.store.save(transfer);
+  ctx.blocks = [];
+  const forged = structuredClone(receipt);
+  forged.logs[0] = { ...forged.logs[0],
+    ...manager.abi.encodeEventLog(manager.abi.getEvent('Bridged'), [hash('44'), addr('55'), addr('66'), 11n]) };
+  witnessRpc = evidenceRpc([forged]);
+  ctx.store.saves.length = 0;
+  await assert.rejects(handleBatch(ctx), /HOLD:/);
+  assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
+  assert.equal(stored(ctx.store, transfer).completedAt, undefined);
+  assert.deepEqual(structuredClone(stored(ctx.store, retained)), original);
+  assert.equal(ctx.saved.length, 0);
+});
+
+test('every consumed manager, queue and payment event must occur in the qualified receipt', async () => {
+  const events = [
+    event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11'), 2),
+    event(queue.abi, 'MessageProcessed', [9n, hash('77'), 8n, addr('11')], addr('22'), 2),
+    event(queue.abi, 'MerkleRoot', [12n, hash('88')], addr('22'), 2),
+    event(payment.abi, 'FeePaid', [], addr('33'), 2),
+  ];
+  for (const consumed of events) {
+    const { receipt, transfer } = outbound();
+    const ctx = context(receipt, transfer);
+    ctx.blocks[0].logs = [{ ...consumed, logIndex: 2, transactionIndex: 0 }];
+    await assert.rejects(handleBatch(ctx), /HOLD:/);
+    assert.equal(transfer.status, Status.Bridging);
+    assert.equal(ctx.saved.length, 0);
+  }
+});
+
+test('inbound creation uses qualified receipt-local coordinates and header time for every deposit', async () => {
+  const deposits = [0, 1].map((index) =>
+    event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11'), 20 + index));
+  const fee = event(payment.abi, 'FeePaid', [], addr('33'), 22);
+  const receipt = fullReceipt([...deposits, fee]);
+  const ctx = context(receipt);
+  ctx.store.rows.set(Pair, new Map([['pair', new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'), isRemoved: false })]]));
+  ctx.blocks[0] = { header: { ...block, timestamp: 0 }, logs: receipt.logs.map((log) => ({
+    ...log, logIndex: Number(BigInt(log.logIndex)), transactionIndex: 0,
+  })) };
+  let primaryReceipts = 0, witnessReceipts = 0;
+  const canonical = evidenceRpc([receipt]);
+  primaryRpc = async (method, params) => {
+    if (method === 'eth_getTransactionReceipt') primaryReceipts++;
+    return canonical(method, params);
+  };
+  witnessRpc = async (method, params) => {
+    if (method === 'eth_getTransactionReceipt') witnessReceipts++;
+    return canonical(method, params);
+  };
+  await handleBatch(ctx);
+  const created = [...ctx.store.rows.get(Transfer).values()];
+  assert.equal(created.length, 2);
+  assert.notEqual(created[0].nonce, created[1].nonce);
+  assert.deepEqual(created.map((row) => row.sourceLogIndex), [0n, 1n]);
+  for (const row of created) {
+    assert.equal(row.txHash, txHash);
+    assert.equal(row.sourceTransactionIndex, 0n);
+    assert.equal(row.timestamp.getTime(), block.timestamp);
+    assert.equal(row.status, Status.Bridging);
+    assert.equal(row.sourceReceiptAuth.localLogIndex, Number(row.sourceLogIndex));
+    assert.equal(row.sourceReceiptAuth.receipt.logs[Number(row.sourceLogIndex)].logIndex,
+      `0x${(20 + Number(row.sourceLogIndex)).toString(16)}`);
+  }
+  assert.equal(primaryReceipts, 1);
+  assert.equal(witnessReceipts, 1);
+});
+
+test('qualified outbound terminal binding survives advancing finality but rejects changed originals', async () => {
+  for (const fault of ['none', 'receipt', 'effect', 'completion-id', 'height', 'time', 'tx-hash']) {
+    const { receipt, transfer } = outbound();
+    const ctx = context(receipt, transfer);
+    await handleBatch(ctx);
+    const completed = stored(ctx.store, transfer);
+    if (fault === 'effect') completed.amount = '11';
+    if (fault === 'completion-id') completed.completionAuth = { ...completed.completionAuth, completionId: 'other' };
+    if (fault === 'height') completed.completedAtBlock = 12n;
+    if (fault === 'time') completed.completedAt = new Date(0);
+    if (fault === 'tx-hash') completed.completedAtTxHash = hash('cc');
+    const retained = structuredClone(completed);
+    const observation = [...ctx.store.rows.get(CompletedTransfer).values()][0];
+    const savedObservation = structuredClone(observation);
+    const fresh = structuredClone(receipt);
+    if (fault === 'receipt') fresh.logs[0] = { ...fresh.logs[0],
+      ...manager.abi.encodeEventLog(manager.abi.getEvent('Bridged'), [hash('44'), addr('55'), addr('66'), 11n]) };
+    primaryRpc = evidenceRpc([fresh], 12);
+    witnessRpc = primaryRpc;
+    ctx.store.saves.length = 0;
+    if (fault === 'none') {
+      await handleBatch(ctx);
+      assert.deepEqual(structuredClone(stored(ctx.store, completed)), retained);
+      assert.equal(stored(ctx.store, completed).completionAuth.checkpointId, retained.completionAuth.checkpointId);
+    } else {
+      await assert.rejects(handleBatch(ctx), /HOLD:/, fault);
+      assert.equal(ctx.saved.length, 0, fault);
+    }
+    assert.deepEqual(structuredClone(completed), retained, fault);
+    assert.deepEqual(structuredClone(observation), savedObservation, fault);
+  }
+});
+
+test('Gear settlement cannot authorize an invented or differently bound original deposit', async () => {
+  for (const fault of ['witness-effect', 'agreed-effect', 'missing', 'transaction-index', 'local-log', 'tx-hash']) {
+    const store = memoryStore(), state = new GearState();
+    const transfer = new Transfer({ id: 'deposit', txHash: hash('bc'), sourceNetwork: Network.Ethereum,
+      blockNumber: 100n, sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'),
+      destination: hash('77'), sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
+    if (fault === 'transaction-index') transfer.sourceTransactionIndex = 4n;
+    if (fault === 'local-log') transfer.sourceLogIndex = 23n;
+    if (fault === 'tx-hash') transfer.txHash = hash('ff');
+    await store.save(transfer);
+    const receipt = inboundReceipt(), changed = structuredClone(receipt);
+    changed.logs[3] = { ...changed.logs[3],
+      ...manager.abi.encodeEventLog(manager.abi.getEvent('BridgingRequested'), [addr('55'), hash('44'), addr('66'), 11n]) };
+    primaryRpc = evidenceRpc(fault === 'missing' ? [] : [fault === 'agreed-effect' ? changed : receipt], 101);
+    witnessRpc = fault === 'witness-effect' ? evidenceRpc([changed], 101) : primaryRpc;
+    await state.new({ store, log: quiet, blocks: [] });
+    state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: Number(transfer.sourceTransactionIndex) });
+    state.recordReceiptSettlement({ slot: '200', transaction_index: String(transfer.sourceTransactionIndex),
+      log_index: String(transfer.sourceLogIndex), deposit_count: '1', operation_id: hash('88'),
+      eth_token_id: addr('66'), vara_token_id: hash('77'), sender: addr('55'), receiver: hash('44'),
+      amount: '10', native: true }, new Date(block.timestamp), 300n, hash('dd'));
+    if (fault === 'witness-effect') await assert.rejects(state.save(), /HOLD:/);
+    else await state.save();
+    assert.equal(stored(store, transfer).status, Status.Bridging, fault);
+    assert.equal(stored(store, transfer).completedAt, undefined, fault);
+    assert.ok((await store.find(ReceiptSettlement)).every((row) => !row.matched), fault);
+  }
+});
+
+test('inbound terminal revalidation preserves bindings and never mutates originals on conflict', async () => {
+  for (const outcome of [Status.Completed, Status.Refunded]) {
+    const store = memoryStore(), state = new GearState();
+    const transfer = new Transfer({ id: 'deposit', txHash: hash('bc'), sourceNetwork: Network.Ethereum,
+      blockNumber: 100n, sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'),
+      destination: hash('77'), sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
+    primaryRpc = evidenceRpc([inboundReceipt()], 101);
+    witnessRpc = primaryRpc;
+    await store.save(transfer);
+    await state.new({ store, log: quiet, blocks: [] });
+    state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: 2 });
+    const deposit = { slot: '200', transaction_index: '2', log_index: '3', deposit_count: '1',
+      operation_id: hash('88'), eth_token_id: addr('66'), vara_token_id: hash('77'), sender: addr('55'),
+      receiver: hash('44'), amount: '10', native: true };
+    if (outcome === Status.Refunded) state.recordReceiptRefund({ ...deposit,
+      child: hash('ab'), payout_child: hash('cd'), returned_value: '10' }, new Date(block.timestamp), 300n, hash('dd'));
+    else state.recordReceiptSettlement(deposit, new Date(block.timestamp), 300n, hash('dd'));
+    await state.save();
+    const completed = stored(store, transfer), [settlement] = await store.find(ReceiptSettlement);
+    const original = structuredClone(completed), originalSettlement = structuredClone(settlement);
+    assert.equal(transfer.status, Status.Bridging);
+    assert.equal(completed.status, outcome);
+    primaryRpc = evidenceRpc([inboundReceipt()], 102);
+    witnessRpc = primaryRpc;
+    const clients = createEthereumEvidenceClients();
+    const checkpoint = await qualifyFinality(clients);
+    const authenticate = createReceiptAuthenticator(clients, checkpoint);
+    const source = (row) => authenticateSourceReceipt(clients, row, addr('11'), checkpoint, authenticate);
+    const revalidated = await reconcileReceiptSettlements(store, [settlement], source);
+    assert.deepEqual(structuredClone(revalidated.transfers[0]), original);
+    const malformedSource = structuredClone(completed.sourceReceiptAuth);
+    delete malformedSource.receipt.cumulativeGasUsed;
+    const malformed = new Transfer({ ...completed, sourceReceiptAuth: malformedSource });
+    store.rows.get(Transfer).set(completed.id, malformed);
+    await assert.rejects(reconcileReceiptSettlements(store, [settlement], source), /HOLD:/);
+    assert.equal(malformed.sourceReceiptAuth.receipt.cumulativeGasUsed, undefined, 'qualification cannot repair retained qualified JSON');
+    store.rows.get(Transfer).set(completed.id, completed);
+    assert.deepEqual(structuredClone(completed), original);
+    for (const change of [
+      { id: 'changed-settlement' }, { blockNumber: 301n }, { txHash: hash('cc') }, { timestamp: new Date(0) },
+      { deposit: { ...settlement.deposit, outcome: outcome === Status.Completed ? 'Refunded' : 'Completed' } },
+      { deposit: { ...settlement.deposit, amount: '11' } },
+    ]) {
+      await assert.rejects(reconcileReceiptSettlements(store, [new ReceiptSettlement({ ...settlement, ...change })], source), /HOLD:/);
+      assert.deepEqual(structuredClone(completed), original);
+      assert.deepEqual(structuredClone(settlement), originalSettlement);
+    }
+    primaryRpc = evidenceRpc([], 102);
+    witnessRpc = primaryRpc;
+    const missing = createReceiptAuthenticator(clients, checkpoint);
+    await assert.rejects(reconcileReceiptSettlements(store, [settlement],
+      (row) => authenticateSourceReceipt(clients, row, addr('11'), checkpoint, missing)), /HOLD:/);
+    assert.deepEqual(structuredClone(completed), original);
+  }
+});
+
+test('multicall cannot reuse an earlier token effect or select ambiguous matching queue events', async () => {
+  for (const duplicate of [false, true]) {
+    const { receipt, transfer } = outbound();
+    if (!duplicate) {
+      receipt.logs[1] = event(queue.abi, 'MessageProcessed', [9n, hash('99'), 7n, addr('11')], addr('22'), 1);
+    }
+    receipt.logs.push(event(queue.abi, 'MessageProcessed', [9n, hash('77'), 8n, addr('11')], addr('22'), 2));
+    const ctx = context(receipt, transfer);
+    if (duplicate) await assert.rejects(handleBatch(ctx), /HOLD:/);
+    else await handleBatch(ctx);
+    assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
+    assert.equal(stored(ctx.store, transfer).completedAt, undefined);
+    assert.ok(ctx.saved.filter((row) => row instanceof CompletedTransfer).every((row) => !row.matched));
+  }
+});
+
 
 test('finalized original same-receipt effect is the only outbound completion', async () => {
   for (const mutate of [
     (r) => { r.logs.shift(); },
     (r) => { r.logs[0] = event(manager.abi, 'Bridged', [hash('44'), addr('55'), addr('66'), 11n], addr('11'), 0); },
-    (r) => { r.logs[0].transactionHash = hash('cc'); },
     (r) => { r.logs[0].address = addr('99'); },
     (r) => { r.logs[0] = event(manager.abi, 'Bridged', [hash('99'), addr('55'), addr('66'), 10n], addr('11'), 0); },
     (r) => { r.logs[0] = event(manager.abi, 'Bridged', [hash('44'), addr('99'), addr('66'), 10n], addr('11'), 0); },
@@ -103,19 +423,27 @@ test('finalized original same-receipt effect is the only outbound completion', a
     mutate(receipt);
     const ctx = context(receipt, transfer);
     await handleBatch(ctx);
-    assert.equal(transfer.status, Status.Bridging);
-    assert.equal(ctx.saved.length, 0);
+    assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
+    assert.equal(ctx.saved.filter((row) => row instanceof Transfer).length, 0);
+    assert.ok(ctx.saved.filter((row) => row instanceof CompletedTransfer).every((row) => !row.matched));
   }
   const { receipt, transfer } = outbound();
   const ctx = context(receipt, transfer);
   await handleBatch(ctx);
-  assert.equal(transfer.status, Status.Completed);
-  assert.equal(transfer.completedAtTxHash, txHash);
-  assert.equal(ctx.saved.length, 1);
+  const completed = stored(ctx.store, transfer);
+  assert.equal(transfer.status, Status.Bridging, 'qualification stages a clone, not the loaded original');
+  assert.equal(completed.status, Status.Completed);
+  assert.equal(completed.completedAtTxHash, txHash);
+  const observation = [...ctx.store.rows.get(CompletedTransfer).values()][0];
+  assert.equal(observation.matched, true);
+  assert.equal(observation.receiptAuth.receipt.transactionHash, txHash);
+  assert.equal(completed.completionAuth.completionId, observation.id);
+  assert.equal(completed.completedAt.getTime(), block.timestamp);
   const later = outbound();
   later.receipt.logs[1] = event(queue.abi, 'MessageProcessed', [10n, hash('77'), 8n, addr('11')], addr('22'), 1);
-  await handleBatch(context(later.receipt, later.transfer));
-  assert.equal(later.transfer.status, Status.Completed);
+  const laterCtx = context(later.receipt, later.transfer);
+  await handleBatch(laterCtx);
+  assert.equal(stored(laterCtx.store, later.transfer).status, Status.Completed);
 });
 
 test('outbound completion survives counterpart lag and restart while unrelated roots advance', async () => {
@@ -123,7 +451,9 @@ test('outbound completion survives counterpart lag and restart while unrelated r
   const store = memoryStore();
   store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
   const ctx = { ...context(receipt, undefined), store };
-  ctx.blocks[0].logs.push({ ...event(queue.abi, 'MerkleRoot', [12n, hash('88')], addr('22'), 2), logIndex: 2 });
+  const root = event(queue.abi, 'MerkleRoot', [12n, hash('88')], addr('22'), 2);
+  receipt.logs.push(root);
+  ctx.blocks[0].logs.push({ ...root, logIndex: 2, transactionIndex: 0 });
   await handleBatch(ctx);
   const retained = [...store.rows.get(CompletedTransfer).values()][0];
   assert.equal(retained.matched, false);
@@ -143,9 +473,9 @@ test('outbound completion survives counterpart lag and restart while unrelated r
   assert.equal(transfer.status, Status.Bridging);
   transfer.ethBridgeBuiltInMsgHash = originalMessageHash;
   await handleBatch(ctx);
-  assert.equal(transfer.status, Status.Completed);
-  assert.equal(transfer.completedAtTxHash, txHash);
-  assert.equal(transfer.completedAtBlock, 11n);
+  assert.equal(stored(store, transfer).status, Status.Completed);
+  assert.equal(stored(store, transfer).completedAtTxHash, txHash);
+  assert.equal(stored(store, transfer).completedAtBlock, 11n);
   assert.equal(store.rows.get(CompletedTransfer).get(retained.id).matched, true);
   store.saves.length = 0;
   await handleBatch(ctx);
@@ -159,7 +489,7 @@ test('pending outbound completion reauthenticates canonical history before match
   await handleBatch({ ...context(receipt, undefined), store });
   await store.save(transfer);
   const changed = { ...context(receipt, transfer, hash('cc')), store, blocks: [] };
-  await assert.rejects(handleBatch(changed), /noncanonical Ethereum block/);
+  await assert.rejects(handleBatch(changed), /HOLD:/);
   assert.equal(transfer.status, Status.Bridging);
   assert.equal([...store.rows.get(CompletedTransfer).values()][0].matched, false);
 });
@@ -180,7 +510,7 @@ test('legacy completion rows and mismatched deferred effects never complete a la
 test('noncanonical batch fails before effects or cursor-owning handler return', async () => {
   const { receipt, transfer } = outbound();
   const ctx = context(receipt, transfer, hash('cc'));
-  await assert.rejects(handleBatch(ctx), /noncanonical Ethereum block/);
+  await assert.rejects(handleBatch(ctx), /HOLD:/);
   assert.equal(transfer.status, Status.Bridging);
   assert.equal(ctx.saved.length, 0);
 });
@@ -218,40 +548,68 @@ function finalityContext(chain, heights, anchorHash) {
     get polls() { return polls; }, get batches() { return batches; } };
 }
 
-test('Ethereum finality lag stays pending beyond 120 seconds with no effects, then completes canonically', async (t) => {
-  mockWait(t);
+test('Ethereum lag HOLDs a batch without polling and completes on a fresh qualified attempt', async () => {
   const { receipt, transfer } = outbound();
   const ctx = context(receipt, transfer);
-  const rpc = ctx._chain.client;
-  let polls = 0, batches = 0, finished = false;
-  ctx._chain.client = {
-    async call(method, params) {
-      if (method === 'eth_getBlockByNumber') {
-        return { number: params[0] === 'finalized' ? (++polls <= 5 ? '0xa' : '0xb') : params[0], hash: block.hash };
-      }
-      return rpc.call(method, params);
-    },
-    async batchCall(calls) { batches++; return rpc.batchCall(calls); },
+  const primary = evidenceRpc([receipt], 12), witness = evidenceRpc([receipt], 10);
+  let polls = 0;
+  primaryRpc = async (method, params) => {
+    if (method === 'eth_getBlockByNumber' && params[0] === 'finalized') polls++;
+    return primary(method, params);
   };
-  const pending = handleBatch(ctx).then(() => { finished = true; });
-  for (let i = 0; i < 4; i++) {
-    await new Promise(setImmediate);
-    t.mock.timers.tick(30_000);
-  }
-  await new Promise(setImmediate);
-  assert.equal(polls, 5);
-  assert.equal(finished, false);
-  assert.equal(batches, 0);
-  assert.equal(transfer.status, Status.Bridging);
+  witnessRpc = witness;
+  await assert.rejects(handleBatch(ctx), /HOLD:/);
+  assert.equal(polls, 1, 'Ethereum qualification is bounded, not a finality wait loop');
+  assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
   assert.equal(ctx.saved.length, 0);
-  t.mock.timers.tick(29_999);
-  await new Promise(setImmediate);
-  assert.equal(finished, false);
-  t.mock.timers.tick(1);
-  await pending;
-  assert.equal(polls, 6);
-  assert.equal(transfer.status, Status.Completed);
-  assert.equal(ctx.saved.length, 1);
+  witnessRpc = evidenceRpc([receipt], 11);
+  await handleBatch(ctx);
+  assert.equal(stored(ctx.store, transfer).status, Status.Completed);
+  assert.equal([...ctx.store.rows.get(EthereumFinalityCheckpoint).values()][0].blockNumber, 11n);
+});
+
+test('Ethereum reload rejects saved-head regression and a changed prior anchor', async () => {
+  for (const fault of ['regression', 'anchor']) {
+    const { receipt, transfer } = outbound();
+    const ctx = context(receipt, transfer);
+    await handleBatch(ctx);
+    const original = structuredClone(stored(ctx.store, transfer));
+    ctx.blocks = [];
+    const canonical = evidenceRpc([receipt], fault === 'regression' ? 10 : 12);
+    primaryRpc = async (method, params) => {
+      const result = await canonical(method, params);
+      if (fault === 'anchor' && method === 'eth_getBlockByNumber' && params[0] === '0xb') {
+        return { ...result, hash: hash('cc') };
+      }
+      return result;
+    };
+    witnessRpc = primaryRpc;
+    ctx.store.saves.length = 0;
+    await assert.rejects(handleBatch(ctx), /HOLD:/);
+    assert.deepEqual(structuredClone(stored(ctx.store, transfer)), original);
+    assert.equal(ctx.store.saves.length, 0);
+  }
+});
+
+test('Ethereum fails closed on malformed, unavailable and noncanonical independent evidence', async () => {
+  for (const fault of ['finality', 'transport', 'missing-header', 'canonical', 'ancestry']) {
+    const { receipt, transfer } = outbound();
+    const ctx = context(receipt, transfer);
+    const canonical = evidenceRpc([receipt], fault === 'ancestry' ? 12 : 11);
+    witnessRpc = async (method, params) => {
+      if (fault === 'transport') throw new Error('transport unavailable');
+      const result = await canonical(method, params);
+      if (method !== 'eth_getBlockByNumber') return result;
+      if (fault === 'finality' && params[0] === 'finalized') return null;
+      if (fault === 'missing-header' && params[0] === '0xb') return null;
+      if (fault === 'canonical' && params[0] === '0xb') return { ...result, hash: hash('cc') };
+      if (fault === 'ancestry' && params[0] === 'finalized') return { ...result, parentHash: hash('cc') };
+      return result;
+    };
+    await assert.rejects(requireEthFinality(ctx), /HOLD:/, fault);
+    assert.equal(transfer.status, Status.Bridging);
+    assert.equal(ctx.saved.length, 0);
+  }
 });
 
 test('Gear finality lag holds the entire batch beyond 120 seconds before any state access', async (t) => {
@@ -261,6 +619,8 @@ test('Gear finality lag holds the entire batch beyond 120 seconds before any sta
   Object.assign(ctx, { store, log: quiet });
   let finished = false;
   const pending = requireGearFinality(ctx).then(async () => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
     await state.new(ctx);
     await state.save();
     finished = true;
@@ -285,7 +645,7 @@ test('Gear finality lag holds the entire batch beyond 120 seconds before any sta
   assert.equal(finished, true);
 });
 
-for (const [chain, requireFinality] of [['Ethereum', requireEthFinality], ['Gear', requireGearFinality]]) {
+for (const [chain, requireFinality] of [['Gear', requireGearFinality]]) {
   test(chain + ' rejects regression from the immediately previous finalized height', async (t) => {
     mockWait(t);
     const ctx = finalityContext(chain, [20, 21, 20]);
@@ -329,12 +689,12 @@ for (const [chain, requireFinality] of [['Ethereum', requireEthFinality], ['Gear
 
 test('Gear proof envelope and queued native outcome remain pending until exact settled log', async () => {
   const store = memoryStore();
-  const transfer = new Transfer({ id: 'deposit', sourceNetwork: Network.Ethereum, blockNumber: 100n,
+  const transfer = new Transfer({ id: 'deposit', txHash: hash('bc'), sourceNetwork: Network.Ethereum, blockNumber: 100n,
     sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'), destination: hash('77'),
     sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
   await store.save(transfer);
   const state = new GearState();
-  const ctx = { store, log: quiet };
+  const ctx = { store, log: quiet, blocks: [] };
   await state.new(ctx);
   state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: 2 });
   await state.save();
@@ -357,7 +717,7 @@ test('Gear proof envelope and queued native outcome remain pending until exact s
   await state.new(ctx);
   state.recordReceiptSettlement({ ...deposit, log_index: '4' }, new Date(), 302n, hash('dd'));
   await state.save();
-  assert.equal(another.status, Status.Completed);
+  assert.equal(stored(store, another).status, Status.Completed);
   assert.equal(transfer.status, Status.Bridging);
   assert.equal((await store.find(ReceiptRelay)).length, 1);
 });
@@ -385,8 +745,8 @@ test('decoded original native refunds remain distinct from delivery and bind the
   };
   for (const mismatch of ['none', 'source', 'wrapper', 'sender', 'recipient', 'amount', 'block', 'transaction', 'log',
     'partial', 'over-return', 'native', 'operation', 'child', 'payout-child', 'same-child']) {
-    const store = memoryStore(), state = new GearState(), ctx = { store, log: quiet };
-    const transfer = new Transfer({ id: 'original', sourceNetwork: Network.Ethereum, blockNumber: 100n,
+    const store = memoryStore(), state = new GearState(), ctx = { store, log: quiet, blocks: [] };
+    const transfer = new Transfer({ id: 'original', txHash: hash('bc'), sourceNetwork: Network.Ethereum, blockNumber: 100n,
       sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'), destination: hash('77'),
       sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
     await store.save(transfer);
@@ -424,11 +784,12 @@ test('decoded original native refunds remain distinct from delivery and bind the
       assert.equal(settlement.matched, false, mismatch);
       continue;
     }
-    assert.equal(transfer.status, 'Refunded');
-    assert.notEqual(transfer.status, Status.Completed);
-    assert.equal(transfer.receiptSlot, 200n);
-    assert.equal(transfer.completedAtBlock, 300n);
-    assert.equal(transfer.completedAtTxHash, hash('dd'));
+    const refunded = stored(store, transfer);
+    assert.equal(refunded.status, Status.Refunded);
+    assert.notEqual(refunded.status, Status.Completed);
+    assert.equal(refunded.receiptSlot, 200n);
+    assert.equal(refunded.completedAtBlock, 300n);
+    assert.equal(refunded.completedAtTxHash, hash('dd'));
     assert.equal(settlement.matched, true);
     assert.equal(settlement.deposit.outcome, 'Refunded');
     for (const field of ['operation_id', 'vara_token_id', 'child', 'payout_child', 'receiver']) {
@@ -440,12 +801,12 @@ test('decoded original native refunds remain distinct from delivery and bind the
       await state.new(ctx);
       await dispatch(state, { ...deposit, ...change });
       await assert.rejects(state.save(), /conflicting receipt deposit/);
-      assert.equal(transfer.status, Status.Refunded);
+      assert.equal(stored(store, transfer).status, Status.Refunded);
     }
     await state.new(ctx);
     await dispatch(state, deposit, 'ReceiptDepositSettled');
     await assert.rejects(state.save(), /conflicting receipt deposit/);
-    assert.equal(transfer.status, Status.Refunded);
+    assert.equal(stored(store, transfer).status, Status.Refunded);
   }
 });
 
@@ -459,29 +820,38 @@ test('bounded pending pages cycle and match authenticated tuples arriving in lat
     timestamp: new Date(1_700_000_000_000), blockNumber: 300n, txHash: hash('bb'), matched: false,
   }));
   await store.save(pending);
-  const state = new GearState(), ctx = { store, log: quiet };
+  const state = new GearState(), ctx = { store, log: quiet, blocks: [{ header: { ...block, height: 300 } }] };
   await state.new(ctx);
   await state.save();
   assert.equal(store.queries.find(({ entity, options }) => entity === ReceiptSettlement && options.where?.matched === false).options.take, 1000);
-  const transfer = new Transfer({ id: 'late', sourceNetwork: Network.Ethereum, blockNumber: 100n,
+  // Replaying the same batch models a transaction retry: it must not skip the first page.
+  const beforeRetry = store.queries.length;
+  await state.new(ctx);
+  await state.save();
+  const retryPage = store.queries.slice(beforeRetry).find(({ entity, options }) =>
+    entity === ReceiptSettlement && options.where?.matched === false);
+  assert.equal(retryPage.options.where.id, undefined);
+  const transfer = new Transfer({ id: 'late', txHash: hash('bc'), sourceNetwork: Network.Ethereum, blockNumber: 100n,
     sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'), destination: hash('77'),
     sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
   await store.save([transfer]);
+  ctx.blocks[0].header = { ...block, height: 301, hash: hash('ab') };
   await state.new(ctx);
   state.recordReceiptRelay({ slot: '1200', block_number: 100, transaction_index: 2 });
   const before = store.queries.length;
   await state.save();
-  assert.equal(transfer.status, Status.Completed);
-  assert.equal(pending[1000].matched, true);
-  assert.equal(pending[0].matched, false);
-  assert.ok(store.queries.length - before <= 6);
-  const first = new Transfer({ ...transfer, id: 'first', blockNumber: 101n, receiptSlot: null, status: Status.Bridging });
+  assert.equal(stored(store, transfer).status, Status.Completed);
+  assert.equal(stored(store, pending[1000]).matched, true);
+  assert.equal(stored(store, pending[0]).matched, false);
+  assert.ok(store.queries.slice(before).filter(({ entity }) => entity !== EthereumFinalityCheckpoint).length <= 6);
+  const first = new Transfer({ ...transfer, id: 'first', txHash: hash('bd'), blockNumber: 101n, receiptSlot: null, status: Status.Bridging });
   await store.save([first]);
+  ctx.blocks[0].header = { ...block, height: 302, hash: hash('ac') };
   await state.new(ctx);
   state.recordReceiptRelay({ slot: '200', block_number: 101, transaction_index: 2 });
   await state.save();
-  assert.equal(first.status, Status.Completed);
-  assert.equal(pending[0].matched, true);
+  assert.equal(stored(store, first).status, Status.Completed);
+  assert.equal(stored(store, pending[0]).matched, true);
   assert.ok(store.saves.every(Array.isArray));
   assert.ok(store.queries.filter(({ entity, options }) => entity === ReceiptSettlement && options.where?.matched === false)
     .every(({ options }) => options.take === 1000 && options.order.id === 'ASC'));
@@ -495,7 +865,7 @@ test('batched receipt joins retain every authenticated tuple, effect and slot ch
   for (const field of ['sourceNetwork', 'blockNumber', 'sourceTransactionIndex', 'sourceLogIndex',
     'source', 'destination', 'sender', 'receiver', 'amount', 'receiptSlot', 'duplicate']) {
     const store = memoryStore();
-    const transfer = new Transfer({ id: 'original', sourceNetwork: Network.Ethereum, blockNumber: 100n,
+    const transfer = new Transfer({ id: 'original', txHash: hash('bc'), sourceNetwork: Network.Ethereum, blockNumber: 100n,
       sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'), destination: hash('77'),
       sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
     if (field === 'sourceNetwork') transfer[field] = Network.Vara;
@@ -503,7 +873,7 @@ test('batched receipt joins retain every authenticated tuple, effect and slot ch
     else if (field !== 'duplicate') transfer[field] = field === 'amount' ? '11' : hash('99');
     await store.save([transfer, ...(field === 'duplicate' ? [new Transfer({ ...transfer, id: 'duplicate' })] : [])]);
     const state = new GearState();
-    await state.new({ store, log: quiet });
+    await state.new({ store, log: quiet, blocks: [] });
     state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: 2 });
     state.recordReceiptSettlement(deposit, new Date(), 300n, hash('bb'));
     if (field === 'receiptSlot' || field === 'duplicate') await assert.rejects(state.save(), /HOLD:/);
@@ -513,7 +883,7 @@ test('batched receipt joins retain every authenticated tuple, effect and slot ch
     }
     assert.equal(transfer.status, Status.Bridging, field);
   }
-  const store = memoryStore(), state = new GearState(), ctx = { store, log: quiet };
+  const store = memoryStore(), state = new GearState(), ctx = { store, log: quiet, blocks: [] };
   await state.new(ctx);
   state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: 2 });
   await state.save();
@@ -719,7 +1089,7 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
   const store = memoryStore();
   await store.save([new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'), isRemoved: false }),
     ...['predecessor-deposit', 'successor-deposit', 'successor-refund'].map((id, index) => new Transfer({
-      id, sourceNetwork: Network.Ethereum, destNetwork: Network.Vara, blockNumber: 100n,
+      id, txHash: hash('bc'), sourceNetwork: Network.Ethereum, destNetwork: Network.Vara, blockNumber: 100n,
       sourceTransactionIndex: 2n, sourceLogIndex: BigInt(index + 3), source: addr('66'), destination: hash('77'),
       sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging,
     })),

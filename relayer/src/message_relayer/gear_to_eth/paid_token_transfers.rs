@@ -20,7 +20,6 @@ use crate::message_relayer::{
         tx_manager::TransactionManager,
     },
 };
-use alloy::providers::Provider;
 use anyhow::Result as AnyResult;
 use ethereum_client::EthApi;
 use gclient::ext::sp_runtime::AccountId32;
@@ -81,14 +80,11 @@ impl Relayer {
         governance_pauser: ActorId,
     ) -> AnyResult<Self> {
         let storage_path = storage_path.as_ref();
-        let destination_genesis = ethereum_client::get_block(eth_api.raw_provider(), 0)
-            .await?
-            .header
-            .hash;
+        let (destination_chain_id, destination_genesis) = eth_api.finality_identity()?;
         let storage = Arc::new(JSONStorage::new(storage_path));
         storage
             .bind_outbound_lane(OutboundLaneIdentity {
-                destination_chain_id: eth_api.raw_provider().get_chain_id().await?,
+                destination_chain_id,
                 destination_genesis_hash: destination_genesis.0.into(),
                 message_queue_address: eth_api.message_queue_address(),
                 bridging_payment_address: Some(bridging_payment_address),

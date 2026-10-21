@@ -15,7 +15,6 @@ use crate::message_relayer::{
         tx_manager::{Transaction, TransactionManager, TxStatus},
     },
 };
-use alloy::providers::Provider;
 use ethereum_client::EthApi;
 use gear_common::api_provider::ApiProviderConnection;
 use primitive_types::U256;
@@ -35,14 +34,11 @@ pub async fn relay(
     governance_pauser: ActorId,
     storage_path: &Path,
 ) -> anyhow::Result<()> {
-    let destination_genesis = ethereum_client::get_block(eth_api.raw_provider(), 0)
-        .await?
-        .header
-        .hash;
+    let (destination_chain_id, destination_genesis) = eth_api.finality_identity()?;
     let storage = Arc::new(JSONStorage::new(storage_path));
     storage
         .bind_outbound_lane(OutboundLaneIdentity {
-            destination_chain_id: eth_api.raw_provider().get_chain_id().await?,
+            destination_chain_id,
             destination_genesis_hash: destination_genesis.0.into(),
             message_queue_address: eth_api.message_queue_address(),
             bridging_payment_address: None,

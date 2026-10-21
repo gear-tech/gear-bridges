@@ -484,7 +484,10 @@ mod tests {
         });
         let api = ethereum_client::PollingEthApi::new(&endpoint)
             .await
-            .unwrap();
+            .unwrap()
+            .with_finality_witness(&format!("{endpoint}/witness"), 560048,
+                alloy::primitives::B256::repeat_byte(1))
+            .await.unwrap();
         let block = api.finalized_block().await.unwrap_err();
         let deposit = api
             .fetch_deposit_events_at(Default::default(), 1, Default::default())

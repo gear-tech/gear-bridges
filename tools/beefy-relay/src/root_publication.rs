@@ -318,14 +318,7 @@ async fn reconcile_publication_owners(
         }
         let signed = signed_publication_identity(intent, ethereum.queue_address)?;
         if let Some(receipt) = ethereum.api.get_finalized_receipt(signed.hash).await? {
-            let proof = authenticated_root_receipt(
-                ethereum,
-                path,
-                signed.hash,
-                (receipt.included_block_number, receipt.included_block_hash),
-                (receipt.finalized_block_number, receipt.finalized_block_hash),
-            )
-            .await?;
+            let proof = &receipt.inclusion;
             let kind = if intent["kind"] == "emptyProgress" {
                 "emptyProgress"
             } else {
@@ -353,6 +346,7 @@ async fn reconcile_publication_owners(
                 Some((receipt.finalized_block_number, receipt.finalized_block_hash)),
             )?;
             intent["publicationReceipt"]["receiptProof"] = serde_json::to_value(&proof)?;
+            intent["publicationReceipt"]["checkpoint"] = serde_json::to_value(&receipt.checkpoint)?;
             persist_root_intent(path, intent)?;
         }
     }
@@ -801,27 +795,16 @@ async fn validate_observed_progress(
             .is_ok_and(|candidate| candidate == Some(event))),
         "external receipt does not authenticate target progress; HOLD"
     );
-    let queue = ethereum_client::abi::IMessageQueue::new(
-        ethereum.queue_address,
-        ethereum.api.raw_provider().clone(),
-    );
+    // Historical state must agree at the same authenticated inclusion hash.
     if kind == "emptyProgress" {
         ensure!(
-            queue
-                .maxBlockNumber()
-                .block(BlockId::hash_canonical(included.1))
-                .call()
-                .await?
+            ethereum.queue_max_block_at(included.1).await?
                 >= U256::from(target),
             "external receipt does not cover empty target; HOLD"
         );
     } else {
         ensure!(
-            queue
-                .getMerkleRoot(U256::from(target))
-                .block(BlockId::hash_canonical(included.1))
-                .call()
-                .await?
+            ethereum.queue_root_at(U256::from(target), included.1).await?
                 == B256::from(root),
             "external receipt did not register exact historical root; HOLD"
         );
@@ -873,14 +856,9 @@ async fn observe_finalized_progress(
     }
     let (finalized_block, finalized_hash) = finalized_ethereum_head(ethereum).await?;
     let provider = ethereum.api.raw_provider();
-    let queue = ethereum_client::abi::IMessageQueue::new(ethereum.queue_address, provider.clone());
-    let at = BlockId::hash_canonical(finalized_hash);
+    // Neither a provider's state response nor a raw finalized tag authorizes progress.
     if kind == "merkleRoot" {
-        let stored = queue
-            .getMerkleRoot(U256::from(target))
-            .block(at)
-            .call()
-            .await?;
+        let stored = ethereum.queue_root_at(U256::from(target), finalized_hash).await?;
         ensure!(
             stored.is_zero() || stored == B256::from(root),
             "conflicting finalized queue root; HOLD"
@@ -888,7 +866,7 @@ async fn observe_finalized_progress(
         if stored.is_zero() {
             return Ok(false);
         }
-    } else if queue.maxBlockNumber().block(at).call().await? < U256::from(target) {
+    } else if ethereum.queue_max_block_at(finalized_hash).await? < U256::from(target) {
         return Ok(false);
     }
     let signatures: &[B256] = if kind == "emptyProgress" {
@@ -983,21 +961,13 @@ async fn observe_finalized_progress(
         "receiptProof":serde_json::to_value(&proof)?});
     if kind == "emptyProgress" {
         ensure!(
-            queue
-                .maxBlockNumber()
-                .block(BlockId::hash_canonical(block_hash))
-                .call()
-                .await?
+            ethereum.queue_max_block_at(block_hash).await?
                 >= U256::from(target),
             "external receipt did not cover empty target; HOLD"
         );
     } else {
         ensure!(
-            queue
-                .getMerkleRoot(U256::from(target))
-                .block(BlockId::hash_canonical(block_hash))
-                .call()
-                .await?
+            ethereum.queue_root_at(U256::from(target), block_hash).await?
                 == B256::from(root),
             "external receipt did not register exact historical root; HOLD"
         );
@@ -1107,12 +1077,7 @@ async fn revalidate_terminal_roots(
                 &std::collections::BTreeMap::from([(number, hash)]),
             )
             .await?;
-            let nonce = ethereum
-                .api
-                .raw_provider()
-                .get_transaction_count(signed.from)
-                .block_id(BlockId::hash_canonical(hash))
-                .await?;
+            let nonce = ethereum.account_nonce_at(signed.from, hash).await?;
             revalidate_root_finalized_pin(ethereum, number, hash).await?;
             ensure!(
                 nonce > signed.nonce && evidence["accountNonce"].as_u64() == Some(nonce),
@@ -1160,14 +1125,7 @@ async fn reconcile_root_original(
         if receipt.receipt.status() {
             return Ok(false);
         }
-        let proof = authenticated_root_receipt(
-            ethereum,
-            output,
-            signed.hash,
-            (receipt.included_block_number, receipt.included_block_hash),
-            (receipt.finalized_block_number, receipt.finalized_block_hash),
-        )
-        .await?;
+        let proof = &receipt.inclusion;
         ensure!(
             !proof.receipt.status()
                 && format!("0x{}", hex::encode(&proof.raw_transaction)) == intent["rawTransaction"],
@@ -1179,7 +1137,7 @@ async fn reconcile_root_original(
             json!({
             "includedBlock":receipt.included_block_number,"includedBlockHash":format!("{:#x}",receipt.included_block_hash),
             "finalizedBlock":receipt.finalized_block_number,"finalizedBlockHash":format!("{:#x}",receipt.finalized_block_hash),
-            "receiptProof":serde_json::to_value(&proof)?}),
+            "receiptProof":serde_json::to_value(proof)?,"checkpoint":receipt.checkpoint}),
         )?;
         persist_root_intent(output, intent)?;
         return Ok(true);
@@ -1201,12 +1159,7 @@ async fn reconcile_root_original(
             ethereum.finality_genesis().await?,
         )
         .await?;
-    let nonce = ethereum
-        .api
-        .raw_provider()
-        .get_transaction_count(signed.from)
-        .block_id(BlockId::hash_canonical(view.block_hash()))
-        .await?;
+    let nonce = ethereum.account_nonce_at(signed.from, view.block_hash()).await?;
     if nonce > signed.nonce {
         // Receipt availability may advance during the pinned nonce query. Keep
         // original ownership and reconcile that receipt before recording an unknown outcome.
@@ -1424,17 +1377,15 @@ async fn canonical_root_inclusion(
         }),
         "canonical root receipt does not record the expected queue progress"
     );
-    let queue = ethereum_client::abi::IMessageQueue::new(ethereum.queue_address, provider.clone());
-    let at = BlockId::hash_canonical(block_hash);
-    let stored = queue
-        .getMerkleRoot(U256::from(source_block))
-        .block(at)
-        .call()
-        .await?;
+    // Unfinalized observations are discovery only; they cannot authorize terminal progress.
+    if block > ethereum.api.verified_finalized_view().await?.block_number() {
+        return Ok(Some((block, block_hash)));
+    }
+    let stored = ethereum.queue_root_at(U256::from(source_block), block_hash).await?;
     ensure!(
         stored == B256::from(expected_root)
             && (kind != "emptyProgress"
-                || queue.maxBlockNumber().block(at).call().await? >= U256::from(source_block)),
+                || ethereum.queue_max_block_at(block_hash).await? >= U256::from(source_block)),
         "canonical root receipt does not store the expected queue progress"
     );
     Ok(Some((block, block_hash)))
@@ -1614,14 +1565,7 @@ pub(crate) async fn wait_for_root_receipt(
                                 "original root finalized anchor changed; HOLD"
                             );
                         }
-                        let proof = authenticated_root_receipt(
-                            ethereum,
-                            output,
-                            transaction_hash,
-                            (block, hash),
-                            (receipt.finalized_block_number, receipt.finalized_block_hash),
-                        )
-                        .await?;
+                        let proof = &receipt.inclusion;
                         ensure!(
                             authenticated_publication_matches(
                                 &proof,
@@ -1643,6 +1587,8 @@ pub(crate) async fn wait_for_root_receipt(
                         if intent["publicationReceipt"]["receiptProof"].is_null() {
                             intent["publicationReceipt"]["receiptProof"] =
                                 serde_json::to_value(&proof)?;
+                            intent["publicationReceipt"]["checkpoint"] =
+                                serde_json::to_value(&receipt.checkpoint)?;
                             persist_root_intent(output, intent)?;
                         }
                         return Ok(RootPublicationState::Accepted);
@@ -1679,6 +1625,7 @@ pub async fn publish_root(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
+    ethereum_witness_rpc: &str,
     wallet: &Path,
     deployment_manifest: &Path,
     publisher_state: &Path,
@@ -1704,6 +1651,7 @@ pub async fn publish_root(
                 source_rpc,
                 witness_rpc,
                 ethereum_rpc,
+                ethereum_witness_rpc,
                 wallet,
                 deployment_manifest,
                 publisher_state,
@@ -1727,6 +1675,7 @@ pub(crate) async fn publish_root_locked(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
+    ethereum_witness_rpc: &str,
     wallet: &Path,
     deployment_manifest: &Path,
     publisher_state: &Path,
@@ -1865,12 +1814,17 @@ pub(crate) async fn publish_root_locked(
     );
     let ethereum = Ethereum::connect(
         ethereum_rpc,
+        ethereum_witness_rpc,
         wallet,
         &active_ethereum,
         fixture,
         public_network,
     )
     .await?;
+    ethereum.api.enable_finality_archive(
+        &state_directory(output).join("finality-history/headers"),
+        ethereum.api.finality_identity()?.1,
+    ).await?;
     ethereum
         .verify_token_bindings(decode_hash(&manifest["gearManager"], "gearManager")?)
         .await?;
@@ -2430,6 +2384,7 @@ mod root_publication_tests {
         let before = original.clone();
         let ethereum = crate::ethereum::Ethereum::connect_readonly(
             &rpc,
+            &std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?,
             &manifest["ethereum"],
             None,
             crate::ethereum::PublicEthereumNetwork::Hoodi,

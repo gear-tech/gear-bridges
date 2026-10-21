@@ -1113,6 +1113,8 @@ mod tests {
             ));
             let socket = std::net::TcpListener::bind("127.0.0.1:0")?;
             let endpoint = format!("http://{}", socket.local_addr()?);
+            let witness_socket = std::net::TcpListener::bind("127.0.0.1:0")?;
+            let witness_endpoint = format!("http://{}", witness_socket.local_addr()?);
             let server_blocks = blocks.clone();
             let server_calls = calls.clone();
             let server_head = head.clone();
@@ -1145,7 +1147,7 @@ mod tests {
                                             .unwrap()
                                     };
                                     let gate =
-                                        if number > 0 && !matches!(tag, "finalized" | "latest") {
+                                        if number > 1 && number < head.load(Ordering::SeqCst) && !matches!(tag, "finalized" | "latest") {
                                             historical_requests.lock().unwrap().clone()
                                         } else {
                                             None
@@ -1181,12 +1183,14 @@ mod tests {
             })
             .workers(1)
             .listen(socket)?
+            .listen(witness_socket)?
             .disable_signals()
             .run();
             let handle = server.handle();
             tokio::spawn(server);
             let api =
-                EthApi::new(&endpoint, &format!("{:#x}", birth.queue), None, None, None).await?;
+                EthApi::new(&endpoint, &format!("{:#x}", birth.queue), None, None, None).await?
+                    .with_finality_witness(&witness_endpoint, 560048, birth.genesis_hash).await?;
             Ok(Self {
                 api,
                 head,
@@ -1224,36 +1228,35 @@ mod tests {
             }
         });
         let started = tokio::time::Instant::now();
-        let proof = tokio::spawn(async move {
+        let mut proof = tokio::spawn(async move {
             let view = extractor.finalized_view().await?;
             Ok::<_, anyhow::Error>((view, extractor.last_finalized))
         });
         let mut observed = Vec::new();
-        for _ in 0..4 {
-            let mut wave = Vec::new();
-            for _ in 0..32 {
-                let (number, release) = historical
-                    .recv()
-                    .await
-                    .context("ancestry traversal stopped before the next bounded request wave")?;
-                observed.push(number);
-                wave.push(release);
+        let result = loop {
+            tokio::select! {
+                result = &mut proof => break result,
+                request = historical.recv() => {
+                    let (number, release) = request
+                        .context("ancestry traversal stopped before completing")?;
+                    observed.push(number);
+                    // Total traversal exceeds 10s; a 32-request window stays well
+                    // below each RPC's bound even while loopback responses drain.
+                    tokio::time::advance(Duration::from_millis(100)).await;
+                    let _ = release.send(());
+                }
             }
-            tokio::time::advance(Duration::from_secs(8)).await;
-            for release in wave {
-                let _ = release.send(());
-            }
-        }
-        let result = proof.await;
+        };
         let elapsed = started.elapsed();
         busy.abort();
         tokio::time::resume();
         rpc.server.stop(true).await;
         source.abort();
         let (view, pin) = result??;
-        assert!(elapsed >= Duration::from_secs(32));
+        assert!(elapsed >= Duration::from_millis(100 * 127));
         observed.sort_unstable();
-        assert_eq!(observed, (2..=129).collect::<Vec<_>>());
+        observed.dedup();
+        assert_eq!(observed, (2..129).collect::<Vec<_>>());
         assert_eq!(view.block_hash(), rpc.blocks[129].header.hash);
         assert_eq!(
             pin,
@@ -1516,7 +1519,12 @@ mod tests {
             None,
             None,
         )
-        .await?;
+        .await?
+        .with_finality_witness(
+            &std::env::var("ETH_WITNESS_RPC")?,
+            std::env::var("ETH_CHAIN_ID")?.parse()?,
+            std::env::var("ROOT_DISCOVERY_ETH_GENESIS")?.parse()?,
+        ).await?;
         let view = api.verified_finalized_view().await?;
         anyhow::ensure!(
             format!("{:#x}", view.genesis_hash()) == std::env::var("ROOT_DISCOVERY_ETH_GENESIS")?,

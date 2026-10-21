@@ -16,7 +16,6 @@ use crate::message_relayer::{
         tx_manager::TransactionManager,
     },
 };
-use alloy::providers::Provider;
 use ethereum_client::EthApi;
 use gear_common::api_provider::ApiProviderConnection;
 use sails_rs::ActorId;
@@ -68,14 +67,11 @@ impl Relayer {
     ) -> anyhow::Result<Self> {
         let (governance_admin, governance_pauser) = governance;
         let storage_path = storage_path.as_ref();
-        let destination_genesis = ethereum_client::get_block(eth_api.raw_provider(), 0)
-            .await?
-            .header
-            .hash;
+        let (destination_chain_id, destination_genesis) = eth_api.finality_identity()?;
         let storage = Arc::new(JSONStorage::new(storage_path));
         storage
             .bind_outbound_lane(OutboundLaneIdentity {
-                destination_chain_id: eth_api.raw_provider().get_chain_id().await?,
+                destination_chain_id,
                 destination_genesis_hash: destination_genesis.0.into(),
                 message_queue_address: eth_api.message_queue_address(),
                 bridging_payment_address: None,

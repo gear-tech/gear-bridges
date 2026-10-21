@@ -242,6 +242,8 @@ mod tests {
         let server_unavailable_reads = unavailable_reads.clone();
         let socket = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", socket.local_addr().unwrap());
+        let witness_socket = TcpListener::bind("127.0.0.1:0").unwrap();
+        let witness_endpoint = format!("http://{}", witness_socket.local_addr().unwrap());
         let server_blocks = blocks.clone();
         let server_queries = queries.clone();
         let server = HttpServer::new(move || {
@@ -295,11 +297,15 @@ mod tests {
         .workers(1)
         .listen(socket)
         .unwrap()
+        .listen(witness_socket)
+        .unwrap()
         .disable_signals()
         .run();
         let server_handle = server.handle();
         tokio::spawn(server);
-        let api = PollingEthApi::new(&endpoint).await.unwrap();
+        let api = PollingEthApi::new(&endpoint).await.unwrap()
+            .with_finality_witness(&witness_endpoint, 560048, blocks[0].header.hash)
+            .await.unwrap();
         let path =
             std::env::temp_dir().join(format!("listener-aged-{}.json", uuid::Uuid::now_v7()));
         let mut bound = identity();

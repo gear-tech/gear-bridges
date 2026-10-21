@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import {
   CompletedTransfer,
   EthBridgeProgram,
+  EthereumFinalityCheckpoint,
   GearEthBridgeMessage,
   InitiatedTransfer,
   GearManagerHandoff,
@@ -25,6 +26,7 @@ const AppDataSource = new DataSource({
   entities: [
     CompletedTransfer,
     EthBridgeProgram,
+    EthereumFinalityCheckpoint,
     GearEthBridgeMessage,
     GearManagerHandoff,
     InitiatedTransfer,

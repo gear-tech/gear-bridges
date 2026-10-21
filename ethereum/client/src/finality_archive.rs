@@ -27,6 +27,8 @@ pub(crate) struct HeaderArchive {
 struct Fence {
     genesis: B256,
     tips: Vec<Header>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    quorum_checkpoint: Option<crate::FinalityCheckpoint>,
 }
 
 pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -85,7 +87,9 @@ impl HeaderArchive {
 
     /// Retain every unresolved witnessed generation. A restart must bridge these
     /// exact tips, not merely reach an old numeric height on a different branch.
-    pub(crate) fn witness(&self, genesis: B256, head: &Header) -> Result<Vec<(u64, B256)>> {
+    pub(crate) fn witness(
+        &self, genesis: B256, head: &Header, approved: Option<&crate::FinalityCheckpoint>,
+    ) -> Result<Vec<(u64, B256)>> {
         let path = self.directory.join("fence.json");
         let mut fence = if path.exists() {
             ensure!(
@@ -103,9 +107,20 @@ impl HeaderArchive {
             Fence {
                 genesis,
                 tips: Vec::new(),
+                quorum_checkpoint: None,
             }
         };
         let hash = head.hash_slow();
+        if let Some(checkpoint) = &fence.quorum_checkpoint {
+            ensure!(
+                checkpoint.schema_version == 1
+                    && checkpoint.policy == "independent-two-el-v1"
+                    && checkpoint.genesis_hash == genesis
+                    && approved.is_some_and(|fresh| fresh.chain_id == checkpoint.chain_id)
+                    && fence.tips.iter().any(|tip| tip == &checkpoint.common_header),
+                "invalid retained quorum checkpoint; HOLD"
+            );
+        }
         let mut required = Vec::with_capacity(fence.tips.len());
         for tip in &fence.tips {
             ensure!(
@@ -132,12 +147,18 @@ impl HeaderArchive {
         Ok(required)
     }
 
-    pub(crate) fn complete(&self, genesis: B256, head: &Header) -> Result<()> {
+    pub(crate) fn complete(
+        &self,
+        genesis: B256,
+        head: &Header,
+        checkpoint: &crate::FinalityCheckpoint,
+    ) -> Result<()> {
         atomic_json(
             &self.directory.join("fence.json"),
             &Fence {
                 genesis,
                 tips: vec![head.clone()],
+                quorum_checkpoint: Some(checkpoint.clone()),
             },
         )
     }

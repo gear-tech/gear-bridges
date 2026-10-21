@@ -52,7 +52,7 @@ impl Transaction {
     pub fn new(message: MessageInBlock, status: TxStatus) -> Self {
         let uuid = Uuid::now_v7();
         Self {
-            journal_version: 4,
+            journal_version: 5,
             completion: None,
             failure_evidence: None,
             nonce_disposition: None,
@@ -76,7 +76,7 @@ impl Transaction {
     /// Validate persisted identity/effects; callers must separately recheck canonical finality.
     pub fn validate_journal(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
-            matches!(self.journal_version, 2..=4),
+            matches!(self.journal_version, 2..=5),
             "HOLD: unsupported outbound transaction journal version {}",
             self.journal_version
         );
@@ -90,8 +90,14 @@ impl Transaction {
                 )
             })?;
             status_fetcher::validate_completion(&self.message.message, signed, evidence)?;
+            if self.journal_version == 5 {
+                anyhow::ensure!(
+                    evidence.inclusion.is_some() && evidence.checkpoint.is_some(),
+                    "HOLD: version 5 completion lacks authenticated receipt evidence"
+                );
+            }
             anyhow::ensure!(
-                self.journal_version >= 3 && self.ethereum_tx_hash == Some(signed.hash),
+                self.ethereum_tx_hash == Some(signed.hash),
                 "HOLD: completion version/hash changed"
             );
         }
@@ -106,6 +112,22 @@ impl Transaction {
                     && self.completion.is_none()
                     && self.ethereum_tx_hash.is_none(),
                 "HOLD: failed original claims completion"
+            );
+        }
+        if self.journal_version == 5
+            && matches!(self.status, TxStatus::Failed { .. })
+            && self.ethereum_submission.is_some()
+        {
+            anyhow::ensure!(
+                self.failure_evidence.as_ref().is_some_and(|evidence|
+                    evidence.inclusion.is_some() && evidence.checkpoint.is_some()),
+                "HOLD: version 5 signed failure lacks authenticated original revert"
+            );
+        }
+        if matches!(self.status, TxStatus::Failed { .. }) && self.ethereum_submission.is_none() {
+            anyhow::ensure!(
+                self.ethereum_tx_attempts.is_empty(),
+                "HOLD: failed original has attempts but no retained signed transaction"
             );
         }
         if let Some(snapshot) = &self.nonce_disposition {
@@ -290,6 +312,10 @@ impl TransactionManager {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("HOLD: completion has no original signed bytes"))?;
         status_fetcher::validate_completion(&current.message.message, signed, &evidence)?;
+        anyhow::ensure!(
+            evidence.inclusion.is_some() && evidence.checkpoint.is_some(),
+            "HOLD: completion lacks authenticated original receipt"
+        );
         let ethereum_tx_hash = Some(signed.hash);
         let mut tx = active
             .remove(&uuid)
@@ -301,7 +327,7 @@ impl TransactionManager {
             tx.remember_attempt(hash);
         }
         tx.status = TxStatus::Completed;
-        tx.journal_version = 4;
+        tx.journal_version = 5;
         tx.completion = Some(evidence);
         tx.ethereum_tx_hash = ethereum_tx_hash;
         self.completed.write().await.insert(uuid, tx);
@@ -326,6 +352,10 @@ impl TransactionManager {
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("HOLD: failed original lacks signed bytes"))?;
             status_fetcher::validate_failure(&tx.message.message, signed, &evidence)?;
+            anyhow::ensure!(
+                evidence.inclusion.is_some() && evidence.checkpoint.is_some(),
+                "HOLD: failure lacks authenticated original revert"
+            );
             reason = format!("Original transaction {} finalized reverted", signed.hash);
             if let Some(saved) = &tx.failure_evidence {
                 anyhow::ensure!(
@@ -340,7 +370,7 @@ impl TransactionManager {
             tx.status = TxStatus::Failed {
                 diagnostic: reason.clone(),
             };
-            tx.journal_version = 4;
+            tx.journal_version = 5;
         }
         self.fail_transaction(uuid, reason).await;
         // The sender cannot unlock the account until the complete failed-original journal is durable.
@@ -442,74 +472,128 @@ impl TransactionManager {
     }
 
     pub async fn verify_completed(&self, api: &ethereum_client::EthApi) -> anyhow::Result<()> {
+        // No mutation or acknowledgement until every original and saved anchor qualifies.
+        let mut completed = self.completed.read().await.clone();
+        let mut active = self.transactions.read().await.clone();
+        let mut view = api.verified_finalized_view().await?;
+        for tx in completed.values_mut().chain(active.values_mut()) {
+            tx.validate_journal()?;
+            if let Some(signed) = &tx.ethereum_submission {
+                if let Some(saved) = &mut tx.completion {
+                    Self::verify_saved_receipt(
+                        api, &mut view, signed, &saved.receipt,
+                        saved.finalized_block_number, saved.finalized_block_hash,
+                        saved.inclusion.as_ref(), saved.checkpoint.as_ref(),
+                    ).await?;
+                    let receipt = api.get_finalized_receipt(signed.hash).await?
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "HOLD: saved completion has no original finalized receipt"))?;
+                    let observed = status_fetcher::completion_evidence(
+                        api, &tx.message.message, signed, receipt,
+                    ).await?;
+                    anyhow::ensure!(
+                        Self::same_original_receipt(&observed.receipt, &saved.receipt)
+                            && observed.token_delivery == saved.token_delivery,
+                        "HOLD: saved completion receipt/effect policy changed"
+                    );
+                    if saved.inclusion.is_none() {
+                        saved.inclusion = observed.inclusion;
+                    }
+                    if saved.checkpoint.is_none() {
+                        saved.checkpoint = observed.checkpoint;
+                    }
+                }
+                if matches!(tx.status, TxStatus::Failed { .. }) {
+                    if let Some(saved) = &tx.failure_evidence {
+                        Self::verify_saved_receipt(
+                            api, &mut view, signed, &saved.receipt,
+                            saved.finalized_block_number, saved.finalized_block_hash,
+                            saved.inclusion.as_ref(), saved.checkpoint.as_ref(),
+                        ).await?;
+                    }
+                    let receipt = api.get_finalized_receipt(signed.hash).await?
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "HOLD: signed failed original receipt is unavailable"))?;
+                    let observed = status_fetcher::failure_evidence(
+                        api, &tx.message.message, signed, receipt,
+                    ).await?;
+                    if let Some(saved) = &mut tx.failure_evidence {
+                        anyhow::ensure!(
+                            Self::same_original_receipt(&observed.receipt, &saved.receipt)
+                                && observed.included_block_number == saved.included_block_number
+                                && observed.included_block_hash == saved.included_block_hash,
+                            "HOLD: failed original receipt changed"
+                        );
+                        if saved.inclusion.is_none() {
+                            saved.inclusion = observed.inclusion;
+                        }
+                        if saved.checkpoint.is_none() {
+                            saved.checkpoint = observed.checkpoint;
+                        }
+                    } else {
+                        tx.failure_evidence = Some(observed);
+                    }
+                }
+                if let Some(saved) = &tx.nonce_disposition {
+                    api.verify_finalized_submission_snapshot(
+                        signed.nonce, tx.message.message.nonce_be, saved,
+                    ).await?;
+                }
+            }
+            tx.journal_version = 5;
+            tx.validate_journal()?;
+        }
+        view.recheck(api.raw_provider()).await?;
+        *self.completed.write().await = completed;
+        *self.transactions.write().await = active;
+        // Existing save.pending protocol durably writes UUID records before acknowledgements.
+        self.storage.save(self).await?;
         for tx in self.completed.read().await.values() {
-            tx.validate_journal()?;
-            let signed = tx
-                .ethereum_submission
-                .as_ref()
-                .expect("validated signed completion");
-            let receipt = api
-                .get_finalized_receipt(signed.hash)
-                .await?
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "HOLD: saved completion has no original canonical finalized receipt"
-                    )
-                })?;
-            let observed =
-                status_fetcher::completion_evidence(api, &tx.message.message, signed, receipt)
-                    .await?;
-            let saved = tx
-                .completion
-                .as_ref()
-                .expect("validated completion evidence");
-            anyhow::ensure!(
-                observed.receipt.block_hash == saved.receipt.block_hash
-                    && observed.token_delivery == saved.token_delivery,
-                "HOLD: saved completion inclusion/effect policy changed"
-            );
-            self.storage
-                .ack_event_pair(tx.message.message.nonce_be)
-                .await?;
+            self.storage.ack_event_pair(tx.message.message.nonce_be).await?;
         }
-        for tx in self.transactions.read().await.values() {
-            tx.validate_journal()?;
-            let Some(signed) = &tx.ethereum_submission else {
-                continue;
-            };
-            if let Some(saved) = &tx.failure_evidence {
-                anyhow::ensure!(
-                    api.is_finalized_block(
-                        saved.finalized_block_number,
-                        primitive_types::H256(saved.finalized_block_hash.0)
-                    )
-                    .await?,
-                    "HOLD: failed original finalized anchor changed"
-                );
-                let receipt = api
-                    .get_finalized_receipt(signed.hash)
-                    .await?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("HOLD: failed original receipt is unavailable")
-                    })?;
-                let observed =
-                    status_fetcher::failure_evidence(api, &tx.message.message, signed, receipt)
-                        .await?;
-                anyhow::ensure!(
-                    observed.receipt == saved.receipt,
-                    "HOLD: failed original receipt changed"
-                );
-            }
-            if let Some(saved) = &tx.nonce_disposition {
-                api.verify_finalized_submission_snapshot(
-                    signed.nonce,
-                    tx.message.message.nonce_be,
-                    saved,
-                )
-                .await?;
-            }
-        }
+        Ok(())
+    }
 
+    fn same_original_receipt(
+        left: &alloy::rpc::types::TransactionReceipt,
+        right: &alloy::rpc::types::TransactionReceipt,
+    ) -> bool {
+        left.inner == right.inner
+            && left.transaction_hash == right.transaction_hash
+            && left.transaction_index == right.transaction_index
+            && left.block_hash == right.block_hash
+            && left.block_number == right.block_number
+            && left.from == right.from
+            && left.to == right.to
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn verify_saved_receipt(
+        api: &ethereum_client::EthApi,
+        view: &mut ethereum_client::FinalizedView,
+        signed: &PreparedContentMessage,
+        receipt: &alloy::rpc::types::TransactionReceipt,
+        finalized_number: u64,
+        finalized_hash: alloy::primitives::B256,
+        inclusion: Option<&ethereum_client::inclusion::RecordedReceiptProof>,
+        checkpoint: Option<&ethereum_client::FinalityCheckpoint>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            receipt.block_number != Some(finalized_number)
+                || receipt.block_hash == Some(finalized_hash),
+            "HOLD: saved finality and inclusion conflict at the same height"
+        );
+        view.verify_blocks(api.raw_provider(), &BTreeMap::from([
+            (finalized_number, finalized_hash),
+            (receipt.block_number.ok_or_else(|| anyhow::anyhow!("HOLD: missing inclusion height"))?,
+             receipt.block_hash.ok_or_else(|| anyhow::anyhow!("HOLD: missing inclusion hash"))?),
+        ])).await?;
+        if let Some(checkpoint) = checkpoint {
+            view.verify_checkpoint(api.raw_provider(), checkpoint).await?;
+        }
+        if let Some(inclusion) = inclusion {
+            inclusion.verify_original_inclusion(view, &signed.raw_transaction, signed.hash)?;
+        }
         Ok(())
     }
 
@@ -1213,23 +1297,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_terminal_records_require_qualification_before_version_five() {
+        let mut tx = transaction();
+        let signed = signed_content(&tx, 36).await;
+        tx.remember_attempt(signed.hash);
+        tx.ethereum_submission = Some(signed.clone());
+        tx.status = TxStatus::Failed { diagnostic: "saved legacy failure".into() };
+        tx.journal_version = 4;
+        tx.validate_journal().unwrap();
+        tx.journal_version = 5;
+        assert!(tx.validate_journal().is_err(), "signed failure needs original reverted inclusion");
+        tx.failure_evidence = Some(status_fetcher::tests::reverted_evidence(&tx.message.message, &signed));
+        tx.validate_journal().unwrap();
+        tx.failure_evidence.as_mut().unwrap().checkpoint = None;
+        assert!(tx.validate_journal().is_err(), "partial authentication cannot qualify a failure");
+
+        tx.failure_evidence = None;
+        tx.status = TxStatus::Completed;
+        tx.ethereum_tx_hash = Some(signed.hash);
+        tx.completion = Some(status_fetcher::tests::evidence(&tx.message.message, &signed, false));
+        tx.validate_journal().unwrap();
+        let evidence = tx.completion.as_mut().unwrap();
+        evidence.inclusion = None;
+        evidence.checkpoint = None;
+        assert!(tx.validate_journal().is_err(), "version five cannot accept legacy completion");
+        for version in 2..=4 {
+            tx.journal_version = version;
+            tx.validate_journal().unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn failed_original_is_durable_counted_once_and_never_reprepared() {
         let path = std::env::temp_dir().join(format!("gear-original-revert-{}", Uuid::new_v4()));
         let storage = bound_storage(&path).await;
         let manager = TransactionManager::new(storage.clone());
         let mut tx = transaction();
         let signed = signed_content(&tx, 36).await;
-        let success = status_fetcher::tests::evidence(&tx.message.message, &signed, false);
-        let mut receipt = serde_json::to_value(&success.receipt).unwrap();
-        receipt["status"] = serde_json::json!("0x0");
-        receipt["logs"] = serde_json::json!([]);
-        let evidence = status_fetcher::FinalizedFailureEvidence {
-            receipt: serde_json::from_value(receipt).unwrap(),
-            included_block_number: 100,
-            included_block_hash: alloy::primitives::B256::from([3; 32]),
-            finalized_block_number: success.finalized_block_number,
-            finalized_block_hash: success.finalized_block_hash,
-        };
+        let evidence = status_fetcher::tests::reverted_evidence(&tx.message.message, &signed);
         tx.status = TxStatus::WaitConfirmations(signed.hash);
         tx.ethereum_submission = Some(signed.clone());
         tx.remember_attempt(signed.hash);

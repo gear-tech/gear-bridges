@@ -6,6 +6,8 @@ use crate::message_relayer::common::ethereum::block_storage::DiscoveryState;
 use alloy::{
     consensus::TxEnvelope,
     eips::eip2718::{Decodable2718, Encodable2718},
+    providers::Provider,
+    sol_types::SolEvent,
     rpc::types::TransactionReceipt,
 };
 use anyhow::{Context, Result};
@@ -98,8 +100,19 @@ pub fn validate_covered_block(block: &CoveredBlock) -> Result<()> {
 struct ExternalCoverageReport {
     schema_version: u32,
     #[serde(default)]
+    intent: Option<ExternalCoverageIntent>,
+    #[serde(default)]
+    ethereum_authentication: Option<ethereum_client::FinalityCheckpoint>,
+    #[serde(default)]
     blocks: Vec<CoveredBlock>,
     admissions: Vec<ExternalCoverageAdmission>,
+}
+#[derive(Deserialize)]
+struct ExternalCoverageIntent {
+    erc20_manager: primitive_types::H160,
+    source_receipt_floor: u64,
+    boundary: CutoverBoundary,
+    boundary_execution_timestamp: u64,
 }
 #[derive(Deserialize)]
 struct ExternalCoverageAdmission {
@@ -160,7 +173,7 @@ fn validate_report_versions(
         }
     }
     anyhow::ensure!(
-        matches!(version, 1 | 2)
+        matches!(version, 1 | 2 | 3)
             && coverage
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
@@ -169,11 +182,17 @@ fn validate_report_versions(
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
                 == Some(version.into())
-            && (version == 2
+            && (matches!(version, 2 | 3)
                 || (!has_field(coverage, "exclusion")
                     && !has_field(coverage, "blocking_redemptions")
                     && !has_field(lifecycle, "exclusion")
-                    && !has_field(lifecycle, "blocking_redemptions"))),
+                    && !has_field(lifecycle, "blocking_redemptions")))
+            && if version == 3 {
+                coverage.get("ethereum_authentication").is_some_and(|value| !value.is_null())
+            } else {
+                !has_field(coverage, "ethereum_authentication")
+                    && !has_field(lifecycle, "ethereum_authentication")
+            },
         "HOLD: seal/report schema disagreement or v2 evidence smuggled into v1"
     );
     Ok(())
@@ -208,6 +227,251 @@ fn validate_coverage_chain(seal: &CutoverSeal, blocks: &[CoveredBlock]) -> Resul
             );
         }
     }
+    Ok(())
+}
+
+/// Rebuild only genuinely absent legacy coverage, without touching any predecessor files.
+pub async fn reconstruct_coverage(
+    eth: &ethereum_client::PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
+    boundary: &CutoverBoundary,
+    genesis: H256,
+) -> Result<Vec<CoveredBlock>> {
+    use alloy::rpc::types::BlockId;
+    use std::time::{Duration, Instant};
+    view.verify_blocks(&**eth, &BTreeMap::from([
+        (boundary.execution_number, boundary.execution_hash.0.into()),
+    ])).await?;
+    let started = Instant::now();
+    let mut hash = alloy_primitives::B256::from(boundary.execution_hash.0);
+    let mut blocks = Vec::new();
+    for number in (0..=boundary.execution_number).rev() {
+        anyhow::ensure!(started.elapsed() < Duration::from_secs(300),
+            "HOLD: legacy coverage reconstruction deadline exhausted");
+        let block = tokio::time::timeout(Duration::from_secs(10),
+            eth.get_block_by_hash(hash).full()).await??
+            .context("HOLD: historical full execution block unavailable")?;
+        anyhow::ensure!(block.header.number == number && block.header.hash == hash
+            && block.header.inner.hash_slow() == hash,
+            "HOLD: reconstructed coverage header changed");
+        let raw_transactions = block.transactions.try_into_transactions()
+            .map_err(|_| anyhow::anyhow!("HOLD: full historical transactions unavailable"))?
+            .into_iter().map(|tx| tx.into_inner().encoded_2718()).collect::<Vec<_>>();
+        let transactions = raw_transactions.iter().map(alloy_primitives::keccak256).collect();
+        let receipts = tokio::time::timeout(Duration::from_secs(10),
+            eth.get_block_receipts(BlockId::hash_canonical(hash))).await??
+            .context("HOLD: historical receipts unavailable")?;
+        let covered = CoveredBlock {
+            number, hash: H256(hash.0), parent_hash: H256(block.header.parent_hash.0),
+            receipts_root: H256(block.header.receipts_root.0), header: block.header.inner,
+            transactions, raw_transactions, receipts,
+        };
+        validate_covered_block(&covered)?;
+        hash = covered.header.parent_hash;
+        blocks.push(covered);
+    }
+    blocks.reverse();
+    anyhow::ensure!(blocks.first().is_some_and(|block| block.hash == genesis
+        && block.parent_hash == H256::zero()), "HOLD: reconstructed genesis changed");
+    view.recheck(&**eth).await?;
+    Ok(blocks)
+}
+
+pub fn belongs_to_source(
+    floor: u64,
+    boundary: &CutoverBoundary,
+    boundary_timestamp: u64,
+    timestamp: u64,
+) -> Result<bool> {
+    let delta = boundary_timestamp.checked_sub(timestamp)
+        .context("HOLD: coverage timestamp exceeds boundary")?;
+    if floor == 0 {
+        return Ok(true);
+    }
+    let Some(slot) = boundary.slot.checked_sub(delta / ethereum_common::SECONDS_PER_SLOT) else {
+        return Ok(false);
+    };
+    if slot < floor {
+        return Ok(false);
+    }
+    anyhow::ensure!(delta % ethereum_common::SECONDS_PER_SLOT == 0,
+        "HOLD: execution timestamp does not map to authenticated Beacon slots");
+    Ok(true)
+}
+
+pub async fn authenticated_payment_manager(
+    eth: &ethereum_client::PollingEthApi,
+    view: &ethereum_client::FinalizedView,
+    payment: primitive_types::H160,
+    number: u64,
+    hash: alloy_primitives::B256,
+) -> Result<primitive_types::H160> {
+    use ethereum_client::abi::BridgingPayment;
+    anyhow::ensure!(view.contains(number, hash), "HOLD: payment state lacks qualified header");
+    let address = alloy_primitives::Address::from_slice(payment.as_bytes());
+    let primary = BridgingPayment::new(address, &**eth);
+    let witness = BridgingPayment::new(address, eth.raw_witness_provider()?);
+    let at = alloy::rpc::types::BlockId::hash_canonical(hash);
+    let first = tokio::time::timeout(std::time::Duration::from_secs(10),
+        primary.erc20Manager().block(at).call()).await??;
+    let second = tokio::time::timeout(std::time::Duration::from_secs(10),
+        witness.erc20Manager().block(at).call()).await??;
+    anyhow::ensure!(first == second, "HOLD: payment manager witnesses disagree");
+    view.recheck(&**eth).await?;
+    Ok(primitive_types::H160::from_slice(first.as_slice()))
+}
+
+pub async fn authenticate_manager_registrations(
+    eth: &ethereum_client::PollingEthApi,
+    view: &ethereum_client::FinalizedView,
+    manager: primitive_types::H160,
+    managers: [H256; 2],
+    number: u64,
+    hash: alloy_primitives::B256,
+) -> Result<()> {
+    use ethereum_client::abi::IERC20Manager;
+    anyhow::ensure!(view.contains(number, hash), "HOLD: registration state lacks qualified header");
+    let address = alloy_primitives::Address::from_slice(manager.as_bytes());
+    let primary = IERC20Manager::new(address, &**eth);
+    let witness = IERC20Manager::new(address, eth.raw_witness_provider()?);
+    let at = alloy::rpc::types::BlockId::hash_canonical(hash);
+    for manager in managers {
+        let first = tokio::time::timeout(std::time::Duration::from_secs(10),
+            primary.isVftManager(manager.0.into()).block(at).call()).await??;
+        let second = tokio::time::timeout(std::time::Duration::from_secs(10),
+            witness.isVftManager(manager.0.into()).block(at).call()).await??;
+        anyhow::ensure!(first == second && first,
+            "HOLD: source/successor registration witnesses disagree or registration disabled");
+    }
+    view.recheck(&**eth).await?;
+    Ok(())
+}
+
+/// Header authentication does not authenticate eth_call; compare both exact historical answers.
+pub async fn authenticated_fee_emitter(
+    eth: &ethereum_client::PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
+    manager_address: primitive_types::H160,
+    configured_payment: Option<primitive_types::H160>,
+    receipt: &TransactionReceipt,
+) -> Result<Option<primitive_types::H160>> {
+    use ethereum_client::abi::{BridgingPayment, IERC20Manager};
+    use alloy::{primitives::Address, rpc::types::BlockId};
+    let hash = receipt.block_hash.context("HOLD: fee receipt block missing")?;
+    let number = receipt.block_number.context("HOLD: fee receipt height missing")?;
+    view.verify_blocks(&**eth, &BTreeMap::from([(number, hash)])).await?;
+    let at = BlockId::hash_canonical(hash);
+    let address = Address::from_slice(manager_address.as_bytes());
+    let primary = IERC20Manager::new(address, &**eth);
+    let witness = IERC20Manager::new(address, eth.raw_witness_provider()?);
+    let mut emitter = None;
+    for log in receipt.inner.logs() {
+        if log.inner.data.topics().first() != Some(&BridgingPayment::FeePaid::SIGNATURE_HASH) {
+            continue;
+        }
+        let approved = if let Some(payment) = configured_payment {
+            log.address().as_slice() == payment.as_bytes()
+        } else {
+            let first = tokio::time::timeout(std::time::Duration::from_secs(10),
+                primary.isBridgingPayment(log.address()).block(at).call()).await??;
+            let second = tokio::time::timeout(std::time::Duration::from_secs(10),
+                witness.isBridgingPayment(log.address()).block(at).call()).await??;
+            anyhow::ensure!(first == second, "HOLD: fee routing witnesses disagree");
+            first
+        };
+        if approved {
+            BridgingPayment::FeePaid::decode_log(&log.inner)
+                .context("HOLD: malformed authenticated FeePaid")?;
+            let found = primitive_types::H160::from_slice(log.address().as_slice());
+            anyhow::ensure!(authenticated_payment_manager(eth, view, found, number, hash).await?
+                == manager_address, "HOLD: approved fee payer manager differs from source");
+            anyhow::ensure!(emitter.is_none_or(|previous| previous == found),
+                "HOLD: multiple approved fee emitters");
+            emitter = Some(found);
+        }
+    }
+    view.recheck(&**eth).await?;
+    Ok(emitter)
+}
+
+async fn authenticate_coverage(
+    seal: &CutoverSeal,
+    coverage: &mut ExternalCoverageReport,
+    eth: &ethereum_client::PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
+) -> Result<()> {
+    use ethereum_client::abi::IERC20Manager;
+    anyhow::ensure!(eth.finality_identity()? == (seal.old_identity.ethereum_chain_id,
+        seal.old_identity.ethereum_genesis_hash.0.into()),
+        "HOLD: predecessor Ethereum approval changed");
+    if let Some(checkpoint) = &coverage.ethereum_authentication {
+        anyhow::ensure!(checkpoint.common_header.number >= seal.boundary.execution_number,
+            "HOLD: saved coverage checkpoint predates its boundary");
+        view.verify_checkpoint(&**eth, checkpoint).await?;
+    }
+    anyhow::ensure!(coverage.schema_version != 3 || coverage.ethereum_authentication.is_some(),
+        "HOLD: v3 coverage has no Ethereum authentication");
+    view.verify_blocks(&**eth, &BTreeMap::from([
+        (seal.boundary.execution_number, seal.boundary.execution_hash.0.into()),
+    ])).await?;
+    if coverage.blocks.is_empty() {
+        anyhow::ensure!(matches!(coverage.schema_version, 1 | 2),
+            "HOLD: v3 coverage inventory missing");
+        coverage.blocks = reconstruct_coverage(eth, view, &seal.boundary,
+            seal.old_identity.ethereum_genesis_hash).await?;
+    }
+    validate_coverage_chain(seal, &coverage.blocks)?;
+    let intent = coverage.intent.as_ref().context("HOLD: sealed source-domain intent missing")?;
+    anyhow::ensure!(intent.boundary == seal.boundary
+        && intent.source_receipt_floor == seal.source_receipt_floor
+        && intent.erc20_manager != primitive_types::H160::zero()
+        && coverage.blocks.last().is_some_and(|block|
+            block.header.timestamp == intent.boundary_execution_timestamp),
+        "HOLD: sealed source-domain intent changed");
+    if let Some(manager) = seal.old_identity.erc20_manager_address {
+        anyhow::ensure!(manager == intent.erc20_manager, "HOLD: sealed source emitter changed");
+    } else {
+        let payment = seal.old_identity.bridging_payment_address.context("HOLD: source payment missing")?;
+        anyhow::ensure!(authenticated_payment_manager(eth, view, payment,
+            seal.boundary.execution_number, seal.boundary.execution_hash.0.into()).await?
+            == intent.erc20_manager, "HOLD: predecessor payment routing witnesses disagree");
+    }
+    let mut deposits = std::collections::BTreeSet::new();
+    for block in &coverage.blocks {
+        if !belongs_to_source(intent.source_receipt_floor, &intent.boundary,
+            intent.boundary_execution_timestamp, block.header.timestamp)? {
+            continue;
+        }
+        for receipt in &block.receipts {
+            if !receipt.status() { continue; }
+            let mut deposit = false;
+            for log in receipt.inner.logs() {
+                if log.address().as_slice() == intent.erc20_manager.as_bytes()
+                    && log.inner.data.topics().first()
+                        == Some(&IERC20Manager::BridgingRequested::SIGNATURE_HASH) {
+                    IERC20Manager::BridgingRequested::decode_log(&log.inner)
+                        .context("HOLD: malformed original deposit")?;
+                    deposit = true;
+                }
+            }
+            if !deposit { continue; }
+            let admission = coverage.admissions.iter().find(|admission|
+                admission.original_tx_hash == receipt.transaction_hash)
+                .context("HOLD: sealed admissions omit a source deposit")?;
+            anyhow::ensure!(admission.original_block_hash == block.hash
+                && Some(admission.receipt_key.1) == receipt.transaction_index
+                && deposits.insert(receipt.transaction_hash),
+                "HOLD: sealed deposit coordinates or inventory changed");
+            let emitter = authenticated_fee_emitter(eth, view, intent.erc20_manager,
+                seal.old_identity.bridging_payment_address, receipt).await?;
+            anyhow::ensure!(emitter == admission.fee_emitter
+                && emitter.is_some() == admission.fee_event_observed,
+                "HOLD: sealed historical fee policy changed");
+        }
+    }
+    anyhow::ensure!(deposits.len() == coverage.admissions.len(),
+        "HOLD: sealed admission outside source deposit inventory");
+    view.recheck(&**eth).await?;
     Ok(())
 }
 
@@ -401,8 +665,8 @@ impl AuthenticatedCoverage {
 
 fn validate_admission_inventory(coverage: &ExternalCoverageReport) -> Result<()> {
     anyhow::ensure!(
-        matches!(coverage.schema_version, 1 | 2)
-            && (coverage.schema_version == 2
+        matches!(coverage.schema_version, 1 | 2 | 3)
+            && (matches!(coverage.schema_version, 2 | 3)
                 || coverage
                     .admissions
                     .iter()
@@ -442,9 +706,7 @@ async fn verify_external_coverage(
         "HOLD: incompatible coverage/seal schema"
     );
     validate_admission_inventory(coverage)?;
-    if coverage.schema_version == 2 {
-        validate_coverage_chain(seal, &coverage.blocks)?;
-    }
+    validate_coverage_chain(seal, &coverage.blocks)?;
     let mut authenticated = AuthenticatedCoverage::default();
     let head = api.last_block_hash().await?;
     let finalized = api.block_number_at(head).await?;
@@ -463,8 +725,8 @@ async fn verify_external_coverage(
                 && admission.original_tx_hash != alloy_primitives::B256::ZERO,
             "HOLD: proof/key/block is outside original deployment coverage"
         );
-        if coverage.schema_version == 2 {
-            validate_admission_block(coverage, admission, &event)?;
+        validate_admission_block(coverage, admission, &event)?;
+        if matches!(coverage.schema_version, 2 | 3) {
             anyhow::ensure!(
                 admission.fee_event_observed == admission.fee_emitter.is_some(),
                 "HOLD: fee evidence changed"
@@ -840,7 +1102,7 @@ impl CutoverSeal {
         let old = &self.old_identity;
         let new = &self.new_identity;
         anyhow::ensure!(
-            matches!(self.schema_version, 1 | 2)
+            matches!(self.schema_version, 1 | 2 | 3)
                 && self.new_manager_code_id != H256::zero()
                 && self.config_fingerprint != H256::zero()
                 && self.boundary.beacon_root != H256::zero()
@@ -1162,6 +1424,8 @@ async fn verify_original_lane(
     seal: &CutoverSeal,
     provider: ApiProviderConnection,
     api: &GearApi,
+    eth: &ethereum_client::PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
 ) -> Result<()> {
     authenticate_status_pins(seal, api).await?;
     let journal = read_original_journal(
@@ -1199,7 +1463,8 @@ async fn verify_original_lane(
         String::new(),
         seal.old_identity.erc20_manager_address,
     );
-    let coverage = read_coverage(seal)?;
+    let mut coverage = read_coverage(seal)?;
+    authenticate_coverage(seal, &mut coverage, eth, view).await?;
     let authenticated = verify_external_coverage(seal, &journal, &coverage, &sender, api).await?;
     anyhow::ensure!(
         journal
@@ -1314,16 +1579,20 @@ pub async fn verify_originals_read_only(
     path: &Path,
     provider: ApiProviderConnection,
     api: &GearApi,
+    eth: &ethereum_client::PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
 ) -> Result<()> {
     let mut path = fs::canonicalize(path)?;
     let mut seen = std::collections::BTreeSet::new();
+    let mut retained = Vec::new();
     loop {
         let (seal, hash) = verify_markers(&path)?;
         anyhow::ensure!(
             seen.insert(hash),
             "HOLD: cyclic predecessor cutover manifests"
         );
-        verify_original_lane(&seal, provider.clone(), api).await?;
+        verify_original_lane(&seal, provider.clone(), api, eth, view).await?;
+        retained.push((path.clone(), hash));
         let predecessor = predecessor_seal_path(
             seal.old_state
                 .path
@@ -1332,6 +1601,11 @@ pub async fn verify_originals_read_only(
         )?;
         verify_markers(&path)?;
         let Some(previous) = predecessor else {
+            view.recheck(&**eth).await?;
+            for (path, digest) in retained {
+                anyhow::ensure!(verify_markers(&path)?.1 == digest,
+                    "HOLD: predecessor changed during authentication");
+            }
             return Ok(());
         };
         let (prior, _) = verify_markers(&previous)?;
@@ -1473,31 +1747,10 @@ pub async fn authenticate_startup(
             &seal.new_identity == identity && approved_code == Some(seal.new_manager_code_id),
             "HOLD: successor runtime/code does not match independently approved cutover"
         );
-        authenticate_status_pins(&seal, api).await?;
-        anyhow::ensure!(
-            eth.chain_id().await? == identity.ethereum_chain_id
-                && H256(eth.get_block(0).await?.header.hash.0) == identity.ethereum_genesis_hash
-                && eth
-                    .is_finalized_block(
-                        seal.boundary.execution_number,
-                        seal.boundary.execution_hash
-                    )
-                    .await?,
-            "HOLD: cutover boundary is not canonical finalized Ethereum history"
-        );
-        let boundary = eth.get_block(seal.boundary.execution_number).await?;
-        anyhow::ensure!(
-            H256(boundary.header.hash.0) == seal.boundary.execution_hash
-                && boundary.header.inner.hash_slow() == boundary.header.hash,
-            "HOLD: authenticated cutover execution header changed"
-        );
-        if seal.schema_version == 2 {
-            let signer: gsdk::signer::Signer = api.clone().into();
-            let provider = ApiProviderConnection::from_api(signer.api().clone());
-            // A v2 digest alone cannot authenticate terminal exceptions or original nonce ownership.
-            verify_original_lane(&seal, provider, api).await?;
-            verify_markers(path)?;
-        }
+        let mut view = eth.verified_finalized_view().await?;
+        let signer: gsdk::signer::Signer = api.clone().into();
+        let provider = ApiProviderConnection::from_api(signer.api().clone());
+        verify_originals_read_only(path, provider, api, eth, &mut view).await?;
         let program = api
             .program_at(identity.vft_manager_address.0.into(), Some(at))
             .await?;
@@ -1872,6 +2125,282 @@ mod tests {
         }
     }
 
+    struct EvidenceRpc {
+        blocks: Vec<alloy::rpc::types::Block>,
+        witness_height: std::sync::atomic::AtomicUsize,
+        fork: std::sync::atomic::AtomicBool,
+        missing_receipts: std::sync::atomic::AtomicBool,
+        conflicting_calls: std::sync::atomic::AtomicBool,
+    }
+
+    async fn evidence_rpc() -> (
+        ethereum_client::PollingEthApi,
+        Arc<EvidenceRpc>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use futures::{SinkExt, StreamExt};
+        use serde_json::{json, Value};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use tokio_tungstenite::tungstenite::Message as Frame;
+        let mut blocks = Vec::new();
+        let mut parent = alloy_primitives::B256::ZERO;
+        for number in 0..=3 {
+            let mut block: alloy::rpc::types::Block = Default::default();
+            block.header.inner = empty_covered_block(number, H256(parent.0)).header;
+            block.header.inner.timestamp = number * 12;
+            if number == 0 {
+                block.header.inner.extra_data = Uuid::now_v7().as_bytes().to_vec().into();
+            }
+            block.header.hash = block.header.inner.hash_slow();
+            block.transactions = alloy::rpc::types::BlockTransactions::Full(Vec::new());
+            parent = block.header.hash;
+            blocks.push(block);
+        }
+        let state = Arc::new(EvidenceRpc {
+            blocks,
+            witness_height: AtomicUsize::new(2),
+            fork: AtomicBool::new(false),
+            missing_receipts: AtomicBool::new(false),
+            conflicting_calls: AtomicBool::new(false),
+        });
+        let primary = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let witness = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let primary_url = format!("ws://{}", primary.local_addr().unwrap());
+        let witness_url = format!("ws://{}", witness.local_addr().unwrap());
+        let server_state = state.clone();
+        let server = tokio::spawn(async move {
+            let mut clients = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = async {
+                        tokio::select! {
+                            accepted = primary.accept() => (accepted, false),
+                            accepted = witness.accept() => (accepted, true),
+                        }
+                    } => {
+                        let (Ok((stream, _)), witness) = accepted else { break };
+                        let state = server_state.clone();
+                        clients.spawn(async move {
+                            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                            while let Some(Ok(Frame::Text(text))) = ws.next().await {
+                                let request: Value = serde_json::from_str(&text).unwrap();
+                                let params = &request["params"];
+                                let result = match request["method"].as_str().unwrap() {
+                                    "eth_chainId" => json!("0x1"),
+                                    "eth_getBlockByNumber" => {
+                                        let tag = params[0].as_str().unwrap();
+                                        let number = if tag == "finalized" {
+                                            if witness { state.witness_height.load(Ordering::SeqCst) } else { 3 }
+                                        } else {
+                                            usize::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
+                                        };
+                                        let mut block = state.blocks[number].clone();
+                                        if witness && number != 0 && state.fork.load(Ordering::SeqCst) {
+                                            block.header.inner.extra_data = vec![99].into();
+                                            block.header.hash = block.header.inner.hash_slow();
+                                        }
+                                        json!(block)
+                                    },
+                                    "eth_getBlockByHash" => state.blocks.iter()
+                                        .find(|block| json!(block.header.hash) == params[0])
+                                        .map(|block| json!(block)).unwrap_or(Value::Null),
+                                    "eth_getBlockReceipts" => {
+                                        if state.missing_receipts.load(Ordering::SeqCst) { Value::Null }
+                                        else { json!([]) }
+                                    },
+                                    "eth_call" => {
+                                        assert_eq!(params[1], json!({
+                                            "blockHash": state.blocks[2].header.hash,
+                                            "requireCanonical": true
+                                        }));
+                                        let manager = alloy_primitives::Address::repeat_byte(2);
+                                        if witness && state.conflicting_calls.load(Ordering::SeqCst) {
+                                            json!(format!("0x{:064x}", 0))
+                                        } else if params[0]["to"] == json!(manager) {
+                                            json!(format!("0x{:064x}", 1))
+                                        } else {
+                                            json!(format!("0x{:0>64}", hex::encode(manager)))
+                                        }
+                                    },
+                                    method => panic!("unexpected cutover fixture RPC {method}"),
+                                };
+                                let reply = json!({"jsonrpc":"2.0","id":request["id"],"result":result});
+                                if ws.send(Frame::Text(reply.to_string().into())).await.is_err() { break; }
+                            }
+                        });
+                    },
+                    joined = clients.join_next(), if !clients.is_empty() => {
+                        joined.unwrap().unwrap();
+                    }
+                }
+            }
+        });
+        let eth = ethereum_client::PollingEthApi::new(&primary_url).await.unwrap()
+            .with_finality_witness(&witness_url, 1, state.blocks[0].header.hash).await.unwrap();
+        (eth, state, server)
+    }
+
+    #[tokio::test]
+    async fn legacy_coverage_reconstructs_under_quorum_without_rewriting_and_rejects_partial_inventory() {
+        use serde_json::json;
+        use std::sync::atomic::Ordering;
+        let (eth, rpc, server) = evidence_rpc().await;
+        let base = std::env::temp_dir().join(format!("cutover-legacy-evidence-{}", Uuid::now_v7()));
+        fs::create_dir_all(base.join("old")).unwrap();
+        for name in ["old/state.json", "old/blocks.json", "old-discovery.json",
+            "cutover-coverage.json", "cutover-calls.json"] {
+            fs::write(base.join(name), b"{}").unwrap();
+        }
+        let mut old = identity();
+        old.ethereum_chain_id = 1;
+        old.ethereum_genesis_hash = H256(rpc.blocks[0].header.hash.0);
+        old.ethereum_start_block = 0;
+        old.erc20_manager_address = Some(primitive_types::H160::repeat_byte(2));
+        old.bridging_payment_address = None;
+        let mut seal = fixture_seal(&base, old);
+        seal.boundary.execution_number = 2;
+        seal.boundary.execution_hash = H256(rpc.blocks[2].header.hash.0);
+        seal.new_identity.ethereum_start_block = 3;
+        let mut view = eth.verified_finalized_view().await.unwrap();
+        assert_eq!(view.block_number(), 2, "ordinary finalized-height lag is accepted");
+        for version in [1, 2] {
+            seal.schema_version = version;
+            let coverage = json!({
+                "schema_version": version, "admissions": [],
+                "intent": {
+                    "erc20_manager": primitive_types::H160::repeat_byte(2),
+                    "source_receipt_floor": 0, "boundary": seal.boundary,
+                    "boundary_execution_timestamp": 24
+                }
+            });
+            let bytes = serde_json::to_vec(&coverage).unwrap();
+            fs::write(&seal.coverage.path, &bytes).unwrap();
+            fs::write(&seal.lifecycle_evidence.path,
+                serde_json::to_vec(&json!({"schema_version": version})).unwrap()).unwrap();
+            let mut retained = read_coverage(&seal).unwrap();
+            authenticate_coverage(&seal, &mut retained, &eth, &mut view).await.unwrap();
+            assert_eq!(retained.blocks.len(), 3);
+            assert_eq!(fs::read(&seal.coverage.path).unwrap(), bytes);
+            assert!(!base.join("ethereum-finality").exists());
+            let mut explicitly_empty = coverage.clone();
+            explicitly_empty["blocks"] = json!([]);
+            let mut empty: ExternalCoverageReport = serde_json::from_value(explicitly_empty.clone()).unwrap();
+            authenticate_coverage(&seal, &mut empty, &eth, &mut view).await.unwrap();
+            explicitly_empty["blocks"] = serde_json::Value::Null;
+            assert!(serde_json::from_value::<ExternalCoverageReport>(explicitly_empty).is_err());
+            retained.blocks.remove(0);
+            assert!(authenticate_coverage(&seal, &mut retained, &eth, &mut view).await.is_err());
+            assert_eq!(fs::read(&seal.coverage.path).unwrap(), bytes);
+            let mut missing_domain = read_coverage(&seal).unwrap();
+            missing_domain.intent = None;
+            assert!(authenticate_coverage(&seal, &mut missing_domain, &eth, &mut view).await.is_err());
+            let mut unavailable = read_coverage(&seal).unwrap();
+            rpc.missing_receipts.store(true, Ordering::SeqCst);
+            assert!(authenticate_coverage(&seal, &mut unavailable, &eth, &mut view).await.is_err());
+            rpc.missing_receipts.store(false, Ordering::SeqCst);
+            assert_eq!(fs::read(&seal.coverage.path).unwrap(), bytes);
+        }
+        let retained = view.checkpoint().clone();
+        let mut v3 = read_coverage(&seal).unwrap();
+        v3.blocks = reconstruct_coverage(&eth, &mut view, &seal.boundary,
+            seal.old_identity.ethereum_genesis_hash).await.unwrap();
+        seal.schema_version = 3;
+        v3.schema_version = 3;
+        assert!(authenticate_coverage(&seal, &mut v3, &eth, &mut view).await.is_err());
+        v3.ethereum_authentication = Some(retained.clone());
+        authenticate_coverage(&seal, &mut v3, &eth, &mut view).await.unwrap();
+        v3.ethereum_authentication.as_mut().unwrap().common_header = rpc.blocks[1].header.inner.clone();
+        assert!(authenticate_coverage(&seal, &mut v3, &eth, &mut view).await.is_err());
+        v3.ethereum_authentication = Some(retained.clone());
+        let original_genesis = seal.old_identity.ethereum_genesis_hash;
+        seal.old_identity.ethereum_genesis_hash = H256::repeat_byte(99);
+        assert!(authenticate_coverage(&seal, &mut v3, &eth, &mut view).await.is_err());
+        seal.old_identity.ethereum_genesis_hash = original_genesis;
+        let old_boundary = seal.boundary.clone();
+        seal.boundary.execution_number = 1;
+        seal.boundary.execution_hash = H256::repeat_byte(98);
+        assert!(authenticate_coverage(&seal, &mut v3, &eth, &mut view).await.is_err(),
+            "an earlier predecessor boundary is authenticated, not trusted from its digest");
+        seal.boundary = old_boundary;
+        rpc.witness_height.store(1, Ordering::SeqCst);
+        assert!(eth.verified_finalized_view().await.is_err(), "saved common fence cannot regress");
+        rpc.witness_height.store(2, Ordering::SeqCst);
+        rpc.fork.store(true, Ordering::SeqCst);
+        assert!(eth.verified_finalized_view().await.is_err(), "private fork cannot authorize cutover");
+        rpc.fork.store(false, Ordering::SeqCst);
+        let mut restarted = eth.reconnect().await.unwrap().verified_finalized_view().await.unwrap();
+        restarted.verify_checkpoint(&*eth, &retained).await.unwrap();
+        assert_eq!(restarted.block_number(), 2);
+        server.abort();
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn historical_fee_policy_requires_matching_calls_even_when_headers_agree() {
+        use alloy::{consensus::{Receipt, ReceiptEnvelope}, primitives::{Address, Log}};
+        use ethereum_client::abi::BridgingPayment;
+        use std::sync::atomic::Ordering;
+        let (eth, rpc, server) = evidence_rpc().await;
+        let payment = Address::repeat_byte(3);
+        let log = Log { address: payment, data: BridgingPayment::FeePaid {}.encode_log_data() };
+        let envelope = ReceiptEnvelope::Legacy(Receipt {
+            status: true.into(), cumulative_gas_used: 21_000, logs: vec![log.clone()],
+        }.with_bloom());
+        let mut value = serde_json::to_value(envelope).unwrap();
+        value.as_object_mut().unwrap().extend(serde_json::json!({
+            "transactionHash": alloy_primitives::B256::repeat_byte(4), "transactionIndex":"0x0",
+            "blockHash": rpc.blocks[2].header.hash, "blockNumber":"0x2",
+            "from": Address::repeat_byte(5), "to": payment, "gasUsed":"0x5208",
+            "effectiveGasPrice":"0x1", "contractAddress":null,
+            "logs":[{"address":payment,"topics":log.data.topics(),"data":"0x",
+                "transactionHash":alloy_primitives::B256::repeat_byte(4),"transactionIndex":"0x0",
+                "blockHash":rpc.blocks[2].header.hash,"blockNumber":"0x2","logIndex":"0x0","removed":false}]
+        }).as_object().unwrap().clone());
+        let receipt: TransactionReceipt = serde_json::from_value(value).unwrap();
+        let original = serde_json::to_vec(&receipt).unwrap();
+        let manager = primitive_types::H160::repeat_byte(2);
+        let mut view = eth.verified_finalized_view().await.unwrap();
+        assert_eq!(authenticated_fee_emitter(&eth, &mut view, manager, None, &receipt).await.unwrap(),
+            Some(primitive_types::H160::repeat_byte(3)));
+        assert_eq!(authenticated_payment_manager(&eth, &view,
+            primitive_types::H160::repeat_byte(3), 2, rpc.blocks[2].header.hash).await.unwrap(), manager);
+        authenticate_manager_registrations(&eth, &view, manager,
+            [H256::repeat_byte(6), H256::repeat_byte(7)], 2, rpc.blocks[2].header.hash).await.unwrap();
+        rpc.conflicting_calls.store(true, Ordering::SeqCst);
+        assert!(authenticated_fee_emitter(&eth, &mut view, manager, None, &receipt).await.is_err());
+        assert!(authenticated_fee_emitter(&eth, &mut view, manager,
+            Some(primitive_types::H160::repeat_byte(3)), &receipt).await.is_err());
+        assert!(authenticated_payment_manager(&eth, &view,
+            primitive_types::H160::repeat_byte(3), 2, rpc.blocks[2].header.hash).await.is_err());
+        assert!(authenticate_manager_registrations(&eth, &view, manager,
+            [H256::repeat_byte(6), H256::repeat_byte(7)], 2, rpc.blocks[2].header.hash).await.is_err());
+        assert_eq!(serde_json::to_vec(&receipt).unwrap(), original);
+        server.abort();
+    }
+
+    #[test]
+    fn finality_checkpoint_cannot_be_smuggled_into_legacy_reports() {
+        for version in [1, 2] {
+            let coverage = serde_json::json!({
+                "schema_version": version, "admissions": [],
+                "ethereum_authentication": null
+            });
+            let lifecycle = serde_json::json!({"schema_version": version});
+            assert!(validate_report_versions(version, &coverage, &lifecycle).is_err());
+        }
+    }
+
+    #[test]
+    fn version_three_requires_nonnull_finality_evidence() {
+        let lifecycle = serde_json::json!({"schema_version": 3});
+        for coverage in [
+            serde_json::json!({"schema_version": 3, "admissions": []}),
+            serde_json::json!({"schema_version": 3, "admissions": [], "ethereum_authentication": null}),
+        ] {
+            assert!(validate_report_versions(3, &coverage, &lifecycle).is_err());
+        }
+    }
+
     #[test]
     fn settlement_only_v1_and_versioned_exclusions_are_not_interchangeable() {
         let v1 = serde_json::json!({"schema_version":1,"admissions":[terminal_admission(None)]});
@@ -2093,6 +2622,8 @@ mod tests {
         admission.proof = event.encode();
         let coverage = ExternalCoverageReport {
             schema_version: 2,
+            intent: None,
+            ethereum_authentication: None,
             blocks: vec![covered],
             admissions: Vec::new(),
         };

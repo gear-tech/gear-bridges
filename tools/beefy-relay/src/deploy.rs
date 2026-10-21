@@ -38,6 +38,8 @@ enum Command {
         gear_suri_file: PathBuf,
         #[arg(long, default_value = "https://hoodi.drpc.org")]
         ethereum_rpc: String,
+        #[command(flatten)]
+        finality: cli_utils::EthereumFinalityArgs,
         #[arg(long)]
         wallet: PathBuf,
         #[arg(long)]
@@ -60,6 +62,8 @@ enum Command {
         witness_rpc: String,
         #[arg(long, default_value = "https://hoodi.drpc.org")]
         ethereum_rpc: String,
+        #[command(flatten)]
+        finality: cli_utils::EthereumFinalityArgs,
         #[arg(long)]
         wallet: PathBuf,
         #[arg(long)]
@@ -137,6 +141,7 @@ async fn main() -> Result<()> {
             expected_genesis,
             gear_suri_file,
             ethereum_rpc,
+            finality,
             wallet,
             deployment_manifest,
             token_stack,
@@ -153,6 +158,7 @@ async fn main() -> Result<()> {
                 &expected_genesis,
                 gear_suri.trim(),
                 &ethereum_rpc,
+                &finality.ethereum_witness_rpc,
                 &wallet,
                 &deployment_manifest,
                 &token_stack,
@@ -168,6 +174,7 @@ async fn main() -> Result<()> {
             source_rpc,
             witness_rpc,
             ethereum_rpc,
+            finality,
             wallet,
             anchor,
             token_stack,
@@ -183,6 +190,7 @@ async fn main() -> Result<()> {
                 &source_rpc,
                 &witness_rpc,
                 &ethereum_rpc,
+                &finality.ethereum_witness_rpc,
                 &wallet,
                 &anchor,
                 &token_stack,

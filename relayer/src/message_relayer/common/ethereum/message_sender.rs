@@ -413,6 +413,9 @@ async fn retry_original(
     let signed = &original.submission;
     // Receipt finality takes precedence over a consumed nonce or a competitor's processed bit.
     if let Some(included) = api.get_finalized_receipt(signed.hash).await? {
+        super::status_fetcher::validate_receipt_authentication(
+            signed, &included.receipt, &included.inclusion, &included.checkpoint,
+        )?;
         anyhow::ensure!(
             included.receipt.transaction_hash == signed.hash
                 && included.receipt.from == signed.sender
@@ -780,6 +783,7 @@ mod tests {
         chain: Vec<alloy::rpc::types::Block>,
         calls: std::sync::Mutex<Vec<String>>,
         receipt: std::sync::Mutex<serde_json::Value>,
+        canonical_receipt: serde_json::Value,
         consumed: std::sync::atomic::AtomicBool,
         processed: std::sync::atomic::AtomicBool,
         reject_send: std::sync::atomic::AtomicBool,
@@ -799,10 +803,6 @@ mod tests {
     }
 
     async fn retry_rpc() -> anyhow::Result<RetryRpc> {
-        use alloy::{
-            primitives::{Bytes, B256},
-            rpc::types::Block,
-        };
         use futures::{SinkExt, StreamExt};
         use serde_json::{json, Value};
         use std::sync::{
@@ -812,24 +812,22 @@ mod tests {
         use tokio_tungstenite::tungstenite::Message as Frame;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let url = format!("ws://{}", listener.local_addr()?);
+        let witness_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let witness_url = format!("ws://{}", witness_listener.local_addr()?);
         let tag = uuid::Uuid::new_v4();
-        let mut parent = B256::ZERO;
-        let chain = (0..=1)
-            .map(|number| {
-                let mut block: Block = Block::default();
-                block.header.inner.number = number;
-                block.header.inner.parent_hash = parent;
-                block.header.inner.extra_data = Bytes::copy_from_slice(tag.as_bytes());
-                block.header.hash = block.header.inner.hash_slow();
-                parent = block.header.hash;
-                block
-            })
-            .collect();
+        let original = original(36).await;
+        let failure = super::super::status_fetcher::tests::reverted_evidence(
+            &original.message, &original.submission,
+        );
+        let (chain, receipt, _, _) = super::super::status_fetcher::tests::authenticated_fixture(
+            &original.submission, failure.receipt, tag.as_bytes(), 1, 1,
+        );
         let (broadcasts, received) = tokio::sync::mpsc::unbounded_channel();
         let state = Arc::new(RetryState {
             chain,
             calls: Mutex::new(vec![]),
             receipt: Mutex::new(Value::Null),
+            canonical_receipt: serde_json::to_value(receipt)?,
             consumed: AtomicBool::new(false),
             processed: AtomicBool::new(false),
             reject_send: AtomicBool::new(false),
@@ -840,7 +838,12 @@ mod tests {
             let mut clients = tokio::task::JoinSet::new();
             loop {
                 tokio::select! {
-                    accepted = listener.accept() => {
+                    accepted = async {
+                        tokio::select! {
+                            accepted = listener.accept() => accepted,
+                            accepted = witness_listener.accept() => accepted,
+                        }
+                    } => {
                         let Ok((socket, _)) = accepted else { break };
                         let state = server_state.clone();
                         clients.spawn(async move {
@@ -854,6 +857,7 @@ mod tests {
                                     "eth_chainId" => json!("0x88bb0"),
                                     "eth_getBalance" => json!("0x1000000000000000000"),
                                     "eth_getTransactionReceipt" => state.receipt.lock().unwrap().clone(),
+                                    "eth_getBlockReceipts" => json!([state.canonical_receipt.clone()]),
                                     "eth_getTransactionByHash" => Value::Null,
                                     "eth_getBlockByNumber" => {
                                         let number = if params[0] == "0x0" { 0 } else { 1 };
@@ -911,6 +915,7 @@ mod tests {
                 return Err(error.into());
             }
         };
+        let api = api.with_finality_witness(&witness_url, 560048, state.chain[0].header.hash).await?;
         state.calls.lock().unwrap().clear();
         Ok(RetryRpc {
             api,
@@ -936,8 +941,9 @@ mod tests {
             original.submission.raw_transaction
         );
         let calls = rpc.state.calls.lock().unwrap().clone();
-        assert_eq!(
-            calls[0], "eth_getTransactionReceipt",
+        assert!(
+            calls.iter().position(|method| method == "eth_getTransactionReceipt").unwrap()
+                < calls.iter().position(|method| method == "eth_getTransactionCount").unwrap(),
             "receipt must precede nonce/processed observations"
         );
         assert!(
@@ -1077,7 +1083,7 @@ mod tests {
         let guard = rpc.api.reserve_submission().await;
         retry_original(&rpc.api, &guard, &original).await?;
         let calls = rpc.state.calls.lock().unwrap().clone();
-        assert_eq!(calls[0], "eth_getTransactionReceipt");
+        assert!(calls.iter().any(|method| method == "eth_getTransactionReceipt"));
         assert!(!calls
             .iter()
             .any(|method| method == "eth_getTransactionCount" || method == "eth_call"));
@@ -1086,6 +1092,20 @@ mod tests {
             futures::poll!(Box::pin(rpc.api.reserve_submission())).is_pending(),
             "receipt observation alone cannot unlock the signer"
         );
+        for field in ["status", "transactionIndex", "from"] {
+            let valid = rpc.state.receipt.lock().unwrap().clone();
+            let mut forged = valid.clone();
+            forged[field] = match field {
+                "status" => json!("0x1"),
+                "transactionIndex" => json!("0x1"),
+                _ => json!(alloy::primitives::Address::ZERO),
+            };
+            *rpc.state.receipt.lock().unwrap() = forged;
+            assert!(retry_original(&rpc.api, &guard, &original).await.is_err(), "{field}");
+            assert!(futures::poll!(Box::pin(rpc.api.reserve_submission())).is_pending());
+            assert!(rpc.broadcasts.try_recv().is_err());
+            *rpc.state.receipt.lock().unwrap() = valid;
+        }
         original.message.payload.push(9);
         assert!(validate_original(&rpc.api, &original).is_err());
         original.message.payload.pop();

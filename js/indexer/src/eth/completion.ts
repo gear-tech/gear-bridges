@@ -1,4 +1,9 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { Transfer } from '../model/index.js';
+import {
+  checkpointId, createReceiptAuthenticator,
+  type AgreedCheckpoint, type AuthenticatedReceipt, type EthereumEvidenceClients, type SourceReceiptAuth,
+} from './finality.js';
 import * as manager from './abi/erc20-manager.js';
 import * as queue from './abi/message-queue.js';
 
@@ -9,6 +14,8 @@ export interface ReceiptLog {
   logIndex: string;
   transactionHash: string;
   blockHash: string;
+  blockNumber: string;
+  transactionIndex: string;
   removed?: boolean;
 }
 export interface Receipt {
@@ -16,6 +23,10 @@ export interface Receipt {
   blockHash: string;
   blockNumber: string;
   status: string;
+  transactionIndex: string;
+  type: string;
+  cumulativeGasUsed: string;
+  logsBloom: string;
   logs: ReceiptLog[];
 }
 
@@ -58,4 +69,105 @@ export function matchesOutboundCompletion(
   return sender.toLowerCase() === transfer.sender.toLowerCase() &&
     receiver.toLowerCase() === transfer.receiver.toLowerCase() &&
     token.toLowerCase() === transfer.destination.toLowerCase() && amount === BigInt(transfer.amount);
+}
+
+export function qualifyOutboundCompletion(
+  transfer: Transfer, original: AuthenticatedReceipt, queueAddress: string, managerAddress: string,
+): { processedLogIndex: number } | undefined {
+  const receipt = original.receipt;
+  if (transfer.bridgingStartedAtBlock == null || !transfer.ethBridgeBuiltInMsgHash) return;
+  const candidates = receipt.logs.filter((log) => {
+    if (log.address !== queueAddress.toLowerCase() ||
+        log.topics[0] !== queue.events.MessageProcessed.topic.toLowerCase()) return false;
+    const [height, messageHash, nonce, destination] = queue.events.MessageProcessed.decode(log);
+    return height >= BigInt(transfer.bridgingStartedAtBlock!) && nonce.toString() === transfer.nonce &&
+      messageHash.toLowerCase() === transfer.ethBridgeBuiltInMsgHash!.toLowerCase() &&
+      destination.toLowerCase() === managerAddress.toLowerCase();
+  });
+  if (candidates.length > 1) throw new Error('HOLD: ambiguous original outbound completion');
+  if (!candidates.length) return;
+  const processedLogIndex = Number(BigInt(candidates[0].logIndex));
+  const height = Number(BigInt(receipt.blockNumber));
+  if (!Number.isSafeInteger(processedLogIndex) || !Number.isSafeInteger(height)) {
+    throw new Error('HOLD: completion coordinates exceed safe integer range');
+  }
+  return matchesOutboundCompletion(receipt, transfer, processedLogIndex,
+    { height, hash: receipt.blockHash }, receipt.transactionHash, queueAddress, managerAddress)
+    ? { processedLogIndex } : undefined;
+}
+
+// Old JSON is evidence, not a cache: absent newly required fields may be supplied,
+// but every previously recorded decision field must still match the original.
+export function assertRetainedReceipt(legacy: unknown, receipt: Receipt): void {
+  if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) {
+    throw new Error('HOLD: missing retained original receipt');
+  }
+  const compare = (saved: Record<string, unknown>, current: Record<string, unknown>, fields: string[]) => {
+    for (const key of fields) {
+      if (!(key in saved)) continue;
+      const value = saved[key];
+      const expected = current[key];
+      if (typeof expected === 'string') {
+        if (typeof value !== 'string') throw new Error(`HOLD: malformed retained receipt ${key}`);
+        const quantity = ['blockNumber', 'transactionIndex', 'logIndex', 'status', 'type', 'cumulativeGasUsed'].includes(key);
+        if (quantity) {
+          if (!/^0x[0-9a-f]+$/i.test(value) || BigInt(value) !== BigInt(expected)) {
+            throw new Error(`HOLD: retained receipt ${key} changed`);
+          }
+        } else if (value.toLowerCase() !== expected) throw new Error(`HOLD: retained receipt ${key} changed`);
+      } else if (key === 'topics') {
+        if (!Array.isArray(value) || !isDeepStrictEqual(value.map((v) => typeof v === 'string' ? v.toLowerCase() : v), expected)) {
+          throw new Error('HOLD: retained receipt topics changed');
+        }
+      } else if (value !== expected) throw new Error(`HOLD: retained receipt ${key} changed`);
+    }
+  };
+  const saved = legacy as Record<string, unknown>;
+  if (['transactionHash', 'blockHash', 'blockNumber', 'status'].some((key) => typeof saved[key] !== 'string')) {
+    throw new Error('HOLD: retained original receipt identity is missing');
+  }
+  compare(saved, receipt as unknown as Record<string, unknown>,
+    ['transactionHash', 'blockHash', 'blockNumber', 'transactionIndex', 'status', 'type', 'cumulativeGasUsed', 'logsBloom']);
+  if (!Array.isArray(saved.logs) || saved.logs.length !== receipt.logs.length) throw new Error('HOLD: retained receipt logs changed');
+  saved.logs.forEach((log, index) => {
+    if (!log || typeof log !== 'object' || Array.isArray(log)) throw new Error('HOLD: malformed retained receipt log');
+    compare(log as Record<string, unknown>, { ...receipt.logs[index], removed: false },
+      ['address', 'topics', 'data', 'logIndex', 'transactionHash', 'blockHash', 'blockNumber', 'transactionIndex', 'removed']);
+  });
+}
+
+export async function authenticateSourceReceipt(
+  clients: EthereumEvidenceClients, transfer: Transfer, managerAddress: string, checkpoint: AgreedCheckpoint,
+  authenticate = createReceiptAuthenticator(clients, checkpoint),
+): Promise<SourceReceiptAuth | undefined> {
+  const retained = transfer.sourceReceiptAuth;
+  const pending = () => {
+    if (retained || transfer.completionAuth) throw new Error('HOLD: previously authenticated source receipt unavailable or changed');
+    return undefined;
+  };
+  if (transfer.sourceTransactionIndex == null || transfer.sourceLogIndex == null || !transfer.txHash) return pending();
+  const height = Number(transfer.blockNumber);
+  const localLogIndex = Number(transfer.sourceLogIndex);
+  if (!Number.isSafeInteger(height) || height < 0 || !Number.isSafeInteger(localLogIndex) || localLogIndex < 0) {
+    throw new Error('HOLD: source receipt coordinates exceed safe integer range');
+  }
+  const original = await authenticate(transfer.txHash, { height, ...(retained ? { hash: retained.receipt.blockHash } : {}) });
+  if (!original) return pending();
+  const receipt = original.receipt;
+  if (receipt.status !== '0x1' || BigInt(receipt.transactionIndex) !== BigInt(transfer.sourceTransactionIndex)) return pending();
+  const log = receipt.logs[localLogIndex];
+  if (!log || log.address !== managerAddress.toLowerCase() ||
+      log.topics[0] !== manager.events.BridgingRequested.topic.toLowerCase()) return pending();
+  const [sender, receiver, token, amount] = manager.events.BridgingRequested.decode(log);
+  if (sender.toLowerCase() !== transfer.sender.toLowerCase() || receiver.toLowerCase() !== transfer.receiver.toLowerCase() ||
+      token.toLowerCase() !== transfer.source.toLowerCase() || amount !== BigInt(transfer.amount)) return pending();
+  if (retained) {
+    if (retained.version !== 1 || retained.localLogIndex !== localLogIndex ||
+        retained.blockTimestamp !== original.blockTimestamp || !retained.checkpointId) {
+      throw new Error('HOLD: retained source authorization changed');
+    }
+    if (!isDeepStrictEqual(retained.receipt, receipt)) throw new Error('HOLD: retained authenticated source receipt changed');
+    return retained;
+  }
+  return { version: 1, checkpointId: checkpointId(checkpoint), receipt, blockTimestamp: original.blockTimestamp, localLogIndex };
 }

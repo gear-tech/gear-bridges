@@ -1,4 +1,5 @@
 import { getEnv } from '../common/index.js';
+import { getEthereumEvidenceConfig } from '../common/env.js';
 
 let apiPath = getEnv('ETH_API_PATH', './api/ethereum');
 
@@ -8,7 +9,7 @@ const rpcOnly = getEnv('ETH_RPC_ONLY', 'false') === 'true';
 export const config = {
   rpcOnly,
   archiveUrl: getEnv('ETH_ARCHIVE_URL', 'https://v2.archive.subsquid.io/network/ethereum-holesky'),
-  rpcUrl: getEnv('ETH_RPC_URL'),
+  ...getEthereumEvidenceConfig(),
   rateLimit: Number(getEnv('ETH_RATE_LIMIT', '10')),
   erc20Manager: getEnv('ETH_ERC20_MANAGER').toLowerCase(),
   msgQ: getEnv('ETH_MSQ_QUEUE').toLowerCase(),

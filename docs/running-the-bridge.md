@@ -85,7 +85,8 @@ Use the approved deployment manifest, original bootstrap and existing private jo
 ~~~sh
 target/release/beefy-relay tokens-follow \
   --source-rpc "$SOURCE_RPC" --witness-rpc "$WITNESS_RPC" \
-  --ethereum-rpc "$EL_RPC" --wallet "$FOLLOWER_WALLET" --root-wallet "$ROOT_WALLET" \
+  --ethereum-rpc "$EL_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" \
+  --wallet "$FOLLOWER_WALLET" --root-wallet "$ROOT_WALLET" \
   --deployment-manifest "$DEPLOYMENT_MANIFEST" --output-dir "$FOLLOWER_DIR" \
   --client-deployment-transaction "$CLIENT_DEPLOYMENT_TRANSACTION"
 ~~~
@@ -97,6 +98,32 @@ The two source endpoints must be independent and agree on authenticated genesis,
 The retained `relayer` loads `.env` and preserves the shared `GEAR_ENDPOINT`, `GEAR_MAX_RECONNECT_ATTEMPTS`, `GEAR_SURI`, `ETH_RPC`, `ETH_BEACON_RPC`, `ETH_MESSAGE_QUEUE_ADDRESS` and command-specific signer/storage arguments. `ETH_FEE_PAYER` is the retained Ethereum delivery signer; `beefy-relay` uses protected wallet files through its own flags. Keep secrets outside the repository and storage private, persistent and dedicated to each actor.
 
 Each Ethereum fee-payer account must have exactly one submitting process. Commitment follower, root publisher, delivery workers, manual commands and observer must use distinct configured signers; deployment and governance authorities remain separate. The in-process nonce lock cannot coordinate replicas or external tools. Do not run active-active writers on one account or share mutable journal directories.
+
+### Independent Ethereum evidence
+
+Every finality-bearing process requires two operationally independent Ethereum execution providers. `--ethereum-witness-rpc` / `ETH_WITNESS_RPC` is separate from the Gear `--witness-rpc`. Different URLs are checked, but do not prove different operators or failure domains. The `independent-two-el-v1` policy assumes **at least one provider is honest**; it is not Beacon consensus verification. Both providers must serve the approved chain/genesis and required historical headers, receipts and hash-pinned state.
+
+The common authority is the lower finalized height after agreement and parent-linked continuity, not either advertised tip alone. Normal height lag is allowed; missing evidence, outage, disagreement, or a common head below retained history is HOLD. There is no single-provider/latest/safe fallback. Qualification uses bounded requests and a shared 300-second ancestry budget. Rust additionally verifies transaction and receipt MPT inclusion and exact signed originals; the indexer independently compares complete decision-relevant receipts and transaction membership, without claiming JS MPT verification.
+
+| Consumer | Required execution configuration and finality owner |
+| --- | --- |
+| `relayer gear-eth-tokens`, `gear-eth-manual`, `eth-gear-tokens`, `eth-gear-manual` | Primary connection plus witness and independently approved `--ethereum-chain-id` / `ETH_CHAIN_ID`, `--ethereum-genesis-hash` / `ETH_GENESIS_HASH`; retain `<storage_path>/ethereum-finality`. |
+| `relayer kill-switch` | Same witness/approved identity; additionally require `--ethereum-finality-dir` with a dedicated persistent directory before scanning or challenging. |
+| `relayer fetch-merkle-roots` | Same witness/approved identity; read-only qualification need not create an archive. |
+| `beefy-relay tokens-follow`, `tokens-publish-root`, `tokens-history-audit`; `beefy-deploy tokens-manifest`, `tokens-configure` | Add `--ethereum-witness-rpc`; identity comes from the selected approved public network or owned-fixture descriptor, never endpoint discovery. Follower keeps `finality-history/headers`; history audit owns `<proof_dir>/headers`. |
+| `vft-manager-tool prepare-cutover`, `finalize-cutover`, `verify-cutover` | Add `--ethereum-witness-rpc`; identity comes from retained old journal/work/seal. Prepare/finalize own `<cutover_dir>/ethereum-finality`; verify is read-only and never creates files or advances a fence. |
+
+For retained relayer commands, set these alongside the existing command-specific source, queue, signer and storage options:
+
+~~~sh
+export ETH_WITNESS_RPC="$EL_WITNESS_RPC"
+export ETH_CHAIN_ID="$APPROVED_EL_CHAIN_ID"
+export ETH_GENESIS_HASH="$APPROVED_EL_GENESIS_HASH"
+target/release/relayer kill-switch --ethereum-finality-dir "$OBSERVER_FINALITY_DIR"
+~~~
+
+Never share writable archives between independent owners or reset a retained fence to clear a HOLD. Reconnect preserves the witness and approval. Outbound UUID journals upgrade to version 5 only after **all** original completion/failure proofs, historical policies and nonce-disposition anchors authenticate; the durable save precedes source acknowledgements and ownership release. Existing signatures, attempts, receipts and finalized coordinates remain original evidence. An interrupted save retains the existing incomplete-write HOLD behavior.
+
 
 ## Run with Docker
 
@@ -251,7 +278,7 @@ Follower schema 4 separates commitment provenance: `origin: "own"` retains `subm
 
 On follower restart, saved finalized commitments are revalidated against their original signed identity, receipt inclusion, finalized anchor and source block before any new submission. A finalized boolean is not sufficient. The worker uses one fresh verified finalized view, deduplicated targets and bounded 32-way checks. Durable hash-linked RLP headers and transaction/receipt trie evidence are locally authenticated on reload; incomplete ancestry fences and interior progress survive interruption beyond the unchanged 32,768-header memory bound. History revalidation and pending-transaction reconciliation share one 300-second startup deadline. Changed or incomplete evidence holds instead of skipping history, resetting the journal or extending warmup deadlines.
 
-`beefy-relay tokens-history-audit --source-rpc <source> --witness-rpc <witness> --ethereum-rpc <EL> --deployment-manifest <manifest> --follower-state <existing-state.json> --proof-dir <new-private-audit-directory>` exercises that read-only historical authentication path without a signer. Keep the original journal untouched and use a separately owned proof directory, never the running follower’s archive. Repeat with the same audit directory for the warm-recovery check; fresh deployment history is not evidence for aged-journal recovery.
+`beefy-relay tokens-history-audit --source-rpc <source> --witness-rpc <Gear-witness> --ethereum-rpc <EL> --ethereum-witness-rpc <independent-EL-witness> --deployment-manifest <manifest> --follower-state <existing-state.json> --proof-dir <new-private-audit-directory>` exercises that read-only historical authentication path without a signer. Keep the original journal untouched and use a separately owned proof directory, never the running follower’s archive. Repeat with the same audit directory for the warm-recovery check; fresh deployment history is not evidence for aged-journal recovery.
 
 Historical endpoint qualification (not a promise of current availability):
 
@@ -413,7 +440,7 @@ no-effect evidence permit fresh proof/signing. Source/proof conflicts remain fat
 
 ### Observer challenge and operator response
 
-`relayer kill-switch` accepts the existing connection/metrics arguments, optional `--from-eth-block`, and `--eth-observer-pk-path` (`ETH_OBSERVER_PK_PATH`). Supply only the separately funded observer-role key, never an admin or publisher key. It has no repair URL or HTTP dependency.
+`relayer kill-switch` requires the execution witness/approved identity and a dedicated `--ethereum-finality-dir`, alongside the existing connection/metrics arguments, optional `--from-eth-block`, and `--eth-observer-pk-path` (`ETH_OBSERVER_PK_PATH`). Supply only the separately funded observer-role key, never an admin or publisher key. It has no repair URL or HTTP dependency.
 
 The observer pins the latest destination head and authenticates its ancestry back to finalized history, each event's inclusion, and the exact stored root at that head. It compares the exact historical finalized source root. Its cursor advances only through finalized destination blocks, so hot blocks and replacements after a reorg are revisited. Missing/pruned source state alone cannot trigger a challenge; invalid source bounds/finality, removed logs and inconsistent destination evidence hold the cursor. An already authenticated mismatch is not suppressed by later unavailable source state. The configured source RPC remains an operator trust boundary.
 
@@ -551,14 +578,14 @@ Once the original deployment is finalized, set `CLIENT`, `VERIFIER`, `MANAGER` a
 ~~~sh
 target/release/beefy-deploy tokens-manifest \
   --source-rpc "$SOURCE_RPC" --witness-rpc "$WITNESS_RPC" \
-  --ethereum-rpc "$HOODI_RPC" --wallet "$DEPLOY_WALLET_JSON" \
+  --ethereum-rpc "$HOODI_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" --wallet "$DEPLOY_WALLET_JSON" \
   --anchor "$RUN/anchor.json" --token-stack "$RUN/tokens/token-stack.json" \
   --client "$CLIENT" --verifier "$VERIFIER" --queue "$QUEUE" --manager "$MANAGER" \
   --output "$RUN/deployment.json"
 target/release/beefy-deploy tokens-configure \
   --source-rpc "$SOURCE_RPC" --witness-rpc "$WITNESS_RPC" \
   --expected-genesis "$SOURCE_GENESIS" --gear-suri-file "$GEAR_SURI_FILE" \
-  --ethereum-rpc "$HOODI_RPC" --wallet "$DEPLOY_WALLET_JSON" \
+  --ethereum-rpc "$HOODI_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" --wallet "$DEPLOY_WALLET_JSON" \
   --deployment-manifest "$RUN/deployment.json" --token-stack "$RUN/tokens/token-stack.json"
 ~~~
 
@@ -571,7 +598,8 @@ Use distinct funded commitment and root signers, separate from deployment and ot
 ~~~sh
 target/release/beefy-relay tokens-follow \
   --source-rpc "$SOURCE_RPC" --witness-rpc "$WITNESS_RPC" \
-  --ethereum-rpc "$HOODI_RPC" --wallet "$FOLLOWER_WALLET" --root-wallet "$ROOT_WALLET" \
+  --ethereum-rpc "$HOODI_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" \
+  --wallet "$FOLLOWER_WALLET" --root-wallet "$ROOT_WALLET" \
   --deployment-manifest "$RUN/deployment.json" --output-dir "$RUN/follower" \
   --client-deployment-transaction "$CLIENT_DEPLOYMENT_TRANSACTION"
 ~~~
@@ -625,7 +653,7 @@ its signed work and active journal row remain intact. Pending or conflicting
 settlement/exclusion evidence, or a failed historical authentication, retains
 the signer hold; never remove ownership files manually to bypass it.
 
-Version-1 mutable work upgrades only after requerying its original historical role pins. Zero blocking can be inferred for an old wrapper only from zero outstanding; missing historical evidence holds. Immutable version-1 predecessor seals remain settlement-only and are never rewritten. Old binaries reject version-2 seals. This coordinated program/client cutover does not retrofit these APIs into already-deployed immutable Gear programs.
+Mutable version-1/2 work upgrades to version 3 only after its historical role pins, source identity, saved coverage and checkpoint continuity authenticate. Work and coverage require a non-null execution checkpoint; the seal binds the immutable coverage through its digest. Immutable version-1/2 predecessor seals and reports stay byte-for-byte unchanged and are reauthenticated on every startup, existing-seal retry, already-Active retry and read-only verification. Genuinely missing legacy coverage inventories are reconstructed in memory; malformed/partial inventories or absent source-domain fields HOLD. Zero blocking can be inferred for an old wrapper only from zero outstanding; missing historical evidence holds. Version-1 restrictions and settlement XOR exclusion remain; Held/Rejected are not successful completion. This does not retrofit already-deployed immutable Gear programs.
 
 
 Seal the exact old transaction, block, discovery and completed coverage/admission bytes in immutable `cutover.json`; install matching `.cutover-seal` markers while old writer locks remain held. Normal relayers must not reopen sealed lanes. Only read-only `verify-cutover` may reauthenticate their original evidence. Successor journals are new paths bound to that seal and the approved new receiver, beginning at execution block B+1 and receipt slot S+1. An incomplete handoff or unavailable original history is HOLD, not permission to relabel the old target.
@@ -637,18 +665,18 @@ target/release/vft-manager-tool --gear-endpoint "$SOURCE_RPC" prepare-cutover \
   --old-vft-manager "$OLD_MANAGER" --new-vft-manager "$NEW_MANAGER" \
   --new-manager-code-id "$NEW_MANAGER_CODE_ID" \
   --old-transactions "$OLD_TRANSACTIONS" --old-discovery "$OLD_DISCOVERY" \
-  --ethereum-rpc "$EL_RPC" --beacon-rpc "$BEACON_RPC" \
+  --ethereum-rpc "$EL_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" --beacon-rpc "$BEACON_RPC" \
   --boundary-slot "$S" --cutover-dir "$CUTOVER_DIR"
 
 target/release/vft-manager-tool --gear-endpoint "$SOURCE_RPC" finalize-cutover \
   --cutover-dir "$CUTOVER_DIR" \
   --new-transactions "$NEW_TRANSACTIONS" --new-discovery "$NEW_DISCOVERY" \
-  --ethereum-rpc "$EL_RPC" --beacon-rpc "$BEACON_RPC" \
+  --ethereum-rpc "$EL_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" --beacon-rpc "$BEACON_RPC" \
   --evm-registration-transaction "$REGISTRATION_TX"
 
 target/release/vft-manager-tool --gear-endpoint "$SOURCE_RPC" verify-cutover \
   --seal "$CUTOVER_DIR/cutover.json" \
-  --ethereum-rpc "$EL_RPC" --beacon-rpc "$BEACON_RPC"
+  --ethereum-rpc "$EL_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" --beacon-rpc "$BEACON_RPC"
 ~~~
 
 Supply the authorized Gear lifecycle signer through protected `GEAR_SURI` for prepare/finalize; the CLI development-key default is not an operator identity. `verify-cutover` neither uses a signing credential nor changes journals. Add `--sponsor-unpaid` to prepare/finalize only with explicit authorization to pay for authentic unpaid deposits. Otherwise unresolved unpaid receipts remain HOLD; previously fulfilled external receipts require their own authenticated original and settlement evidence, never borrowed lane provenance.
@@ -659,7 +687,34 @@ Before beginning the source drain, direct and paid lane identities must bind the
 
 Retain `cutover-work.json`, `cutover-coverage.json`, `cutover-calls.json`, `cutover.json`, `cutover-activation.json`, original journals and matching seal markers. Start the successor with the tool-reported `--cutover-seal` and `--successor-manager-code-id`; a retry after activation authenticates the original activation and preserves successor progress. If the activation marker was not saved, finalization first reconciles the original unpause call and validates existing successor journals, even when populated; it never reinitializes them or signs another unpause for an ambiguous original.
 
-Both indexers wait through valid finalized-head lag in 30-second polls without committing any part of the batch. Previous finalized pins and the complete batch remain authenticated; missing or conflicting history fails closed. Shut down the processor to cancel this wait. Scheduling confirmations are not finality. For an existing database, preserve the separate [event-coordinate reindex requirements](internals.md); schema migration alone does not authenticate old rows.
+Indexer scheduling confirmations are not finality. Both processors and the repair command require `ETH_RPC_URL`, independent `ETH_WITNESS_RPC`, approved decimal `ETH_CHAIN_ID`, and exact 32-byte `ETH_GENESIS_HASH`. Both EL URLs must be HTTP(S). `ETH_HTTP_RPC_URL` remains metadata-only, never an implicit witness. The Gear processor also requires `ETH_ERC20_MANAGER` to authorize original source receipts. Repair needs that manager and `ETH_MSQ_QUEUE`, but no Squid/archive configuration. Every consumed manager, queue and payment event must match its independently qualified receipt. Gear settlement completion additionally requires that exact original EL deposit; this adds no new Gear trust model.
+
+### Indexer evidence migration and bounded repair
+
+Pause **both processors and the API**, retain a database backup, install the upgraded code/configuration, and apply `1792540800000-ethereum_evidence.js` through the existing migration runner:
+
+~~~sh
+yarn build:indexer
+yarn workspace indexer migration:run
+~~~
+
+Only resume upgraded processes. The single migration transaction preserves legacy resolution coordinates/flags and original receipt/deposit JSON, demotes unauthenticated Vara→Ethereum Completed and Ethereum→Vara Completed/Refunded projections to Bridging, clears their live completion coordinates, and resets unqualified matching flags. This includes old direct completions without an observation. Other directions, amounts, source identities, nonterminal/Failed rows, role maps and native/refund children are untouched. NULL authorization never qualifies an outcome. Rollback refuses to discard preserved or qualified evidence.
+
+After invalidation, refresh already-open clients: their completed-transfer polling may have stopped. Claim visibility requires `completedAt == null` and AwaitingPayment/Bridging; the API may resume while bounded repair restores independently authenticated outcomes. Preserve the separate [event-coordinate reindex requirements](internals.md); migration alone does not authenticate old rows.
+
+~~~sh
+yarn workspace indexer reconcile --direction vara-to-eth --limit 1
+yarn workspace indexer reconcile --direction vara-to-eth --limit 1 --apply
+yarn workspace indexer reconcile --direction eth-to-vara --limit 1 --apply
+# Continue the selected direction using the returned lastExaminedId:
+yarn workspace indexer reconcile --direction vara-to-eth --limit 1000 --after "$LAST_EXAMINED_ID" --apply
+~~~
+
+Each invocation examines one keyset-ordered page (default 1000, allowed 1–1000) and reports `lastExaminedId`, `hasMore`, qualified/pending counts and held IDs. Default is reporting-only: migrations are disabled, the transaction is read-only, and no checkpoint/projection/cursor is written. `--apply` uses one SERIALIZABLE transaction. Missing counterparts advance only the external scan hint, not verification. Outage, conflicting evidence or serialization failure aborts the entire page without a success cursor; repeat that page, not a later one. Concurrent checkpoint insertion never overwrites the winner; live ingestion retries its complete transaction, while repair aborts its page.
+
+Periodic reruns include already-matched/terminal rows and revalidate the original receipt, effects, settlement/completion binding and coordinates. New finality may advance without replacing original authorization/checkpoint references. Refunded remains distinct from Completed. Legacy direct outbound recovery uses its preserved original completion hash/block, never the Gear source transaction hash or an arbitrary same-nonce success. Missing original evidence remains pending/HOLD, never an inferred delivery.
+
+Phase 1 does not close the Phase 0 immutable-program retrofit or held-liability payment gates, nor establish live-cutover qualification. Local dual-RPC execution/database fixtures exercise disagreement and preservation behavior, not production provider independence.
 
 Gear program IDs from configuration seed missing database roles only. Authenticated rotation events update the durable role map sequentially; reloads and restarts preserve those rotations rather than restoring stale environment IDs.
 

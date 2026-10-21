@@ -9,7 +9,7 @@ use alloy::{
 use anyhow::{ensure, Context, Result};
 use std::{fs, path::Path};
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedReceiptProof {
     pub genesis: B256,
@@ -214,6 +214,7 @@ pub async fn authenticated_receipt_block(
     }
     ensure!(receipts.len() == transactions.len(), errors.count);
     let mut envelopes = Vec::with_capacity(receipts.len());
+    let mut global_log_index = 0u64;
     for (index, receipt) in receipts.into_iter().enumerate() {
         ensure!(
             receipt.transaction_index == Some(index as u64)
@@ -223,6 +224,17 @@ pub async fn authenticated_receipt_block(
                     == B256::from(keccak256(&transactions[index].encoded_2718())),
             errors.coordinates
         );
+        for log in receipt.inner.logs() {
+            ensure!(
+                !log.removed && log.block_number == Some(block_number)
+                    && log.block_hash == Some(block_hash)
+                    && log.transaction_hash == Some(receipt.transaction_hash)
+                    && log.transaction_index == Some(index as u64)
+                    && log.log_index == Some(global_log_index),
+                errors.coordinates
+            );
+            global_log_index = global_log_index.checked_add(1).context(errors.coordinates)?;
+        }
         envelopes.push((index as u64, receipt.into_primitives_receipt().inner));
     }
     ensure!(
@@ -252,8 +264,39 @@ pub async fn authenticate_transaction_receipt(
             "saved receipt inclusion changed; HOLD"
         );
         proof.verify_inclusion(view, hash)?;
+        view.recheck(provider).await?;
         return Ok(proof);
     }
+    let proof = prove_transaction_receipt(provider, view, block_number, block_hash, hash).await?;
+    let temporary = path.with_extension("json.tmp");
+    use std::io::Write;
+    let mut file = std::io::BufWriter::new(fs::File::create(&temporary)?);
+    serde_json::to_writer(&mut file, &proof)?;
+    file.flush()?;
+    file.get_ref().sync_all()?;
+    fs::rename(temporary, path)?;
+    fs::File::open(directory)?.sync_all()?;
+    Ok(proof)
+}
+
+/// Build retained inclusion evidence without creating or touching a cache directory.
+pub async fn prove_transaction_receipt(
+    provider: &impl Provider,
+    view: &crate::FinalizedView,
+    block_number: u64,
+    block_hash: B256,
+    hash: B256,
+) -> Result<RecordedReceiptProof> {
+    Ok(prove_transaction_receipt_with_log_index(provider, view, block_number, block_hash, hash).await?.0)
+}
+
+pub(crate) async fn prove_transaction_receipt_with_log_index(
+    provider: &impl Provider,
+    view: &crate::FinalizedView,
+    block_number: u64,
+    block_hash: B256,
+    hash: B256,
+) -> Result<(RecordedReceiptProof, u64)> {
     ensure!(
         view.contains(block_number, block_hash),
         "receipt block is not authenticated; HOLD"
@@ -278,6 +321,11 @@ pub async fn authenticate_transaction_receipt(
         .iter()
         .position(|tx| B256::from(keccak256(&tx.encoded_2718())) == hash)
         .context("signed transaction absent from inclusion; HOLD")? as u64;
+    let first_log_index = envelopes.iter().take(index as usize)
+        .try_fold(0u64, |total, (_, receipt)| {
+            total.checked_add(u64::try_from(receipt.logs().len())?)
+                .context("receipt log index overflow")
+        })?;
     let receipt = ethereum_common::utils::generate_merkle_proof(index, &envelopes)?;
     let proof = RecordedReceiptProof {
         genesis: view.genesis_hash(),
@@ -289,15 +337,8 @@ pub async fn authenticate_transaction_receipt(
         receipt_proof: receipt.proof,
     };
     proof.verify_inclusion(view, hash)?;
-    let temporary = path.with_extension("json.tmp");
-    use std::io::Write;
-    let mut file = std::io::BufWriter::new(fs::File::create(&temporary)?);
-    serde_json::to_writer(&mut file, &proof)?;
-    file.flush()?;
-    file.get_ref().sync_all()?;
-    fs::rename(temporary, path)?;
-    fs::File::open(directory)?.sync_all()?;
-    Ok(proof)
+    view.recheck(provider).await?;
+    Ok((proof, first_log_index))
 }
 
 #[cfg(test)]

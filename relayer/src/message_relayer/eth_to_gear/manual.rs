@@ -44,7 +44,7 @@ pub async fn relay(
 ) -> AnyResult<()> {
     super::cutover::reject_sealed(storage_path)?;
     let _journal_lock = lock_journal(storage_path)?;
-    let ethereum_genesis_hash = eth_api.get_block(0).await?.header.hash;
+    let (ethereum_chain_id, ethereum_genesis_hash) = eth_api.finality_identity()?;
     eth_api
         .enable_finality_archive(
             &storage_path.join("ethereum-finality"),
@@ -96,7 +96,7 @@ pub async fn relay(
     )
     .await?;
     let runtime = InboundRuntimeIdentity {
-        ethereum_chain_id: eth_api.chain_id().await?,
+        ethereum_chain_id,
         ethereum_genesis_hash: ethereum_genesis_hash.0.into(),
         ethereum_start_block: original.included_block_number,
         erc20_manager_address: None,

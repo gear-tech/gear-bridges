@@ -20,6 +20,9 @@ export class ReceiptSettlement {
   @Column({ name: 'tx_hash' })
   txHash!: string;
 
+  @Column('boolean', { nullable: true, name: 'legacy_matched' })
+  legacyMatched?: boolean | null;
+
   @Index('IDX_receipt_settlement_matched')
   @Column({ default: false })
   matched!: boolean;

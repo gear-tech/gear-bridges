@@ -155,6 +155,7 @@ pub async fn manifest(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
+    ethereum_witness_rpc: &str,
     wallet: &Path,
     anchor_path: &Path,
     stack_path: &Path,
@@ -275,10 +276,11 @@ pub async fn manifest(
         "queue": queue, "receiver": manager,
     });
     let mut ethereum_manifest =
-        Ethereum::token_manifest(ethereum_rpc, wallet, &addresses, fixture.as_ref()).await?;
+        Ethereum::token_manifest(ethereum_rpc, ethereum_witness_rpc, wallet, &addresses, fixture.as_ref()).await?;
     ethereum_manifest["sourceGenesis"] = anchor["sourceGenesis"].clone();
     let ethereum = Ethereum::connect(
         ethereum_rpc,
+        ethereum_witness_rpc,
         wallet,
         &ethereum_manifest,
         fixture.as_ref(),
@@ -2233,6 +2235,7 @@ pub async fn configure(
     expected_genesis: &str,
     suri: &str,
     ethereum_rpc: &str,
+    ethereum_witness_rpc: &str,
     wallet: &Path,
     deployment_manifest: &Path,
     token_stack: &Path,
@@ -2272,6 +2275,7 @@ pub async fn configure(
     );
     let ethereum = beefy_relay::ethereum::Ethereum::connect(
         ethereum_rpc,
+        ethereum_witness_rpc,
         wallet,
         &deployment["ethereum"],
         fixture.as_ref(),

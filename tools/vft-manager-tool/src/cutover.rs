@@ -9,12 +9,9 @@ use alloy_eips::BlockId;
 use alloy_primitives::B256;
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use clap::Args;
-use cli_utils::GearConnectionArgs;
+use cli_utils::{EthereumFinalityArgs, GearConnectionArgs};
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{
-    abi::{BridgingPayment, IERC20Manager},
-    PollingEthApi,
-};
+use ethereum_client::{abi::IERC20Manager, PollingEthApi};
 use ethereum_common::tree_hash::TreeHash;
 use gclient::GearApi;
 use gear_common::{
@@ -75,6 +72,8 @@ pub struct PrepareCutover {
     pub old_discovery: PathBuf,
     #[arg(long)]
     pub ethereum_rpc: String,
+    #[command(flatten)]
+    pub ethereum_finality: EthereumFinalityArgs,
     #[arg(long)]
     pub beacon_rpc: String,
     #[arg(long)]
@@ -94,6 +93,8 @@ pub struct FinalizeCutover {
     pub new_discovery: PathBuf,
     #[arg(long)]
     pub ethereum_rpc: String,
+    #[command(flatten)]
+    pub ethereum_finality: EthereumFinalityArgs,
     #[arg(long)]
     pub beacon_rpc: String,
     /// Actual authorized registration transaction; no EVM signing is performed here.
@@ -108,6 +109,8 @@ pub struct VerifyCutover {
     pub seal: PathBuf,
     #[arg(long)]
     pub ethereum_rpc: String,
+    #[command(flatten)]
+    pub ethereum_finality: EthereumFinalityArgs,
     #[arg(long)]
     pub beacon_rpc: String,
 }
@@ -331,7 +334,10 @@ async fn record_role_pin(api: &GearApi, path: &Path, token: H256, wrapper: bool)
 #[serde(deny_unknown_fields)]
 struct Work {
     schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ethereum_authentication: Option<ethereum_client::FinalityCheckpoint>,
     intent: Intent,
+    #[serde(default)]
     blocks: Vec<CoveredBlock>,
     admissions: Vec<Admission>,
     calls: Vec<FinalizedCutoverCall>,
@@ -346,7 +352,10 @@ struct Work {
 #[serde(deny_unknown_fields)]
 struct CoverageReport {
     schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ethereum_authentication: Option<ethereum_client::FinalityCheckpoint>,
     intent: Intent,
+    #[serde(default)]
     blocks: Vec<CoveredBlock>,
     admissions: Vec<Admission>,
 }
@@ -408,11 +417,14 @@ fn lock_other_signers(
 }
 async fn release_owned_signers(
     api: &GearApi,
+    eth: &PollingEthApi,
     path: &Path,
     current: &File,
     others: &[([u8; 32], File, bool)],
 ) -> Result<()> {
-    let work = read_work(path)?;
+    let mut work = read_work(path)?;
+    let mut view = eth.verified_finalized_view().await?;
+    authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     let signer: gsdk::signer::Signer = api.clone().into();
     let scanner = sender(
         ApiProviderConnection::from_api(signer.api().clone()),
@@ -457,6 +469,7 @@ async fn release_owned_signers(
                         .await?;
                 }
             }
+            view.recheck(&**eth).await?;
             Ok(())
         },
     )
@@ -511,9 +524,21 @@ fn work_path(directory: &Path) -> PathBuf {
 }
 fn validate_work_version(work: &Work) -> Result<()> {
     ensure!(
-        matches!(work.schema_version, 1 | 2),
+        matches!(work.schema_version, 1 | 2 | 3),
         "HOLD: unsupported cutover work schema"
     );
+    ensure!(if work.schema_version == 3 {
+        work.ethereum_authentication.as_ref().is_some_and(|checkpoint|
+            checkpoint.schema_version == 1
+                && checkpoint.policy == "independent-two-el-v1"
+                && checkpoint.chain_id == work.intent.old_identity.ethereum_chain_id
+                && checkpoint.genesis_hash.0 == work.intent.old_identity.ethereum_genesis_hash.0
+                && checkpoint.common_header.number >= work.intent.boundary.execution_number
+                && work.registration.as_ref().is_none_or(|registration|
+                    checkpoint.common_header.number >= registration.included_number))
+    } else {
+        work.ethereum_authentication.is_none()
+    }, "HOLD: cutover finality evidence/schema mismatch");
     if work.schema_version == 1 {
         ensure!(
             work.admissions
@@ -563,11 +588,128 @@ fn upgrade_role_evidence(saved: &RolePin, mut observed: RolePin) -> Result<RoleP
     Ok(observed)
 }
 
-async fn upgrade_work(api: &GearApi, path: &Path) -> Result<()> {
-    let mut work = read_work(path)?;
-    if work.schema_version == 2 {
-        return Ok(());
+async fn authenticate_work_ethereum(
+    eth: &PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
+    work: &mut Work,
+) -> Result<()> {
+    ensure!(eth.finality_identity()? == (work.intent.old_identity.ethereum_chain_id,
+        work.intent.old_identity.ethereum_genesis_hash.0.into()),
+        "HOLD: cutover Ethereum approval changed");
+    if let Some(checkpoint) = &work.ethereum_authentication {
+        view.verify_checkpoint(&**eth, checkpoint).await?;
     }
+    let mut targets = std::collections::BTreeMap::from([
+        (work.intent.boundary.execution_number, work.intent.boundary.execution_hash.0.into()),
+    ]);
+    if let Some(registration) = &work.registration {
+        for (number, hash) in [(registration.included_number, registration.included_hash),
+            (registration.finalized_number, registration.finalized_hash)] {
+            ensure!(targets.insert(number, hash).is_none_or(|old| old == hash),
+                "HOLD: registration contradicts cutover boundary");
+        }
+    }
+    for block in &work.blocks {
+        ensure!(targets.insert(block.number, block.hash.0.into())
+            .is_none_or(|old| old == B256::from(block.hash.0)),
+            "HOLD: saved coverage contradicts boundary");
+    }
+    view.verify_blocks(&**eth, &targets).await?;
+    // Admissions are durably written before the scan cursor. Reconstruct the one
+    // in-progress block in memory; never turn it into an advanced coverage cursor.
+    let missing = work.admissions.iter().any(|admission|
+        !work.blocks.iter().any(|block| block.hash == admission.original_block_hash));
+    let recovered = if missing {
+        let mut boundary = work.intent.boundary.clone();
+        if work.schema_version == 3 {
+            let next = u64::try_from(work.blocks.len())?;
+            for admission in &work.admissions {
+                if work.blocks.iter().any(|block| block.hash == admission.original_block_hash) {
+                    continue;
+                }
+                let mut bytes = admission.proof.as_slice();
+                let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
+                ensure!(bytes.is_empty()
+                    && proof.proof_block.block.body.execution_payload.block_number == next,
+                    "HOLD: saved work has a partial non-prefix inventory");
+                boundary.execution_number = next;
+                boundary.execution_hash = admission.original_block_hash;
+            }
+        }
+        let recovered = seal::reconstruct_coverage(eth, view, &boundary,
+            work.intent.old_identity.ethereum_genesis_hash).await?;
+        ensure!(work.blocks.iter().zip(&recovered).all(|(saved, fresh)| saved.hash == fresh.hash),
+            "HOLD: saved coverage prefix changed");
+        recovered
+    } else {
+        Vec::new()
+    };
+    let mut parent = H256::zero();
+    for (index, block) in work.blocks.iter().enumerate() {
+        ensure!(block.number == u64::try_from(index)? && block.parent_hash == parent
+            && block.number <= work.intent.boundary.execution_number
+            && (index != 0 || block.hash == work.intent.old_identity.ethereum_genesis_hash),
+            "HOLD: saved coverage is partial, malformed or disconnected");
+        validate_covered_block(block)?;
+        parent = block.hash;
+    }
+    for admission in &work.admissions {
+        let block = work.blocks.iter().chain(&recovered)
+            .find(|block| block.hash == admission.original_block_hash)
+            .context("HOLD: saved admission has no covered block")?;
+        let receipt = block.receipts.iter().find(|receipt|
+            receipt.transaction_hash == admission.original_tx_hash)
+            .context("HOLD: saved admission receipt missing")?;
+        let mut bytes = admission.proof.as_slice();
+        let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
+        ensure!(bytes.is_empty()
+            && proof.receipt_rlp == alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(receipt.as_ref()))
+            && proof.transaction_index == admission.receipt_key.1
+            && proof.proof_block.block.slot == admission.receipt_key.0
+            && proof.proof_block.block.body.execution_payload.block_hash.0.0 == block.hash.0
+            && proof.proof_block.block.body.execution_payload.receipts_root.0.0 == block.receipts_root.0
+            && block.transactions.get(usize::try_from(admission.receipt_key.1)?)
+                == Some(&admission.original_tx_hash),
+            "HOLD: saved admission original linkage changed");
+        let (_, envelope) = ethereum_common::utils::rlp_encode_index_and_receipt(
+            &admission.receipt_key.1, &ethereum_common::utils::map_receipt_envelope(receipt.as_ref()));
+        ethereum_client::inclusion::verify_indexed_value(block.header.receipts_root,
+            admission.receipt_key.1, &envelope, &proof.proof)?;
+        ensure!(seal::authenticated_fee_emitter(eth, view, work.intent.erc20_manager,
+            work.intent.old_identity.bridging_payment_address, receipt).await? == admission.fee_emitter
+            && admission.fee_event_observed == admission.fee_emitter.is_some(),
+            "HOLD: saved admission fee policy changed");
+    }
+    if let Some(registration) = &work.registration {
+        validate_registration(&work.intent, registration)?;
+        verify_registrations_at(eth, &work.intent, view,
+            registration.finalized_number, registration.finalized_hash).await?;
+    }
+    view.recheck(&**eth).await?;
+    Ok(())
+}
+
+async fn upgrade_work(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
+    let mut work = read_work(path)?;
+    let mut view = eth.verified_finalized_view().await?;
+    if matches!(work.schema_version, 1 | 2) && work.blocks.is_empty() && !work.admissions.is_empty() {
+        work.blocks = seal::reconstruct_coverage(eth, &mut view, &work.intent.boundary,
+            work.intent.old_identity.ethereum_genesis_hash).await?;
+        let mut deposits = BTreeSet::new();
+        for block in &work.blocks {
+            if belongs_to_source(&work.intent, block.header.timestamp)? {
+                for receipt in &block.receipts {
+                    if receipt.status() && is_deposit(receipt, work.intent.erc20_manager)? {
+                        deposits.insert(receipt.transaction_hash);
+                    }
+                }
+            }
+        }
+        ensure!(deposits == work.admissions.iter().map(|row| row.original_tx_hash).collect(),
+            "HOLD: reconstructed legacy work does not match retained admission inventory");
+    }
+    authenticate_work_ethereum(eth, &mut view, &mut work).await?;
+    authenticate_source_emitter(eth, &work.intent.old_identity, work.intent.erc20_manager).await?;
     for pin in work
         .intent
         .initial_role_pins
@@ -583,17 +725,29 @@ async fn upgrade_work(api: &GearApi, path: &Path) -> Result<()> {
             pin.token,
             work.intent.native_wrapper == Some(pin.token),
             Some(pin.block_hash),
-            true,
+            work.schema_version == 1,
         )
         .await?;
-        *pin = upgrade_role_evidence(pin, observed)?;
+        if work.schema_version == 1 {
+            *pin = upgrade_role_evidence(pin, observed)?;
+        } else {
+            ensure!(*pin == observed, "HOLD: historical role evidence changed");
+        }
     }
-    work.schema_version = 2;
+    view.recheck(&**eth).await?;
+    work.ethereum_authentication = Some(view.checkpoint().clone());
+    work.schema_version = 3;
     save(path, &work)
 }
 
 fn read_versioned_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+    ensure!(matches!(value["schema_version"].as_u64(), Some(1 | 2 | 3)),
+        "HOLD: unsupported cutover evidence schema");
+    if value["schema_version"] != 3 {
+        ensure!(value.get("ethereum_authentication").is_none(),
+            "HOLD: legacy evidence contains an Ethereum authentication field");
+    }
     if value["schema_version"] == 1 {
         let admissions = value["admissions"].as_array().into_iter().flatten();
         ensure!(
@@ -622,7 +776,7 @@ fn read_work(path: &Path) -> Result<Work> {
     );
     let work: Work = read_versioned_json(path)?;
     ensure!(
-        matches!(work.schema_version, 1 | 2),
+        matches!(work.schema_version, 1 | 2 | 3),
         "HOLD: unsupported cutover work schema"
     );
     validate_work_version(&work)?;
@@ -661,6 +815,7 @@ fn save(path: &Path, work: &Work) -> Result<()> {
 }
 async fn release_draining_hold(
     api: &GearApi,
+    eth: &PollingEthApi,
     path: &Path,
     current: &File,
     others: &[([u8; 32], File, bool)],
@@ -674,7 +829,7 @@ async fn release_draining_hold(
     {
         return Ok(false);
     }
-    release_owned_signers(api, path, current, others).await?;
+    release_owned_signers(api, eth, path, current, others).await?;
     Ok(true)
 }
 fn lock_work(directory: &Path) -> Result<File> {
@@ -1583,22 +1738,26 @@ async fn ensure_call_authority(api: &GearApi, step: &CutoverStep, target: ActorI
 }
 async fn run_cutover_call(
     api: &GearApi,
+    eth: &PollingEthApi,
     work_path: &Path,
     step: CutoverStep,
     intent: &Intent,
 ) -> Result<FinalizedCutoverCall> {
     let (target, payload) = lifecycle_request(intent, &step)?;
-    run_cutover_request(api, work_path, step, target, &payload).await
+    run_cutover_request(api, eth, work_path, step, target, &payload).await
 }
 
 async fn run_cutover_request(
     api: &GearApi,
+    eth: &PollingEthApi,
     work_path: &Path,
     step: CutoverStep,
     target: ActorId,
     payload: &[u8],
 ) -> Result<FinalizedCutoverCall> {
     let mut work = read_work(work_path)?;
+    let mut view = eth.verified_finalized_view().await?;
+    authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     let signer: gsdk::signer::Signer = api.clone().into();
     let mut identity = work.intent.old_identity.clone();
     identity.vft_manager_address = hash_actor(target);
@@ -1654,6 +1813,7 @@ async fn run_cutover_request(
         index
     } else {
         ensure_call_authority(api, &step, target).await?;
+        view.recheck(&**eth).await?;
         let original = scanner
             .prepare_call(
                 api,
@@ -1678,6 +1838,7 @@ async fn run_cutover_request(
         work.calls.len() - 1
     };
     for _ in 0..4 {
+        view.recheck(&**eth).await?;
         let call = &mut work.calls[index];
         let result = reconcile_call(api, &scanner, call, true).await;
         save(work_path, &work)?;
@@ -1717,74 +1878,14 @@ async fn fee_emitter(
     intent: &Intent,
     receipt: &TransactionReceipt,
 ) -> Result<Option<H160>> {
-    let manager = IERC20Manager::new(
-        alloy_primitives::Address::from_slice(intent.erc20_manager.as_bytes()),
-        &**eth,
-    );
-    for log in receipt.inner.logs() {
-        if log.inner.data.topics().first() != Some(&BridgingPayment::FeePaid::SIGNATURE_HASH) {
-            continue;
-        }
-        let address = H160::from_slice(log.address().as_slice());
-        let approved = if let Some(payment) = intent.old_identity.bridging_payment_address {
-            address == payment
-        } else {
-            manager
-                .isBridgingPayment(log.address())
-                .block(BlockId::hash_canonical(
-                    receipt
-                        .block_hash
-                        .context("HOLD: fee receipt block missing")?,
-                ))
-                .call()
-                .await?
-        };
-        if approved {
-            BridgingPayment::FeePaid::decode_log(&log.inner)
-                .context("HOLD: malformed authenticated FeePaid")?;
-            let payment = BridgingPayment::new(log.address(), &**eth);
-            ensure!(
-                payment
-                    .erc20Manager()
-                    .block(BlockId::hash_canonical(
-                        receipt
-                            .block_hash
-                            .context("HOLD: fee receipt block missing")?
-                    ))
-                    .call()
-                    .await?
-                    .as_slice()
-                    == intent.erc20_manager.as_bytes(),
-                "HOLD: approved fee payer belongs to a different ERC20 manager"
-            );
-            return Ok(Some(address));
-        }
-    }
-    Ok(None)
+    let mut view = eth.verified_finalized_view().await?;
+    seal::authenticated_fee_emitter(eth, &mut view, intent.erc20_manager,
+        intent.old_identity.bridging_payment_address, receipt).await
 }
+
 fn belongs_to_source(intent: &Intent, timestamp: u64) -> Result<bool> {
-    if intent.source_receipt_floor == 0 {
-        return Ok(true);
-    }
-    let delta = intent
-        .boundary_execution_timestamp
-        .checked_sub(timestamp)
-        .context("HOLD: coverage timestamp exceeds boundary")?;
-    let Some(slot) = intent
-        .boundary
-        .slot
-        .checked_sub(delta / ethereum_common::SECONDS_PER_SLOT)
-    else {
-        return Ok(false);
-    };
-    if slot < intent.source_receipt_floor {
-        return Ok(false);
-    }
-    ensure!(
-        delta % ethereum_common::SECONDS_PER_SLOT == 0,
-        "HOLD: execution timestamp does not map to authenticated Beacon slots"
-    );
-    Ok(true)
+    seal::belongs_to_source(intent.source_receipt_floor, &intent.boundary,
+        intent.boundary_execution_timestamp, timestamp)
 }
 
 fn external_parent_result(
@@ -2266,7 +2367,7 @@ async fn authenticate_exclusion(
         .as_ref()
         .context("HOLD: exclusion pin missing")?;
     ensure!(
-        work.schema_version == 2 && admission.settlement.is_none(),
+        matches!(work.schema_version, 2 | 3) && admission.settlement.is_none(),
         "HOLD: settlement/exclusion conflict"
     );
     let mut bytes = admission.proof.as_slice();
@@ -2714,6 +2815,8 @@ async fn scan_coverage(
     sponsor: bool,
 ) -> Result<()> {
     let mut work = read_work(path)?;
+    let mut view = eth.verified_finalized_view().await?;
+    authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     let originals = seal::read_original_journal(&work.intent.old_transactions)?;
     let signer: gsdk::signer::Signer = api.clone().into();
     let readonly_sender = sender(
@@ -2728,13 +2831,7 @@ async fn scan_coverage(
         .blocks
         .last()
         .map_or(floor, |block| block.number.saturating_add(1));
-    for covered in &work.blocks {
-        ensure!(
-            eth.is_finalized_block(covered.number, covered.hash).await?,
-            "HOLD: saved canonical coverage changed"
-        );
-        validate_covered_block(covered)?;
-    }
+    work.ethereum_authentication = Some(view.checkpoint().clone());
     while next <= work.intent.boundary.execution_number {
         let canonical = eth.get_block(next).await?;
         let block = eth
@@ -2742,14 +2839,12 @@ async fn scan_coverage(
             .full()
             .await?
             .context("HOLD: complete canonical transaction inventory unavailable")?;
-        ensure!(
-            block.header.number == next
-                && block.header.inner.hash_slow() == block.header.hash
-                && eth
-                    .is_finalized_block(next, H256(block.header.hash.0))
-                    .await?,
-            "HOLD: coverage header is not canonical finalized"
-        );
+        ensure!(block.header.number == next
+            && block.header.inner.hash_slow() == block.header.hash,
+            "HOLD: coverage header identity changed");
+        view.verify_blocks(&**eth, &std::collections::BTreeMap::from([
+            (next, block.header.hash),
+        ])).await?;
         if let Some(previous) = work.blocks.last() {
             ensure!(
                 block.header.parent_hash.0 == previous.hash.0,
@@ -2799,7 +2894,9 @@ async fn scan_coverage(
             {
                 continue;
             }
-            let emitter = fee_emitter(eth, &work.intent, receipt).await?;
+            let emitter = seal::authenticated_fee_emitter(eth, &mut view,
+                work.intent.erc20_manager, work.intent.old_identity.bridging_payment_address,
+                receipt).await?;
             let paid = emitter.is_some();
             if let Some(existing) = work
                 .admissions
@@ -2971,6 +3068,7 @@ async fn scan_coverage(
             header: block.header.inner,
             raw_transactions,
         });
+        view.recheck(&**eth).await?;
         save(path, &work)?;
         next = next
             .checked_add(1)
@@ -3002,6 +3100,8 @@ async fn drain(
     sponsor: bool,
 ) -> Result<()> {
     let mut work = read_work(path)?;
+    let mut view = eth.verified_finalized_view().await?;
+    authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     let signer: gsdk::signer::Signer = api.clone().into();
     let provider = ApiProviderConnection::from_api(signer.api().clone());
     let sender = sender(
@@ -3112,6 +3212,7 @@ async fn drain(
                     sender_id == work.intent.old_identity.gear_sender,
                     "HOLD: only original lane signer may create its never-signed proof"
                 );
+                view.recheck(&**eth).await?;
                 let signed = sender.prepare_submission(api, &proof).await?;
                 manager
                     .finalize_transaction(Response {
@@ -3124,6 +3225,7 @@ async fn drain(
                 signed
             }
         };
+        view.recheck(&**eth).await?;
         let response = reconcile_original_response(
             api,
             &sender,
@@ -3133,6 +3235,7 @@ async fn drain(
             signed,
         )
         .await;
+        view.recheck(&**eth).await?;
         let done = matches!(response.status, MessageStatus::Success { .. });
         manager.finalize_transaction(response).await?;
         ensure!(
@@ -3269,6 +3372,7 @@ async fn drain(
             save(path, &work)?;
             continue;
         }
+        view.recheck(&**eth).await?;
         let signed = match admission.signed.take() {
             Some(signed) => signed,
             None => sender.prepare_submission(api, &proof).await?,
@@ -3280,6 +3384,7 @@ async fn drain(
             .signed
             .take()
             .context("Missing original cutover proof")?;
+        view.recheck(&**eth).await?;
         let result = reconcile_original(
             api,
             &sender,
@@ -3288,6 +3393,7 @@ async fn drain(
             admission.settlement.as_ref(),
         )
         .await;
+        view.recheck(&**eth).await?;
         admission.signed = Some(signed);
         let status = result.map(|(status, _)| status);
         if let Ok(MessageStatus::Success {
@@ -3367,29 +3473,16 @@ async fn authenticate_source_emitter(
     identity: &InboundRuntimeIdentity,
     source_manager: H160,
 ) -> Result<()> {
+    let view = eth.verified_finalized_view().await?;
     let payment_manager = if let Some(payment) = identity.bridging_payment_address {
-        let finalized = eth.finalized_block().await?;
-        let payment = BridgingPayment::new(
-            alloy_primitives::Address::from_slice(payment.as_bytes()),
-            &**eth,
-        );
-        let manager = payment
-            .erc20Manager()
-            .block(BlockId::hash_canonical(finalized.header.hash))
-            .call()
-            .await?;
-        ensure!(
-            finalized.header.inner.hash_slow() == finalized.header.hash
-                && eth
-                    .is_finalized_block(finalized.header.number, H256(finalized.header.hash.0))
-                    .await?,
-            "HOLD: paid lane emitter routing anchor is not canonical finalized"
-        );
-        Some(H160::from_slice(manager.as_slice()))
+        Some(seal::authenticated_payment_manager(eth, &view, payment,
+            view.block_number(), view.block_hash()).await?)
     } else {
         None
     };
-    validate_source_emitter(identity, payment_manager, source_manager)
+    validate_source_emitter(identity, payment_manager, source_manager)?;
+    view.recheck(&**eth).await?;
+    Ok(())
 }
 
 pub async fn prepare(
@@ -3400,9 +3493,6 @@ pub async fn prepare(
     let _work_owner = lock_work(&args.cutover_dir)?;
     let path = work_path(&args.cutover_dir);
     let old_transactions = fs::canonicalize(&args.old_transactions)?;
-    if path.exists() {
-        upgrade_work(api, &path).await?;
-    }
     let old_discovery = fs::canonicalize(&args.old_discovery)?;
     let _journals = seal::lock_original_journals(&old_transactions, &old_discovery)?;
     let journal = seal::read_original_journal(&old_transactions)?;
@@ -3429,11 +3519,29 @@ pub async fn prepare(
             ),
         "HOLD: original journal contains receipts above proposed boundary"
     );
-    let eth = PollingEthApi::new(&args.ethereum_rpc).await?;
+    let eth = PollingEthApi::new(&args.ethereum_rpc).await?
+        .with_finality_witness(&args.ethereum_finality.ethereum_witness_rpc,
+            old_identity.ethereum_chain_id, old_identity.ethereum_genesis_hash.0.into()).await?;
+    eth.enable_finality_archive(&args.cutover_dir.join("ethereum-finality"),
+        old_identity.ethereum_genesis_hash.0.into()).await?;
+    let mut view = eth.verified_finalized_view().await?;
+    if let Some(predecessor) = seal::predecessor_seal_path(&old_transactions)? {
+        let signer: gsdk::signer::Signer = api.clone().into();
+        seal::verify_originals_read_only(&predecessor,
+            ApiProviderConnection::from_api(signer.api().clone()), api, &eth, &mut view).await?;
+    }
     let beacon = BeaconClient::new(args.beacon_rpc.clone(), Some(Duration::from_secs(30))).await?;
     let manager = VftManager::new(GClientRemoting::new(api.clone()));
     let at = api.last_block_hash().await?;
     let pin = sails_rs::H256::from_slice(at.as_ref());
+    // Beacon is only a locator until the execution boundary and checkpoint proof agree.
+    let selected = beacon.get_block::<ethereum_common::beacon::electra::Block>(
+        args.boundary_slot).await?;
+    ensure!(selected.slot == args.boundary_slot, "HOLD: selected boundary slot changed");
+    view.verify_blocks(&*eth, &std::collections::BTreeMap::from([(
+        selected.body.execution_payload.block_number,
+        B256::from(selected.body.execution_payload.block_hash.0.0),
+    )])).await?;
     let block = authenticate_cutover_boundary(
         &beacon,
         api,
@@ -3441,6 +3549,12 @@ pub async fn prepare(
         args.boundary_slot,
     )
     .await?;
+    ensure!(block.tree_hash_root() == selected.tree_hash_root(),
+        "HOLD: authenticated Beacon boundary changed after execution qualification");
+    view.recheck(&*eth).await?;
+    if path.exists() {
+        upgrade_work(api, &eth, &path).await?;
+    }
     let source_status = manager
         .cutover_status()
         .at_block(pin)
@@ -3609,7 +3723,8 @@ pub async fn prepare(
         save(
             &path,
             &Work {
-                schema_version: 2,
+                schema_version: 3,
+                ethereum_authentication: Some(view.checkpoint().clone()),
                 intent: intent.clone(),
                 blocks: vec![],
                 admissions: vec![],
@@ -3628,7 +3743,7 @@ pub async fn prepare(
     let _other_signers = lock_other_signers(api, &resumed.intent, &resumed, &path)?;
     let result: Result<()> = async {
         authenticate_environment(api, &eth, &intent).await?;
-        run_cutover_call(api, &path, CutoverStep::BeginCutover, &intent).await?;
+        run_cutover_call(api, &eth, &path, CutoverStep::BeginCutover, &intent).await?;
         let (source, _) = status(api, intent.old_identity.vft_manager_address).await?;
         ensure!(
             source.phase == CutoverPhase::Draining
@@ -3640,18 +3755,18 @@ pub async fn prepare(
         scan_coverage(api, &eth, &beacon, &path, args.sponsor_unpaid).await?;
         drain(api, connection, &eth, &beacon, &path, args.sponsor_unpaid).await?;
         drain_discovery(&eth, &path).await?;
-        drain_source(api, &path).await?;
+        drain_source(api, &eth, &path).await?;
         Ok(())
     }
     .await;
     if let Err(error) = result {
-        let release = release_draining_hold(api, &path, &_signer_owner, &_other_signers).await;
+        let release = release_draining_hold(api, &eth, &path, &_signer_owner, &_other_signers).await;
         return match release {
             Ok(_) => Err(error),
             Err(release) => Err(error.context(format!("Signer ownership retained: {release:#}"))),
         };
     }
-    release_owned_signers(api, &path, &_signer_owner, &_other_signers).await?;
+    release_owned_signers(api, &eth, &path, &_signer_owner, &_other_signers).await?;
     println!("Prepared cutover coverage and original admissions; source remains Draining. Run finalize-cutover with authorized EVM registration evidence.");
     Ok(())
 }
@@ -3690,7 +3805,7 @@ async fn drain_discovery(eth: &PollingEthApi, path: &Path) -> Result<()> {
     }
     Ok(())
 }
-async fn drain_source(api: &GearApi, path: &Path) -> Result<()> {
+async fn drain_source(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
     let work = read_work(path)?;
     let manager = VftManager::new(GClientRemoting::new(api.clone()));
     let source = actor(work.intent.old_identity.vft_manager_address);
@@ -3709,7 +3824,7 @@ async fn drain_source(api: &GearApi, path: &Path) -> Result<()> {
                 SourceStatus::TokenDepositCompleted(true) | SourceStatus::TokensReturnComplete(false) | SourceStatus::BridgeResponseReceived(None) => {
                     let key=H256(request.into_bytes());
                     let ordinal=u32::try_from(read_work(path)?.calls.iter().filter(|call|matches!(call.step,CutoverStep::SourceRefund(previous,_) if previous==key) && definite_refund_rejection(call)).count())?;
-                    run_cutover_call(api, path, CutoverStep::SourceRefund(key, ordinal), &work.intent).await?;
+                    run_cutover_call(api, eth, path, CutoverStep::SourceRefund(key, ordinal), &work.intent).await?;
                 }
                 _ => bail!("HOLD: original outgoing request {request:?} or deposit/refund child remains unresolved"),
             }
@@ -3837,59 +3952,32 @@ async fn authenticate_registration(
         finalized_hash: receipt.finalized_block_hash,
     };
     validate_registration(intent, &registration)?;
-    let manager = IERC20Manager::new(
-        alloy_primitives::Address::from_slice(intent.erc20_manager.as_bytes()),
-        &**eth,
-    );
-    let at = BlockId::hash_canonical(registration.finalized_hash);
-    ensure!(
-        manager
-            .isVftManager(intent.old_identity.vft_manager_address.0.into())
-            .block(at)
-            .call()
-            .await?
-            && manager
-                .isVftManager(intent.new_identity.vft_manager_address.0.into())
-                .block(at)
-                .call()
-                .await?,
-        "HOLD: ERC20Manager must retain source registration and register successor"
-    );
+    let mut view = eth.verified_finalized_view().await?;
+    view.verify_checkpoint(&**eth, &receipt.checkpoint).await?;
+    view.verify_blocks(&**eth, &std::collections::BTreeMap::from([
+        (registration.included_number, registration.included_hash),
+        (registration.finalized_number, registration.finalized_hash),
+    ])).await?;
+    receipt.inclusion.verify_inclusion(&view, hash)?;
+    verify_registrations_at(eth, intent, &view,
+        registration.finalized_number, registration.finalized_hash).await?;
     Ok(registration)
 }
+async fn verify_registrations_at(
+    eth: &PollingEthApi,
+    intent: &Intent,
+    view: &ethereum_client::FinalizedView,
+    number: u64,
+    hash: B256,
+) -> Result<()> {
+    seal::authenticate_manager_registrations(eth, view, intent.erc20_manager,
+        [intent.old_identity.vft_manager_address, intent.new_identity.vft_manager_address],
+        number, hash).await
+}
+
 async fn verify_current_registrations(eth: &PollingEthApi, intent: &Intent) -> Result<()> {
-    let finalized = eth.finalized_block().await?;
-    ensure!(
-        finalized.header.inner.hash_slow() == finalized.header.hash
-            && eth
-                .is_finalized_block(finalized.header.number, H256(finalized.header.hash.0))
-                .await?,
-        "HOLD: live registration anchor is not canonical finalized"
-    );
-    let manager = IERC20Manager::new(
-        alloy_primitives::Address::from_slice(intent.erc20_manager.as_bytes()),
-        &**eth,
-    );
-    let pin = BlockId::hash_canonical(finalized.header.hash);
-    ensure!(
-        manager
-            .isVftManager(intent.old_identity.vft_manager_address.0.into())
-            .block(pin)
-            .call()
-            .await?
-            && manager
-                .isVftManager(intent.new_identity.vft_manager_address.0.into())
-                .block(pin)
-                .call()
-                .await?,
-        "HOLD: source/successor ERC20 registration must remain enabled"
-    );
-    ensure!(
-        eth.is_finalized_block(finalized.header.number, H256(finalized.header.hash.0))
-            .await?,
-        "HOLD: registration anchor changed during readback"
-    );
-    Ok(())
+    let view = eth.verified_finalized_view().await?;
+    verify_registrations_at(eth, intent, &view, view.block_number(), view.block_hash()).await
 }
 fn validate_lifecycle_report(work: &Work) -> Result<()> {
     let successful = |step: &CutoverStep| {
@@ -4067,15 +4155,15 @@ where
     handoff().await
 }
 
-async fn handoff_roles(api: &GearApi, path: &Path) -> Result<()> {
+async fn handoff_roles(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
     // Delay all role readback/guards until retained originals are persisted.
     handoff_after_reconciliation(reconcile_retained_role_calls(api, path), || {
-        handoff_roles_reconciled(api, path)
+        handoff_roles_reconciled(api, eth, path)
     })
     .await
 }
 
-async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
+async fn handoff_roles_reconciled(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
     use vft_client::traits::VftAdmin as _;
     use vft_vara_client::traits::{NativeEscrow as _, VftAdmin as _};
     let work = read_work(path)?;
@@ -4121,7 +4209,7 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
                             .any(|call| call.step == step && complete(&call.original))),
                 "HOLD: token role points to unexpected identity or unjournaled handoff"
             );
-            run_cutover_call(api, path, step, &work.intent).await?;
+            run_cutover_call(api, eth, path, step, &work.intent).await?;
         }
         let at = api.last_block_hash().await?;
         let pin = sails_rs::H256::from_slice(at.as_ref());
@@ -4194,7 +4282,7 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
                                 && complete(&call.original))),
                 "HOLD: native minter unexpected/unrecorded"
             );
-            run_cutover_call(api, path, CutoverStep::TokenMinter(wrapper), &work.intent).await?;
+            run_cutover_call(api, eth, path, CutoverStep::TokenMinter(wrapper), &work.intent).await?;
         } else {
             ensure!(
                 minter == actor(initial.minter),
@@ -4206,7 +4294,7 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
             CutoverStep::WrapperConfigureManager,
             CutoverStep::WrapperSetBurner,
         ] {
-            run_cutover_call(api, path, step, &work.intent).await?;
+            run_cutover_call(api, eth, path, step, &work.intent).await?;
         }
         let at = api.last_block_hash().await?;
         let pin = sails_rs::H256::from_slice(at.as_ref());
@@ -4219,7 +4307,7 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
                 )?,
             "HOLD: wrapper handoff readback differs"
         );
-        run_cutover_call(api, path, CutoverStep::WrapperResume, &work.intent).await?;
+        run_cutover_call(api, eth, path, CutoverStep::WrapperResume, &work.intent).await?;
         record_role_pin(api, path, wrapper, true).await?;
     }
     Ok(())
@@ -4371,7 +4459,7 @@ fn completed_coverage(work: &Work) -> Result<()> {
         );
         if admission.exclusion.is_some() {
             ensure!(
-                work.schema_version == 2
+                matches!(work.schema_version, 2 | 3)
                     && admission.settlement.is_none()
                     && ((admission.external_original.is_some()
                         && admission.admission == "externally-resolved"
@@ -4400,17 +4488,26 @@ pub async fn finalize(
 ) -> Result<()> {
     let _owner = lock_work(&args.cutover_dir)?;
     let path = work_path(&args.cutover_dir);
-    upgrade_work(api, &path).await?;
     let mut work = read_work(&path)?;
     let _journals =
         seal::lock_original_journals(&work.intent.old_transactions, &work.intent.old_discovery)?;
     let _signer = lock_signer(&path, api, work.intent.old_identity.gear_genesis_hash)?;
     let _other_signers = lock_other_signers(api, &work.intent, &work, &path)?;
-    let eth = PollingEthApi::new(&args.ethereum_rpc).await?;
+    let eth = PollingEthApi::new(&args.ethereum_rpc).await?
+        .with_finality_witness(&args.ethereum_finality.ethereum_witness_rpc,
+            work.intent.old_identity.ethereum_chain_id,
+            work.intent.old_identity.ethereum_genesis_hash.0.into()).await?;
+    eth.enable_finality_archive(&args.cutover_dir.join("ethereum-finality"),
+        work.intent.old_identity.ethereum_genesis_hash.0.into()).await?;
+    let mut view = eth.verified_finalized_view().await?;
     let beacon = BeaconClient::new(args.beacon_rpc.clone(), Some(Duration::from_secs(30))).await?;
     authenticate_environment(api, &eth, &work.intent).await?;
     authenticate_boundary(api, &beacon, &work.intent).await?;
-    save(&path, &work)?;
+    let signer: gsdk::signer::Signer = api.clone().into();
+    let provider = ApiProviderConnection::from_api(signer.api().clone());
+    if let Some(predecessor) = seal::predecessor_seal_path(&work.intent.old_transactions)? {
+        seal::verify_originals_read_only(&predecessor, provider.clone(), api, &eth, &mut view).await?;
+    }
     let seal_path = args.cutover_dir.join("cutover.json");
     if seal_path.exists() {
         let (existing, _) = seal::verify_seal_files(&seal_path)?;
@@ -4420,19 +4517,22 @@ pub async fn finalize(
             "HOLD: seal/work identity changed"
         );
         seal::install_seal_markers(&seal_path)?;
+        seal::verify_originals_read_only(&seal_path, provider.clone(), api, &eth, &mut view).await?;
+        upgrade_work(api, &eth, &path).await?;
     } else {
+        upgrade_work(api, &eth, &path).await?;
         scan_coverage(api, &eth, &beacon, &path, args.sponsor_unpaid).await?;
         drain(api, connection, &eth, &beacon, &path, args.sponsor_unpaid).await?;
         drain_discovery(&eth, &path).await?;
-        drain_source(api, &path).await?;
+        drain_source(api, &eth, &path).await?;
         work = read_work(&path)?;
         completed_coverage(&work)?;
         let old = actor(work.intent.old_identity.vft_manager_address);
         let new = actor(work.intent.new_identity.vft_manager_address);
         let (source, _) = status(api, hash_actor(old)).await?;
         if source.phase == CutoverPhase::Draining {
-            run_cutover_call(api, &path, CutoverStep::SourcePause, &work.intent).await?;
-            run_cutover_call(api, &path, CutoverStep::PrepareCutover, &work.intent).await?;
+            run_cutover_call(api, &eth, &path, CutoverStep::SourcePause, &work.intent).await?;
+            run_cutover_call(api, &eth, &path, CutoverStep::PrepareCutover, &work.intent).await?;
         }
         let (source, _) = status(api, hash_actor(old)).await?;
         if source.phase != CutoverPhase::Retired {
@@ -4446,7 +4546,7 @@ pub async fn finalize(
                     })
                     .count(),
             )?;
-            run_cutover_call(api, &path, CutoverStep::Upgrade(ordinal), &work.intent).await?;
+            run_cutover_call(api, &eth, &path, CutoverStep::Upgrade(ordinal), &work.intent).await?;
         }
         let (source, retirement) = status(api, hash_actor(old)).await?;
         ensure!(
@@ -4460,7 +4560,7 @@ pub async fn finalize(
             work.retirement = Some(retirement);
         }
         save(&path, &work)?;
-        handoff_roles(api, &path).await?;
+        handoff_roles(api, &eth, &path).await?;
         work = read_work(&path)?;
         if let Some(hash) = args.evm_registration_transaction {
             ensure!(
@@ -4472,6 +4572,9 @@ pub async fn finalize(
             let registration = authenticate_registration(&eth, &work.intent, hash).await?;
             if work.registration.is_none() {
                 work.registration = Some(registration);
+                let mut registration_view = eth.verified_finalized_view().await?;
+                authenticate_work_ethereum(&eth, &mut registration_view, &mut work).await?;
+                work.ethereum_authentication = Some(registration_view.checkpoint().clone());
                 save(&path, &work)?;
             }
         }
@@ -4492,8 +4595,13 @@ pub async fn finalize(
                     .await?,
             "HOLD: original authorized EVM registration history changed"
         );
+        let mut registration_view = eth.verified_finalized_view().await?;
+        authenticate_work_ethereum(&eth, &mut registration_view, &mut work).await?;
+        work.ethereum_authentication = Some(registration_view.checkpoint().clone());
+        save(&path, &work)?;
         run_cutover_request(
             api,
+            &eth,
             &path,
             CutoverStep::FinalizeCutover,
             new,
@@ -4516,7 +4624,8 @@ pub async fn finalize(
         atomic_json(
             &coverage_path,
             &CoverageReport {
-                schema_version: 2,
+                schema_version: 3,
+                ethereum_authentication: work.ethereum_authentication.clone(),
                 intent: work.intent.clone(),
                 blocks: work.blocks.clone(),
                 admissions: work.admissions.clone(),
@@ -4526,7 +4635,7 @@ pub async fn finalize(
         atomic_json(
             &calls_path,
             &LifecycleReport {
-                schema_version: 2,
+                schema_version: 3,
                 intent: work.intent.clone(),
                 calls: work.calls.clone(),
                 role_pins: work.role_pins.clone(),
@@ -4535,7 +4644,7 @@ pub async fn finalize(
             true,
         )?;
         let sealed = CutoverSeal {
-            schema_version: 2,
+            schema_version: 3,
             old_identity: work.intent.old_identity.clone(),
             new_identity: work.intent.new_identity.clone(),
             new_manager_code_id: work.intent.new_manager_code_id,
@@ -4552,6 +4661,8 @@ pub async fn finalize(
         };
         seal::seal_cutover(&seal_path, &sealed)?;
     }
+    let mut view = eth.verified_finalized_view().await?;
+    seal::verify_originals_read_only(&seal_path, provider, api, &eth, &mut view).await?;
     work = read_work(&path)?;
     let transactions = absolute_new_path(&args.new_transactions)?;
     let discovery = absolute_new_path(&args.new_discovery)?;
@@ -4576,7 +4687,8 @@ pub async fn finalize(
     );
     if verify_activation(api, &activation_scanner, &work.intent, &seal_path).await? {
         let (sealed, _) = seal::verify_markers(&seal_path)?;
-        seal::verify_originals_read_only(&seal_path, activation_scanner.api_provider.clone(), api)
+        seal::verify_originals_read_only(&seal_path, activation_scanner.api_provider.clone(),
+            api, &eth, &mut view)
             .await?;
         validate_successor_journals(
             &work.intent.new_identity,
@@ -4586,7 +4698,7 @@ pub async fn finalize(
             &discovery,
         )?;
         verify_current_registrations(&eth, &work.intent).await?;
-        release_owned_signers(api, &path, &_signer, &_other_signers).await?;
+        release_owned_signers(api, &eth, &path, &_signer, &_other_signers).await?;
         println!("Cutover already activated; verified original activation without resetting successor journals.");
         return Ok(());
     }
@@ -4614,7 +4726,7 @@ pub async fn finalize(
     )
     .await?;
     if !recovered_activation {
-        run_cutover_call(api, &path, CutoverStep::DestinationUnpause, &work.intent).await?;
+        run_cutover_call(api, &eth, &path, CutoverStep::DestinationUnpause, &work.intent).await?;
     }
     let (destination, active_pin) =
         status(api, work.intent.new_identity.vft_manager_address).await?;
@@ -4639,7 +4751,7 @@ pub async fn finalize(
         &(seal::load_seal(&seal_path)?.1, activation, active_pin),
         true,
     )?;
-    release_owned_signers(api, &path, &_signer, &_other_signers).await?;
+    release_owned_signers(api, &eth, &path, &_signer, &_other_signers).await?;
     println!("Successor runtime: {} --cutover-seal {} --successor-manager-code-id {} ; original journals stay sealed and read-only",serde_json::to_string(&work.intent.new_identity)?,seal_path.display(),hex::encode(work.intent.new_manager_code_id.0));
     Ok(())
 }
@@ -4659,7 +4771,12 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     let provider = provider(connection).await?;
     let mut readonly = provider.clone();
     let api = readonly.gclient();
-    let eth = PollingEthApi::new(&args.ethereum_rpc).await?;
+    let eth = PollingEthApi::new(&args.ethereum_rpc).await?
+        .with_finality_witness(&args.ethereum_finality.ethereum_witness_rpc,
+            sealed.old_identity.ethereum_chain_id,
+            sealed.old_identity.ethereum_genesis_hash.0.into()).await?;
+    // Deliberately no archive attachment: verification never owns or advances durable history.
+    let mut view = eth.verified_finalized_view().await?;
     let beacon = BeaconClient::new(args.beacon_rpc.clone(), Some(Duration::from_secs(30))).await?;
     let report: CoverageReport = read_versioned_json(&sealed.coverage.path)?;
     let lifecycle: LifecycleReport = read_versioned_json(&sealed.lifecycle_evidence.path)?;
@@ -4676,9 +4793,10 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     );
     authenticate_environment(&api, &eth, &report.intent).await?;
     authenticate_boundary(&api, &beacon, &report.intent).await?;
-    seal::verify_originals_read_only(&args.seal, provider.clone(), &api).await?;
-    let work = Work {
+    seal::verify_originals_read_only(&args.seal, provider.clone(), &api, &eth, &mut view).await?;
+    let mut work = Work {
         schema_version: sealed.schema_version,
+        ethereum_authentication: report.ethereum_authentication,
         intent: report.intent.clone(),
         blocks: report.blocks,
         admissions: report.admissions,
@@ -4690,6 +4808,11 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
         new_transactions: None,
         new_discovery: None,
     };
+    if work.blocks.is_empty() && matches!(work.schema_version, 1 | 2) {
+        work.blocks = seal::reconstruct_coverage(&eth, &mut view, &work.intent.boundary,
+            work.intent.old_identity.ethereum_genesis_hash).await?;
+    }
+    authenticate_work_ethereum(&eth, &mut view, &mut work).await?;
     completed_coverage(&work)?;
     validate_lifecycle_report(&work)?;
     let finalized = api.block_number_at(api.last_block_hash().await?).await?;
@@ -5789,6 +5912,7 @@ mod tests {
         };
         Work {
             schema_version: 2,
+            ethereum_authentication: None,
             intent: Intent {
                 old_identity: identity.clone(),
                 new_identity: identity.clone(),
@@ -6029,6 +6153,52 @@ mod tests {
         validate_work_version(&work).unwrap();
         work.intent.initial_role_pins[0].blocking_redemptions = Some(0);
         assert!(validate_work_version(&work).is_err());
+    }
+
+    #[tokio::test]
+    async fn version_three_preserves_exclusion_rules_and_requires_checkpoint() {
+        let mut work = terminal_coverage_fixture().await;
+        let original = serde_json::to_vec(&work.admissions).unwrap();
+        work.schema_version = 3;
+        assert!(completed_coverage(&work).is_err());
+        let header = work.blocks[0].header.clone();
+        work.intent.old_identity.ethereum_genesis_hash = H256(header.hash_slow().0);
+        work.ethereum_authentication = Some(ethereum_client::FinalityCheckpoint {
+            schema_version: 1,
+            policy: "independent-two-el-v1".into(),
+            chain_id: work.intent.old_identity.ethereum_chain_id,
+            genesis_hash: header.hash_slow(),
+            common_header: header.clone(),
+            primary_finalized_header: header.clone(),
+            witness_finalized_header: header,
+        });
+        completed_coverage(&work).unwrap();
+        assert_eq!(serde_json::to_vec(&work.admissions).unwrap(), original);
+        work.admissions[0].settlement = work.admissions[0].exclusion.clone();
+        assert!(completed_coverage(&work).is_err());
+        work.admissions[0].settlement = None;
+        work.ethereum_authentication.as_mut().unwrap().policy = "single-provider".into();
+        assert!(completed_coverage(&work).is_err());
+    }
+
+    #[tokio::test]
+    async fn legacy_work_rejects_present_null_checkpoint_without_rewriting() {
+        let mut work = terminal_coverage_fixture().await;
+        let directory = std::env::temp_dir().join(format!("cutover-schema-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let path = work_path(&directory);
+        for version in [1, 2] {
+            work.schema_version = version;
+            work.admissions[0].settlement = work.admissions[0].exclusion.take()
+                .or(work.admissions[0].settlement.clone());
+            let mut value = serde_json::to_value(&work).unwrap();
+            value["ethereum_authentication"] = serde_json::Value::Null;
+            let bytes = serde_json::to_vec(&value).unwrap();
+            fs::write(&path, &bytes).unwrap();
+            assert!(read_work(&path).is_err());
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+        }
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

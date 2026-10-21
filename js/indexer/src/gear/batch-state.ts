@@ -15,6 +15,11 @@ import {
   getVaraTokenSymbol,
 } from './rpc-queries.js';
 import type { Relayed, ReceiptDepositEffect, ReceiptDepositRefunded, ReceiptDepositSettled } from './types/index.js';
+import { createEthereumEvidenceClients, createReceiptAuthenticator, loadCheckpoint, qualifyFinality, retainCheckpoint,
+  type SourceReceiptAuth } from '../eth/finality.js';
+import { authenticateSourceReceipt } from '../eth/completion.js';
+import { reconcileReceiptSettlements, validateReceiptSettlement } from './receipt-reconciliation.js';
+import { config } from './config.js';
 
 function sameDeposit(a: ReceiptDepositEffect, b: ReceiptDepositEffect): boolean {
   return Object.keys(a).length === Object.keys(b).length &&
@@ -46,6 +51,8 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   private _receiptRelays: Map<string, Relayed> = new Map();
   private _receiptSettlements: Map<string, ReceiptSettlement> = new Map();
   private _receiptSettlementCursor?: string;
+  private _receiptSettlementBatch?: string;
+  private _receiptSettlementStart?: string;
 
   constructor() {
     super(NETWORK, COUNTERPART_NETWORK);
@@ -69,6 +76,13 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   public async new(ctx: DataHandlerContext<Store, any>) {
+    const batchKey = ctx.blocks.map(({ header }) => `${header.height}:${header.hash}`).join(',');
+    if (this._receiptSettlementBatch === batchKey) {
+      this._receiptSettlementCursor = this._receiptSettlementStart;
+    } else {
+      this._receiptSettlementBatch = batchKey;
+      this._receiptSettlementStart = this._receiptSettlementCursor;
+    }
     await super.new(ctx);
     const initTransfers = await ctx.store.find(InitiatedTransfer, {});
     for (const transfer of initTransfers) {
@@ -178,6 +192,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   public recordReceiptSettlement(deposit: ReceiptDepositEffect, timestamp: Date, blockNumber: bigint, txHash: string) {
+    validateReceiptSettlement(deposit);
     const id = `${deposit.slot}:${deposit.transaction_index}:${deposit.log_index}`;
     const existing = this._receiptSettlements.get(id);
     if (existing && !sameDeposit(existing.deposit, deposit)) throw new Error('HOLD: conflicting receipt deposit settlement');
@@ -185,15 +200,10 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   public recordReceiptRefund(deposit: ReceiptDepositRefunded, timestamp: Date, blockNumber: bigint, txHash: string) {
-    const messageId = (id: string) => /^0x[0-9a-fA-F]{64}$/.test(id) && BigInt(id) !== 0n;
-    if (!deposit.native || !messageId(deposit.operation_id) || !messageId(deposit.child) || !messageId(deposit.payout_child) ||
-        deposit.child === deposit.payout_child || BigInt(deposit.returned_value) !== BigInt(deposit.amount)) {
-      throw new Error('HOLD: native refund lacks its original children or full returned backing');
-    }
     this.recordReceiptSettlement({ ...deposit, outcome: 'Refunded' }, timestamp, blockNumber, txHash);
   }
 
-  private async _saveReceiptSettlements() {
+  private async _saveReceiptSettlements(authenticateSource: (transfer: Transfer) => Promise<SourceReceiptAuth | undefined>) {
     const batchSize = 1000;
     const relays = [...this._receiptRelays.entries()];
     for (let offset = 0; offset < relays.length; offset += batchSize) {
@@ -238,68 +248,29 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       pending = await loadPending();
     }
     if (!pending.length) return;
-    const receiptIds = [...new Set(pending.map(({ deposit: d }) => d.slot + ':' + d.transaction_index))];
-    const authenticated = new Map((await this._ctx.store.find(ReceiptRelay, {
-      where: { id: In(receiptIds) },
-    })).map((row) => [row.id, row]));
-    const tuples = pending.flatMap(({ deposit: d }) => {
-      const relay = authenticated.get(d.slot + ':' + d.transaction_index);
-      return relay ? [{ sourceNetwork: Network.Ethereum, blockNumber: relay.blockNumber,
-        sourceTransactionIndex: BigInt(d.transaction_index), sourceLogIndex: BigInt(d.log_index) }] : [];
-    });
-    const transfers = tuples.length ? await this._ctx.store.find(Transfer, { where: tuples }) : [];
-    const byTuple = new Map<string, Transfer>();
-    for (const transfer of transfers) {
-      const tuple = transfer.blockNumber + ':' + transfer.sourceTransactionIndex + ':' + transfer.sourceLogIndex;
-      if (byTuple.has(tuple)) throw new Error('HOLD: ambiguous original receipt transfer tuple');
-      byTuple.set(tuple, transfer);
-    }
-    const changedTransfers = new Map<string, Transfer>();
-    const matched: ReceiptSettlement[] = [];
-    for (const settlement of pending) {
-      const d = settlement.deposit;
-      const relay = authenticated.get(d.slot + ':' + d.transaction_index);
-      if (!relay) continue;
-      const transfer = byTuple.get(relay.blockNumber + ':' + BigInt(d.transaction_index) + ':' + BigInt(d.log_index));
-      if (!transfer || transfer.source.toLowerCase() !== d.eth_token_id.toLowerCase() ||
-          transfer.destination.toLowerCase() !== d.vara_token_id.toLowerCase() ||
-          transfer.sender.toLowerCase() !== d.sender.toLowerCase() ||
-          transfer.receiver.toLowerCase() !== d.receiver.toLowerCase() ||
-          BigInt(transfer.amount) !== BigInt(d.amount)) continue;
-      if (transfer.receiptSlot != null && BigInt(transfer.receiptSlot) !== BigInt(d.slot)) {
-        throw new Error('HOLD: original transfer already bound to another receipt slot');
-      }
-      transfer.receiptSlot = BigInt(d.slot);
-      const outcome = 'outcome' in d && d.outcome === 'Refunded' ? Status.Refunded : Status.Completed;
-      if ((transfer.status === Status.Completed || transfer.status === Status.Refunded) && transfer.status !== outcome) {
-        throw new Error('HOLD: original receipt terminal outcome cannot be replaced');
-      }
-      if (transfer.status !== outcome) {
-        transfer.status = outcome;
-        transfer.completedAt = settlement.timestamp;
-        transfer.completedAtBlock = settlement.blockNumber;
-        transfer.completedAtTxHash = settlement.txHash;
-      }
-      settlement.matched = true;
-      changedTransfers.set(transfer.id, transfer);
-      matched.push(settlement);
-    }
-    if (changedTransfers.size) await this._ctx.store.save(mapValues(changedTransfers));
-    if (matched.length) await this._ctx.store.save(matched);
+    const updates = await reconcileReceiptSettlements(this._ctx.store, pending, authenticateSource);
+    if (updates.transfers.length) await this._ctx.store.save(updates.transfers);
+    if (updates.settlements.length) await this._ctx.store.save(updates.settlements);
     this._receiptSettlementCursor = pending[pending.length - 1].id;
   }
 
   public async save() {
+    const clients = createEthereumEvidenceClients();
+    const checkpoint = await qualifyFinality(clients, await loadCheckpoint(this._ctx.store, clients));
+    const authenticate = createReceiptAuthenticator(clients, checkpoint);
     if (this._transfersToRemove.size > 0) {
       await this._ctx.store.remove(setValues(this._transfersToRemove));
     }
 
-    await this._saveReceiptSettlements();
+    await this._saveReceiptSettlements((transfer) =>
+      authenticateSourceReceipt(clients, transfer, config.erc20Manager, checkpoint, authenticate));
     await Promise.all([this._saveEthBridgeMessages(), this._savePairs()]);
     await this._processStatuses();
     await this._processPriorityRequests();
     await this._saveTransfers();
     await this._saveInitiatedTransfers();
+    await qualifyFinality(clients, checkpoint);
+    await retainCheckpoint(this._ctx.store, checkpoint);
   }
 
   public async handleRequestBridgingReply(id: string, nonce: string) {

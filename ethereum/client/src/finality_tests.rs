@@ -489,6 +489,39 @@ async fn inconsistent_tip_parent_links_and_receipts_above_common_remain_held() -
     Ok(())
 }
 
+#[tokio::test]
+async fn historical_verification_budget_is_per_call_not_view_lifetime() -> AnyResult<()> {
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    for (seed, archived) in [(173, false), (174, true)] {
+        let chain = chain(seed, 4);
+        let cleanup = temp_archive(chain[0].header.hash);
+        let primary = Fixture::new(chain.clone(), 4).await?;
+        let witness = Fixture::new(chain.clone(), 4).await?;
+        let api = primary.api(&witness).await?;
+        let mut view = if archived {
+            api.verified_finalized_view_with_archive(&cleanup.directory, chain[0].header.hash).await?
+        } else {
+            api.verified_finalized_view().await?
+        };
+        let checkpoint = view.checkpoint().clone();
+        let target = BTreeMap::from([(2, chain[2].header.hash)]);
+        view.verify_blocks(api.raw_provider(), &target).await?;
+
+        // Simulate time spent processing other journal records, without aging the pin.
+        tokio::time::pause();
+        tokio::time::advance(MAX_PROOF_DURATION + Duration::from_secs(1)).await;
+        tokio::time::resume();
+        view.verify_blocks(api.raw_provider(), &target).await?;
+        view.verify_blocks(api.raw_provider(), &BTreeMap::from([(0, chain[0].header.hash)])).await?;
+        assert!(view.contains(0, chain[0].header.hash));
+        assert_eq!(view.checkpoint(), &checkpoint);
+
+        witness.state.lock().unwrap().chain[4].header.inner.extra_data = vec![255].into();
+        assert!(view.verify_blocks(api.raw_provider(), &target).await.is_err());
+    }
+    Ok(())
+}
+
 #[tokio::test(start_paused = true)]
 async fn qualification_shares_one_total_budget_across_both_inputs() -> AnyResult<()> {
     use alloy::transports::mock::{Asserter, MockTransport};

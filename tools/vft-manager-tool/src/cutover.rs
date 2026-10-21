@@ -573,6 +573,17 @@ fn zero_blocking(pin: &RolePin, version: u32) -> Result<bool> {
     Ok(blocking == 0)
 }
 
+fn allow_historical_drained_inference(pin: &RolePin, version: u32) -> bool {
+    // A journal upgrade cannot add a getter to the program at its historical block.
+    // Only repeat the inference when the retained liabilities and blocking count permit it.
+    pin.outstanding_redemptions == Some(0)
+        && match version {
+            1 => pin.blocking_redemptions.is_none(),
+            2 | 3 => pin.blocking_redemptions == Some(0),
+            _ => false,
+        }
+}
+
 fn upgrade_role_evidence(saved: &RolePin, mut observed: RolePin) -> Result<RolePin> {
     let blocking = observed.blocking_redemptions.take();
     ensure!(
@@ -725,7 +736,7 @@ async fn upgrade_work(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result
             pin.token,
             work.intent.native_wrapper == Some(pin.token),
             Some(pin.block_hash),
-            work.schema_version == 1,
+            allow_historical_drained_inference(pin, work.schema_version),
         )
         .await?;
         if work.schema_version == 1 {
@@ -4828,7 +4839,7 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
             pin.token,
             work.intent.native_wrapper == Some(pin.token),
             Some(pin.block_hash),
-            work.schema_version == 1,
+            allow_historical_drained_inference(pin, work.schema_version),
         )
         .await?;
         if work.schema_version == 1 {
@@ -6235,6 +6246,48 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(upgrade_role_evidence(&saved, changed).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn historical_drained_inference_survives_upgrade_and_revalidation() {
+        let legacy = historical_wrapper_pin(0, None);
+        assert!(allow_historical_drained_inference(&legacy, 1));
+        let upgraded = upgrade_role_evidence(&legacy, legacy.clone()).unwrap();
+        assert_eq!(upgraded, historical_wrapper_pin(0, Some(0)));
+        for versions in [[1, 3, 3], [1, 2, 3]] {
+            let mut saved = legacy.clone();
+            for version in versions {
+                assert!(allow_historical_drained_inference(&saved, version));
+                if version == 1 {
+                    saved = upgrade_role_evidence(&saved, saved.clone()).unwrap();
+                }
+                assert_eq!(saved, upgraded);
+                saved = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn historical_drained_inference_rejects_nonzero_unknown_and_contradictory_counts() {
+        for version in [1, 2, 3] {
+            for pin in [
+                historical_wrapper_pin(1, None),
+                historical_wrapper_pin(1, Some(0)),
+                historical_wrapper_pin(0, Some(1)),
+                RolePin {
+                    outstanding_redemptions: None,
+                    ..historical_wrapper_pin(0, Some(0))
+                },
+            ] {
+                assert!(!allow_historical_drained_inference(&pin, version));
+            }
+        }
+        for version in [2, 3] {
+            assert!(!allow_historical_drained_inference(
+                &historical_wrapper_pin(0, None),
+                version,
+            ));
         }
     }
 

@@ -198,6 +198,50 @@ fn verify_recorded_receipt(
     Ok(())
 }
 
+/// Recover the journal's original proof without requiring historical block bodies.
+/// Only an absent field permits legacy cache/RPC reconstruction; corrupt retained
+/// evidence must never be replaced by a provider's new answer.
+pub(crate) async fn recover_receipt_proof(
+    provider: &impl Provider,
+    view: &mut ethereum_client::FinalizedView,
+    included: (u64, B256),
+    hash: B256,
+    retained: Option<&Value>,
+    checkpoint: Option<&Value>,
+    directory: &Path,
+) -> Result<RecordedReceiptProof> {
+    if let Some(checkpoint) = checkpoint {
+        let checkpoint: ethereum_client::FinalityCheckpoint =
+            serde::Deserialize::deserialize(checkpoint)?;
+        ensure!(
+            checkpoint.common_header.number >= included.0,
+            "saved receipt checkpoint predates inclusion; HOLD"
+        );
+        view.verify_checkpoint(provider, &checkpoint).await?;
+    }
+    let proof = match retained {
+        Some(retained) => {
+            let proof: RecordedReceiptProof = serde::Deserialize::deserialize(retained)?;
+            ensure!(
+                serde_json::to_value(&proof)? == *retained,
+                "retained receipt proof changed representation; HOLD"
+            );
+            proof
+        }
+        None => ethereum_client::inclusion::authenticate_transaction_receipt(
+            provider, view, included.0, included.1, hash, directory,
+        )
+        .await?,
+    };
+    ensure!(
+        proof.header.number == included.0 && proof.header.hash_slow() == included.1,
+        "retained receipt inclusion changed; HOLD"
+    );
+    proof.verify_inclusion(view, hash)?;
+    view.recheck(provider).await?;
+    Ok(proof)
+}
+
 /// Fetch a block once for every distinct original inclusion, then retain compact
 /// transaction and receipt MPT proofs. Receipt JSON metadata is never reused as proof.
 pub(crate) async fn authenticate_recorded_receipts(
@@ -2313,6 +2357,126 @@ mod tests {
             ethereum.transactions.is_empty(),
             "bootstrap reads must not sign or populate submissions"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn retained_recovery_needs_headers_not_receipt_bodies_and_legacy_still_authenticates(
+    ) -> Result<()> {
+        use alloy::{
+            network::TransactionBuilder,
+            providers::ProviderBuilder,
+            rpc::types::TransactionRequest,
+            transports::mock::Asserter,
+        };
+        let anvil = Anvil::new()
+            .host("127.0.0.1")
+            .port(0u16)
+            .chain_id(31_337)
+            .arg("--slots-in-an-epoch")
+            .arg("1")
+            .try_spawn()?;
+        let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
+        let api = EthApi::new(
+            &anvil.ws_endpoint(), &address_string(Address::ZERO), Some(&key), None, None,
+        ).await?;
+        let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
+        let api = api.with_finality_witness(&anvil.endpoint(), 31_337, genesis).await?;
+        let receipt = api.raw_provider().send_transaction(
+            TransactionRequest::default().with_to(Address::repeat_byte(42)).with_gas_limit(21_000),
+        ).await?.get_receipt().await?;
+        api.raw_provider().client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
+        let finalized = api.get_finalized_receipt(receipt.transaction_hash).await?
+            .context("fixture receipt not finalized")?;
+        let included = (finalized.included_block_number, finalized.included_block_hash);
+        let retained = serde_json::to_value(&finalized.inclusion)?;
+        let checkpoint = serde_json::to_value(&finalized.checkpoint)?;
+        let mut view = api.verified_finalized_view().await?;
+        view.verify_blocks(api.raw_provider(), &std::collections::BTreeMap::from([included])).await?;
+        let header = api.raw_provider().get_block_by_hash(view.block_hash()).await?
+            .context("fixture finalized header missing")?;
+        // This transport can supply only the authenticated header, not the original
+        // full block/receipt set. Reconstruction against it cannot succeed.
+        let asserter = Asserter::new();
+        let headers_only = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+        for _ in 0..32 {
+            asserter.push_success(&header);
+        }
+        let directory = tempfile::tempdir()?;
+        let absent_cache = directory.path().join("not-created");
+        let recovered = recover_receipt_proof(
+            &headers_only, &mut view, included, receipt.transaction_hash,
+            Some(&retained), Some(&checkpoint), &absent_cache,
+        ).await?;
+        assert_eq!(serde_json::to_value(recovered)?, retained);
+        assert!(!absent_cache.exists());
+        for bad in [
+            Value::Null,
+            json!({}),
+            {
+                let mut proof = finalized.inclusion.clone();
+                proof.receipt_proof.clear();
+                serde_json::to_value(proof)?
+            },
+            {
+                let mut proof = finalized.inclusion.clone();
+                proof.raw_transaction.push(0);
+                serde_json::to_value(proof)?
+            },
+            {
+                let mut proof = finalized.inclusion.clone();
+                proof.index += 1;
+                serde_json::to_value(proof)?
+            },
+            {
+                let mut proof = finalized.inclusion.clone();
+                proof.receipt = alloy::consensus::ReceiptEnvelope::Eip1559(
+                    alloy::consensus::Receipt::<alloy::primitives::Log> {
+                        status: false.into(),
+                        cumulative_gas_used: 21_000,
+                        logs: Vec::new(),
+                    }.with_bloom(),
+                );
+                serde_json::to_value(proof)?
+            },
+        ] {
+            assert!(recover_receipt_proof(
+                &headers_only, &mut view, included, receipt.transaction_hash,
+                Some(&bad), None, &absent_cache,
+            ).await.is_err());
+            assert!(!absent_cache.exists(), "bad retained proof must not reconstruct");
+        }
+        assert!(recover_receipt_proof(
+            &headers_only, &mut view, included, B256::ZERO,
+            Some(&retained), None, &absent_cache,
+        ).await.is_err());
+        assert!(recover_receipt_proof(
+            &headers_only, &mut view, (included.0, B256::ZERO), receipt.transaction_hash,
+            Some(&retained), None, &absent_cache,
+        ).await.is_err());
+        let mut bad_checkpoint = checkpoint.clone();
+        bad_checkpoint["schema_version"] = json!(2);
+        assert!(recover_receipt_proof(
+            &headers_only, &mut view, included, receipt.transaction_hash,
+            Some(&retained), Some(&bad_checkpoint), &absent_cache,
+        ).await.is_err());
+        // Genuine legacy absence still requires a valid full proof: no body/cache
+        // means HOLD, while the real historical body reconstructs and is cached.
+        assert!(recover_receipt_proof(
+            &headers_only, &mut view, included, receipt.transaction_hash,
+            None, None, &directory.path().join("unavailable"),
+        ).await.is_err());
+        let legacy_cache = directory.path().join("legacy");
+        let legacy = recover_receipt_proof(
+            api.raw_provider(), &mut view, included, receipt.transaction_hash,
+            None, None, &legacy_cache,
+        ).await?;
+        assert_eq!(serde_json::to_value(legacy)?, retained);
+        let cached = recover_receipt_proof(
+            &headers_only, &mut view, included, receipt.transaction_hash,
+            None, None, &legacy_cache,
+        ).await?;
+        assert_eq!(serde_json::to_value(cached)?, retained);
         Ok(())
     }
 

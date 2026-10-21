@@ -961,7 +961,6 @@ pub struct FinalizedView {
     blocks: BTreeMap<u64, B256>,
     checkpoint: FinalityCheckpoint,
     witness: FinalityWitness,
-    started: Instant,
 }
 
 impl FinalizedView {
@@ -1021,6 +1020,7 @@ impl FinalizedView {
         provider: &impl Provider,
         targets: &BTreeMap<u64, B256>,
     ) -> Result<(), Error> {
+        let started = Instant::now();
         self.recheck(provider).await?;
         let _verification = finality_lock(self.genesis).lock_owned().await;
         let Some((&oldest, _)) = targets.first_key_value() else {
@@ -1042,7 +1042,7 @@ impl FinalizedView {
             provider,
             (self.block_number(), self.block_hash()),
             oldest,
-            self.started,
+            started,
             &archives,
             Some(targets),
         )
@@ -1085,7 +1085,7 @@ async fn verified_finalized_view(
         return Err(Error::FinalizedAncestryConflict);
     }
     let view = FinalizedView {
-        header, genesis, checkpoint, witness: witness.clone(), started,
+        header, genesis, checkpoint, witness: witness.clone(),
         blocks: BTreeMap::from([head]),
     };
     view.recheck(provider).await?;

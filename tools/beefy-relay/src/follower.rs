@@ -1767,12 +1767,13 @@ async fn revalidate_terminal_submissions(
                     ]),
                 )
                 .await?;
-                let receipt = ethereum_client::inclusion::authenticate_transaction_receipt(
+                let receipt = crate::ethereum::recover_receipt_proof(
                     ethereum.api.raw_provider(),
-                    &view,
-                    included,
-                    block_hash,
+                    &mut view,
+                    (included, block_hash),
                     hash,
+                    evidence.get("inclusion"),
+                    evidence.get("checkpoint"),
                     &directory.join("receipts"),
                 )
                 .await?;
@@ -1827,19 +1828,7 @@ async fn revalidate_terminal_submissions(
                         ]),
                     )
                     .await?;
-                    let proof = ethereum_client::inclusion::authenticate_transaction_receipt(
-                        ethereum.api.raw_provider(),
-                        &view,
-                        receipt.included_block_number,
-                        receipt.included_block_hash,
-                        identity.hash,
-                        &directory.join("receipts"),
-                    )
-                    .await?;
-                    ensure!(
-                        proof.raw_transaction == raw,
-                        "recovered held original signed bytes changed; HOLD"
-                    );
+                    receipt.inclusion.verify_original_inclusion(&view, &raw, identity.hash)?;
                 }
             }
             _ => anyhow::bail!("invalid original terminal disposition; HOLD"),

@@ -575,6 +575,7 @@ async fn authenticated_root_receipt(
     hash: B256,
     included: (u64, B256),
     finalized: (u64, B256),
+    evidence: Option<&Value>,
 ) -> Result<ethereum_client::inclusion::RecordedReceiptProof> {
     ensure!(
         finalized.0 >= included.0,
@@ -597,12 +598,13 @@ async fn authenticated_root_receipt(
     }
     view.verify_blocks(ethereum.api.raw_provider(), &targets)
         .await?;
-    ethereum_client::inclusion::authenticate_transaction_receipt(
+    crate::ethereum::recover_receipt_proof(
         ethereum.api.raw_provider(),
-        &view,
-        included.0,
-        included.1,
+        &mut view,
+        included,
         hash,
+        evidence.and_then(|value| value.get("receiptProof")),
+        evidence.and_then(|value| value.get("checkpoint")),
         &directory.join("receipts"),
     )
     .await
@@ -755,9 +757,10 @@ async fn validate_observed_progress(
         &observed["actualTransactionHash"],
         "external root transaction",
     )?);
-    let proof = authenticated_root_receipt(ethereum, path, hash, included, finalized).await?;
+    let proof =
+        authenticated_root_receipt(ethereum, path, hash, included, finalized, Some(observed)).await?;
     ensure!(
-        proof.receipt.status() && serde_json::to_value(&proof)? == observed["receiptProof"],
+        proof.receipt.status(),
         "external root authenticated receipt changed; HOLD"
     );
     let transaction = accepted_root_transaction(
@@ -934,6 +937,7 @@ async fn observe_finalized_progress(
         hash,
         (number, block_hash),
         (finalized_block, finalized_hash),
+        None,
     )
     .await?;
     ensure!(
@@ -1046,11 +1050,10 @@ async fn revalidate_terminal_roots(
                 )?),
             );
             let proof =
-                authenticated_root_receipt(ethereum, path, signed.hash, included, finalized)
+                authenticated_root_receipt(ethereum, path, signed.hash, included, finalized, Some(evidence))
                     .await?;
             ensure!(
                 !proof.receipt.status()
-                    && serde_json::to_value(&proof)? == evidence["receiptProof"]
                     && format!("0x{}", hex::encode(&proof.raw_transaction))
                         == original["rawTransaction"],
                 "archived failed original receipt changed; HOLD"
@@ -1088,14 +1091,7 @@ async fn revalidate_terminal_roots(
                     receipt.receipt.from == signed.from && receipt.receipt.to == signed.to,
                     "archived original receipt identity changed; HOLD"
                 );
-                let proof = authenticated_root_receipt(
-                    ethereum,
-                    path,
-                    signed.hash,
-                    (receipt.included_block_number, receipt.included_block_hash),
-                    (receipt.finalized_block_number, receipt.finalized_block_hash),
-                )
-                .await?;
+                let proof = &receipt.inclusion;
                 ensure!(
                     format!("0x{}", hex::encode(&proof.raw_transaction))
                         == original["rawTransaction"],
@@ -1202,9 +1198,18 @@ pub(crate) async fn validate_root_publication(
             .try_into()?;
         let kind = intent["kind"].as_str().unwrap_or("merkleRoot");
         let root = decode_hash(&intent["root"], "saved root")?;
-        let included = canonical_root_inclusion(ethereum, intent, target, kind, root)
-            .await?
-            .context("original root inclusion disappeared; HOLD")?;
+        let pin = &intent["publicationReceipt"];
+        let included = if pin["finalized"] == true {
+            ensure!(pin["kind"] == kind, "saved root receipt kind changed; HOLD");
+            (
+                pin["block"].as_u64().context("root inclusion missing")?,
+                B256::from(decode_hash(&pin["blockHash"], "root inclusion hash")?),
+            )
+        } else {
+            canonical_root_inclusion(ethereum, intent, target, kind, root)
+                .await?
+                .context("original root inclusion disappeared; HOLD")?
+        };
         if intent["publicationReceipt"]["finalized"] == true {
             let pin = &intent["publicationReceipt"];
             let proof = authenticated_root_receipt(
@@ -1221,6 +1226,7 @@ pub(crate) async fn validate_root_publication(
                         "root finality hash",
                     )?),
                 ),
+                Some(pin),
             )
             .await?;
             ensure!(
@@ -1234,12 +1240,13 @@ pub(crate) async fn validate_root_publication(
                     == intent["rawTransaction"],
                 "original finalized root proof changed signed bytes or status; HOLD"
             );
-            if !pin["receiptProof"].is_null() {
-                ensure!(
-                    pin["receiptProof"] == serde_json::to_value(&proof)?,
-                    "original root proof changed; HOLD"
-                );
-            }
+            ensure!(
+                ethereum.queue_root_at(U256::from(target), included.1).await?
+                    == B256::from(root)
+                    && (kind != "emptyProgress"
+                        || ethereum.queue_max_block_at(included.1).await? >= U256::from(target)),
+                "original finalized root state changed; HOLD"
+            );
         }
     }
     Ok(())

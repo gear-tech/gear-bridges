@@ -1480,3 +1480,5 @@ export interface SourceRequestEvidence {
 }
 
 export type Order = "Direct" | "Reverse";
+
+export const IDL_SHA256 = '2e94e7f7faf979c57c422942676693c6c93dcf4fedc44596cdbe5628ab2eec5a';

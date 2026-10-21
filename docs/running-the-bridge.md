@@ -618,6 +618,13 @@ target/release/vft-manager-tool hex-encoded-message resolve-receipt-deposit \
 
 New work, coverage, lifecycle reports and seals use schema version 2. Each terminal admission has exactly one historical settlement or exclusion pin. Exclusions authenticate the complete receipt cohort, canonical transaction/receipt tries and exact transaction index/hash, plus every retained parent and native-continuation nonce disposition no later than exclusion and source retirement. An enqueued parent still needs its original finalized reply. Owned excluded rows remain in the original active journal, never in successful completion history; work retains an authenticated copy without rewriting original bytes. Foreign exclusions use `externally-resolved`; paid/sponsored fee evidence stays unchanged. Restart and read-only verification reauthenticate exclusions, not just file digests.
 
+Prepare, finalize (including an already-activated retry), and draining-error
+recovery release cutover signer ownership only after authenticating every
+retained original. A terminal exclusion qualifies separately from settlement:
+its signed work and active journal row remain intact. Pending or conflicting
+settlement/exclusion evidence, or a failed historical authentication, retains
+the signer hold; never remove ownership files manually to bypass it.
+
 Version-1 mutable work upgrades only after requerying its original historical role pins. Zero blocking can be inferred for an old wrapper only from zero outstanding; missing historical evidence holds. Immutable version-1 predecessor seals remain settlement-only and are never rewritten. Old binaries reject version-2 seals. This coordinated program/client cutover does not retrofit these APIs into already-deployed immutable Gear programs.
 
 

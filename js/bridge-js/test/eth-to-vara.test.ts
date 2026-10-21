@@ -354,7 +354,10 @@ describe('SDK finalized consumer and token effects', () => {
     const pending = encode('NativeSettlementPending');
     expect(() => assertNativePendingReply(pending, profile, contract)).not.toThrow();
     expect(() => decodeConsumerReply(pending, profile, contract)).toThrow();
-    for (const error of ['NativeSettlementReturned', 'MessageFailed', 'ReceiptLeaseActive']) expect(() => assertNativePendingReply(encode(error), profile, contract)).toThrow();
+    for (const error of ['NativeSettlementReturned', 'MessageFailed', 'ReceiptLeaseActive', 'ReceiptResolved']) {
+      expect(() => assertNativePendingReply(encode(error), profile, contract)).toThrow();
+      expect(() => decodeConsumerReply(encode(error), profile, contract)).toThrow();
+    }
     expect(() => assertNativePendingReply(pending, profile, { ...contract, nativeSettlement: undefined })).toThrow();
     expect(() => assertNativePendingReply(pending, { ...profile, nativeWrapper: undefined }, contract)).toThrow();
     expect(() => assertNativePendingReply((pending + '00') as HexString, profile, contract)).toThrow();
@@ -377,7 +380,7 @@ describe('SDK finalized consumer and token effects', () => {
       identity.managerId, identity.proxyId, expected.managerAddress, identity.slot, identity.transactionIndex, 0, keccak256(receiptRlp)]).toU8a();
     expect(rows[0].operation_id).toBe(keccak256(tuple));
     expect(rows[1].operation_id).not.toBe(rows[0].operation_id);
-    for (const outcome of ['Unknown', 'Pending', 'InFlight', 'Rejected']) expect(() => validateNativePendingCohort(identity, [{ ...rows[0], outcome }, rows[1]])).toThrow();
+    for (const outcome of ['Unknown', 'Pending', 'InFlight', 'Rejected', 'Retryable', 'Held']) expect(() => validateNativePendingCohort(identity, [{ ...rows[0], outcome }, rows[1]])).toThrow();
     for (const change of [{ child: null }, { native: false }, { supply: 'Ethereum' as const }, { operation_id: hash(99) }, { amount: 11n }]) {
       expect(() => validateNativePendingCohort(identity, [{ ...rows[0], ...change }, rows[1]])).toThrow();
     }
@@ -597,8 +600,10 @@ describe('SDK finalized consumer and token effects', () => {
     const result = await validateFinalizedNativeReconciliationReply(params);
     expect(result.txHash).toBe(fixture.params.txHash); expect(result.msgId).toBe(fixture.params.msgId); expect(result.replyBlockHash).toBe(hash(12));
     expect(() => validateFinalizedNativeReconciliationReply({ ...params, transactionIndex: 4n })).toThrow();
-    fixture.state.payload = registry.createType('(String,String,Result<ReceiptStatus,Error>)', ['VftManager','ReconcileReceipt',{ ok: 'Reserved' }]).toHex();
-    await expect(validateFinalizedNativeReconciliationReply(params)).rejects.toThrow();
+    for (const status of ['Reserved', 'Resolved']) {
+      fixture.state.payload = registry.createType('(String,String,Result<ReceiptStatus,Error>)', ['VftManager','ReconcileReceipt',{ ok: status }]).toHex();
+      await expect(validateFinalizedNativeReconciliationReply(params)).rejects.toThrow();
+    }
     fixture.state.payload = registry.createType('(String,String,Result<ReceiptStatus,Error>)', ['VftManager','ReconcileReceipt',{ ok: 'Processed' }]).toHex();
     fixture.state.requestCanonical = false;
     await expect(validateFinalizedNativeReconciliationReply(params)).rejects.toThrow();

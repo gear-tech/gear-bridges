@@ -38,7 +38,7 @@ export interface ConsumerReplyContract {
     expectedEffect: InboundTokenEffect;
     readDeposits: (pin: HexString, proof: ProofResult) => Promise<readonly NativeReceiptDeposit[]>;
     readRedemption: (operationId: HexString, pin: HexString) => Promise<NativeRedemption | null>;
-    readReceiptStatus: (pin: HexString, proof: ProofResult) => Promise<'Unknown' | 'Reserved' | 'Processed'>;
+    readReceiptStatus: (pin: HexString, proof: ProofResult) => Promise<'Unknown' | 'Reserved' | 'Processed' | 'Resolved'>;
   }>;
   readonly resultType: string;
   readonly idlSha256: string;

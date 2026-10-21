@@ -49,6 +49,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     fs::{self, File, OpenOptions},
+    future::Future,
     io::Write,
     path::{Path, PathBuf},
     str::FromStr,
@@ -405,13 +406,71 @@ fn lock_other_signers(
         })
         .collect()
 }
-fn release_owned_signers(
+async fn release_owned_signers(
     api: &GearApi,
     path: &Path,
     current: &File,
     others: &[([u8; 32], File, bool)],
 ) -> Result<()> {
     let work = read_work(path)?;
+    let signer: gsdk::signer::Signer = api.clone().into();
+    let scanner = sender(
+        ApiProviderConnection::from_api(signer.api().clone()),
+        &work.intent.old_identity,
+        Some(work.intent.erc20_manager),
+    );
+    release_signers_after_authentication(
+        &work,
+        path,
+        api.account_id().clone().into(),
+        current,
+        others,
+        async {
+            for call in &work.calls {
+                verify_lifecycle_original(api, &scanner, &work.intent, call).await?;
+            }
+            for admission in &work.admissions {
+                if admission.exclusion.is_some() {
+                    authenticate_exclusion(api, &scanner, &work, admission).await?;
+                    continue;
+                }
+                let mut bytes = admission.proof.as_slice();
+                let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
+                ensure!(
+                    bytes.is_empty(),
+                    "HOLD: owned admission proof encoding changed"
+                );
+                for archived in &admission.attempts {
+                    verify_proof_attempt(&scanner, &proof, archived).await?;
+                }
+                if let Some(signed) = &admission.signed {
+                    scanner
+                        .verify_saved_completion(
+                            api,
+                            &proof,
+                            signed,
+                            admission
+                                .settlement
+                                .as_ref()
+                                .context("HOLD: owned proof settlement pending")?,
+                        )
+                        .await?;
+                }
+            }
+            Ok(())
+        },
+    )
+    .await
+}
+
+async fn release_signers_after_authentication(
+    work: &Work,
+    path: &Path,
+    current_sender: [u8; 32],
+    current: &File,
+    others: &[([u8; 32], File, bool)],
+    authentication: impl Future<Output = Result<()>>,
+) -> Result<()> {
     ensure!(
         work.calls.iter().all(|call| complete(&call.original)
             || terminal_upgrade(call)
@@ -421,9 +480,11 @@ fn release_owned_signers(
     ensure!(
         work.admissions
             .iter()
-            .all(|admission| admission.signed.is_none() || admission.settlement.is_some()),
-        "HOLD: unresolved sponsored original retains signer ownership"
+            .all(|admission| admission.settlement.is_some() ^ admission.exclusion.is_some()),
+        "HOLD: unresolved or conflicting admission retains signer ownership"
     );
+    // No durable owner is removed until every original has authenticated disposition.
+    authentication.await?;
     for (sender, file, durable) in others {
         if *durable {
             signer_ownership::release_cutover_signer(
@@ -436,7 +497,7 @@ fn release_owned_signers(
     }
     signer_ownership::release_cutover_signer(
         work.intent.old_identity.gear_genesis_hash,
-        api.account_id().clone().into(),
+        current_sender,
         path,
         current,
     )
@@ -605,16 +666,6 @@ async fn release_draining_hold(
     others: &[([u8; 32], File, bool)],
 ) -> Result<bool> {
     let work = read_work(path)?;
-    if !work.calls.iter().all(|call| {
-        complete(&call.original)
-            || terminal_upgrade(call)
-            || (call.archived_no_effect && no_effect(&call.original))
-    }) || work.admissions.iter().any(|admission| {
-        admission.settlement.is_none()
-            && (admission.signed.is_some() || admission.external_original.is_some())
-    }) {
-        return Ok(false);
-    }
     let (state, _) = status(api, work.intent.old_identity.vft_manager_address).await?;
     if state.phase != CutoverPhase::Draining
         || state.successor != Some(actor(work.intent.new_identity.vft_manager_address))
@@ -623,40 +674,7 @@ async fn release_draining_hold(
     {
         return Ok(false);
     }
-    let signer: gsdk::signer::Signer = api.clone().into();
-    let scanner = sender(
-        ApiProviderConnection::from_api(signer.api().clone()),
-        &work.intent.old_identity,
-        Some(work.intent.erc20_manager),
-    );
-    for call in &work.calls {
-        verify_lifecycle_original(api, &scanner, &work.intent, call).await?;
-    }
-    for admission in &work.admissions {
-        let mut bytes = admission.proof.as_slice();
-        let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
-        ensure!(
-            bytes.is_empty(),
-            "HOLD: owned admission proof encoding changed"
-        );
-        for archived in &admission.attempts {
-            verify_proof_attempt(&scanner, &proof, archived).await?;
-        }
-        if let Some(signed) = &admission.signed {
-            scanner
-                .verify_saved_completion(
-                    api,
-                    &proof,
-                    signed,
-                    admission
-                        .settlement
-                        .as_ref()
-                        .context("HOLD: owned proof settlement pending")?,
-                )
-                .await?;
-        }
-    }
-    release_owned_signers(api, path, current, others)?;
+    release_owned_signers(api, path, current, others).await?;
     Ok(true)
 }
 fn lock_work(directory: &Path) -> Result<File> {
@@ -3633,7 +3651,7 @@ pub async fn prepare(
             Err(release) => Err(error.context(format!("Signer ownership retained: {release:#}"))),
         };
     }
-    release_owned_signers(api, &path, &_signer_owner, &_other_signers)?;
+    release_owned_signers(api, &path, &_signer_owner, &_other_signers).await?;
     println!("Prepared cutover coverage and original admissions; source remains Draining. Run finalize-cutover with authorized EVM registration evidence.");
     Ok(())
 }
@@ -4568,7 +4586,7 @@ pub async fn finalize(
             &discovery,
         )?;
         verify_current_registrations(&eth, &work.intent).await?;
-        release_owned_signers(api, &path, &_signer, &_other_signers)?;
+        release_owned_signers(api, &path, &_signer, &_other_signers).await?;
         println!("Cutover already activated; verified original activation without resetting successor journals.");
         return Ok(());
     }
@@ -4621,7 +4639,7 @@ pub async fn finalize(
         &(seal::load_seal(&seal_path)?.1, activation, active_pin),
         true,
     )?;
-    release_owned_signers(api, &path, &_signer, &_other_signers)?;
+    release_owned_signers(api, &path, &_signer, &_other_signers).await?;
     println!("Successor runtime: {} --cutover-seal {} --successor-manager-code-id {} ; original journals stay sealed and read-only",serde_json::to_string(&work.intent.new_identity)?,seal_path.display(),hex::encode(work.intent.new_manager_code_id.0));
     Ok(())
 }
@@ -5800,6 +5818,115 @@ mod tests {
             readiness: None,
             new_transactions: None,
             new_discovery: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn signer_release_requires_authenticated_terminal_evidence_and_preserves_originals() {
+        let fixture = terminal_coverage_fixture().await;
+        for provenance in ["owned", "sponsored", "external"] {
+            for disposition in [
+                "excluded", "settled", "pending", "conflict", "invalid", "lifecycle",
+            ] {
+                let mut work = fixture.clone();
+                let admission = &mut work.admissions[0];
+                match provenance {
+                    "owned" => admission.original_lane_uuid = Some(Uuid::now_v7()),
+                    "external" => {
+                        admission.external_original = Some(seal::CanonicalExternalOriginal {
+                            provenance: "canonical-external".into(),
+                            original: admission.signed.take().unwrap(),
+                            discovered_at: admission.exclusion.clone().unwrap(),
+                        });
+                        admission.admission = "externally-resolved".into();
+                    }
+                    _ => {}
+                }
+                if provenance != "external" {
+                    admission.attempts.push(original_with_reply(None));
+                }
+                match disposition {
+                    "settled" => {
+                        admission.settlement = admission.exclusion.take();
+                        if provenance == "external" {
+                            admission.admission = "externally-delivered".into();
+                        }
+                    }
+                    "pending" => admission.exclusion = None,
+                    "conflict" => admission.settlement = admission.exclusion.clone(),
+                    "lifecycle" => work.calls.push(FinalizedCutoverCall {
+                        step: CutoverStep::DestinationUnpause,
+                        attempt: 0,
+                        target: work.intent.new_identity.vft_manager_address,
+                        payload: io::Unpause::encode_call(),
+                        gas: 1,
+                        value: 0,
+                        original: original_with_reply(None),
+                        archived_no_effect: false,
+                    }),
+                    _ => {}
+                }
+                let directory = std::env::temp_dir()
+                    .join(format!("cutover-signer-release-{}", Uuid::now_v7()));
+                fs::create_dir(&directory).unwrap();
+                let path = work_path(&directory);
+                let genesis = seal::digest(Uuid::now_v7().as_bytes());
+                work.intent.old_identity.gear_genesis_hash = genesis;
+                save(&path, &work).unwrap();
+                let before = fs::read(&path).unwrap();
+                let current_sender = [41; 32];
+                let other_sender = [42; 32];
+                let current =
+                    signer_ownership::lock_cutover_signer(genesis, current_sender, &path).unwrap();
+                let others = vec![(
+                    other_sender,
+                    signer_ownership::lock_cutover_signer(genesis, other_sender, &path).unwrap(),
+                    true,
+                )];
+                let authenticated = std::cell::Cell::new(false);
+                // Exercise the real release gate and durable ownership; the RPC
+                // authentication boundary is controlled here, not chain evidence.
+                let result = release_signers_after_authentication(
+                    &work,
+                    &path,
+                    current_sender,
+                    &current,
+                    &others,
+                    async {
+                        authenticated.set(true);
+                        ensure!(disposition != "invalid", "HOLD: invalid exclusion evidence");
+                        Ok(())
+                    },
+                )
+                .await;
+                let released = matches!(disposition, "excluded" | "settled");
+                assert_eq!(result.is_ok(), released, "{provenance}/{disposition}");
+                assert_eq!(
+                    authenticated.get(),
+                    matches!(disposition, "excluded" | "settled" | "invalid"),
+                    "{provenance}/{disposition}"
+                );
+                assert_eq!(fs::read(&path).unwrap(), before);
+                assert_eq!(serde_json::to_vec(&work).unwrap(), before);
+                drop(current);
+                drop(others);
+                for account in [current_sender, other_sender] {
+                    let normal_owner = signer_ownership::lock_signer(genesis, account);
+                    assert_eq!(
+                        normal_owner.is_ok(),
+                        released,
+                        "durable owner must survive an unsuccessful release: {provenance}/{disposition}"
+                    );
+                    drop(normal_owner);
+                    if !released {
+                        let retained =
+                            signer_ownership::lock_cutover_signer(genesis, account, &path).unwrap();
+                        signer_ownership::release_cutover_signer(genesis, account, &path, &retained)
+                            .unwrap();
+                    }
+                }
+                fs::remove_dir_all(directory).unwrap();
+            }
         }
     }
 

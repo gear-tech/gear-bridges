@@ -16,6 +16,15 @@ The native-capable token frontend also requires approved `nativeWrapper.programI
 
 Accepted `0x`-prefixed profile hashes, program IDs, CodeIds and fork versions are byte identities: hexadecimal letter case does not change approval. Preparation and finalized-effect authentication compare those bytes consistently, and the frontend applies the same rule when matching its configured token lane. IDL SHA-256 fields retain their required lowercase format.
 
+When regenerating the manager or native-wrapper bindings, update the corresponding
+IDL SHA-256 pins in `src/eth-to-vara/token-effect.ts` and preserve the frontend
+manager client's `IDL_SHA256` export. Hash the checked-in `api/gear/*.idl` files,
+not deployed state. Qualify a profile for the matching new programs independently;
+do not rewrite an old deployment's approval to make it pass. Run
+`yarn workspace @gear-js/bridge test --mode unit`, rebuild the SDK, and typecheck
+the frontend consumers. `Resolved` is a supported receipt status, not financial
+success.
+
 Inbound `wait: false` requires the checkpoint already applied at the supplied finalized preparation pin. `wait: true` retries only `NotPresent`, polling later canonical finalized source pins while preparation is still unsigned. Each pin must preserve the original and previously observed finalized history and the exact runtime, proxy, slot-selected endpoint, checkpoint and deployed CodeIds. `OutDated`, unknown failures, changed bindings and unsupported forks HOLD. Polling and proof I/O share the same absolute original deadline; a timeout never resets it or permits later signing.
 
 ## Quick Start

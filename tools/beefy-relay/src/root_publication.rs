@@ -443,6 +443,44 @@ fn signed_publication_identity(
     Ok(identity)
 }
 
+async fn sign_and_persist_root(
+    api: &ethereum_client::EthApi,
+    queue: Address,
+    request: alloy::rpc::types::TransactionRequest,
+    output: &Path,
+    intent: &mut Value,
+    publisher: Address,
+    nonce: u64,
+) -> Result<ethereum_client::TransactionIdentity> {
+    use alloy::{eips::Encodable2718, network::TransactionBuilder};
+
+    let chain_id = api.finality_identity()?.0;
+    let filled = api
+        .raw_provider()
+        .fill(request.with_chain_id(chain_id))
+        .await
+        .context("sign original queue-root transaction")
+        .context(RootPublicationHeld)?;
+    let raw = filled
+        .as_envelope()
+        .context("root transaction was not signed")?
+        .encoded_2718();
+    let mut candidate = intent.clone();
+    candidate["rawTransaction"] = json!(format!("0x{}", hex::encode(&raw)));
+    candidate["txHash"] = json!(format!("0x{}", hex::encode(crate::keccak256(&raw))));
+    candidate["status"] = json!("signed original root transaction; broadcast outcome not yet known");
+    let signed = signed_publication_identity(&candidate, queue)?;
+    ensure!(
+        candidate["sourceIdentity"]["destinationChainId"].as_u64() == Some(chain_id)
+            && signed.from == publisher
+            && signed.nonce == nonce,
+        "signed root chain, publisher or reserved nonce differs from approved intent"
+    );
+    persist_root_intent(output, &candidate)?;
+    *intent = candidate;
+    Ok(signed)
+}
+
 fn validate_root_intent(intent: &Value, queue: Address) -> Result<()> {
     ensure!(
         matches!(intent["schemaVersion"].as_u64(), Some(3 | 4)),
@@ -1687,7 +1725,7 @@ pub(crate) async fn publish_root_locked(
     public_network: crate::ethereum::PublicEthereumNetwork,
 ) -> Result<RootPublicationState> {
     use crate::{encode_queue_proof, ethereum::Ethereum, evidence::proof_evidence, source::Source};
-    use alloy::{eips::Encodable2718, primitives::B256, providers::Provider};
+    use alloy::{primitives::B256, providers::Provider};
     use anyhow::Context;
     use gear_rpc_client::GearApi as SourceApi;
     use gsdk::ext::subxt::utils::H256;
@@ -2122,7 +2160,7 @@ pub(crate) async fn publish_root_locked(
         saved_publication_nonce(&intent)?
     };
     let provider = ethereum.api.raw_provider();
-    if intent["txHash"].is_null() {
+    let signed = if intent["txHash"].is_null() {
         ensure_pinned_latest_anchor(
             &ethereum.checkpoint().await?,
             anchor_block,
@@ -2146,22 +2184,19 @@ pub(crate) async fn publish_root_locked(
                 .nonce(saved_nonce)
                 .into_transaction_request()
         };
-        let filled = provider
-            .fill(request)
-            .await
-            .context("sign original queue-root transaction")
-            .context(RootPublicationHeld)?;
-        let raw = filled
-            .as_envelope()
-            .context("root transaction was not signed")?
-            .encoded_2718();
-        intent["rawTransaction"] = json!(format!("0x{}", hex::encode(&raw)));
-        intent["txHash"] = json!(format!("0x{}", hex::encode(crate::keccak256(&raw))));
-        intent["status"] =
-            json!("signed original root transaction; broadcast outcome not yet known");
-        persist_root_intent(output, &intent)?;
-    }
-    let signed = signed_publication_identity(&intent, ethereum.queue_address)?;
+        sign_and_persist_root(
+            &ethereum.api,
+            ethereum.queue_address,
+            request,
+            output,
+            &mut intent,
+            publisher_signer,
+            saved_nonce,
+        )
+        .await?
+    } else {
+        signed_publication_identity(&intent, ethereum.queue_address)?
+    };
     let transaction_hash = signed.hash;
     ensure!(
         signed.from == publisher_signer && signed.nonce == saved_nonce,
@@ -2223,6 +2258,157 @@ pub(crate) async fn publish_root_locked(
 #[cfg(test)]
 mod root_publication_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn root_signing_binds_configured_chain_before_persisting_either_kind() -> Result<()> {
+        use alloy::{
+            consensus::Transaction,
+            network::TransactionBuilder,
+            node_bindings::Anvil,
+            providers::Provider,
+        };
+
+        let anvil = Anvil::new()
+            .host("127.0.0.1")
+            .port(0u16)
+            .chain_id(31_337)
+            .try_spawn()?;
+        // A second owned transport, not a claim of production provider independence.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let witness_url = format!("http://{}", listener.local_addr()?);
+        let port = anvil.port();
+        struct Witness(tokio::task::JoinHandle<()>);
+        impl Drop for Witness {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let _witness = Witness(tokio::spawn(async move {
+            let mut clients = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((mut downstream, _)) = accepted else { break };
+                        clients.spawn(async move {
+                            if let Ok(mut upstream) = tokio::net::TcpStream::connect(
+                                (std::net::Ipv4Addr::LOCALHOST, port),
+                            ).await {
+                                let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
+                            }
+                        });
+                    }
+                    joined = clients.join_next(), if !clients.is_empty() => {
+                        if let Some(Err(error)) = joined { panic!("Anvil forwarding failed: {error}"); }
+                    }
+                }
+            }
+        }));
+        let queue = Address::repeat_byte(4);
+        let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
+        let api = ethereum_client::EthApi::new(
+            &anvil.ws_endpoint(),
+            &format!("{queue:#x}"),
+            Some(&key),
+            None,
+            None,
+        )
+        .await?;
+        let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
+        let api = api.with_finality_witness(&witness_url, 31_337, genesis).await?;
+        let provider = api.raw_provider();
+        let publisher = anvil.addresses()[0];
+        // Change the real RPC answer after configuration, before the first fill.
+        provider
+            .client()
+            .request::<_, Value>("anvil_setChainId", (31_338u64,))
+            .await?;
+        assert_eq!(provider.get_chain_id().await?, 31_338);
+        assert_eq!(api.finality_identity()?.0, 31_337);
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("root.json");
+        for kind in ["merkleRoot", "emptyProgress"] {
+            for failure in [
+                None,
+                Some("chain"),
+                Some("sender"),
+                Some("publisher"),
+                Some("nonce"),
+                Some("calldata"),
+                Some("value"),
+            ] {
+                let root = if kind == "merkleRoot" {
+                    B256::repeat_byte(9)
+                } else {
+                    B256::ZERO
+                };
+                let mut intent = json!({
+                    "schemaVersion":4, "kind":kind, "sourceBlock":21, "root":root,
+                    "sourceIdentity":{"destinationChainId":31_337},
+                    "sender":publisher, "queueProof":"0x0102", "nonce":"0",
+                    "rawTransaction":null, "txHash":null, "status":"prepared",
+                });
+                let queue_contract =
+                    ethereum_client::abi::IMessageQueue::new(queue, provider.clone());
+                let request = if kind == "emptyProgress" {
+                    queue_contract
+                        .submitEmptyQueueProgress(U256::from(21), vec![1, 2].into())
+                        .into_transaction_request()
+                } else {
+                    queue_contract
+                        .submitMerkleRoot(U256::from(21), root, vec![1, 2].into())
+                        .into_transaction_request()
+                };
+                // Fixed gas keeps Anvil's wrong-chain estimate rejection out of signing.
+                let mut request = request.with_nonce(0).with_gas_limit(100_000);
+                let mut approved_publisher = publisher;
+                let mut approved_nonce = 0;
+                match failure {
+                    Some("chain") => {
+                        intent["sourceIdentity"]["destinationChainId"] = json!(31_338);
+                    }
+                    Some("sender") => intent["sender"] = json!(Address::repeat_byte(5)),
+                    Some("publisher") => approved_publisher = Address::repeat_byte(5),
+                    Some("nonce") => approved_nonce = 1,
+                    Some("calldata") => intent["queueProof"] = json!("0x03"),
+                    Some("value") => request = request.with_value(U256::from(1)),
+                    _ => {}
+                }
+                persist_root_intent(&path, &intent)?;
+                let before = intent.clone();
+                let bytes = fs::read(&path)?;
+                let result = sign_and_persist_root(
+                    &api,
+                    queue,
+                    request,
+                    &path,
+                    &mut intent,
+                    approved_publisher,
+                    approved_nonce,
+                )
+                .await;
+                if let Some(failure) = failure {
+                    assert!(result.is_err(), "{kind}: {failure}");
+                    assert_eq!(intent, before, "{kind}: {failure}");
+                    assert_eq!(fs::read(&path)?, bytes, "{kind}: {failure}");
+                } else {
+                    let signed = result?;
+                    assert_eq!(serde_json::from_slice::<Value>(&fs::read(&path)?)?, intent);
+                    let raw = hex::decode(
+                        intent["rawTransaction"].as_str().unwrap().trim_start_matches("0x"),
+                    )?;
+                    let (envelope, identity) =
+                        crate::ethereum::signed_transaction(&raw, signed.hash, 0, queue)?;
+                    assert_eq!(envelope.chain_id(), Some(31_337));
+                    assert_eq!(identity, signed);
+                    assert_eq!(identity.from, publisher);
+                    assert_eq!(signed_publication_identity(&intent, queue)?, signed);
+                    assert!(provider.get_transaction_by_hash(signed.hash).await?.is_none());
+                }
+                assert_eq!(provider.get_transaction_count(publisher).pending().await?, 0);
+            }
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn restart_inventory_fences_signed_and_unsigned_owners_without_a_mempool() -> Result<()> {

@@ -3,6 +3,7 @@ use alloy::node_bindings::Anvil;
 use alloy::{
     consensus::{transaction::SignerRecoverable, Transaction as _, TxEnvelope},
     eips::{Decodable2718, Encodable2718},
+    network::TransactionBuilder,
     node_bindings::AnvilInstance,
     primitives::{Address, Bytes, FixedBytes, B256, U256},
     providers::{Provider, WalletProvider},
@@ -1672,21 +1673,30 @@ impl Ethereum {
             latest == nonce && pending == nonce,
             "commitment nonce is uncertain; refusing a replacement nonce"
         );
+        let chain_id = self.api.finality_identity()?.0;
         let filled = provider
-            .fill(call.nonce(nonce).into_transaction_request())
+            .fill(
+                call.nonce(nonce)
+                    .into_transaction_request()
+                    .with_chain_id(chain_id),
+            )
             .await
             .context("sign original Fiat-Shamir commitment")?;
         let raw = filled
             .as_envelope()
             .context("commitment transaction was not signed")?
             .encoded_2718();
+        let hash = B256::from(keccak256(&raw));
+        let (signed, identity) = signed_transaction(&raw, hash, nonce, self.client_address)?;
+        ensure!(
+            signed.chain_id() == Some(chain_id) && identity.from == sender,
+            "signed commitment chain or signer differs from approved identity; HOLD"
+        );
+        validate_commitment_call(&signed, &anchor.raw)?;
         transaction["rawTransaction"] = json!(bytes(&raw));
-        transaction["txHash"] = json!(bytes(keccak256(&raw)));
+        transaction["txHash"] = json!(bytes(hash));
         transaction["sender"] = json!(format!("{sender:#x}"));
-        transaction["chainId"] = json!(filled
-            .as_envelope()
-            .context("signed commitment envelope missing")?
-            .chain_id());
+        transaction["chainId"] = json!(chain_id);
         transaction["clientAddress"] = json!(format!("{:#x}", self.client_address));
         journal(&transaction, None)?;
         let receipt = self.resume_commitment(&transaction).await?;
@@ -1755,7 +1765,7 @@ impl Ethereum {
         let provider = self.api.raw_provider();
         let (transaction, signed) = signed_transaction(&raw, hash, nonce, self.client_address)?;
         ensure!(
-            transaction.chain_id() == Some(provider.get_chain_id().await?),
+            transaction.chain_id() == Some(self.api.finality_identity()?.0),
             "saved commitment belongs to another Ethereum chain; HOLD"
         );
         ensure!(
@@ -2262,6 +2272,299 @@ mod tests {
         network::TxSigner,
         primitives::TxKind,
     };
+
+    async fn commitment_signing_fixture() -> Result<(
+        Ethereum,
+        CapturedCommitment,
+        RuntimeLeaf,
+        QueueSnapshot,
+        SimplifiedMmrProof,
+    )> {
+        use alloy::{rpc::types::TransactionRequest, sol_types::SolValue};
+        use crate::source::AuthoritySet;
+
+        // Synthetic signatures qualify signing/journaling only, not a native runtime.
+        let case = crate::fixtures::generate_fixtures()?.cases.remove(0);
+        let raw = hex::decode(case.signed_commitment.trim_start_matches("0x"))?;
+        let keys = case
+            .authority_keys
+            .iter()
+            .map(|key| {
+                let key = hex::decode(key.trim_start_matches("0x"))?;
+                key.try_into().map_err(|_| anyhow::anyhow!("invalid fixture key"))
+            })
+            .collect::<Result<Vec<[u8; 33]>>>()?;
+        let validated = crate::validate_signed_commitment(
+            &raw,
+            &keys,
+            Some(0),
+            Some(case.anchor_block as u32),
+        )?;
+        let current = AuthoritySet {
+            id: 0,
+            keys: keys.iter().map(|key| key.to_vec()).collect(),
+            root: case.authority_root.parse::<B256>()?.0,
+        };
+        let anchor = CapturedCommitment {
+            block: case.anchor_block as u32,
+            block_hash: [0; 32],
+            finalized_height: case.anchor_block as u32,
+            raw,
+            validated,
+            next: AuthoritySet { id: 1, ..current.clone() },
+            current,
+        };
+        let freshness = &case.freshness_proof;
+        let snapshot = QueueSnapshot::decode(&hex::decode(
+            freshness.snapshot_preimage.trim_start_matches("0x"),
+        )?)?;
+        let leaf = crate::decode_outer_leaf(&hex::decode(
+            freshness.outer_leaf.trim_start_matches("0x"),
+        )?)?;
+        let proof = SimplifiedMmrProof {
+            items: freshness.simplified_items.iter()
+                .map(|item| Ok(item.parse::<B256>()?.0))
+                .collect::<Result<_>>()?,
+            proof_order: freshness.proof_order.parse::<B256>()?.0,
+        };
+        let anvil = Anvil::new()
+            .host("127.0.0.1")
+            .port(0u16)
+            .chain_id(31_337)
+            .arg("--slots-in-an-epoch")
+            .arg("1")
+            .arg("--timestamp")
+            .arg((snapshot.source_timestamp_ms / 1_000).to_string())
+            .try_spawn()?;
+        let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
+        let queue: Address = case.destination_queue.parse()?;
+        let deployer = EthApi::new(
+            &anvil.ws_endpoint(), &address_string(queue), Some(&key), None, None,
+        ).await?;
+        let arguments = (
+            case.source_domain.parse::<B256>()?,
+            U256::from(31_337),
+            queue,
+            case.mmr_start_block,
+            case.anchor_block - 1,
+            case.source_timestamp_ms,
+            (0u128, u128::from(case.validator_count), B256::from(anchor.current.root)),
+            (1u128, u128::from(case.validator_count), B256::from(anchor.next.root)),
+        ).abi_encode();
+        let receipt = deployer.raw_provider().send_transaction(
+            TransactionRequest::default()
+                .with_deploy_code([BeefyClient::BYTECODE.as_ref(), arguments.as_slice()].concat())
+                .with_gas_limit(6_000_000),
+        ).await?.get_receipt().await?;
+        assert!(receipt.status());
+        let genesis = ethereum_client::get_block(deployer.raw_provider(), 0).await?.header.hash;
+        let witness = AnvilWitness::new(anvil.port()).await?;
+        // A fresh filler must not reuse the deployment's cached RPC chain ID.
+        let api = EthApi::new(
+            &anvil.ws_endpoint(), &address_string(queue), Some(&key), None, None,
+        ).await?.with_finality_witness(&witness.url, 31_337, genesis).await?;
+        let ethereum = Ethereum {
+            _anvil: Some(anvil),
+            _witness: Some(witness),
+            owned_fixture_network: None,
+            api,
+            public_network: PublicEthereumNetwork::Hoodi,
+            client_address: receipt.contract_address.context("missing created client")?,
+            verifier_address: Address::ZERO,
+            queue_address: queue,
+            receiver_address: Address::ZERO,
+            transactions: Vec::new(),
+        };
+        Ok((ethereum, anchor, leaf, snapshot, proof))
+    }
+
+    #[tokio::test]
+    async fn commitment_signing_uses_configured_chain_despite_rpc_drift() -> Result<()> {
+        let (mut ethereum, anchor, leaf, snapshot, proof) = commitment_signing_fixture().await?;
+        use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        let upstream = ethereum.api.raw_provider().root().clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        let reported_chain = Arc::new(AtomicU64::new(31_337));
+        let chain = reported_chain.clone();
+        let forwarder = AnvilWitness {
+            url,
+            server: tokio::spawn(async move {
+                let mut clients = tokio::task::JoinSet::new();
+                loop {
+                    tokio::select! {
+                        accepted = listener.accept() => {
+                            let Ok((stream, _)) = accepted else { break };
+                            let upstream = upstream.clone();
+                            let chain = chain.clone();
+                            clients.spawn(async move {
+                                let mut stream = BufReader::new(stream);
+                                let mut length = None;
+                                loop {
+                                    let mut line = String::new();
+                                    ensure!(stream.read_line(&mut line).await? > 0, "incomplete RPC headers");
+                                    if line == "\r\n" { break; }
+                                    if let Some((name, value)) = line.split_once(':') {
+                                        if name.eq_ignore_ascii_case("content-length") {
+                                            length = Some(value.trim().parse::<usize>()?);
+                                        }
+                                    }
+                                }
+                                let mut body = vec![0; length.context("RPC content length missing")?];
+                                stream.read_exact(&mut body).await?;
+                                let request: Value = serde_json::from_slice(&body)?;
+                                let method = request["method"].as_str().context("RPC method missing")?;
+                                let result = if method == "eth_chainId" {
+                                    json!(format!("0x{:x}", chain.load(Ordering::SeqCst)))
+                                } else {
+                                    upstream.client().request::<_, Value>(
+                                        method.to_owned(), request["params"].clone(),
+                                    ).await?
+                                };
+                                let body = serde_json::to_vec(&json!({
+                                    "jsonrpc":"2.0", "id":request["id"], "result":result,
+                                }))?;
+                                let headers = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                    body.len(),
+                                );
+                                stream.get_mut().write_all(headers.as_bytes()).await?;
+                                stream.get_mut().write_all(&body).await?;
+                                stream.get_mut().shutdown().await?;
+                                Ok::<_, anyhow::Error>(())
+                            });
+                        }
+                        joined = clients.join_next(), if !clients.is_empty() => {
+                            joined.unwrap().expect("RPC forwarding panicked").expect("RPC forwarding failed");
+                        }
+                    }
+                }
+            }),
+        };
+        let key = format!("0x{}", hex::encode(ethereum._anvil.as_ref().unwrap().first_key().to_bytes()));
+        ethereum.api = EthApi::new(
+            &forwarder.url, &address_string(ethereum.queue_address), Some(&key), None, None,
+        ).await?.with_finality_witness(
+            &ethereum._witness.as_ref().unwrap().url, 31_337, ethereum.api.finality_identity()?.1,
+        ).await?;
+        reported_chain.store(31_338, Ordering::SeqCst);
+        let provider = ethereum.api.raw_provider().clone();
+        assert_eq!(provider.get_chain_id().await?, 31_338);
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("commitment.json");
+        let mut writes = Vec::new();
+        let error = ethereum.submit_commitment(
+            &anchor, &leaf, &snapshot, &proof, None,
+            |transaction, receipt| {
+                assert!(receipt.is_none());
+                fs::write(&path, serde_json::to_vec(transaction)?)?;
+                writes.push(transaction.clone());
+                ensure!(transaction["rawTransaction"].is_null(), "stop after signed persistence");
+                Ok(())
+            },
+        ).await.unwrap_err();
+        assert!(error.to_string().contains("stop after signed persistence"), "{error:#}");
+        assert_eq!(writes.len(), 2);
+        assert!(writes[0]["rawTransaction"].is_null());
+        assert!(writes[0]["txHash"].is_null());
+        let saved: Value = serde_json::from_slice(&fs::read(&path)?)?;
+        assert_eq!(saved, writes[1]);
+        assert_eq!(saved["chainId"], 31_337);
+        let nonce = saved["nonce"].as_u64().unwrap();
+        assert_eq!(writes[0]["nonce"], nonce);
+        let raw = hex::decode(saved["rawTransaction"].as_str().unwrap().trim_start_matches("0x"))?;
+        let hash = saved["txHash"].as_str().unwrap().parse::<B256>()?;
+        let (signed, identity) = signed_transaction(&raw, hash, nonce, ethereum.client_address)?;
+        assert_eq!(signed.chain_id(), Some(31_337));
+        assert_eq!(identity.from, provider.default_signer_address());
+        validate_commitment_call(&signed, &anchor.raw)?;
+        assert_eq!(provider.get_transaction_count(identity.from).await?, nonce);
+        assert_eq!(provider.get_transaction_count(identity.from).pending().await?, nonce);
+        assert!(provider.get_transaction_by_hash(hash).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn commitment_semantics_failure_preserves_unsigned_nonce_reservation() -> Result<()> {
+        let (mut ethereum, mut anchor, leaf, snapshot, proof) = commitment_signing_fixture().await?;
+        // Keep the validated commitment used to build calldata, but contradict its saved source.
+        let other = crate::fixtures::generate_fixtures()?.cases.remove(1);
+        anchor.raw = hex::decode(other.signed_commitment.trim_start_matches("0x"))?;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("commitment.json");
+        let mut writes = 0;
+        let error = ethereum.submit_commitment(
+            &anchor, &leaf, &snapshot, &proof, None,
+            |transaction, receipt| {
+                assert!(receipt.is_none());
+                writes += 1;
+                fs::write(&path, serde_json::to_vec(transaction)?)?;
+                Ok(())
+            },
+        ).await.unwrap_err();
+        assert!(error.to_string().contains("changed source commitment semantics"), "{error:#}");
+        assert_eq!(writes, 1);
+        let saved: Value = serde_json::from_slice(&fs::read(path)?)?;
+        assert!(saved["rawTransaction"].is_null());
+        assert!(saved["txHash"].is_null());
+        assert!(saved["chainId"].is_null());
+        let nonce = saved["nonce"].as_u64().unwrap();
+        let provider = ethereum.api.raw_provider();
+        let sender = provider.default_signer_address();
+        assert_eq!(provider.get_transaction_count(sender).await?, nonce);
+        assert_eq!(provider.get_transaction_count(sender).pending().await?, nonce);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn commitment_resume_rejects_wrong_chain_original_without_rewrite_or_broadcast() -> Result<()> {
+        let (mut ethereum, anchor, leaf, snapshot, proof) = commitment_signing_fixture().await?;
+        let provider = ethereum.api.raw_provider().clone();
+        provider.client().request::<_, Value>("anvil_setChainId", (31_338u64,)).await?;
+        let anvil = ethereum._anvil.as_ref().unwrap();
+        let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
+        let wrong_api = EthApi::new(
+            &anvil.ws_endpoint(), &address_string(ethereum.queue_address), Some(&key), None, None,
+        ).await?.with_finality_witness(
+            &ethereum._witness.as_ref().unwrap().url,
+            31_338,
+            ethereum.api.finality_identity()?.1,
+        ).await?;
+        // Produce the durable original through the real production signing path.
+        let approved_api = std::mem::replace(&mut ethereum.api, wrong_api);
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("commitment.json");
+        let error = ethereum.submit_commitment(
+            &anchor, &leaf, &snapshot, &proof, None,
+            |transaction, receipt| {
+                assert!(receipt.is_none());
+                fs::write(&path, serde_json::to_vec(transaction)?)?;
+                ensure!(transaction["rawTransaction"].is_null(), "stop after signed persistence");
+                Ok(())
+            },
+        ).await.unwrap_err();
+        assert!(error.to_string().contains("stop after signed persistence"), "{error:#}");
+        ethereum.api = approved_api;
+        let original = fs::read(&path)?;
+        let saved: Value = serde_json::from_slice(&original)?;
+        assert_eq!(saved["chainId"], 31_338);
+        assert_eq!(provider.get_chain_id().await?, 31_338);
+        assert_eq!(ethereum.api.finality_identity()?.0, 31_337);
+        let nonce = saved["nonce"].as_u64().unwrap();
+        let hash = saved["txHash"].as_str().unwrap().parse::<B256>()?;
+        for _ in 0..2 {
+            let error = ethereum.resume_commitment(&saved).await.unwrap_err();
+            assert!(error.to_string().contains("another Ethereum chain"), "{error:#}");
+            assert_eq!(fs::read(&path)?, original);
+            assert_eq!(serde_json::to_vec(&saved)?, original);
+            assert_eq!(provider.get_transaction_count(provider.default_signer_address()).await?, nonce);
+            assert_eq!(provider.get_transaction_count(provider.default_signer_address()).pending().await?, nonce);
+            assert!(provider.get_transaction_by_hash(hash).await?.is_none());
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn bootstrap_deployment_hint_authenticates_creation_and_restart() -> Result<()> {

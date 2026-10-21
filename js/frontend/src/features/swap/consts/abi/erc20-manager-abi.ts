@@ -443,6 +443,7 @@ const ERC20_MANAGER_ABI = [
   { type: 'error', name: 'InvalidSender', inputs: [] },
   { type: 'error', name: 'InvalidSource', inputs: [] },
   { type: 'error', name: 'InvalidTokenType', inputs: [] },
+  { type: 'error', name: 'InvalidWrappedVara', inputs: [] },
   { type: 'error', name: 'NotInitializing', inputs: [] },
   {
     type: 'error',

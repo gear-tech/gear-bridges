@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import { TransactionBuilder, ActorId, MessageId, H160, H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import { TransactionBuilder, ActorId, H160, MessageId, H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
@@ -207,7 +207,7 @@ export class VftManager {
   /**
    * Settlement policy is explicit, and only changes at a paused boundary.
   */
-  public configureNativeWrapper(wrapper: ActorId | null): TransactionBuilder<null> {
+  public configureNativeWrapper(wrapper: [ActorId, H160] | null): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
@@ -216,7 +216,7 @@ export class VftManager {
       'VftManager',
       'ConfigureNativeWrapper',
       wrapper,
-      'Option<[u8;32]>',
+      'Option<([u8;32], [u8;20])>',
       'Null',
       this._program.programId,
     );
@@ -1392,13 +1392,16 @@ export interface ReceiptDepositState {
 }
 
 /**
- * Retained proof that the original deposit had no financial effect.
+ * Retained rejection evidence, including historical native absence tombstones.
 */
 export type ReceiptRejectionEvidence = 
   | { InvalidRecipient: null }
   | { InvalidAmount: null }
   | { NativeAmountOverflow: null }
   | { UnlockFalse: { child: MessageId } }
+  /**
+   * Historical decoding only: absence does not prove economic rejection.
+  */
   | { NativeErrorAbsent: { child: MessageId } };
 
 /**
@@ -1481,4 +1484,4 @@ export interface SourceRequestEvidence {
 
 export type Order = "Direct" | "Reverse";
 
-export const IDL_SHA256 = '2e94e7f7faf979c57c422942676693c6c93dcf4fedc44596cdbe5628ab2eec5a';
+export const IDL_SHA256 = '24af190a703abed2b5a7e17c550739a9d4b7520c1b5a9d7e178c3a91c182bdb3';

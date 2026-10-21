@@ -109,18 +109,97 @@ contract ERC20ManagerTest is Test, Base {
     }
 
     function test_NativeAmountBoundary() public {
-        uint256 overflow = uint256(type(uint128).max) + 1;
+        for (uint256 variant; variant < 4; variant++) {
+            _checkNativeAmount(variant, uint256(type(uint80).max) + 1, IERC20Manager.InvalidAmount.selector);
+            _checkNativeAmount(variant, type(uint80).max, bytes4(0));
+        }
+    }
+
+    function testFuzz_OversizedNativeAmount(uint256 amount, uint256 variant) public {
+        amount = bound(amount, uint256(type(uint80).max) + 1, type(uint128).max);
+        _checkNativeAmount(bound(variant, 0, 3), amount, IERC20Manager.InvalidAmount.selector);
+    }
+
+    function test_OversizedLegacyEntryRejectsMissingWrappedVara() public {
+        vm.mockCall(address(governanceAdmin), abi.encodeWithSignature("wrappedVara()"), abi.encode(address(0)));
+        for (uint256 variant; variant < 4; variant++) {
+            _checkNativeAmount(variant, uint256(type(uint80).max) + 1, IERC20Manager.InvalidWrappedVara.selector);
+        }
+    }
+
+    function _checkNativeAmount(uint256 variant, uint256 amount, bytes4 expectedError) internal {
+        (address owner, uint256 key) = makeAddrAndKey("nativeAmount");
+        uint256 fee = deploymentArguments.bridgingPaymentFee;
+        vm.deal(owner, fee);
         vm.prank(address(erc20Manager));
-        IERC20Mintable(address(wrappedVara)).mint(address(this), overflow);
-        wrappedVara.approve(address(erc20Manager), overflow);
+        IERC20Mintable(address(wrappedVara)).mint(owner, amount);
+        uint256 balance = wrappedVara.balanceOf(owner);
         uint256 supply = wrappedVara.totalSupply();
-        vm.expectRevert(IERC20Manager.InvalidAmount.selector);
-        erc20Manager.requestBridging(address(wrappedVara), overflow, bytes32(uint256(1)));
-        assertEq(wrappedVara.balanceOf(address(this)), overflow);
-        assertEq(wrappedVara.totalSupply(), supply);
-        erc20Manager.requestBridging(address(wrappedVara), type(uint128).max, bytes32(uint256(1)));
-        assertEq(wrappedVara.balanceOf(address(this)), 1);
-        assertEq(wrappedVara.totalSupply(), supply - type(uint128).max);
+        uint256 custody = wrappedVara.balanceOf(address(erc20Manager));
+        uint256 paymentBalance = address(bridgingPayment).balance;
+        address feeRecipient = bridgingPayment.owner();
+        uint256 feeRecipientBalance = feeRecipient.balance;
+        uint256 nonce = wrappedVara.nonces(owner);
+        uint256 deadline = block.timestamp + 1;
+        bytes32 digest = MessageHashUtils.toTypedDataHash(
+            wrappedVara.DOMAIN_SEPARATOR(),
+            keccak256(
+                abi.encode(
+                    keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                    owner,
+                    address(erc20Manager),
+                    amount,
+                    nonce,
+                    deadline
+                )
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+        vm.startPrank(owner);
+        wrappedVara.approve(address(erc20Manager), variant < 2 ? amount : 0);
+        vm.recordLogs();
+        if (expectedError != bytes4(0)) vm.expectRevert(expectedError);
+        if (variant == 0) {
+            erc20Manager.requestBridging(address(wrappedVara), amount, bytes32(uint256(1)));
+        } else if (variant == 1) {
+            erc20Manager.requestBridgingPayingFee{value: fee}(
+                address(wrappedVara), amount, bytes32(uint256(1)), address(bridgingPayment)
+            );
+        } else if (variant == 2) {
+            erc20Manager.requestBridgingWithPermit(
+                address(wrappedVara), amount, bytes32(uint256(1)), deadline, v, r, s
+            );
+        } else {
+            erc20Manager.requestBridgingPayingFeeWithPermit{value: fee}(
+                address(wrappedVara), amount, bytes32(uint256(1)), deadline, v, r, s, address(bridgingPayment)
+            );
+        }
+        vm.stopPrank();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 requests;
+        for (uint256 i; i < logs.length; i++) {
+            if (
+                logs[i].emitter == address(erc20Manager) && logs[i].topics.length != 0
+                    && logs[i].topics[0] == IERC20Manager.BridgingRequested.selector
+            ) {
+                requests++;
+                assertEq(logs[i].topics[1], bytes32(uint256(uint160(owner))));
+                assertEq(logs[i].topics[2], bytes32(uint256(1)));
+                assertEq(logs[i].topics[3], bytes32(uint256(uint160(address(wrappedVara)))));
+                assertEq(abi.decode(logs[i].data, (uint256)), amount);
+            }
+        }
+        bool accepted = expectedError == bytes4(0);
+        uint256 paidFee = accepted && variant % 2 == 1 ? fee : 0;
+        assertEq(requests, accepted ? 1 : 0);
+        assertEq(wrappedVara.balanceOf(owner), balance - (accepted ? amount : 0));
+        assertEq(wrappedVara.totalSupply(), supply - (accepted ? amount : 0));
+        assertEq(wrappedVara.balanceOf(address(erc20Manager)), custody);
+        assertEq(address(bridgingPayment).balance, paymentBalance);
+        assertEq(feeRecipient.balance, feeRecipientBalance + paidFee);
+        assertEq(owner.balance, fee - paidFee);
+        assertEq(wrappedVara.nonces(owner), nonce + (accepted && variant >= 2 ? 1 : 0));
+        assertEq(wrappedVara.allowance(owner, address(erc20Manager)), !accepted && variant < 2 ? amount : 0);
     }
 
     function test_OrdinaryEthereumAmountAboveNativeRange() public {
@@ -132,6 +211,25 @@ contract ERC20ManagerTest is Test, Base {
         erc20Manager.requestBridging(address(circleToken), amount, bytes32(uint256(1)));
         assertEq(circleToken.balanceOf(address(this)), 0);
         assertEq(circleToken.balanceOf(address(erc20Manager)), custody + amount);
+    }
+
+    function test_InitializeRejectsMissingWrappedVara() public {
+        vm.mockCall(address(governanceAdmin), abi.encodeWithSignature("wrappedVara()"), abi.encode(address(0)));
+        address implementation = address(new ERC20Manager());
+        vm.expectRevert(IERC20Manager.InvalidWrappedVara.selector);
+        UnsafeUpgrades.deployUUPSProxy(
+            implementation,
+            abi.encodeCall(
+                ERC20Manager.initialize,
+                (
+                    governanceAdmin,
+                    governancePauser,
+                    messageQueue,
+                    deploymentArguments.vftManager,
+                    new IERC20Manager.TokenInfo[](0)
+                )
+            )
+        );
     }
 
     function test_InitializeWithInvalidTokenType() public {

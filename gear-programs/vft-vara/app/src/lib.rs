@@ -185,8 +185,8 @@ pub enum PayoutStatus {
     Delivered,
     Returned,
     Ambiguous,
-    /// The original rejected payout's full returned value backs wrapped tokens
-    /// credited exactly once to its original recipient. Not native delivery.
+    /// Returned backing covers wrapped tokens credited exactly once at the
+    /// original amount. Excess remains native backing; this is not delivery.
     Refunded,
 }
 
@@ -254,7 +254,12 @@ impl NativeEscrow<'_> {
 
     /// Assume the original liability without credit, redispatch or settlement.
     #[export]
-    pub fn hold_redemption(&mut self, operation_id: H256, expected: Redemption) -> Redemption {
+    pub fn hold_redemption(
+        &mut self,
+        operation_id: H256,
+        expected: Redemption,
+        acknowledge_irreversible_hold: bool,
+    ) -> Redemption {
         assert_eq!(
             Syscall::message_source(),
             self.program.authorities.borrow().admin(),
@@ -272,8 +277,14 @@ impl NativeEscrow<'_> {
             matches!(
                 original.status,
                 PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
-            ) && U256::from(original.returned_value) <= original.amount,
+            ),
             "Invalid held liability"
+        );
+        let still_resolvable = original.status == PayoutStatus::Queued
+            || U256::from(original.returned_value) >= original.amount;
+        assert!(
+            !still_resolvable || acknowledge_irreversible_hold,
+            "Acknowledge irreversible hold"
         );
         assert!(self.blocking_redemptions() > 0, "No blocking obligation");
         let held = self
@@ -320,10 +331,12 @@ impl NativeEscrow<'_> {
             {
                 return existing.clone();
             }
-            // Only the authenticated original error/full-value reply records this
-            // pending credit. Never mint in handle_reply: a trapped reply is consumed.
-            if existing.status == PayoutStatus::Queued
-                && U256::from(existing.returned_value) == existing.amount
+            // Only authenticated original backing authorizes this pending credit.
+            // Never mint in handle_reply: a trapped reply is consumed.
+            if matches!(
+                existing.status,
+                PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+            ) && U256::from(existing.returned_value) >= existing.amount
             {
                 let paused = self.program.pause.is_paused();
                 self.program.pause.resume();
@@ -349,7 +362,10 @@ impl NativeEscrow<'_> {
             !operation_id.is_zero() && !to.is_zero() && !amount.is_zero(),
             "Invalid redemption"
         );
-        assert!(amount <= U256::from(u128::MAX), "Native amount overflow");
+        assert!(
+            amount <= (U256::one() << 80) - U256::one(),
+            "Native amount overflow"
+        );
         self.program
             .base_vft_admin_exposure()
             .burn(from, amount)
@@ -418,7 +434,9 @@ impl NativeEscrow<'_> {
             // Persist the authenticated backing before attempting wrapped credit
             // in a separate retryable RedeemEscrow command. Capacity exhaustion
             // (or an event-emission failure after mint) must not lose this reply.
-            Ok(ReplyCode::Error(_)) if U256::from(value) == redemption.amount => {
+            Ok(ReplyCode::Success(_) | ReplyCode::Error(_))
+                if U256::from(value) >= redemption.amount =>
+            {
                 PayoutStatus::Queued
             }
             _ => PayoutStatus::Ambiguous,
@@ -491,12 +509,12 @@ mod tests {
         program.outstanding_redemptions.set(1);
         let mut escrow = program.native_escrow();
         assert!(catch_unwind(AssertUnwindSafe(|| {
-            escrow.hold_redemption(operation, original.clone());
+            escrow.hold_redemption(operation, original.clone(), true);
         }))
         .is_err());
         program.pause.pause();
         assert_eq!(
-            escrow.hold_redemption(operation, original.clone()),
+            escrow.hold_redemption(operation, original.clone(), true),
             original
         );
         assert_eq!(escrow.blocking_redemptions(), 0);
@@ -516,11 +534,11 @@ mod tests {
             returned
         );
         assert_eq!(
-            escrow.hold_redemption(operation, original.clone()),
+            escrow.hold_redemption(operation, original.clone(), false),
             original
         );
         assert!(catch_unwind(AssertUnwindSafe(|| {
-            escrow.hold_redemption(operation, returned.clone());
+            escrow.hold_redemption(operation, returned.clone(), true);
         }))
         .is_err());
         assert_eq!(escrow.outstanding_redemptions(), 1);
@@ -553,7 +571,7 @@ mod tests {
         };
         let mut escrow = program.native_escrow();
         assert!(catch_unwind(AssertUnwindSafe(|| {
-            escrow.hold_redemption(operation, original.clone());
+            escrow.hold_redemption(operation, original.clone(), true);
         }))
         .is_err());
         program
@@ -563,23 +581,19 @@ mod tests {
         program.outstanding_redemptions.set(1);
         Syscall::with_message_source(outsider);
         assert!(catch_unwind(AssertUnwindSafe(|| {
-            escrow.hold_redemption(operation, original.clone());
+            escrow.hold_redemption(operation, original.clone(), true);
         }))
         .is_err());
         Syscall::with_message_source(admin);
         let mut changed = original.clone();
         changed.returned_value = 3;
         assert!(catch_unwind(AssertUnwindSafe(|| {
-            escrow.hold_redemption(operation, changed);
+            escrow.hold_redemption(operation, changed, true);
         }))
         .is_err());
         for invalid in [
             Redemption {
                 child: MessageId::zero(),
-                ..original.clone()
-            },
-            Redemption {
-                returned_value: 6,
                 ..original.clone()
             },
             Redemption {
@@ -596,7 +610,7 @@ mod tests {
                 .borrow_mut()
                 .insert(operation, invalid.clone());
             assert!(catch_unwind(AssertUnwindSafe(|| {
-                escrow.hold_redemption(operation, invalid);
+                escrow.hold_redemption(operation, invalid, true);
             }))
             .is_err());
             assert_eq!(escrow.held_redemption(operation), None);
@@ -608,7 +622,7 @@ mod tests {
             .borrow_mut()
             .insert(operation, original.clone());
         assert_eq!(
-            escrow.hold_redemption(operation, original.clone()),
+            escrow.hold_redemption(operation, original.clone(), false),
             original
         );
         assert_eq!(escrow.redemption(operation), Some(original));
@@ -618,6 +632,29 @@ mod tests {
 
     #[test]
     fn full_return_survives_balance_capacity_failure_and_retries_once() {
+        for returned_value in [5, 6] {
+            for code in [
+                ReplyCode::Success(SuccessReplyReason::Auto),
+                ReplyCode::Error(ErrorReplyReason::Execution(
+                    SimpleExecutionError::UserspacePanic,
+                )),
+            ] {
+                for status in [
+                    PayoutStatus::Queued,
+                    PayoutStatus::Returned,
+                    PayoutStatus::Ambiguous,
+                ] {
+                    refund_after_capacity_failure(returned_value, code, status);
+                }
+            }
+        }
+    }
+
+    fn refund_after_capacity_failure(
+        returned_value: u128,
+        reply_code: ReplyCode,
+        retry_status: PayoutStatus,
+    ) {
         let manager = ActorId::from(1_000u64);
         let recipient = ActorId::from(2_000u64);
         let operation = H256([7; 32]);
@@ -662,10 +699,8 @@ mod tests {
             .insert(child, operation);
         program.outstanding_redemptions.set(1);
         Syscall::with_reply_to(Ok(child));
-        Syscall::with_reply_code(Ok(ReplyCode::Error(ErrorReplyReason::Execution(
-            SimpleExecutionError::UserspacePanic,
-        ))));
-        Syscall::with_message_value(5);
+        Syscall::with_reply_code(Ok(reply_code));
+        Syscall::with_message_value(returned_value);
         // A forged source cannot authorize credit.
         assert!(program.native_escrow().handle_payout_reply());
         assert_eq!(
@@ -680,7 +715,7 @@ mod tests {
         assert!(program.native_escrow().handle_payout_reply());
         let pending = program.native_escrow().redemption(operation).unwrap();
         assert_eq!(pending.status, PayoutStatus::Queued);
-        assert_eq!(pending.returned_value, 5);
+        assert_eq!(pending.returned_value, returned_value);
         assert_eq!(program.native_escrow().outstanding_redemptions(), 1);
         // Even a contradictory duplicate of the original callback cannot erase backing.
         Syscall::with_reply_code(Ok(ReplyCode::Success(SuccessReplyReason::Auto)));
@@ -690,6 +725,14 @@ mod tests {
             program.native_escrow().redemption(operation),
             Some(pending.clone())
         );
+        // Retained Returned/Ambiguous records with full backing can also recover.
+        program
+            .redemptions
+            .borrow_mut()
+            .get_mut(&operation)
+            .unwrap()
+            .status = retry_status;
+        let pending = program.native_escrow().redemption(operation).unwrap();
         Syscall::with_message_source(manager);
         let supply = program.vft2().total_supply().unwrap();
         assert!(catch_unwind(AssertUnwindSafe(|| {
@@ -715,6 +758,8 @@ mod tests {
             .native_escrow()
             .redeem_escrow(operation, manager, recipient, amount);
         assert_eq!(refunded.status, PayoutStatus::Refunded);
+        assert_eq!(refunded.returned_value, returned_value);
+        assert_eq!(refunded.child, child);
         assert!(program.pause.is_paused());
         assert_eq!(program.native_escrow().outstanding_redemptions(), 0);
         assert_eq!(program.vft2().balance_of(recipient).unwrap(), amount);
@@ -727,5 +772,216 @@ mod tests {
         );
         assert_eq!(program.vft2().total_supply().unwrap(), supply + amount);
         assert_eq!(program.payout_children.borrow().len(), 1);
+    }
+
+    #[test]
+    fn resolvable_holds_require_explicit_consent() {
+        for (status, returned_value) in [
+            (PayoutStatus::Queued, 0),
+            (PayoutStatus::Queued, 5),
+            (PayoutStatus::Queued, 6),
+            (PayoutStatus::Returned, 5),
+            (PayoutStatus::Returned, 6),
+            (PayoutStatus::Ambiguous, 5),
+            (PayoutStatus::Ambiguous, 6),
+        ] {
+            let manager = ActorId::from(1_000u64);
+            Syscall::with_message_source(manager);
+            let program = Program::new(Mainnet::No);
+            program.pause.pause();
+            let operation = H256([27; 32]);
+            let original = Redemption {
+                from: manager,
+                to: ActorId::from(2_000u64),
+                amount: 5u64.into(),
+                child: MessageId::from([28; 32]),
+                status,
+                returned_value,
+            };
+            program
+                .redemptions
+                .borrow_mut()
+                .insert(operation, original.clone());
+            program.outstanding_redemptions.set(1);
+            let mut escrow = program.native_escrow();
+            assert!(catch_unwind(AssertUnwindSafe(|| {
+                escrow.hold_redemption(operation, original.clone(), false);
+            }))
+            .is_err());
+            assert_eq!(escrow.held_redemption(operation), None);
+            assert_eq!(escrow.blocking_redemptions(), 1);
+            assert_eq!(
+                escrow.hold_redemption(operation, original.clone(), true),
+                original
+            );
+            assert_eq!(
+                escrow.hold_redemption(operation, original.clone(), false),
+                original
+            );
+            assert_eq!(escrow.blocking_redemptions(), 0);
+            assert_eq!(escrow.outstanding_redemptions(), 1);
+        }
+    }
+
+    #[test]
+    fn partial_ambiguous_hold_needs_no_irreversible_consent() {
+        let manager = ActorId::from(1_000u64);
+        Syscall::with_message_source(manager);
+        let program = Program::new(Mainnet::No);
+        program.pause.pause();
+        let operation = H256([29; 32]);
+        let original = Redemption {
+            from: manager,
+            to: ActorId::from(2_000u64),
+            amount: 5u64.into(),
+            child: MessageId::from([30; 32]),
+            status: PayoutStatus::Ambiguous,
+            returned_value: 2,
+        };
+        program
+            .redemptions
+            .borrow_mut()
+            .insert(operation, original.clone());
+        program.outstanding_redemptions.set(1);
+        assert_eq!(
+            program
+                .native_escrow()
+                .hold_redemption(operation, original.clone(), false),
+            original
+        );
+        assert_eq!(program.native_escrow().blocking_redemptions(), 0);
+        assert_eq!(program.native_escrow().outstanding_redemptions(), 1);
+    }
+
+    #[test]
+    fn payout_reply_retains_actual_backing_without_minting() {
+        for success in [false, true] {
+            for returned_value in [0, 2, 5, 6] {
+                let manager = ActorId::from(1_000u64);
+                let recipient = ActorId::from(2_000u64);
+                Syscall::with_message_source(manager);
+                let program = Program::new(Mainnet::No);
+                let operation = H256([31; 32]);
+                let child = MessageId::from([32; 32]);
+                program.redemptions.borrow_mut().insert(
+                    operation,
+                    Redemption {
+                        from: manager,
+                        to: recipient,
+                        amount: 5u64.into(),
+                        child,
+                        status: PayoutStatus::Queued,
+                        returned_value: 0,
+                    },
+                );
+                program
+                    .payout_children
+                    .borrow_mut()
+                    .insert(child, operation);
+                program.outstanding_redemptions.set(1);
+                Syscall::with_message_source(recipient);
+                Syscall::with_reply_to(Ok(child));
+                Syscall::with_reply_code(Ok(if success {
+                    ReplyCode::Success(SuccessReplyReason::Auto)
+                } else {
+                    ReplyCode::Error(ErrorReplyReason::Execution(
+                        SimpleExecutionError::UserspacePanic,
+                    ))
+                }));
+                Syscall::with_message_value(returned_value);
+                assert!(program.native_escrow().handle_payout_reply());
+                let result = program.native_escrow().redemption(operation).unwrap();
+                let expected = if success && returned_value == 0 {
+                    PayoutStatus::Delivered
+                } else if returned_value >= 5 {
+                    PayoutStatus::Queued
+                } else {
+                    PayoutStatus::Ambiguous
+                };
+                assert_eq!(result.status, expected);
+                assert_eq!(result.returned_value, returned_value);
+                assert_eq!(result.child, child);
+                assert_eq!(program.vft2().total_supply().unwrap(), U256::zero());
+                assert_eq!(
+                    program.native_escrow().outstanding_redemptions(),
+                    u64::from(expected != PayoutStatus::Delivered)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn held_late_delivery_completes_counters_but_keeps_saved_snapshot() {
+        let manager = ActorId::from(1_000u64);
+        let recipient = ActorId::from(2_000u64);
+        Syscall::with_message_source(manager);
+        let program = Program::new(Mainnet::No);
+        program.pause.pause();
+        let operation = H256([33; 32]);
+        let child = MessageId::from([34; 32]);
+        let original = Redemption {
+            from: manager,
+            to: recipient,
+            amount: 5u64.into(),
+            child,
+            status: PayoutStatus::Queued,
+            returned_value: 0,
+        };
+        program
+            .redemptions
+            .borrow_mut()
+            .insert(operation, original.clone());
+        program
+            .payout_children
+            .borrow_mut()
+            .insert(child, operation);
+        program.outstanding_redemptions.set(1);
+        let mut escrow = program.native_escrow();
+        escrow.hold_redemption(operation, original.clone(), true);
+        Syscall::with_message_source(recipient);
+        Syscall::with_reply_to(Ok(child));
+        Syscall::with_reply_code(Ok(ReplyCode::Success(SuccessReplyReason::Auto)));
+        Syscall::with_message_value(0);
+        assert!(escrow.handle_payout_reply());
+        assert_eq!(
+            escrow.redemption(operation).unwrap().status,
+            PayoutStatus::Delivered
+        );
+        assert_eq!(escrow.outstanding_redemptions(), 0);
+        assert_eq!(escrow.blocking_redemptions(), 0);
+        assert_eq!(escrow.held_redemption(operation), Some(original.clone()));
+        assert!(escrow.handle_payout_reply());
+        Syscall::with_message_source(manager);
+        assert_eq!(
+            escrow.hold_redemption(operation, original.clone(), false),
+            original
+        );
+        assert_eq!(escrow.outstanding_redemptions(), 0);
+    }
+
+    #[test]
+    fn oversized_native_amount_rejects_before_burning_or_dispatching() {
+        let manager = ActorId::from(1_000u64);
+        Syscall::with_message_source(manager);
+        let program = Program::new(Mainnet::No);
+        *program.escrow_manager.borrow_mut() = Some(manager);
+        let operation = H256([35; 32]);
+        let error = catch_unwind(AssertUnwindSafe(|| {
+            program.native_escrow().redeem_escrow(
+                operation,
+                manager,
+                ActorId::from(2_000u64),
+                U256::one() << 80,
+            );
+        }))
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<&str>(),
+            Some(&"Native amount overflow")
+        );
+        assert_eq!(program.vft2().total_supply().unwrap(), U256::zero());
+        assert_eq!(program.native_escrow().redemption(operation), None);
+        assert_eq!(program.native_escrow().outstanding_redemptions(), 0);
+        assert!(program.payout_children.borrow().is_empty());
     }
 }

@@ -21,8 +21,8 @@ export interface SettledReceiptDeposit {
   outcome: string;
 }
 
-export const VFT_MANAGER_IDL_SHA256 = '2e94e7f7faf979c57c422942676693c6c93dcf4fedc44596cdbe5628ab2eec5a';
-export const NATIVE_WRAPPER_IDL_SHA256 = '49339daa2161aa825286687f93875ccd8d8be9985796c143dd5aa64177d741e4';
+export const VFT_MANAGER_IDL_SHA256 = '24af190a703abed2b5a7e17c550739a9d4b7520c1b5a9d7e178c3a91c182bdb3';
+export const NATIVE_WRAPPER_IDL_SHA256 = '8ef5f27c84e720d05b7ffb3496153a0049e1e642e2c5c8a72cadff662c9ff2f1';
 
 export interface NativeReceiptDeposit extends SettledReceiptDeposit {
   supply: 'Gear' | 'Ethereum'; native: boolean; operation_id: HexString; child: HexString | null;
@@ -87,8 +87,8 @@ export function validateNativeRedemption(row: NativeReceiptDeposit, managerId: H
   if (!value || !row.native || BigInt(row.amount) <= 0n || value.from !== managerId || value.to !== row.receiver || BigInt(value.amount) !== BigInt(row.amount) ||
       !messageId(value.child) || value.child === row.child ||
       (value.status !== 'Queued' && value.status !== 'Delivered' && value.status !== 'Refunded') ||
-      (value.status === 'Queued' ? BigInt(value.returned_value) !== 0n && BigInt(value.returned_value) !== BigInt(row.amount) :
-        BigInt(value.returned_value) !== (value.status === 'Refunded' ? BigInt(row.amount) : 0n)) ||
+      (value.status === 'Queued' ? BigInt(value.returned_value) !== 0n && BigInt(value.returned_value) < BigInt(row.amount) :
+        value.status === 'Refunded' ? BigInt(value.returned_value) < BigInt(row.amount) : BigInt(value.returned_value) !== 0n) ||
       (original && (value.from !== original.from || value.to !== original.to || BigInt(value.amount) !== BigInt(original.amount) ||
         value.child !== original.child || (original.status !== 'Queued' &&
           (value.status !== original.status || BigInt(value.returned_value) !== BigInt(original.returned_value))) ||

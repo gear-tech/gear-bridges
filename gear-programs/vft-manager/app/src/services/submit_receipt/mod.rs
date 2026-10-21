@@ -63,14 +63,19 @@ impl DepositStatus {
     }
 }
 
-/// Retained proof that the original deposit had no financial effect.
+/// Retained rejection evidence, including historical native absence tombstones.
 #[derive(Clone, Debug, Encode, Decode, TypeInfo, PartialEq, Eq)]
 pub enum ReceiptRejectionEvidence {
     InvalidRecipient,
     InvalidAmount,
     NativeAmountOverflow,
-    UnlockFalse { child: MessageId },
-    NativeErrorAbsent { child: MessageId },
+    UnlockFalse {
+        child: MessageId,
+    },
+    /// Historical decoding only: absence does not prove economic rejection.
+    NativeErrorAbsent {
+        child: MessageId,
+    },
 }
 
 fn initial_deposit_status(deposit: &ReceiptDeposit) -> DepositStatus {
@@ -78,7 +83,7 @@ fn initial_deposit_status(deposit: &ReceiptDeposit) -> DepositStatus {
         ReceiptRejectionEvidence::InvalidRecipient
     } else if deposit.amount.is_zero() {
         ReceiptRejectionEvidence::InvalidAmount
-    } else if deposit.native && deposit.amount > U256::from(u128::MAX) {
+    } else if deposit.native && deposit.amount > (U256::one() << 80) - U256::one() {
         ReceiptRejectionEvidence::NativeAmountOverflow
     } else {
         return DepositStatus::Pending;
@@ -91,6 +96,20 @@ pub(super) struct ReceiptLogProgress {
     pub deposit: ReceiptDeposit,
     pub status: DepositStatus,
     pub child: Option<MessageId>,
+}
+
+fn validate_retained_rejection(log: &ReceiptLogProgress) -> Result<(), Error> {
+    match &log.status {
+        DepositStatus::Rejected(ReceiptRejectionEvidence::NativeErrorAbsent { .. }) => {
+            Err(Error::InvalidReconciliation)
+        }
+        DepositStatus::Rejected(
+            ReceiptRejectionEvidence::InvalidRecipient
+            | ReceiptRejectionEvidence::InvalidAmount
+            | ReceiptRejectionEvidence::NativeAmountOverflow,
+        ) if log.child.is_some() => Err(Error::InvalidReconciliation),
+        _ => Ok(()),
+    }
 }
 
 #[derive(Clone)]
@@ -227,9 +246,8 @@ pub(super) fn emit_refunded(
         d.native && matches!(progress.status, DepositStatus::Refunded),
         "Not a wrapped refund"
     );
-    assert_eq!(
-        U256::from(returned_value),
-        d.amount,
+    assert!(
+        U256::from(returned_value) >= d.amount,
         "Incomplete returned backing"
     );
     let child = progress.child.expect("Original wrapper child missing");
@@ -501,6 +519,7 @@ pub async fn resolve_receipt_deposit(
     if progress.lease_until > now {
         return Err(Error::ReceiptLeaseActive);
     }
+    validate_retained_rejection(log)?;
     match log.status {
         DepositStatus::Rejected(_) => {
             complete_transaction(key);
@@ -571,10 +590,16 @@ async fn resolve_log(guard: &LogGuard<'_>, config: &Config) -> Result<DepositSta
         token_operations::query_native::<GetRedemption>(guard, &deposit.operation_id, config)
             .await?;
     guard.check()?;
-    let Some(original) = original else {
-        return token_operations::absence_rejection(guard).map(DepositStatus::Rejected);
-    };
+    let original = original.ok_or(Error::InvalidReconciliation)?;
     token_operations::validate_redemption(guard, &original)?;
+    if !matches!(
+        original.status,
+        vft_vara_client::PayoutStatus::Queued
+            | vft_vara_client::PayoutStatus::Returned
+            | vft_vara_client::PayoutStatus::Ambiguous
+    ) {
+        return Err(Error::InvalidReconciliation);
+    }
     let held =
         token_operations::query_native::<HeldRedemption>(guard, &deposit.operation_id, config)
             .await?
@@ -1159,7 +1184,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_native_invalid_inputs_allow_only_frozen_no_effect_absence_reasons() {
+    fn invalid_native_inputs_are_rejected_before_dispatch() {
         for (receiver, amount, expected) in [
             (
                 ActorId::zero(),
@@ -1173,33 +1198,82 @@ mod tests {
             ),
             (
                 ActorId::from([1; 32]),
-                U256::from(u128::MAX) + U256::one(),
+                U256::one() << 80,
                 ReceiptRejectionEvidence::NativeAmountOverflow,
             ),
         ] {
             let mut deposit = original_deposit();
             deposit.receiver = receiver;
             deposit.amount = amount;
-            let guard = LogGuard {
-                key: (1, 0),
-                deposit: &deposit,
-                generation: 1,
-                child: Some(MessageId::from([4; 32])),
-                revision: 0,
-                admin: None,
-            };
-            // Production calls this only after the exact authenticated None query.
-            assert_eq!(token_operations::absence_rejection(&guard), Ok(expected));
-            let mut non_native = deposit.clone();
-            non_native.native = false;
-            let guard = LogGuard {
-                deposit: &non_native,
-                ..guard
-            };
+            assert!(matches!(
+                initial_deposit_status(&deposit),
+                DepositStatus::Rejected(reason) if reason == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn native_amount_boundary_does_not_restrict_non_native_inputs() {
+        let mut deposit = original_deposit();
+        deposit.amount = (U256::one() << 80) - U256::one();
+        assert!(matches!(
+            initial_deposit_status(&deposit),
+            DepositStatus::Pending
+        ));
+        deposit.amount += U256::one();
+        assert!(matches!(
+            initial_deposit_status(&deposit),
+            DepositStatus::Rejected(ReceiptRejectionEvidence::NativeAmountOverflow)
+        ));
+        deposit.native = false;
+        assert!(matches!(
+            initial_deposit_status(&deposit),
+            DepositStatus::Pending
+        ));
+    }
+
+    #[test]
+    fn historical_native_absence_evidence_keeps_discriminant_four() {
+        let child = MessageId::from([4; 32]);
+        let mut encoded = vec![4];
+        child.encode_to(&mut encoded);
+        assert_eq!(
+            ReceiptRejectionEvidence::decode(&mut encoded.as_slice()).unwrap(),
+            ReceiptRejectionEvidence::NativeErrorAbsent { child }
+        );
+    }
+
+    #[test]
+    fn historical_rejections_cannot_authorize_dispatched_invalid_inputs_or_absence() {
+        let child = MessageId::from([4; 32]);
+        let mut log = ReceiptLogProgress {
+            deposit: original_deposit(),
+            status: DepositStatus::Rejected(ReceiptRejectionEvidence::NativeErrorAbsent { child }),
+            child: Some(child),
+        };
+        for original_child in [None, Some(child)] {
+            log.child = original_child;
             assert_eq!(
-                token_operations::absence_rejection(&guard),
-                Err(Error::InvalidReconciliation),
+                validate_retained_rejection(&log),
+                Err(Error::InvalidReconciliation)
             );
         }
+        for reason in [
+            ReceiptRejectionEvidence::InvalidRecipient,
+            ReceiptRejectionEvidence::InvalidAmount,
+            ReceiptRejectionEvidence::NativeAmountOverflow,
+        ] {
+            log.status = DepositStatus::Rejected(reason);
+            log.child = Some(child);
+            assert_eq!(
+                validate_retained_rejection(&log),
+                Err(Error::InvalidReconciliation)
+            );
+            log.child = None;
+            assert_eq!(validate_retained_rejection(&log), Ok(()));
+        }
+        log.status = DepositStatus::Rejected(ReceiptRejectionEvidence::UnlockFalse { child });
+        log.child = Some(child);
+        assert_eq!(validate_retained_rejection(&log), Ok(()));
     }
 }

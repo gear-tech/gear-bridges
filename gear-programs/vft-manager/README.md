@@ -33,19 +33,25 @@ mint/unlock mailbox benchmark.
 paginated order. `ReceiptStatus::Resolved` instead means every log is terminal
 with at least one `Rejected` or `Held` exception; it never means financial success.
 `ReceiptDeposits` retains every authenticated log. Zero recipients, zero amounts,
-and native amounts above `u128::MAX` are rejected before dispatch; valid sibling
-logs continue normally. `ReceiptRejection` exposes the retained typed evidence.
+and native amounts above `2^80−1` are rejected before dispatch; valid sibling
+logs continue normally. `ReceiptRejection` retains typed evidence, not repayment
+of any historical Ethereum burn/escrow.
 Explicit VFT errors remain `Retryable`, distinct from terminal `Rejected`.
 Exception tombstones and their progress are retained indefinitely for replay and
 liability evidence; ordinary successful-history pruning never removes them.
 Submitting a newly resolved receipt returns `ReceiptResolved`; replay returns
 `AlreadyProcessed`. No financial completion event is emitted for exceptions.
 
-An exact authenticated `TransferFrom(false)` is terminal `UnlockFalse`; malformed
-or trailing-byte replies remain ambiguous. A native error becomes
-`NativeErrorAbsent` only after the original wrapper returns an exact authenticated
-`Redemption(None)`. Previously attempted native operations are reconciled, never
-redispatched as a new payout.
+An exact authenticated non-native `TransferFrom(false)` is terminal `UnlockFalse`;
+malformed or trailing-byte replies remain ambiguous. Native `Redemption(None)`
+never authorizes rejection or creates a payout through public reconciliation.
+Only a matching frozen native `Retryable` row with its terminal authenticated
+`ErrorReply` request child can redispatch the same operation ID/from/to/amount.
+The old terminal request child remains retained; timeout or ambiguous retries
+cannot inherit its retry permission. Wrapper deduplication preserves the original
+payout child. Historical `NativeErrorAbsent` (SCALE discriminant 4) remains
+decodable but cannot authorize new resolution or exclusion. Input-invalid
+rejections require no dispatched child.
 
 While the manager is paused in `Active` or `Draining`, its admin may call
 `ResolveReceiptDeposit(slot, transaction_index, log_index, operation_id, child)`.
@@ -57,14 +63,20 @@ domain, configuration revision, receipt generation and original child.
 Matching repeated resolution is idempotent; `Held` mints nothing and preserves
 the original liability even when a late payout reply subsequently arrives.
 
-Native redemption requires configuring the manager's zero-VFT-minimum native
-wrapper and the wrapper's escrow manager while both are paused. Configuration
-rejects a nonzero minimum; it does not silently repair previously reaped escrow.
+Native redemption requires `ConfigureNativeWrapper(Some((wrapper, approved_wrapped_vara)))`
+and the wrapper's escrow manager while both are paused. The approved nonzero
+Ethereum address must equal the wrapper's mapped Gear-supply token; minimum
+balance must be zero. `None` clears the binding. This is an explicit admin approval,
+not an Ethereum-state oracle or protection against a malicious admin. The shipped
+configuration tool independently qualifies finalized primary/witness governance
+`wrappedVara()` and the registered native pair before configuring.
 A queued mailbox payout is not settled until its original reply is authenticated.
-An original recipient error returning the exact full payout first records durable
-backing in the wrapper. Reconciliation retries wrapped credit for that original
-recipient; capacity failure retains the backing and outstanding obligation for
-another retry, without another native payout. Only successful credit records
+An original success or error returning at least the payout amount records durable
+backing. Reconciliation retries wrapped credit for unheld `Queued`, `Returned` or
+`Ambiguous` originals with full/excess backing; it credits only the original amount,
+retains actual returned evidence, and leaves excess native backing at the wrapper.
+Capacity failure retains backing and the obligation without another native payout.
+Only successful credit records
 `ReceiptDepositOutcome::Refunded`, not native `Settled`/`Delivered`, and
 releases the completed receipt reservation. Refunds emit the distinct
 `ReceiptDepositRefunded` event, never the native-delivery settlement or
@@ -72,9 +84,10 @@ releases the completed receipt reservation. Refunds emit the distinct
 recipient, amount, manager child, payout child and full returned backing. The
 finalized indexer/history outcome is `Refunded` (wrapped), not native delivered.
 Duplicate callbacks, reconciliation and receipt
-replay cannot mint again or enqueue another native payout. Partial, ambiguous
-and legacy `Returned` evidence stays held. Fully resolved wrapped refunds no
-longer veto manager/wrapper-manager cutover.
+replay cannot mint again or enqueue another native payout. Partial or unknown
+backing stays unresolved. Live `Delivered`/`Refunded` state is checked before a
+saved hold; historical holds are retained but cannot mask economic completion.
+Fully resolved wrapped refunds no longer veto manager/wrapper-manager cutover.
 
 ### Retained-program cutover
 
@@ -84,6 +97,18 @@ migration protocol: `InsertTransactions` is removed and `Upgrade` never exits,
 clears mappings, transfers native operating reserves, or deletes original
 receipt/source/native/transfer evidence. These guards require new immutable
 programs; they cannot retrofit an already-deployed old manager.
+
+Changing the retained ZK verifier to BEEFY is a separate Ethereum proxy upgrade
+and does not itself require replacing managers, wrappers or token identities.
+Live code IDs, query capabilities and outstanding liabilities must be qualified
+before relying on corrected immutable-program behavior.
+
+Non-native `Retryable`/ambiguous reservations remain an **accepted availability
+risk (P0-A3)**, potentially permanent. There is no non-native terminal/held escape.
+Before `BeginCutover` and again before the first paused/drained custody `Upgrade`,
+perform the [mandatory complete-inventory scan](../../docs/running-the-bridge.md#mandatory-manager-replacement-inventory-gate--accepted-p0-a3-availability-risk).
+Successful transaction history or journals alone cannot enumerate reservations.
+Missing complete inventory or unresolved rows means **HOLD**, never force-clear.
 
 The admin lifecycle is:
 

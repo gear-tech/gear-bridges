@@ -30,6 +30,11 @@ interface IERC20Manager is IPausable, IMessageHandler {
     error InvalidAmount();
 
     /**
+     * @dev Error thrown when governance has no wrapped native token configured.
+     */
+    error InvalidWrappedVara();
+
+    /**
      * @dev Error thrown when the token type is invalid (`TokenType.Unknown`).
      */
     error InvalidTokenType();

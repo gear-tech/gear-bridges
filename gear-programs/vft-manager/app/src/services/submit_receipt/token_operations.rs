@@ -65,25 +65,17 @@ pub(super) fn unlock_false(guard: &super::LogGuard<'_>) -> bool {
     })
 }
 
-pub(super) fn absence_rejection(
-    guard: &super::LogGuard<'_>,
-) -> Result<super::ReceiptRejectionEvidence, Error> {
-    if !guard.deposit.native {
-        return Err(Error::InvalidReconciliation);
-    }
-    if let super::DepositStatus::Rejected(evidence) = super::initial_deposit_status(guard.deposit) {
-        return Ok(evidence);
-    }
-    let details = original_details(guard).ok_or(Error::InvalidReconciliation)?;
-    if !matches!(details.action, ChildAction::Native)
-        || !details.terminal
-        || details.failure != Some(ChildFailure::ErrorReply)
-    {
-        return Err(Error::InvalidReconciliation);
-    }
-    Ok(super::ReceiptRejectionEvidence::NativeErrorAbsent {
-        child: guard.child.ok_or(Error::InvalidReconciliation)?,
-    })
+fn retryable_native_child(guard: &super::LogGuard<'_>) -> bool {
+    guard.deposit.native
+        && matches!(
+            super::deposit_status(guard.key, guard.deposit.log_index),
+            Some(super::DepositStatus::Retryable(_))
+        )
+        && original_details(guard).is_some_and(|details| {
+            matches!(details.action, ChildAction::Native)
+                && details.terminal
+                && details.failure == Some(ChildFailure::ErrorReply)
+        })
 }
 
 /// Only the immutable original manager child is made quiescent by evidence.
@@ -107,7 +99,6 @@ pub(super) fn validate_redemption(
         != (Syscall::program_id(), deposit.receiver, deposit.amount)
         || redemption.child.is_zero()
         || Some(redemption.child) == guard.child
-        || U256::from(redemption.returned_value) > redemption.amount
     {
         return Err(Error::InvalidReconciliation);
     }
@@ -281,18 +272,17 @@ pub fn handle_persistent_reply() {
                 if (r.from, r.to, r.amount) != (Syscall::program_id(), data.receiver, data.amount)
                     || r.child.is_zero()
                     || r.child == child
-                    || U256::from(r.returned_value) > r.amount
                 {
                     return Err(Error::InvalidReply);
                 }
                 match r.status {
                     PayoutStatus::Delivered if r.returned_value == 0 => Ok(false),
-                    PayoutStatus::Refunded if U256::from(r.returned_value) == r.amount => {
+                    PayoutStatus::Refunded if U256::from(r.returned_value) >= r.amount => {
                         refund = Some((r.child, r.returned_value));
                         Ok(true)
                     }
                     PayoutStatus::Queued
-                        if r.returned_value == 0 || U256::from(r.returned_value) == r.amount =>
+                        if r.returned_value == 0 || U256::from(r.returned_value) >= r.amount =>
                     {
                         Err(Error::NativeSettlementPending)
                     }
@@ -386,9 +376,14 @@ pub(super) async fn redeem_native_log(
     config: &Config,
 ) -> Result<(), Error> {
     if super::original_child(key, deposit.log_index).is_some() {
-        return reconcile_native_log(key, deposit, config).await;
+        let guard = super::LogGuard::capture(key, deposit, false)?;
+        if !retryable_native_child(&guard) {
+            return reconcile_native_log(key, deposit, config).await;
+        }
+        // A new request must not inherit the completed error attempt's retry permission.
+        super::set_deposit_status(key, deposit.log_index, super::DepositStatus::InFlight);
     }
-    let result = send::<RedeemEscrow>(
+    send::<RedeemEscrow>(
         key,
         deposit,
         &(
@@ -400,14 +395,7 @@ pub(super) async fn redeem_native_log(
         config,
         ChildAction::Native,
     )
-    .await;
-    if matches!(&result, Err(Error::ReplyFailure(_))) {
-        // The authenticated terminal error alone does not prove that no operation
-        // exists: a dead continuation recovers through this same query path.
-        reconcile_native_log(key, deposit, config).await
-    } else {
-        result
-    }
+    .await
 }
 
 /// Reconcile the immutable original payout; retry backed wrapped credit, never a new payout.
@@ -431,29 +419,32 @@ pub(super) async fn reconcile_native_log(
     }
     let original = query_native::<GetRedemption>(&guard, &deposit.operation_id, config).await?;
     guard.check()?;
-    let Some(mut redemption) = original else {
-        let rejection = absence_rejection(&guard)?;
-        quiesce_original(&guard)?;
-        super::set_deposit_status(
-            key,
-            deposit.log_index,
-            super::DepositStatus::Rejected(rejection),
-        );
-        return Err(Error::ReceiptResolved);
-    };
+    let mut redemption = original.ok_or(Error::InvalidReconciliation)?;
     validate_redemption(&guard, &redemption)?;
-    let held = query_native::<HeldRedemption>(&guard, &deposit.operation_id, config).await?;
-    guard.check()?;
-    if let Some(held) = held {
-        validate_redemption(&guard, &held)?;
-        if held.child != redemption.child {
-            return Err(Error::InvalidReconciliation);
+    if matches!(
+        redemption.status,
+        PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+    ) {
+        let held = query_native::<HeldRedemption>(&guard, &deposit.operation_id, config).await?;
+        guard.check()?;
+        if let Some(held) = held {
+            validate_redemption(&guard, &held)?;
+            if held.child != redemption.child
+                || !matches!(
+                    held.status,
+                    PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+                )
+            {
+                return Err(Error::InvalidReconciliation);
+            }
+            // Only paused admin resolution may turn an authenticated hold into Held.
+            return Err(Error::NativeSettlementPending);
         }
-        // Only paused admin resolution may turn an authenticated hold into Held.
-        return Err(Error::NativeSettlementPending);
     }
-    if redemption.status == PayoutStatus::Queued
-        && U256::from(redemption.returned_value) == deposit.amount
+    if matches!(
+        redemption.status,
+        PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+    ) && U256::from(redemption.returned_value) >= deposit.amount
     {
         let payout_child = redemption.child;
         // This existing-operation retry can only credit full returned backing.
@@ -478,7 +469,7 @@ pub(super) async fn reconcile_native_log(
     match redemption.status {
         PayoutStatus::Delivered | PayoutStatus::Refunded => {
             let refunded = redemption.status == PayoutStatus::Refunded;
-            if (refunded && U256::from(redemption.returned_value) != deposit.amount)
+            if (refunded && U256::from(redemption.returned_value) < deposit.amount)
                 || (!refunded && redemption.returned_value != 0)
             {
                 return Err(Error::InvalidReply);
@@ -636,7 +627,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_child_flag_without_original_native_error_is_not_absence_proof() {
+    fn native_retry_requires_exact_terminal_error_and_current_retryable_status() {
         let deposit = super::super::tests::original_deposit();
         let child = MessageId::from([21; 32]);
         let guard = super::super::LogGuard {
@@ -647,6 +638,21 @@ mod tests {
             revision: 0,
             admin: None,
         };
+        use super::super::{DepositStatus, ReceiptLogProgress, ReceiptProgress};
+        super::super::receipt_progress_mut().insert(
+            guard.key,
+            ReceiptProgress {
+                deposits: vec![ReceiptLogProgress {
+                    deposit: deposit.clone(),
+                    status: DepositStatus::Retryable(Error::ReplyFailure("paused".into())),
+                    child: Some(child),
+                }],
+                receipt_hash: H256::zero(),
+                generation: 1,
+                lease_until: 0,
+            },
+        );
+        assert!(!retryable_native_child(&guard));
         children().insert(
             child,
             TxDetails {
@@ -663,20 +669,52 @@ mod tests {
                 failure: None,
             },
         );
-        assert_eq!(absence_rejection(&guard), Err(Error::InvalidReconciliation));
+        assert!(!retryable_native_child(&guard));
         children().get_mut(&child).unwrap().failure = Some(ChildFailure::ErrorReply);
-        assert_eq!(
-            absence_rejection(&guard),
-            Ok(super::super::ReceiptRejectionEvidence::NativeErrorAbsent { child }),
-        );
+        assert!(retryable_native_child(&guard));
         children().get_mut(&child).unwrap().terminal = false;
-        assert_eq!(absence_rejection(&guard), Err(Error::InvalidReconciliation));
+        assert!(!retryable_native_child(&guard));
         children().get_mut(&child).unwrap().terminal = true;
         children().get_mut(&child).unwrap().failure = Some(ChildFailure::UnlockFalse);
-        assert_eq!(absence_rejection(&guard), Err(Error::InvalidReconciliation));
+        assert!(!retryable_native_child(&guard));
         children().get_mut(&child).unwrap().failure = Some(ChildFailure::ErrorReply);
         children().get_mut(&child).unwrap().action = ChildAction::Unlock;
-        assert_eq!(absence_rejection(&guard), Err(Error::InvalidReconciliation));
+        assert!(!retryable_native_child(&guard));
+        children().get_mut(&child).unwrap().action = ChildAction::Native;
+        let mut non_native = deposit.clone();
+        non_native.native = false;
+        assert!(!retryable_native_child(&super::super::LogGuard {
+            deposit: &non_native,
+            ..guard
+        }));
+        let original = children().get(&child).unwrap().clone();
+        for field in 0..8 {
+            let mut changed = original.clone();
+            match field {
+                0 => changed.slot += 1,
+                1 => changed.transaction_index += 1,
+                2 => changed.log_index += 1,
+                3 => changed.operation_id = H256([99; 32]),
+                4 => changed.token_id = ActorId::from([99; 32]),
+                5 => changed.receiver = ActorId::from([99; 32]),
+                6 => changed.amount += U256::one(),
+                _ => changed.erc20_sender = H160([99; 20]),
+            }
+            children().insert(child, changed);
+            assert!(!retryable_native_child(&guard));
+        }
+        children().insert(child, original);
+        for status in [
+            DepositStatus::Pending,
+            DepositStatus::InFlight,
+            DepositStatus::NativeQueued,
+            DepositStatus::Ambiguous(Error::ReplyTimeout("retry timed out".into())),
+        ] {
+            super::super::set_deposit_status(guard.key, deposit.log_index, status);
+            assert!(!retryable_native_child(&guard));
+        }
+        super::super::receipt_progress_mut().remove(&guard.key);
         children().remove(&child);
+        assert!(!retryable_native_child(&guard));
     }
 }

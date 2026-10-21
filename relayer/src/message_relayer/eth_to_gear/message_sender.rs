@@ -747,7 +747,7 @@ fn native_payout_reconciliation_ready(
             // The original rejection has returned all backing, but wrapped credit
             // still requires ReconcileReceipt -> the same RedeemEscrow operation.
             vft_vara_client::PayoutStatus::Queued => {
-                sails_rs::U256::from(payout.returned_value) == row.amount
+                sails_rs::U256::from(payout.returned_value) >= row.amount
                     && matches!(
                         row.outcome,
                         vft_manager_client::ReceiptDepositOutcome::NativeQueued
@@ -762,7 +762,7 @@ fn native_payout_reconciliation_ready(
                     )
             }
             vft_vara_client::PayoutStatus::Refunded => {
-                sails_rs::U256::from(payout.returned_value) == row.amount
+                sails_rs::U256::from(payout.returned_value) >= row.amount
                     && matches!(
                         row.outcome,
                         vft_manager_client::ReceiptDepositOutcome::Refunded
@@ -834,12 +834,12 @@ fn financial_settlement_status(
     }
 }
 
-// The finalized typed manager record proves the original child result; absence
-// alone is never evidence of rejection.
-fn rejection_requires_absence(
+// Only invalid, undispatched inputs or the exact original unlock's false reply
+// prove rejection. Historical native absence evidence never authorizes exclusion.
+fn validate_rejection(
     row: &vft_manager_client::ReceiptDepositState,
     reason: &vft_manager_client::ReceiptRejectionEvidence,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<()> {
     use vft_manager_client::{
         ReceiptDepositOutcome, ReceiptRejectionEvidence as Reason, TokenSupply,
     };
@@ -847,27 +847,26 @@ fn rejection_requires_absence(
         matches!(row.outcome, ReceiptDepositOutcome::Rejected),
         "Rejection evidence belongs to a non-rejected deposit"
     );
-    let input_rejection = match reason {
+    match reason {
         Reason::InvalidRecipient => {
             anyhow::ensure!(
-                row.receiver.is_zero(),
-                "InvalidRecipient differs from frozen input"
+                row.child.is_none() && row.receiver.is_zero(),
+                "InvalidRecipient requires an undispatched matching frozen input"
             );
-            true
         }
         Reason::InvalidAmount => {
             anyhow::ensure!(
-                row.amount.is_zero(),
-                "InvalidAmount differs from frozen input"
+                row.child.is_none() && row.amount.is_zero(),
+                "InvalidAmount requires an undispatched matching frozen input"
             );
-            true
         }
         Reason::NativeAmountOverflow => {
             anyhow::ensure!(
-                row.native && row.amount > sails_rs::U256::from(u128::MAX),
-                "NativeAmountOverflow differs from frozen input"
+                row.child.is_none()
+                    && row.native
+                    && row.amount > (sails_rs::U256::one() << 80) - sails_rs::U256::one(),
+                "NativeAmountOverflow requires an undispatched matching frozen input"
             );
-            true
         }
         Reason::UnlockFalse { child } => {
             anyhow::ensure!(
@@ -877,24 +876,34 @@ fn rejection_requires_absence(
                     && row.child == Some(*child),
                 "UnlockFalse differs from original unlock child"
             );
-            false
         }
-        Reason::NativeErrorAbsent { child } => {
-            anyhow::ensure!(
-                row.native && !child.is_zero() && row.child == Some(*child),
-                "NativeErrorAbsent differs from original native child"
-            );
-            return Ok(true);
+        Reason::NativeErrorAbsent { .. } => {
+            anyhow::bail!("Historical NativeErrorAbsent does not authorize exclusion");
         }
-    };
-    if input_rejection && row.child.is_some() {
-        anyhow::ensure!(
-            row.native,
-            "Dispatched non-native invalid input does not prove no effect"
-        );
-        return Ok(true);
     }
-    Ok(false)
+    Ok(())
+}
+
+fn held_redemption_identity_matches(
+    row: &vft_manager_client::ReceiptDepositState,
+    manager: H256,
+    saved: &vft_vara_client::Redemption,
+    live: &vft_vara_client::Redemption,
+) -> bool {
+    row.native
+        && !row.amount.is_zero()
+        && matches!(row.outcome, vft_manager_client::ReceiptDepositOutcome::Held)
+        && row
+            .child
+            .is_some_and(|child| !child.is_zero() && child != saved.child)
+        && !saved.child.is_zero()
+        && saved.from == sails_rs::ActorId::from(manager.0)
+        && saved.to == row.receiver
+        && saved.amount == row.amount
+        && live.from == saved.from
+        && live.to == saved.to
+        && live.amount == saved.amount
+        && live.child == saved.child
 }
 
 fn validate_held_redemption(
@@ -907,30 +916,42 @@ fn validate_held_redemption(
     let saved = saved.ok_or_else(|| anyhow::anyhow!("Held deposit has no saved wrapper hold"))?;
     let live = live.ok_or_else(|| anyhow::anyhow!("Held deposit has no original redemption"))?;
     anyhow::ensure!(
-        row.native
-            && !row.amount.is_zero()
-            && matches!(row.outcome, vft_manager_client::ReceiptDepositOutcome::Held)
-            && row
-                .child
-                .is_some_and(|child| !child.is_zero() && child != saved.child)
-            && !saved.child.is_zero()
-            && saved.from == sails_rs::ActorId::from(manager.0)
-            && saved.to == row.receiver
-            && saved.amount == row.amount
-            && sails_rs::U256::from(saved.returned_value) <= saved.amount
+        held_redemption_identity_matches(row, manager, saved, live)
             && matches!(
                 saved.status,
                 PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
             )
-            && live.from == saved.from
-            && live.to == saved.to
-            && live.amount == saved.amount
-            && live.child == saved.child
-            && sails_rs::U256::from(live.returned_value) <= live.amount,
+            && matches!(
+                live.status,
+                PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+            ),
         "Wrapper hold differs from immutable original payout identity"
     );
-    // The saved snapshot is immutable; a late authenticated callback may advance
-    // the original without erasing the liability evidence used at handoff.
+    // Saved snapshots remain historical evidence, but a live terminal payout is
+    // no longer an active unpaid hold at this finalized observation.
+    Ok(())
+}
+
+// A callback can deliver the original payout after the manager recorded Held,
+// even in the same finalized block. Authenticate that historical exception
+// without treating it as an active unpaid hold or rewriting financial outcomes.
+fn validate_delivered_historical_hold(
+    row: &vft_manager_client::ReceiptDepositState,
+    manager: H256,
+    saved: Option<&vft_vara_client::Redemption>,
+    live: Option<&vft_vara_client::Redemption>,
+) -> anyhow::Result<()> {
+    use vft_vara_client::PayoutStatus;
+    let saved = saved.ok_or_else(|| anyhow::anyhow!("Held deposit has no saved wrapper hold"))?;
+    let live = live.ok_or_else(|| anyhow::anyhow!("Held deposit has no original redemption"))?;
+    anyhow::ensure!(
+        held_redemption_identity_matches(row, manager, saved, live)
+            && saved.status == PayoutStatus::Queued
+            && saved.returned_value == 0
+            && live.status == PayoutStatus::Delivered
+            && live.returned_value == 0,
+        "Historical held delivery differs from original queued payout"
+    );
     Ok(())
 }
 
@@ -1893,18 +1914,7 @@ impl MessageSender {
                         .ok_or_else(|| {
                             anyhow::anyhow!("Rejected deposit lacks typed original evidence")
                         })?;
-                    if rejection_requires_absence(row, &reason)? {
-                        let payout = wrapper
-                            .redemption(row.operation_id)
-                            .with_gas_limit(gas)
-                            .at_block(hash.0.into())
-                            .recv(row.token_id)
-                            .await?;
-                        anyhow::ensure!(
-                            payout.is_none(),
-                            "Rejected native child has an original redemption"
-                        );
-                    }
+                    validate_rejection(row, &reason)?;
                 }
                 Outcome::Held => {
                     let saved = wrapper
@@ -1919,12 +1929,23 @@ impl MessageSender {
                         .at_block(hash.0.into())
                         .recv(row.token_id)
                         .await?;
-                    validate_held_redemption(
-                        row,
-                        self.receiver_address,
-                        saved.as_ref(),
-                        live.as_ref(),
-                    )?;
+                    if live.as_ref().is_some_and(|payout| {
+                        payout.status == vft_vara_client::PayoutStatus::Delivered
+                    }) {
+                        validate_delivered_historical_hold(
+                            row,
+                            self.receiver_address,
+                            saved.as_ref(),
+                            live.as_ref(),
+                        )?;
+                    } else {
+                        validate_held_redemption(
+                            row,
+                            self.receiver_address,
+                            saved.as_ref(),
+                            live.as_ref(),
+                        )?;
+                    }
                 }
                 Outcome::Settled | Outcome::Refunded => {
                     anyhow::ensure!(
@@ -2718,7 +2739,7 @@ mod tests {
         let (bytes, mut rows) = receipt_fixture(&[
             (0, 123u64.into()),
             (6, 0u64.into()),
-            (6, sails_rs::U256::from(u128::MAX) + sails_rs::U256::one()),
+            (6, sails_rs::U256::one() << 80),
         ]);
         rows[2].native = true;
         for row in &mut rows {
@@ -2756,17 +2777,32 @@ mod tests {
         .iter()
         .enumerate()
         {
-            assert!(!rejection_requires_absence(&rows[i], reason).unwrap());
+            assert!(validate_rejection(&rows[i], reason).is_ok());
+            for native in [false, true] {
+                let mut dispatched = rows[i].clone();
+                dispatched.native = native;
+                dispatched.child = Some(MessageId::from([8; 32]));
+                assert!(validate_rejection(&dispatched, reason).is_err());
+            }
+            let mut pending = rows[i].clone();
+            pending.outcome = Outcome::Pending;
+            assert!(validate_rejection(&pending, reason).is_err());
             for wrong in [
                 Reason::InvalidRecipient,
                 Reason::InvalidAmount,
                 Reason::NativeAmountOverflow,
             ] {
                 if &wrong != reason {
-                    assert!(rejection_requires_absence(&rows[i], &wrong).is_err());
+                    assert!(validate_rejection(&rows[i], &wrong).is_err());
                 }
             }
         }
+        let mut representable = rows[2].clone();
+        representable.amount -= sails_rs::U256::one();
+        assert!(validate_rejection(&representable, &Reason::NativeAmountOverflow).is_err());
+        let mut non_native = rows[2].clone();
+        non_native.native = false;
+        assert!(validate_rejection(&non_native, &Reason::NativeAmountOverflow).is_err());
         assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).unwrap());
         let pin = FinalizedReceiptObservation {
             finalized_block_number: Some(20),
@@ -2781,24 +2817,41 @@ mod tests {
         assert!(identity(&wrong).is_err());
         let child = MessageId::from([8; 32]);
         rows[0].child = Some(child);
-        assert!(rejection_requires_absence(&rows[0], &Reason::InvalidRecipient).is_err());
+        assert!(validate_rejection(&rows[0], &Reason::InvalidRecipient).is_err());
         rows[0].native = true;
-        assert!(rejection_requires_absence(&rows[0], &Reason::InvalidRecipient).unwrap());
+        assert!(validate_rejection(&rows[0], &Reason::InvalidRecipient).is_err());
         rows[0].native = false;
         let unlock = Reason::UnlockFalse { child };
-        assert!(!rejection_requires_absence(&rows[0], &unlock).unwrap());
+        assert!(validate_rejection(&rows[0], &unlock).is_ok());
+        rows[0].supply = vft_manager_client::TokenSupply::Ethereum;
+        assert!(validate_rejection(&rows[0], &unlock).is_err());
+        rows[0].supply = vft_manager_client::TokenSupply::Gear;
+        rows[0].native = true;
+        assert!(validate_rejection(&rows[0], &unlock).is_err());
+        rows[0].native = false;
+        rows[0].child = Some(MessageId::zero());
+        assert!(validate_rejection(
+            &rows[0],
+            &Reason::UnlockFalse {
+                child: MessageId::zero(),
+            },
+        )
+        .is_err());
         rows[0].child = Some(MessageId::from([9; 32]));
-        assert!(rejection_requires_absence(&rows[0], &unlock).is_err());
+        assert!(validate_rejection(&rows[0], &unlock).is_err());
         rows[0].child = Some(child);
         let absent = Reason::NativeErrorAbsent { child };
-        assert!(rejection_requires_absence(&rows[0], &absent).is_err());
+        let encoded = absent.encode();
+        assert_eq!(encoded[0], 4);
+        let absent = Reason::decode(&mut &encoded[..]).unwrap();
+        assert!(validate_rejection(&rows[0], &absent).is_err());
         rows[0].native = true;
-        assert!(rejection_requires_absence(&rows[0], &absent).unwrap());
+        assert!(validate_rejection(&rows[0], &absent).is_err());
         rows[0].child = Some(MessageId::from([9; 32]));
-        assert!(rejection_requires_absence(&rows[0], &absent).is_err());
+        assert!(validate_rejection(&rows[0], &absent).is_err());
         rows[0].child = None;
-        assert!(rejection_requires_absence(&rows[0], &absent).is_err());
-        assert!(rejection_requires_absence(&rows[0], &unlock).is_err());
+        assert!(validate_rejection(&rows[0], &absent).is_err());
+        assert!(validate_rejection(&rows[0], &unlock).is_err());
     }
 
     #[test]
@@ -2839,27 +2892,170 @@ mod tests {
             PayoutStatus::Returned,
             PayoutStatus::Ambiguous,
         ] {
-            let mut partial = saved.clone();
-            partial.status = status;
-            partial.returned_value = 31;
-            let encoded = partial.encode();
-            let partial = Redemption::decode(&mut &encoded[..]).unwrap();
-            assert!(
-                validate_held_redemption(&rows[0], manager, Some(&partial), Some(&partial)).is_ok()
-            );
+            for returned_value in [31, saved.amount.as_u128(), saved.amount.as_u128() + 1] {
+                let mut snapshot = saved.clone();
+                snapshot.status = status.clone();
+                snapshot.returned_value = returned_value;
+                let encoded = snapshot.encode();
+                let snapshot = Redemption::decode(&mut &encoded[..]).unwrap();
+                assert!(validate_held_redemption(
+                    &rows[0],
+                    manager,
+                    Some(&snapshot),
+                    Some(&snapshot),
+                )
+                .is_ok());
+            }
         }
         assert!(validate_held_redemption(&rows[0], manager, None, Some(&live)).is_err());
         assert!(validate_held_redemption(&rows[0], manager, Some(&saved), None).is_err());
-        live.status = PayoutStatus::Delivered;
-        live.returned_value = 0;
-        assert!(validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_ok());
+        for status in [PayoutStatus::Delivered, PayoutStatus::Refunded] {
+            live.status = status;
+            live.returned_value = if live.status == PayoutStatus::Refunded {
+                live.amount.as_u128() + 1
+            } else {
+                0
+            };
+            assert!(
+                validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_err()
+            );
+        }
+        let mut delivered = saved.clone();
+        delivered.status = PayoutStatus::Delivered;
+        let original_evidence = (rows.encode(), saved.encode(), delivered.encode());
+        assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).unwrap());
+        assert!(
+            validate_held_redemption(&rows[0], manager, Some(&saved), Some(&delivered)).is_err()
+        );
+        assert!(validate_delivered_historical_hold(
+            &rows[0],
+            manager,
+            Some(&saved),
+            Some(&delivered),
+        )
+        .is_ok());
+        assert!(
+            validate_delivered_historical_hold(&rows[0], manager, None, Some(&delivered)).is_err()
+        );
+        assert!(validate_delivered_historical_hold(&rows[0], manager, Some(&saved), None).is_err());
+        for field in [
+            "child",
+            "manager-child",
+            "different-child",
+            "from",
+            "to",
+            "amount",
+            "backing",
+        ] {
+            for change_saved in [false, true] {
+                let mut wrong_saved = saved.clone();
+                let mut wrong_live = delivered.clone();
+                let wrong = if change_saved {
+                    &mut wrong_saved
+                } else {
+                    &mut wrong_live
+                };
+                match field {
+                    "child" => wrong.child = MessageId::zero(),
+                    "manager-child" => wrong.child = rows[0].child.unwrap(),
+                    "different-child" => wrong.child = MessageId::from([10; 32]),
+                    "from" => wrong.from = ActorId::zero(),
+                    "to" => wrong.to = ActorId::zero(),
+                    "amount" => wrong.amount += 1.into(),
+                    "backing" => wrong.returned_value = 1,
+                    _ => unreachable!(),
+                }
+                assert!(
+                    validate_delivered_historical_hold(
+                        &rows[0],
+                        manager,
+                        Some(&wrong_saved),
+                        Some(&wrong_live),
+                    )
+                    .is_err(),
+                    "{field}, saved={change_saved}"
+                );
+            }
+        }
+        for status in [
+            PayoutStatus::Queued,
+            PayoutStatus::Returned,
+            PayoutStatus::Ambiguous,
+            PayoutStatus::Delivered,
+            PayoutStatus::Refunded,
+        ] {
+            let mut wrong_saved = saved.clone();
+            wrong_saved.status = status.clone();
+            if status != PayoutStatus::Queued {
+                assert!(validate_delivered_historical_hold(
+                    &rows[0],
+                    manager,
+                    Some(&wrong_saved),
+                    Some(&delivered),
+                )
+                .is_err());
+            }
+            let mut wrong_live = delivered.clone();
+            wrong_live.status = status.clone();
+            if status != PayoutStatus::Delivered {
+                assert!(validate_delivered_historical_hold(
+                    &rows[0],
+                    manager,
+                    Some(&saved),
+                    Some(&wrong_live),
+                )
+                .is_err());
+            }
+        }
+        for field in [
+            "native",
+            "amount",
+            "outcome",
+            "missing-child",
+            "zero-child",
+            "child",
+        ] {
+            let mut wrong = rows[0].clone();
+            match field {
+                "native" => wrong.native = false,
+                "amount" => wrong.amount = 0.into(),
+                "outcome" => wrong.outcome = Outcome::Settled,
+                "missing-child" => wrong.child = None,
+                "zero-child" => wrong.child = Some(MessageId::zero()),
+                "child" => wrong.child = Some(saved.child),
+                _ => unreachable!(),
+            }
+            assert!(validate_delivered_historical_hold(
+                &wrong,
+                manager,
+                Some(&saved),
+                Some(&delivered),
+            )
+            .is_err(), "{field}");
+        }
+        let same_pin = FinalizedReceiptObservation {
+            finalized_block_number: Some(20),
+            finalized_block_hash: format!("{:#x}", H256::repeat_byte(20)),
+        };
+        for status in [ReceiptStatus::Resolved, ReceiptStatus::Processed] {
+            assert!(matches!(
+                financial_settlement_status((17, 4), &status, &rows, true, same_pin.clone()),
+                MessageStatus::NeedsReconciliation { .. }
+            ));
+        }
+        assert!(!native_payout_reconciliation_ready(
+            &rows[0], manager, &delivered
+        ));
+        assert_eq!(
+            original_evidence,
+            (rows.encode(), saved.encode(), delivered.encode())
+        );
         assert_eq!(saved.status, PayoutStatus::Queued);
         assert_eq!(saved.returned_value, 0);
-        let mut excessive = saved.clone();
-        excessive.returned_value = excessive.amount.as_u128() + 1;
-        assert!(
-            validate_held_redemption(&rows[0], manager, Some(&excessive), Some(&live)).is_err()
-        );
+        live = saved.clone();
+        live.status = PayoutStatus::Ambiguous;
+        live.returned_value = live.amount.as_u128() + 1;
+        assert!(validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_ok());
         let original_child = rows[0].child.take();
         assert!(validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_err());
         rows[0].child = original_child;
@@ -2877,7 +3073,7 @@ mod tests {
                 MessageStatus::NeedsReconciliation { .. }
             ));
         }
-        for field in ["child", "manager-child", "from", "to", "amount", "excess"] {
+        for field in ["child", "manager-child", "from", "to", "amount"] {
             let mut wrong = live.clone();
             match field {
                 "child" => wrong.child = MessageId::zero(),
@@ -2885,7 +3081,6 @@ mod tests {
                 "from" => wrong.from = ActorId::zero(),
                 "to" => wrong.to = ActorId::zero(),
                 "amount" => wrong.amount += 1.into(),
-                "excess" => wrong.returned_value = wrong.amount.as_u128() + 1,
                 _ => unreachable!(),
             }
             assert!(
@@ -3060,6 +3255,12 @@ mod tests {
         assert!(native_payout_reconciliation_ready(
             &refunded, manager, &payout
         ));
+        payout.returned_value += 1;
+        assert!(native_payout_reconciliation_ready(
+            &refunded, manager, &payout
+        ));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
+        payout.returned_value -= 1;
         payout.returned_value -= 1;
         assert!(!native_payout_reconciliation_ready(
             &refunded, manager, &payout
@@ -3087,6 +3288,11 @@ mod tests {
         assert!(native_payout_reconciliation_ready(
             &pending, manager, &payout
         ));
+        payout.returned_value += 1;
+        assert!(native_payout_reconciliation_ready(
+            &pending, manager, &payout
+        ));
+        payout.returned_value -= 1;
         assert!(!native_payout_reconciliation_ready(
             &refunded, manager, &payout
         ));
@@ -3094,7 +3300,6 @@ mod tests {
         let original_child = payout.child;
         for field in [
             "partial",
-            "excess",
             "from",
             "to",
             "amount",
@@ -3106,7 +3311,6 @@ mod tests {
             let mut invalid = payout.clone();
             match field {
                 "partial" => invalid.returned_value -= 1,
-                "excess" => invalid.returned_value += 1,
                 "from" => invalid.from = ActorId::zero(),
                 "to" => invalid.to = ActorId::zero(),
                 "amount" => invalid.amount += 1.into(),
@@ -3128,6 +3332,11 @@ mod tests {
             &pending, manager, &payout
         ));
         pending.outcome = ReceiptDepositOutcome::Refunded;
+        assert!(native_payout_reconciliation_ready(
+            &pending, manager, &payout
+        ));
+        assert_eq!(payout.child, original_child);
+        payout.returned_value += 1;
         assert!(native_payout_reconciliation_ready(
             &pending, manager, &payout
         ));

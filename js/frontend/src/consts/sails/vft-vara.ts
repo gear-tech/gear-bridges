@@ -1116,7 +1116,7 @@ export class NativeEscrow {
   /**
    * Assume the original liability without credit, redispatch or settlement.
   */
-  public holdRedemption(operation_id: H256, expected: Redemption): TransactionBuilder<Redemption> {
+  public holdRedemption(operation_id: H256, expected: Redemption, acknowledge_irreversible_hold: boolean): TransactionBuilder<Redemption> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<Redemption>(
       this._program.api,
@@ -1124,8 +1124,8 @@ export class NativeEscrow {
       'send_message',
       'NativeEscrow',
       'HoldRedemption',
-      [operation_id, expected],
-      '(H256, Redemption)',
+      [operation_id, expected, acknowledge_irreversible_hold],
+      '(H256, Redemption, bool)',
       'Redemption',
       this._program.programId,
     );

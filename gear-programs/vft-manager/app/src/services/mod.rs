@@ -371,12 +371,21 @@ impl VftManager {
 
     /// Settlement policy is explicit, and only changes at a paused boundary.
     #[export]
-    pub async fn configure_native_wrapper(&mut self, wrapper: Option<ActorId>) {
+    pub async fn configure_native_wrapper(&mut self, wrapper: Option<(ActorId, H160)>) {
         self.ensure_admin();
         self.ensure_economic_mutable();
         assert!(self.state().is_paused, "Not paused");
-        if let Some(wrapper) = wrapper {
+        if let Some((wrapper, approved_wrapped_vara)) = wrapper {
             assert!(!wrapper.is_zero(), "Invalid native wrapper");
+            assert!(
+                !approved_wrapped_vara.is_zero(),
+                "Invalid native Ethereum token"
+            );
+            assert_eq!(
+                self.state().token_map.get_eth_token_id(&wrapper),
+                Ok(approved_wrapped_vara),
+                "Native wrapper Ethereum mapping differs"
+            );
             assert_eq!(
                 self.state().token_map.get_supply_type(&wrapper),
                 Ok(TokenSupply::Gear),
@@ -402,7 +411,7 @@ impl VftManager {
                 "Configuration changed while qualifying wrapper"
             );
         }
-        self.state_mut().native_wrapper = wrapper;
+        self.state_mut().native_wrapper = wrapper.map(|(actor, _)| actor);
     }
 
     #[export]

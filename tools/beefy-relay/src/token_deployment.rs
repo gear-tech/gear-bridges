@@ -1,6 +1,7 @@
 use alloy::{
     primitives::{Address, B256, U256},
     providers::Provider,
+    rpc::types::BlockId,
     sol,
 };
 use anyhow::{anyhow, ensure, Result};
@@ -68,6 +69,10 @@ sol! {
         function bridgingPayments() external view returns (address[] memory);
         function hasRole(bytes32 role, address account) external view returns (bool);
         function paused() external view returns (bool);
+    }
+    #[sol(rpc)]
+    interface ConfiguredGovernance {
+        function wrappedVara() external view returns (address);
     }
     #[sol(rpc)]
     interface ConfiguredERC20 {
@@ -275,8 +280,14 @@ pub async fn manifest(
         "chainId": chain_id, "client": client, "verifier": verifier,
         "queue": queue, "receiver": manager,
     });
-    let mut ethereum_manifest =
-        Ethereum::token_manifest(ethereum_rpc, ethereum_witness_rpc, wallet, &addresses, fixture.as_ref()).await?;
+    let mut ethereum_manifest = Ethereum::token_manifest(
+        ethereum_rpc,
+        ethereum_witness_rpc,
+        wallet,
+        &addresses,
+        fixture.as_ref(),
+    )
+    .await?;
     ethereum_manifest["sourceGenesis"] = anchor["sourceGenesis"].clone();
     let ethereum = Ethereum::connect(
         ethereum_rpc,
@@ -392,11 +403,7 @@ fn lock_token_stack(path: &Path) -> Result<File> {
 }
 
 // Reload before every mutation: signed message records must survive status changes.
-fn intent(
-    output: &Path,
-    component: &str,
-    binary: &[u8],
-) -> Result<(ActorId, bool, Vec<u8>)> {
+fn intent(output: &Path, component: &str, binary: &[u8]) -> Result<(ActorId, bool, Vec<u8>)> {
     let mut state = read_config_stack(&output.join("token-stack.json"))?;
     let genesis = state["sourceGenesis"]
         .as_str()
@@ -768,17 +775,17 @@ pub async fn prepare(
         let native = component == "nativeVft";
         let label = if native { "native VFT" } else { component };
         let (binary, token_code) = if native {
-            (vft_vara::WASM_BINARY, code(&api, vft_vara::WASM_BINARY).await?)
+            (
+                vft_vara::WASM_BINARY,
+                code(&api, vft_vara::WASM_BINARY).await?,
+            )
         } else {
             (vft::WASM_BINARY, vft_code)
         };
         let (token, new, salt) = intent(output, component, binary)?;
         if new {
-            let remoting = JournaledRemoting::new(
-                api.clone(),
-                &path,
-                &format!("constructor.{component}"),
-            );
+            let remoting =
+                JournaledRemoting::new(api.clone(), &path, &format!("constructor.{component}"));
             let deployed = if native {
                 vft_vara_client::VftVaraFactory::new(remoting)
                     .new(Mainnet::No)
@@ -1454,7 +1461,9 @@ async fn reconcile_setup_message(
         let block_hash = api.get_block_hash(number).await?;
         let block = signer.api().blocks().at(block_hash).await?;
         let extrinsics = block.extrinsics().await?;
-        for extrinsic in extrinsics.iter().filter(|extrinsic| extrinsic.hash() == GearHash(hash))
+        for extrinsic in extrinsics
+            .iter()
+            .filter(|extrinsic| extrinsic.hash() == GearHash(hash))
         {
             ensure!(
                 inclusion.is_none() && extrinsic.bytes() == raw,
@@ -1534,7 +1543,8 @@ async fn reconcile_setup_message(
     )?;
     if let Some((included, _, id)) = inclusion {
         let range =
-            setup_evidence_range(api, &message["replyEvidence"], included, finalized_number).await?;
+            setup_evidence_range(api, &message["replyEvidence"], included, finalized_number)
+                .await?;
         if let Some(found) =
             gear_rpc_client::observation::find_reply(&chain, range, GearHash(id), |_, _| {}).await?
         {
@@ -1554,8 +1564,7 @@ async fn reconcile_setup_message(
                 "original finalized reply changed; HOLD"
             );
             ensure!(
-                message["replyPayload"].is_null()
-                    || message["replyPayload"] == evidence["payload"],
+                message["replyPayload"].is_null() || message["replyPayload"] == evidence["payload"],
                 "original reply bytes changed; HOLD"
             );
             ensure!(
@@ -1625,14 +1634,9 @@ async fn reconcile_setup_message(
                 .api()
                 .tx()
                 .create_partial(
-                    &gear::tx().gear().create_program(
-                        code,
-                        salt,
-                        payload,
-                        gas,
-                        value,
-                        false,
-                    ),
+                    &gear::tx()
+                        .gear()
+                        .create_program(code, salt, payload, gas, value, false),
                     signer.account_id(),
                     params,
                 )
@@ -1797,14 +1801,9 @@ impl JournaledRemoting {
                     .api()
                     .tx()
                     .create_signed(
-                        &gear::tx().gear().create_program(
-                            code,
-                            salt,
-                            payload,
-                            gas,
-                            value,
-                            false,
-                        ),
+                        &gear::tx()
+                            .gear()
+                            .create_program(code, salt, payload, gas, value, false),
                         signer.signer(),
                         PolkadotExtrinsicParamsBuilder::new()
                             .immortal()
@@ -2084,64 +2083,149 @@ async fn inspect_ethereum_configuration(
     ethereum: &beefy_relay::ethereum::Ethereum,
     gear_manager: [u8; 32],
 ) -> Result<Value> {
-    let manager = ConfiguredERC20Manager::new(
+    let view = ethereum.api.verified_finalized_view().await?;
+    let mut configuration = inspect_ethereum_configuration_at(
+        ethereum.api.raw_provider(),
         ethereum.receiver_address,
-        ethereum.api.raw_provider().clone(),
+        ethereum.queue_address,
+        gear_manager,
+        view.block_id(),
+    )
+    .await?;
+    let witness = inspect_ethereum_configuration_at(
+        ethereum.api.raw_witness_provider()?,
+        ethereum.receiver_address,
+        ethereum.queue_address,
+        gear_manager,
+        view.block_id(),
+    )
+    .await?;
+    qualified_ethereum_configuration(&configuration, &witness)?;
+    configuration["beefyRecovery"] = ethereum.recovery_configuration().await?;
+    view.recheck(ethereum.api.raw_provider()).await?;
+    Ok(configuration)
+}
+
+fn qualified_wrapped_vara(admin: Address, pauser: Address) -> Result<Address> {
+    ensure!(
+        admin != Address::ZERO && admin == pauser,
+        "HOLD: governance wrappedVara identities are zero or disagree"
     );
-    let governance_admin = manager.governanceAdmin().call().await?;
-    let governance_pauser = manager.governancePauser().call().await?;
+    Ok(admin)
+}
+
+fn qualified_ethereum_configuration(expected: &Value, observed: &Value) -> Result<Address> {
+    ensure!(
+        expected == observed,
+        "HOLD: Ethereum configuration changed or providers disagree; requalify tokens-manifest"
+    );
+    let wrapped_vara: Address = observed["wrappedVara"]
+        .as_str()
+        .ok_or_else(|| anyhow!("HOLD: qualified wrappedVara identity missing"))?
+        .parse()?;
+    ensure!(
+        wrapped_vara != Address::ZERO,
+        "HOLD: qualified wrappedVara is zero"
+    );
+    Ok(wrapped_vara)
+}
+
+fn ensure_native_pair(address: Address, approved_wrapped_vara: Address) -> Result<()> {
+    ensure!(
+        address == approved_wrapped_vara && address != Address::ZERO,
+        "HOLD: nativeVft Ethereum mapping differs from qualified wrappedVara"
+    );
+    Ok(())
+}
+
+fn validate_native_configuration_intents(stack: &Value, identity: &Value) -> Result<()> {
+    for key in [
+        "native.pause",
+        "native.wrapperManager",
+        "native.managerWrapper",
+        "native.resume",
+    ] {
+        let action = &stack["configuration"]["actions"][key];
+        ensure!(
+            action.is_null() || action["intent"] == *identity,
+            "HOLD: configuration action {key} native identity changed; requalify before recovery"
+        );
+    }
+    Ok(())
+}
+
+async fn inspect_ethereum_configuration_at(
+    provider: &impl Provider,
+    receiver_address: Address,
+    queue_address: Address,
+    gear_manager: [u8; 32],
+    at: BlockId,
+) -> Result<Value> {
+    let manager = ConfiguredERC20Manager::new(receiver_address, provider);
+    let governance_admin = manager.governanceAdmin().block(at).call().await?;
+    let governance_pauser = manager.governancePauser().block(at).call().await?;
     let expected_gear_manager = B256::from(gear_manager);
-    let vft_managers = manager.vftManagers().call().await?;
+    let vft_managers = manager.vftManagers().block(at).call().await?;
     ensure!(
         governance_admin != Address::ZERO
             && governance_pauser != Address::ZERO
-            && manager.messageQueue().call().await? == ethereum.queue_address
-            && manager.totalVftManagers().call().await? == U256::from(1u8)
+            && manager.messageQueue().block(at).call().await? == queue_address
+            && manager.totalVftManagers().block(at).call().await? == U256::from(1u8)
             && vft_managers == vec![expected_gear_manager]
-            && manager.isVftManager(expected_gear_manager).call().await?
-            && manager.totalTokens().call().await? == U256::from(EVM_TOKEN_SPECS.len())
-            && !manager.paused().call().await?,
+            && manager
+                .isVftManager(expected_gear_manager)
+                .block(at)
+                .call()
+                .await?
+            && manager.totalTokens().block(at).call().await? == U256::from(EVM_TOKEN_SPECS.len())
+            && !manager.paused().block(at).call().await?,
         "fresh EVM token manager roles, queue, token set, or VFT registration differ"
     );
     let mut pauser_role = [0u8; 32];
     pauser_role[31] = 1;
     ensure!(
-        manager.hasRole(B256::ZERO, governance_admin).call().await?
+        manager
+            .hasRole(B256::ZERO, governance_admin)
+            .block(at)
+            .call()
+            .await?
             && manager
                 .hasRole(B256::from(pauser_role), governance_admin)
+                .block(at)
                 .call()
                 .await?
             && manager
                 .hasRole(B256::from(pauser_role), governance_pauser)
+                .block(at)
                 .call()
                 .await?,
         "fresh EVM token manager governance roles are incomplete"
     );
-    let admin_code = ethereum
-        .api
-        .raw_provider()
-        .get_code_at(governance_admin)
-        .await?;
-    let pauser_code = ethereum
-        .api
-        .raw_provider()
-        .get_code_at(governance_pauser)
-        .await?;
+    let admin_code = provider.get_code_at(governance_admin).block_id(at).await?;
+    let pauser_code = provider.get_code_at(governance_pauser).block_id(at).await?;
     ensure!(
         !admin_code.is_empty() && !pauser_code.is_empty(),
         "EVM governance identities are not deployed contracts"
     );
-    let manager_code = ethereum
-        .api
-        .raw_provider()
-        .get_code_at(ethereum.receiver_address)
-        .await?;
+    let wrapped_vara = qualified_wrapped_vara(
+        ConfiguredGovernance::new(governance_admin, provider)
+            .wrappedVara()
+            .block(at)
+            .call()
+            .await?,
+        ConfiguredGovernance::new(governance_pauser, provider)
+            .wrappedVara()
+            .block(at)
+            .call()
+            .await?,
+    )?;
+    let manager_code = provider.get_code_at(receiver_address).block_id(at).await?;
     ensure!(
         !manager_code.is_empty(),
         "EVM token manager has no runtime code"
     );
 
-    let token_addresses = manager.tokens().call().await?;
+    let token_addresses = manager.tokens().block(at).call().await?;
     ensure!(
         token_addresses.len() == EVM_TOKEN_SPECS.len(),
         "EVM token manager does not have exactly six fresh test tokens"
@@ -2149,11 +2233,11 @@ async fn inspect_ethereum_configuration(
     let mut by_symbol = BTreeMap::<String, Address>::new();
     let mut token_records = Vec::with_capacity(token_addresses.len());
     for address in token_addresses {
-        let token = ConfiguredERC20::new(address, ethereum.api.raw_provider().clone());
-        let name = token.name().call().await?;
-        let symbol = token.symbol().call().await?;
-        let decimals = token.decimals().call().await?;
-        let kind = manager.getTokenType(address).call().await?;
+        let token = ConfiguredERC20::new(address, provider);
+        let name = token.name().block(at).call().await?;
+        let symbol = token.symbol().block(at).call().await?;
+        let decimals = token.decimals().block(at).call().await?;
+        let kind = manager.getTokenType(address).block(at).call().await?;
         let spec = EVM_TOKEN_SPECS
             .iter()
             .find(|spec| spec.symbol == symbol)
@@ -2163,7 +2247,7 @@ async fn inspect_ethereum_configuration(
             by_symbol.insert(symbol.clone(), address).is_none(),
             "duplicate EVM token symbol {symbol}"
         );
-        let code = ethereum.api.raw_provider().get_code_at(address).await?;
+        let code = provider.get_code_at(address).block_id(at).await?;
         ensure!(!code.is_empty(), "EVM token {symbol} has no runtime code");
         token_records.push(json!({
             "address": format!("{address:#x}"),
@@ -2178,42 +2262,41 @@ async fn inspect_ethereum_configuration(
         by_symbol.len() == EVM_TOKEN_SPECS.len(),
         "EVM token registry is incomplete"
     );
+    ensure!(
+        by_symbol.get("WTVARA") == Some(&wrapped_vara),
+        "HOLD: governance wrappedVara is not the registered Gear-supply WTVARA token"
+    );
     token_records.sort_by(|left, right| left["symbol"].as_str().cmp(&right["symbol"].as_str()));
 
-    let payment_addresses = manager.bridgingPayments().call().await?;
+    let payment_addresses = manager.bridgingPayments().block(at).call().await?;
     ensure!(
-        manager.totalBridgingPayments().call().await? == U256::from(1u8)
+        manager.totalBridgingPayments().block(at).call().await? == U256::from(1u8)
             && payment_addresses.len() == 1,
         "fresh EVM token manager must have exactly one bridging-payment contract"
     );
     let payment_address = payment_addresses[0];
-    let payment =
-        ConfiguredBridgingPayment::new(payment_address, ethereum.api.raw_provider().clone());
-    let payment_manager = payment.erc20Manager().call().await?;
-    let payment_fee = payment.fee().call().await?;
-    let payment_owner = payment.owner().call().await?;
-    let payment_code = ethereum
-        .api
-        .raw_provider()
-        .get_code_at(payment_address)
-        .await?;
+    let payment = ConfiguredBridgingPayment::new(payment_address, provider);
+    let payment_manager = payment.erc20Manager().block(at).call().await?;
+    let payment_fee = payment.fee().block(at).call().await?;
+    let payment_owner = payment.owner().block(at).call().await?;
+    let payment_code = provider.get_code_at(payment_address).block_id(at).await?;
     ensure!(
         payment_address != Address::ZERO
-            && payment_manager == ethereum.receiver_address
+            && payment_manager == receiver_address
             && payment_fee > U256::ZERO
             && payment_owner != Address::ZERO
             && !payment_code.is_empty(),
         "EVM bridging-payment identity, owner, fee, or manager binding is invalid"
     );
     Ok(json!({
-        "manager": format!("{:#x}", ethereum.receiver_address),
+        "manager": format!("{receiver_address:#x}"),
         "managerCodeHash": format!("{:#x}", alloy::primitives::keccak256(manager_code.as_ref())),
         "governanceAdmin": format!("{governance_admin:#x}"),
         "governanceAdminCodeHash": format!("{:#x}", alloy::primitives::keccak256(admin_code.as_ref())),
         "governancePauser": format!("{governance_pauser:#x}"),
         "governancePauserCodeHash": format!("{:#x}", alloy::primitives::keccak256(pauser_code.as_ref())),
-        "messageQueue": format!("{:#x}", ethereum.queue_address),
-        "beefyRecovery": ethereum.recovery_configuration().await?,
+        "messageQueue": format!("{queue_address:#x}"),
+        "wrappedVara": format!("{wrapped_vara:#x}"),
         "vftManagers": [format!("{expected_gear_manager:#x}")],
         "tokens": token_records,
         "bridgingPayments": [{
@@ -2354,7 +2437,6 @@ pub async fn configure(
         source.source_genesis.into(),
         <[u8; 32]>::from(api.account_id().clone()),
     )?;
-    reconcile_saved_setup(&api, &stack_path).await?;
     let setup = ActorId::from(<[u8; 32]>::from(api.account_id().clone()));
     let manager_id = actor(
         stack["programs"]["vftManager"]["id"]
@@ -2389,10 +2471,41 @@ pub async fn configure(
         .await?;
     let evm_configuration =
         inspect_ethereum_configuration(&ethereum, manager_id.into_bytes()).await?;
-    ensure!(
-        deployment["ethereumConfiguration"] == evm_configuration,
-        "Hoodi governance, token, queue, or payment identity changed since tokens-manifest"
-    );
+    let approved_wrapped_vara =
+        qualified_ethereum_configuration(&deployment["ethereumConfiguration"], &evm_configuration)?;
+    let native_id = actor(
+        stack["programs"]["nativeVft"]["id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("native wrapper ID missing"))?,
+    )?;
+    let native_spec = GEAR_TOKEN_SPECS
+        .iter()
+        .find(|spec| spec.component == "nativeVft")
+        .ok_or_else(|| anyhow!("native wrapper specification missing"))?;
+    let native_address: Address = evm_configuration["tokens"]
+        .as_array()
+        .and_then(|tokens| {
+            tokens
+                .iter()
+                .find(|token| token["symbol"] == native_spec.evm_symbol)
+        })
+        .and_then(|token| token["address"].as_str())
+        .ok_or_else(|| anyhow!("native wrapper Ethereum token missing"))?
+        .parse()?;
+    ensure_native_pair(native_address, approved_wrapped_vara)?;
+    let native_identity = json!({
+        "manager": format!("0x{}", hex::encode(manager_id.into_bytes())),
+        "wrapper": format!("0x{}", hex::encode(native_id.into_bytes())),
+        "wrappedVara": format!("{approved_wrapped_vara:#x}"),
+    });
+    if !stack["configuration"]["identity"].is_null() {
+        qualified_ethereum_configuration(
+            &stack["configuration"]["identity"]["ethereum"],
+            &evm_configuration,
+        )?;
+    }
+    validate_native_configuration_intents(&stack, &native_identity)?;
+    reconcile_saved_setup(&api, &stack_path).await?;
     let anchor_block = deployment["anchor"]["block"]
         .as_u64()
         .ok_or_else(|| anyhow!("signed anchor block missing"))?;
@@ -2595,6 +2708,7 @@ pub async fn configure(
             spec.component
         );
         if spec.component == "nativeVft" {
+            ensure_native_pair(address, approved_wrapped_vara)?;
             ensure_native_minimum_balance(
                 vft_vara_client::VftExtension::new(remoting.clone())
                     .minimum_balance()
@@ -2842,11 +2956,6 @@ pub async fn configure(
         }
     }
 
-    let native_id = pairs
-        .iter()
-        .find(|(spec, _, _)| spec.component == "nativeVft")
-        .map(|(_, peer, _)| *peer)
-        .ok_or_else(|| anyhow!("native wrapper is absent"))?;
     let native = vft_vara_client::NativeEscrow::new(remoting.clone());
     let native_admin = vft_vara_client::VftAdmin::new(remoting.clone());
     let (at, _, _) = finalized_evidence(&source).await?;
@@ -2878,7 +2987,6 @@ pub async fn configure(
         !was_ready || (native_bound && !native_paused),
         "ready native configuration changed or was safety-paused"
     );
-    let native_identity = json!({"manager": format!("0x{}", hex::encode(manager_id.into_bytes())), "wrapper": format!("0x{}", hex::encode(native_id.into_bytes()))});
     if !native_bound {
         ensure!(
             manager_paused,
@@ -2954,7 +3062,10 @@ pub async fn configure(
                     &stack_path,
                     key,
                 ))
-                .configure_native_wrapper(Some(native_id))
+                .configure_native_wrapper(Some((
+                    native_id,
+                    H160::from_slice(approved_wrapped_vara.as_slice()),
+                )))
                 .with_gas_limit(gas)
                 .send_recv(manager_id)
                 .await?;
@@ -3158,6 +3269,90 @@ fn state_directory(path: &Path) -> &Path {
 #[cfg(test)]
 mod configuration_recovery_tests {
     use super::*;
+
+    #[test]
+    fn native_identity_requires_governance_provider_and_manifest_agreement() -> Result<()> {
+        let approved = Address::from([1; 20]);
+        let substitute = Address::from([2; 20]);
+        assert_eq!(qualified_wrapped_vara(approved, approved)?, approved);
+        for (admin, pauser) in [
+            (Address::ZERO, Address::ZERO),
+            (approved, Address::ZERO),
+            (Address::ZERO, approved),
+            (approved, substitute),
+        ] {
+            assert!(qualified_wrapped_vara(admin, pauser).is_err());
+        }
+        let configuration = json!({
+            "wrappedVara": format!("{approved:#x}"),
+            "tokens": [{"symbol": "WTVARA", "address": format!("{approved:#x}"), "type": 2}],
+        });
+        assert_eq!(
+            qualified_ethereum_configuration(&configuration, &configuration)?,
+            approved
+        );
+        let mut changed = configuration.clone();
+        changed["wrappedVara"] = json!(format!("{substitute:#x}"));
+        assert!(qualified_ethereum_configuration(&configuration, &changed).is_err());
+        assert!(qualified_ethereum_configuration(&changed, &configuration).is_err());
+        let mut missing = configuration.clone();
+        missing.as_object_mut().unwrap().remove("wrappedVara");
+        assert!(qualified_ethereum_configuration(&missing, &configuration).is_err());
+        assert!(qualified_ethereum_configuration(&missing, &missing).is_err());
+        let mut zero = configuration.clone();
+        zero["wrappedVara"] = json!(format!("{:#x}", Address::ZERO));
+        assert!(qualified_ethereum_configuration(&zero, &zero).is_err());
+
+        ensure_native_pair(approved, approved)?;
+        // Correct metadata is not approval to substitute another registered Gear token.
+        changed = configuration.clone();
+        changed["tokens"][0]["address"] = json!(format!("{substitute:#x}"));
+        let symbol_only_pair: Address =
+            changed["tokens"][0]["address"].as_str().unwrap().parse()?;
+        assert_eq!(changed["tokens"][0]["symbol"], "WTVARA");
+        assert!(ensure_native_pair(symbol_only_pair, approved).is_err());
+        assert!(qualified_ethereum_configuration(&configuration, &changed).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn native_identity_recovery_rejects_unqualified_and_changed_intents_without_writes(
+    ) -> Result<()> {
+        let directory = directory("native-identity")?;
+        let path = directory.join("token-stack.json");
+        let identity = json!({
+            "manager": "manager",
+            "wrapper": "wrapper",
+            "wrappedVara": format!("{:#x}", Address::from([1; 20])),
+        });
+        for key in [
+            "native.pause",
+            "native.wrapperManager",
+            "native.managerWrapper",
+            "native.resume",
+        ] {
+            for status in ["pending", "verified"] {
+                let mut state = json!({"configuration":{"actions":{}}});
+                state["configuration"]["actions"][key] =
+                    json!({"status":status,"intent":identity,"messages":[]});
+                validate_native_configuration_intents(&state, &identity)?;
+                for changed in [Value::Null, json!(format!("{:#x}", Address::from([2; 20])))] {
+                    let mut stale = state.clone();
+                    stale["configuration"]["actions"][key]["intent"]["wrappedVara"] = changed;
+                    save(&directory, &stale)?;
+                    let before = fs::read(&path)?;
+                    assert!(validate_native_configuration_intents(&stale, &identity).is_err());
+                    // Even already-bound recovery must retain the original approval unchanged.
+                    assert!(
+                        prepare_configuration_action(&path, key, identity.clone(), true).is_err()
+                    );
+                    assert_eq!(fs::read(&path)?, before);
+                }
+            }
+        }
+        fs::remove_dir_all(directory)?;
+        Ok(())
+    }
 
     #[test]
     fn native_wrapper_minimum_balance_rejects_dust_policy() -> Result<()> {

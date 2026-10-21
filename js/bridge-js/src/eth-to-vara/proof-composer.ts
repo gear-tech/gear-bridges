@@ -20,7 +20,7 @@ import {
   ProofResult,
 } from '../vara/index.js';
 import { StatusCb, withOriginalDeadline } from '../util.js';
-import { NATIVE_WRAPPER_IDL_SHA256 } from './token-effect.js';
+import { NATIVE_WRAPPER_IDL_SHA256, VFT_MANAGER_IDL_SHA256 } from './token-effect.js';
 
 export type CheckpointNetwork = 'Mainnet' | 'Sepolia' | 'Holesky' | 'Hoodi' | Readonly<{
   localFixture: Readonly<{ genesis_time: bigint; genesis_validators_root: HexString }>;
@@ -77,6 +77,7 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
       (copy.checkpoint.idlSha256 !== CHECKPOINT_IDL_SHA256 &&
         !(typeof copy.checkpoint.network === 'string' && copy.checkpoint.idlSha256 === LEGACY_PUBLIC_CHECKPOINT_IDL_SHA256)) ||
       copy.historicalProxyIdlSha256 !== PROXY_IDL_SHA256 ||
+      (copy.consumer.service === 'VftManager' && copy.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256) ||
       (copy.nativeWrapper && copy.nativeWrapper.idlSha256 !== NATIVE_WRAPPER_IDL_SHA256)) {
     throw new Error('HOLD: unqualified deployed inbound IDL or proof framing');
   }

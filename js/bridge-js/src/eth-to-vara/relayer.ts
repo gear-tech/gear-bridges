@@ -64,6 +64,11 @@ async function readNativeRedemptions(rows: readonly NativeReceiptDeposit[], pin:
 /** Standard manager adapter; arbitrary consumers must still supply their own verifyEffect. */
 export function createVftManagerReplyContract(profile: InboundProofProfile,
   adapter: Pick<ConsumerReplyContract, 'registry' | 'idlSha256'> & NonNullable<ConsumerReplyContract['nativeSettlement']>): ConsumerReplyContract {
+  profile = immutableInboundProfile(profile);
+  if (profile.consumer.service !== 'VftManager' || profile.consumer.method !== 'SubmitReceipt' ||
+      adapter.idlSha256 !== VFT_MANAGER_IDL_SHA256) {
+    throw new Error('HOLD: consumer decoder does not match approved deployed IDL');
+  }
   const { registry, idlSha256, ...settlement } = adapter;
   return {
     registry, idlSha256, resultType: 'Result<Null, Error>',
@@ -90,7 +95,8 @@ export function createVftManagerReplyContract(profile: InboundProofProfile,
 }
 
 function consumerResult(payload: HexString, profile: InboundProofProfile, contract: Pick<ConsumerReplyContract, 'registry' | 'resultType' | 'idlSha256'>) {
-  if (contract.idlSha256 !== profile.consumer.idlSha256 || !/^Result<.+>$/.test(contract.resultType)) {
+  if ((profile.consumer.service === 'VftManager' && profile.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256) ||
+      contract.idlSha256 !== profile.consumer.idlSha256 || !/^Result<.+>$/.test(contract.resultType)) {
     throw new Error('HOLD: consumer decoder does not match approved deployed IDL');
   }
   const decoded = contract.registry.createType<ITuple>(

@@ -1290,7 +1290,7 @@ async fn vft_burn_from() -> Result<()> {
         .await
         .unwrap();
     service
-        .configure_native_wrapper(Some(vft_id))
+        .configure_native_wrapper(Some((vft_id, address_token.into())))
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
@@ -1585,7 +1585,7 @@ async fn vft_burn_from() -> Result<()> {
         .await
         .unwrap();
     service
-        .configure_native_wrapper(Some(vft_id))
+        .configure_native_wrapper(Some((vft_id, address_token.into())))
         .with_gas_limit(gas_limit)
         .send_recv(destination)
         .await
@@ -1699,6 +1699,7 @@ async fn vft_burn_from() -> Result<()> {
                 vft_vara_client::native_escrow::io::HoldRedemption::encode_call(
                     held_row.operation_id,
                     held_snapshot.clone(),
+                    true,
                 ),
             ),
             (
@@ -1706,6 +1707,7 @@ async fn vft_burn_from() -> Result<()> {
                 vft_vara_client::native_escrow::io::HoldRedemption::encode_call(
                     held_row.operation_id,
                     held_snapshot.clone(),
+                    true,
                 ),
             ),
         ],
@@ -1860,7 +1862,7 @@ async fn vft_burn_from() -> Result<()> {
         .unwrap();
     assert_eq!(
         escrow
-            .hold_redemption(held_row.operation_id, held_snapshot.clone())
+            .hold_redemption(held_row.operation_id, held_snapshot.clone(), false)
             .with_gas_limit(gas_limit)
             .send_recv(vft_id)
             .await

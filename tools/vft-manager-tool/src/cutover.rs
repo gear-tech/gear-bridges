@@ -438,42 +438,219 @@ async fn release_owned_signers(
         current,
         others,
         async {
-            for call in &work.calls {
-                verify_lifecycle_original(api, &scanner, &work.intent, call).await?;
-            }
-            for admission in &work.admissions {
-                if admission.exclusion.is_some() {
-                    authenticate_exclusion(api, &scanner, &work, admission).await?;
-                    continue;
-                }
-                let mut bytes = admission.proof.as_slice();
-                let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
-                ensure!(
-                    bytes.is_empty(),
-                    "HOLD: owned admission proof encoding changed"
-                );
-                for archived in &admission.attempts {
-                    verify_proof_attempt(&scanner, &proof, archived).await?;
-                }
-                if let Some(signed) = &admission.signed {
-                    scanner
-                        .verify_saved_completion(
-                            api,
-                            &proof,
-                            signed,
-                            admission
-                                .settlement
-                                .as_ref()
-                                .context("HOLD: owned proof settlement pending")?,
-                        )
-                        .await?;
-                }
-            }
+            authenticate_release_evidence(api, &scanner, &work).await?;
             view.recheck(&**eth).await?;
             Ok(())
         },
     )
     .await
+}
+
+fn release_settlement_original<'a>(
+    identity: &InboundRuntimeIdentity,
+    admission: &'a Admission,
+    proof: &eth_events_electra_client::EthToVaraEvent,
+    journal: Option<&'a seal::OriginalJournal>,
+) -> Result<&'a SignedSubmission> {
+    let pin = admission
+        .settlement
+        .as_ref()
+        .context("HOLD: owned proof settlement pending")?;
+    ensure!(
+        admission.exclusion.is_none()
+            && admission.receipt_key == (proof.proof_block.block.slot, proof.transaction_index),
+        "HOLD: settlement proof/key or disposition changed"
+    );
+    if let Some(journal) = journal {
+        ensure!(
+            journal.runtime_identity.as_ref() == Some(identity),
+            "HOLD: original journal runtime identity changed"
+        );
+    }
+    if let Some(external) = &admission.external_original {
+        ensure!(
+            external.provenance == "canonical-external"
+                && admission.admission == "externally-delivered"
+                && admission.signed.is_none()
+                && admission.attempts.is_empty()
+                && admission.original_lane_uuid.is_none(),
+            "HOLD: external provenance is mixed with owned originals"
+        );
+        let journal = journal.context("HOLD: external original journal missing")?;
+        for old in journal
+            .transactions
+            .values()
+            .chain(journal.completed.values())
+        {
+            if old.tx.tx_hash == admission.original_tx_hash
+                || old
+                    .receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.receipt_key == admission.receipt_key)
+            {
+                ensure!(
+                    never_dispatched(old),
+                    "HOLD: external original attempts to replace a retained owned signature"
+                );
+            }
+        }
+        if let Some(uuid) = admission.undispatched_old_admission {
+            let old = journal
+                .transactions
+                .get(&uuid)
+                .context("HOLD: external link is not a retained unsigned original")?;
+            ensure!(
+                old.uuid == uuid
+                    && never_dispatched(old)
+                    && old.tx.tx_hash == admission.original_tx_hash
+                    && old.tx.slot_number.0 == admission.receipt_key.0
+                    && old
+                        .receipt
+                        .as_ref()
+                        .is_none_or(|_| old.receipt_event().is_ok_and(|original| {
+                            original.transaction_index == proof.transaction_index
+                                && original.receipt_rlp == proof.receipt_rlp
+                                && original.proof_block.block.body.execution_payload.block_hash
+                                    == proof.proof_block.block.body.execution_payload.block_hash
+                        })),
+                "HOLD: external original does not match retained unsigned admission"
+            );
+        }
+        ensure!(
+            pin.finalized_block_number.is_some_and(|terminal| external
+                .discovered_at
+                .finalized_block_number
+                .is_some_and(|discovered| terminal <= discovered)),
+            "HOLD: settlement postdates external discovery"
+        );
+        return Ok(&external.original);
+    }
+    ensure!(
+        admission.undispatched_old_admission.is_none()
+            && admission.admission
+                == if admission.fee_event_observed {
+                    "paid"
+                } else {
+                    "cutover-sponsored"
+                },
+        "HOLD: original settlement provenance changed"
+    );
+    if let Some(uuid) = admission.original_lane_uuid {
+        let old = journal
+            .context("HOLD: completed original journal missing")?
+            .completed
+            .get(&uuid)
+            .context("HOLD: settlement UUID is not completed")?;
+        ensure!(
+            old.uuid == uuid
+                && matches!(
+                    old.status,
+                    relayer::message_relayer::eth_to_gear::tx_manager::TxStatus::Completed
+                )
+                && old.tx.tx_hash == admission.original_tx_hash
+                && old.receipt_event()?.encode() == admission.proof
+                && admission.signed.is_none()
+                && admission.attempts.is_empty()
+                && old
+                    .saved_settlement_observation
+                    .as_ref()
+                    .or(old.receipt_observation.as_ref())
+                    == Some(pin),
+            "HOLD: completed original linkage or settlement pin changed"
+        );
+        let signed = old
+            .receipt
+            .as_ref()
+            .and_then(|receipt| receipt.signed_submission.as_ref())
+            .context("HOLD: settlement original signature missing")?;
+        ensure!(
+            signed.sender.parse::<subxt::utils::AccountId32>()?.0 == identity.gear_sender,
+            "HOLD: completed original sender changed"
+        );
+        return Ok(signed);
+    }
+    admission
+        .signed
+        .as_ref()
+        .context("HOLD: settlement original signature missing")
+}
+
+async fn authenticate_release_evidence(
+    api: &GearApi,
+    scanner: &MessageSender,
+    work: &Work,
+) -> Result<()> {
+    for call in &work.calls {
+        verify_lifecycle_original(api, scanner, &work.intent, call).await?;
+    }
+    // Retain one immutable view of the original journal for all settlement provenance.
+    let journal = work
+        .admissions
+        .iter()
+        .any(|admission| {
+            admission.settlement.is_some()
+                && (admission.external_original.is_some() || admission.original_lane_uuid.is_some())
+        })
+        .then(|| seal::read_original_journal(&work.intent.old_transactions))
+        .transpose()?;
+    for admission in &work.admissions {
+        if admission.exclusion.is_some() {
+            authenticate_exclusion(api, scanner, work, admission).await?;
+            continue;
+        }
+        let mut bytes = admission.proof.as_slice();
+        let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
+        ensure!(
+            bytes.is_empty(),
+            "HOLD: owned admission proof encoding changed"
+        );
+        let signed = release_settlement_original(
+            &work.intent.old_identity,
+            admission,
+            &proof,
+            journal.as_ref(),
+        )?;
+        let pin = admission
+            .settlement
+            .as_ref()
+            .context("HOLD: owned proof settlement pending")?;
+        for archived in &admission.attempts {
+            verify_proof_attempt(scanner, &proof, archived).await?;
+        }
+        if let Some(external) = &admission.external_original {
+            let mut external = external.clone();
+            ensure!(
+                matches!(qualify_external_original(
+                    api, scanner, &proof, &mut external, Some(pin), &work.intent.old_identity, None,
+                ).await?, QualifiedExternal::Settled(observed) if &observed == pin),
+                "HOLD: external settlement pin changed"
+            );
+        } else {
+            if let Some(uuid) = admission.original_lane_uuid {
+                let receipt = journal
+                    .as_ref()
+                    .and_then(|journal| journal.completed.get(&uuid))
+                    .and_then(|old| old.receipt.as_ref())
+                    .context("HOLD: completed original proof missing")?;
+                for archived in &receipt.submission_attempts {
+                    ensure!(
+                        archived
+                            .signed_submission
+                            .sender
+                            .parse::<subxt::utils::AccountId32>()?
+                            .0
+                            == work.intent.old_identity.gear_sender,
+                        "HOLD: completed original attempt sender changed"
+                    );
+                    verify_proof_attempt(scanner, &proof, &archived.signed_submission).await?;
+                }
+            }
+            scanner
+                .verify_saved_completion(api, &proof, signed, pin)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 async fn release_signers_after_authentication(
@@ -527,18 +704,26 @@ fn validate_work_version(work: &Work) -> Result<()> {
         matches!(work.schema_version, 1 | 2 | 3),
         "HOLD: unsupported cutover work schema"
     );
-    ensure!(if work.schema_version == 3 {
-        work.ethereum_authentication.as_ref().is_some_and(|checkpoint|
-            checkpoint.schema_version == 1
-                && checkpoint.policy == "independent-two-el-v1"
-                && checkpoint.chain_id == work.intent.old_identity.ethereum_chain_id
-                && checkpoint.genesis_hash.0 == work.intent.old_identity.ethereum_genesis_hash.0
-                && checkpoint.common_header.number >= work.intent.boundary.execution_number
-                && work.registration.as_ref().is_none_or(|registration|
-                    checkpoint.common_header.number >= registration.included_number))
-    } else {
-        work.ethereum_authentication.is_none()
-    }, "HOLD: cutover finality evidence/schema mismatch");
+    ensure!(
+        if work.schema_version == 3 {
+            work.ethereum_authentication
+                .as_ref()
+                .is_some_and(|checkpoint| {
+                    checkpoint.schema_version == 1
+                        && checkpoint.policy == "independent-two-el-v1"
+                        && checkpoint.chain_id == work.intent.old_identity.ethereum_chain_id
+                        && checkpoint.genesis_hash.0
+                            == work.intent.old_identity.ethereum_genesis_hash.0
+                        && checkpoint.common_header.number >= work.intent.boundary.execution_number
+                        && work.registration.as_ref().is_none_or(|registration| {
+                            checkpoint.common_header.number >= registration.included_number
+                        })
+                })
+        } else {
+            work.ethereum_authentication.is_none()
+        },
+        "HOLD: cutover finality evidence/schema mismatch"
+    );
     if work.schema_version == 1 {
         ensure!(
             work.admissions
@@ -801,11 +986,15 @@ async fn upgrade_work(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result
 
 fn read_versioned_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
-    ensure!(matches!(value["schema_version"].as_u64(), Some(1 | 2 | 3)),
-        "HOLD: unsupported cutover evidence schema");
+    ensure!(
+        matches!(value["schema_version"].as_u64(), Some(1 | 2 | 3)),
+        "HOLD: unsupported cutover evidence schema"
+    );
     if value["schema_version"] != 3 {
-        ensure!(value.get("ethereum_authentication").is_none(),
-            "HOLD: legacy evidence contains an Ethereum authentication field");
+        ensure!(
+            value.get("ethereum_authentication").is_none(),
+            "HOLD: legacy evidence contains an Ethereum authentication field"
+        );
     }
     if value["schema_version"] == 1 {
         let admissions = value["admissions"].as_array().into_iter().flatten();
@@ -1934,13 +2123,23 @@ async fn fee_emitter(
     receipt: &TransactionReceipt,
 ) -> Result<Option<H160>> {
     let mut view = eth.verified_finalized_view().await?;
-    seal::authenticated_fee_emitter(eth, &mut view, intent.erc20_manager,
-        intent.old_identity.bridging_payment_address, receipt).await
+    seal::authenticated_fee_emitter(
+        eth,
+        &mut view,
+        intent.erc20_manager,
+        intent.old_identity.bridging_payment_address,
+        receipt,
+    )
+    .await
 }
 
 fn belongs_to_source(intent: &Intent, timestamp: u64) -> Result<bool> {
-    seal::belongs_to_source(intent.source_receipt_floor, &intent.boundary,
-        intent.boundary_execution_timestamp, timestamp)
+    seal::belongs_to_source(
+        intent.source_receipt_floor,
+        &intent.boundary,
+        intent.boundary_execution_timestamp,
+        timestamp,
+    )
 }
 
 fn external_parent_result(
@@ -2894,12 +3093,15 @@ async fn scan_coverage(
             .full()
             .await?
             .context("HOLD: complete canonical transaction inventory unavailable")?;
-        ensure!(block.header.number == next
-            && block.header.inner.hash_slow() == block.header.hash,
-            "HOLD: coverage header identity changed");
-        view.verify_blocks(&**eth, &std::collections::BTreeMap::from([
-            (next, block.header.hash),
-        ])).await?;
+        ensure!(
+            block.header.number == next && block.header.inner.hash_slow() == block.header.hash,
+            "HOLD: coverage header identity changed"
+        );
+        view.verify_blocks(
+            &**eth,
+            &std::collections::BTreeMap::from([(next, block.header.hash)]),
+        )
+        .await?;
         if let Some(previous) = work.blocks.last() {
             ensure!(
                 block.header.parent_hash.0 == previous.hash.0,
@@ -2949,9 +3151,14 @@ async fn scan_coverage(
             {
                 continue;
             }
-            let emitter = seal::authenticated_fee_emitter(eth, &mut view,
-                work.intent.erc20_manager, work.intent.old_identity.bridging_payment_address,
-                receipt).await?;
+            let emitter = seal::authenticated_fee_emitter(
+                eth,
+                &mut view,
+                work.intent.erc20_manager,
+                work.intent.old_identity.bridging_payment_address,
+                receipt,
+            )
+            .await?;
             let paid = emitter.is_some();
             if let Some(existing) = work
                 .admissions
@@ -3533,8 +3740,16 @@ async fn authenticate_source_emitter(
 ) -> Result<()> {
     let view = eth.verified_finalized_view().await?;
     let payment_manager = if let Some(payment) = identity.bridging_payment_address {
-        Some(seal::authenticated_payment_manager(eth, &view, payment,
-            view.block_number(), view.block_hash()).await?)
+        Some(
+            seal::authenticated_payment_manager(
+                eth,
+                &view,
+                payment,
+                view.block_number(),
+                view.block_hash(),
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -3577,29 +3792,51 @@ pub async fn prepare(
             ),
         "HOLD: original journal contains receipts above proposed boundary"
     );
-    let eth = PollingEthApi::new(&args.ethereum_rpc).await?
-        .with_finality_witness(&args.ethereum_finality.ethereum_witness_rpc,
-            old_identity.ethereum_chain_id, old_identity.ethereum_genesis_hash.0.into()).await?;
-    eth.enable_finality_archive(&args.cutover_dir.join("ethereum-finality"),
-        old_identity.ethereum_genesis_hash.0.into()).await?;
+    let eth = PollingEthApi::new(&args.ethereum_rpc)
+        .await?
+        .with_finality_witness(
+            &args.ethereum_finality.ethereum_witness_rpc,
+            old_identity.ethereum_chain_id,
+            old_identity.ethereum_genesis_hash.0.into(),
+        )
+        .await?;
+    eth.enable_finality_archive(
+        &args.cutover_dir.join("ethereum-finality"),
+        old_identity.ethereum_genesis_hash.0.into(),
+    )
+    .await?;
     let mut view = eth.verified_finalized_view().await?;
     if let Some(predecessor) = seal::predecessor_seal_path(&old_transactions)? {
         let signer: gsdk::signer::Signer = api.clone().into();
-        seal::verify_originals_read_only(&predecessor,
-            ApiProviderConnection::from_api(signer.api().clone()), api, &eth, &mut view).await?;
+        seal::verify_originals_read_only(
+            &predecessor,
+            ApiProviderConnection::from_api(signer.api().clone()),
+            api,
+            &eth,
+            &mut view,
+        )
+        .await?;
     }
     let beacon = BeaconClient::new(args.beacon_rpc.clone(), Some(Duration::from_secs(30))).await?;
     let manager = VftManager::new(GClientRemoting::new(api.clone()));
     let at = api.last_block_hash().await?;
     let pin = sails_rs::H256::from_slice(at.as_ref());
     // Beacon is only a locator until the execution boundary and checkpoint proof agree.
-    let selected = beacon.get_block::<ethereum_common::beacon::electra::Block>(
-        args.boundary_slot).await?;
-    ensure!(selected.slot == args.boundary_slot, "HOLD: selected boundary slot changed");
-    view.verify_blocks(&*eth, &std::collections::BTreeMap::from([(
-        selected.body.execution_payload.block_number,
-        B256::from(selected.body.execution_payload.block_hash.0.0),
-    )])).await?;
+    let selected = beacon
+        .get_block::<ethereum_common::beacon::electra::Block>(args.boundary_slot)
+        .await?;
+    ensure!(
+        selected.slot == args.boundary_slot,
+        "HOLD: selected boundary slot changed"
+    );
+    view.verify_blocks(
+        &*eth,
+        &std::collections::BTreeMap::from([(
+            selected.body.execution_payload.block_number,
+            B256::from(selected.body.execution_payload.block_hash.0 .0),
+        )]),
+    )
+    .await?;
     let block = authenticate_cutover_boundary(
         &beacon,
         api,
@@ -3607,8 +3844,10 @@ pub async fn prepare(
         args.boundary_slot,
     )
     .await?;
-    ensure!(block.tree_hash_root() == selected.tree_hash_root(),
-        "HOLD: authenticated Beacon boundary changed after execution qualification");
+    ensure!(
+        block.tree_hash_root() == selected.tree_hash_root(),
+        "HOLD: authenticated Beacon boundary changed after execution qualification"
+    );
     view.recheck(&*eth).await?;
     if path.exists() {
         upgrade_work(api, &eth, &path).await?;
@@ -3818,7 +4057,8 @@ pub async fn prepare(
     }
     .await;
     if let Err(error) = result {
-        let release = release_draining_hold(api, &eth, &path, &_signer_owner, &_other_signers).await;
+        let release =
+            release_draining_hold(api, &eth, &path, &_signer_owner, &_other_signers).await;
         return match release {
             Ok(_) => Err(error),
             Err(release) => Err(error.context(format!("Signer ownership retained: {release:#}"))),
@@ -4012,13 +4252,23 @@ async fn authenticate_registration(
     validate_registration(intent, &registration)?;
     let mut view = eth.verified_finalized_view().await?;
     view.verify_checkpoint(&**eth, &receipt.checkpoint).await?;
-    view.verify_blocks(&**eth, &std::collections::BTreeMap::from([
-        (registration.included_number, registration.included_hash),
-        (registration.finalized_number, registration.finalized_hash),
-    ])).await?;
+    view.verify_blocks(
+        &**eth,
+        &std::collections::BTreeMap::from([
+            (registration.included_number, registration.included_hash),
+            (registration.finalized_number, registration.finalized_hash),
+        ]),
+    )
+    .await?;
     receipt.inclusion.verify_inclusion(&view, hash)?;
-    verify_registrations_at(eth, intent, &view,
-        registration.finalized_number, registration.finalized_hash).await?;
+    verify_registrations_at(
+        eth,
+        intent,
+        &view,
+        registration.finalized_number,
+        registration.finalized_hash,
+    )
+    .await?;
     Ok(registration)
 }
 async fn verify_registrations_at(
@@ -4028,9 +4278,18 @@ async fn verify_registrations_at(
     number: u64,
     hash: B256,
 ) -> Result<()> {
-    seal::authenticate_manager_registrations(eth, view, intent.erc20_manager,
-        [intent.old_identity.vft_manager_address, intent.new_identity.vft_manager_address],
-        number, hash).await
+    seal::authenticate_manager_registrations(
+        eth,
+        view,
+        intent.erc20_manager,
+        [
+            intent.old_identity.vft_manager_address,
+            intent.new_identity.vft_manager_address,
+        ],
+        number,
+        hash,
+    )
+    .await
 }
 
 async fn verify_current_registrations(eth: &PollingEthApi, intent: &Intent) -> Result<()> {
@@ -4340,7 +4599,14 @@ async fn handoff_roles_reconciled(api: &GearApi, eth: &PollingEthApi, path: &Pat
                                 && complete(&call.original))),
                 "HOLD: native minter unexpected/unrecorded"
             );
-            run_cutover_call(api, eth, path, CutoverStep::TokenMinter(wrapper), &work.intent).await?;
+            run_cutover_call(
+                api,
+                eth,
+                path,
+                CutoverStep::TokenMinter(wrapper),
+                &work.intent,
+            )
+            .await?;
         } else {
             ensure!(
                 minter == actor(initial.minter),
@@ -4551,12 +4817,19 @@ pub async fn finalize(
         seal::lock_original_journals(&work.intent.old_transactions, &work.intent.old_discovery)?;
     let _signer = lock_signer(&path, api, work.intent.old_identity.gear_genesis_hash)?;
     let _other_signers = lock_other_signers(api, &work.intent, &work, &path)?;
-    let eth = PollingEthApi::new(&args.ethereum_rpc).await?
-        .with_finality_witness(&args.ethereum_finality.ethereum_witness_rpc,
+    let eth = PollingEthApi::new(&args.ethereum_rpc)
+        .await?
+        .with_finality_witness(
+            &args.ethereum_finality.ethereum_witness_rpc,
             work.intent.old_identity.ethereum_chain_id,
-            work.intent.old_identity.ethereum_genesis_hash.0.into()).await?;
-    eth.enable_finality_archive(&args.cutover_dir.join("ethereum-finality"),
-        work.intent.old_identity.ethereum_genesis_hash.0.into()).await?;
+            work.intent.old_identity.ethereum_genesis_hash.0.into(),
+        )
+        .await?;
+    eth.enable_finality_archive(
+        &args.cutover_dir.join("ethereum-finality"),
+        work.intent.old_identity.ethereum_genesis_hash.0.into(),
+    )
+    .await?;
     let mut view = eth.verified_finalized_view().await?;
     let beacon = BeaconClient::new(args.beacon_rpc.clone(), Some(Duration::from_secs(30))).await?;
     authenticate_environment(api, &eth, &work.intent).await?;
@@ -4564,7 +4837,8 @@ pub async fn finalize(
     let signer: gsdk::signer::Signer = api.clone().into();
     let provider = ApiProviderConnection::from_api(signer.api().clone());
     if let Some(predecessor) = seal::predecessor_seal_path(&work.intent.old_transactions)? {
-        seal::verify_originals_read_only(&predecessor, provider.clone(), api, &eth, &mut view).await?;
+        seal::verify_originals_read_only(&predecessor, provider.clone(), api, &eth, &mut view)
+            .await?;
     }
     let seal_path = args.cutover_dir.join("cutover.json");
     if seal_path.exists() {
@@ -4575,7 +4849,8 @@ pub async fn finalize(
             "HOLD: seal/work identity changed"
         );
         seal::install_seal_markers(&seal_path)?;
-        seal::verify_originals_read_only(&seal_path, provider.clone(), api, &eth, &mut view).await?;
+        seal::verify_originals_read_only(&seal_path, provider.clone(), api, &eth, &mut view)
+            .await?;
         upgrade_work(api, &eth, &path).await?;
     } else {
         upgrade_work(api, &eth, &path).await?;
@@ -4604,7 +4879,14 @@ pub async fn finalize(
                     })
                     .count(),
             )?;
-            run_cutover_call(api, &eth, &path, CutoverStep::Upgrade(ordinal), &work.intent).await?;
+            run_cutover_call(
+                api,
+                &eth,
+                &path,
+                CutoverStep::Upgrade(ordinal),
+                &work.intent,
+            )
+            .await?;
         }
         let (source, retirement) = status(api, hash_actor(old)).await?;
         ensure!(
@@ -4745,9 +5027,14 @@ pub async fn finalize(
     );
     if verify_activation(api, &activation_scanner, &work.intent, &seal_path).await? {
         let (sealed, _) = seal::verify_markers(&seal_path)?;
-        seal::verify_originals_read_only(&seal_path, activation_scanner.api_provider.clone(),
-            api, &eth, &mut view)
-            .await?;
+        seal::verify_originals_read_only(
+            &seal_path,
+            activation_scanner.api_provider.clone(),
+            api,
+            &eth,
+            &mut view,
+        )
+        .await?;
         validate_successor_journals(
             &work.intent.new_identity,
             &sealed.predecessor(seal::load_seal(&seal_path)?.1),
@@ -4784,7 +5071,14 @@ pub async fn finalize(
     )
     .await?;
     if !recovered_activation {
-        run_cutover_call(api, &eth, &path, CutoverStep::DestinationUnpause, &work.intent).await?;
+        run_cutover_call(
+            api,
+            &eth,
+            &path,
+            CutoverStep::DestinationUnpause,
+            &work.intent,
+        )
+        .await?;
     }
     let (destination, active_pin) =
         status(api, work.intent.new_identity.vft_manager_address).await?;
@@ -4829,10 +5123,14 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     let provider = provider(connection).await?;
     let mut readonly = provider.clone();
     let api = readonly.gclient();
-    let eth = PollingEthApi::new(&args.ethereum_rpc).await?
-        .with_finality_witness(&args.ethereum_finality.ethereum_witness_rpc,
+    let eth = PollingEthApi::new(&args.ethereum_rpc)
+        .await?
+        .with_finality_witness(
+            &args.ethereum_finality.ethereum_witness_rpc,
             sealed.old_identity.ethereum_chain_id,
-            sealed.old_identity.ethereum_genesis_hash.0.into()).await?;
+            sealed.old_identity.ethereum_genesis_hash.0.into(),
+        )
+        .await?;
     // Deliberately no archive attachment: verification never owns or advances durable history.
     let mut view = eth.verified_finalized_view().await?;
     let beacon = BeaconClient::new(args.beacon_rpc.clone(), Some(Duration::from_secs(30))).await?;
@@ -4867,8 +5165,13 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
         new_discovery: None,
     };
     if work.blocks.is_empty() && matches!(work.schema_version, 1 | 2) {
-        work.blocks = seal::reconstruct_coverage(&eth, &mut view, &work.intent.boundary,
-            work.intent.old_identity.ethereum_genesis_hash).await?;
+        work.blocks = seal::reconstruct_coverage(
+            &eth,
+            &mut view,
+            &work.intent.boundary,
+            work.intent.old_identity.ethereum_genesis_hash,
+        )
+        .await?;
     }
     authenticate_work_ethereum(&eth, &mut view, &mut work).await?;
     completed_coverage(&work)?;
@@ -5049,8 +5352,8 @@ mod tests {
         assert!(validate_source_emitter(&identity, Some(bound), bound).is_err());
     }
 
-    #[test]
-    fn ambiguous_activation_holds_until_original_reply_is_reconciled() {
+    #[tokio::test]
+    async fn ambiguous_activation_holds_until_original_reply_is_reconciled() {
         let mut call = FinalizedCutoverCall {
             step: CutoverStep::DestinationUnpause,
             attempt: 0,
@@ -5064,6 +5367,19 @@ mod tests {
         let original = serde_json::to_vec(&call).unwrap();
         assert!(activation_recovered(&mut call).is_err());
         assert_eq!(serde_json::to_vec(&call).unwrap(), original);
+        let directory = std::env::temp_dir().join(format!("cutover-ambiguous-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let mut work = terminal_coverage_fixture().await;
+        work.calls.push(call.clone());
+        let authenticated = std::cell::Cell::new(false);
+        let error = assert_release_holds(&work, &work_path(&directory), async {
+            authenticated.set(true);
+            Ok(())
+        })
+        .await;
+        assert!(error.contains("unresolved lifecycle original"));
+        assert!(!authenticated.get());
+        fs::remove_dir_all(directory).unwrap();
         call.original.finalized_reply = original_with_reply(Some(vec![])).finalized_reply;
         assert!(activation_recovered(&mut call).unwrap());
         let saved = call.original.clone();
@@ -5080,8 +5396,8 @@ mod tests {
         assert!(call.archived_no_effect);
     }
 
-    #[test]
-    fn missing_activation_marker_preserves_populated_bound_successor_journals() {
+    #[tokio::test]
+    async fn missing_activation_marker_preserves_populated_bound_successor_journals() {
         use relayer::message_relayer::{
             common::{
                 ethereum::block_storage::{BlockCursor, DiscoveryState},
@@ -5160,6 +5476,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(paths.each_ref().map(|path| fs::read(path).unwrap()), before);
+        let mut work = terminal_coverage_fixture().await;
+        work.calls.push(FinalizedCutoverCall {
+            step: CutoverStep::DestinationUnpause,
+            attempt: 0,
+            target: identity.vft_manager_address,
+            payload: io::Unpause::encode_call(),
+            gas: 1,
+            value: 0,
+            original: original_with_reply(None),
+            archived_no_effect: false,
+        });
+        for invalid_marker in [false, true] {
+            if invalid_marker {
+                atomic_json(
+                    &directory.join("cutover-activation.json"),
+                    &"invalid",
+                    false,
+                )
+                .unwrap();
+            }
+            assert!(activation_recovered(&mut work.calls[0]).is_err());
+            let error = assert_release_holds(&work, &work_path(&directory), async {
+                panic!("unresolved activation must not reach authentication");
+            })
+            .await;
+            assert!(error.contains("unresolved lifecycle original"));
+            assert_eq!(paths.each_ref().map(|path| fs::read(path).unwrap()), before);
+        }
         let mut changed = predecessor.clone();
         changed.manifest_digest = H256::repeat_byte(16);
         assert!(validate_successor_journals(
@@ -6350,12 +6694,410 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    async fn assert_release_holds(
+        work: &Work,
+        path: &Path,
+        authentication: impl Future<Output = Result<()>>,
+    ) -> String {
+        save(path, work).unwrap();
+        let before = fs::read(path).unwrap();
+        let genesis = work.intent.old_identity.gear_genesis_hash;
+        let current_sender = seal::digest(Uuid::now_v7().as_bytes()).0;
+        let other_sender = seal::digest(Uuid::now_v7().as_bytes()).0;
+        let current = signer_ownership::lock_cutover_signer(genesis, current_sender, path).unwrap();
+        let others = vec![(
+            other_sender,
+            signer_ownership::lock_cutover_signer(genesis, other_sender, path).unwrap(),
+            true,
+        )];
+        let error = release_signers_after_authentication(
+            work,
+            path,
+            current_sender,
+            &current,
+            &others,
+            authentication,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(fs::read(path).unwrap(), before);
+        assert_eq!(serde_json::to_vec(work).unwrap(), before);
+        drop(current);
+        drop(others);
+        for account in [current_sender, other_sender] {
+            assert!(signer_ownership::lock_signer(genesis, account).is_err());
+            let retained = signer_ownership::lock_cutover_signer(genesis, account, path).unwrap();
+            signer_ownership::release_cutover_signer(genesis, account, path, &retained).unwrap();
+        }
+        format!("{error:#}")
+    }
+
+    #[tokio::test]
+    #[ignore = "read-only owned Gear node at CUTOVER_NATIVE_SOURCE required"]
+    async fn signer_release_real_authentication_holds() -> Result<()> {
+        let rpc = std::env::var("CUTOVER_NATIVE_SOURCE")?;
+        ensure!(
+            rpc.starts_with("ws://127.0.0.1:") && rpc[15..].bytes().all(|b| b.is_ascii_digit()),
+            "only an owned loopback node may run this read-only authentication"
+        );
+        let provider = ApiProvider::new(rpc, 0).await?;
+        let connection = provider.connection();
+        let mut readonly = connection.clone();
+        let api = readonly.gclient();
+        let genesis = api.get_block_hash(0).await?;
+        let directory =
+            std::env::temp_dir().join(format!("cutover-release-rpc-{}", Uuid::now_v7()));
+        fs::create_dir(&directory)?;
+        let mut work = terminal_coverage_fixture().await;
+        work.intent.old_identity.gear_genesis_hash = genesis;
+        work.intent.old_transactions = directory.clone();
+        let scanner = sender(
+            connection,
+            &work.intent.old_identity,
+            Some(work.intent.erc20_manager),
+        );
+        let journal = seal::OriginalJournal {
+            schema_version: 7,
+            runtime_identity: Some(work.intent.old_identity.clone()),
+            predecessor_cutover: None,
+            transactions: Default::default(),
+            completed: Default::default(),
+            failed: Default::default(),
+        };
+        let journal_path = directory.join("state.json");
+        atomic_json(&journal_path, &journal, false)?;
+        let journal_before = fs::read(&journal_path)?;
+        let mut changed_hash = genesis;
+        changed_hash.0[0] ^= 1;
+        let admission = &mut work.admissions[0];
+        admission.settlement = admission.exclusion.take();
+        admission
+            .settlement
+            .as_mut()
+            .unwrap()
+            .finalized_block_number = Some(0);
+        admission.settlement.as_mut().unwrap().finalized_block_hash = format!("{genesis:#x}");
+        admission.external_original = Some(seal::CanonicalExternalOriginal {
+            provenance: "canonical-external".into(),
+            original: admission.signed.take().unwrap(),
+            discovered_at: FinalizedReceiptObservation {
+                finalized_block_number: Some(0),
+                finalized_block_hash: format!("{changed_hash:#x}"),
+            },
+        });
+        admission.admission = "externally-delivered".into();
+        let error = assert_release_holds(
+            &work,
+            &work_path(&directory),
+            authenticate_release_evidence(&api, &scanner, &work),
+        )
+        .await;
+        assert!(
+            error.contains("HOLD: external original discovery pin changed"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&journal_path)?, journal_before);
+        work.admissions[0].signed = Some(
+            work.admissions[0]
+                .external_original
+                .as_ref()
+                .unwrap()
+                .original
+                .clone(),
+        );
+        let error = assert_release_holds(
+            &work,
+            &work_path(&directory),
+            authenticate_release_evidence(&api, &scanner, &work),
+        )
+        .await;
+        assert!(
+            error.contains("HOLD: external provenance is mixed with owned originals"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&journal_path)?, journal_before);
+        work.admissions[0].signed = None;
+        // An orphan pin must fail the same production authenticator, not a mocked gate.
+        work.admissions[0].external_original = None;
+        work.admissions[0].admission = "cutover-sponsored".into();
+        let error = assert_release_holds(
+            &work,
+            &work_path(&directory),
+            authenticate_release_evidence(&api, &scanner, &work),
+        )
+        .await;
+        assert!(
+            error.contains("HOLD: settlement original signature missing"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&journal_path)?, journal_before);
+        fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn settlement_release_provenance_preserves_owners_and_original_journal() {
+        use relayer::message_relayer::{
+            common::{EthereumSlotNumber, TxHashWithSlot},
+            eth_to_gear::tx_manager::{ReceiptEvidence, TxStatus},
+        };
+        let fixture = terminal_coverage_fixture().await;
+        for provenance in ["local", "completed", "external"] {
+            let cases: &[&str] = match provenance {
+                "local" => &[
+                    "valid",
+                    "orphan",
+                    "label",
+                    "unsigned-link",
+                    "missing-pin",
+                    "key",
+                ],
+                "completed" => &[
+                    "valid",
+                    "orphan",
+                    "label",
+                    "unsigned-link",
+                    "missing-pin",
+                    "key",
+                    "runtime",
+                    "missing-row",
+                    "uuid",
+                    "status",
+                    "tx",
+                    "proof",
+                    "pin",
+                    "sender",
+                    "mixed-signature",
+                    "mixed-attempt",
+                ],
+                _ => &[
+                    "valid",
+                    "valid-unsigned",
+                    "label",
+                    "missing-pin",
+                    "key",
+                    "runtime",
+                    "provenance",
+                    "mixed-signature",
+                    "mixed-attempt",
+                    "mixed-uuid",
+                    "owned-tx",
+                    "owned-key",
+                    "unsigned-link",
+                    "unsigned-tx",
+                    "unsigned-slot",
+                    "unsigned-proof",
+                    "unsigned-dispatched",
+                    "discovery-height",
+                ],
+            };
+            for case in cases {
+                let mut work = fixture.clone();
+                let admission = &mut work.admissions[0];
+                admission.settlement = admission.exclusion.take();
+                let mut original = admission.signed.clone().unwrap();
+                original.sender =
+                    subxt::utils::AccountId32(work.intent.old_identity.gear_sender).to_string();
+                original.receipt_key = admission.receipt_key;
+                let mut row = Transaction::new(
+                    TxHashWithSlot {
+                        tx_hash: admission.original_tx_hash,
+                        slot_number: EthereumSlotNumber(admission.receipt_key.0),
+                    },
+                    TxStatus::Completed,
+                );
+                row.receipt = Some(ReceiptEvidence {
+                    payload: admission.proof.clone(),
+                    receipt_key: admission.receipt_key,
+                    composed_at_ms: 0,
+                    handed_off_at_ms: Some(1),
+                    initial_response: None,
+                    signed_submission: Some(original.clone()),
+                    submission_attempts: vec![],
+                });
+                row.saved_settlement_observation = admission.settlement.clone();
+                let uuid = row.uuid;
+                let mut journal = seal::OriginalJournal {
+                    schema_version: 7,
+                    runtime_identity: Some(work.intent.old_identity.clone()),
+                    predecessor_cutover: None,
+                    transactions: Default::default(),
+                    completed: Default::default(),
+                    failed: Default::default(),
+                };
+                if provenance == "completed" {
+                    admission.signed = None;
+                    admission.original_lane_uuid = Some(uuid);
+                    journal.completed.insert(uuid, row.clone());
+                } else if provenance == "external" {
+                    admission.signed = None;
+                    admission.admission = "externally-delivered".into();
+                    admission.external_original = Some(seal::CanonicalExternalOriginal {
+                        provenance: "canonical-external".into(),
+                        original: original.clone(),
+                        discovered_at: admission.settlement.clone().unwrap(),
+                    });
+                }
+                match *case {
+                    "orphan" if provenance == "completed" => {
+                        journal
+                            .completed
+                            .get_mut(&uuid)
+                            .unwrap()
+                            .receipt
+                            .as_mut()
+                            .unwrap()
+                            .signed_submission = None;
+                    }
+                    "orphan" => admission.signed = None,
+                    "label" => admission.admission = "paid".into(),
+                    "missing-pin" => admission.settlement = None,
+                    "key" => admission.receipt_key.1 += 1,
+                    "runtime" => journal.runtime_identity.as_mut().unwrap().gear_sender = [99; 32],
+                    "missing-row" => journal.completed.clear(),
+                    "uuid" => journal.completed.get_mut(&uuid).unwrap().uuid = Uuid::now_v7(),
+                    "status" => {
+                        journal.completed.get_mut(&uuid).unwrap().status = TxStatus::ComposeProof
+                    }
+                    "tx" => {
+                        journal.completed.get_mut(&uuid).unwrap().tx.tx_hash = B256::repeat_byte(99)
+                    }
+                    "proof" => journal
+                        .completed
+                        .get_mut(&uuid)
+                        .unwrap()
+                        .receipt
+                        .as_mut()
+                        .unwrap()
+                        .payload
+                        .push(0),
+                    "pin" => {
+                        journal
+                            .completed
+                            .get_mut(&uuid)
+                            .unwrap()
+                            .saved_settlement_observation
+                            .as_mut()
+                            .unwrap()
+                            .finalized_block_hash = format!("{:#x}", H256::repeat_byte(99))
+                    }
+                    "sender" => {
+                        journal
+                            .completed
+                            .get_mut(&uuid)
+                            .unwrap()
+                            .receipt
+                            .as_mut()
+                            .unwrap()
+                            .signed_submission
+                            .as_mut()
+                            .unwrap()
+                            .sender = subxt::utils::AccountId32([99; 32]).to_string()
+                    }
+                    "mixed-signature" => admission.signed = Some(original.clone()),
+                    "mixed-attempt" => admission.attempts.push(original.clone()),
+                    "mixed-uuid" => admission.original_lane_uuid = Some(uuid),
+                    "provenance" => {
+                        admission.external_original.as_mut().unwrap().provenance = "foreign".into()
+                    }
+                    "owned-tx" => {
+                        journal.transactions.insert(uuid, row.clone());
+                    }
+                    "owned-key" => {
+                        row.tx.tx_hash = B256::repeat_byte(99);
+                        journal.completed.insert(uuid, row.clone());
+                    }
+                    "unsigned-link" => admission.undispatched_old_admission = Some(Uuid::now_v7()),
+                    "valid-unsigned"
+                    | "unsigned-tx"
+                    | "unsigned-slot"
+                    | "unsigned-proof"
+                    | "unsigned-dispatched" => {
+                        admission.undispatched_old_admission = Some(uuid);
+                        row.status = TxStatus::ComposeProof;
+                        row.saved_settlement_observation = None;
+                        let receipt = row.receipt.as_mut().unwrap();
+                        receipt.handed_off_at_ms = None;
+                        receipt.signed_submission = None;
+                        match *case {
+                            "valid-unsigned" => {}
+                            "unsigned-tx" => row.tx.tx_hash = B256::repeat_byte(99),
+                            "unsigned-slot" => row.tx.slot_number.0 += 1,
+                            "unsigned-proof" => receipt.payload.clear(),
+                            "unsigned-dispatched" => receipt.handed_off_at_ms = Some(1),
+                            _ => unreachable!(),
+                        }
+                        journal.transactions.insert(uuid, row.clone());
+                    }
+                    "discovery-height" => {
+                        admission
+                            .external_original
+                            .as_mut()
+                            .unwrap()
+                            .discovered_at
+                            .finalized_block_number = Some(0)
+                    }
+                    "valid" => {}
+                    _ => unreachable!(),
+                }
+                let directory = std::env::temp_dir()
+                    .join(format!("cutover-release-provenance-{}", Uuid::now_v7()));
+                fs::create_dir(&directory).unwrap();
+                work.intent.old_transactions = directory.clone();
+                atomic_json(&directory.join("state.json"), &journal, false).unwrap();
+                let journal_before = fs::read(directory.join("state.json")).unwrap();
+                let proof = eth_events_electra_client::EthToVaraEvent::decode(
+                    &mut work.admissions[0].proof.as_slice(),
+                )
+                .unwrap();
+                let validate = || {
+                    release_settlement_original(
+                        &work.intent.old_identity,
+                        &work.admissions[0],
+                        &proof,
+                        Some(&journal),
+                    )
+                    .map(|_| ())
+                };
+                if matches!(*case, "valid" | "valid-unsigned") {
+                    validate().unwrap();
+                    if provenance == "completed" {
+                        // Both historical pin representations remain supported, with saved taking precedence.
+                        let retained = journal.completed.get_mut(&uuid).unwrap();
+                        retained.receipt_observation = retained.saved_settlement_observation.take();
+                        release_settlement_original(
+                            &work.intent.old_identity,
+                            &work.admissions[0],
+                            &proof,
+                            Some(&journal),
+                        )
+                        .unwrap();
+                    }
+                } else {
+                    assert!(validate().is_err(), "{provenance}/{case}");
+                    assert_release_holds(&work, &work_path(&directory), async { validate() }).await;
+                }
+                assert_eq!(
+                    fs::read(directory.join("state.json")).unwrap(),
+                    journal_before
+                );
+                fs::remove_dir_all(directory).unwrap();
+            }
+        }
+    }
+
     #[tokio::test]
     async fn signer_release_requires_authenticated_terminal_evidence_and_preserves_originals() {
         let fixture = terminal_coverage_fixture().await;
         for provenance in ["owned", "sponsored", "external"] {
             for disposition in [
-                "excluded", "settled", "pending", "conflict", "invalid", "lifecycle",
+                "excluded",
+                "settled",
+                "pending",
+                "conflict",
+                "invalid",
+                "lifecycle",
+                "activated",
             ] {
                 let mut work = fixture.clone();
                 let admission = &mut work.admissions[0];
@@ -6383,20 +7125,20 @@ mod tests {
                     }
                     "pending" => admission.exclusion = None,
                     "conflict" => admission.settlement = admission.exclusion.clone(),
-                    "lifecycle" => work.calls.push(FinalizedCutoverCall {
+                    "lifecycle" | "activated" => work.calls.push(FinalizedCutoverCall {
                         step: CutoverStep::DestinationUnpause,
                         attempt: 0,
                         target: work.intent.new_identity.vft_manager_address,
                         payload: io::Unpause::encode_call(),
                         gas: 1,
                         value: 0,
-                        original: original_with_reply(None),
+                        original: original_with_reply((disposition == "activated").then(Vec::new)),
                         archived_no_effect: false,
                     }),
                     _ => {}
                 }
-                let directory = std::env::temp_dir()
-                    .join(format!("cutover-signer-release-{}", Uuid::now_v7()));
+                let directory =
+                    std::env::temp_dir().join(format!("cutover-signer-release-{}", Uuid::now_v7()));
                 fs::create_dir(&directory).unwrap();
                 let path = work_path(&directory);
                 let genesis = seal::digest(Uuid::now_v7().as_bytes());
@@ -6428,11 +7170,14 @@ mod tests {
                     },
                 )
                 .await;
-                let released = matches!(disposition, "excluded" | "settled");
+                let released = matches!(disposition, "excluded" | "settled" | "activated");
                 assert_eq!(result.is_ok(), released, "{provenance}/{disposition}");
                 assert_eq!(
                     authenticated.get(),
-                    matches!(disposition, "excluded" | "settled" | "invalid"),
+                    matches!(
+                        disposition,
+                        "excluded" | "settled" | "invalid" | "activated"
+                    ),
                     "{provenance}/{disposition}"
                 );
                 assert_eq!(fs::read(&path).unwrap(), before);
@@ -6450,8 +7195,10 @@ mod tests {
                     if !released {
                         let retained =
                             signer_ownership::lock_cutover_signer(genesis, account, &path).unwrap();
-                        signer_ownership::release_cutover_signer(genesis, account, &path, &retained)
-                            .unwrap();
+                        signer_ownership::release_cutover_signer(
+                            genesis, account, &path, &retained,
+                        )
+                        .unwrap();
                     }
                 }
                 fs::remove_dir_all(directory).unwrap();
@@ -6594,7 +7341,9 @@ mod tests {
         let path = work_path(&directory);
         for version in [1, 2] {
             work.schema_version = version;
-            work.admissions[0].settlement = work.admissions[0].exclusion.take()
+            work.admissions[0].settlement = work.admissions[0]
+                .exclusion
+                .take()
                 .or(work.admissions[0].settlement.clone());
             let mut value = serde_json::to_value(&work).unwrap();
             value["ethereum_authentication"] = serde_json::Value::Null;

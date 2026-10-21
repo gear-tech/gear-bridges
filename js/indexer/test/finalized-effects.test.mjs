@@ -843,7 +843,7 @@ test('decoded original native refunds remain distinct from delivery and bind the
     if (mismatch === 'payout-child') value.payout_child = hash('00');
     if (mismatch === 'same-child') value.payout_child = value.child;
     await state.new(ctx);
-    if (['partial', 'over-return', 'native', 'operation', 'child', 'payout-child', 'same-child'].includes(mismatch)) {
+    if (['partial', 'native', 'operation', 'child', 'payout-child', 'same-child'].includes(mismatch)) {
       await assert.rejects(dispatch(state, value), /HOLD: native refund/);
       assert.equal(transfer.status, Status.Bridging, mismatch);
       assert.equal((await store.find(ReceiptSettlement)).length, 0, mismatch);
@@ -852,7 +852,7 @@ test('decoded original native refunds remain distinct from delivery and bind the
     await dispatch(state, value);
     await state.save();
     const [settlement] = await store.find(ReceiptSettlement);
-    if (mismatch !== 'none') {
+    if (mismatch !== 'none' && mismatch !== 'over-return') {
       assert.equal(transfer.status, Status.Bridging, mismatch);
       assert.equal(settlement.matched, false, mismatch);
       continue;
@@ -868,11 +868,13 @@ test('decoded original native refunds remain distinct from delivery and bind the
     for (const field of ['operation_id', 'vara_token_id', 'child', 'payout_child', 'receiver']) {
       assert.equal(settlement.deposit[field], deposit[field], field);
     }
-    assert.equal(BigInt(settlement.deposit.returned_value), 10n);
-    // An authenticated terminal record cannot become delivery or another payout operation.
-    for (const change of [{ operation_id: hash('99') }, { child: hash('99') }, { payout_child: hash('99') }]) {
+    assert.equal(BigInt(settlement.deposit.returned_value), BigInt(value.returned_value));
+    assert.equal(refunded.amount, '10');
+    // An authenticated terminal record cannot change backing, delivery or payout operation.
+    for (const change of [{ operation_id: hash('99') }, { child: hash('99') }, { payout_child: hash('99') },
+      { returned_value: String(BigInt(value.returned_value) + 1n) }]) {
       await state.new(ctx);
-      await dispatch(state, { ...deposit, ...change });
+      await dispatch(state, { ...value, ...change });
       await assert.rejects(state.save(), /conflicting receipt deposit/);
       assert.equal(stored(store, transfer).status, Status.Refunded);
     }

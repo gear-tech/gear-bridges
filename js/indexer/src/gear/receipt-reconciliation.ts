@@ -9,7 +9,7 @@ export function validateReceiptSettlement(deposit: ReceiptDepositEffect): void {
   if (deposit.outcome !== 'Refunded') throw new Error('HOLD: unsupported receipt settlement outcome');
   const messageId = (id: string) => /^0x[0-9a-fA-F]{64}$/.test(id) && BigInt(id) !== 0n;
   if (!deposit.native || !messageId(deposit.operation_id) || !messageId(deposit.child) || !messageId(deposit.payout_child) ||
-      deposit.child === deposit.payout_child || BigInt(deposit.returned_value) !== BigInt(deposit.amount)) {
+      deposit.child === deposit.payout_child || BigInt(deposit.returned_value) < BigInt(deposit.amount)) {
     throw new Error('HOLD: native refund lacks its original children or full returned backing');
   }
 }

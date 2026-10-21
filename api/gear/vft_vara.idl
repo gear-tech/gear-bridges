@@ -19,8 +19,8 @@ type PayoutStatus = enum {
   Delivered,
   Returned,
   Ambiguous,
-  /// The original rejected payout's full returned value backs wrapped tokens
-  /// credited exactly once to its original recipient. Not native delivery.
+  /// Returned backing covers wrapped tokens credited exactly once at the
+  /// original amount. Excess remains native backing; this is not delivery.
   Refunded,
 };
 
@@ -158,7 +158,7 @@ service VftNativeExchangeAdmin {
 service NativeEscrow {
   ConfigureManager : (manager: actor_id) -> null;
   /// Assume the original liability without credit, redispatch or settlement.
-  HoldRedemption : (operation_id: h256, expected: Redemption) -> Redemption;
+  HoldRedemption : (operation_id: h256, expected: Redemption, acknowledge_irreversible_hold: bool) -> Redemption;
   /// This acknowledgement proves only enqueueing. Settlement requires the original
   /// payout reply; a user mailbox entry is still an outstanding native obligation.
   RedeemEscrow : (operation_id: h256, from: actor_id, to: actor_id, amount: u256) -> Redemption;

@@ -69,6 +69,8 @@ enum HexEncodedMessage {
     HoldNativeRedemption {
         operation_id: H256,
         expected_redemption_hex: String,
+        #[arg(long)]
+        acknowledge_irreversible_hold: bool,
     },
 }
 
@@ -151,6 +153,7 @@ fn print_encoded_message(message: HexEncodedMessage) -> AnyResult<()> {
         HoldNativeRedemption {
             operation_id,
             expected_redemption_hex,
+            acknowledge_irreversible_hold,
         } => {
             let bytes = hex::decode(
                 expected_redemption_hex
@@ -167,6 +170,7 @@ fn print_encoded_message(message: HexEncodedMessage) -> AnyResult<()> {
                 vft_vara_client::native_escrow::io::HoldRedemption::encode_call(
                     operation_id,
                     expected,
+                    acknowledge_irreversible_hold,
                 ),
             )
         }

@@ -207,7 +207,7 @@ type ReceiptDepositState = struct {
   outcome: ReceiptDepositOutcome,
 };
 
-/// Retained proof that the original deposit had no financial effect.
+/// Retained rejection evidence, including historical native absence tombstones.
 type ReceiptRejectionEvidence = enum {
   InvalidRecipient,
   InvalidAmount,
@@ -215,6 +215,7 @@ type ReceiptRejectionEvidence = enum {
   UnlockFalse: struct {
     child: message_id
   },
+  /// Historical decoding only: absence does not prove economic rejection.
   NativeErrorAbsent: struct {
     child: message_id
   },
@@ -295,7 +296,7 @@ service VftManager {
   /// Swaps internal hash maps of the TokenMap instance.
   CalculateGasForTokenMapSwap : () -> null;
   /// Settlement policy is explicit, and only changes at a paused boundary.
-  ConfigureNativeWrapper : (wrapper: opt actor_id) -> null;
+  ConfigureNativeWrapper : (wrapper: opt struct { actor_id, h160 }) -> null;
   /// End an emergency stop before its deadline.
   /// 
   /// Can be called only by a [State::admin] or [State::pause_admin].

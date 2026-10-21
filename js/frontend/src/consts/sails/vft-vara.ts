@@ -1,7 +1,8 @@
 /* eslint-disable */
+import type { MessageId } from 'sails-js';
 import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import { TransactionBuilder, ActorId, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS, H256, MessageId } from 'sails-js';
+import { TransactionBuilder, ActorId, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS, H256 } from 'sails-js';
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
@@ -372,6 +373,21 @@ export class VftAdmin {
     );
   }
 
+  public setMinimumBalance(value: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftAdmin',
+      'SetMinimumBalance',
+      value,
+      'U256',
+      'Null',
+      this._program.programId,
+    );
+  }
+
   public appendAllowancesShard(capacity: number): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -532,21 +548,6 @@ export class VftAdmin {
       'SetExpiryPeriod',
       period,
       'u32',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  public setMinimumBalance(value: number | string | bigint): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'VftAdmin',
-      'SetMinimumBalance',
-      value,
-      'U256',
       'Null',
       this._program.programId,
     );
@@ -1113,6 +1114,24 @@ export class NativeEscrow {
   }
 
   /**
+   * Assume the original liability without credit, redispatch or settlement.
+  */
+  public holdRedemption(operation_id: H256, expected: Redemption): TransactionBuilder<Redemption> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<Redemption>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'NativeEscrow',
+      'HoldRedemption',
+      [operation_id, expected],
+      '(H256, Redemption)',
+      'Redemption',
+      this._program.programId,
+    );
+  }
+
+  /**
    * This acknowledgement proves only enqueueing. Settlement requires the original
    * payout reply; a user mailbox entry is still an outstanding native obligation.
   */
@@ -1128,6 +1147,35 @@ export class NativeEscrow {
       '(H256, [u8;32], [u8;32], U256)',
       'Redemption',
       this._program.programId,
+    );
+  }
+
+  /**
+   * Financial obligations remain outstanding even when explicitly held for handoff.
+  */
+  public blockingRedemptions(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'BlockingRedemptions',
+      null,
+      null,
+      'u64',
+    );
+  }
+
+  public heldRedemption(operation_id: H256): QueryBuilder<Redemption | null> {
+    return new QueryBuilder<Redemption | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'HeldRedemption',
+      operation_id,
+      'H256',
+      'Option<Redemption>',
     );
   }
 
@@ -1187,7 +1235,4 @@ export interface Redemption {
   returned_value: number | string | bigint;
 }
 
-/**
- * Refunded restores exactly backed wrapped tokens to the original recipient; it is not native delivery.
- */
 export type PayoutStatus = "Queued" | "Delivered" | "Returned" | "Ambiguous" | "Refunded";

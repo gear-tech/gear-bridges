@@ -330,14 +330,14 @@ pub(super) async fn upgrade(service: &mut VftManager, destination: ActorId) {
     if service.state().cutover.phase == CutoverPhase::Draining {
         if let Some(wrapper) = service.state().native_wrapper {
             let manager: Option<ActorId> = query(wrapper, "NativeEscrow", "Manager", &config).await;
-            let outstanding: u64 =
-                query(wrapper, "NativeEscrow", "OutstandingRedemptions", &config).await;
+            let blocking: u64 =
+                query(wrapper, "NativeEscrow", "BlockingRedemptions", &config).await;
             assert_eq!(
                 manager,
                 Some(Syscall::program_id()),
                 "Unexpected wrapper manager"
             );
-            assert_eq!(outstanding, 0, "Outstanding native redemptions");
+            assert_eq!(blocking, 0, "Blocking native redemptions");
         }
         ensure_transfer_state(service, destination);
         service.state_mut().cutover.phase = CutoverPhase::Transferring;
@@ -514,8 +514,7 @@ pub(super) async fn finalize(service: &mut VftManager) {
     if let Some(wrapper) = service.state().native_wrapper {
         let manager: Option<ActorId> = query(wrapper, "NativeEscrow", "Manager", &config).await;
         let burner: ActorId = query(wrapper, "VftAdmin", "Burner", &config).await;
-        let outstanding: u64 =
-            query(wrapper, "NativeEscrow", "OutstandingRedemptions", &config).await;
+        let blocking: u64 = query(wrapper, "NativeEscrow", "BlockingRedemptions", &config).await;
         assert_eq!(
             manager,
             Some(Syscall::program_id()),
@@ -526,7 +525,7 @@ pub(super) async fn finalize(service: &mut VftManager) {
             Syscall::program_id(),
             "Wrapper burner not handed off"
         );
-        assert_eq!(outstanding, 0, "Outstanding native redemptions");
+        assert_eq!(blocking, 0, "Blocking native redemptions");
     }
     service.ensure_quiescent();
     assert_eq!(

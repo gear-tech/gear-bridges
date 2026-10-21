@@ -436,6 +436,7 @@ const ERC20_MANAGER_ABI = [
   { type: 'error', name: 'ExpectedPause', inputs: [] },
   { type: 'error', name: 'FailedCall', inputs: [] },
   { type: 'error', name: 'InvalidAmount', inputs: [] },
+  { type: 'error', name: 'InvalidRecipient', inputs: [] },
   { type: 'error', name: 'InvalidBridgingPayment', inputs: [] },
   { type: 'error', name: 'InvalidInitialization', inputs: [] },
   { type: 'error', name: 'InvalidPayload', inputs: [] },

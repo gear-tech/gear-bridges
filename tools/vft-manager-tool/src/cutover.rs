@@ -28,7 +28,8 @@ use gear_core::{
 use primitive_types::{H160, H256};
 use relayer::message_relayer::eth_to_gear::{
     cutover::{
-        self as seal, is_undispatched_old_admission as never_dispatched, CutoverBoundary,
+        self as seal, is_undispatched_old_admission as never_dispatched, validate_covered_block,
+        validate_exclusion_copy, verify_excluded_original, CoveredBlock, CutoverBoundary,
         CutoverSeal, FinalizedCutoverStatus,
     },
     message_sender::{
@@ -158,18 +159,6 @@ struct FinalizedCutoverCall {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CoveredBlock {
-    number: u64,
-    hash: H256,
-    parent_hash: H256,
-    receipts_root: H256,
-    transactions: Vec<B256>,
-    receipts: Vec<TransactionReceipt>,
-    header: alloy::consensus::Header,
-    raw_transactions: Vec<Vec<u8>>,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Admission {
     receipt_key: (u64, u64),
     original_tx_hash: B256,
@@ -181,6 +170,8 @@ struct Admission {
     signed: Option<SignedSubmission>,
     attempts: Vec<SignedSubmission>,
     settlement: Option<FinalizedReceiptObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exclusion: Option<FinalizedReceiptObservation>,
     original_lane_uuid: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_original: Option<seal::CanonicalExternalOriginal>,
@@ -209,6 +200,8 @@ struct RolePin {
     burner: H256,
     manager: Option<H256>,
     outstanding_redemptions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    blocking_redemptions: Option<u64>,
     paused: bool,
 }
 async fn read_role_pin(
@@ -216,6 +209,16 @@ async fn read_role_pin(
     token: H256,
     wrapper: bool,
     at: Option<H256>,
+) -> Result<RolePin> {
+    read_role_pin_inner(api, token, wrapper, at, false).await
+}
+
+async fn read_role_pin_inner(
+    api: &GearApi,
+    token: H256,
+    wrapper: bool,
+    at: Option<H256>,
+    allow_drained_inference: bool,
 ) -> Result<RolePin> {
     use vft_client::traits::VftAdmin as _;
     use vft_vara_client::traits::NativeEscrow as _;
@@ -228,8 +231,23 @@ async fn read_role_pin(
     let minter = hash_actor(admin.minter().at_block(pin).recv(actor(token)).await?);
     let burner = hash_actor(admin.burner().at_block(pin).recv(actor(token)).await?);
     let paused = admin.is_paused().at_block(pin).recv(actor(token)).await?;
-    let (manager, outstanding_redemptions) = if wrapper {
+    let (manager, outstanding_redemptions, blocking_redemptions) = if wrapper {
         let escrow = vft_vara_client::NativeEscrow::new(GClientRemoting::new(api.clone()));
+        let outstanding = escrow
+            .outstanding_redemptions()
+            .at_block(pin)
+            .recv(actor(token))
+            .await?;
+        let blocking = match escrow
+            .blocking_redemptions()
+            .at_block(pin)
+            .recv(actor(token))
+            .await
+        {
+            Ok(blocking) => blocking,
+            Err(_) if allow_drained_inference && outstanding == 0 => 0,
+            Err(error) => return Err(error.into()),
+        };
         (
             escrow
                 .manager()
@@ -237,17 +255,18 @@ async fn read_role_pin(
                 .recv(actor(token))
                 .await?
                 .map(hash_actor),
-            Some(
-                escrow
-                    .outstanding_redemptions()
-                    .at_block(pin)
-                    .recv(actor(token))
-                    .await?,
-            ),
+            Some(outstanding),
+            Some(blocking),
         )
     } else {
-        (None, None)
+        (None, None, None)
     };
+    ensure!(
+        blocking_redemptions
+            .zip(outstanding_redemptions)
+            .is_none_or(|(blocking, outstanding)| blocking <= outstanding),
+        "HOLD: blocking native obligations exceed outstanding liabilities"
+    );
     Ok(RolePin {
         token,
         block_number: api.block_number_at(at).await?,
@@ -256,6 +275,7 @@ async fn read_role_pin(
         burner,
         manager,
         outstanding_redemptions,
+        blocking_redemptions,
         paused,
     })
 }
@@ -428,16 +448,124 @@ fn actor(id: H256) -> ActorId {
 fn work_path(directory: &Path) -> PathBuf {
     directory.join("cutover-work.json")
 }
+fn validate_work_version(work: &Work) -> Result<()> {
+    ensure!(
+        matches!(work.schema_version, 1 | 2),
+        "HOLD: unsupported cutover work schema"
+    );
+    if work.schema_version == 1 {
+        ensure!(
+            work.admissions
+                .iter()
+                .all(|admission| admission.exclusion.is_none()
+                    && admission.admission != "externally-resolved")
+                && work
+                    .intent
+                    .initial_role_pins
+                    .iter()
+                    .chain(&work.role_pins)
+                    .all(|pin| pin.blocking_redemptions.is_none()),
+            "HOLD: version-one evidence contains version-two exclusions/counts"
+        );
+    }
+    Ok(())
+}
+
+fn zero_blocking(pin: &RolePin, version: u32) -> Result<bool> {
+    let outstanding = pin
+        .outstanding_redemptions
+        .context("HOLD: native financial count missing")?;
+    let blocking = match pin.blocking_redemptions {
+        Some(blocking) => blocking,
+        None if version == 1 && outstanding == 0 => 0,
+        None => bail!("HOLD: historical blocking count missing"),
+    };
+    ensure!(
+        blocking <= outstanding,
+        "HOLD: blocking count exceeds native liabilities"
+    );
+    Ok(blocking == 0)
+}
+
+fn upgrade_role_evidence(saved: &RolePin, mut observed: RolePin) -> Result<RolePin> {
+    let blocking = observed.blocking_redemptions.take();
+    ensure!(
+        observed == *saved,
+        "HOLD: version-one historical role evidence changed"
+    );
+    observed.blocking_redemptions = match (blocking, observed.outstanding_redemptions) {
+        (Some(blocking), Some(outstanding)) if blocking <= outstanding => Some(blocking),
+        (None, Some(0)) => Some(0),
+        (None, None) => None,
+        _ => bail!("HOLD: historical native blocking evidence missing or contradictory"),
+    };
+    Ok(observed)
+}
+
+async fn upgrade_work(api: &GearApi, path: &Path) -> Result<()> {
+    let mut work = read_work(path)?;
+    if work.schema_version == 2 {
+        return Ok(());
+    }
+    for pin in work
+        .intent
+        .initial_role_pins
+        .iter_mut()
+        .chain(&mut work.role_pins)
+    {
+        ensure!(
+            api.get_block_hash(pin.block_number).await?.as_ref() == pin.block_hash.as_bytes(),
+            "HOLD: historical role pin is noncanonical"
+        );
+        let observed = read_role_pin_inner(
+            api,
+            pin.token,
+            work.intent.native_wrapper == Some(pin.token),
+            Some(pin.block_hash),
+            true,
+        )
+        .await?;
+        *pin = upgrade_role_evidence(pin, observed)?;
+    }
+    work.schema_version = 2;
+    save(path, &work)
+}
+
+fn read_versioned_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+    if value["schema_version"] == 1 {
+        let admissions = value["admissions"].as_array().into_iter().flatten();
+        ensure!(
+            admissions
+                .into_iter()
+                .all(|admission| admission.get("exclusion").is_none()),
+            "HOLD: version-one evidence contains an exclusion field"
+        );
+        for pins in [&value["role_pins"], &value["intent"]["initial_role_pins"]] {
+            ensure!(
+                pins.as_array()
+                    .into_iter()
+                    .flatten()
+                    .all(|pin| pin.get("blocking_redemptions").is_none()),
+                "HOLD: version-one evidence contains a blocking count field"
+            );
+        }
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
 fn read_work(path: &Path) -> Result<Work> {
     ensure!(
         !PathBuf::from(format!("{}.new", path.display())).exists(),
         "HOLD: interrupted cutover work evidence"
     );
-    let work: Work = serde_json::from_slice(&fs::read(path)?)?;
+    let work: Work = read_versioned_json(path)?;
     ensure!(
-        work.schema_version == 1,
+        matches!(work.schema_version, 1 | 2),
         "HOLD: unsupported cutover work schema"
     );
+    validate_work_version(&work)?;
+    validate_admission_uniqueness(&work.admissions)?;
     Ok(work)
 }
 fn atomic_json<T: Serialize>(path: &Path, value: &T, immutable: bool) -> Result<()> {
@@ -743,13 +871,7 @@ async fn verify_lifecycle_original(
         observed.original.scanned_finalized_hash =
             original.original.prepared_finalized_hash.clone();
     }
-    reconcile_call(
-        api,
-        scanner,
-        &mut observed,
-        false,
-    )
-    .await?;
+    reconcile_call(api, scanner, &mut observed, false).await?;
     ensure!(
         observed.original.raw_extrinsic == original.original.raw_extrinsic
             && observed.original.inclusion_block_number == original.original.inclusion_block_number
@@ -988,9 +1110,7 @@ async fn reconcile_call(
     if found {
         if let Some(id) = &call.original.message_id {
             let id = H256::from_str(id)?;
-            call.original
-                .observe_reply(&chain, id, call.target)
-                .await?;
+            call.original.observe_reply(&chain, id, call.target).await?;
         }
     } else {
         let latest = H256::from_str(&call.original.scanned_finalized_hash)?;
@@ -1278,11 +1398,8 @@ async fn reconcile_original_response(
     }
 }
 
-async fn settle_original_nonces(
-    api: &GearApi,
-    scanner: &MessageSender,
-    intent: &Intent,
-) -> Result<()> {
+async fn settle_original_nonces(api: &GearApi, scanner: &MessageSender, work: &Work) -> Result<()> {
+    let intent = &work.intent;
     if seal::marker_path(&intent.old_transactions).exists() {
         return Ok(());
     }
@@ -1306,12 +1423,51 @@ async fn settle_original_nonces(
     let manager = TransactionManager::new(storage.clone());
     storage.load(&manager).await?;
     for transaction in originals {
+        if let Some(admission) = work.admissions.iter().find(|admission| {
+            admission.original_lane_uuid == Some(transaction.uuid) && admission.exclusion.is_some()
+        }) {
+            authenticate_exclusion(api, scanner, work, admission).await?;
+            continue;
+        }
         let proof = transaction.receipt_event()?;
         let signed = transaction
             .receipt
             .as_ref()
             .and_then(|receipt| receipt.signed_submission.clone())
             .context("Missing original")?;
+        if let Some(pin) = scanner.receipt_resolution_status(api, &proof, None).await? {
+            ensure!(
+                signed.sender.parse::<subxt::utils::AccountId32>()?.0
+                    == intent.old_identity.gear_sender,
+                "HOLD: excluded original signer differs from owned lane"
+            );
+            observe_excluded_original(scanner, &intent.old_identity, &proof, &signed, &pin).await?;
+            for archived in &transaction
+                .receipt
+                .as_ref()
+                .context("HOLD: original proof missing")?
+                .submission_attempts
+            {
+                ensure!(
+                    archived
+                        .signed_submission
+                        .sender
+                        .parse::<subxt::utils::AccountId32>()?
+                        .0
+                        == intent.old_identity.gear_sender,
+                    "HOLD: archived owned signer changed"
+                );
+                observe_excluded_original(
+                    scanner,
+                    &intent.old_identity,
+                    &proof,
+                    &archived.signed_submission,
+                    &pin,
+                )
+                .await?;
+            }
+            continue;
+        }
         let response = reconcile_original_response(
             api,
             scanner,
@@ -1440,7 +1596,7 @@ async fn run_cutover_request(
             &work.intent.old_identity,
             Some(work.intent.erc20_manager),
         ),
-        &work.intent,
+        &work,
     )
     .await?;
     // No new nonce while any earlier lifecycle original is unresolved.
@@ -1524,48 +1680,6 @@ async fn run_cutover_request(
     bail!("HOLD: original lifecycle outcome pending; resume same cutover work")
 }
 
-fn validate_covered_block(block: &CoveredBlock) -> Result<()> {
-    ensure!(
-        block.header.number == block.number
-            && block.header.hash_slow().0 == block.hash.0
-            && block.header.parent_hash.0 == block.parent_hash.0
-            && block.header.receipts_root.0 == block.receipts_root.0,
-        "HOLD: saved coverage header identity changed"
-    );
-    let transactions = block
-        .raw_transactions
-        .iter()
-        .map(|raw| {
-            let mut bytes = raw.as_slice();
-            let transaction = TxEnvelope::decode_2718(&mut bytes)?;
-            ensure!(
-                bytes.is_empty() && transaction.encoded_2718() == *raw,
-                "HOLD: noncanonical coverage transaction"
-            );
-            Ok(transaction)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let hashes = block
-        .raw_transactions
-        .iter()
-        .map(alloy_primitives::keccak256)
-        .collect::<Vec<_>>();
-    ensure!(
-        hashes == block.transactions
-            && alloy::consensus::proofs::calculate_transaction_root(&transactions)
-                == block.header.transactions_root,
-        "HOLD: coverage transaction inventory/trie differs from authenticated header"
-    );
-    let mut receipts = block.receipts.clone();
-    validate_receipt_set(
-        block.number,
-        block.hash.0.into(),
-        &hashes,
-        block.receipts_root.0.into(),
-        &mut receipts,
-    )?;
-    Ok(())
-}
 fn is_deposit(receipt: &TransactionReceipt, manager: H160) -> Result<bool> {
     let mut found = false;
     for log in receipt.inner.logs() {
@@ -1793,7 +1907,8 @@ fn attach_external_native_continuations(
             && continuation.finalized_reply.as_ref().is_some_and(|reply| {
                 matches!(
                     exact_reply::<io::ReconcileReceipt>(&reply.payload),
-                    Ok(Ok(vft_manager_client::ReceiptStatus::Processed))
+                    Ok(Ok(vft_manager_client::ReceiptStatus::Processed
+                        | vft_manager_client::ReceiptStatus::Resolved))
                 )
             })
     }) {
@@ -1814,6 +1929,7 @@ fn attach_external_native_continuations(
 async fn discover_external_originals(
     scanner: &MessageSender,
     genesis: H256,
+    until: Option<&FinalizedReceiptObservation>,
 ) -> Result<Vec<(Vec<u8>, seal::CanonicalExternalOriginal)>> {
     let chain = scanner.api_provider.client();
     ensure!(
@@ -1821,8 +1937,22 @@ async fn discover_external_originals(
             && chain.block_number_to_hash(0).await? == genesis,
         "HOLD: external original discovery genesis changed"
     );
-    let head = chain.latest_finalized_block().await?;
-    let end = chain.block_hash_to_number(head).await?;
+    let latest = chain.latest_finalized_block().await?;
+    let latest_number = chain.block_hash_to_number(latest).await?;
+    let (head, end) = match until {
+        Some(pin) => {
+            let number = pin
+                .finalized_block_number
+                .context("HOLD: external discovery cutoff height missing")?;
+            let hash = H256::from_str(&pin.finalized_block_hash)?;
+            ensure!(
+                number <= latest_number && chain.block_number_to_hash(number).await? == hash,
+                "HOLD: external discovery cutoff is not canonical finalized"
+            );
+            (hash, number)
+        }
+        None => (latest, latest_number),
+    };
     let mut proofs = Vec::new();
     let mut continuations = Vec::new();
     for number in 1..=end {
@@ -1939,8 +2069,8 @@ async fn discover_external_originals(
         "HOLD: external original finalized history changed"
     );
     let discovered_at = FinalizedReceiptObservation {
-        finalized_block_number: Some(final_number),
-        finalized_block_hash: format!("{final_head:#x}"),
+        finalized_block_number: Some(end),
+        finalized_block_hash: format!("{head:#x}"),
     };
     let mut found = Vec::with_capacity(proofs.len());
     for (proof, mut original) in proofs {
@@ -1957,13 +2087,446 @@ async fn discover_external_originals(
     found.sort_by_key(|(proof, external)| !accepted_external_parent(proof, &external.original));
     Ok(found)
 }
+fn preserves_original(observed: &SignedSubmission, saved: &SignedSubmission) -> bool {
+    validate_exclusion_copy(saved, observed).is_ok()
+}
+
+async fn observe_excluded_call(
+    scanner: &MessageSender,
+    signed: &mut SignedSubmission,
+    destination: H256,
+    call: &[u8],
+    exclusion: &FinalizedReceiptObservation,
+) -> Result<()> {
+    let saved = signed.clone();
+    let chain = scanner.api_provider.client();
+    let number = exclusion
+        .finalized_block_number
+        .context("HOLD: exclusion height missing")?;
+    let hash = H256::from_str(&exclusion.finalized_block_hash)?;
+    ensure!(
+        signed.prepared_finalized_number <= number
+            && signed.scanned_finalized_number <= number
+            && signed.reply_scanned_finalized_number <= number,
+        "HOLD: original observations postdate exclusion"
+    );
+    // Saved dispositions are reauthenticated by the shared verifier, not replaced
+    // by a newer account nonce or a later scan cursor.
+    if signed.has_terminal_reconciliation() {
+        return Ok(());
+    }
+    let found = scanner
+        .find_signed_extrinsic(signed, destination, call)
+        .await?;
+    if signed.scanned_finalized_number < saved.scanned_finalized_number {
+        signed.scanned_finalized_number = saved.scanned_finalized_number;
+        signed.scanned_finalized_hash = saved.scanned_finalized_hash.clone();
+    }
+    if found {
+        if let Some(id) = signed
+            .message_id
+            .as_deref()
+            .map(H256::from_str)
+            .transpose()?
+        {
+            scanner
+                .find_finalized_reply(signed, id, destination)
+                .await?;
+        }
+    } else {
+        let nonce = u64::from(chain.api.info_at(&signed.sender, Some(hash)).await?.nonce);
+        ensure!(
+            nonce > signed.nonce,
+            "HOLD: excluded original nonce remains unconsumed"
+        );
+        signed.scanned_finalized_number = number;
+        signed.scanned_finalized_hash = exclusion.finalized_block_hash.clone();
+        signed.finalized_nonce_consumed = Some(nonce);
+    }
+    ensure!(
+        preserves_original(signed, &saved),
+        "HOLD: exclusion discovery changed retained original observations"
+    );
+    Ok(())
+}
+
+async fn observe_excluded_original(
+    scanner: &MessageSender,
+    identity: &InboundRuntimeIdentity,
+    proof: &eth_events_electra_client::EthToVaraEvent,
+    original: &SignedSubmission,
+    exclusion: &FinalizedReceiptObservation,
+) -> Result<SignedSubmission> {
+    let mut copy = original.clone();
+    observe_excluded_call(
+        scanner,
+        &mut copy,
+        scanner.historical_proxy_address,
+        &receipt_call(scanner, proof),
+        exclusion,
+    )
+    .await?;
+    let call = io::ReconcileReceipt::encode_call(original.receipt_key.0, original.receipt_key.1);
+    for continuation in copy
+        .native_reconciliation_attempts
+        .iter_mut()
+        .chain(copy.native_reconciliation.as_deref_mut())
+    {
+        observe_excluded_call(
+            scanner,
+            continuation,
+            scanner.receiver_address,
+            &call,
+            exclusion,
+        )
+        .await?;
+    }
+    ensure!(
+        preserves_original(&copy, original),
+        "HOLD: exclusion work copy replaced original evidence"
+    );
+    verify_excluded_original(
+        scanner,
+        &scanner.api_provider,
+        identity,
+        proof,
+        &copy,
+        exclusion,
+    )
+    .await?;
+    Ok(copy)
+}
+
+fn validate_owned_exclusion(
+    identity: &InboundRuntimeIdentity,
+    admission: &Admission,
+    retained: &Transaction,
+) -> Result<()> {
+    let receipt = retained
+        .receipt
+        .as_ref()
+        .context("HOLD: excluded original proof missing")?;
+    let saved = receipt
+        .signed_submission
+        .as_ref()
+        .context("HOLD: excluded owned signature missing")?;
+    let signed = admission
+        .signed
+        .as_ref()
+        .context("HOLD: exclusion work copy missing")?;
+    ensure!(
+        admission.original_lane_uuid == Some(retained.uuid)
+            && retained.tx.tx_hash == admission.original_tx_hash
+            && retained.receipt_event()?.encode() == admission.proof
+            && signed.sender.parse::<subxt::utils::AccountId32>()?.0 == identity.gear_sender
+            && preserves_original(signed, saved)
+            && admission.attempts.len() == receipt.submission_attempts.len()
+            && admission
+                .attempts
+                .iter()
+                .zip(&receipt.submission_attempts)
+                .all(
+                    |(copy, original)| preserves_original(copy, &original.signed_submission)
+                        && copy
+                            .sender
+                            .parse::<subxt::utils::AccountId32>()
+                            .is_ok_and(|sender| sender.0 == identity.gear_sender)
+                ),
+        "HOLD: excluded original journal linkage changed"
+    );
+    Ok(())
+}
+
+async fn authenticate_exclusion(
+    api: &GearApi,
+    scanner: &MessageSender,
+    work: &Work,
+    admission: &Admission,
+) -> Result<()> {
+    let pin = admission
+        .exclusion
+        .as_ref()
+        .context("HOLD: exclusion pin missing")?;
+    ensure!(
+        work.schema_version == 2 && admission.settlement.is_none(),
+        "HOLD: settlement/exclusion conflict"
+    );
+    let mut bytes = admission.proof.as_slice();
+    let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
+    ensure!(bytes.is_empty(), "HOLD: exclusion proof trailing bytes");
+    ensure!(
+        scanner
+            .receipt_resolution_status(api, &proof, Some(pin))
+            .await?
+            .as_ref()
+            == Some(pin),
+        "HOLD: historical terminal resolution missing"
+    );
+    if let Some(retirement) = &work.retirement {
+        ensure!(
+            pin.finalized_block_number
+                .is_some_and(|number| number <= retirement.block_number),
+            "HOLD: exclusion postdates retirement"
+        );
+    }
+    let journal = seal::read_original_journal(&work.intent.old_transactions)?;
+    for retained in journal
+        .transactions
+        .values()
+        .chain(journal.completed.values())
+        .filter(|row| {
+            row.tx.tx_hash == admission.original_tx_hash
+                && row
+                    .receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.signed_submission.is_some())
+        })
+    {
+        ensure!(
+            admission.original_lane_uuid == Some(retained.uuid)
+                && journal.transactions.contains_key(&retained.uuid),
+            "HOLD: known owned signature cannot be replaced by foreign/sponsored evidence"
+        );
+    }
+    let original = if let Some(external) = &admission.external_original {
+        ensure!(
+            external.provenance == "canonical-external"
+                && admission.admission == "externally-resolved"
+                && admission.original_lane_uuid.is_none()
+                && admission.signed.is_none()
+                && admission.attempts.is_empty(),
+            "HOLD: foreign exclusion provenance conflicts"
+        );
+        &external.original
+    } else {
+        ensure!(
+            admission.admission
+                == if admission.fee_event_observed {
+                    "paid"
+                } else {
+                    "cutover-sponsored"
+                },
+            "HOLD: owned exclusion fee provenance changed"
+        );
+        let signed = admission
+            .signed
+            .as_ref()
+            .context("HOLD: excluded signed original missing")?;
+        if let Some(uuid) = admission.original_lane_uuid {
+            let journal = seal::read_original_journal(&work.intent.old_transactions)?;
+            let retained = journal
+                .transactions
+                .get(&uuid)
+                .context("HOLD: excluded original active UUID missing")?;
+            validate_owned_exclusion(&work.intent.old_identity, admission, retained)?;
+        }
+        signed
+    };
+    for archived in &admission.attempts {
+        verify_excluded_original(
+            scanner,
+            &scanner.api_provider,
+            &work.intent.old_identity,
+            &proof,
+            archived,
+            pin,
+        )
+        .await?;
+    }
+    verify_excluded_original(
+        scanner,
+        &scanner.api_provider,
+        &work.intent.old_identity,
+        &proof,
+        original,
+        pin,
+    )
+    .await
+}
+
+async fn record_resolution(
+    api: &GearApi,
+    scanner: &MessageSender,
+    path: &Path,
+    work: &mut Work,
+    index: usize,
+) -> Result<bool> {
+    if work.admissions[index].exclusion.is_some() {
+        authenticate_exclusion(api, scanner, work, &work.admissions[index]).await?;
+        return Ok(true);
+    }
+    if work.admissions[index].settlement.is_some() {
+        return Ok(false);
+    }
+    let mut bytes = work.admissions[index].proof.as_slice();
+    let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
+    ensure!(bytes.is_empty(), "HOLD: admission proof trailing bytes");
+    let retirement_pin = work
+        .retirement
+        .as_ref()
+        .map(|retirement| FinalizedReceiptObservation {
+            finalized_block_number: Some(retirement.block_number),
+            finalized_block_hash: format!("{:#x}", retirement.block_hash),
+        });
+    let Some(pin) = scanner
+        .receipt_resolution_status(api, &proof, retirement_pin.as_ref())
+        .await?
+    else {
+        return Ok(false);
+    };
+    let journal = seal::read_original_journal(&work.intent.old_transactions)?;
+    let owned = journal.transactions.values().find(|row| {
+        row.tx.tx_hash == work.admissions[index].original_tx_hash
+            && row
+                .receipt
+                .as_ref()
+                .is_some_and(|receipt| receipt.signed_submission.is_some())
+    });
+    let admission = &mut work.admissions[index];
+    if owned.is_none() && admission.signed.is_none() && !admission.attempts.is_empty() {
+        admission.signed = admission.attempts.pop();
+    }
+    if let Some(row) = owned {
+        ensure!(
+            row.receipt_event()?.encode() == admission.proof,
+            "HOLD: owned exclusion proof identity changed"
+        );
+        let receipt = row.receipt.as_ref().context("HOLD: owned proof missing")?;
+        let signed = receipt
+            .signed_submission
+            .as_ref()
+            .context("HOLD: owned signature missing")?;
+        ensure!(
+            signed.sender.parse::<subxt::utils::AccountId32>()?.0
+                == work.intent.old_identity.gear_sender,
+            "HOLD: retained owned signer changed"
+        );
+        ensure!(
+            admission.external_original.is_none(),
+            "HOLD: foreign original cannot replace owned signature"
+        );
+        let previous_signed = admission.signed.as_ref();
+        if let Some(previous) = previous_signed {
+            validate_exclusion_copy(signed, previous)?;
+        } else {
+            ensure!(
+                admission.attempts.is_empty(),
+                "HOLD: sponsored attempts conflict with retained owned signature"
+            );
+        }
+        let copy = observe_excluded_original(
+            scanner,
+            &work.intent.old_identity,
+            &proof,
+            previous_signed.unwrap_or(signed),
+            &pin,
+        )
+        .await?;
+        validate_exclusion_copy(signed, &copy)?;
+        let mut attempts = Vec::with_capacity(receipt.submission_attempts.len());
+        ensure!(
+            admission.attempts.is_empty()
+                || admission.attempts.len() == receipt.submission_attempts.len(),
+            "HOLD: retained owned archived proof history changed"
+        );
+        for (index, archived) in receipt.submission_attempts.iter().enumerate() {
+            ensure!(
+                archived
+                    .signed_submission
+                    .sender
+                    .parse::<subxt::utils::AccountId32>()?
+                    .0
+                    == work.intent.old_identity.gear_sender,
+                "HOLD: archived owned signer changed"
+            );
+            let saved = admission
+                .attempts
+                .get(index)
+                .unwrap_or(&archived.signed_submission);
+            validate_exclusion_copy(&archived.signed_submission, saved)?;
+            attempts.push(
+                observe_excluded_original(scanner, &work.intent.old_identity, &proof, saved, &pin)
+                    .await?,
+            );
+        }
+        admission.signed = Some(copy);
+        admission.attempts = attempts;
+        admission.original_lane_uuid = Some(row.uuid);
+        admission.undispatched_old_admission = None;
+        admission.external_original = None;
+        admission.admission = if admission.fee_event_observed {
+            "paid"
+        } else {
+            "cutover-sponsored"
+        }
+        .into();
+    } else if let Some(signed) = &admission.signed {
+        admission.signed = Some(
+            observe_excluded_original(scanner, &work.intent.old_identity, &proof, signed, &pin)
+                .await?,
+        );
+        for archived in &mut admission.attempts {
+            *archived = observe_excluded_original(
+                scanner,
+                &work.intent.old_identity,
+                &proof,
+                archived,
+                &pin,
+            )
+            .await?;
+        }
+    } else {
+        if admission.external_original.is_none() {
+            let candidates = discover_external_originals(
+                scanner,
+                work.intent.old_identity.gear_genesis_hash,
+                Some(&pin),
+            )
+            .await?;
+            admission.external_original = candidates
+                .into_iter()
+                .find(|(bytes, _)| *bytes == admission.proof)
+                .map(|(_, external)| external);
+        }
+        let external = admission
+            .external_original
+            .as_mut()
+            .context("HOLD: resolved receipt lacks authenticated original provenance")?;
+        external.original = observe_excluded_original(
+            scanner,
+            &work.intent.old_identity,
+            &proof,
+            &external.original,
+            &pin,
+        )
+        .await?;
+        admission.undispatched_old_admission = journal
+            .transactions
+            .values()
+            .find(|row| row.tx.tx_hash == admission.original_tx_hash && never_dispatched(row))
+            .map(|row| row.uuid);
+        admission.admission = "externally-resolved".into();
+    }
+    admission.exclusion = Some(pin);
+    authenticate_exclusion(api, scanner, work, &work.admissions[index]).await?;
+    save(path, work)?;
+    Ok(true)
+}
+
+enum QualifiedExternal {
+    Settled(FinalizedReceiptObservation),
+    Excluded(FinalizedReceiptObservation),
+}
+
 async fn qualify_external_original(
     api: &GearApi,
     scanner: &MessageSender,
     proof: &eth_events_electra_client::EthToVaraEvent,
     external: &mut seal::CanonicalExternalOriginal,
     saved: Option<&FinalizedReceiptObservation>,
-) -> Result<FinalizedReceiptObservation> {
+    identity: &InboundRuntimeIdentity,
+    exclusion: Option<&FinalizedReceiptObservation>,
+) -> Result<QualifiedExternal> {
     ensure!(
         external.provenance == "canonical-external",
         "HOLD: unsupported external original provenance"
@@ -1981,11 +2544,29 @@ async fn qualify_external_original(
                 == external.discovered_at.finalized_block_hash,
         "HOLD: external original discovery pin changed"
     );
+    if let Some(pin) = exclusion.cloned().or(if saved.is_none() {
+        scanner.receipt_resolution_status(api, proof, None).await?
+    } else {
+        None
+    }) {
+        ensure!(
+            saved.is_none()
+                && scanner
+                    .receipt_resolution_status(api, proof, Some(&pin))
+                    .await?
+                    .as_ref()
+                    == Some(&pin),
+            "HOLD: external settlement/exclusion conflicts"
+        );
+        external.original =
+            observe_excluded_original(scanner, identity, proof, &external.original, &pin).await?;
+        return Ok(QualifiedExternal::Excluded(pin));
+    }
     if let Some(saved) = saved {
         scanner
             .verify_saved_completion(api, proof, &external.original, saved)
             .await?;
-        return Ok(saved.clone());
+        return Ok(QualifiedExternal::Settled(saved.clone()));
     }
     let payload = receipt_call(scanner, proof);
     ensure!(
@@ -2066,7 +2647,7 @@ async fn qualify_external_original(
                 finalized_block_number: Some(latest),
                 finalized_block_hash: format!("{latest_hash:#x}"),
             };
-            return Ok(pin);
+            return Ok(QualifiedExternal::Settled(pin));
         }
     }
     bail!("HOLD: external original has no authenticated complete historical economic settlement; resume its original manual owner during Draining")
@@ -2226,6 +2807,7 @@ async fn scan_coverage(
                         discover_external_originals(
                             &readonly_sender,
                             work.intent.old_identity.gear_genesis_hash,
+                            None,
                         )
                         .await?,
                     );
@@ -2237,10 +2819,7 @@ async fn scan_coverage(
                     .as_ref()
                     .context("External discovery cache missing")?
                     .iter()
-                    .find(|(proof, external)| {
-                        if !accepted_external_parent(proof, &external.original) {
-                            return false;
-                        }
+                    .find(|(proof, _)| {
                         let Ok(event) = eth_events_electra_client::EthToVaraEvent::decode(
                             &mut proof.as_slice(),
                         ) else {
@@ -2280,6 +2859,35 @@ async fn scan_coverage(
                     .context("Original receipt identity missing")?
                     .receipt_event()?
             };
+            ensure!(
+                proof.transaction_index
+                    == receipt
+                        .transaction_index
+                        .context("HOLD: receipt index missing")?
+                    && proof.receipt_rlp
+                        == alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(
+                            receipt.as_ref()
+                        ))
+                    && proof
+                        .proof_block
+                        .block
+                        .body
+                        .execution_payload
+                        .block_hash
+                        .0
+                         .0
+                        == block.header.hash.0
+                    && proof
+                        .proof_block
+                        .block
+                        .body
+                        .execution_payload
+                        .receipts_root
+                        .0
+                         .0
+                        == block.header.receipts_root.0,
+                "HOLD: original proof does not bind canonical receipt/header"
+            );
             let key = (proof.proof_block.block.slot, proof.transaction_index);
             if key.0 < work.intent.source_receipt_floor {
                 continue;
@@ -2319,6 +2927,7 @@ async fn scan_coverage(
                 signed: None,
                 attempts: vec![],
                 settlement: None,
+                exclusion: None,
                 original_lane_uuid: None,
                 undispatched_old_admission: if external_original.is_some() {
                     original
@@ -2329,6 +2938,8 @@ async fn scan_coverage(
                 },
                 external_original,
             });
+            let index = work.admissions.len() - 1;
+            record_resolution(api, &readonly_sender, path, &mut work, index).await?;
             // Admission is committed before the coverage cursor can move.
             save(path, &work)?;
         }
@@ -2356,7 +2967,9 @@ async fn scan_coverage(
     let unpaid = work
         .admissions
         .iter()
-        .filter(|admission| admission.admission == "cutover-sponsored")
+        .filter(|admission| {
+            admission.admission == "cutover-sponsored" && admission.exclusion.is_none()
+        })
         .count();
     ensure!(unpaid == 0 || sponsor, "HOLD: {unpaid} authentic unpaid pre-boundary receipts require --sponsor-unpaid; admissions retained in cutover-work.json");
     Ok(())
@@ -2371,21 +2984,30 @@ async fn drain(
     sponsor: bool,
 ) -> Result<()> {
     let mut work = read_work(path)?;
-    ensure!(
-        sponsor
-            || work
-                .admissions
-                .iter()
-                .all(|admission| admission.fee_event_observed
-                    || admission.external_original.is_some()),
-        "HOLD: unpaid sponsorship requires explicit invocation authorization"
-    );
     let signer: gsdk::signer::Signer = api.clone().into();
     let provider = ApiProviderConnection::from_api(signer.api().clone());
     let sender = sender(
         provider.clone(),
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
+    );
+    let mut excluded_owned = BTreeSet::new();
+    for index in 0..work.admissions.len() {
+        if record_resolution(api, &sender, path, &mut work, index).await? {
+            if let Some(uuid) = work.admissions[index].original_lane_uuid {
+                excluded_owned.insert(uuid);
+            }
+        }
+    }
+    ensure!(
+        sponsor
+            || work
+                .admissions
+                .iter()
+                .all(|admission| admission.fee_event_observed
+                    || admission.external_original.is_some()
+                    || admission.exclusion.is_some()),
+        "HOLD: unpaid sponsorship requires explicit invocation authorization"
     );
     let storage = Arc::new(JSONStorage::new(&work.intent.old_transactions));
     bind_original_storage(
@@ -2405,6 +3027,9 @@ async fn drain(
         .cloned()
         .collect();
     for transaction in originals {
+        if excluded_owned.contains(&transaction.uuid) {
+            continue;
+        }
         if let Some(admission) = work
             .admissions
             .iter()
@@ -2439,6 +3064,25 @@ async fn drain(
             .cloned()
             .context("Original admission vanished")?;
         let proof = transaction.receipt_event()?;
+        if sender
+            .receipt_resolution_status(api, &proof, None)
+            .await?
+            .is_some()
+        {
+            let index = work
+                .admissions
+                .iter()
+                .position(|admission| admission.original_tx_hash == transaction.tx.tx_hash)
+                .context("HOLD: original terminal receipt is outside canonical coverage")?;
+            ensure!(
+                record_resolution(api, &sender, path, &mut work, index).await?,
+                "HOLD: resolution changed"
+            );
+            if let Some(uuid) = work.admissions[index].original_lane_uuid {
+                excluded_owned.insert(uuid);
+            }
+            continue;
+        }
         let signed = match transaction
             .receipt
             .as_ref()
@@ -2484,14 +3128,26 @@ async fn drain(
             .read()
             .await
             .keys()
-            .all(|uuid| work.admissions.iter().any(|admission| admission
-                .undispatched_old_admission
-                == Some(*uuid)
-                && admission.external_original.is_some())),
+            .all(|uuid| excluded_owned.contains(uuid)
+                || work
+                    .admissions
+                    .iter()
+                    .any(
+                        |admission| admission.undispatched_old_admission == Some(*uuid)
+                            && admission.external_original.is_some()
+                            && seal::read_original_journal(&work.intent.old_transactions)
+                                .ok()
+                                .and_then(|journal| journal.transactions.get(uuid).cloned())
+                                .is_some_and(|row| never_dispatched(&row)
+                                    && row.tx.tx_hash == admission.original_tx_hash)
+                    )),
         "HOLD: original lane contains failed admissions"
     );
     let mut external_cache: Option<Vec<(Vec<u8>, seal::CanonicalExternalOriginal)>> = None;
     for index in 0..work.admissions.len() {
+        if record_resolution(api, &sender, path, &mut work, index).await? {
+            continue;
+        }
         let admission = &mut work.admissions[index];
         let mut bytes = admission.proof.as_slice();
         let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
@@ -2512,6 +3168,7 @@ async fn drain(
                         discover_external_originals(
                             &sender,
                             work.intent.old_identity.gear_genesis_hash,
+                            None,
                         )
                         .await?,
                     );
@@ -2535,11 +3192,20 @@ async fn drain(
                 &proof,
                 external,
                 admission.settlement.as_ref(),
+                &work.intent.old_identity,
+                admission.exclusion.as_ref(),
             )
             .await;
-            if let Ok(pin) = &result {
-                admission.settlement = Some(pin.clone());
-                admission.admission = "externally-delivered".into();
+            match &result {
+                Ok(QualifiedExternal::Settled(pin)) => {
+                    admission.settlement = Some(pin.clone());
+                    admission.admission = "externally-delivered".into();
+                }
+                Ok(QualifiedExternal::Excluded(pin)) => {
+                    admission.exclusion = Some(pin.clone());
+                    admission.admission = "externally-resolved".into();
+                }
+                Err(_) => {}
             }
             save(path, &work)?;
             result?;
@@ -2645,14 +3311,13 @@ async fn drain(
             .read()
             .await
             .values()
-            .all(|transaction| never_dispatched(transaction)
-                && work
-                    .admissions
-                    .iter()
-                    .any(|admission| admission.undispatched_old_admission
+            .all(|transaction| excluded_owned.contains(&transaction.uuid)
+                || (never_dispatched(transaction)
+                    && work.admissions.iter().any(|admission| admission
+                        .undispatched_old_admission
                         == Some(transaction.uuid)
                         && admission.external_original.is_some()
-                        && admission.settlement.is_some())),
+                        && (admission.settlement.is_some() ^ admission.exclusion.is_some())))),
         "HOLD: original lane remains undrained"
     );
     Ok(())
@@ -2717,6 +3382,9 @@ pub async fn prepare(
     let _work_owner = lock_work(&args.cutover_dir)?;
     let path = work_path(&args.cutover_dir);
     let old_transactions = fs::canonicalize(&args.old_transactions)?;
+    if path.exists() {
+        upgrade_work(api, &path).await?;
+    }
     let old_discovery = fs::canonicalize(&args.old_discovery)?;
     let _journals = seal::lock_original_journals(&old_transactions, &old_discovery)?;
     let journal = seal::read_original_journal(&old_transactions)?;
@@ -2923,7 +3591,7 @@ pub async fn prepare(
         save(
             &path,
             &Work {
-                schema_version: 1,
+                schema_version: 2,
                 intent: intent.clone(),
                 blocks: vec![],
                 admissions: vec![],
@@ -3036,17 +3704,15 @@ async fn drain_source(api: &GearApi, path: &Path) -> Result<()> {
             .context("Tracker pagination overflow")?;
     }
     if let Some(wrapper) = work.intent.native_wrapper {
-        use vft_vara_client::traits::NativeEscrow as _;
-        let escrow = vft_vara_client::NativeEscrow::new(GClientRemoting::new(api.clone()));
         let at = api.last_block_hash().await?;
+        let roles = read_role_pin(api, wrapper, true, Some(H256::from_slice(at.as_ref()))).await?;
         ensure!(
-            escrow
-                .outstanding_redemptions()
-                .at_block(sails_rs::H256::from_slice(at.as_ref()))
-                .recv(actor(wrapper))
-                .await?
-                == 0,
-            "HOLD: original native payouts remain undelivered"
+            zero_blocking(&roles, work.schema_version)?,
+            "HOLD: original native payouts remain blocking"
+        );
+        ensure!(
+            !roles.paused,
+            "HOLD: resume wrapper after retaining holds and before source custody transfer"
         );
     }
     Ok(())
@@ -3282,7 +3948,7 @@ fn validate_lifecycle_report(work: &Work) -> Result<()> {
         if work.intent.native_wrapper == Some(roles.token) {
             ensure!(
                 roles.manager == Some(new)
-                    && roles.outstanding_redemptions == Some(0)
+                    && zero_blocking(roles, work.schema_version)?
                     && !roles.paused,
                 "HOLD: final native wrapper policy differs"
             );
@@ -3486,13 +4152,11 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
             "HOLD: wrapper burner unexpected/unrecorded"
         );
         ensure!(
-            escrow
-                .outstanding_redemptions()
-                .at_block(pin)
-                .recv(actor(wrapper))
-                .await?
-                == 0,
-            "HOLD: outstanding original native redemption"
+            zero_blocking(
+                &read_role_pin(api, wrapper, true, Some(H256::from_slice(at.as_ref()))).await?,
+                work.schema_version
+            )?,
+            "HOLD: blocking original native redemption"
         );
         let initial = work
             .intent
@@ -3531,12 +4195,10 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
         ensure!(
             escrow.manager().at_block(pin).recv(actor(wrapper)).await? == Some(new)
                 && admin.burner().at_block(pin).recv(actor(wrapper)).await? == new
-                && escrow
-                    .outstanding_redemptions()
-                    .at_block(pin)
-                    .recv(actor(wrapper))
-                    .await?
-                    == 0,
+                && zero_blocking(
+                    &read_role_pin(api, wrapper, true, Some(H256::from_slice(at.as_ref()))).await?,
+                    work.schema_version
+                )?,
             "HOLD: wrapper handoff readback differs"
         );
         run_cutover_call(api, path, CutoverStep::WrapperResume, &work.intent).await?;
@@ -3544,9 +4206,53 @@ async fn handoff_roles_reconciled(api: &GearApi, path: &Path) -> Result<()> {
     }
     Ok(())
 }
+fn validate_admission_uniqueness(admissions: &[Admission]) -> Result<()> {
+    ensure!(
+        admissions
+            .iter()
+            .map(|admission| admission.receipt_key)
+            .collect::<BTreeSet<_>>()
+            .len()
+            == admissions.len(),
+        "HOLD: duplicate coverage admission keys"
+    );
+    ensure!(
+        admissions
+            .iter()
+            .map(|admission| admission.original_tx_hash)
+            .collect::<BTreeSet<_>>()
+            .len()
+            == admissions.len(),
+        "HOLD: duplicate admitted transaction identity"
+    );
+    let owned = admissions
+        .iter()
+        .filter_map(|admission| {
+            admission
+                .original_lane_uuid
+                .or(admission.undispatched_old_admission)
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        owned.iter().collect::<BTreeSet<_>>().len() == owned.len(),
+        "HOLD: duplicate ownership UUID"
+    );
+    ensure!(
+        admissions
+            .iter()
+            .all(|admission| !(admission.original_lane_uuid.is_some()
+                && admission.undispatched_old_admission.is_some())),
+        "HOLD: conflicting owned/undispatched UUID"
+    );
+    Ok(())
+}
+
 fn completed_coverage(work: &Work) -> Result<()> {
+    validate_work_version(work)?;
+    validate_admission_uniqueness(&work.admissions)?;
     let mut expected = 0;
     let mut previous = None;
+    let mut accounted = BTreeSet::new();
     for block in &work.blocks {
         ensure!(
             block.number == expected && previous.is_none_or(|hash| hash == block.parent_hash),
@@ -3576,9 +4282,32 @@ fn completed_coverage(work: &Work) -> Result<()> {
                                     receipt.as_ref()
                                 ))
                             && proof.transaction_index == admission.receipt_key.1
-                            && proof.proof_block.block.slot == admission.receipt_key.0,
+                            && proof.proof_block.block.slot == admission.receipt_key.0
+                            && proof
+                                .proof_block
+                                .block
+                                .body
+                                .execution_payload
+                                .block_hash
+                                .0
+                                 .0
+                                == block.hash.0
+                            && proof
+                                .proof_block
+                                .block
+                                .body
+                                .execution_payload
+                                .receipts_root
+                                .0
+                                 .0
+                                == block.receipts_root.0
+                            && block
+                                .transactions
+                                .get(usize::try_from(proof.transaction_index)?)
+                                == Some(&admission.original_tx_hash),
                         "HOLD: admission proof does not contain the original canonical receipt/key"
                     );
+                    accounted.insert(admission.original_tx_hash);
                 }
             }
         }
@@ -3597,26 +4326,53 @@ fn completed_coverage(work: &Work) -> Result<()> {
         "HOLD: coverage is incomplete"
     );
     ensure!(
+        accounted.len() == work.admissions.len(),
+        "HOLD: admission lies outside canonical covered deposits"
+    );
+    ensure!(
         work.admissions
             .iter()
-            .all(|admission| admission.settlement.is_some()
-                && admission.receipt_key.0 <= work.intent.boundary.slot
-                && admission.receipt_key.0 >= work.intent.source_receipt_floor
-                && (admission.fee_event_observed
-                    || admission.admission == "cutover-sponsored"
-                    || (admission.admission == "externally-delivered"
-                        && admission.external_original.is_some()))),
+            .all(
+                |admission| (admission.settlement.is_some() ^ admission.exclusion.is_some())
+                    && admission.receipt_key.0 <= work.intent.boundary.slot
+                    && admission.receipt_key.0 >= work.intent.source_receipt_floor
+                    && (admission.fee_event_observed
+                        || admission.admission == "cutover-sponsored"
+                        || (matches!(
+                            admission.admission.as_str(),
+                            "externally-delivered" | "externally-resolved"
+                        ) && admission.external_original.is_some()))
+            ),
         "HOLD: economic admissions undrained or policy changed"
     );
-    let keys = work
-        .admissions
-        .iter()
-        .map(|admission| admission.receipt_key)
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        keys.len() == work.admissions.len(),
-        "HOLD: duplicate coverage admission keys"
-    );
+    for admission in &work.admissions {
+        ensure!(
+            !(admission.original_lane_uuid.is_some()
+                && admission.undispatched_old_admission.is_some()),
+            "HOLD: conflicting owned/undispatched UUID"
+        );
+        if admission.exclusion.is_some() {
+            ensure!(
+                work.schema_version == 2
+                    && admission.settlement.is_none()
+                    && ((admission.external_original.is_some()
+                        && admission.admission == "externally-resolved"
+                        && admission.signed.is_none()
+                        && admission.original_lane_uuid.is_none()
+                        && admission.attempts.is_empty())
+                        || (admission.external_original.is_none()
+                            && admission.signed.is_some()
+                            && admission.undispatched_old_admission.is_none()
+                            && admission.admission
+                                == if admission.fee_event_observed {
+                                    "paid"
+                                } else {
+                                    "cutover-sponsored"
+                                })),
+                "HOLD: exclusion provenance conflicts"
+            );
+        }
+    }
     Ok(())
 }
 pub async fn finalize(
@@ -3626,6 +4382,7 @@ pub async fn finalize(
 ) -> Result<()> {
     let _owner = lock_work(&args.cutover_dir)?;
     let path = work_path(&args.cutover_dir);
+    upgrade_work(api, &path).await?;
     let mut work = read_work(&path)?;
     let _journals =
         seal::lock_original_journals(&work.intent.old_transactions, &work.intent.old_discovery)?;
@@ -3741,7 +4498,7 @@ pub async fn finalize(
         atomic_json(
             &coverage_path,
             &CoverageReport {
-                schema_version: 1,
+                schema_version: 2,
                 intent: work.intent.clone(),
                 blocks: work.blocks.clone(),
                 admissions: work.admissions.clone(),
@@ -3751,7 +4508,7 @@ pub async fn finalize(
         atomic_json(
             &calls_path,
             &LifecycleReport {
-                schema_version: 1,
+                schema_version: 2,
                 intent: work.intent.clone(),
                 calls: work.calls.clone(),
                 role_pins: work.role_pins.clone(),
@@ -3760,7 +4517,7 @@ pub async fn finalize(
             true,
         )?;
         let sealed = CutoverSeal {
-            schema_version: 1,
+            schema_version: 2,
             old_identity: work.intent.old_identity.clone(),
             new_identity: work.intent.new_identity.clone(),
             new_manager_code_id: work.intent.new_manager_code_id,
@@ -3886,12 +4643,11 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     let api = readonly.gclient();
     let eth = PollingEthApi::new(&args.ethereum_rpc).await?;
     let beacon = BeaconClient::new(args.beacon_rpc.clone(), Some(Duration::from_secs(30))).await?;
-    let report: CoverageReport = serde_json::from_slice(&fs::read(&sealed.coverage.path)?)?;
-    let lifecycle: LifecycleReport =
-        serde_json::from_slice(&fs::read(&sealed.lifecycle_evidence.path)?)?;
+    let report: CoverageReport = read_versioned_json(&sealed.coverage.path)?;
+    let lifecycle: LifecycleReport = read_versioned_json(&sealed.lifecycle_evidence.path)?;
     ensure!(
-        report.schema_version == 1
-            && lifecycle.schema_version == 1
+        report.schema_version == sealed.schema_version
+            && lifecycle.schema_version == sealed.schema_version
             && report.intent == lifecycle.intent
             && report.intent.old_identity == sealed.old_identity
             && report.intent.new_identity == sealed.new_identity
@@ -3904,7 +4660,7 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     authenticate_boundary(&api, &beacon, &report.intent).await?;
     seal::verify_originals_read_only(&args.seal, provider.clone(), &api).await?;
     let work = Work {
-        schema_version: 1,
+        schema_version: sealed.schema_version,
         intent: report.intent.clone(),
         blocks: report.blocks,
         admissions: report.admissions,
@@ -3926,15 +4682,19 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
                     == pin.block_hash,
             "HOLD: finalized role state pin changed"
         );
+        let mut observed = read_role_pin_inner(
+            &api,
+            pin.token,
+            work.intent.native_wrapper == Some(pin.token),
+            Some(pin.block_hash),
+            work.schema_version == 1,
+        )
+        .await?;
+        if work.schema_version == 1 {
+            observed.blocking_redemptions = None;
+        }
         ensure!(
-            read_role_pin(
-                &api,
-                pin.token,
-                work.intent.native_wrapper == Some(pin.token),
-                Some(pin.block_hash)
-            )
-            .await?
-                == *pin,
+            observed == *pin,
             "HOLD: historical role state changed or unavailable"
         );
     }
@@ -3968,6 +4728,10 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
                 && admission.fee_event_observed == admission.fee_emitter.is_some(),
             "HOLD: transaction-local fee evidence changed"
         );
+        if admission.exclusion.is_some() {
+            authenticate_exclusion(&api, &scanner, &work, admission).await?;
+            continue;
+        }
         if let Some(uuid) = admission.original_lane_uuid {
             let original = seal::read_original_journal(&work.intent.old_transactions)?
                 .completed
@@ -4004,6 +4768,8 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
                 &proof,
                 &mut external,
                 admission.settlement.as_ref(),
+                &work.intent.old_identity,
+                admission.exclusion.as_ref(),
             )
             .await?;
             continue;
@@ -4886,6 +5652,469 @@ mod tests {
         call.original.finalized_reply_error = Some("Error".into());
         assert!(!complete(&call.original));
     }
+    async fn terminal_coverage_fixture() -> Work {
+        use alloy::{
+            consensus::{
+                proofs::{calculate_receipt_root, calculate_transaction_root},
+                Receipt, ReceiptEnvelope, SignableTransaction, TxLegacy,
+            },
+            network::TxSigner,
+            primitives::{Address, Log, TxKind, U256},
+            signers::local::PrivateKeySigner,
+        };
+        let identity = cutover_identity();
+        let emitter = identity.erc20_manager_address.unwrap();
+        let event = IERC20Manager::BridgingRequested {
+            token: Address::from([9; 20]),
+            from: Address::from([10; 20]),
+            to: B256::ZERO,
+            amount: U256::from(1),
+        };
+        let log = Log {
+            address: Address::from(emitter.0),
+            data: event.encode_log_data(),
+        };
+        let envelope = ReceiptEnvelope::Legacy(
+            Receipt {
+                status: true.into(),
+                cumulative_gas_used: 21_000,
+                logs: vec![log.clone()],
+            }
+            .with_bloom(),
+        );
+        let signer = PrivateKeySigner::from_bytes(&B256::from([17; 32])).unwrap();
+        let mut transaction = TxLegacy {
+            chain_id: Some(1),
+            gas_price: 1,
+            gas_limit: 21_000,
+            to: TxKind::Call(log.address),
+            ..Default::default()
+        };
+        let signature = signer.sign_transaction(&mut transaction).await.unwrap();
+        let transaction = TxEnvelope::Legacy(transaction.into_signed(signature));
+        let raw = transaction.encoded_2718();
+        let tx_hash = alloy_primitives::keccak256(&raw);
+        let header = alloy::consensus::Header {
+            transactions_root: calculate_transaction_root(&[transaction]),
+            receipts_root: calculate_receipt_root(std::slice::from_ref(&envelope)),
+            gas_used: 21_000,
+            gas_limit: 30_000_000,
+            ..Default::default()
+        };
+        let block_hash = header.hash_slow();
+        let mut receipt = serde_json::to_value(&envelope).unwrap();
+        let fields = serde_json::json!({
+            "transactionHash": tx_hash, "transactionIndex": "0x0", "blockHash": block_hash,
+            "blockNumber": "0x0", "gasUsed": "0x5208", "effectiveGasPrice": "0x1",
+            "from": signer.address(), "to": log.address, "contractAddress": null,
+            "logs": [{ "address": log.address, "topics": log.data.topics(), "data": log.data.data,
+                "transactionHash": tx_hash, "transactionIndex": "0x0", "blockHash": block_hash,
+                "blockNumber": "0x0", "logIndex": "0x0", "removed": false }]
+        });
+        receipt
+            .as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        let receipt: TransactionReceipt = serde_json::from_value(receipt).unwrap();
+        let covered = CoveredBlock {
+            number: 0,
+            hash: H256(block_hash.0),
+            parent_hash: H256(header.parent_hash.0),
+            receipts_root: H256(header.receipts_root.0),
+            transactions: vec![tx_hash],
+            receipts: vec![receipt.clone()],
+            header,
+            raw_transactions: vec![raw],
+        };
+        // Real canonical Ethereum encoding; the zero SCALE beacon frame is only
+        // a coordinate fixture, never passed off as authenticated checkpoint evidence.
+        let mut proof = receipt_frame();
+        proof.transaction_index = 0;
+        proof.receipt_rlp = alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(
+            receipt.as_ref(),
+        ));
+        proof
+            .proof_block
+            .block
+            .body
+            .execution_payload
+            .block_hash
+            .0
+             .0 = block_hash.0;
+        proof
+            .proof_block
+            .block
+            .body
+            .execution_payload
+            .receipts_root
+            .0
+             .0 = covered.receipts_root.0;
+        let pin = FinalizedReceiptObservation {
+            finalized_block_number: Some(52),
+            finalized_block_hash: format!("{:#x}", H256::repeat_byte(6)),
+        };
+        let admission = Admission {
+            receipt_key: (32, 0),
+            original_tx_hash: tx_hash,
+            original_block_hash: covered.hash,
+            fee_emitter: None,
+            admission: "cutover-sponsored".into(),
+            fee_event_observed: false,
+            proof: proof.encode(),
+            signed: Some(original_with_reply(None)),
+            attempts: vec![],
+            settlement: None,
+            exclusion: Some(pin),
+            original_lane_uuid: None,
+            external_original: None,
+            undispatched_old_admission: None,
+        };
+        Work {
+            schema_version: 2,
+            intent: Intent {
+                old_identity: identity.clone(),
+                new_identity: identity.clone(),
+                new_manager_code_id: H256::repeat_byte(11),
+                old_transactions: PathBuf::from("unused-originals"),
+                old_discovery: PathBuf::from("unused-discovery"),
+                source_receipt_floor: 0,
+                boundary: CutoverBoundary {
+                    slot: 32,
+                    beacon_root: H256::zero(),
+                    execution_number: 0,
+                    execution_hash: covered.hash,
+                },
+                boundary_execution_timestamp: 0,
+                config_fingerprint: H256::zero(),
+                erc20_manager: emitter,
+                native_wrapper: None,
+                initial_role_pins: vec![],
+                mappings: vec![],
+            },
+            blocks: vec![covered],
+            admissions: vec![admission],
+            calls: vec![],
+            role_pins: vec![],
+            registration: None,
+            retirement: None,
+            readiness: None,
+            new_transactions: None,
+            new_discovery: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn canonical_terminal_coverage_preserves_each_original_provenance_and_xor() {
+        let fixture = terminal_coverage_fixture().await;
+        for provenance in ["owned", "sponsored", "external"] {
+            let mut work = fixture.clone();
+            let admission = &mut work.admissions[0];
+            match provenance {
+                "owned" => admission.original_lane_uuid = Some(Uuid::now_v7()),
+                "external" => {
+                    admission.external_original = Some(seal::CanonicalExternalOriginal {
+                        provenance: "canonical-external".into(),
+                        original: admission.signed.take().unwrap(),
+                        discovered_at: admission.exclusion.clone().unwrap(),
+                    });
+                    admission.admission = "externally-resolved".into();
+                }
+                _ => {}
+            }
+            let before = serde_json::to_vec(&work).unwrap();
+            completed_coverage(&work).unwrap();
+            assert_eq!(
+                serde_json::to_vec(&work).unwrap(),
+                before,
+                "read-only coverage must not rewrite original work"
+            );
+            work.admissions[0].settlement = work.admissions[0].exclusion.clone();
+            assert!(
+                completed_coverage(&work).is_err(),
+                "settlement and exclusion are mutually exclusive"
+            );
+            work.admissions[0].settlement = None;
+            work.admissions[0].exclusion = None;
+            assert!(
+                completed_coverage(&work).is_err(),
+                "neither terminal pin cannot qualify"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn canonical_terminal_coverage_rejects_hash_index_header_and_uuid_substitution() {
+        let fixture = terminal_coverage_fixture().await;
+        for field in ["tx", "index", "block", "receipt", "root"] {
+            let mut work = fixture.clone();
+            match field {
+                "tx" => work.admissions[0].original_tx_hash = B256::repeat_byte(44),
+                "index" => work.admissions[0].receipt_key.1 = 1,
+                "block" => work.admissions[0].original_block_hash = H256::repeat_byte(44),
+                "receipt" => work.blocks[0].receipts[0].transaction_hash = B256::repeat_byte(44),
+                "root" => work.blocks[0].header.transactions_root = B256::repeat_byte(44),
+                _ => unreachable!(),
+            }
+            assert!(completed_coverage(&work).is_err(), "{field}");
+        }
+        let mut admissions = fixture.admissions.clone();
+        admissions[0].original_lane_uuid = Some(Uuid::now_v7());
+        let mut duplicate = admissions[0].clone();
+        duplicate.receipt_key.1 += 1;
+        duplicate.original_tx_hash = B256::repeat_byte(45);
+        admissions.push(duplicate);
+        assert!(validate_admission_uniqueness(&admissions)
+            .unwrap_err()
+            .to_string()
+            .contains("UUID"));
+        admissions[1].original_lane_uuid = None;
+        admissions[1].undispatched_old_admission = admissions[0].original_lane_uuid;
+        assert!(
+            validate_admission_uniqueness(&admissions).is_err(),
+            "UUID cannot change ownership kind"
+        );
+    }
+
+    fn historical_wrapper_pin(outstanding: u64, blocking: Option<u64>) -> RolePin {
+        RolePin {
+            token: H256::repeat_byte(1),
+            block_number: 10,
+            block_hash: H256::repeat_byte(2),
+            minter: H256::repeat_byte(3),
+            burner: H256::repeat_byte(3),
+            manager: Some(H256::repeat_byte(3)),
+            outstanding_redemptions: Some(outstanding),
+            blocking_redemptions: blocking,
+            paused: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn version_one_cannot_smuggle_exclusions_or_blocking_counts() {
+        let mut work = terminal_coverage_fixture().await;
+        work.schema_version = 1;
+        assert!(validate_work_version(&work).is_err());
+        work.admissions[0].settlement = work.admissions[0].exclusion.take();
+        completed_coverage(&work).unwrap();
+        work.intent
+            .initial_role_pins
+            .push(historical_wrapper_pin(0, None));
+        validate_work_version(&work).unwrap();
+        work.intent.initial_role_pins[0].blocking_redemptions = Some(0);
+        assert!(validate_work_version(&work).is_err());
+    }
+
+    #[test]
+    fn historical_role_upgrade_requires_unchanged_pins_and_separates_liability() {
+        let saved = historical_wrapper_pin(1, None);
+        let upgraded = upgrade_role_evidence(&saved, historical_wrapper_pin(1, Some(0))).unwrap();
+        assert_eq!(upgraded.outstanding_redemptions, Some(1));
+        assert!(zero_blocking(&upgraded, 2).unwrap());
+        assert!(zero_blocking(&saved, 1).is_err());
+        assert!(upgrade_role_evidence(&saved, saved.clone()).is_err());
+        let drained = historical_wrapper_pin(0, None);
+        assert_eq!(
+            upgrade_role_evidence(&drained, drained.clone())
+                .unwrap()
+                .blocking_redemptions,
+            Some(0)
+        );
+        for field in [
+            "hash",
+            "height",
+            "manager",
+            "paused",
+            "outstanding",
+            "blocking",
+        ] {
+            let mut changed = historical_wrapper_pin(1, Some(0));
+            match field {
+                "hash" => changed.block_hash = H256::repeat_byte(99),
+                "height" => changed.block_number += 1,
+                "manager" => changed.manager = Some(H256::repeat_byte(99)),
+                "paused" => changed.paused = false,
+                "outstanding" => changed.outstanding_redemptions = Some(2),
+                "blocking" => changed.blocking_redemptions = Some(2),
+                _ => unreachable!(),
+            }
+            assert!(upgrade_role_evidence(&saved, changed).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn exclusion_copy_retains_original_parent_and_continuation_observations() {
+        let (proof, mut original) = external_parent_fixture(true);
+        let continuation = external_continuation_fixture(&original, 1);
+        original.native_reconciliation = Some(Box::new(continuation));
+        let encoded = serde_json::to_vec(&original).unwrap();
+        let copy = original.clone();
+        assert!(preserves_original(&copy, &original));
+        for field in ["raw", "reply", "nonce", "child", "attempt"] {
+            let mut changed = copy.clone();
+            match field {
+                "raw" => changed.raw_extrinsic.push(0),
+                "reply" => changed.finalized_reply.as_mut().unwrap().payload.push(0),
+                "nonce" => changed.finalized_nonce_consumed = Some(100),
+                "child" => changed.native_reconciliation.as_mut().unwrap().message_id = None,
+                "attempt" => changed
+                    .native_reconciliation_attempts
+                    .push(external_continuation_fixture(&original, 2)),
+                _ => unreachable!(),
+            }
+            if field == "nonce" {
+                let mut saved = original.clone();
+                saved.finalized_nonce_consumed = Some(99);
+                assert!(!preserves_original(&changed, &saved));
+            } else {
+                assert!(!preserves_original(&changed, &original), "{field}");
+            }
+        }
+        assert_eq!(serde_json::to_vec(&original).unwrap(), encoded);
+        assert!(!proof.is_empty());
+    }
+
+    #[tokio::test]
+    async fn owned_exclusion_uses_work_copy_without_completing_or_rewriting_original_row() {
+        use relayer::message_relayer::{
+            common::{EthereumSlotNumber, TxHashWithSlot},
+            eth_to_gear::tx_manager::{ReceiptEvidence, TxStatus},
+        };
+        let mut work = terminal_coverage_fixture().await;
+        let admission = &mut work.admissions[0];
+        let mut original = admission.signed.clone().unwrap();
+        original.sender =
+            subxt::utils::AccountId32(work.intent.old_identity.gear_sender).to_string();
+        original.receipt_key = admission.receipt_key;
+        let mut row = Transaction::new(
+            TxHashWithSlot {
+                tx_hash: admission.original_tx_hash,
+                slot_number: EthereumSlotNumber(32),
+            },
+            TxStatus::NeedsReconciliation {
+                diagnostic: "retained held liability".into(),
+            },
+        );
+        row.receipt = Some(ReceiptEvidence {
+            payload: admission.proof.clone(),
+            receipt_key: admission.receipt_key,
+            composed_at_ms: 0,
+            handed_off_at_ms: Some(1),
+            initial_response: None,
+            signed_submission: Some(original.clone()),
+            submission_attempts: vec![],
+        });
+        admission.original_lane_uuid = Some(row.uuid);
+        admission.signed = Some(original.clone());
+        admission.signed.as_mut().unwrap().finalized_reply =
+            original_with_reply(Some(vec![1, 2])).finalized_reply;
+        let directory =
+            std::env::temp_dir().join(format!("cutover-owned-exclusion-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let journal = seal::OriginalJournal {
+            schema_version: 7,
+            runtime_identity: Some(work.intent.old_identity.clone()),
+            predecessor_cutover: None,
+            transactions: [(row.uuid, row.clone())].into(),
+            completed: Default::default(),
+            failed: Default::default(),
+        };
+        atomic_json(&directory.join("state.json"), &journal, false).unwrap();
+        let before = fs::read(directory.join("state.json")).unwrap();
+        let retained = seal::read_original_journal(&directory).unwrap();
+        validate_owned_exclusion(
+            &work.intent.old_identity,
+            admission,
+            retained.transactions.get(&row.uuid).unwrap(),
+        )
+        .unwrap();
+        assert!(retained.completed.is_empty());
+        assert!(matches!(
+            retained.transactions[&row.uuid].status,
+            TxStatus::NeedsReconciliation { .. }
+        ));
+        assert_eq!(
+            retained.transactions[&row.uuid]
+                .receipt
+                .as_ref()
+                .unwrap()
+                .signed_submission
+                .as_ref(),
+            Some(&original)
+        );
+        assert_eq!(fs::read(directory.join("state.json")).unwrap(), before);
+        admission.signed.as_mut().unwrap().raw_extrinsic.push(0);
+        assert!(validate_owned_exclusion(&work.intent.old_identity, admission, &row).is_err());
+        admission.signed = Some(original);
+        admission.original_lane_uuid = Some(Uuid::now_v7());
+        assert!(validate_owned_exclusion(&work.intent.old_identity, admission, &row).is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn version_one_reader_rejects_even_null_new_fields_without_rewriting_work() {
+        let directory = std::env::temp_dir().join(format!("cutover-v1-fields-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("cutover-work.json");
+        let mut work = terminal_coverage_fixture().await;
+        work.schema_version = 1;
+        work.admissions[0].settlement = work.admissions[0].exclusion.take();
+        work.intent
+            .initial_role_pins
+            .push(historical_wrapper_pin(0, None));
+        atomic_json(&path, &work, false).unwrap();
+        assert_eq!(read_work(&path).unwrap().schema_version, 1);
+        for field in ["exclusion", "blocking_redemptions"] {
+            let mut value = serde_json::to_value(&work).unwrap();
+            if field == "exclusion" {
+                value["admissions"][0][field] = serde_json::Value::Null;
+            } else {
+                value["intent"]["initial_role_pins"][0][field] = serde_json::Value::Null;
+            }
+            atomic_json(&path, &value, false).unwrap();
+            let before = fs::read(&path).unwrap();
+            assert!(read_work(&path).is_err(), "{field}");
+            assert_eq!(fs::read(&path).unwrap(), before);
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn external_resolved_continuation_is_terminal_but_not_financial_success() {
+        let (proof, mut parent) = external_parent_fixture(true);
+        let mut resolved = external_continuation_fixture(&parent, 1);
+        let mut payload = io::ReconcileReceipt::ROUTE.to_vec();
+        payload.extend(
+            Result::<vft_manager_client::ReceiptStatus, vft_manager_client::Error>::Ok(
+                vft_manager_client::ReceiptStatus::Resolved,
+            )
+            .encode(),
+        );
+        resolved.finalized_reply.as_mut().unwrap().payload = payload;
+        let redundant = external_continuation_fixture(&parent, 2);
+        attach_external_native_continuations(&proof, &mut parent, &[resolved.clone(), redundant])
+            .unwrap();
+        assert_eq!(parent.native_reconciliation.as_deref(), Some(&resolved));
+        assert!(parent.native_reconciliation_attempts.is_empty());
+        let mut reply = io::SubmitReceipt::ROUTE.to_vec();
+        reply.extend(
+            Result::<(), vft_manager_client::Error>::Err(
+                vft_manager_client::Error::ReceiptResolved,
+            )
+            .encode(),
+        );
+        use historical_proxy_client::historical_proxy::io::Redirect;
+        let event =
+            eth_events_electra_client::EthToVaraEvent::decode(&mut proof.as_slice()).unwrap();
+        let nested: <Redirect as ActionIo>::Reply = Ok((event.receipt_rlp, reply));
+        let mut encoded = Redirect::ROUTE.to_vec();
+        encoded.extend(nested.encode());
+        let exception = original_with_reply(Some(encoded));
+        assert!(
+            !accepted_external_parent(&proof, &exception),
+            "exception admission must use independent exclusion authentication"
+        );
+    }
+
     #[test]
     fn immutable_evidence_is_not_overwritten() {
         let directory = std::env::temp_dir().join(format!("cutover-immutable-{}", Uuid::now_v7()));

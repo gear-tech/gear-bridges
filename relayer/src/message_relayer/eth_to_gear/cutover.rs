@@ -3,6 +3,11 @@ use super::{
     message_sender::MessageSender, storage::InboundRuntimeIdentity, tx_manager::Transaction,
 };
 use crate::message_relayer::common::ethereum::block_storage::DiscoveryState;
+use alloy::{
+    consensus::TxEnvelope,
+    eips::eip2718::{Decodable2718, Encodable2718},
+    rpc::types::TransactionReceipt,
+};
 use anyhow::{Context, Result};
 use gclient::GearApi;
 use gear_common::{
@@ -32,11 +37,68 @@ pub struct CanonicalExternalOriginal {
     pub discovered_at: super::message_sender::FinalizedReceiptObservation,
 }
 
-// Only the fields needed to bind immutable external coverage to never-dispatched old rows.
-// The tool separately authenticates the complete transaction/receipt-trie coverage report.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoveredBlock {
+    pub number: u64,
+    pub hash: H256,
+    pub parent_hash: H256,
+    pub receipts_root: H256,
+    pub transactions: Vec<alloy_primitives::B256>,
+    pub receipts: Vec<TransactionReceipt>,
+    pub header: alloy::consensus::Header,
+    pub raw_transactions: Vec<Vec<u8>>,
+}
+
+pub fn validate_covered_block(block: &CoveredBlock) -> Result<()> {
+    anyhow::ensure!(
+        block.header.number == block.number
+            && block.header.hash_slow().0 == block.hash.0
+            && block.header.parent_hash.0 == block.parent_hash.0
+            && block.header.receipts_root.0 == block.receipts_root.0,
+        "HOLD: saved coverage header identity changed"
+    );
+    let transactions = block
+        .raw_transactions
+        .iter()
+        .map(|raw| {
+            let mut bytes = raw.as_slice();
+            let transaction = TxEnvelope::decode_2718(&mut bytes)?;
+            anyhow::ensure!(
+                bytes.is_empty() && transaction.encoded_2718() == *raw,
+                "HOLD: noncanonical coverage transaction"
+            );
+            Ok(transaction)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let hashes = block
+        .raw_transactions
+        .iter()
+        .map(alloy_primitives::keccak256)
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        hashes == block.transactions
+            && alloy::consensus::proofs::calculate_transaction_root(&transactions)
+                == block.header.transactions_root,
+        "HOLD: coverage transaction inventory/trie differs from authenticated header"
+    );
+    let mut receipts = block.receipts.clone();
+    super::proof_composer::validate_receipt_set(
+        block.number,
+        block.hash.0.into(),
+        &hashes,
+        block.receipts_root.0.into(),
+        &mut receipts,
+    )?;
+    Ok(())
+}
+
+// Shared projection keeps canonical transaction coverage and terminal evidence at every reader.
 #[derive(Deserialize)]
 struct ExternalCoverageReport {
     schema_version: u32,
+    #[serde(default)]
+    blocks: Vec<CoveredBlock>,
     admissions: Vec<ExternalCoverageAdmission>,
 }
 #[derive(Deserialize)]
@@ -47,6 +109,12 @@ struct ExternalCoverageAdmission {
     admission: String,
     proof: Vec<u8>,
     settlement: Option<super::message_sender::FinalizedReceiptObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exclusion: Option<super::message_sender::FinalizedReceiptObservation>,
+    #[serde(default)]
+    fee_emitter: Option<primitive_types::H160>,
+    #[serde(default)]
+    fee_event_observed: bool,
     #[serde(default)]
     signed: Option<super::message_sender::SignedSubmission>,
     #[serde(default)]
@@ -77,39 +145,310 @@ pub fn is_undispatched_old_admission(transaction: &Transaction) -> bool {
         })
 }
 
+fn validate_report_versions(
+    version: u32,
+    coverage: &serde_json::Value,
+    lifecycle: &serde_json::Value,
+) -> Result<()> {
+    fn has_field(value: &serde_json::Value, name: &str) -> bool {
+        match value {
+            serde_json::Value::Object(fields) => {
+                fields.contains_key(name) || fields.values().any(|value| has_field(value, name))
+            }
+            serde_json::Value::Array(values) => values.iter().any(|value| has_field(value, name)),
+            _ => false,
+        }
+    }
+    anyhow::ensure!(
+        matches!(version, 1 | 2)
+            && coverage
+                .get("schema_version")
+                .and_then(|value| value.as_u64())
+                == Some(version.into())
+            && lifecycle
+                .get("schema_version")
+                .and_then(|value| value.as_u64())
+                == Some(version.into())
+            && (version == 2
+                || (!has_field(coverage, "exclusion")
+                    && !has_field(coverage, "blocking_redemptions")
+                    && !has_field(lifecycle, "exclusion")
+                    && !has_field(lifecycle, "blocking_redemptions"))),
+        "HOLD: seal/report schema disagreement or v2 evidence smuggled into v1"
+    );
+    Ok(())
+}
+
+fn read_coverage(seal: &CutoverSeal) -> Result<ExternalCoverageReport> {
+    let coverage = serde_json::from_slice(&committed_bytes(&seal.coverage.path)?)?;
+    let lifecycle = serde_json::from_slice(&committed_bytes(&seal.lifecycle_evidence.path)?)?;
+    validate_report_versions(seal.schema_version, &coverage, &lifecycle)?;
+    Ok(serde_json::from_value(coverage)?)
+}
+
+fn validate_coverage_chain(seal: &CutoverSeal, blocks: &[CoveredBlock]) -> Result<()> {
+    anyhow::ensure!(
+        blocks.first().is_some_and(|block| {
+            block.number == 0
+                && block.hash == seal.old_identity.ethereum_genesis_hash
+                && block.parent_hash == H256::zero()
+        }) && blocks.last().is_some_and(|block| {
+            block.number == seal.boundary.execution_number
+                && block.hash == seal.boundary.execution_hash
+        }),
+        "HOLD: canonical coverage does not span the full source boundary"
+    );
+    for (index, block) in blocks.iter().enumerate() {
+        validate_covered_block(block)?;
+        if let Some(previous) = index.checked_sub(1).map(|index| &blocks[index]) {
+            anyhow::ensure!(
+                previous.number.checked_add(1) == Some(block.number)
+                    && previous.hash == block.parent_hash,
+                "HOLD: canonical coverage has a gap or conflicting parent"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_admission_block(
+    coverage: &ExternalCoverageReport,
+    admission: &ExternalCoverageAdmission,
+    event: &eth_events_electra_client::EthToVaraEvent,
+) -> Result<()> {
+    use ethereum_common::trie_db::{HashDB, Trie};
+    let execution = &event.proof_block.block.body.execution_payload;
+    let block = coverage
+        .blocks
+        .iter()
+        .find(|block| block.number == execution.block_number)
+        .context("HOLD: admission has no authenticated covered block")?;
+    let index = usize::try_from(event.transaction_index)?;
+    let receipt = block
+        .receipts
+        .iter()
+        .find(|receipt| receipt.transaction_index == Some(event.transaction_index))
+        .context("HOLD: admission receipt index is outside block")?;
+    let expected = ethereum_common::utils::map_receipt_envelope(receipt.as_ref());
+    anyhow::ensure!(
+        block.hash == admission.original_block_hash
+            && execution.block_hash.0 .0 == block.hash.0
+            && execution.parent_hash.0 .0 == block.parent_hash.0
+            && execution.receipts_root.0 .0 == block.receipts_root.0
+            && block.transactions.get(index) == Some(&admission.original_tx_hash)
+            && event.receipt_rlp == alloy_rlp::encode(&expected),
+        "HOLD: admission proof/header/receipt/index/transaction hash linkage changed"
+    );
+    let mut db = ethereum_common::memory_db::new();
+    for node in &event.proof {
+        db.insert(ethereum_common::hash_db::EMPTY_PREFIX, node);
+    }
+    let root = ethereum_common::Hash256::from(block.receipts_root.0);
+    let trie = ethereum_common::patricia_trie::TrieDB::new(&db, &root)
+        .map_err(|_| anyhow::anyhow!("HOLD: admission receipt proof has the wrong root"))?;
+    let (key, value) =
+        ethereum_common::utils::rlp_encode_index_and_receipt(&event.transaction_index, &expected);
+    anyhow::ensure!(
+        matches!(trie.get(&key), Ok(Some(found)) if found == value),
+        "HOLD: admission receipt proof does not authenticate the selected covered receipt"
+    );
+    Ok(())
+}
+
+/// A cutover copy may add observations, never replace an original request or saved disposition.
+pub fn validate_exclusion_copy(
+    original: &super::message_sender::SignedSubmission,
+    copy: &super::message_sender::SignedSubmission,
+) -> Result<()> {
+    anyhow::ensure!(
+        original.same_request(copy)
+            && original
+                .inclusion_block_number
+                .is_none_or(|value| copy.inclusion_block_number == Some(value))
+            && original
+                .inclusion_block_hash
+                .as_ref()
+                .is_none_or(|value| copy.inclusion_block_hash.as_ref() == Some(value))
+            && original
+                .message_id
+                .as_ref()
+                .is_none_or(|value| copy.message_id.as_ref() == Some(value))
+            && original
+                .finalized_dispatch_error
+                .as_ref()
+                .is_none_or(|value| copy.finalized_dispatch_error.as_ref() == Some(value))
+            && original
+                .finalized_reply
+                .as_ref()
+                .is_none_or(|value| copy.finalized_reply.as_ref() == Some(value))
+            && original
+                .finalized_reply_error
+                .as_ref()
+                .is_none_or(|value| copy.finalized_reply_error.as_ref() == Some(value))
+            && original
+                .finalized_nonce_consumed
+                .is_none_or(|value| copy.finalized_nonce_consumed == Some(value))
+            && original.scanned_finalized_number <= copy.scanned_finalized_number
+            && (original.scanned_finalized_number != copy.scanned_finalized_number
+                || original.scanned_finalized_hash == copy.scanned_finalized_hash)
+            && original.reply_scanned_finalized_number <= copy.reply_scanned_finalized_number
+            && (original.reply_scanned_finalized_number != copy.reply_scanned_finalized_number
+                || original.reply_scanned_finalized_hash == copy.reply_scanned_finalized_hash)
+            && original.native_reconciliation_attempts.len()
+                == copy.native_reconciliation_attempts.len()
+            && original.native_reconciliation.is_some() == copy.native_reconciliation.is_some(),
+        "HOLD: exclusion copy changed retained original request or observations"
+    );
+    for (original, copy) in original
+        .native_reconciliation_attempts
+        .iter()
+        .chain(original.native_reconciliation.as_deref())
+        .zip(
+            copy.native_reconciliation_attempts
+                .iter()
+                .chain(copy.native_reconciliation.as_deref()),
+        )
+    {
+        validate_exclusion_copy(original, copy)?;
+    }
+    Ok(())
+}
+
+async fn authenticate_retained_checkpoints(
+    provider: &ApiProviderConnection,
+    original: &super::message_sender::SignedSubmission,
+    maximum: u32,
+) -> Result<()> {
+    // A work copy can advance a cursor, but cannot hide an already-saved noncanonical pin.
+    let chain = provider.client();
+    for original in std::iter::once(original)
+        .chain(original.native_reconciliation_attempts.iter())
+        .chain(original.native_reconciliation.as_deref())
+    {
+        for (number, hash) in [
+            (
+                original.prepared_finalized_number,
+                original.prepared_finalized_hash.as_str(),
+            ),
+            (
+                original.scanned_finalized_number,
+                original.scanned_finalized_hash.as_str(),
+            ),
+            (
+                original.reply_scanned_finalized_number,
+                original.reply_scanned_finalized_hash.as_str(),
+            ),
+        ]
+        .into_iter()
+        .chain(
+            original
+                .inclusion_block_number
+                .zip(original.inclusion_block_hash.as_deref()),
+        )
+        .chain(
+            original
+                .finalized_reply
+                .as_ref()
+                .map(|reply| {
+                    Ok::<_, anyhow::Error>((
+                        reply
+                            .observation
+                            .finalized_block_number
+                            .context("HOLD: retained reply height absent")?,
+                        reply.observation.finalized_block_hash.as_str(),
+                    ))
+                })
+                .transpose()?,
+        ) {
+            let hash: H256 = hash.parse()?;
+            anyhow::ensure!(
+                number <= maximum
+                    && hash != H256::zero()
+                    && chain.block_number_to_hash(number).await? == hash,
+                "HOLD: retained original observation is noncanonical or follows exclusion"
+            );
+        }
+        anyhow::ensure!(
+            original.inclusion_block_number.is_some() == original.inclusion_block_hash.is_some(),
+            "HOLD: retained original inclusion is incomplete"
+        );
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct AuthenticatedCoverage {
+    unsigned: std::collections::BTreeSet<Uuid>,
+    excluded_owned: std::collections::BTreeSet<Uuid>,
+    fulfilled_handoffs: BTreeMap<(u64, ethereum_client::TxHash), (u64, H256)>,
+    accounted_handoffs: BTreeMap<(u64, ethereum_client::TxHash), (u64, H256)>,
+}
+
+impl AuthenticatedCoverage {
+    fn accounts_for_handoff(
+        &self,
+        slot: u64,
+        tx: ethereum_client::TxHash,
+        number: u64,
+        hash: H256,
+    ) -> bool {
+        self.fulfilled_handoffs
+            .get(&(slot, tx))
+            .or_else(|| self.accounted_handoffs.get(&(slot, tx)))
+            == Some(&(number, hash))
+    }
+}
+
+fn validate_admission_inventory(coverage: &ExternalCoverageReport) -> Result<()> {
+    anyhow::ensure!(
+        matches!(coverage.schema_version, 1 | 2)
+            && (coverage.schema_version == 2
+                || coverage
+                    .admissions
+                    .iter()
+                    .all(|row| row.exclusion.is_none())),
+        "HOLD: incompatible coverage/exclusion schema"
+    );
+    let mut receipts = std::collections::BTreeSet::new();
+    let mut transactions = std::collections::BTreeSet::new();
+    let mut ownership = std::collections::BTreeSet::new();
+    for admission in &coverage.admissions {
+        anyhow::ensure!(
+            receipts.insert(admission.receipt_key)
+                && transactions.insert(admission.original_tx_hash)
+                && admission
+                    .original_lane_uuid
+                    .into_iter()
+                    .chain(admission.undispatched_old_admission)
+                    .all(|uuid| ownership.insert(uuid))
+                && !(admission.original_lane_uuid.is_some()
+                    && admission.undispatched_old_admission.is_some())
+                && (admission.settlement.is_some() ^ admission.exclusion.is_some()),
+            "HOLD: duplicate receipt/transaction/ownership or ambiguous terminal coverage"
+        );
+    }
+    Ok(())
+}
+
 async fn verify_external_coverage(
     seal: &CutoverSeal,
     journal: &OriginalJournal,
     coverage: &ExternalCoverageReport,
     sender: &MessageSender,
     api: &GearApi,
-) -> Result<(
-    std::collections::BTreeSet<Uuid>,
-    BTreeMap<(u64, ethereum_client::TxHash), (u64, H256)>,
-)> {
-    let mut unsigned = std::collections::BTreeSet::new();
-    let mut fulfilled = BTreeMap::new();
-    let mut receipt_keys = std::collections::BTreeSet::new();
+) -> Result<AuthenticatedCoverage> {
+    anyhow::ensure!(
+        coverage.schema_version == seal.schema_version,
+        "HOLD: incompatible coverage/seal schema"
+    );
+    validate_admission_inventory(coverage)?;
+    if coverage.schema_version == 2 {
+        validate_coverage_chain(seal, &coverage.blocks)?;
+    }
+    let mut authenticated = AuthenticatedCoverage::default();
     let head = api.last_block_hash().await?;
     let finalized = api.block_number_at(head).await?;
     for admission in &coverage.admissions {
-        let Some(external) = &admission.external_original else {
-            anyhow::ensure!(
-                admission.undispatched_old_admission.is_none()
-                    && admission.admission != "externally-delivered",
-                "HOLD: external admission lacks its canonical original evidence"
-            );
-            continue;
-        };
-        anyhow::ensure!(
-            external.provenance == "canonical-external"
-                && admission.admission == "externally-delivered"
-                && admission.signed.is_none()
-                && admission.attempts.is_empty()
-                && admission.original_lane_uuid.is_none()
-                && receipt_keys.insert(admission.receipt_key),
-            "HOLD: external provenance is mixed with own originals or duplicates another receipt"
-        );
         let mut input = admission.proof.as_slice();
         let event = eth_events_electra_client::EthToVaraEvent::decode(&mut input)?;
         let execution = &event.proof_block.block.body.execution_payload;
@@ -122,77 +461,286 @@ async fn verify_external_coverage(
                 && block_hash == admission.original_block_hash
                 && execution.block_number <= seal.boundary.execution_number
                 && admission.original_tx_hash != alloy_primitives::B256::ZERO,
-            "HOLD: external proof/key/block is outside original deployment coverage"
+            "HOLD: proof/key/block is outside original deployment coverage"
         );
-        let settlement = admission
-            .settlement
+        if coverage.schema_version == 2 {
+            validate_admission_block(coverage, admission, &event)?;
+            anyhow::ensure!(
+                admission.fee_event_observed == admission.fee_emitter.is_some(),
+                "HOLD: fee evidence changed"
+            );
+        }
+        let pin = admission
+            .exclusion
             .as_ref()
-            .context("HOLD: external original has no saved full settlement pin")?;
-        let discovered_number = external
-            .discovered_at
-            .finalized_block_number
-            .context("HOLD: external discovery has no finalized height")?;
-        let discovered_hash = external
-            .discovered_at
-            .finalized_block_hash
-            .parse::<H256>()?;
-        anyhow::ensure!(discovered_hash != H256::zero() && discovered_number <= finalized
-            && api.get_block_hash(discovered_number).await? == discovered_hash
-            && settlement.finalized_block_number.is_some_and(|number| number <= discovered_number && number <= seal.retirement.block_number),
-            "HOLD: external discovery/settlement is not canonical finalized pre-retirement evidence");
-        // Historical mode authenticates the actual foreign sender/raw/proof/reply and every economic effect.
-        // It does not sign, rebroadcast, replace a known original, or mutate the old row.
-        sender
-            .verify_saved_completion(api, &event, &external.original, settlement)
-            .await?;
-        if let Some(uuid) = admission.undispatched_old_admission {
-            let old = journal
+            .or(admission.settlement.as_ref())
+            .context("HOLD: terminal observation absent")?;
+        anyhow::ensure!(
+            pin.finalized_block_number
+                .is_some_and(|number| number <= seal.retirement.block_number),
+            "HOLD: terminal observation follows source retirement"
+        );
+        if let Some(external) = &admission.external_original {
+            anyhow::ensure!(
+                external.provenance == "canonical-external"
+                    && admission.admission
+                        == if admission.exclusion.is_some() {
+                            "externally-resolved"
+                        } else {
+                            "externally-delivered"
+                        }
+                    && admission.signed.is_none()
+                    && admission.attempts.is_empty()
+                    && admission.original_lane_uuid.is_none(),
+                "HOLD: external provenance is mixed with owned originals"
+            );
+            // A known owned signature always wins; a foreign original cannot erase its nonce.
+            for old in journal
                 .transactions
-                .get(&uuid)
-                .context("HOLD: external link is not an unresolved original-lane admission")?;
-            anyhow::ensure!(is_undispatched_old_admission(old) && unsigned.insert(uuid)
-                && old.tx.tx_hash == admission.original_tx_hash && old.tx.slot_number.0 == admission.receipt_key.0,
-                "HOLD: external receipt cannot replace a retained signature, handoff or another admission");
-            if old.receipt.is_some() {
-                let original = old.receipt_event()?;
+                .values()
+                .chain(journal.completed.values())
+            {
+                if old.tx.tx_hash == admission.original_tx_hash
+                    || old
+                        .receipt
+                        .as_ref()
+                        .is_some_and(|receipt| receipt.receipt_key == admission.receipt_key)
+                {
+                    anyhow::ensure!(
+                        is_undispatched_old_admission(old),
+                        "HOLD: external original attempts to replace a retained owned signature"
+                    );
+                }
+            }
+            let number = external
+                .discovered_at
+                .finalized_block_number
+                .context("HOLD: external discovery has no finalized height")?;
+            let hash = external
+                .discovered_at
+                .finalized_block_hash
+                .parse::<H256>()?;
+            anyhow::ensure!(
+                hash != H256::zero()
+                    && number <= finalized
+                    && api.get_block_hash(number).await? == hash
+                    && pin
+                        .finalized_block_number
+                        .is_some_and(|terminal| terminal <= number),
+                "HOLD: external discovery is not canonical finalized evidence"
+            );
+            if let Some(exclusion) = &admission.exclusion {
+                verify_excluded_original(
+                    sender,
+                    &sender.api_provider,
+                    &seal.old_identity,
+                    &event,
+                    &external.original,
+                    exclusion,
+                )
+                .await?;
+            } else {
+                sender
+                    .verify_saved_completion(api, &event, &external.original, pin)
+                    .await?;
+            }
+            if let Some(uuid) = admission.undispatched_old_admission {
+                let old = journal
+                    .transactions
+                    .get(&uuid)
+                    .context("HOLD: external link is not a retained unsigned original")?;
                 anyhow::ensure!(
-                    original.transaction_index == event.transaction_index
-                        && original.receipt_rlp == event.receipt_rlp
-                        && H256::from(
-                            original
-                                .proof_block
-                                .block
-                                .body
-                                .execution_payload
-                                .block_hash
-                                .0
-                                 .0
-                        ) == block_hash,
-                    "HOLD: unsigned original row and foreign original prove different receipts"
+                    is_undispatched_old_admission(old)
+                        && old.tx.tx_hash == admission.original_tx_hash
+                        && old.tx.slot_number.0 == admission.receipt_key.0
+                        && old
+                            .receipt
+                            .as_ref()
+                            .is_none_or(|_| old.receipt_event().is_ok_and(|original| {
+                                original.transaction_index == event.transaction_index
+                                    && original.receipt_rlp == event.receipt_rlp
+                                    && original.proof_block.block.body.execution_payload.block_hash
+                                        == execution.block_hash
+                            })),
+                    "HOLD: external original does not match retained unsigned admission"
+                );
+                authenticated.unsigned.insert(uuid);
+            }
+            anyhow::ensure!(
+                api.get_block_hash(number).await? == hash,
+                "HOLD: external discovery finalized pin changed"
+            );
+        } else if let Some(exclusion) = &admission.exclusion {
+            anyhow::ensure!(
+                admission.undispatched_old_admission.is_none()
+                    && admission.admission
+                        == if admission.fee_event_observed {
+                            "paid"
+                        } else {
+                            "cutover-sponsored"
+                        },
+                "HOLD: excluded original fee/provenance changed"
+            );
+            let copy = admission
+                .signed
+                .as_ref()
+                .context("HOLD: excluded original signature absent")?;
+            if let Some(uuid) = admission.original_lane_uuid {
+                let old = journal
+                    .transactions
+                    .get(&uuid)
+                    .context("HOLD: excluded owned UUID is not in active original rows")?;
+                let receipt = old
+                    .receipt
+                    .as_ref()
+                    .context("HOLD: owned exclusion has no retained proof")?;
+                let original = receipt
+                    .signed_submission
+                    .as_ref()
+                    .context("HOLD: owned exclusion has no retained original signature")?;
+                authenticate_retained_checkpoints(
+                    &sender.api_provider,
+                    original,
+                    exclusion
+                        .finalized_block_number
+                        .context("HOLD: exclusion height absent")?,
+                )
+                .await?;
+                anyhow::ensure!(
+                    copy.sender
+                        == subxt::utils::AccountId32::from(seal.old_identity.gear_sender)
+                            .to_string()
+                        && old.tx.tx_hash == admission.original_tx_hash
+                        && old.tx.slot_number.0 == admission.receipt_key.0
+                        && receipt.receipt_key == admission.receipt_key
+                        && old.receipt_event()?.encode() == event.encode()
+                        && receipt.submission_attempts.len() == admission.attempts.len()
+                        && old.saved_settlement_observation.is_none()
+                        && !matches!(old.status, super::tx_manager::TxStatus::Completed),
+                    "HOLD: exclusion lost owned receipt/proof/signer linkage"
+                );
+                validate_exclusion_copy(original, copy)?;
+                for (original, copy) in receipt.submission_attempts.iter().zip(&admission.attempts)
+                {
+                    authenticate_retained_checkpoints(
+                        &sender.api_provider,
+                        &original.signed_submission,
+                        exclusion
+                            .finalized_block_number
+                            .context("HOLD: exclusion height absent")?,
+                    )
+                    .await?;
+                    validate_exclusion_copy(&original.signed_submission, copy)?;
+                }
+                authenticated.excluded_owned.insert(uuid);
+            } else {
+                anyhow::ensure!(
+                    !journal
+                        .transactions
+                        .values()
+                        .chain(journal.completed.values())
+                        .any(|old| {
+                            old.tx.tx_hash == admission.original_tx_hash
+                                && !is_undispatched_old_admission(old)
+                        }),
+                    "HOLD: sponsored exclusion replaced known original ownership"
                 );
             }
-        }
-        anyhow::ensure!(
-            fulfilled
-                .insert(
-                    (admission.receipt_key.0, admission.original_tx_hash),
-                    (execution.block_number, block_hash)
+            for original in admission.attempts.iter().chain(std::iter::once(copy)) {
+                anyhow::ensure!(
+                    admission.original_lane_uuid.is_none()
+                        || original.sender
+                            == subxt::utils::AccountId32::from(seal.old_identity.gear_sender)
+                                .to_string(),
+                    "HOLD: excluded owned proof attempt signer changed"
+                );
+                verify_excluded_original(
+                    sender,
+                    &sender.api_provider,
+                    &seal.old_identity,
+                    &event,
+                    original,
+                    exclusion,
                 )
-                .is_none(),
-            "HOLD: external receipt duplicates original handoff ownership"
-        );
-        anyhow::ensure!(
-            api.get_block_hash(discovered_number).await? == discovered_hash,
-            "HOLD: external discovery finalized pin changed during qualification"
-        );
+                .await?;
+            }
+        } else {
+            anyhow::ensure!(
+                admission.undispatched_old_admission.is_none()
+                    && admission.admission
+                        == if admission.fee_event_observed {
+                            "paid"
+                        } else {
+                            "cutover-sponsored"
+                        },
+                "HOLD: original settlement provenance changed"
+            );
+            if let Some(uuid) = admission.original_lane_uuid {
+                let old = journal
+                    .completed
+                    .get(&uuid)
+                    .context("HOLD: settlement UUID is not completed")?;
+                anyhow::ensure!(
+                    old.tx.tx_hash == admission.original_tx_hash
+                        && old.receipt_event()?.encode() == event.encode()
+                        && admission.signed.is_none()
+                        && admission.attempts.is_empty(),
+                    "HOLD: completed original linkage changed"
+                );
+            } else {
+                let original = admission
+                    .signed
+                    .as_ref()
+                    .context("HOLD: sponsored signature absent")?;
+                sender
+                    .verify_saved_completion(api, &event, original, pin)
+                    .await?;
+                for attempt in &admission.attempts {
+                    validate_original_identity(&seal.old_identity, &event, attempt)?;
+                    let call = historical_proxy_client::historical_proxy::io::Redirect::encode_call(
+                        event.proof_block.block.slot,
+                        event.encode(),
+                        seal.old_identity.vft_manager_address.0.into(),
+                        vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec(),
+                    );
+                    authenticate_original_call(
+                        sender,
+                        &sender.api_provider,
+                        attempt,
+                        seal.old_identity.historical_proxy_address,
+                        &call,
+                    )
+                    .await?;
+                }
+            }
+        }
+        if let Some(exclusion) = &admission.exclusion {
+            anyhow::ensure!(
+                sender
+                    .receipt_resolution_status(api, &event, Some(exclusion))
+                    .await?
+                    .as_ref()
+                    == Some(exclusion),
+                "HOLD: saved exclusion no longer authenticates terminal receipt resolution"
+            );
+            authenticated.accounted_handoffs.insert(
+                (admission.receipt_key.0, admission.original_tx_hash),
+                (execution.block_number, block_hash),
+            );
+        } else if admission.external_original.is_some() {
+            authenticated.fulfilled_handoffs.insert(
+                (admission.receipt_key.0, admission.original_tx_hash),
+                (execution.block_number, block_hash),
+            );
+        }
     }
     let final_head = api.last_block_hash().await?;
     anyhow::ensure!(
         api.block_number_at(final_head).await? >= finalized
             && api.get_block_hash(finalized).await? == head,
-        "HOLD: Gear finality changed during external original qualification"
+        "HOLD: Gear finality changed during coverage qualification"
     );
-    Ok((unsigned, fulfilled))
+    Ok(authenticated)
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -292,7 +840,7 @@ impl CutoverSeal {
         let old = &self.old_identity;
         let new = &self.new_identity;
         anyhow::ensure!(
-            self.schema_version == 1
+            matches!(self.schema_version, 1 | 2)
                 && self.new_manager_code_id != H256::zero()
                 && self.config_fingerprint != H256::zero()
                 && self.boundary.beacon_root != H256::zero()
@@ -414,6 +962,7 @@ pub fn verify_seal_files(path: &Path) -> Result<(CutoverSeal, H256)> {
             file.path.display()
         );
     }
+    read_coverage(&seal)?;
     Ok((seal, hash))
 }
 pub fn install_seal_markers(path: &Path) -> Result<H256> {
@@ -449,6 +998,7 @@ pub fn seal_cutover(path: &Path, seal: &CutoverSeal) -> Result<H256> {
             "HOLD: old evidence changed before sealing"
         );
     }
+    read_coverage(seal)?;
     immutable_json(path, seal)?;
     install_seal_markers(path)
 }
@@ -591,12 +1141,19 @@ pub fn read_original_journal(path: &Path) -> Result<OriginalJournal> {
             && (journal.schema_version == 7 || journal.predecessor_cutover.is_none()),
         "HOLD: unsupported original journal identity/schema"
     );
+    let mut transactions = std::collections::BTreeSet::new();
+    let mut receipts = std::collections::BTreeSet::new();
     for (uuid, tx) in journal.transactions.iter().chain(journal.completed.iter()) {
         anyhow::ensure!(
             *uuid == tx.uuid
                 && !(journal.transactions.contains_key(uuid)
-                    && journal.completed.contains_key(uuid)),
-            "HOLD: original receipt UUID ownership changed"
+                    && journal.completed.contains_key(uuid))
+                && transactions.insert((tx.tx.slot_number.0, tx.tx.tx_hash))
+                && tx
+                    .receipt
+                    .as_ref()
+                    .is_none_or(|receipt| receipts.insert(receipt.receipt_key)),
+            "HOLD: original receipt UUID/key/transaction ownership changed"
         );
     }
     Ok(journal)
@@ -642,21 +1199,20 @@ async fn verify_original_lane(
         String::new(),
         seal.old_identity.erc20_manager_address,
     );
-    let coverage: ExternalCoverageReport =
-        serde_json::from_slice(&committed_bytes(&seal.coverage.path)?)?;
-    anyhow::ensure!(
-        coverage.schema_version == 1,
-        "HOLD: unsupported external coverage schema"
-    );
-    let (unsigned, fulfilled_handoffs) =
-        verify_external_coverage(seal, &journal, &coverage, &sender, api).await?;
+    let coverage = read_coverage(seal)?;
+    let authenticated = verify_external_coverage(seal, &journal, &coverage, &sender, api).await?;
     anyhow::ensure!(
         journal
             .transactions
             .keys()
-            .all(|uuid| unsigned.contains(uuid))
-            && journal.failed.keys().all(|uuid| unsigned.contains(uuid)),
-        "HOLD: sealed source retains an owned/unknown original or unqualified unsigned admission"
+            .all(|uuid| authenticated.unsigned.contains(uuid)
+                || authenticated.excluded_owned.contains(uuid))
+            && journal.failed.keys().all(|uuid| {
+                journal.transactions.contains_key(uuid)
+                    && (authenticated.unsigned.contains(uuid)
+                        || authenticated.excluded_owned.contains(uuid))
+            }),
+        "HOLD: sealed source retains an unauthenticated active/failed original admission"
     );
     for (slot, block) in &blocks {
         anyhow::ensure!(
@@ -667,9 +1223,8 @@ async fn verify_original_lane(
         );
         for tx_hash in &block.transactions {
             anyhow::ensure!(
-                fulfilled_handoffs.get(&(slot.0, *tx_hash))
-                    == Some(&(block.number.0, block.hash.expect("validated hash"))),
-                "HOLD: original block handoff has no authenticated external fulfillment"
+                authenticated.accounts_for_handoff(slot.0, *tx_hash, block.number.0, block.hash.expect("validated hash")),
+                "HOLD: original block handoff has no exact authenticated fulfillment or accounted exclusion"
             );
         }
     }
@@ -936,6 +1491,13 @@ pub async fn authenticate_startup(
                 && boundary.header.inner.hash_slow() == boundary.header.hash,
             "HOLD: authenticated cutover execution header changed"
         );
+        if seal.schema_version == 2 {
+            let signer: gsdk::signer::Signer = api.clone().into();
+            let provider = ApiProviderConnection::from_api(signer.api().clone());
+            // A v2 digest alone cannot authenticate terminal exceptions or original nonce ownership.
+            verify_original_lane(&seal, provider, api).await?;
+            verify_markers(path)?;
+        }
         let program = api
             .program_at(identity.vft_manager_address.0.into(), Some(at))
             .await?;
@@ -1000,6 +1562,134 @@ pub async fn ensure_receipt_domain(api: &GearApi, receiver: H256, slot: u64) -> 
     Ok(())
 }
 
+fn validate_original_identity(
+    identity: &InboundRuntimeIdentity,
+    payload: &eth_events_electra_client::EthToVaraEvent,
+    original: &super::message_sender::SignedSubmission,
+) -> Result<()> {
+    anyhow::ensure!(
+        original.chain_genesis_hash == format!("{:#x}", identity.gear_genesis_hash)
+            && original.manager == format!("{:#x}", identity.vft_manager_address)
+            && original.historical_proxy == format!("{:#x}", identity.historical_proxy_address)
+            && original.receipt_key == (payload.proof_block.block.slot, payload.transaction_index)
+            && original.payload_hash
+                == format!("{:#x}", alloy_primitives::keccak256(payload.encode())),
+        "HOLD: original proof identity changed"
+    );
+    original.validate_native_reconciliation()
+}
+
+fn validate_disposition_bound(
+    original: &super::message_sender::SignedSubmission,
+    maximum: u32,
+) -> Result<()> {
+    anyhow::ensure!(
+        original.prepared_finalized_number <= original.scanned_finalized_number
+            && original.scanned_finalized_number <= maximum
+            && original.reply_scanned_finalized_number <= maximum
+            && original.reply_scanned_finalized_number >= original.prepared_finalized_number
+            && original
+                .inclusion_block_number
+                .is_none_or(|number| number <= maximum)
+            && original.finalized_reply.as_ref().is_none_or(|reply| {
+                reply
+                    .observation
+                    .finalized_block_number
+                    .is_some_and(|number| number <= maximum)
+            })
+            && original.has_terminal_reconciliation(),
+        "HOLD: original has no terminal nonce/reply disposition at or before exclusion"
+    );
+    Ok(())
+}
+
+async fn authenticate_original_call(
+    sender: &MessageSender,
+    provider: &ApiProviderConnection,
+    original: &super::message_sender::SignedSubmission,
+    destination: H256,
+    call: &[u8],
+) -> Result<()> {
+    use std::str::FromStr;
+    let chain = provider.client();
+    anyhow::ensure!(
+        original.chain_genesis_hash == format!("{:#x}", chain.api.genesis_hash()),
+        "HOLD: original belongs to another Gear genesis"
+    );
+    let mut observed = original.clone();
+    if original.inclusion_block_number.is_none() {
+        observed.scanned_finalized_number = original.prepared_finalized_number;
+        observed.scanned_finalized_hash = original.prepared_finalized_hash.clone();
+    }
+    let included = sender
+        .find_signed_extrinsic(&mut observed, destination, call)
+        .await?;
+    for (number, hash) in [
+        (
+            original.scanned_finalized_number,
+            &original.scanned_finalized_hash,
+        ),
+        (
+            original.reply_scanned_finalized_number,
+            &original.reply_scanned_finalized_hash,
+        ),
+    ] {
+        anyhow::ensure!(
+            chain.block_number_to_hash(number).await? == H256::from_str(hash)?,
+            "HOLD: original saved finalized checkpoint changed"
+        );
+    }
+    if !included {
+        let hash = H256::from_str(&original.scanned_finalized_hash)?;
+        let latest = chain
+            .block_hash_to_number(chain.latest_finalized_block().await?)
+            .await?;
+        let nonce = u64::from(chain.api.info_at(&original.sender, Some(hash)).await?.nonce);
+        anyhow::ensure!(
+            original.scanned_finalized_number <= latest
+                && nonce > original.nonce
+                && original
+                    .finalized_nonce_consumed
+                    .is_none_or(|saved| saved == nonce)
+                && original.inclusion_block_number.is_none()
+                && original.inclusion_block_hash.is_none()
+                && original.message_id.is_none()
+                && original.finalized_dispatch_error.is_none()
+                && original.finalized_reply.is_none()
+                && original.finalized_reply_error.is_none(),
+            "HOLD: absent original has no canonical consumed-nonce disposition"
+        );
+    } else {
+        anyhow::ensure!(
+            observed.inclusion_block_number == original.inclusion_block_number
+                && observed.inclusion_block_hash == original.inclusion_block_hash
+                && observed.message_id == original.message_id
+                && observed.finalized_dispatch_error == original.finalized_dispatch_error
+                && original.finalized_nonce_consumed.is_none(),
+            "HOLD: original dispatch changed"
+        );
+        if let Some(id) = original.message_id.as_deref() {
+            sender
+                .find_finalized_reply(&mut observed, H256::from_str(id)?, destination)
+                .await?
+                .context("HOLD: original reply unavailable")?;
+            anyhow::ensure!(
+                observed.finalized_reply == original.finalized_reply
+                    && observed.finalized_reply_error == original.finalized_reply_error,
+                "HOLD: original reply changed"
+            );
+        } else {
+            anyhow::ensure!(
+                original.finalized_dispatch_error.is_some()
+                    && original.finalized_reply.is_none()
+                    && original.finalized_reply_error.is_none(),
+                "HOLD: original has an unknown outcome"
+            );
+        }
+    }
+    Ok(())
+}
+
 async fn verify_archived_proof(
     sender: &MessageSender,
     provider: &ApiProviderConnection,
@@ -1007,21 +1697,11 @@ async fn verify_archived_proof(
     payload: &eth_events_electra_client::EthToVaraEvent,
     original: &super::message_sender::SignedSubmission,
 ) -> Result<()> {
-    use historical_proxy_client::historical_proxy::io::Redirect;
-    use std::str::FromStr;
-    let chain = provider.client();
-    let account = subxt::utils::AccountId32::from(identity.gear_sender);
     anyhow::ensure!(
-        original.sender == account.to_string()
-            && original.chain_genesis_hash == format!("{:#x}", identity.gear_genesis_hash)
-            && original.manager == format!("{:#x}", identity.vft_manager_address)
-            && original.historical_proxy == format!("{:#x}", identity.historical_proxy_address)
-            && original.receipt_key == (payload.proof_block.block.slot, payload.transaction_index)
-            && original.payload_hash
-                == format!("{:#x}", alloy_primitives::keccak256(payload.encode())),
-        "HOLD: archived original proof identity changed"
+        original.sender == subxt::utils::AccountId32::from(identity.gear_sender).to_string(),
+        "HOLD: archived owned proof signer changed"
     );
-    original.validate_native_reconciliation()?;
+    validate_original_identity(identity, payload, original)?;
     for continuation in original
         .native_reconciliation_attempts
         .iter()
@@ -1031,64 +1711,91 @@ async fn verify_archived_proof(
             .authenticate_archived_continuation(continuation)
             .await?;
     }
-    let call = Redirect::encode_call(
+    let call = historical_proxy_client::historical_proxy::io::Redirect::encode_call(
         payload.proof_block.block.slot,
         payload.encode(),
         identity.vft_manager_address.0.into(),
         vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec(),
     );
-    let mut observed = original.clone();
-    if original.inclusion_block_number.is_none() {
-        observed.scanned_finalized_number = original.prepared_finalized_number;
-        observed.scanned_finalized_hash = original.prepared_finalized_hash.clone();
-    }
-    let included = sender
-        .find_signed_extrinsic(&mut observed, identity.historical_proxy_address, &call)
+    authenticate_original_call(
+        sender,
+        provider,
+        original,
+        identity.historical_proxy_address,
+        &call,
+    )
+    .await
+}
+
+/// Authenticate nonce disposition, not financial completion. Never mutates the retained journal.
+/// Ownership callers additionally pin `original.sender` to their lane's `gear_sender`.
+pub async fn verify_excluded_original(
+    sender: &MessageSender,
+    provider: &ApiProviderConnection,
+    identity: &InboundRuntimeIdentity,
+    payload: &eth_events_electra_client::EthToVaraEvent,
+    original: &super::message_sender::SignedSubmission,
+    exclusion: &super::message_sender::FinalizedReceiptObservation,
+) -> Result<()> {
+    use std::str::FromStr;
+    validate_original_identity(identity, payload, original)?;
+    anyhow::ensure!(
+        sender.receiver_address == identity.vft_manager_address
+            && sender.historical_proxy_address == identity.historical_proxy_address,
+        "HOLD: exclusion verifier runtime differs from original identity"
+    );
+    let maximum = exclusion
+        .finalized_block_number
+        .context("HOLD: exclusion has no finalized height")?;
+    let chain = provider.client();
+    let latest = chain
+        .block_hash_to_number(chain.latest_finalized_block().await?)
         .await?;
-    if !included {
-        let hash = H256::from_str(&original.scanned_finalized_hash)?;
-        let latest = chain
-            .block_hash_to_number(chain.latest_finalized_block().await?)
-            .await?;
-        anyhow::ensure!(
-            original.scanned_finalized_number <= latest
-                && chain
-                    .block_number_to_hash(original.scanned_finalized_number)
-                    .await?
-                    == hash
-                && u64::from(chain.api.info_at(&original.sender, Some(hash)).await?.nonce)
-                    > original.nonce,
-            "HOLD: archived absent original has no canonical consumed-nonce disposition"
+    let hash = H256::from_str(&exclusion.finalized_block_hash)?;
+    anyhow::ensure!(
+        hash != H256::zero()
+            && maximum <= latest
+            && chain.block_number_to_hash(maximum).await? == hash,
+        "HOLD: exclusion is not canonical finalized evidence"
+    );
+    validate_disposition_bound(original, maximum)?;
+    let call = historical_proxy_client::historical_proxy::io::Redirect::encode_call(
+        payload.proof_block.block.slot,
+        payload.encode(),
+        identity.vft_manager_address.0.into(),
+        vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec(),
+    );
+    authenticate_original_call(
+        sender,
+        provider,
+        original,
+        identity.historical_proxy_address,
+        &call,
+    )
+    .await?;
+    for continuation in original
+        .native_reconciliation_attempts
+        .iter()
+        .chain(original.native_reconciliation.as_deref())
+    {
+        validate_disposition_bound(continuation, maximum)?;
+        let call = vft_manager_client::vft_manager::io::ReconcileReceipt::encode_call(
+            original.receipt_key.0,
+            original.receipt_key.1,
         );
-    } else {
-        anyhow::ensure!(
-            observed.inclusion_block_number == original.inclusion_block_number
-                && observed.inclusion_block_hash == original.inclusion_block_hash
-                && observed.message_id == original.message_id
-                && observed.finalized_dispatch_error == original.finalized_dispatch_error,
-            "HOLD: archived original dispatch changed"
-        );
-        if let Some(id) = original.message_id.as_deref() {
-            sender
-                .find_finalized_reply(
-                    &mut observed,
-                    H256::from_str(id)?,
-                    identity.historical_proxy_address,
-                )
-                .await?
-                .context("HOLD: archived original reply unavailable")?;
-            anyhow::ensure!(
-                observed.finalized_reply == original.finalized_reply
-                    && observed.finalized_reply_error == original.finalized_reply_error,
-                "HOLD: archived original reply changed"
-            );
-        } else {
-            anyhow::ensure!(
-                original.finalized_dispatch_error.is_some(),
-                "HOLD: archived original has an unknown outcome"
-            );
-        }
+        authenticate_original_call(
+            sender,
+            provider,
+            continuation,
+            identity.vft_manager_address,
+            &call,
+        )
+        .await?;
     }
+    anyhow::ensure!(
+        chain.block_number_to_hash(maximum).await? == hash,
+        "HOLD: exclusion finalized pin changed during original authentication"
+    );
     Ok(())
 }
 
@@ -1124,6 +1831,288 @@ mod tests {
     };
     use gear_common::signer_ownership::{lock_cutover_signer, lock_signer, release_cutover_signer};
     use std::sync::Arc;
+
+    fn original_fixture() -> super::super::message_sender::SignedSubmission {
+        serde_json::from_value(serde_json::json!({
+            "chain_genesis_hash":"original","manager":"original","historical_proxy":"original","sender":"original",
+            "receipt_key":[32,0],"payload_hash":"original","nonce":1,"extrinsic_hash":"original","raw_extrinsic":[1,2],
+            "prepared_finalized_number":1,"prepared_finalized_hash":"prepared","scanned_finalized_number":2,"scanned_finalized_hash":"scanned",
+            "reply_scanned_finalized_number":2,"reply_scanned_finalized_hash":"scanned",
+            "inclusion_block_number":null,"inclusion_block_hash":null,"message_id":null
+        })).unwrap()
+    }
+
+    fn terminal_admission(uuid: Option<Uuid>) -> serde_json::Value {
+        serde_json::json!({
+            "receipt_key":[32,0],"original_tx_hash":alloy_primitives::B256::repeat_byte(1),
+            "original_block_hash":H256::repeat_byte(2),"admission":"paid","proof":[],
+            "settlement":{"finalized_block_number":10,"finalized_block_hash":"canonical"},
+            "original_lane_uuid":uuid
+        })
+    }
+
+    fn empty_covered_block(number: u64, parent: H256) -> CoveredBlock {
+        let empty_root = alloy_primitives::keccak256([0x80]);
+        let header = alloy::consensus::Header {
+            number,
+            parent_hash: parent.0.into(),
+            receipts_root: empty_root,
+            transactions_root: empty_root,
+            ..Default::default()
+        };
+        CoveredBlock {
+            number,
+            hash: H256(header.hash_slow().0),
+            parent_hash: parent,
+            receipts_root: H256(empty_root.0),
+            transactions: Vec::new(),
+            receipts: Vec::new(),
+            raw_transactions: Vec::new(),
+            header,
+        }
+    }
+
+    #[test]
+    fn settlement_only_v1_and_versioned_exclusions_are_not_interchangeable() {
+        let v1 = serde_json::json!({"schema_version":1,"admissions":[terminal_admission(None)]});
+        let calls1 = serde_json::json!({"schema_version":1});
+        validate_report_versions(1, &v1, &calls1).unwrap();
+        let report: ExternalCoverageReport = serde_json::from_value(v1.clone()).unwrap();
+        validate_admission_inventory(&report).unwrap();
+        let mut excluded = v1.clone();
+        excluded["admissions"][0]["exclusion"] = excluded["admissions"][0]["settlement"].clone();
+        excluded["admissions"][0]["settlement"] = serde_json::Value::Null;
+        assert!(validate_report_versions(1, &excluded, &calls1).is_err());
+        assert!(
+            validate_admission_inventory(&serde_json::from_value(excluded.clone()).unwrap())
+                .is_err()
+        );
+        excluded["schema_version"] = 2.into();
+        let calls2 = serde_json::json!({"schema_version":2});
+        validate_report_versions(2, &excluded, &calls2).unwrap();
+        validate_admission_inventory(&serde_json::from_value(excluded.clone()).unwrap()).unwrap();
+        assert!(validate_report_versions(2, &excluded, &calls1).is_err());
+        assert!(validate_report_versions(1, &v1, &calls2).is_err());
+        let mut smuggled = v1.clone();
+        smuggled["admissions"][0]["exclusion"] = serde_json::Value::Null;
+        assert!(validate_report_versions(1, &smuggled, &calls1).is_err());
+        let old_roles =
+            serde_json::json!({"schema_version":1,"role_pins":[{"blocking_redemptions":0}]});
+        assert!(validate_report_versions(1, &v1, &old_roles).is_err());
+        let mut both = excluded.clone();
+        both["admissions"][0]["settlement"] = v1["admissions"][0]["settlement"].clone();
+        assert!(validate_admission_inventory(&serde_json::from_value(both).unwrap()).is_err());
+        excluded["admissions"][0]["exclusion"] = serde_json::Value::Null;
+        assert!(validate_admission_inventory(&serde_json::from_value(excluded).unwrap()).is_err());
+    }
+
+    #[test]
+    fn duplicate_receipt_transaction_and_owned_uuid_fail_before_chain_queries() {
+        let uuid = Uuid::from_u128(1);
+        let first = terminal_admission(Some(uuid));
+        let mut second = first.clone();
+        let check = |second| {
+            let report: ExternalCoverageReport = serde_json::from_value(serde_json::json!({
+                "schema_version":2,"admissions":[first.clone(),second]
+            }))
+            .unwrap();
+            validate_admission_inventory(&report)
+        };
+        assert!(check(second.clone()).is_err());
+        second["receipt_key"] = serde_json::json!([32, 1]);
+        second["original_tx_hash"] =
+            serde_json::to_value(alloy_primitives::B256::repeat_byte(3)).unwrap();
+        assert!(
+            check(second.clone()).is_err(),
+            "same ownership UUID cannot excuse two receipts"
+        );
+        second["original_lane_uuid"] = serde_json::Value::Null;
+        check(second.clone()).unwrap();
+        second["original_tx_hash"] = first["original_tx_hash"].clone();
+        assert!(
+            check(second).is_err(),
+            "one Ethereum transaction cannot become two admissions"
+        );
+    }
+
+    #[test]
+    fn exclusion_nonce_reply_and_pin_guards_preserve_original_bytes() {
+        use super::super::message_sender::{FinalizedReceiptObservation, FinalizedReplyEvidence};
+        let original = original_fixture();
+        let bytes = serde_json::to_vec(&original).unwrap();
+        assert!(validate_disposition_bound(&original, 10).is_err());
+        let mut copy = original.clone();
+        copy.finalized_nonce_consumed = Some(copy.nonce);
+        assert!(validate_disposition_bound(&copy, 10).is_err());
+        copy.finalized_nonce_consumed = Some(copy.nonce + 1);
+        validate_disposition_bound(&copy, 10).unwrap();
+        validate_exclusion_copy(&original, &copy).unwrap();
+        assert!(validate_disposition_bound(&copy, 1).is_err());
+        copy.inclusion_block_number = Some(3);
+        copy.inclusion_block_hash = Some("included".into());
+        copy.message_id = Some("child".into());
+        copy.finalized_nonce_consumed = None;
+        assert!(
+            validate_disposition_bound(&copy, 10).is_err(),
+            "Resolved cannot excuse a missing original reply"
+        );
+        let mut reply = vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec();
+        reply.extend(
+            Result::<(), vft_manager_client::Error>::Err(
+                vft_manager_client::Error::ReceiptResolved,
+            )
+            .encode(),
+        );
+        copy.finalized_reply = Some(FinalizedReplyEvidence {
+            payload: reply,
+            observation: FinalizedReceiptObservation {
+                finalized_block_number: Some(4),
+                finalized_block_hash: "reply".into(),
+            },
+        });
+        validate_disposition_bound(&copy, 10).unwrap();
+        assert!(validate_disposition_bound(&copy, 3).is_err());
+        validate_exclusion_copy(&original, &copy).unwrap();
+        let saved = copy.clone();
+        copy.finalized_reply.as_mut().unwrap().payload.push(0);
+        assert!(validate_exclusion_copy(&saved, &copy).is_err());
+        copy = saved.clone();
+        copy.raw_extrinsic.push(0);
+        assert!(validate_exclusion_copy(&saved, &copy).is_err());
+        copy = saved.clone();
+        copy.native_reconciliation = Some(Box::new(original.clone()));
+        assert!(validate_exclusion_copy(&saved, &copy).is_err());
+        assert_eq!(serde_json::to_vec(&original).unwrap(), bytes);
+    }
+
+    #[test]
+    fn accounted_handoff_requires_exact_slot_transaction_block_and_hash() {
+        let mut coverage = AuthenticatedCoverage::default();
+        let tx = alloy_primitives::B256::repeat_byte(1);
+        let hash = H256::repeat_byte(2);
+        coverage.accounted_handoffs.insert((32, tx), (100, hash));
+        assert!(
+            coverage.fulfilled_handoffs.is_empty(),
+            "exclusion is not financial fulfillment"
+        );
+        assert!(coverage.accounts_for_handoff(32, tx, 100, hash));
+        assert!(!coverage.accounts_for_handoff(33, tx, 100, hash));
+        assert!(!coverage.accounts_for_handoff(
+            32,
+            alloy_primitives::B256::repeat_byte(3),
+            100,
+            hash
+        ));
+        assert!(!coverage.accounts_for_handoff(32, tx, 101, hash));
+        assert!(!coverage.accounts_for_handoff(32, tx, 100, H256::repeat_byte(3)));
+    }
+
+    #[test]
+    fn canonical_receipt_fixture_binds_exact_transaction_index_hash_and_trie_proof() {
+        use eth_events_electra_client::{
+            BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent,
+        };
+        use ethereum_common::{
+            beacon::electra::Block,
+            utils::{self, BeaconBlockResponse},
+        };
+        use std::io::Read;
+        #[derive(Deserialize)]
+        struct Receipts {
+            result: Vec<TransactionReceipt>,
+        }
+        #[derive(Deserialize)]
+        struct Fixture {
+            tx_hash: ethereum_client::TxHash,
+            tx_index: u64,
+            receipts: Receipts,
+            block: BeaconBlockResponse<Block>,
+        }
+        let bytes: &[u8] = include_bytes!("../../../../tests/src/relayer/transactions.json.zst");
+        let mut decoder = ruzstd::StreamingDecoder::new(bytes).unwrap();
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).unwrap();
+        let fixture = serde_json::from_slice::<Vec<Fixture>>(&decoded)
+            .unwrap()
+            .into_iter()
+            .min_by_key(|fixture| fixture.tx_hash)
+            .unwrap();
+        let block = fixture.block.data.message;
+        let execution = &block.body.execution_payload;
+        let mapped = fixture
+            .receipts
+            .result
+            .iter()
+            .map(|receipt| {
+                (
+                    receipt.transaction_index.unwrap(),
+                    utils::map_receipt_envelope(receipt.as_ref()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let merkle = utils::generate_merkle_proof(fixture.tx_index, &mapped).unwrap();
+        // This test exercises receipt linkage; header/chain authentication is an independent gate.
+        let covered = CoveredBlock {
+            number: execution.block_number,
+            hash: H256::from(execution.block_hash.0 .0),
+            parent_hash: H256::from(execution.parent_hash.0 .0),
+            receipts_root: H256::from(execution.receipts_root.0 .0),
+            transactions: execution
+                .transactions
+                .iter()
+                .map(|raw| alloy_primitives::keccak256(raw.0.as_ref()))
+                .collect(),
+            raw_transactions: execution
+                .transactions
+                .iter()
+                .map(|raw| raw.0.to_vec())
+                .collect(),
+            receipts: fixture.receipts.result,
+            header: Default::default(),
+        };
+        let event = EthToVaraEvent {
+            proof_block: BlockInclusionProof {
+                block: BlockGenericForBlockBody {
+                    slot: block.slot,
+                    proposer_index: block.proposer_index,
+                    parent_root: block.parent_root,
+                    state_root: block.state_root,
+                    body: block.body.into(),
+                },
+                headers: Vec::new(),
+            },
+            proof: merkle.proof,
+            transaction_index: fixture.tx_index,
+            receipt_rlp: alloy_rlp::encode(&merkle.receipt),
+        };
+        let mut admission: ExternalCoverageAdmission =
+            serde_json::from_value(terminal_admission(None)).unwrap();
+        admission.receipt_key = (event.proof_block.block.slot, event.transaction_index);
+        admission.original_tx_hash = fixture.tx_hash;
+        admission.original_block_hash = covered.hash;
+        admission.proof = event.encode();
+        let coverage = ExternalCoverageReport {
+            schema_version: 2,
+            blocks: vec![covered],
+            admissions: Vec::new(),
+        };
+        let mut encoded = admission.proof.as_slice();
+        let decoded = EthToVaraEvent::decode(&mut encoded).unwrap();
+        assert!(encoded.is_empty());
+        validate_admission_block(&coverage, &admission, &decoded).unwrap();
+        admission.original_tx_hash = alloy_primitives::B256::repeat_byte(99);
+        assert!(validate_admission_block(&coverage, &admission, &decoded).is_err());
+        admission.original_tx_hash = fixture.tx_hash;
+        let mut wrong = decoded.clone();
+        wrong.transaction_index = wrong.transaction_index.checked_add(1).unwrap();
+        assert!(validate_admission_block(&coverage, &admission, &wrong).is_err());
+        wrong = decoded.clone();
+        wrong.proof.clear();
+        assert!(validate_admission_block(&coverage, &admission, &wrong).is_err());
+        wrong = decoded;
+        wrong.receipt_rlp.push(0);
+        assert!(validate_admission_block(&coverage, &admission, &wrong).is_err());
+    }
 
     #[test]
     fn external_original_link_never_replaces_signature_handoff_or_claimed_completion() {
@@ -1297,9 +2286,33 @@ mod tests {
         storage.bind_runtime_identity(identity()).await.unwrap();
         assert_eq!(fs::read(old.join("state.json")).unwrap(), original);
         for name in ["cutover-coverage.json", "cutover-calls.json"] {
-            fs::write(base.join(name), b"{}").unwrap();
+            fs::write(base.join(name), br#"{"schema_version":1,"admissions":[]}"#).unwrap();
         }
         let seal = fixture_seal(&base, identity());
+        let first = empty_covered_block(0, H256::zero());
+        let last = empty_covered_block(1, first.hash);
+        let mut chain_seal = seal.clone();
+        chain_seal.schema_version = 2;
+        chain_seal.old_identity.ethereum_start_block = 0;
+        chain_seal.new_identity.ethereum_start_block = 2;
+        chain_seal.old_identity.ethereum_genesis_hash = first.hash;
+        chain_seal.new_identity.ethereum_genesis_hash = first.hash;
+        chain_seal.boundary.execution_number = 1;
+        chain_seal.boundary.execution_hash = last.hash;
+        chain_seal.validate().unwrap();
+        validate_coverage_chain(&chain_seal, &[first.clone(), last.clone()]).unwrap();
+        assert!(validate_coverage_chain(&chain_seal, &[last.clone()]).is_err());
+        let wrong_parent = empty_covered_block(1, H256::repeat_byte(3));
+        chain_seal.boundary.execution_hash = wrong_parent.hash;
+        assert!(validate_coverage_chain(&chain_seal, &[first.clone(), wrong_parent]).is_err());
+        let mut malformed = first;
+        malformed.raw_transactions.push(vec![0]);
+        assert!(validate_covered_block(&malformed).is_err());
+        let mut bad_root = last;
+        bad_root.header.receipts_root = alloy_primitives::B256::ZERO;
+        bad_root.receipts_root = H256::zero();
+        bad_root.hash = H256(bad_root.header.hash_slow().0);
+        assert!(validate_covered_block(&bad_root).is_err());
         let path = base.join("cutover.json");
         let hash = seal_cutover(&path, &seal).unwrap();
         assert_eq!(verify_markers(&path).unwrap().1, hash);

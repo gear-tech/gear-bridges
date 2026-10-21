@@ -57,6 +57,19 @@ enum HexEncodedMessage {
     RemoveVaraToEthAddress {
         vara_token_id: ActorId,
     },
+    /// Encode bounded manager resolution without broadcasting.
+    ResolveReceiptDeposit {
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        operation_id: H256,
+        child: Option<MessageId>,
+    },
+    /// Encode a hold using the raw SCALE Redemption snapshot, without its route.
+    HoldNativeRedemption {
+        operation_id: H256,
+        expected_redemption_hex: String,
+    },
 }
 
 #[derive(Args)]
@@ -81,7 +94,7 @@ fn str_to_actorid(s: String) -> AnyResult<ActorId> {
     })?))
 }
 
-fn print_encoded_message(message: HexEncodedMessage) {
+fn print_encoded_message(message: HexEncodedMessage) -> AnyResult<()> {
     use HexEncodedMessage::*;
 
     let (label, encoded_call) = match message {
@@ -119,9 +132,48 @@ fn print_encoded_message(message: HexEncodedMessage) {
             "RemoveVaraToEthAddress",
             io::RemoveVaraToEthAddress::encode_call(vara_token_id),
         ),
+        ResolveReceiptDeposit {
+            slot,
+            transaction_index,
+            log_index,
+            operation_id,
+            child,
+        } => (
+            "ResolveReceiptDeposit",
+            io::ResolveReceiptDeposit::encode_call(
+                slot,
+                transaction_index,
+                log_index,
+                operation_id,
+                child,
+            ),
+        ),
+        HoldNativeRedemption {
+            operation_id,
+            expected_redemption_hex,
+        } => {
+            let bytes = hex::decode(
+                expected_redemption_hex
+                    .strip_prefix("0x")
+                    .unwrap_or(&expected_redemption_hex),
+            )
+            .context("Invalid Redemption hex")?;
+            let mut input = bytes.as_slice();
+            let expected = vft_vara_client::Redemption::decode(&mut input)
+                .context("Invalid SCALE Redemption")?;
+            anyhow::ensure!(input.is_empty(), "Trailing bytes after SCALE Redemption");
+            (
+                "HoldRedemption",
+                vft_vara_client::native_escrow::io::HoldRedemption::encode_call(
+                    operation_id,
+                    expected,
+                ),
+            )
+        }
     };
 
     println!(r#"{label}: "{}""#, hex::encode(encoded_call));
+    Ok(())
 }
 
 #[tokio::main]
@@ -137,8 +189,7 @@ async fn main() -> AnyResult<()> {
 
     let cli = Cli::parse();
     if let CliCommands::HexEncodedMessage(args) = cli.command {
-        print_encoded_message(args.message);
-        return Ok(());
+        return print_encoded_message(args.message);
     }
 
     if let CliCommands::VerifyCutover(args) = &cli.command {

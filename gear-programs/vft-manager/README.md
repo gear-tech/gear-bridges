@@ -29,11 +29,33 @@ Mint success replies are empty; TransferFrom success replies contain the route
 and `true`. Native redemption is covered by the receipt settlement tests, not this
 mint/unlock mailbox benchmark.
 
-`Transactions` exports only completed receipt replay keys, in the existing paginated
-order. Reserved keys are not migration records; use `ReceiptStatus` and
-`ReceiptDeposits` to inspect unresolved settlement. An explicit VFT error reply
-is retryable for the same receipt. A successful transport reply containing
-`false` is quarantined, not redispatched.
+`Transactions` exports only settled/refunded receipt replay keys, in the existing
+paginated order. `ReceiptStatus::Resolved` instead means every log is terminal
+with at least one `Rejected` or `Held` exception; it never means financial success.
+`ReceiptDeposits` retains every authenticated log. Zero recipients, zero amounts,
+and native amounts above `u128::MAX` are rejected before dispatch; valid sibling
+logs continue normally. `ReceiptRejection` exposes the retained typed evidence.
+Explicit VFT errors remain `Retryable`, distinct from terminal `Rejected`.
+Exception tombstones and their progress are retained indefinitely for replay and
+liability evidence; ordinary successful-history pruning never removes them.
+Submitting a newly resolved receipt returns `ReceiptResolved`; replay returns
+`AlreadyProcessed`. No financial completion event is emitted for exceptions.
+
+An exact authenticated `TransferFrom(false)` is terminal `UnlockFalse`; malformed
+or trailing-byte replies remain ambiguous. A native error becomes
+`NativeErrorAbsent` only after the original wrapper returns an exact authenticated
+`Redemption(None)`. Previously attempted native operations are reconciled, never
+redispatched as a new payout.
+
+While the manager is paused in `Active` or `Draining`, its admin may call
+`ResolveReceiptDeposit(slot, transaction_index, log_index, operation_id, child)`.
+The exact retained identity and an expired/released receipt lease are required.
+Resolution accepts only retained no-effect rejection evidence or the wrapper's
+authenticated original hold. It cannot force-clear an ambiguous non-native
+transfer. Evidence queries fence changes to administrator, pause, deployment
+domain, configuration revision, receipt generation and original child.
+Matching repeated resolution is idempotent; `Held` mints nothing and preserves
+the original liability even when a late payout reply subsequently arrives.
 
 Native redemption requires configuring the manager's zero-VFT-minimum native
 wrapper and the wrapper's escrow manager while both are paused. Configuration
@@ -83,8 +105,9 @@ The admin lifecycle is:
    Preparation rechecks pause, permanent economic-activity state, quiescence and
    configuration revision after the source query. `Unpause` cannot activate it.
 3. `Upgrade(destination)` checks the prepared destination, the paused source's
-   local obligations, and the same wrapper's manager and zero outstanding
-   redemptions. It enters irreversible `Transferring` and transfers the frozen,
+   local obligations, and the same wrapper's manager and zero blocking
+   redemptions. Held liabilities remain financially outstanding. It enters
+   irreversible `Transferring` and transfers the frozen,
    sorted token inventory. Each enqueue and original child record is atomic.
    Concurrent continuation calls cannot claim a token twice. Continue this same
    cutover until every token is completed and final token balances are zero;
@@ -92,7 +115,7 @@ The admin lifecycle is:
 4. Handoff existing token roles and the wrapper manager/burner through their
    authorized lifecycle. Wrapper backing and original payout records stay at
    that wrapper. `FinalizeCutover` authenticates matching retired source status,
-   completed custody, destination wrapper manager/burner and zero outstanding
+   completed custody, destination wrapper manager/burner and zero blocking
    redemptions, then enters `Ready` while remaining paused. Only `Unpause`
    changes `Ready` to `Active`. A later cutover retains the predecessor and
    the existing receipt floor.
@@ -138,9 +161,10 @@ for each custody transfer.
 Quiescence checks receipt reservations/nonterminal receipt children, the
 incremental pending-original-builtin count, source deposit/refund children and
 only terminal tracker states: failed deposit, queued source response, or
-completed refund. A reservation moves into completed history only when its
-nonempty per-log progress is entirely processed. These checks prove admitted
-Gear obligations, **not coverage of unseen Ethereum deposits**.
+completed refund. A receipt reservation is released only when all of its logs
+are settled, refunded, rejected or held; exceptions remain outside successful
+history. These checks prove admitted Gear obligations, **not coverage of unseen
+Ethereum deposits**.
 
 The operator must separately authenticate the boundary, complete all canonical
 receipt-root coverage (including explicitly sponsored authentic unpaid

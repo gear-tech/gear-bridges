@@ -33,6 +33,16 @@ $ forge build
 $ forge test
 ```
 
+### Deposit validation
+
+All four ERC20Manager deposit entrypoints reject a zero destination with
+`InvalidRecipient()` and zero amounts with `InvalidAmount()`. Only the native
+token identified by `governanceAdmin.wrappedVara()` is limited to `uint128`;
+ordinary Ethereum- and Gear-supply tokens retain their `uint256` amount range.
+Validation precedes transfer/burn, and a rejection rolls back fee and permit
+effects. Existing proxies require an authorized implementation upgrade; updating
+this repository does not upgrade deployed contracts.
+
 ### Format
 
 ```shell

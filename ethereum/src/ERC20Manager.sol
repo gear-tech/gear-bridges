@@ -462,6 +462,12 @@ contract ERC20Manager is
         if (amount == 0) {
             revert InvalidAmount();
         }
+        if (to == bytes32(0)) {
+            revert InvalidRecipient();
+        }
+        if (amount > type(uint128).max && token == address(_governanceAdmin.wrappedVara())) {
+            revert InvalidAmount();
+        }
 
         (, TokenType tokenType) = _tokens.tryGet(token);
 

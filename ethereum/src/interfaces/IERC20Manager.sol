@@ -40,6 +40,11 @@ interface IERC20Manager is IPausable, IMessageHandler {
     error InvalidBridgingPayment();
 
     /**
+     * @dev Error thrown when the destination is zero.
+     */
+    error InvalidRecipient();
+
+    /**
      * @dev Event emitted when bridging request is made.
      */
     event BridgingRequested(address indexed from, bytes32 indexed to, address indexed token, uint256 amount);

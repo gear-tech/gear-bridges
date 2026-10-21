@@ -15,6 +15,11 @@ static mut TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 /// Reservations are kept separate so completed-history eviction cannot remove them.
 static mut RESERVED_TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
 
+/// Receipts with terminal exceptions are not successful transaction history.
+// ponytail: retain exception tombstones indefinitely until an authenticated archival
+// protocol can preserve their liability and replay evidence.
+static mut RESOLVED_TRANSACTIONS: Option<BTreeSet<(u64, u64)>> = None;
+
 /// Maximum amount of successfully processed Ethereum transactions that this
 /// program can store.
 pub const TX_HISTORY_DEPTH: usize = 50_000_000;
@@ -36,7 +41,7 @@ pub(super) struct ReceiptDeposit {
     pub operation_id: H256,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum DepositStatus {
     Pending,
     InFlight,
@@ -45,6 +50,40 @@ pub(super) enum DepositStatus {
     Refunded,
     Retryable(Error),
     Ambiguous(Error),
+    Rejected(ReceiptRejectionEvidence),
+    Held,
+}
+
+impl DepositStatus {
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Processed | Self::Refunded | Self::Rejected(_) | Self::Held
+        )
+    }
+}
+
+/// Retained proof that the original deposit had no financial effect.
+#[derive(Clone, Debug, Encode, Decode, TypeInfo, PartialEq, Eq)]
+pub enum ReceiptRejectionEvidence {
+    InvalidRecipient,
+    InvalidAmount,
+    NativeAmountOverflow,
+    UnlockFalse { child: MessageId },
+    NativeErrorAbsent { child: MessageId },
+}
+
+fn initial_deposit_status(deposit: &ReceiptDeposit) -> DepositStatus {
+    let rejection = if deposit.receiver.is_zero() {
+        ReceiptRejectionEvidence::InvalidRecipient
+    } else if deposit.amount.is_zero() {
+        ReceiptRejectionEvidence::InvalidAmount
+    } else if deposit.native && deposit.amount > U256::from(u128::MAX) {
+        ReceiptRejectionEvidence::NativeAmountOverflow
+    } else {
+        return DepositStatus::Pending;
+    };
+    DepositStatus::Rejected(rejection)
 }
 
 #[derive(Clone)]
@@ -72,6 +111,10 @@ pub enum ReceiptDepositOutcome {
     NativeQueued,
     /// Original native payout rejected; exact backed wrapped value credited.
     Refunded,
+    /// A failed original operation remains eligible for a safe retry.
+    Retryable,
+    /// An unresolved native liability is retained independently of handoff.
+    Held,
 }
 
 #[derive(Clone, Debug, Encode, Decode, TypeInfo, PartialEq, Eq)]
@@ -113,15 +156,24 @@ pub fn receipt_deposits(key: (u64, u64)) -> Vec<ReceiptDepositState> {
                             DepositStatus::InFlight => ReceiptDepositOutcome::InFlight,
                             DepositStatus::Processed => ReceiptDepositOutcome::Settled,
                             DepositStatus::Refunded => ReceiptDepositOutcome::Refunded,
-                            DepositStatus::Retryable(_) => ReceiptDepositOutcome::Rejected,
+                            DepositStatus::Retryable(_) => ReceiptDepositOutcome::Retryable,
                             DepositStatus::Ambiguous(_) => ReceiptDepositOutcome::Unknown,
                             DepositStatus::NativeQueued => ReceiptDepositOutcome::NativeQueued,
+                            DepositStatus::Rejected(_) => ReceiptDepositOutcome::Rejected,
+                            DepositStatus::Held => ReceiptDepositOutcome::Held,
                         },
                     }
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn receipt_rejection(key: (u64, u64), log_index: u64) -> Option<ReceiptRejectionEvidence> {
+    match deposit_status(key, log_index)? {
+        DepositStatus::Rejected(evidence) => Some(evidence),
+        _ => None,
+    }
 }
 
 #[allow(unused_variables)]
@@ -225,7 +277,9 @@ pub(super) fn set_deposit_status(key: (u64, u64), log_index: u64, status: Deposi
             .deposits
             .binary_search_by_key(&log_index, |progress| progress.deposit.log_index)
         {
-            progress.deposits[index].status = status;
+            if !progress.deposits[index].status.is_terminal() {
+                progress.deposits[index].status = status;
+            }
         }
     }
 }
@@ -244,13 +298,78 @@ fn owns_generation(key: (u64, u64), generation: u64) -> bool {
         .is_some_and(|p| p.generation == generation)
 }
 
+/// Fence every asynchronous evidence read against the immutable original log and
+/// the receipt generation that authorized it. No configuration is inferred anew.
+pub(super) struct LogGuard<'a> {
+    key: (u64, u64),
+    deposit: &'a ReceiptDeposit,
+    generation: u64,
+    child: Option<MessageId>,
+    revision: u64,
+    admin: Option<ActorId>,
+}
+
+impl<'a> LogGuard<'a> {
+    fn capture(key: (u64, u64), deposit: &'a ReceiptDeposit, admin: bool) -> Result<Self, Error> {
+        let service = VftManager::new();
+        let guard = Self {
+            key,
+            deposit,
+            generation: receipt_progress_mut()
+                .get(&key)
+                .ok_or(Error::InvalidReconciliation)?
+                .generation,
+            child: original_child(key, deposit.log_index),
+            revision: service.state().economic_revision,
+            admin: admin.then(Syscall::message_source),
+        };
+        guard.check()?;
+        Ok(guard)
+    }
+
+    fn check_snapshot(&self, progress: &ReceiptProgress, revision: u64) -> Result<(), Error> {
+        if progress.generation != self.generation {
+            return Err(Error::ReceiptLeaseActive);
+        }
+        if revision != self.revision
+            || !progress
+                .deposits
+                .iter()
+                .any(|log| log.deposit == *self.deposit && log.child == self.child)
+        {
+            return Err(Error::InvalidReconciliation);
+        }
+        Ok(())
+    }
+
+    fn check(&self) -> Result<(), Error> {
+        let service = VftManager::new();
+        service.ensure_receipt_domain(self.key.0)?;
+        if self.admin.is_some_and(|admin| {
+            service.state().admin != admin
+                || Syscall::message_source() != admin
+                || !service.state().is_paused
+        }) {
+            return Err(Error::InvalidReconciliation);
+        }
+        self.check_snapshot(
+            receipt_progress_mut()
+                .get(&self.key)
+                .ok_or(Error::InvalidReconciliation)?,
+            service.state().economic_revision,
+        )
+    }
+}
+
 pub(super) fn record_child(key: (u64, u64), log_index: u64, child: MessageId) {
     if let Some(log) = receipt_progress_mut().get_mut(&key).and_then(|p| {
         p.deposits
             .iter_mut()
             .find(|p| p.deposit.log_index == log_index)
     }) {
-        log.child = Some(child);
+        if !log.status.is_terminal() {
+            log.child = Some(child);
+        }
     }
 }
 
@@ -283,50 +402,217 @@ pub fn reserved_transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
     unsafe { static_mut!(RESERVED_TRANSACTIONS).as_mut() }.expect("Program should be constructed")
 }
 
-/// Reconcile already-dispatched native payouts without replacing the proof request,
-/// claiming a generation, or dispatching mint/unlock/redemption again.
+fn resolved_transactions() -> &'static BTreeSet<(u64, u64)> {
+    unsafe { static_ref!(RESOLVED_TRANSACTIONS).as_ref() }.expect("Program should be constructed")
+}
+
+fn resolved_transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
+    unsafe { static_mut!(RESOLVED_TRANSACTIONS).as_mut() }.expect("Program should be constructed")
+}
+
+/// Reconcile original native attempts even when a sibling remains ambiguous.
+/// This may retry original full-return credit, but never creates a native payout.
 pub async fn reconcile_receipt(key: (u64, u64), config: &Config) -> Result<ReceiptStatus, Error> {
     if receipt_status(key) != ReceiptStatus::Reserved {
         return Ok(receipt_status(key));
     }
-    let native = {
-        let Some(progress) = receipt_progress_mut().get(&key) else {
-            return Ok(ReceiptStatus::Reserved);
-        };
-        if let Some(error) = progress.deposits.iter().find_map(|p| match &p.status {
-            DepositStatus::Ambiguous(error) => Some(error.clone()),
-            _ => None,
-        }) {
-            return Err(error);
-        }
-        progress
-            .deposits
-            .iter()
-            .filter(|p| p.deposit.native && matches!(p.status, DepositStatus::NativeQueued))
-            .map(|p| p.deposit.clone())
-            .collect::<Vec<_>>()
+    let generation = match receipt_progress_mut().get(&key) {
+        Some(progress) => progress.generation,
+        None => return Ok(ReceiptStatus::Reserved),
     };
+    let service = VftManager::new();
+    let revision = service.state().economic_revision;
+    let native = receipt_progress_mut()
+        .get(&key)
+        .map(|progress| {
+            progress
+                .deposits
+                .iter()
+                .filter(|log| {
+                    log.deposit.native && log.child.is_some() && !log.status.is_terminal()
+                })
+                .map(|log| log.deposit.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut error = None;
     for deposit in native {
-        match token_operations::reconcile_native_log(key, &deposit, config).await {
-            Ok(()) | Err(Error::NativeSettlementPending) => {}
-            Err(error) => return Err(error),
+        let result = token_operations::reconcile_native_log(key, &deposit, config).await;
+        service.ensure_receipt_domain(key.0)?;
+        if !owns_generation(key, generation) {
+            return Err(Error::ReceiptLeaseActive);
+        }
+        if service.state().economic_revision != revision {
+            return Err(Error::InvalidReconciliation);
+        }
+        match result {
+            Ok(()) | Err(Error::NativeSettlementPending | Error::ReceiptResolved) => {}
+            Err(failure) => {
+                error.get_or_insert(failure);
+            }
         }
     }
     complete_transaction(key);
-    Ok(receipt_status(key))
+    if receipt_status(key) != ReceiptStatus::Reserved {
+        return Ok(receipt_status(key));
+    }
+    if let Some(failure) = error.or_else(|| {
+        receipt_progress_mut()
+            .get(&key)?
+            .deposits
+            .iter()
+            .find_map(|log| match &log.status {
+                DepositStatus::Ambiguous(error) | DepositStatus::Retryable(error) => {
+                    Some(error.clone())
+                }
+                _ => None,
+            })
+    }) {
+        return Err(failure);
+    }
+    Ok(ReceiptStatus::Reserved)
+}
+
+/// Resolve only bounded no-effect evidence or an authenticated retained liability.
+pub async fn resolve_receipt_deposit(
+    service: &mut VftManager,
+    key: (u64, u64),
+    log_index: u64,
+    operation_id: H256,
+    child: Option<MessageId>,
+) -> Result<ReceiptDepositOutcome, Error> {
+    assert!(service.state().is_paused, "Not paused");
+    service.ensure_receipt_domain(key.0)?;
+    let now = Syscall::block_height();
+    let progress = receipt_progress_mut()
+        .get(&key)
+        .ok_or(Error::InvalidReconciliation)?;
+    let log = progress
+        .deposits
+        .iter()
+        .find(|log| log.deposit.log_index == log_index)
+        .ok_or(Error::InvalidReconciliation)?;
+    if log.deposit.operation_id != operation_id
+        || log.child != child
+        || child.is_some_and(|child| child.is_zero())
+    {
+        return Err(Error::InvalidReconciliation);
+    }
+    if progress.lease_until > now {
+        return Err(Error::ReceiptLeaseActive);
+    }
+    match log.status {
+        DepositStatus::Rejected(_) => {
+            complete_transaction(key);
+            return Ok(ReceiptDepositOutcome::Rejected);
+        }
+        DepositStatus::Held => {
+            complete_transaction(key);
+            return Ok(ReceiptDepositOutcome::Held);
+        }
+        DepositStatus::Processed | DepositStatus::Refunded => {
+            return Err(Error::InvalidReconciliation);
+        }
+        _ => {}
+    }
+    let deposit = log.deposit.clone();
+    let generation = progress
+        .generation
+        .checked_add(1)
+        .ok_or(Error::ReceiptLeaseActive)?;
+    let lease_until = now
+        .checked_add(service.config().reply_timeout.max(1))
+        .ok_or(Error::ReceiptLeaseActive)?;
+    let progress = receipt_progress_mut().get_mut(&key).unwrap();
+    progress.generation = generation;
+    progress.lease_until = lease_until;
+    let result = match LogGuard::capture(key, &deposit, true) {
+        Ok(guard) => {
+            let evidence = resolve_log(&guard, service.config()).await;
+            evidence.and_then(|status| {
+                guard.check()?;
+                token_operations::quiesce_original(&guard)?;
+                let outcome = match status {
+                    DepositStatus::Rejected(_) => ReceiptDepositOutcome::Rejected,
+                    DepositStatus::Held => ReceiptDepositOutcome::Held,
+                    _ => return Err(Error::InvalidReconciliation),
+                };
+                set_deposit_status(key, log_index, status);
+                complete_transaction(key);
+                Ok(outcome)
+            })
+        }
+        Err(error) => Err(error),
+    };
+    release_receipt_lease(key, generation);
+    result
+}
+
+async fn resolve_log(guard: &LogGuard<'_>, config: &Config) -> Result<DepositStatus, Error> {
+    use vft_vara_client::native_escrow::io::{HeldRedemption, Redemption as GetRedemption};
+    let deposit = guard.deposit;
+    if guard.child.is_none() {
+        return match initial_deposit_status(deposit) {
+            status @ DepositStatus::Rejected(_) => Ok(status),
+            _ => Err(Error::InvalidReconciliation),
+        };
+    }
+    if token_operations::unlock_false(guard) {
+        return Ok(DepositStatus::Rejected(
+            ReceiptRejectionEvidence::UnlockFalse {
+                child: guard.child.unwrap(),
+            },
+        ));
+    }
+    if !deposit.native {
+        return Err(Error::InvalidReconciliation);
+    }
+    let original =
+        token_operations::query_native::<GetRedemption>(guard, &deposit.operation_id, config)
+            .await?;
+    guard.check()?;
+    let Some(original) = original else {
+        return token_operations::absence_rejection(guard).map(DepositStatus::Rejected);
+    };
+    token_operations::validate_redemption(guard, &original)?;
+    let held =
+        token_operations::query_native::<HeldRedemption>(guard, &deposit.operation_id, config)
+            .await?
+            .ok_or(Error::InvalidReconciliation)?;
+    guard.check()?;
+    token_operations::validate_redemption(guard, &held)?;
+    if held.child != original.child
+        || !matches!(
+            held.status,
+            vft_vara_client::PayoutStatus::Queued
+                | vft_vara_client::PayoutStatus::Returned
+                | vft_vara_client::PayoutStatus::Ambiguous
+        )
+    {
+        return Err(Error::InvalidReconciliation);
+    }
+    Ok(DepositStatus::Held)
 }
 
 /// Read the retained state for one Ethereum receipt key.
 pub fn receipt_status(key: (u64, u64)) -> ReceiptStatus {
-    receipt_status_in(transactions(), reserved_transactions(), key)
+    receipt_status_in(
+        transactions(),
+        reserved_transactions(),
+        resolved_transactions(),
+        key,
+    )
 }
 
 fn receipt_status_in(
     processed: &BTreeSet<(u64, u64)>,
     reserved: &BTreeSet<(u64, u64)>,
+    resolved: &BTreeSet<(u64, u64)>,
     key: (u64, u64),
 ) -> ReceiptStatus {
-    if processed.contains(&key) {
+    if resolved.contains(&key) {
+        ReceiptStatus::Resolved
+    } else if processed.contains(&key) {
         ReceiptStatus::Processed
     } else if reserved.contains(&key) {
         ReceiptStatus::Reserved
@@ -339,20 +625,24 @@ pub(super) fn is_quiescent() -> bool {
     reserved_transactions().is_empty() && token_operations::is_quiescent()
 }
 
-/// Move a successful receipt reservation into bounded processed history.
+/// Complete only fully terminal receipts, keeping exceptions out of successful history.
 pub fn complete_transaction(key: (u64, u64)) {
-    if !receipt_progress_mut().get(&key).is_some_and(|p| {
-        !p.deposits.is_empty()
-            && p.deposits.iter().all(|log| {
-                matches!(
-                    log.status,
-                    DepositStatus::Processed | DepositStatus::Refunded
-                )
-            })
-    }) {
+    let Some(progress) = receipt_progress_mut().get(&key) else {
+        return;
+    };
+    if progress.deposits.is_empty() || !progress.deposits.iter().all(|log| log.status.is_terminal())
+    {
         return;
     }
+    let resolved = progress
+        .deposits
+        .iter()
+        .any(|log| matches!(log.status, DepositStatus::Rejected(_) | DepositStatus::Held));
     reserved_transactions_mut().remove(&key);
+    if resolved {
+        resolved_transactions_mut().insert(key);
+        return;
+    }
     transactions_mut().insert(key);
     if transactions().len() > TX_HISTORY_DEPTH {
         if let Some(old) = transactions_mut().pop_first() {
@@ -380,6 +670,7 @@ pub fn seed() {
     unsafe {
         TRANSACTIONS = Some(BTreeSet::new());
         RESERVED_TRANSACTIONS = Some(BTreeSet::new());
+        RESOLVED_TRANSACTIONS = Some(BTreeSet::new());
         RECEIPT_PROGRESS = Some(BTreeMap::new());
     }
 }
@@ -392,11 +683,13 @@ pub(super) async fn benchmark_reply(
     supply: TokenSupply,
 ) -> Result<(), Error> {
     if transactions().contains(&key)
+        || resolved_transactions().contains(&key)
         || reserved_transactions().contains(&key)
         || receipt_progress_mut().contains_key(&key)
     {
         return Err(Error::AlreadyProcessed);
     }
+    service.ensure_economic_mutable();
     let lease_until = Syscall::block_height()
         .checked_add(service.config().reply_timeout.max(1))
         .ok_or(Error::ReceiptLeaseActive)?;
@@ -427,17 +720,26 @@ pub(super) async fn benchmark_reply(
             lease_until,
         },
     );
+    let revision = service.state().economic_revision;
     let result = match supply {
         TokenSupply::Ethereum => token_operations::mint_log(key, &deposit, service.config()).await,
         TokenSupply::Gear => token_operations::unlock_log(key, &deposit, service.config()).await,
     };
+    if !owns_generation(key, 1) {
+        return Err(Error::ReceiptLeaseActive);
+    }
+    if service.state().economic_revision != revision {
+        release_receipt_lease(key, 1);
+        return Err(Error::InvalidReconciliation);
+    }
     match &result {
-        Ok(()) => complete_transaction(key),
+        Ok(()) => {}
         Err(error) if matches!(deposit_status(key, 0), Some(DepositStatus::InFlight)) => {
             set_deposit_status(key, 0, DepositStatus::Ambiguous(error.clone()));
         }
         Err(_) => {}
     }
+    complete_transaction(key);
     release_receipt_lease(key, 1);
     result
 }
@@ -479,6 +781,9 @@ pub async fn submit_receipt(
     }
 
     let key = (slot, transaction_index);
+    if transactions().contains(&key) || resolved_transactions().contains(&key) {
+        return Err(Error::AlreadyProcessed);
+    }
     let mut deposits = if let Some(progress) = receipt_progress_mut().get(&key) {
         if progress.receipt_hash != receipt_hash {
             return Err(Error::AlreadyProcessed);
@@ -541,10 +846,6 @@ pub async fn submit_receipt(
         return Err(Error::UnsupportedEthEvent);
     }
 
-    if transactions().contains(&key) {
-        return Err(Error::AlreadyProcessed);
-    }
-
     let now = Syscall::block_height();
     let lease_until = now
         .checked_add(service.config().reply_timeout.max(1))
@@ -580,40 +881,54 @@ pub async fn submit_receipt(
                 return Err(Error::TransactionTooOld);
             }
             generation = 1;
-            reserved_transactions_mut().insert(key);
+            let progress_deposits: Vec<_> = deposits
+                .iter()
+                .cloned()
+                .map(|deposit| ReceiptLogProgress {
+                    status: initial_deposit_status(&deposit),
+                    deposit,
+                    child: None,
+                })
+                .collect();
+            let has_processing_work = progress_deposits
+                .iter()
+                .any(|log| !log.status.is_terminal());
+            if has_processing_work {
+                reserved_transactions_mut().insert(key);
+            }
             receipt_progress_mut().insert(
                 key,
                 ReceiptProgress {
-                    deposits: deposits
-                        .iter()
-                        .cloned()
-                        .map(|deposit| ReceiptLogProgress {
-                            deposit,
-                            status: DepositStatus::Pending,
-                            child: None,
-                        })
-                        .collect(),
+                    deposits: progress_deposits,
                     receipt_hash,
                     generation,
-                    lease_until,
+                    lease_until: if has_processing_work { lease_until } else { 0 },
                 },
             );
         }
     }
 
     service.record_receipt_admission(slot);
+    let revision = service.state().economic_revision;
     let mut retryable_error = None;
     let mut ambiguous_error = None;
     for deposit in &deposits {
         if !owns_generation(key, generation) {
             return Err(Error::ReceiptLeaseActive);
         }
+        if service.state().economic_revision != revision {
+            release_receipt_lease(key, generation);
+            return Err(Error::InvalidReconciliation);
+        }
         let Some(status) = deposit_status(key, deposit.log_index) else {
             release_receipt_lease(key, generation);
             return Err(Error::Internal("Receipt log progress is missing".into()));
         };
         match &status {
-            DepositStatus::Processed | DepositStatus::Refunded => continue,
+            DepositStatus::Processed
+            | DepositStatus::Refunded
+            | DepositStatus::Rejected(_)
+            | DepositStatus::Held => continue,
             DepositStatus::Ambiguous(error) => {
                 ambiguous_error.get_or_insert(error.clone());
                 continue;
@@ -634,7 +949,9 @@ pub async fn submit_receipt(
             DepositStatus::Pending | DepositStatus::Retryable(_) | DepositStatus::NativeQueued => {}
         }
 
-        if !matches!(&status, DepositStatus::NativeQueued) {
+        if !matches!(&status, DepositStatus::NativeQueued)
+            && !(deposit.native && original_child(key, deposit.log_index).is_some())
+        {
             set_deposit_status(key, deposit.log_index, DepositStatus::InFlight);
         }
         let result = match deposit.supply {
@@ -649,6 +966,10 @@ pub async fn submit_receipt(
         if !owns_generation(key, generation) {
             return Err(Error::ReceiptLeaseActive);
         }
+        if service.state().economic_revision != revision {
+            release_receipt_lease(key, generation);
+            return Err(Error::InvalidReconciliation);
+        }
         if let Err(error) = result {
             match deposit_status(key, deposit.log_index) {
                 Some(DepositStatus::Retryable(error)) => {
@@ -657,7 +978,12 @@ pub async fn submit_receipt(
                 Some(DepositStatus::Ambiguous(error)) => {
                     ambiguous_error.get_or_insert(error);
                 }
-                Some(DepositStatus::Processed | DepositStatus::Refunded) => {}
+                Some(
+                    DepositStatus::Processed
+                    | DepositStatus::Refunded
+                    | DepositStatus::Rejected(_)
+                    | DepositStatus::Held,
+                ) => {}
                 Some(DepositStatus::NativeQueued) if error == Error::NativeSettlementPending => {}
                 Some(DepositStatus::NativeQueued) => {
                     ambiguous_error.get_or_insert(error.clone());
@@ -675,21 +1001,13 @@ pub async fn submit_receipt(
         return Err(error);
     }
     if deposits.iter().any(|deposit| {
-        !matches!(
-            deposit_status(key, deposit.log_index),
-            Some(DepositStatus::Processed | DepositStatus::Refunded)
-        )
+        !deposit_status(key, deposit.log_index).is_some_and(|status| status.is_terminal())
     }) {
         release_receipt_lease(key, generation);
         if deposits.iter().all(|deposit| {
-            matches!(
-                deposit_status(key, deposit.log_index),
-                Some(
-                    DepositStatus::Processed
-                        | DepositStatus::Refunded
-                        | DepositStatus::NativeQueued
-                )
-            )
+            deposit_status(key, deposit.log_index).is_some_and(|status| {
+                status.is_terminal() || matches!(status, DepositStatus::NativeQueued)
+            })
         }) {
             return Err(Error::NativeSettlementPending);
         }
@@ -700,7 +1018,11 @@ pub async fn submit_receipt(
 
     complete_transaction(key);
     release_receipt_lease(key, generation);
-    Ok(())
+    if receipt_status(key) == ReceiptStatus::Resolved {
+        Err(Error::ReceiptResolved)
+    } else {
+        Ok(())
+    }
 }
 
 pub fn fill_transactions() -> bool {
@@ -739,32 +1061,145 @@ mod tests {
     fn receipt_status_tracks_reservation_processing_and_history_eviction() {
         let mut processed = BTreeSet::from([(1, 0)]);
         let mut reserved = BTreeSet::new();
+        let mut resolved = BTreeSet::new();
         let key = (2, 7);
 
         assert_eq!(
-            receipt_status_in(&processed, &reserved, key),
+            receipt_status_in(&processed, &reserved, &resolved, key),
             ReceiptStatus::Unknown
         );
         reserved.insert(key);
         assert_eq!(
-            receipt_status_in(&processed, &reserved, key),
+            receipt_status_in(&processed, &reserved, &resolved, key),
             ReceiptStatus::Reserved
         );
 
         complete_transaction_in(&mut processed, &mut reserved, key, 1);
         assert_eq!(
-            receipt_status_in(&processed, &reserved, key),
+            receipt_status_in(&processed, &reserved, &resolved, key),
             ReceiptStatus::Processed
         );
         assert_eq!(
-            receipt_status_in(&processed, &reserved, (1, 0)),
+            receipt_status_in(&processed, &reserved, &resolved, (1, 0)),
             ReceiptStatus::Unknown
         );
 
         complete_transaction_in(&mut processed, &mut reserved, (3, 0), 1);
         assert_eq!(
-            receipt_status_in(&processed, &reserved, key),
+            receipt_status_in(&processed, &reserved, &resolved, key),
             ReceiptStatus::Unknown
         );
+
+        resolved.insert(key);
+        complete_transaction_in(&mut processed, &mut reserved, (4, 0), 1);
+        assert_eq!(
+            receipt_status_in(&processed, &reserved, &resolved, key),
+            ReceiptStatus::Resolved
+        );
+    }
+
+    pub(super) fn original_deposit() -> ReceiptDeposit {
+        ReceiptDeposit {
+            log_index: 0,
+            sender: H160::zero(),
+            receiver: ActorId::from([1; 32]),
+            token_id: ActorId::from([2; 32]),
+            eth_token_id: H160::zero(),
+            amount: 5u64.into(),
+            supply: TokenSupply::Gear,
+            native: true,
+            operation_id: H256([3; 32]),
+        }
+    }
+
+    #[test]
+    fn asynchronous_log_fence_rejects_stale_generation_revision_and_identity() {
+        let deposit = original_deposit();
+        let child = Some(MessageId::from([4; 32]));
+        let guard = LogGuard {
+            key: (1, 0),
+            deposit: &deposit,
+            generation: 7,
+            child,
+            revision: 9,
+            admin: None,
+        };
+        let mut progress = ReceiptProgress {
+            deposits: vec![ReceiptLogProgress {
+                deposit: deposit.clone(),
+                status: DepositStatus::Ambiguous(Error::InvalidReply),
+                child,
+            }],
+            receipt_hash: H256::zero(),
+            generation: 7,
+            lease_until: 0,
+        };
+        assert_eq!(guard.check_snapshot(&progress, 9), Ok(()));
+        progress.generation += 1;
+        assert_eq!(
+            guard.check_snapshot(&progress, 9),
+            Err(Error::ReceiptLeaseActive)
+        );
+        progress.generation -= 1;
+        assert_eq!(
+            guard.check_snapshot(&progress, 10),
+            Err(Error::InvalidReconciliation)
+        );
+        progress.deposits[0].child = Some(MessageId::from([5; 32]));
+        assert_eq!(
+            guard.check_snapshot(&progress, 9),
+            Err(Error::InvalidReconciliation)
+        );
+        progress.deposits[0].child = child;
+        progress.deposits[0].deposit.operation_id = H256([6; 32]);
+        assert_eq!(
+            guard.check_snapshot(&progress, 9),
+            Err(Error::InvalidReconciliation)
+        );
+    }
+
+    #[test]
+    fn legacy_native_invalid_inputs_allow_only_frozen_no_effect_absence_reasons() {
+        for (receiver, amount, expected) in [
+            (
+                ActorId::zero(),
+                5u64.into(),
+                ReceiptRejectionEvidence::InvalidRecipient,
+            ),
+            (
+                ActorId::from([1; 32]),
+                U256::zero(),
+                ReceiptRejectionEvidence::InvalidAmount,
+            ),
+            (
+                ActorId::from([1; 32]),
+                U256::from(u128::MAX) + U256::one(),
+                ReceiptRejectionEvidence::NativeAmountOverflow,
+            ),
+        ] {
+            let mut deposit = original_deposit();
+            deposit.receiver = receiver;
+            deposit.amount = amount;
+            let guard = LogGuard {
+                key: (1, 0),
+                deposit: &deposit,
+                generation: 1,
+                child: Some(MessageId::from([4; 32])),
+                revision: 0,
+                admin: None,
+            };
+            // Production calls this only after the exact authenticated None query.
+            assert_eq!(token_operations::absence_rejection(&guard), Ok(expected));
+            let mut non_native = deposit.clone();
+            non_native.native = false;
+            let guard = LogGuard {
+                deposit: &non_native,
+                ..guard
+            };
+            assert_eq!(
+                token_operations::absence_rejection(&guard),
+                Err(Error::InvalidReconciliation),
+            );
+        }
     }
 }

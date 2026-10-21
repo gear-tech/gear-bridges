@@ -65,4 +65,8 @@ pub enum Error {
     ReceiptOutsideDeployment,
     Retired,
     CutoverNotReady,
+    /// Every receipt log is terminal, but at least one did not financially settle.
+    ReceiptResolved,
+    /// The original authenticated token operation explicitly rejected without effect.
+    TokenOperationRejected,
 }

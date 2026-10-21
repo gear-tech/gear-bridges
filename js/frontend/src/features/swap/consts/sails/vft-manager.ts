@@ -13,15 +13,16 @@ export class SailsProgram {
       InitConfig: {"gear_bridge_builtin":"[u8;32]","historical_proxy_address":"[u8;32]","config":"Config"},
       Config: {"gas_for_token_ops":"u64","gas_for_reply_deposit":"u64","gas_to_send_request_to_builtin":"u64","gas_for_swap_token_maps":"u64","reply_timeout":"u32","fee_bridge":"u128","fee_incoming":"u128"},
       TokenSupply: {"_enum":["Ethereum","Gear"]},
-      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null"}},
-      ReceiptStatus: {"_enum":["Unknown","Reserved","Processed"]},
+      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null","ReceiptResolved":"Null","TokenOperationRejected":"Null"}},
+      ReceiptStatus: {"_enum":["Unknown","Reserved","Processed","Resolved"]},
       SourceRequestOutcome: {"_enum":{"Pending":"Null","Queued":{"nonce":"U256","hash":"H256","queue_id":"u64"},"NotQueued":"Null"}},
+      ReceiptDepositOutcome: {"_enum":["Pending","InFlight","Settled","Rejected","Unknown","NativeQueued","Refunded","Retryable","Held"]},
       CutoverStatus: {"phase":"CutoverPhase","predecessor":"Option<[u8;32]>","successor":"Option<[u8;32]>","minimum_receipt_slot":"u64","last_receipt_slot":"Option<u64>","config_fingerprint":"Option<H256>","transfer_count":"u32","completed_transfer_count":"u32","in_flight_transfer_count":"u32"},
       CutoverPhase: {"_enum":["Active","Draining","AwaitingSource","Transferring","Retired","Ready"]},
       CustodyTransferAttempt: {"token":"[u8;32]","amount":"U256","child":"[u8;32]","outcome":"CustodyTransferOutcome"},
       CustodyTransferOutcome: {"_enum":["InFlight","Completed","Rejected","Ambiguous"]},
       ReceiptDepositState: {"log_index":"u64","sender":"H160","receiver":"[u8;32]","token_id":"[u8;32]","eth_token_id":"H160","amount":"U256","supply":"TokenSupply","native":"bool","operation_id":"H256","child":"Option<[u8;32]>","outcome":"ReceiptDepositOutcome"},
-      ReceiptDepositOutcome: {"_enum":["Pending","InFlight","Settled","Rejected","Unknown","NativeQueued","Refunded"]},
+      ReceiptRejectionEvidence: {"_enum":{"InvalidRecipient":"Null","InvalidAmount":"Null","NativeAmountOverflow":"Null","UnlockFalse":{"child":"[u8;32]"},"NativeErrorAbsent":{"child":"[u8;32]"}}},
       MessageInfo: {"status":"MessageStatus","details":"TxDetails"},
       MessageStatus: {"_enum":{"SendingMessageToDepositTokens":"Null","TokenDepositCompleted":"bool","SendingMessageToBridgeBuiltin":"Null","BridgeResponseReceived":"Option<(U256, H256, u64)>","SendingMessageToReturnTokens":"Null","TokensReturnComplete":"bool"}},
       TxDetails: {"vara_token_id":"[u8;32]","sender":"[u8;32]","amount":"U256","receiver":"H160","token_supply":"TokenSupply"},
@@ -475,6 +476,24 @@ export class VftManager {
   }
 
   /**
+   * Resolve one original deposit using no-effect proof or a retained native hold.
+  */
+  public resolveReceiptDeposit(slot: number | string | bigint, transaction_index: number | string | bigint, log_index: number | string | bigint, operation_id: H256, child: MessageId | null): TransactionBuilder<{ ok: ReceiptDepositOutcome } | { err: Error }> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<{ ok: ReceiptDepositOutcome } | { err: Error }>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftManager',
+      'ResolveReceiptDeposit',
+      [slot, transaction_index, log_index, operation_id, child],
+      '(u64, u64, u64, H256, Option<[u8;32]>)',
+      'Result<ReceiptDepositOutcome, Error>',
+      this._program.programId,
+    );
+  }
+
+  /**
    * Change [State::admin]. Can be called only by a [State::admin].
   */
   public setAdmin(new_admin: ActorId): TransactionBuilder<null> {
@@ -854,6 +873,22 @@ export class VftManager {
   }
 
   /**
+   * Read retained no-effect evidence for a terminally rejected deposit.
+  */
+  public receiptRejection(slot: number | string | bigint, transaction_index: number | string | bigint, log_index: number | string | bigint): QueryBuilder<ReceiptRejectionEvidence | null> {
+    return new QueryBuilder<ReceiptRejectionEvidence | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'ReceiptRejection',
+      [slot, transaction_index, log_index],
+      '(u64, u64, u64)',
+      'Option<ReceiptRejectionEvidence>',
+    );
+  }
+
+  /**
    * Read the current status for one Ethereum receipt key.
   */
   public receiptStatus(slot: number | string | bigint, transaction_index: number | string | bigint): QueryBuilder<ReceiptStatus> {
@@ -1116,7 +1151,7 @@ export class VftManager {
 
   /**
    * Original native payout rejected and fully refunded as backed wrapped VARA.
-   */
+  */
   public subscribeToReceiptDepositRefundedEvent(callback: (data: { slot: number | string | bigint; transaction_index: number | string | bigint; log_index: number | string | bigint; deposit_count: number | string | bigint; operation_id: H256; eth_token_id: H160; vara_token_id: ActorId; sender: H160; receiver: ActorId; amount: number | string | bigint; native: boolean; child: MessageId; payout_child: MessageId; returned_value: number | string | bigint }) => void | Promise<void>): Promise<() => void> {
     return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
@@ -1140,13 +1175,13 @@ export interface InitConfig {
   gear_bridge_builtin: ActorId;
   /**
    * Address of the `historical-proxy` program.
-   *
+   * 
    * For more info see [State::historical_proxy_address].
   */
   historical_proxy_address: ActorId;
   /**
    * Config that will be used to send messages to the other programs.
-   *
+   * 
    * For more info see [Config].
   */
   config: Config;
@@ -1198,7 +1233,7 @@ export type TokenSupply = "Ethereum" | "Gear";
 /**
  * Error types for VFT Manageer service.
 */
-export type Error =
+export type Error = 
   /**
    * Error sending message to the program.
   */
@@ -1297,17 +1332,27 @@ export type Error =
   | { InvalidReconciliation: null }
   | { ReceiptOutsideDeployment: null }
   | { Retired: null }
-  | { CutoverNotReady: null };
+  | { CutoverNotReady: null }
+  /**
+   * Every receipt log is terminal, but at least one did not financially settle.
+  */
+  | { ReceiptResolved: null }
+  /**
+   * The original authenticated token operation explicitly rejected without effect.
+  */
+  | { TokenOperationRejected: null };
 
 /**
  * The on-chain outcome of an Ethereum receipt key.
 */
-export type ReceiptStatus = "Unknown" | "Reserved" | "Processed";
+export type ReceiptStatus = "Unknown" | "Reserved" | "Processed" | "Resolved";
 
-export type SourceRequestOutcome =
+export type SourceRequestOutcome = 
   | { Pending: null }
   | { Queued: { nonce: number | string | bigint; hash: H256; queue_id: number | string | bigint } }
   | { NotQueued: null };
+
+export type ReceiptDepositOutcome = "Pending" | "InFlight" | "Settled" | "Rejected" | "Unknown" | "NativeQueued" | "Refunded" | "Retryable" | "Held";
 
 export interface CutoverStatus {
   phase: CutoverPhase;
@@ -1347,9 +1392,14 @@ export interface ReceiptDepositState {
 }
 
 /**
- * Refunded is an authenticated full wrapped refund, distinct from native Settled.
- */
-export type ReceiptDepositOutcome = "Pending" | "InFlight" | "Settled" | "Rejected" | "Unknown" | "NativeQueued" | "Refunded";
+ * Retained proof that the original deposit had no financial effect.
+*/
+export type ReceiptRejectionEvidence = 
+  | { InvalidRecipient: null }
+  | { InvalidAmount: null }
+  | { NativeAmountOverflow: null }
+  | { UnlockFalse: { child: MessageId } }
+  | { NativeErrorAbsent: { child: MessageId } };
 
 /**
  * Entry for a single message in [MessageTracker].
@@ -1368,7 +1418,7 @@ export interface MessageInfo {
 /**
  * State in which message processing can be.
 */
-export type MessageStatus =
+export type MessageStatus = 
   /**
    * Message to deposit tokens is sent.
   */
@@ -1430,5 +1480,3 @@ export interface SourceRequestEvidence {
 }
 
 export type Order = "Direct" | "Reverse";
-
-export const IDL_SHA256 = '14f42d4ede5182f38e3fd5059bff97a877c02877c3892a9494152f7c48fcc698';

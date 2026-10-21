@@ -22,7 +22,7 @@ use token_mapping::TokenMap;
 mod request_bridging;
 pub mod submit_receipt;
 
-pub use submit_receipt::abi as eth_abi;
+pub use submit_receipt::{abi as eth_abi, ReceiptRejectionEvidence};
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
 /// Two days at Vara's three-second block time.
@@ -37,12 +37,14 @@ pub enum Order {
 /// The on-chain outcome of an Ethereum receipt key.
 #[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
 pub enum ReceiptStatus {
-    /// No reservation or retained processed record exists.
+    /// No reservation or retained terminal record exists.
     Unknown,
     /// The receipt is currently being processed.
     Reserved,
-    /// The receipt completed and remains in bounded history.
+    /// Every deposit settled or refunded, and the receipt remains in bounded history.
     Processed,
+    /// Every deposit is terminal, with at least one rejection or retained liability.
+    Resolved,
 }
 
 /// VFT Manager service.
@@ -323,6 +325,18 @@ impl VftManager {
     ) -> Vec<submit_receipt::ReceiptDepositState> {
         submit_receipt::receipt_deposits((slot, transaction_index))
     }
+
+    /// Read retained no-effect evidence for a terminally rejected deposit.
+    #[export]
+    pub fn receipt_rejection(
+        &self,
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+    ) -> Option<ReceiptRejectionEvidence> {
+        submit_receipt::receipt_rejection((slot, transaction_index), log_index)
+    }
+
     /// Reconcile original native payout outcomes; this never starts an economic child.
     #[export]
     pub async fn reconcile_receipt(
@@ -332,6 +346,27 @@ impl VftManager {
     ) -> Result<ReceiptStatus, Error> {
         self.ensure_receipt_domain(slot)?;
         submit_receipt::reconcile_receipt((slot, transaction_index), self.config()).await
+    }
+
+    /// Resolve one original deposit using no-effect proof or a retained native hold.
+    #[export]
+    pub async fn resolve_receipt_deposit(
+        &mut self,
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        operation_id: H256,
+        child: Option<MessageId>,
+    ) -> Result<submit_receipt::ReceiptDepositOutcome, Error> {
+        self.ensure_admin();
+        submit_receipt::resolve_receipt_deposit(
+            self,
+            (slot, transaction_index),
+            log_index,
+            operation_id,
+            child,
+        )
+        .await
     }
 
     /// Settlement policy is explicit, and only changes at a paused boundary.
@@ -867,7 +902,6 @@ impl VftManager {
     ) -> Result<(), Error> {
         self.ensure_admin();
         self.ensure_receipt_domain(_slot)?;
-        self.ensure_economic_mutable();
         self.record_receipt_admission(_slot);
         #[cfg(feature = "mocks")]
         {

@@ -115,16 +115,22 @@ type Error = enum {
   ReceiptOutsideDeployment,
   Retired,
   CutoverNotReady,
+  /// Every receipt log is terminal, but at least one did not financially settle.
+  ReceiptResolved,
+  /// The original authenticated token operation explicitly rejected without effect.
+  TokenOperationRejected,
 };
 
 /// The on-chain outcome of an Ethereum receipt key.
 type ReceiptStatus = enum {
-  /// No reservation or retained processed record exists.
+  /// No reservation or retained terminal record exists.
   Unknown,
   /// The receipt is currently being processed.
   Reserved,
-  /// The receipt completed and remains in bounded history.
+  /// Every deposit settled or refunded, and the receipt remains in bounded history.
   Processed,
+  /// Every deposit is terminal, with at least one rejection or retained liability.
+  Resolved,
 };
 
 type SourceRequestOutcome = enum {
@@ -135,6 +141,21 @@ type SourceRequestOutcome = enum {
     queue_id: u64,
   },
   NotQueued,
+};
+
+type ReceiptDepositOutcome = enum {
+  Pending,
+  InFlight,
+  Settled,
+  Rejected,
+  Unknown,
+  NativeQueued,
+  /// Original native payout rejected; exact backed wrapped value credited.
+  Refunded,
+  /// A failed original operation remains eligible for a safe retry.
+  Retryable,
+  /// An unresolved native liability is retained independently of handoff.
+  Held,
 };
 
 type CutoverStatus = struct {
@@ -186,15 +207,17 @@ type ReceiptDepositState = struct {
   outcome: ReceiptDepositOutcome,
 };
 
-type ReceiptDepositOutcome = enum {
-  Pending,
-  InFlight,
-  Settled,
-  Rejected,
-  Unknown,
-  NativeQueued,
-  /// Original native payout rejected; exact backed wrapped value credited.
-  Refunded,
+/// Retained proof that the original deposit had no financial effect.
+type ReceiptRejectionEvidence = enum {
+  InvalidRecipient,
+  InvalidAmount,
+  NativeAmountOverflow,
+  UnlockFalse: struct {
+    child: message_id
+  },
+  NativeErrorAbsent: struct {
+    child: message_id
+  },
 };
 
 /// Entry for a single message in [MessageTracker].
@@ -322,6 +345,8 @@ service VftManager {
   /// Allowance should be granted to the current program to spend `amount` tokens
   /// from the source address.
   RequestBridging : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
+  /// Resolve one original deposit using no-effect proof or a retained native hold.
+  ResolveReceiptDeposit : (slot: u64, transaction_index: u64, log_index: u64, operation_id: h256, child: opt message_id) -> result (ReceiptDepositOutcome, Error);
   /// Change [State::admin]. Can be called only by a [State::admin].
   SetAdmin : (new_admin: actor_id) -> null;
   /// Change [State::pause_admin]. Can be called only by a [State::admin].
@@ -373,6 +398,8 @@ service VftManager {
   /// Get current [State::pause_admin] address.
   query PauseAdmin : () -> actor_id;
   query ReceiptDeposits : (slot: u64, transaction_index: u64) -> vec ReceiptDepositState;
+  /// Read retained no-effect evidence for a terminally rejected deposit.
+  query ReceiptRejection : (slot: u64, transaction_index: u64, log_index: u64) -> opt ReceiptRejectionEvidence;
   /// Read the current status for one Ethereum receipt key.
   query ReceiptStatus : (slot: u64, transaction_index: u64) -> ReceiptStatus;
   /// Get state of a `request_bridging` message tracker.

@@ -289,11 +289,7 @@ async fn bench_gas_for_reply() -> Result<()> {
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
     let slot_start = 2_000;
     let vft_manager_id = factory
-        .gas_calculation(
-            manager_init_config(),
-            slot_start,
-            None,
-        )
+        .gas_calculation(manager_init_config(), slot_start, None)
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -402,11 +398,7 @@ async fn getter_transactions() -> Result<()> {
     let factory = vft_manager_client::VftManagerFactory::new(GClientRemoting::new(api.clone()));
     let slot_start = 2_000;
     let vft_manager_id = factory
-        .gas_calculation(
-            manager_init_config(),
-            slot_start,
-            Some(CAPACITY as u32),
-        )
+        .gas_calculation(manager_init_config(), slot_start, Some(CAPACITY as u32))
         .with_gas_limit(gas_limit)
         .send_recv(code_id, salt)
         .await
@@ -1153,7 +1145,7 @@ async fn init() -> Result<()> {
 #[tokio::test]
 async fn vft_burn_from() -> Result<()> {
     use vft_vara_client::{
-        traits::{NativeEscrow, Vft, VftAdmin, VftExtension, VftVaraFactory},
+        traits::{NativeEscrow, Vft, VftAdmin, VftExtension, VftNativeExchange, VftVaraFactory},
         vft_2::events::Vft2Events,
         Mainnet, PayoutStatus,
     };
@@ -1191,6 +1183,16 @@ async fn vft_burn_from() -> Result<()> {
 
     // unpause the VftManager
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
+    assert!(service.is_paused().recv(vft_manager_id).await.unwrap());
+    assert_eq!(
+        service
+            .get_config()
+            .recv(vft_manager_id)
+            .await
+            .unwrap()
+            .encode(),
+        manager_init_config().config.encode()
+    );
     service
         .unpause()
         .with_gas_limit(gas_limit)
@@ -1451,6 +1453,17 @@ async fn vft_burn_from() -> Result<()> {
             .map_err(|e| anyhow!("{e:?}"))?,
         Err(Error::NativeSettlementPending)
     );
+    for _ in 0..2 {
+        assert_eq!(
+            service
+                .reconcile_receipt(10, 3)
+                .with_gas_limit(gas_limit)
+                .send_recv(vft_manager_id)
+                .await
+                .unwrap(),
+            Ok(ReceiptStatus::Processed)
+        );
+    }
     // Wait for the exact wrapped refund, not merely its earlier burn.
     listener
         .proc(|event| match event {
@@ -1484,17 +1497,6 @@ async fn vft_burn_from() -> Result<()> {
         .unwrap();
     assert_eq!(returned.status, PayoutStatus::Refunded);
     assert_eq!(returned.returned_value, u128::try_from(amount_2).unwrap());
-    for _ in 0..2 {
-        assert_eq!(
-            service
-                .reconcile_receipt(10, 3)
-                .with_gas_limit(gas_limit)
-                .send_recv(vft_manager_id)
-                .await
-                .unwrap(),
-            Ok(ReceiptStatus::Processed)
-        );
-    }
     assert_eq!(
         service
             .submit_receipt(10, 3, receipt_rlp)
@@ -1545,6 +1547,367 @@ async fn vft_burn_from() -> Result<()> {
         amount_2
     );
     assert_eq!(api.total_balance(vft_id).await?, balance_vft_native_before);
+
+    let destination = vft_manager_client::VftManagerFactory::new(remoting.clone())
+        .new(InitConfig {
+            gear_bridge_builtin: Default::default(),
+            historical_proxy_address: accounts[0].0,
+            config: service.get_config().recv(vft_manager_id).await.unwrap(),
+        })
+        .with_gas_limit(gas_limit)
+        .send_recv(code_id, [salt.as_slice(), b"held-cutover"].concat())
+        .await
+        .unwrap();
+    println!(
+        "program_id = {} (held_cutover_destination)",
+        hex::encode(destination)
+    );
+    assert!(service.is_paused().recv(destination).await.unwrap());
+    assert_eq!(
+        service
+            .cutover_status()
+            .recv(destination)
+            .await
+            .unwrap()
+            .phase,
+        vft_manager_client::CutoverPhase::Active
+    );
+    service
+        .update_erc_20_manager_address(address_erc20_manager.into())
+        .with_gas_limit(gas_limit)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    service
+        .map_vara_to_eth_address(vft_id, address_token.into(), TokenSupply::Gear)
+        .with_gas_limit(gas_limit)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    service
+        .configure_native_wrapper(Some(vft_id))
+        .with_gas_limit(gas_limit)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    // Submit nonce-ordered administrative messages together so finality waits do
+    // not exhaust the mailbox lifetime. Check each message's authenticated reply.
+    async fn send_admin_batch(
+        api: &GearApi,
+        calls: Vec<(ActorId, Vec<u8>)>,
+        gas_limit: u64,
+    ) -> Result<Vec<Vec<u8>>> {
+        let mut listeners = Vec::with_capacity(calls.len());
+        for _ in 0..calls.len() {
+            listeners.push(api.subscribe().await?);
+        }
+        let nonce = api.rpc_nonce().await?;
+        let messages = futures::future::try_join_all(calls.into_iter().enumerate().map(
+            |(index, (target, payload))| {
+                let mut sender = api.clone();
+                sender.set_nonce(nonce + index as u64);
+                async move {
+                    sender
+                        .send_message_bytes(target, payload, gas_limit / 8, 0)
+                        .await
+                }
+            },
+        ))
+        .await?;
+        let mut replies = Vec::with_capacity(messages.len());
+        for (message, mut listener) in messages.into_iter().zip(listeners) {
+            let (id, _) = message;
+            let (_, reply, _) = listener.reply_bytes_on(id).await?;
+            replies.push(reply.map_err(|error| anyhow!("{error}"))?);
+        }
+        Ok(replies)
+    }
+
+    // Retain a real, still-unclaimed payout as a liability across manager handoff.
+    let held_raw = 2_000_000_000_000u128;
+    let held_amount = U256::from(held_raw);
+    let supply_before = service_vft.total_supply().recv(vft_id).await.unwrap();
+    vft_vara_client::VftNativeExchange::new(remoting.clone())
+        .mint()
+        .with_value(held_raw)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .unwrap();
+    assert!(vft_vara_client::Vft::new(remoting.clone())
+        .transfer(vft_manager_id, held_amount)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .unwrap());
+    let held_receipt = crate::create_receipt_rlp(
+        address_erc20_manager.into(),
+        address_from.into(),
+        address_receiver,
+        address_token.into(),
+        held_amount,
+    );
+    assert_eq!(
+        service
+            .submit_receipt(11, 0, held_receipt.clone())
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_manager_id)
+            .await
+            .unwrap(),
+        Err(Error::NativeSettlementPending)
+    );
+    let held_row = service
+        .receipt_deposits(11, 0)
+        .recv(vft_manager_id)
+        .await
+        .unwrap()
+        .remove(0);
+    let held_snapshot = escrow
+        .redemption(held_row.operation_id)
+        .recv(vft_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(held_snapshot.status, PayoutStatus::Queued);
+    assert_eq!(
+        (held_snapshot.from, held_snapshot.to, held_snapshot.amount),
+        (vft_manager_id, address_receiver, held_amount)
+    );
+    assert_ne!(Some(held_snapshot.child), held_row.child);
+    println!(
+        "held_native operation=0x{} child=0x{} redemption=0x{}",
+        hex::encode(held_row.operation_id),
+        hex::encode(held_row.child.unwrap()),
+        hex::encode(held_snapshot.encode())
+    );
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(vft_id).await.unwrap(),
+        1
+    );
+    assert_eq!(escrow.blocking_redemptions().recv(vft_id).await.unwrap(), 1);
+    let wrapper_balance_before_hold = api.total_balance(vft_id).await?;
+    let hold_replies = send_admin_batch(
+        &api,
+        vec![
+            (
+                vft_manager_id,
+                vft_manager_client::vft_manager::io::Pause::encode_call(),
+            ),
+            (vft_id, vft_vara_client::vft_admin::io::Pause::encode_call()),
+            (
+                vft_id,
+                vft_vara_client::native_escrow::io::HoldRedemption::encode_call(
+                    held_row.operation_id,
+                    held_snapshot.clone(),
+                ),
+            ),
+            (
+                vft_id,
+                vft_vara_client::native_escrow::io::HoldRedemption::encode_call(
+                    held_row.operation_id,
+                    held_snapshot.clone(),
+                ),
+            ),
+        ],
+        gas_limit,
+    )
+    .await?;
+    for reply in &hold_replies[2..] {
+        assert_eq!(
+            vft_vara_client::native_escrow::io::HoldRedemption::decode_reply(reply).unwrap(),
+            held_snapshot
+        );
+    }
+    for _ in 0..2 {
+        assert_eq!(
+            service
+                .resolve_receipt_deposit(11, 0, 0, held_row.operation_id, held_row.child)
+                .with_gas_limit(gas_limit)
+                .send_recv(vft_manager_id)
+                .await
+                .unwrap(),
+            Ok(ReceiptDepositOutcome::Held)
+        );
+    }
+    assert_eq!(
+        service
+            .receipt_status(11, 0)
+            .recv(vft_manager_id)
+            .await
+            .unwrap(),
+        ReceiptStatus::Resolved
+    );
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(vft_id).await.unwrap(),
+        1
+    );
+    assert_eq!(escrow.blocking_redemptions().recv(vft_id).await.unwrap(), 0);
+    assert_eq!(
+        service_vft
+            .balance_of(address_receiver)
+            .recv(vft_id)
+            .await
+            .unwrap(),
+        U256::zero()
+    );
+    assert_eq!(
+        service_vft.total_supply().recv(vft_id).await.unwrap(),
+        supply_before
+    );
+    assert_eq!(
+        api.total_balance(vft_id).await?,
+        wrapper_balance_before_hold
+    );
+    send_admin_batch(
+        &api,
+        vec![
+            (
+                vft_id,
+                vft_vara_client::vft_admin::io::Resume::encode_call(),
+            ),
+            (
+                vft_manager_id,
+                vft_manager_client::vft_manager::io::BeginCutover::encode_call(destination, 12),
+            ),
+            (
+                destination,
+                vft_manager_client::vft_manager::io::PrepareCutover::encode_call(
+                    vft_manager_id,
+                    12,
+                ),
+            ),
+        ],
+        gas_limit,
+    )
+    .await?;
+
+    service
+        .upgrade(destination)
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .unwrap();
+    send_admin_batch(
+        &api,
+        vec![
+            (vft_id, vft_vara_client::vft_admin::io::Pause::encode_call()),
+            (
+                vft_id,
+                vft_vara_client::native_escrow::io::ConfigureManager::encode_call(destination),
+            ),
+            (
+                vft_id,
+                vft_vara_client::vft_admin::io::SetBurner::encode_call(destination),
+            ),
+            (
+                vft_id,
+                vft_vara_client::vft_admin::io::Resume::encode_call(),
+            ),
+            (
+                destination,
+                vft_manager_client::vft_manager::io::FinalizeCutover::encode_call(),
+            ),
+        ],
+        gas_limit,
+    )
+    .await?;
+    assert_eq!(
+        service
+            .cutover_status()
+            .recv(vft_manager_id)
+            .await
+            .unwrap()
+            .phase,
+        vft_manager_client::CutoverPhase::Retired
+    );
+    assert_eq!(
+        service
+            .cutover_status()
+            .recv(destination)
+            .await
+            .unwrap()
+            .phase,
+        vft_manager_client::CutoverPhase::Ready
+    );
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(vft_id).await.unwrap(),
+        1
+    );
+    assert_eq!(escrow.blocking_redemptions().recv(vft_id).await.unwrap(), 0);
+    assert_eq!(
+        escrow
+            .held_redemption(held_row.operation_id)
+            .recv(vft_id)
+            .await
+            .unwrap(),
+        Some(held_snapshot.clone())
+    );
+    let mailbox = api2.get_mailbox_messages(10).await?;
+    let original = mailbox
+        .iter()
+        .find(|(message, _)| message.id().into_bytes() == held_snapshot.child.into_bytes())
+        .expect("original payout mailbox must survive manager rotation")
+        .0
+        .id();
+    let (claimed, _) = api2.claim_value(original).await?;
+    assert_eq!(claimed, held_raw);
+    // An awaited wrapper command also orders readback after the original callback.
+    service_vft_admin
+        .pause()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        escrow
+            .hold_redemption(held_row.operation_id, held_snapshot.clone())
+            .with_gas_limit(gas_limit)
+            .send_recv(vft_id)
+            .await
+            .unwrap(),
+        held_snapshot
+    );
+    service_vft_admin
+        .resume()
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_id)
+        .await
+        .unwrap();
+    let live = escrow
+        .redemption(held_row.operation_id)
+        .recv(vft_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(live.status, PayoutStatus::Delivered);
+    assert_eq!(live.child, held_snapshot.child);
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(vft_id).await.unwrap(),
+        0
+    );
+    assert_eq!(escrow.blocking_redemptions().recv(vft_id).await.unwrap(), 0);
+    assert_eq!(
+        escrow
+            .held_redemption(held_row.operation_id)
+            .recv(vft_id)
+            .await
+            .unwrap(),
+        Some(held_snapshot)
+    );
+    assert_eq!(
+        service
+            .receipt_deposits(11, 0)
+            .recv(vft_manager_id)
+            .await
+            .unwrap()[0]
+            .outcome,
+        ReceiptDepositOutcome::Held
+    );
+    assert_eq!(
+        service_vft.total_supply().recv(vft_id).await.unwrap(),
+        supply_before
+    );
+    println!("held_cutover source=Retired destination=Ready receipt=Resolved outcome=Held outstanding=0 blocking=0");
 
     Ok(())
 }

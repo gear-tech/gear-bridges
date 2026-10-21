@@ -157,9 +157,14 @@ service VftNativeExchangeAdmin {
 
 service NativeEscrow {
   ConfigureManager : (manager: actor_id) -> null;
+  /// Assume the original liability without credit, redispatch or settlement.
+  HoldRedemption : (operation_id: h256, expected: Redemption) -> Redemption;
   /// This acknowledgement proves only enqueueing. Settlement requires the original
   /// payout reply; a user mailbox entry is still an outstanding native obligation.
   RedeemEscrow : (operation_id: h256, from: actor_id, to: actor_id, amount: u256) -> Redemption;
+  /// Financial obligations remain outstanding even when explicitly held for handoff.
+  query BlockingRedemptions : () -> u64;
+  query HeldRedemption : (operation_id: h256) -> opt Redemption;
   query Manager : () -> opt actor_id;
   query OutstandingRedemptions : () -> u64;
   query Redemption : (operation_id: h256) -> opt Redemption;

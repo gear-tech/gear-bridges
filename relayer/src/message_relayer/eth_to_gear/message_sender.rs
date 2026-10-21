@@ -401,9 +401,11 @@ impl SignedSubmission {
             let message = found.event.message;
             let details = message.details().expect("discovered reply has details");
             let sender = signed.sender.parse::<subxt::utils::AccountId32>()?;
-            anyhow::ensure!(message.source().as_ref() == expected_source.as_bytes()
-                && message.destination().as_ref() == sender.0,
-                "Original reply source/destination differs from its authenticated actor and signer");
+            anyhow::ensure!(
+                message.source().as_ref() == expected_source.as_bytes()
+                    && message.destination().as_ref() == sender.0,
+                "Original reply source/destination differs from its authenticated actor and signer"
+            );
             let reply_error = (!details.to_reply_code().is_success())
                 .then(|| format!("{:?}", details.to_reply_code()));
             let evidence = FinalizedReplyEvidence {
@@ -650,7 +652,7 @@ fn validate_deposit_evidence(
     ethereum_manager: H160,
     manager: H256,
     proxy: H256,
-    deposits: &[vft_manager_client::ReceiptDepositState],
+    deposits: Option<&[vft_manager_client::ReceiptDepositState]>,
 ) -> anyhow::Result<()> {
     use alloy::sol_types::SolEvent;
     use alloy_rlp::Decodable;
@@ -672,6 +674,10 @@ fn validate_deposit_evidence(
             continue;
         }
         let event = BridgingRequested::decode_raw_log_validate(log.topics(), &log.data.data)?;
+        let Some(deposits) = deposits else {
+            expected += 1;
+            continue;
+        };
         let row = deposits.get(expected).ok_or_else(|| {
             anyhow::anyhow!("Original receipt deposit {log_index} has no retained economic outcome")
         })?;
@@ -699,14 +705,14 @@ fn validate_deposit_evidence(
                 && row.amount == sails_rs::U256::from_little_endian(event.amount.as_le_slice())
                 && row.operation_id.0 == operation_id.0
                 && !row.token_id.is_zero()
-                && row.child.is_some()
+                && row.child.is_none_or(|child| !child.is_zero())
                 && (!row.native || matches!(row.supply, vft_manager_client::TokenSupply::Gear)),
             "Economic outcome differs from original receipt deposit {log_index}"
         );
         expected += 1;
     }
     anyhow::ensure!(
-        expected != 0 && deposits.len() == expected,
+        expected != 0 && deposits.is_none_or(|rows| rows.len() == expected),
         "Receipt deposit count differs from the complete original receipt"
     );
     Ok(())
@@ -765,6 +771,167 @@ fn native_payout_reconciliation_ready(
             }
             _ => false,
         }
+}
+
+struct ReceiptEvidence {
+    hash: H256,
+    observation: FinalizedReceiptObservation,
+    status: vft_manager_client::ReceiptStatus,
+    deposits: Vec<vft_manager_client::ReceiptDepositState>,
+    gas: u64,
+}
+
+fn resolution_cohort(
+    status: &vft_manager_client::ReceiptStatus,
+    rows: &[vft_manager_client::ReceiptDepositState],
+) -> anyhow::Result<bool> {
+    use vft_manager_client::{ReceiptDepositOutcome as Outcome, ReceiptStatus};
+    let exception = rows
+        .iter()
+        .any(|row| matches!(row.outcome, Outcome::Rejected | Outcome::Held));
+    if !matches!(status, ReceiptStatus::Resolved) {
+        anyhow::ensure!(
+            !matches!(status, ReceiptStatus::Processed) || !exception,
+            "Processed receipt contains a terminal exception"
+        );
+        return Ok(false);
+    }
+    anyhow::ensure!(
+        exception
+            && rows.iter().all(|row| matches!(
+                row.outcome,
+                Outcome::Settled | Outcome::Refunded | Outcome::Rejected | Outcome::Held
+            )),
+        "Resolved receipt lacks a complete terminal exception cohort"
+    );
+    Ok(true)
+}
+
+fn financial_settlement_status(
+    receipt_key: (u64, u64),
+    status: &vft_manager_client::ReceiptStatus,
+    rows: &[vft_manager_client::ReceiptDepositState],
+    effects_resolved: bool,
+    observation: FinalizedReceiptObservation,
+) -> MessageStatus {
+    use vft_manager_client::{ReceiptDepositOutcome as Outcome, ReceiptStatus};
+    if effects_resolved
+        && matches!(status, ReceiptStatus::Processed)
+        && !rows.is_empty()
+        && rows.iter().all(|row| {
+            row.child.is_some() && matches!(row.outcome, Outcome::Settled | Outcome::Refunded)
+        })
+    {
+        MessageStatus::Success {
+            receipt_observation: Some(observation),
+        }
+    } else {
+        MessageStatus::NeedsReconciliation {
+            receipt_key,
+            diagnostic: "Original receipt has pending, unknown or exceptional per-log outcomes; original signed request retained".into(),
+            receipt_observation: Some(observation),
+        }
+    }
+}
+
+// The finalized typed manager record proves the original child result; absence
+// alone is never evidence of rejection.
+fn rejection_requires_absence(
+    row: &vft_manager_client::ReceiptDepositState,
+    reason: &vft_manager_client::ReceiptRejectionEvidence,
+) -> anyhow::Result<bool> {
+    use vft_manager_client::{
+        ReceiptDepositOutcome, ReceiptRejectionEvidence as Reason, TokenSupply,
+    };
+    anyhow::ensure!(
+        matches!(row.outcome, ReceiptDepositOutcome::Rejected),
+        "Rejection evidence belongs to a non-rejected deposit"
+    );
+    let input_rejection = match reason {
+        Reason::InvalidRecipient => {
+            anyhow::ensure!(
+                row.receiver.is_zero(),
+                "InvalidRecipient differs from frozen input"
+            );
+            true
+        }
+        Reason::InvalidAmount => {
+            anyhow::ensure!(
+                row.amount.is_zero(),
+                "InvalidAmount differs from frozen input"
+            );
+            true
+        }
+        Reason::NativeAmountOverflow => {
+            anyhow::ensure!(
+                row.native && row.amount > sails_rs::U256::from(u128::MAX),
+                "NativeAmountOverflow differs from frozen input"
+            );
+            true
+        }
+        Reason::UnlockFalse { child } => {
+            anyhow::ensure!(
+                !row.native
+                    && matches!(row.supply, TokenSupply::Gear)
+                    && !child.is_zero()
+                    && row.child == Some(*child),
+                "UnlockFalse differs from original unlock child"
+            );
+            false
+        }
+        Reason::NativeErrorAbsent { child } => {
+            anyhow::ensure!(
+                row.native && !child.is_zero() && row.child == Some(*child),
+                "NativeErrorAbsent differs from original native child"
+            );
+            return Ok(true);
+        }
+    };
+    if input_rejection && row.child.is_some() {
+        anyhow::ensure!(
+            row.native,
+            "Dispatched non-native invalid input does not prove no effect"
+        );
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn validate_held_redemption(
+    row: &vft_manager_client::ReceiptDepositState,
+    manager: H256,
+    saved: Option<&vft_vara_client::Redemption>,
+    live: Option<&vft_vara_client::Redemption>,
+) -> anyhow::Result<()> {
+    use vft_vara_client::PayoutStatus;
+    let saved = saved.ok_or_else(|| anyhow::anyhow!("Held deposit has no saved wrapper hold"))?;
+    let live = live.ok_or_else(|| anyhow::anyhow!("Held deposit has no original redemption"))?;
+    anyhow::ensure!(
+        row.native
+            && !row.amount.is_zero()
+            && matches!(row.outcome, vft_manager_client::ReceiptDepositOutcome::Held)
+            && row
+                .child
+                .is_some_and(|child| !child.is_zero() && child != saved.child)
+            && !saved.child.is_zero()
+            && saved.from == sails_rs::ActorId::from(manager.0)
+            && saved.to == row.receiver
+            && saved.amount == row.amount
+            && sails_rs::U256::from(saved.returned_value) <= saved.amount
+            && matches!(
+                saved.status,
+                PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+            )
+            && live.from == saved.from
+            && live.to == saved.to
+            && live.amount == saved.amount
+            && live.child == saved.child
+            && sails_rs::U256::from(live.returned_value) <= live.amount,
+        "Wrapper hold differs from immutable original payout identity"
+    );
+    // The saved snapshot is immutable; a late authenticated callback may advance
+    // the original without erasing the liability evidence used at handoff.
+    Ok(())
 }
 
 pub struct MessageSender {
@@ -1478,19 +1645,22 @@ impl MessageSender {
             ))
     }
 
-    pub async fn settlement_status(
+    async fn receipt_evidence(
         &self,
         gear_api: &GearApi,
         payload: &EthToVaraEvent,
         query_pin: Option<&FinalizedReceiptObservation>,
-    ) -> anyhow::Result<(MessageStatus, bool)> {
-        use vft_manager_client::{ReceiptDepositOutcome, ReceiptStatus};
-        use vft_vara_client::traits::NativeEscrow as _;
+    ) -> anyhow::Result<ReceiptEvidence> {
         anyhow::ensure!(
             self.receiver_route == SubmitReceipt::ROUTE,
             "Unsupported consumer identity/IDL: token completion requires SubmitReceipt"
         );
         let chain = self.api_provider.client();
+        let query_client: gsdk::signer::Signer = gear_api.clone().into();
+        anyhow::ensure!(
+            query_client.api().genesis_hash().as_ref() == chain.api.genesis_hash().as_ref(),
+            "Receipt query and canonical provider belong to different Gear genesis"
+        );
         let latest = chain.latest_finalized_block().await?;
         let finalized_number = chain.block_hash_to_number(latest).await?;
         let (hash, observation) = if let Some(pin) = query_pin {
@@ -1556,14 +1726,6 @@ impl MessageSender {
             .at_block(hash.0.into())
             .recv(self.receiver_address.0.into())
             .await?;
-        validate_deposit_evidence(
-            &payload.receipt_rlp,
-            key,
-            H160::from(ethereum_manager.0),
-            self.receiver_address,
-            self.historical_proxy_address,
-            &deposits,
-        )?;
         let mappings = manager
             .vara_to_eth_addresses()
             .with_gas_limit(gas)
@@ -1576,9 +1738,19 @@ impl MessageSender {
             .at_block(hash.0.into())
             .recv(self.receiver_address.0.into())
             .await?;
-        let mut rows_settled = matches!(status, ReceiptStatus::Processed);
-        let mut effects_resolved = true;
-        let mut has_native = false;
+        // Unknown receipts have no retained cohort yet, but their complete input
+        // must still decode; absence of state must not hide malformed evidence.
+        let retained = (!deposits.is_empty()
+            || !matches!(status, vft_manager_client::ReceiptStatus::Unknown))
+        .then_some(deposits.as_slice());
+        validate_deposit_evidence(
+            &payload.receipt_rlp,
+            key,
+            H160::from(ethereum_manager.0),
+            self.receiver_address,
+            self.historical_proxy_address,
+            retained,
+        )?;
         for row in &deposits {
             anyhow::ensure!(
                 row.native == (native_wrapper == Some(row.token_id)),
@@ -1592,10 +1764,67 @@ impl MessageSender {
                         && supply == &row.supply),
                 "Original receipt token mapping is unavailable or changed"
             );
-            rows_settled &= matches!(
+        }
+        self.recheck_receipt_pin(&observation).await?;
+        Ok(ReceiptEvidence {
+            hash,
+            observation,
+            status,
+            deposits,
+            gas,
+        })
+    }
+
+    async fn recheck_receipt_pin(
+        &self,
+        observation: &FinalizedReceiptObservation,
+    ) -> anyhow::Result<()> {
+        let chain = self.api_provider.client();
+        let finalized = chain
+            .block_hash_to_number(chain.latest_finalized_block().await?)
+            .await?;
+        let number = observation
+            .finalized_block_number
+            .ok_or_else(|| anyhow::anyhow!("Receipt pin has no height"))?;
+        validate_settlement_pin(
+            observation,
+            finalized,
+            chain.block_number_to_hash(number).await?,
+        )
+    }
+
+    pub async fn settlement_status(
+        &self,
+        gear_api: &GearApi,
+        payload: &EthToVaraEvent,
+        query_pin: Option<&FinalizedReceiptObservation>,
+    ) -> anyhow::Result<(MessageStatus, bool)> {
+        use vft_manager_client::{ReceiptDepositOutcome, ReceiptStatus};
+        use vft_vara_client::traits::NativeEscrow as _;
+        let ReceiptEvidence {
+            hash,
+            observation,
+            status,
+            deposits,
+            gas,
+        } = self.receipt_evidence(gear_api, payload, query_pin).await?;
+        resolution_cohort(&status, &deposits)?;
+        let key = (payload.proof_block.block.slot, payload.transaction_index);
+        let mut effects_resolved = true;
+        let mut has_native = false;
+        for row in &deposits {
+            if matches!(
                 row.outcome,
-                ReceiptDepositOutcome::Settled | ReceiptDepositOutcome::Refunded
-            );
+                ReceiptDepositOutcome::Settled
+                    | ReceiptDepositOutcome::Refunded
+                    | ReceiptDepositOutcome::NativeQueued
+                    | ReceiptDepositOutcome::Held
+            ) {
+                anyhow::ensure!(
+                    row.child.is_some(),
+                    "Economic outcome has no original child"
+                );
+            }
             if row.native
                 && matches!(
                     row.outcome,
@@ -1616,37 +1845,121 @@ impl MessageSender {
                     native_payout_reconciliation_ready(row, self.receiver_address, payout)
                 });
             } else {
-                effects_resolved &= matches!(row.outcome, ReceiptDepositOutcome::Settled);
+                effects_resolved &=
+                    row.child.is_some() && matches!(row.outcome, ReceiptDepositOutcome::Settled);
             }
         }
-        validate_settlement_pin(
-            &observation,
-            finalized_number,
-            chain
-                .block_number_to_hash(
-                    observation
-                        .finalized_block_number
-                        .expect("settlement pin has height"),
-                )
-                .await?,
-        )?;
+        self.recheck_receipt_pin(&observation).await?;
         let native_ready = has_native
             && effects_resolved
             && matches!(status, ReceiptStatus::Reserved | ReceiptStatus::Processed);
         Ok((
-            if rows_settled && effects_resolved {
-                MessageStatus::Success {
-                    receipt_observation: Some(observation),
-                }
-            } else {
-                MessageStatus::NeedsReconciliation {
-                receipt_key: key,
-                diagnostic: "Original receipt has pending or unknown per-log economic outcomes; original signed request retained".into(),
-                receipt_observation: Some(observation),
-            }
-            },
+            financial_settlement_status(key, &status, &deposits, effects_resolved, observation),
             native_ready,
         ))
+    }
+
+    /// Authenticates terminal exceptions for handoff, never financial settlement.
+    pub async fn receipt_resolution_status(
+        &self,
+        gear_api: &GearApi,
+        payload: &EthToVaraEvent,
+        query_pin: Option<&FinalizedReceiptObservation>,
+    ) -> anyhow::Result<Option<FinalizedReceiptObservation>> {
+        use vft_manager_client::ReceiptDepositOutcome as Outcome;
+        use vft_vara_client::traits::NativeEscrow as _;
+        let ReceiptEvidence {
+            hash,
+            observation,
+            status,
+            deposits,
+            gas,
+        } = self.receipt_evidence(gear_api, payload, query_pin).await?;
+        if !resolution_cohort(&status, &deposits)? {
+            return Ok(None);
+        }
+        let key = (payload.proof_block.block.slot, payload.transaction_index);
+        let manager = VftManager::new(GClientRemoting::new(gear_api.clone()));
+        let wrapper = vft_vara_client::NativeEscrow::new(GClientRemoting::new(gear_api.clone()));
+        for row in &deposits {
+            match row.outcome {
+                Outcome::Rejected => {
+                    let reason = manager
+                        .receipt_rejection(key.0, key.1, row.log_index)
+                        .with_gas_limit(gas)
+                        .at_block(hash.0.into())
+                        .recv(self.receiver_address.0.into())
+                        .await?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Rejected deposit lacks typed original evidence")
+                        })?;
+                    if rejection_requires_absence(row, &reason)? {
+                        let payout = wrapper
+                            .redemption(row.operation_id)
+                            .with_gas_limit(gas)
+                            .at_block(hash.0.into())
+                            .recv(row.token_id)
+                            .await?;
+                        anyhow::ensure!(
+                            payout.is_none(),
+                            "Rejected native child has an original redemption"
+                        );
+                    }
+                }
+                Outcome::Held => {
+                    let saved = wrapper
+                        .held_redemption(row.operation_id)
+                        .with_gas_limit(gas)
+                        .at_block(hash.0.into())
+                        .recv(row.token_id)
+                        .await?;
+                    let live = wrapper
+                        .redemption(row.operation_id)
+                        .with_gas_limit(gas)
+                        .at_block(hash.0.into())
+                        .recv(row.token_id)
+                        .await?;
+                    validate_held_redemption(
+                        row,
+                        self.receiver_address,
+                        saved.as_ref(),
+                        live.as_ref(),
+                    )?;
+                }
+                Outcome::Settled | Outcome::Refunded => {
+                    anyhow::ensure!(
+                        row.child.is_some(),
+                        "Settled sibling has no original economic child"
+                    );
+                    if row.native {
+                        let payout = wrapper
+                            .redemption(row.operation_id)
+                            .with_gas_limit(gas)
+                            .at_block(hash.0.into())
+                            .recv(row.token_id)
+                            .await?;
+                        anyhow::ensure!(
+                            payout.as_ref().is_some_and(|payout| {
+                                native_payout_reconciliation_ready(
+                                    row,
+                                    self.receiver_address,
+                                    payout,
+                                )
+                            }),
+                            "Settled native sibling lacks exact original payout evidence"
+                        );
+                    } else {
+                        anyhow::ensure!(
+                            matches!(row.outcome, Outcome::Settled),
+                            "Non-native sibling cannot be refunded"
+                        );
+                    }
+                }
+                _ => anyhow::bail!("Unresolved sibling in terminal receipt"),
+            }
+        }
+        self.recheck_receipt_pin(&observation).await?;
+        Ok(Some(observation))
     }
 
     pub(super) async fn authenticate_archived_continuation(
@@ -2315,8 +2628,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_original_deposit_and_native_payout_must_match() {
+    fn receipt_fixture(
+        inputs: &[(u8, sails_rs::U256)],
+    ) -> (Vec<u8>, Vec<vft_manager_client::ReceiptDepositState>) {
         use alloy::sol_types::SolEvent;
         use alloy_consensus::{Receipt, ReceiptWithBloom};
         use alloy_primitives::{Address, Log};
@@ -2327,13 +2641,19 @@ mod tests {
         let ethereum_manager = H160::repeat_byte(1);
         let manager = H256::repeat_byte(2);
         let proxy = H256::repeat_byte(3);
-        let key = (17, 4);
-        let events: Vec<_> = (0..2)
-            .map(|n| BridgingRequested {
-                token: Address::from([4; 20]),
+        let key = (17u64, 4u64);
+        let events: Vec<_> = inputs
+            .iter()
+            .enumerate()
+            .map(|(index, (receiver, amount))| BridgingRequested {
+                token: Address::from([4 + index as u8; 20]),
                 from: Address::from([5; 20]),
-                to: FixedBytes::from([6 + n; 32]),
-                amount: alloy_primitives::U256::from(123 + n as u64),
+                to: FixedBytes::from([*receiver; 32]),
+                amount: {
+                    let mut bytes = [0u8; 32];
+                    amount.to_little_endian(&mut bytes);
+                    alloy_primitives::U256::from_le_bytes(bytes)
+                },
             })
             .collect();
         let logs = events
@@ -2361,7 +2681,7 @@ mod tests {
                 log_index: i as u64,
                 sender: event.from.0 .0.into(),
                 receiver: event.to.0.into(),
-                token_id: ActorId::from([7; 32]),
+                token_id: ActorId::from([7 + i as u8; 32]),
                 eth_token_id: event.token.0 .0.into(),
                 amount: sails_rs::U256::from_little_endian(event.amount.as_le_slice()),
                 supply: TokenSupply::Gear,
@@ -2385,28 +2705,280 @@ mod tests {
                 outcome: ReceiptDepositOutcome::Settled,
             })
             .collect();
+        (bytes, rows)
+    }
+
+    #[test]
+    fn encoded_rejections_require_frozen_input_and_original_child() {
+        use sails_rs::MessageId;
+        use vft_manager_client::{
+            ReceiptDepositOutcome as Outcome, ReceiptRejectionEvidence as Reason,
+        };
+        let manager = H256::repeat_byte(2);
+        let (bytes, mut rows) = receipt_fixture(&[
+            (0, 123u64.into()),
+            (6, 0u64.into()),
+            (6, sails_rs::U256::from(u128::MAX) + sails_rs::U256::one()),
+        ]);
+        rows[2].native = true;
+        for row in &mut rows {
+            row.child = None;
+            row.outcome = Outcome::Rejected;
+        }
+        let encoded = rows.encode();
+        let mut rows =
+            Vec::<vft_manager_client::ReceiptDepositState>::decode(&mut &encoded[..]).unwrap();
+        let identity = |rows: &[vft_manager_client::ReceiptDepositState]| {
+            validate_deposit_evidence(
+                &bytes,
+                (17, 4),
+                H160::repeat_byte(1),
+                manager,
+                H256::repeat_byte(3),
+                Some(rows),
+            )
+        };
+        assert!(identity(&rows).is_ok());
+        for reason in [
+            Reason::InvalidRecipient,
+            Reason::InvalidAmount,
+            Reason::NativeAmountOverflow,
+        ] {
+            let encoded = reason.encode();
+            let decoded = Reason::decode(&mut &encoded[..]).unwrap();
+            assert_eq!(decoded, reason);
+        }
+        for (i, reason) in [
+            Reason::InvalidRecipient,
+            Reason::InvalidAmount,
+            Reason::NativeAmountOverflow,
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(!rejection_requires_absence(&rows[i], reason).unwrap());
+            for wrong in [
+                Reason::InvalidRecipient,
+                Reason::InvalidAmount,
+                Reason::NativeAmountOverflow,
+            ] {
+                if &wrong != reason {
+                    assert!(rejection_requires_absence(&rows[i], &wrong).is_err());
+                }
+            }
+        }
+        assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).unwrap());
+        let pin = FinalizedReceiptObservation {
+            finalized_block_number: Some(20),
+            finalized_block_hash: format!("{:#x}", H256::repeat_byte(20)),
+        };
+        assert!(matches!(
+            financial_settlement_status((17, 4), &ReceiptStatus::Resolved, &rows, true, pin),
+            MessageStatus::NeedsReconciliation { .. }
+        ));
+        let mut wrong = rows.clone();
+        wrong[0].operation_id = [0; 32].into();
+        assert!(identity(&wrong).is_err());
+        let child = MessageId::from([8; 32]);
+        rows[0].child = Some(child);
+        assert!(rejection_requires_absence(&rows[0], &Reason::InvalidRecipient).is_err());
+        rows[0].native = true;
+        assert!(rejection_requires_absence(&rows[0], &Reason::InvalidRecipient).unwrap());
+        rows[0].native = false;
+        let unlock = Reason::UnlockFalse { child };
+        assert!(!rejection_requires_absence(&rows[0], &unlock).unwrap());
+        rows[0].child = Some(MessageId::from([9; 32]));
+        assert!(rejection_requires_absence(&rows[0], &unlock).is_err());
+        rows[0].child = Some(child);
+        let absent = Reason::NativeErrorAbsent { child };
+        assert!(rejection_requires_absence(&rows[0], &absent).is_err());
+        rows[0].native = true;
+        assert!(rejection_requires_absence(&rows[0], &absent).unwrap());
+        rows[0].child = Some(MessageId::from([9; 32]));
+        assert!(rejection_requires_absence(&rows[0], &absent).is_err());
+        rows[0].child = None;
+        assert!(rejection_requires_absence(&rows[0], &absent).is_err());
+        assert!(rejection_requires_absence(&rows[0], &unlock).is_err());
+    }
+
+    #[test]
+    fn encoded_hold_preserves_saved_liability_after_original_advances() {
+        use sails_rs::{ActorId, MessageId};
+        use vft_manager_client::ReceiptDepositOutcome as Outcome;
+        use vft_vara_client::{PayoutStatus, Redemption};
+        let manager = H256::repeat_byte(2);
+        let (bytes, mut rows) = receipt_fixture(&[(6, 123u64.into()), (7, 124u64.into())]);
+        rows[0].native = true;
+        rows[0].outcome = Outcome::Held;
+        let encoded = rows.encode();
+        let mut rows =
+            Vec::<vft_manager_client::ReceiptDepositState>::decode(&mut &encoded[..]).unwrap();
+        assert!(validate_deposit_evidence(
+            &bytes,
+            (17, 4),
+            H160::repeat_byte(1),
+            manager,
+            H256::repeat_byte(3),
+            Some(&rows)
+        )
+        .is_ok());
+        let saved = Redemption {
+            from: ActorId::from(manager.0),
+            to: rows[0].receiver,
+            amount: rows[0].amount,
+            child: MessageId::from([9; 32]),
+            status: PayoutStatus::Queued,
+            returned_value: 0,
+        };
+        let encoded = saved.encode();
+        let saved = Redemption::decode(&mut &encoded[..]).unwrap();
+        let mut live = saved.clone();
+        assert!(validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_ok());
+        for status in [
+            PayoutStatus::Queued,
+            PayoutStatus::Returned,
+            PayoutStatus::Ambiguous,
+        ] {
+            let mut partial = saved.clone();
+            partial.status = status;
+            partial.returned_value = 31;
+            let encoded = partial.encode();
+            let partial = Redemption::decode(&mut &encoded[..]).unwrap();
+            assert!(
+                validate_held_redemption(&rows[0], manager, Some(&partial), Some(&partial)).is_ok()
+            );
+        }
+        assert!(validate_held_redemption(&rows[0], manager, None, Some(&live)).is_err());
+        assert!(validate_held_redemption(&rows[0], manager, Some(&saved), None).is_err());
+        live.status = PayoutStatus::Delivered;
+        live.returned_value = 0;
+        assert!(validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_ok());
+        assert_eq!(saved.status, PayoutStatus::Queued);
+        assert_eq!(saved.returned_value, 0);
+        let mut excessive = saved.clone();
+        excessive.returned_value = excessive.amount.as_u128() + 1;
         assert!(
-            validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, &rows).is_ok()
+            validate_held_redemption(&rows[0], manager, Some(&excessive), Some(&live)).is_err()
         );
-        // The retained hash-20 rows qualify; evicted latest rows must never substitute for them.
-        assert!(
-            validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, &[]).is_err()
-        );
+        let original_child = rows[0].child.take();
+        assert!(validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_err());
+        rows[0].child = original_child;
+        assert!(!native_payout_reconciliation_ready(
+            &rows[0], manager, &live
+        ));
+        assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).unwrap());
+        let pin = FinalizedReceiptObservation {
+            finalized_block_number: Some(20),
+            finalized_block_hash: format!("{:#x}", H256::repeat_byte(20)),
+        };
+        for status in [ReceiptStatus::Resolved, ReceiptStatus::Processed] {
+            assert!(matches!(
+                financial_settlement_status((17, 4), &status, &rows, true, pin.clone()),
+                MessageStatus::NeedsReconciliation { .. }
+            ));
+        }
+        for field in ["child", "manager-child", "from", "to", "amount", "excess"] {
+            let mut wrong = live.clone();
+            match field {
+                "child" => wrong.child = MessageId::zero(),
+                "manager-child" => wrong.child = rows[0].child.unwrap(),
+                "from" => wrong.from = ActorId::zero(),
+                "to" => wrong.to = ActorId::zero(),
+                "amount" => wrong.amount += 1.into(),
+                "excess" => wrong.returned_value = wrong.amount.as_u128() + 1,
+                _ => unreachable!(),
+            }
+            assert!(
+                validate_held_redemption(&rows[0], manager, Some(&saved), Some(&wrong)).is_err(),
+                "{field}"
+            );
+        }
+        for status in [PayoutStatus::Delivered, PayoutStatus::Refunded] {
+            let mut wrong = saved.clone();
+            wrong.status = status;
+            assert!(
+                validate_held_redemption(&rows[0], manager, Some(&wrong), Some(&live)).is_err()
+            );
+        }
+        for outcome in [
+            Outcome::Pending,
+            Outcome::InFlight,
+            Outcome::Retryable,
+            Outcome::Unknown,
+            Outcome::NativeQueued,
+        ] {
+            rows[1].outcome = outcome;
+            assert!(!resolution_cohort(&ReceiptStatus::Reserved, &rows).unwrap());
+            assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).is_err());
+        }
+        rows[0].outcome = Outcome::Settled;
+        rows[1].outcome = Outcome::Settled;
+        assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).is_err());
+    }
+
+    #[test]
+    fn every_original_deposit_and_native_payout_must_match() {
+        use sails_rs::{ActorId, MessageId};
+        use vft_manager_client::ReceiptDepositOutcome;
+        let ethereum_manager = H160::repeat_byte(1);
+        let manager = H256::repeat_byte(2);
+        let proxy = H256::repeat_byte(3);
+        let key = (17, 4);
+        let (mut bytes, rows) = receipt_fixture(&[(6, 123u64.into()), (7, 124u64.into())]);
         assert!(validate_deposit_evidence(
             &bytes,
             key,
             ethereum_manager,
             manager,
             proxy,
-            &rows[..1]
+            Some(&rows)
+        )
+        .is_ok());
+        assert!(
+            validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, None).is_ok()
+        );
+        let pin = FinalizedReceiptObservation {
+            finalized_block_number: Some(20),
+            finalized_block_hash: format!("{:#x}", H256::repeat_byte(20)),
+        };
+        assert!(matches!(
+            financial_settlement_status(key, &ReceiptStatus::Processed, &rows, true, pin.clone()),
+            MessageStatus::Success { .. }
+        ));
+        assert!(matches!(
+            financial_settlement_status(key, &ReceiptStatus::Reserved, &rows, true, pin),
+            MessageStatus::NeedsReconciliation { .. }
+        ));
+        // The retained hash-20 rows qualify; evicted latest rows must never substitute for them.
+        assert!(validate_deposit_evidence(
+            &bytes,
+            key,
+            ethereum_manager,
+            manager,
+            proxy,
+            Some(&[])
+        )
+        .is_err());
+        assert!(validate_deposit_evidence(
+            &bytes,
+            key,
+            ethereum_manager,
+            manager,
+            proxy,
+            Some(&rows[..1])
         )
         .is_err());
         let mut wrong = rows.clone();
         wrong.swap(0, 1);
-        assert!(
-            validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, &wrong)
-                .is_err()
-        );
+        assert!(validate_deposit_evidence(
+            &bytes,
+            key,
+            ethereum_manager,
+            manager,
+            proxy,
+            Some(&wrong)
+        )
+        .is_err());
         for field in [
             "sender",
             "receiver",
@@ -2424,12 +2996,19 @@ mod tests {
                 "operation" => wrong[0].operation_id = [0; 32].into(),
                 "log" => wrong[0].log_index += 1,
                 "token" => wrong[0].eth_token_id = [0; 20].into(),
-                "child" => wrong[0].child = None,
+                "child" => wrong[0].child = Some(MessageId::zero()),
                 _ => unreachable!(),
             }
             assert!(
-                validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, &wrong)
-                    .is_err(),
+                validate_deposit_evidence(
+                    &bytes,
+                    key,
+                    ethereum_manager,
+                    manager,
+                    proxy,
+                    Some(&wrong)
+                )
+                .is_err(),
                 "{field}"
             );
         }
@@ -2439,13 +3018,21 @@ mod tests {
             ethereum_manager,
             manager,
             proxy,
-            &rows
+            Some(&rows)
         )
         .is_err());
         bytes.push(0);
+        assert!(validate_deposit_evidence(
+            &bytes,
+            key,
+            ethereum_manager,
+            manager,
+            proxy,
+            Some(&rows)
+        )
+        .is_err());
         assert!(
-            validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, &rows)
-                .is_err()
+            validate_deposit_evidence(&bytes, key, ethereum_manager, manager, proxy, None).is_err()
         );
         let row = &rows[0];
         let mut payout = vft_vara_client::Redemption {
@@ -2470,14 +3057,22 @@ mod tests {
         assert!(!native_payout_reconciliation_ready(row, manager, &payout)); // Never relabel Settled as refunded.
         let mut refunded = row.clone();
         refunded.outcome = ReceiptDepositOutcome::Refunded;
-        assert!(native_payout_reconciliation_ready(&refunded, manager, &payout));
+        assert!(native_payout_reconciliation_ready(
+            &refunded, manager, &payout
+        ));
         payout.returned_value -= 1;
-        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(
+            &refunded, manager, &payout
+        ));
         payout.returned_value += 1;
         payout.status = vft_vara_client::PayoutStatus::Returned;
-        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(
+            &refunded, manager, &payout
+        ));
         payout.status = vft_vara_client::PayoutStatus::Ambiguous;
-        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(
+            &refunded, manager, &payout
+        ));
         // An authenticated full return is continuation-ready, not Refunded:
         // only the original operation can restore wrapped credit.
         let mut pending = row.clone();
@@ -2485,13 +3080,29 @@ mod tests {
         pending.outcome = ReceiptDepositOutcome::NativeQueued;
         payout.status = vft_vara_client::PayoutStatus::Queued;
         payout.returned_value = 0;
-        assert!(!native_payout_reconciliation_ready(&pending, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(
+            &pending, manager, &payout
+        ));
         payout.returned_value = pending.amount.as_u128();
-        assert!(native_payout_reconciliation_ready(&pending, manager, &payout));
-        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout));
+        assert!(native_payout_reconciliation_ready(
+            &pending, manager, &payout
+        ));
+        assert!(!native_payout_reconciliation_ready(
+            &refunded, manager, &payout
+        ));
         assert!(!native_payout_reconciliation_ready(row, manager, &payout));
         let original_child = payout.child;
-        for field in ["partial", "excess", "from", "to", "amount", "child", "manager-child", "ambiguous", "returned"] {
+        for field in [
+            "partial",
+            "excess",
+            "from",
+            "to",
+            "amount",
+            "child",
+            "manager-child",
+            "ambiguous",
+            "returned",
+        ] {
             let mut invalid = payout.clone();
             match field {
                 "partial" => invalid.returned_value -= 1,
@@ -2505,21 +3116,30 @@ mod tests {
                 "returned" => invalid.status = vft_vara_client::PayoutStatus::Returned,
                 _ => unreachable!(),
             }
-            assert!(!native_payout_reconciliation_ready(&pending, manager, &invalid), "{field}");
+            assert!(
+                !native_payout_reconciliation_ready(&pending, manager, &invalid),
+                "{field}"
+            );
         }
         // Even a falsely terminal manager row cannot complete before the actual
         // wrapper refund. Then the same payout child qualifies that wrapped effect.
         payout.status = vft_vara_client::PayoutStatus::Refunded;
-        assert!(native_payout_reconciliation_ready(&pending, manager, &payout));
+        assert!(native_payout_reconciliation_ready(
+            &pending, manager, &payout
+        ));
         pending.outcome = ReceiptDepositOutcome::Refunded;
-        assert!(native_payout_reconciliation_ready(&pending, manager, &payout));
+        assert!(native_payout_reconciliation_ready(
+            &pending, manager, &payout
+        ));
         assert_eq!(payout.child, original_child);
         pending.amount = 0.into();
         payout.amount = 0.into();
         payout.returned_value = 0;
         payout.status = vft_vara_client::PayoutStatus::Queued;
         pending.outcome = ReceiptDepositOutcome::NativeQueued;
-        assert!(!native_payout_reconciliation_ready(&pending, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(
+            &pending, manager, &payout
+        ));
     }
 
     #[tokio::test]
@@ -2620,6 +3240,7 @@ mod tests {
             ReceiptStatus::Processed,
             ReceiptStatus::Reserved,
             ReceiptStatus::Unknown,
+            ReceiptStatus::Resolved,
         ] {
             match receipt_query_result(key, Ok((status, observation.clone()))) {
                 MessageStatus::NeedsReconciliation {

@@ -32,9 +32,26 @@ Gear recipient**, never the manager or another destination, with no second
 native payout. `Refunded` is not native delivery. Duplicate calls/replies cannot
 mint again, decrement again or replace committed returned backing; legacy
 `Returned`, unreturned `Queued` and `Ambiguous` remain held obligations.
-Paused `ConfigureManager` requires zero
-outstanding obligations and a zero VFT minimum. Rotation never rewrites the
-original operation, from, amount, recipient, child or reply records.
+`NativeEscrow::HoldRedemption(operation_id, expected)` requires the wrapper admin
+and pause. It retains the exact queried snapshot of an existing Queued, Returned
+or Ambiguous payout with its nonzero original child. It does not settle, mint,
+forgive debt, or change the original redemption. Matching repeated holds are
+idempotent, including after the original callback advances the live record.
+Conflicting snapshots, terminal payouts and returned value above the original
+amount reject.
+
+`BlockingRedemptions()` subtracts held outstanding liabilities from the financial
+`OutstandingRedemptions()` count. Paused `ConfigureManager` requires zero blocking
+obligations. Rotation retains original redemptions, payout children and hold
+snapshots. A held operation cannot dispatch or receive wrapped credit again.
+Its original callback can still record delivery or returned backing after rotation;
+delivery decrements both outstanding counters once, without deleting the saved
+hold. A full return after holding records backing but does not mint.
+
+Resume the wrapper after confirming holds and before source custody transfer;
+paused token transfers would otherwise block upgrade. Keep the source manager
+paused for bounded receipt resolution. The existing role handoff pauses the
+wrapper again when rotating its manager and burner.
 
 The minimum is zero at construction so fractional burns never reap pooled
 manager escrow into awesome-sails `unused` balances (for example, a 1.5 VARA

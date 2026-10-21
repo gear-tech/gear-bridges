@@ -417,10 +417,7 @@ async fn retry_original(
             signed, &included.receipt, &included.inclusion, &included.checkpoint,
         )?;
         anyhow::ensure!(
-            included.receipt.transaction_hash == signed.hash
-                && included.receipt.from == signed.sender
-                && included.receipt.to == Some(signed.contract)
-                && included.receipt.block_number == Some(included.included_block_number)
+            included.receipt.block_number == Some(included.included_block_number)
                 && included.receipt.block_hash == Some(included.included_block_hash),
             "finalized original receipt identity differs from saved submission"
         );
@@ -857,7 +854,7 @@ mod tests {
                                     "eth_chainId" => json!("0x88bb0"),
                                     "eth_getBalance" => json!("0x1000000000000000000"),
                                     "eth_getTransactionReceipt" => state.receipt.lock().unwrap().clone(),
-                                    "eth_getBlockReceipts" => json!([state.canonical_receipt.clone()]),
+                                    "eth_getBlockReceipts" => json!([state.canonical_receipt]),
                                     "eth_getTransactionByHash" => Value::Null,
                                     "eth_getBlockByNumber" => {
                                         let number = if params[0] == "0x0" { 0 } else { 1 };

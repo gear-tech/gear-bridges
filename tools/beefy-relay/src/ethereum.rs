@@ -575,8 +575,53 @@ pub struct DestinationCheckpoint {
     pub next_root: Hash32,
 }
 
+// Owned loopback routes exercise two transports, not production provider independence.
+#[cfg(test)]
+struct AnvilWitness {
+    url: String,
+    server: tokio::task::JoinHandle<()>,
+}
+
+#[cfg(test)]
+impl AnvilWitness {
+    async fn new(port: u16) -> Result<Self> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        let server = tokio::spawn(async move {
+            let mut clients = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((mut downstream, _)) = accepted else { break };
+                        clients.spawn(async move {
+                            if let Ok(mut upstream) = tokio::net::TcpStream::connect(
+                                (std::net::Ipv4Addr::LOCALHOST, port),
+                            ).await {
+                                let _ = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await;
+                            }
+                        });
+                    }
+                    joined = clients.join_next(), if !clients.is_empty() => {
+                        if let Some(Err(error)) = joined { panic!("Anvil forwarding failed: {error}"); }
+                    }
+                }
+            }
+        });
+        Ok(Self { url, server })
+    }
+}
+
+#[cfg(test)]
+impl Drop for AnvilWitness {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
 pub struct Ethereum {
     _anvil: Option<AnvilInstance>,
+    #[cfg(test)]
+    _witness: Option<AnvilWitness>,
     pub(crate) owned_fixture_network: Option<OwnedFixtureNetwork>,
     pub(crate) public_network: PublicEthereumNetwork,
     pub api: EthApi,
@@ -736,7 +781,8 @@ impl Ethereum {
         .await
         .context("connect Ethereum client to Anvil")?;
         let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
-        let api = api.with_finality_witness(&anvil.endpoint(), 31_337, genesis).await?;
+        let witness = AnvilWitness::new(anvil.port()).await?;
+        let api = api.with_finality_witness(&witness.url, 31_337, genesis).await?;
         let transactions = deployment_transactions(&deployment)?;
         for address in [
             client_address,
@@ -757,6 +803,7 @@ impl Ethereum {
 
         let ethereum = Self {
             _anvil: Some(anvil),
+            _witness: Some(witness),
             owned_fixture_network: None,
             public_network: PublicEthereumNetwork::Hoodi,
             api,
@@ -912,6 +959,8 @@ impl Ethereum {
         .await?;
         Ok(Self {
             _anvil: None,
+            #[cfg(test)]
+            _witness: None,
             owned_fixture_network: fixture.cloned(),
             public_network,
             api,
@@ -2239,7 +2288,8 @@ mod tests {
         )
         .await?;
         let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
-        let api = api.with_finality_witness(&anvil.endpoint(), 31_337, genesis).await?;
+        let witness = AnvilWitness::new(anvil.port()).await?;
+        let api = api.with_finality_witness(&witness.url, 31_337, genesis).await?;
         let provider = api.raw_provider().clone();
         let arguments = (
             B256::from([1; 32]),
@@ -2278,6 +2328,7 @@ mod tests {
             .await?;
         let ethereum = Ethereum {
             _anvil: Some(anvil),
+            _witness: Some(witness),
             owned_fixture_network: None,
             api,
             public_network: PublicEthereumNetwork::Hoodi,
@@ -2381,7 +2432,8 @@ mod tests {
             &anvil.ws_endpoint(), &address_string(Address::ZERO), Some(&key), None, None,
         ).await?;
         let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
-        let api = api.with_finality_witness(&anvil.endpoint(), 31_337, genesis).await?;
+        let witness = AnvilWitness::new(anvil.port()).await?;
+        let api = api.with_finality_witness(&witness.url, 31_337, genesis).await?;
         let receipt = api.raw_provider().send_transaction(
             TransactionRequest::default().with_to(Address::repeat_byte(42)).with_gas_limit(21_000),
         ).await?.get_receipt().await?;

@@ -239,3 +239,54 @@ test('shared environment requires two distinct HTTP endpoints and approved exact
     keys.forEach((key, i) => { if (before[i] === undefined) delete process.env[key]; else process.env[key] = before[i]; });
   }
 });
+
+test('endpoint policy rejects plaintext remote transport on either evidence source', () => {
+  const valid = { ETH_RPC_URL: 'https://primary.example', ETH_WITNESS_RPC: 'https://witness.example',
+    ETH_CHAIN_ID: '1', ETH_GENESIS_HASH: hash(1) };
+  const before = Object.fromEntries(Object.keys(valid).map((key) => [key, process.env[key]]));
+  try {
+    for (const key of ['ETH_RPC_URL', 'ETH_WITNESS_RPC']) {
+      for (const endpoint of ['http://rpc.example', 'http://192.168.1.2:8545',
+        'http://[2001:db8::1]:8545', 'http://localhost.example:8545', 'http://127.0.0.1.example:8545']) {
+        Object.assign(process.env, valid, { [key]: endpoint });
+        assert.throws(() => getEthereumEvidenceConfig(), /HTTPS|secure|loopback/i, `${key}=${endpoint}`);
+      }
+    }
+    for (const endpoint of ['https://rpc.example:443/rpc', 'http://localhost.:8545',
+      'http://127.0.0.2:8545', 'http://[::1]:8545']) {
+      Object.assign(process.env, valid, { ETH_RPC_URL: endpoint });
+      assert.equal(getEthereumEvidenceConfig().chainId, 1n);
+    }
+  } finally {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});
+
+test('endpoint policy rejects canonical duplicate sources without treating aliases as independence', () => {
+  const valid = { ETH_CHAIN_ID: '1', ETH_GENESIS_HASH: hash(1),
+    ETH_RPC_URL: 'https://primary.example', ETH_WITNESS_RPC: 'https://witness.example' };
+  const before = Object.fromEntries(Object.keys(valid).map((key) => [key, process.env[key]]));
+  try {
+    for (const [primary, witness] of [
+      ['https://RPC.EXAMPLE:443/rpc', 'https://rpc.example./rpc///'],
+      ['https://alice:one@rpc.example/rpc', 'https://bob:two@rpc.example/rpc/'],
+      ['http://localhost:8545/rpc', 'http://127.0.0.1:8545/rpc/'],
+      ['http://127.0.0.2:8545', 'http://[::1]:8545/'],
+      ['http://LOCALHOST.:80/', 'http://127.0.0.1'],
+    ]) {
+      Object.assign(process.env, valid, { ETH_RPC_URL: primary, ETH_WITNESS_RPC: witness });
+      assert.throws(() => getEthereumEvidenceConfig(), /independent|distinct|duplicate/i, `${primary} vs ${witness}`);
+    }
+    Object.assign(process.env, valid, { ETH_RPC_URL: 'http://localhost:8545',
+      ETH_WITNESS_RPC: 'http://127.0.0.1:8546' });
+    assert.equal(getEthereumEvidenceConfig().chainId, 1n, 'distinct fixture ports remain usable');
+    Object.assign(process.env, valid, { ETH_WITNESS_RPC: 'https://witness.example/#fragment' });
+    assert.throws(() => getEthereumEvidenceConfig(), /fragment/i);
+  } finally {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});

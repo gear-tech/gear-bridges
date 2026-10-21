@@ -59,9 +59,8 @@ mod tests {
         assert_eq!(cli.finality.ethereum_witness_rpc, "wss://witness.example");
         assert_eq!(cli.identity.ethereum_chain_id, 560048);
         for missing in [1, 3, 5] {
-            let args: Vec<_> = complete.iter().enumerate()
-                .filter_map(|(index, value)| (!(missing..=missing + 1).contains(&index)).then_some(*value))
-                .collect();
+            let args = complete.iter().enumerate()
+                .filter_map(|(index, value)| (!(missing..=missing + 1).contains(&index)).then_some(*value));
             assert!(TestFinalityCli::try_parse_from(args).is_err());
         }
     }

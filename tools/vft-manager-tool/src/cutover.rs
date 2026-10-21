@@ -604,97 +604,161 @@ async fn authenticate_work_ethereum(
     view: &mut ethereum_client::FinalizedView,
     work: &mut Work,
 ) -> Result<()> {
-    ensure!(eth.finality_identity()? == (work.intent.old_identity.ethereum_chain_id,
-        work.intent.old_identity.ethereum_genesis_hash.0.into()),
-        "HOLD: cutover Ethereum approval changed");
+    ensure!(
+        eth.finality_identity()?
+            == (
+                work.intent.old_identity.ethereum_chain_id,
+                work.intent.old_identity.ethereum_genesis_hash.0.into()
+            ),
+        "HOLD: cutover Ethereum approval changed"
+    );
     if let Some(checkpoint) = &work.ethereum_authentication {
         view.verify_checkpoint(&**eth, checkpoint).await?;
     }
-    let mut targets = std::collections::BTreeMap::from([
-        (work.intent.boundary.execution_number, work.intent.boundary.execution_hash.0.into()),
-    ]);
+    let mut targets = std::collections::BTreeMap::from([(
+        work.intent.boundary.execution_number,
+        work.intent.boundary.execution_hash.0.into(),
+    )]);
     if let Some(registration) = &work.registration {
-        for (number, hash) in [(registration.included_number, registration.included_hash),
-            (registration.finalized_number, registration.finalized_hash)] {
-            ensure!(targets.insert(number, hash).is_none_or(|old| old == hash),
-                "HOLD: registration contradicts cutover boundary");
+        for (number, hash) in [
+            (registration.included_number, registration.included_hash),
+            (registration.finalized_number, registration.finalized_hash),
+        ] {
+            ensure!(
+                targets.insert(number, hash).is_none_or(|old| old == hash),
+                "HOLD: registration contradicts cutover boundary"
+            );
         }
     }
     for block in &work.blocks {
-        ensure!(targets.insert(block.number, block.hash.0.into())
-            .is_none_or(|old| old == B256::from(block.hash.0)),
-            "HOLD: saved coverage contradicts boundary");
+        ensure!(
+            targets
+                .insert(block.number, block.hash.0.into())
+                .is_none_or(|old| old == B256::from(block.hash.0)),
+            "HOLD: saved coverage contradicts boundary"
+        );
     }
     view.verify_blocks(&**eth, &targets).await?;
-    // Admissions are durably written before the scan cursor. Reconstruct the one
-    // in-progress block in memory; never turn it into an advanced coverage cursor.
-    let missing = work.admissions.iter().any(|admission|
-        !work.blocks.iter().any(|block| block.hash == admission.original_block_hash));
-    let recovered = if missing {
-        let mut boundary = work.intent.boundary.clone();
-        if work.schema_version == 3 {
-            let next = u64::try_from(work.blocks.len())?;
-            for admission in &work.admissions {
-                if work.blocks.iter().any(|block| block.hash == admission.original_block_hash) {
-                    continue;
-                }
-                let mut bytes = admission.proof.as_slice();
-                let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
-                ensure!(bytes.is_empty()
-                    && proof.proof_block.block.body.execution_payload.block_number == next,
-                    "HOLD: saved work has a partial non-prefix inventory");
-                boundary.execution_number = next;
-                boundary.execution_hash = admission.original_block_hash;
-            }
-        }
-        let recovered = seal::reconstruct_coverage(eth, view, &boundary,
-            work.intent.old_identity.ethereum_genesis_hash).await?;
-        ensure!(work.blocks.iter().zip(&recovered).all(|(saved, fresh)| saved.hash == fresh.hash),
-            "HOLD: saved coverage prefix changed");
-        recovered
-    } else {
-        Vec::new()
-    };
     let mut parent = H256::zero();
     for (index, block) in work.blocks.iter().enumerate() {
-        ensure!(block.number == u64::try_from(index)? && block.parent_hash == parent
-            && block.number <= work.intent.boundary.execution_number
-            && (index != 0 || block.hash == work.intent.old_identity.ethereum_genesis_hash),
-            "HOLD: saved coverage is partial, malformed or disconnected");
+        ensure!(
+            block.number == u64::try_from(index)?
+                && block.parent_hash == parent
+                && block.number <= work.intent.boundary.execution_number
+                && (index != 0 || block.hash == work.intent.old_identity.ethereum_genesis_hash),
+            "HOLD: saved coverage is partial, malformed or disconnected"
+        );
         validate_covered_block(block)?;
         parent = block.hash;
     }
+    // Older scanners could commit admissions before their block. Authenticate only
+    // those missing blocks, without advancing the cursor past unrecorded deposits.
+    // An empty legacy inventory claims no scanned prefix: its originals may span
+    // multiple blocks, and scan_coverage must still visit every height from genesis.
+    let mut missing = std::collections::BTreeMap::new();
     for admission in &work.admissions {
-        let block = work.blocks.iter().chain(&recovered)
+        if work.blocks.iter().any(|block| block.hash == admission.original_block_hash) {
+            continue;
+        }
+        let mut bytes = admission.proof.as_slice();
+        let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
+        let number = proof.proof_block.block.body.execution_payload.block_number;
+        ensure!(
+            bytes.is_empty()
+                && number <= work.intent.boundary.execution_number
+                && (work.blocks.is_empty() || number == u64::try_from(work.blocks.len())?),
+            "HOLD: saved work has a partial non-prefix inventory"
+        );
+        let hash = B256::from(admission.original_block_hash.0);
+        ensure!(
+            missing.insert(number, hash).is_none_or(|previous| previous == hash),
+            "HOLD: saved admissions contradict each other's block"
+        );
+    }
+    let mut recovered = Vec::with_capacity(missing.len());
+    if !missing.is_empty() {
+        view.verify_blocks(&**eth, &missing).await?;
+        let started = std::time::Instant::now();
+        for (number, hash) in missing {
+            ensure!(started.elapsed() < Duration::from_secs(300),
+                "HOLD: mutable coverage recovery deadline exhausted");
+            recovered.push(seal::fetch_covered_block(eth, number, hash).await?);
+        }
+    }
+    for admission in &work.admissions {
+        let block = work
+            .blocks
+            .iter()
+            .chain(&recovered)
             .find(|block| block.hash == admission.original_block_hash)
             .context("HOLD: saved admission has no covered block")?;
-        let receipt = block.receipts.iter().find(|receipt|
-            receipt.transaction_hash == admission.original_tx_hash)
+        let receipt = block
+            .receipts
+            .iter()
+            .find(|receipt| receipt.transaction_hash == admission.original_tx_hash)
             .context("HOLD: saved admission receipt missing")?;
         let mut bytes = admission.proof.as_slice();
         let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
-        ensure!(bytes.is_empty()
-            && proof.receipt_rlp == alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(receipt.as_ref()))
-            && proof.transaction_index == admission.receipt_key.1
-            && proof.proof_block.block.slot == admission.receipt_key.0
-            && proof.proof_block.block.body.execution_payload.block_hash.0.0 == block.hash.0
-            && proof.proof_block.block.body.execution_payload.receipts_root.0.0 == block.receipts_root.0
-            && block.transactions.get(usize::try_from(admission.receipt_key.1)?)
-                == Some(&admission.original_tx_hash),
-            "HOLD: saved admission original linkage changed");
-        let (_, envelope) = ethereum_common::utils::rlp_encode_index_and_receipt(
-            &admission.receipt_key.1, &ethereum_common::utils::map_receipt_envelope(receipt.as_ref()));
-        ethereum_client::inclusion::verify_indexed_value(block.header.receipts_root,
-            admission.receipt_key.1, &envelope, &proof.proof)?;
-        ensure!(seal::authenticated_fee_emitter(eth, view, work.intent.erc20_manager,
-            work.intent.old_identity.bridging_payment_address, receipt).await? == admission.fee_emitter
-            && admission.fee_event_observed == admission.fee_emitter.is_some(),
-            "HOLD: saved admission fee policy changed");
+        let expected = ethereum_common::utils::map_receipt_envelope(receipt.as_ref());
+        ensure!(
+            bytes.is_empty()
+                && proof.receipt_rlp == alloy_rlp::encode(&expected)
+                && proof.transaction_index == admission.receipt_key.1
+                && proof.proof_block.block.slot == admission.receipt_key.0
+                && proof
+                    .proof_block
+                    .block
+                    .body
+                    .execution_payload
+                    .block_hash
+                    .0
+                     .0
+                    == block.hash.0
+                && proof
+                    .proof_block
+                    .block
+                    .body
+                    .execution_payload
+                    .receipts_root
+                    .0
+                     .0
+                    == block.receipts_root.0
+                && block
+                    .transactions
+                    .get(usize::try_from(admission.receipt_key.1)?)
+                    == Some(&admission.original_tx_hash),
+            "HOLD: saved admission original linkage changed"
+        );
+        ethereum_client::inclusion::verify_indexed_value(
+            block.header.receipts_root,
+            admission.receipt_key.1,
+            &expected.encoded_2718(),
+            &proof.proof,
+        )?;
+        ensure!(
+            seal::authenticated_fee_emitter(
+                eth,
+                view,
+                work.intent.erc20_manager,
+                work.intent.old_identity.bridging_payment_address,
+                receipt
+            )
+            .await?
+                == admission.fee_emitter
+                && admission.fee_event_observed == admission.fee_emitter.is_some(),
+            "HOLD: saved admission fee policy changed"
+        );
     }
     if let Some(registration) = &work.registration {
         validate_registration(&work.intent, registration)?;
-        verify_registrations_at(eth, &work.intent, view,
-            registration.finalized_number, registration.finalized_hash).await?;
+        verify_registrations_at(
+            eth,
+            &work.intent,
+            view,
+            registration.finalized_number,
+            registration.finalized_hash,
+        )
+        .await?;
     }
     view.recheck(&**eth).await?;
     Ok(())
@@ -703,22 +767,6 @@ async fn authenticate_work_ethereum(
 async fn upgrade_work(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
     let mut work = read_work(path)?;
     let mut view = eth.verified_finalized_view().await?;
-    if matches!(work.schema_version, 1 | 2) && work.blocks.is_empty() && !work.admissions.is_empty() {
-        work.blocks = seal::reconstruct_coverage(eth, &mut view, &work.intent.boundary,
-            work.intent.old_identity.ethereum_genesis_hash).await?;
-        let mut deposits = BTreeSet::new();
-        for block in &work.blocks {
-            if belongs_to_source(&work.intent, block.header.timestamp)? {
-                for receipt in &block.receipts {
-                    if receipt.status() && is_deposit(receipt, work.intent.erc20_manager)? {
-                        deposits.insert(receipt.transaction_hash);
-                    }
-                }
-            }
-        }
-        ensure!(deposits == work.admissions.iter().map(|row| row.original_tx_hash).collect(),
-            "HOLD: reconstructed legacy work does not match retained admission inventory");
-    }
     authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     authenticate_source_emitter(eth, &work.intent.old_identity, work.intent.erc20_manager).await?;
     for pin in work
@@ -786,10 +834,6 @@ fn read_work(path: &Path) -> Result<Work> {
         "HOLD: interrupted cutover work evidence"
     );
     let work: Work = read_versioned_json(path)?;
-    ensure!(
-        matches!(work.schema_version, 1 | 2 | 3),
-        "HOLD: unsupported cutover work schema"
-    );
     validate_work_version(&work)?;
     validate_admission_uniqueness(&work.admissions)?;
     Ok(work)
@@ -3064,10 +3108,6 @@ async fn scan_coverage(
                 },
                 external_original,
             });
-            let index = work.admissions.len() - 1;
-            record_resolution(api, &readonly_sender, path, &mut work, index).await?;
-            // Admission is committed before the coverage cursor can move.
-            save(path, &work)?;
         }
         work.blocks.push(CoveredBlock {
             number: next,
@@ -3080,6 +3120,8 @@ async fn scan_coverage(
             raw_transactions,
         });
         view.recheck(&**eth).await?;
+        // All deposits and their covered block/cursor become durable together,
+        // before any resolution can persist or act on an individual admission.
         save(path, &work)?;
         next = next
             .checked_add(1)
@@ -3091,6 +3133,11 @@ async fn scan_coverage(
             && block.hash == work.intent.boundary.execution_hash),
         "HOLD: incomplete boundary coverage"
     );
+    // Also run when the boundary block was committed before a crash: there may
+    // be no new blocks, but every saved original still needs reconciliation.
+    for index in 0..work.admissions.len() {
+        record_resolution(api, &readonly_sender, path, &mut work, index).await?;
+    }
     let unpaid = work
         .admissions
         .iter()
@@ -5954,6 +6001,353 @@ mod tests {
             new_transactions: None,
             new_discovery: None,
         }
+    }
+
+    // Reproduce a committed admission whose block was not yet appended by scan_coverage.
+    // Only transport responses are mocked: headers, signed transactions and receipt proofs
+    // are checked by authenticate_work_ethereum exactly as they are on restart.
+    async fn interrupted_coverage_fixture() -> (Work, Vec<CoveredBlock>) {
+        let mut work = terminal_coverage_fixture().await;
+        let mut deposit = work.blocks.pop().unwrap();
+        use alloy::{
+            consensus::{SignableTransaction, TxLegacy},
+            network::TxSigner,
+            primitives::TxKind,
+            signers::local::PrivateKeySigner,
+        };
+        // The crash happened after the first of two deposits. Recovery must not
+        // mark this whole block scanned and silently skip its second receipt.
+        let signer = PrivateKeySigner::from_bytes(&B256::from([17; 32])).unwrap();
+        let mut transaction = TxLegacy {
+            chain_id: Some(1), nonce: 1, gas_price: 1, gas_limit: 21_000,
+            to: TxKind::Call(work.intent.erc20_manager.0.into()),
+            ..Default::default()
+        };
+        let signature = signer.sign_transaction(&mut transaction).await.unwrap();
+        let transaction = TxEnvelope::Legacy(transaction.into_signed(signature));
+        let raw = transaction.encoded_2718();
+        let hash = alloy_primitives::keccak256(&raw);
+        let mut receipt = serde_json::to_value(&deposit.receipts[0]).unwrap();
+        receipt["transactionHash"] = serde_json::json!(hash);
+        receipt["transactionIndex"] = serde_json::json!("0x1");
+        receipt["cumulativeGasUsed"] = serde_json::json!("0xa410");
+        for log in receipt["logs"].as_array_mut().unwrap() {
+            log["transactionHash"] = serde_json::json!(hash);
+            log["transactionIndex"] = serde_json::json!("0x1");
+            log["logIndex"] = serde_json::json!("0x1");
+        }
+        deposit.transactions.push(hash);
+        deposit.raw_transactions.push(raw);
+        deposit.receipts.push(serde_json::from_value(receipt).unwrap());
+        let transactions = deposit.raw_transactions.iter()
+            .map(|raw| TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap()).collect::<Vec<_>>();
+        let envelopes = deposit.receipts.iter()
+            .map(|receipt| ethereum_common::utils::map_receipt_envelope(receipt.as_ref()))
+            .collect::<Vec<_>>();
+        deposit.header.transactions_root = alloy::consensus::proofs::calculate_transaction_root(&transactions);
+        deposit.header.receipts_root = alloy::consensus::proofs::calculate_receipt_root(&envelopes);
+        deposit.header.gas_used = 42_000;
+        deposit.receipts_root = H256(deposit.header.receipts_root.0);
+        let mut chain = Vec::new();
+        let mut parent = B256::ZERO;
+        for number in 0..=8 {
+            let mut header = if number == 2 {
+                deposit.header.clone()
+            } else {
+                alloy::consensus::Header {
+                    transactions_root: alloy_primitives::keccak256([0x80]),
+                    receipts_root: alloy_primitives::keccak256([0x80]),
+                    ..Default::default()
+                }
+            };
+            header.number = number;
+            header.parent_hash = parent;
+            header.timestamp = number * 12;
+            if number == 0 {
+                header.extra_data = Uuid::now_v7().as_bytes().to_vec().into();
+            }
+            let hash = header.hash_slow();
+            let block = if number == 2 {
+                deposit.number = number;
+                deposit.hash = H256(hash.0);
+                deposit.parent_hash = H256(parent.0);
+                deposit.header = header;
+                for saved in &mut deposit.receipts {
+                    let mut receipt = serde_json::to_value(&*saved).unwrap();
+                    receipt["blockNumber"] = serde_json::json!("0x2");
+                    receipt["blockHash"] = serde_json::json!(hash);
+                    for log in receipt["logs"].as_array_mut().unwrap() {
+                        log["blockNumber"] = serde_json::json!("0x2");
+                        log["blockHash"] = serde_json::json!(hash);
+                    }
+                    *saved = serde_json::from_value(receipt).unwrap();
+                }
+                deposit.clone()
+            } else {
+                CoveredBlock {
+                    number, hash: H256(hash.0), parent_hash: H256(parent.0),
+                    receipts_root: H256(header.receipts_root.0), header,
+                    transactions: vec![], raw_transactions: vec![], receipts: vec![],
+                }
+            };
+            validate_covered_block(&block).unwrap();
+            chain.push(block);
+            parent = hash;
+        }
+        let admission = &mut work.admissions[0];
+        admission.original_block_hash = deposit.hash;
+        admission.exclusion = None;
+        let mut proof = eth_events_electra_client::EthToVaraEvent::decode(
+            &mut admission.proof.as_slice(),
+        ).unwrap();
+        let payload = &mut proof.proof_block.block.body.execution_payload;
+        payload.block_number = 2;
+        payload.block_hash.0.0 = deposit.hash.0;
+        payload.receipts_root.0.0 = deposit.receipts_root.0;
+        payload.timestamp = 24;
+        proof.proof = ethereum_common::utils::generate_merkle_proof(
+            0, &envelopes.into_iter().enumerate().map(|(index, receipt)| (index as u64, receipt)).collect::<Vec<_>>(),
+        ).unwrap().proof;
+        admission.proof = proof.encode();
+        work.intent.old_identity.ethereum_genesis_hash = chain[0].hash;
+        work.intent.boundary.execution_number = 8;
+        work.intent.boundary.execution_hash = chain[8].hash;
+        work.intent.boundary.slot = 38;
+        work.intent.boundary_execution_timestamp = 96;
+        work.blocks = chain[..2].to_vec();
+        (work, chain)
+    }
+
+    struct WorkEvidenceRpc {
+        url: String,
+        // Pruning bodies must not remove the canonical headers used by finality.
+        bodies: Arc<std::sync::Mutex<BTreeSet<u64>>>,
+        requests: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+        server: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for WorkEvidenceRpc {
+        fn drop(&mut self) {
+            self.server.abort();
+        }
+    }
+
+    impl WorkEvidenceRpc {
+        async fn new(chain: Vec<CoveredBlock>) -> Self {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            use serde_json::{json, Value};
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let bodies = Arc::new(std::sync::Mutex::new(chain.iter().map(|b| b.number).collect::<BTreeSet<_>>()));
+            let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let available = bodies.clone();
+            let observed = requests.clone();
+            let chain = Arc::new(chain);
+            let server = tokio::spawn(async move {
+                loop {
+                    let Ok((mut socket, _)) = listener.accept().await else { break };
+                    let chain = chain.clone();
+                    let available = available.clone();
+                    let observed = observed.clone();
+                    tokio::spawn(async move {
+                        let mut buffer = Vec::new();
+                        let request = loop {
+                            let mut chunk = [0; 4096];
+                            let count = socket.read(&mut chunk).await.unwrap();
+                            if count == 0 { return; }
+                            buffer.extend_from_slice(&chunk[..count]);
+                            let Some(end) = buffer.windows(4).position(|b| b == b"\r\n\r\n") else { continue };
+                            let headers = std::str::from_utf8(&buffer[..end]).unwrap();
+                            let length: usize = headers.lines().find_map(|line| line.split_once(':')
+                                .filter(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+                                .map(|(_, value)| value.trim().parse().unwrap())).unwrap();
+                            if buffer.len() >= end + 4 + length {
+                                break serde_json::from_slice::<Value>(&buffer[end + 4..end + 4 + length]).unwrap();
+                            }
+                        };
+                        observed.lock().unwrap().push(request.clone());
+                        let params = &request["params"];
+                        let result = match request["method"].as_str().unwrap() {
+                            "eth_chainId" => json!("0x1"),
+                            "eth_getBlockByNumber" | "eth_getBlockByHash" => {
+                                let block = if request["method"] == "eth_getBlockByNumber" {
+                                    let number = if params[0] == "finalized" { 8 }
+                                    else { u64::from_str_radix(params[0].as_str().unwrap().trim_start_matches("0x"), 16).unwrap() };
+                                    chain.iter().find(|b| b.number == number)
+                                } else {
+                                    chain.iter().find(|b| json!(b.hash) == params[0])
+                                };
+                                block.map_or(Value::Null, |block| {
+                                    if params[1] == true && !available.lock().unwrap().contains(&block.number) {
+                                        return Value::Null;
+                                    }
+                                    let mut header: alloy::rpc::types::Header = Default::default();
+                                    header.inner = block.header.clone();
+                                    header.hash = block.hash.0.into();
+                                    let mut value = serde_json::to_value(header).unwrap();
+                                    value["transactions"] = if params[1] == true {
+                                        json!(block.raw_transactions.iter().enumerate().map(|(index, raw)| {
+                                            let tx = TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
+                                            let mut tx = serde_json::to_value(tx).unwrap();
+                                            tx["blockHash"] = json!(block.hash);
+                                            tx["blockNumber"] = json!(format!("0x{:x}", block.number));
+                                            tx["transactionIndex"] = json!(format!("0x{index:x}"));
+                                            tx["from"] = json!(block.receipts[index].from);
+                                            tx
+                                        }).collect::<Vec<_>>())
+                                    } else { json!(block.transactions) };
+                                    value["uncles"] = json!([]);
+                                    value
+                                })
+                            }
+                            "eth_getBlockReceipts" => {
+                                let hash = params[0].get("blockHash").unwrap_or(&params[0]);
+                                chain.iter().find(|b| json!(b.hash) == *hash)
+                                    .filter(|b| available.lock().unwrap().contains(&b.number))
+                                    .map_or(Value::Null, |b| json!(b.receipts))
+                            }
+                            method => panic!("unexpected work recovery RPC {method}"),
+                        };
+                        let response = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
+                        let _ = socket.write_all(format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                            response.len(),
+                        ).as_bytes()).await;
+                    });
+                }
+            });
+            Self { url, bodies, requests, server }
+        }
+    }
+
+    async fn assert_interrupted_coverage_recovers_without_unneeded_bodies(version: u32, empty_inventory: bool) {
+        let (mut work, chain) = interrupted_coverage_fixture().await;
+        if empty_inventory {
+            work.blocks.clear();
+        }
+        let primary = WorkEvidenceRpc::new(chain.clone()).await;
+        let witness = WorkEvidenceRpc::new(chain.clone()).await;
+        let eth = PollingEthApi::new(&primary.url).await.unwrap()
+            .with_finality_witness(&witness.url, 1, chain[0].hash.0.into()).await.unwrap();
+        let mut view = eth.verified_finalized_view().await.unwrap();
+        work.schema_version = version;
+        if version == 3 {
+            work.ethereum_authentication = Some(view.checkpoint().clone());
+        }
+        let directory = std::env::temp_dir().join(format!("cutover-mid-block-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let path = work_path(&directory);
+        // This is exactly the durable state between the admission save and block save.
+        save(&path, &work).unwrap();
+        let original = fs::read(&path).unwrap();
+        let mut restarted = read_work(&path).unwrap();
+        authenticate_work_ethereum(&eth, &mut view, &mut restarted).await.unwrap();
+        assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
+        let mut falsely_advanced = restarted.clone();
+        falsely_advanced.blocks = chain.clone();
+        assert!(completed_coverage(&falsely_advanced).unwrap_err().to_string().contains("omitted a deposit"),
+            "recovery must not certify the other deposit in a partially scanned block");
+
+        let mut changed_original = restarted.clone();
+        changed_original.admissions[0].original_tx_hash = B256::repeat_byte(99);
+        assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed_original).await.is_err(),
+            "recovery must still bind the saved original to the authenticated receipt");
+
+        // A missing original body still HOLDs; retained signatures/admissions are not replaced.
+        primary.bodies.lock().unwrap().clear();
+        assert!(authenticate_work_ethereum(&eth, &mut view, &mut restarted).await.is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
+        primary.bodies.lock().unwrap().insert(2);
+        primary.requests.lock().unwrap().clear();
+        let result = authenticate_work_ethereum(&eth, &mut view, &mut restarted).await;
+        let requests = primary.requests.lock().unwrap().clone();
+        let body_hashes = requests.iter().filter_map(|request| {
+            (request["method"] == "eth_getBlockByHash" && request["params"][1] == true)
+                .then(|| request["params"][0].clone())
+        }).collect::<Vec<_>>();
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
+        fs::remove_dir_all(directory).unwrap();
+        assert!(result.is_ok(),
+            "a saved prefix plus its one in-progress admitted block must recover without old/future bodies: {result:?}; requests={body_hashes:?}");
+        assert_eq!(body_hashes, vec![serde_json::json!(chain[2].hash)]);
+        assert_eq!(restarted.blocks.len(), if empty_inventory { 0 } else { 2 },
+            "authentication must not advance the scan past unrecorded sibling deposits");
+    }
+
+    #[tokio::test]
+    async fn interrupted_v3_coverage_recovers_without_refetching_saved_prefix() {
+        assert_interrupted_coverage_recovers_without_unneeded_bodies(3, false).await;
+    }
+
+    #[tokio::test]
+    async fn interrupted_v2_coverage_recovers_without_fetching_future_boundary() {
+        assert_interrupted_coverage_recovers_without_unneeded_bodies(2, false).await;
+    }
+
+    #[tokio::test]
+    async fn interrupted_legacy_empty_coverage_recovers_without_certifying_inventory() {
+        assert_interrupted_coverage_recovers_without_unneeded_bodies(2, true).await;
+        // upgrade_work retains the empty scan cursor when adding its v3 checkpoint.
+        assert_interrupted_coverage_recovers_without_unneeded_bodies(3, true).await;
+    }
+
+    #[tokio::test]
+    async fn committed_coverage_block_retains_all_pending_originals_on_restart() {
+        let (mut work, chain) = interrupted_coverage_fixture().await;
+        let block = &chain[2];
+        let envelopes = block.receipts.iter().enumerate().map(|(index, receipt)| {
+            (index as u64, ethereum_common::utils::map_receipt_envelope(receipt.as_ref()))
+        }).collect::<Vec<_>>();
+        let mut second = work.admissions[0].clone();
+        second.receipt_key.1 = 1;
+        second.original_tx_hash = block.transactions[1];
+        second.signed = None;
+        let mut proof = eth_events_electra_client::EthToVaraEvent::decode(
+            &mut second.proof.as_slice(),
+        ).unwrap();
+        proof.transaction_index = 1;
+        proof.receipt_rlp = alloy_rlp::encode(&envelopes[1].1);
+        proof.proof = ethereum_common::utils::generate_merkle_proof(1, &envelopes).unwrap().proof;
+        second.proof = proof.encode();
+        work.admissions.push(second);
+        work.blocks = chain[..3].to_vec();
+        work.intent.boundary.execution_number = 2;
+        work.intent.boundary.execution_hash = block.hash;
+        work.intent.boundary.slot = 32;
+        work.intent.boundary_execution_timestamp = 24;
+        let primary = WorkEvidenceRpc::new(chain.clone()).await;
+        let witness = WorkEvidenceRpc::new(chain.clone()).await;
+        let eth = PollingEthApi::new(&primary.url).await.unwrap()
+            .with_finality_witness(&witness.url, 1, chain[0].hash.0.into()).await.unwrap();
+        let mut view = eth.verified_finalized_view().await.unwrap();
+        work.schema_version = 3;
+        work.ethereum_authentication = Some(view.checkpoint().clone());
+        let directory = std::env::temp_dir().join(format!("cutover-block-commit-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let path = work_path(&directory);
+        // One durable save contains the cursor and BOTH pending deposits, including
+        // the retained signed original. Restart needs no old transaction bodies.
+        save(&path, &work).unwrap();
+        let original = fs::read(&path).unwrap();
+        let mut restarted = read_work(&path).unwrap();
+        primary.bodies.lock().unwrap().clear();
+        witness.bodies.lock().unwrap().clear();
+        authenticate_work_ethereum(&eth, &mut view, &mut restarted).await.unwrap();
+        assert_eq!(restarted.blocks.last().unwrap().number, restarted.intent.boundary.execution_number);
+        assert_eq!(restarted.admissions.len(), 2);
+        assert!(restarted.admissions.iter().all(|row| row.settlement.is_none() && row.exclusion.is_none()));
+        assert!(restarted.admissions[0].signed.is_some());
+        assert!(restarted.admissions[1].signed.is_none());
+        assert!(completed_coverage(&restarted).unwrap_err().to_string().contains("undrained"),
+            "a committed scan cursor is not an economic settlement");
+        assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
+        assert_eq!(fs::read(&path).unwrap(), original);
+        fs::write(PathBuf::from(format!("{}.new", path.display())), b"interrupted").unwrap();
+        assert!(read_work(&path).is_err(), "an incomplete atomic write must still HOLD");
+        assert_eq!(fs::read(&path).unwrap(), original);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]

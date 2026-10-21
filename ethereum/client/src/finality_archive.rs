@@ -147,17 +147,12 @@ impl HeaderArchive {
         Ok(required)
     }
 
-    pub(crate) fn complete(
-        &self,
-        genesis: B256,
-        head: &Header,
-        checkpoint: &crate::FinalityCheckpoint,
-    ) -> Result<()> {
+    pub(crate) fn complete(&self, checkpoint: &crate::FinalityCheckpoint) -> Result<()> {
         atomic_json(
             &self.directory.join("fence.json"),
             &Fence {
-                genesis,
-                tips: vec![head.clone()],
+                genesis: checkpoint.genesis_hash,
+                tips: vec![checkpoint.common_header.clone()],
                 quorum_checkpoint: Some(checkpoint.clone()),
             },
         )

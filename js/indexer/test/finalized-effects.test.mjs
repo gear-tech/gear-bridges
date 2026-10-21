@@ -61,7 +61,7 @@ function memoryStore() {
         if (expected?.type === 'in') return expected.value.includes(row[key]);
         if (expected?.type === 'moreThan') return row[key] > expected.value;
         if (expected?.type === 'isNull') return row[key] == null;
-        if (expected?.type === 'not') return !compare(expected.value);
+        if (expected?.type === 'not') return !compare(expected.child ?? expected.value);
         return row[key] === expected;
       };
       return compare(value);
@@ -216,6 +216,79 @@ test('deferred completion rereads both receipts, not merely their matching heade
   assert.equal(stored(ctx.store, transfer).completedAt, undefined);
   assert.deepEqual(structuredClone(stored(ctx.store, retained)), original);
   assert.equal(ctx.saved.length, 0);
+});
+
+for (const legacyMatched of [true, false]) {
+  test(`legacy backlog with legacyMatched=${legacyMatched} cannot wedge fresh live completion`, async () => {
+    const { receipt, transfer } = outbound();
+    const ctx = context(receipt, transfer);
+    const oldReceipt = structuredClone(receipt);
+    oldReceipt.transactionHash = hash('ce');
+    for (const log of oldReceipt.logs) log.transactionHash = oldReceipt.transactionHash;
+    const legacy = new CompletedTransfer({ id: `outbound:${addr('22')}:7`, srcNetwork: Network.Vara,
+      destNetwork: Network.Ethereum, txHash: oldReceipt.transactionHash, blockNumber: 11n,
+      timestamp: new Date(block.timestamp), matched: false, legacyMatched, receiptAuth: null,
+      outboundReceipt: { receipt: oldReceipt, logIndex: 1, nonce: '7', queue: addr('22'), manager: addr('11') } });
+    const oldTransfer = new Transfer({ ...transfer, id: 'legacy-original', nonce: '7',
+      completedAt: null, completedAtBlock: null, completedAtTxHash: null, completionAuth: null,
+      legacyResolution: { status: 'Completed', completedAt: String(block.timestamp),
+        completedAtBlock: '11', completedAtTxHash: oldReceipt.transactionHash } });
+    await ctx.store.save([legacy, oldTransfer]);
+    const savedLegacy = structuredClone(legacy), savedTransfer = structuredClone(oldTransfer);
+    const requests = [];
+    const dispatch = evidenceRpc([receipt]);
+    primaryRpc = witnessRpc = async (method, params) => {
+      if (method === 'eth_getTransactionReceipt') requests.push(params[0]);
+      return dispatch(method, params);
+    };
+    ctx.store.saves.length = 0;
+    await handleBatch(ctx);
+    assert.equal(stored(ctx.store, transfer).status, Status.Completed, 'fresh qualified work must commit');
+    assert.deepEqual(structuredClone(stored(ctx.store, legacy)), savedLegacy, 'retain original legacy JSON and flags');
+    assert.deepEqual(structuredClone(stored(ctx.store, oldTransfer)), savedTransfer, 'legacy claim remains nonterminal');
+    assert.ok(!requests.includes(oldReceipt.transactionHash), 'standalone repair owns unauthenticated legacy history');
+  });
+}
+
+test('legacy backlog cannot consume the live pending page ahead of qualified counterpart-lag work', async () => {
+  const { receipt, transfer } = outbound();
+  const ctx = context(receipt);
+  await handleBatch(ctx);
+  const qualified = [...ctx.store.rows.get(CompletedTransfer).values()][0];
+  await ctx.store.save(transfer);
+  await ctx.store.save(Array.from({ length: 1000 }, (_, index) => new CompletedTransfer({
+    ...qualified, id: `legacy-${String(index).padStart(4, '0')}`, receiptAuth: null,
+    legacyMatched: index % 2 === 0, txHash: hash('ce'),
+    outboundReceipt: { ...qualified.outboundReceipt, nonce: String(1000 + index),
+      receipt: { ...receipt, transactionHash: hash('ce') } },
+  })));
+  ctx.blocks = [];
+  const { handleBatch: restarted } = await import('../lib/eth/handler.js?legacy-backlog-page');
+  await restarted(ctx);
+  assert.equal(stored(ctx.store, transfer).status, Status.Completed);
+  assert.equal(stored(ctx.store, qualified).matched, true);
+  assert.equal([...ctx.store.rows.get(CompletedTransfer).values()].filter((row) => row.legacyMatched != null)
+    .every((row) => !row.matched && row.receiptAuth == null), true);
+});
+
+test('legacy backlog exemption never skips qualified, unmarked or current-batch evidence', async () => {
+  for (const mode of ['qualified', 'unmarked', 'current']) {
+    const { receipt, transfer } = outbound();
+    const ctx = context(receipt);
+    await handleBatch(ctx);
+    const retained = [...ctx.store.rows.get(CompletedTransfer).values()][0];
+    retained.legacyMatched = mode === 'unmarked' ? null : false;
+    if (mode !== 'qualified') retained.receiptAuth = null;
+    await ctx.store.save(transfer);
+    if (mode !== 'current') ctx.blocks = [];
+    const original = structuredClone(retained);
+    primaryRpc = witnessRpc = evidenceRpc([]);
+    ctx.store.saves.length = 0;
+    await assert.rejects(handleBatch(ctx), /HOLD:.*receipt/i, mode);
+    assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
+    assert.deepEqual(structuredClone(stored(ctx.store, retained)), original);
+    assert.equal(ctx.saved.length, 0);
+  }
 });
 
 test('every consumed manager, queue and payment event must occur in the qualified receipt', async () => {

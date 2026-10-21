@@ -90,7 +90,7 @@ export async function reconcilePage(
       status: Not(Status.Failed), ...(options.after ? { id: MoreThan(options.after) } : {}) },
     order: { id: 'ASC' }, take: options.limit + 1,
   });
-  const page = selected.slice(0, options.limit).map((row) => new Transfer({ ...row }));
+  const page = selected.slice(0, options.limit);
   const report: ReconcileReport = { direction: options.direction, limit: options.limit, apply: options.apply,
     lastExaminedId: page.at(-1)?.id ?? null, hasMore: selected.length > options.limit, qualified: 0, pending: 0, heldIds: [] };
   const changedTransfers = new Map<string, Transfer>(), changedCompletions = new Map<string, CompletedTransfer>();

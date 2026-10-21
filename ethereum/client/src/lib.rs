@@ -48,6 +48,7 @@ async fn connect_rpc(
     ws_max_retry: Option<u32>,
     ws_retry_interval: Option<Duration>,
 ) -> Result<alloy::rpc::client::RpcClient, Error> {
+    finality_endpoint_identity(url).map_err(|_| Error::WrongNodeUrl)?;
     let builder = alloy::rpc::client::RpcClient::builder()
         .layer(tower::util::MapFutureLayer::new(
             |future| -> alloy::transports::TransportFut<'static> { Box::pin(future) },
@@ -413,6 +414,27 @@ struct FinalityWitness {
     genesis: B256,
 }
 
+// URL spelling cannot establish operator independence; reject obvious aliases.
+fn finality_endpoint_identity(url: &Url) -> AnyResult<(&str, &str, u16, &str, Option<&str>)> {
+    let host = url.host_str().context("HOLD: Ethereum endpoint has no host")?
+        .trim_end_matches('.');
+    let address = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')).unwrap_or(host);
+    let loopback = host == "localhost"
+        || address.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
+    let scheme = match url.scheme() {
+        "https" | "wss" => "https",
+        "http" | "ws" if loopback => "http",
+        _ => bail!("HOLD: Ethereum endpoints require HTTPS/WSS except literal loopback or localhost"),
+    };
+    Ok((
+        scheme,
+        if loopback { "localhost" } else { host },
+        url.port_or_known_default().context("HOLD: Ethereum endpoint has no port")?,
+        url.path().trim_end_matches('/'),
+        url.query(),
+    ))
+}
+
 impl FinalityWitness {
     async fn connect(
         primary: &Url,
@@ -422,11 +444,11 @@ impl FinalityWitness {
         retries: Option<u32>,
         interval: Option<Duration>,
     ) -> AnyResult<Self> {
-        let mut witness = Url::parse(witness)?;
-        let mut primary = primary.clone();
-        witness.set_fragment(None);
-        primary.set_fragment(None);
-        ensure!(primary != witness, "HOLD: primary and witness endpoints must be independent");
+        let witness = Url::parse(witness)?;
+        ensure!(
+            finality_endpoint_identity(primary)? != finality_endpoint_identity(&witness)?,
+            "HOLD: primary and witness endpoints must be independent",
+        );
         Ok(Self {
             provider: RootProvider::builder()
                 .connect_client(connect_rpc(&witness, retries, interval).await?),
@@ -517,8 +539,7 @@ impl PollingEthApi {
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
         Ok(
             finalized_ancestor(&self.provider, require_witness(&self.finality)?, number, B256::from(hash.0))
-                .await?
-                .is_some(),
+                .await?,
         )
     }
 
@@ -677,6 +698,8 @@ static FINALITY_LOCKS: OnceLock<std::sync::Mutex<HashMap<B256, Weak<Mutex<()>>>>
 const MAX_CHAINS: usize = 8;
 const MAX_KNOWN_ANCESTORS: usize = 32_768;
 const MAX_PROOF_DURATION: Duration = Duration::from_secs(300);
+// Eight mainnet epochs of advertised lag; not a historical ancestry/proof limit.
+const MAX_FINALIZED_TIP_DISTANCE: u64 = 256;
 
 impl VerifiedAncestry {
     fn remember(&mut self, proof: impl IntoIterator<Item = (u64, B256)>) {
@@ -792,6 +815,9 @@ async fn finality_pin(
             return Err(Error::FinalizedAncestryConflict);
         }
         tips.push(tip);
+    }
+    if tips[0].number.abs_diff(tips[1].number) > MAX_FINALIZED_TIP_DISTANCE {
+        return Err(Error::FinalizedAncestryPending);
     }
     let height = tips[0].number.min(tips[1].number);
     let common = qualified_header(provider, BlockNumberOrTag::Number(height)).await?;
@@ -1096,7 +1122,7 @@ async fn verified_finalized_view(
         return Err(Error::FinalizedAncestryPending);
     }
     for archive in archives_for(genesis) {
-        archive.complete(genesis, &view.header.inner, &view.checkpoint)
+        archive.complete(&view.checkpoint)
             .map_err(|_| Error::FinalizedAncestryPending)?;
     }
     Ok(view)
@@ -1107,14 +1133,14 @@ async fn finalized_ancestor(
     witness: &FinalityWitness,
     number: u64,
     hash: B256,
-) -> Result<Option<(u64, B256)>, Error> {
+) -> Result<bool, Error> {
     let mut view = verified_finalized_view(provider, witness).await?;
     if number > view.block_number() {
         return Err(Error::FinalizedAncestryPending);
     }
     match view.verify_blocks(provider, &BTreeMap::from([(number, hash)])).await {
-        Ok(()) => Ok(Some((view.block_number(), view.block_hash()))),
-        Err(Error::FinalizedAncestryConflict) => Ok(None),
+        Ok(()) => Ok(true),
+        Err(Error::FinalizedAncestryConflict) => Ok(false),
         Err(error) => Err(error),
     }
 }
@@ -1360,7 +1386,13 @@ async fn finalized_transaction_receipt(
     view.verify_blocks(&provider, &BTreeMap::from([(included_block_number, included_block_hash)])).await?;
     let (inclusion, first_log_index) = inclusion::prove_transaction_receipt_with_log_index(
         &provider, &view, included_block_number, included_block_hash, tx_hash,
-    ).await.map_err(invalid)?;
+    ).await.map_err(|error| match error.downcast::<Error>() {
+        Ok(error) => error,
+        Err(error) => match error.downcast::<TransportError>() {
+            Ok(error) => Error::from(error),
+            Err(error) => invalid(error),
+        },
+    })?;
     validate_receipt_locator(&receipt, &inclusion, tx_hash).map_err(invalid)?;
     if receipt.inner.logs().first().is_some_and(|log| log.log_index != Some(first_log_index)) {
         return Err(Error::InvalidFinalityEvidence("receipt global log index differs from included predecessors".into()));
@@ -1372,7 +1404,7 @@ async fn finalized_transaction_receipt(
         included_block_hash,
         finalized_block_number: view.block_number(),
         finalized_block_hash: view.block_hash(),
-        checkpoint: view.checkpoint.clone(),
+        checkpoint: view.checkpoint,
         inclusion,
     }))
 }
@@ -1384,14 +1416,14 @@ fn validate_receipt_locator(
 ) -> AnyResult<()> {
     use alloy::{
         consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope},
-        eips::{Decodable2718, Encodable2718},
+        eips::Decodable2718,
     };
     ensure!(
         receipt.transaction_hash == hash
             && receipt.transaction_index == Some(proof.index)
             && receipt.block_number == Some(proof.header.number)
             && receipt.block_hash == Some(proof.header.hash_slow())
-            && receipt.clone().into_primitives_receipt().inner.encoded_2718() == proof.receipt.encoded_2718(),
+            && receipt.inner.clone().into_primitives_receipt() == proof.receipt,
         "receipt locator differs from included envelope"
     );
     let mut bytes = proof.raw_transaction.as_slice();
@@ -1834,8 +1866,7 @@ impl EthApi {
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
         Ok(
             finalized_ancestor(self.raw_provider(), require_witness(&self.contracts.finality)?, number, B256::from(hash.0))
-                .await?
-                .is_some(),
+                .await?,
         )
     }
 
@@ -2589,7 +2620,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.directory);
         }
     }
-    fn header_chain(seed: u8, height: u64) -> Vec<Block> {
+    pub(super) fn header_chain(seed: u8, height: u64) -> Vec<Block> {
         let mut parent = B256::ZERO;
         (0..=height)
             .map(|number| {

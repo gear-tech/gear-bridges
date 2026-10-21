@@ -722,7 +722,6 @@ async fn validate_observed_progress(
     path: &Path,
     intent: &Value,
 ) -> Result<()> {
-    use alloy::rpc::types::BlockId;
     let observed = &intent["observedProgress"];
     ensure!(
         observed.is_object()
@@ -848,7 +847,7 @@ async fn observe_finalized_progress(
 ) -> Result<bool> {
     use alloy::{
         providers::Provider,
-        rpc::types::{BlockId, Filter},
+        rpc::types::Filter,
     };
     if !intent["observedProgress"].is_null() {
         validate_observed_progress(ethereum, output, intent).await?;
@@ -1022,7 +1021,6 @@ async fn revalidate_terminal_roots(
     path: &Path,
     intent: &Value,
 ) -> Result<()> {
-    use alloy::{providers::Provider, rpc::types::BlockId};
     let Some(terminals) = intent["terminalSubmissions"].as_array() else {
         return Ok(());
     };
@@ -1108,7 +1106,7 @@ async fn reconcile_root_original(
     output: &Path,
     intent: &mut Value,
 ) -> Result<bool> {
-    use alloy::{providers::Provider, rpc::types::BlockId};
+    use alloy::providers::Provider;
     if intent["txHash"].is_null() {
         return Ok(false);
     }
@@ -1133,7 +1131,7 @@ async fn reconcile_root_original(
             json!({
             "includedBlock":receipt.included_block_number,"includedBlockHash":format!("{:#x}",receipt.included_block_hash),
             "finalizedBlock":receipt.finalized_block_number,"finalizedBlockHash":format!("{:#x}",receipt.finalized_block_hash),
-            "receiptProof":serde_json::to_value(proof)?,"checkpoint":receipt.checkpoint}),
+            "receiptProof":proof,"checkpoint":receipt.checkpoint}),
         )?;
         persist_root_intent(output, intent)?;
         return Ok(true);
@@ -1199,19 +1197,12 @@ pub(crate) async fn validate_root_publication(
         let kind = intent["kind"].as_str().unwrap_or("merkleRoot");
         let root = decode_hash(&intent["root"], "saved root")?;
         let pin = &intent["publicationReceipt"];
-        let included = if pin["finalized"] == true {
+        if pin["finalized"] == true {
             ensure!(pin["kind"] == kind, "saved root receipt kind changed; HOLD");
-            (
+            let included = (
                 pin["block"].as_u64().context("root inclusion missing")?,
                 B256::from(decode_hash(&pin["blockHash"], "root inclusion hash")?),
-            )
-        } else {
-            canonical_root_inclusion(ethereum, intent, target, kind, root)
-                .await?
-                .context("original root inclusion disappeared; HOLD")?
-        };
-        if intent["publicationReceipt"]["finalized"] == true {
-            let pin = &intent["publicationReceipt"];
+            );
             let proof = authenticated_root_receipt(
                 ethereum,
                 path,
@@ -1247,6 +1238,10 @@ pub(crate) async fn validate_root_publication(
                         || ethereum.queue_max_block_at(included.1).await? >= U256::from(target)),
                 "original finalized root state changed; HOLD"
             );
+        } else {
+            canonical_root_inclusion(ethereum, intent, target, kind, root)
+                .await?
+                .context("original root inclusion disappeared; HOLD")?;
         }
     }
     Ok(())
@@ -1318,7 +1313,7 @@ async fn canonical_root_inclusion(
 ) -> Result<Option<(u64, B256)>> {
     use alloy::{
         providers::Provider,
-        rpc::types::{BlockId, BlockNumberOrTag},
+        rpc::types::BlockNumberOrTag,
     };
 
     let signed = signed_publication_identity(intent, ethereum.queue_address)?;

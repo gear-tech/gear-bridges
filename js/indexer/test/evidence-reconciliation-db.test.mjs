@@ -160,6 +160,9 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
   const outbound = { receipt: oldReceipt, logIndex: 3, nonce: '9', queue: identity.queue, manager: identity.manager };
   await insert('completed_transfer', { id: `outbound:${identity.queue}:9`, src_network: 'Vara', dest_network: 'Ethereum',
     tx_hash: fixture.txHashes[1], block_number: '11', timestamp: time, outbound_receipt: outbound, matched: true });
+  await insert('completed_transfer', { id: 'legacy-unmatched', src_network: 'Vara', dest_network: 'Ethereum',
+    tx_hash: fixture.txHashes[1], block_number: '11', timestamp: time,
+    outbound_receipt: { ...outbound, nonce: '999' }, matched: false });
   await insert('completed_transfer', { id: 'unrelated-completion', src_network: 'Ethereum', dest_network: 'Vara',
     tx_hash: hash('e0'), block_number: '301', timestamp: time, matched: true });
   for (const [index, slot] of [[2, '200'], [3, '201']]) {
@@ -193,6 +196,9 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     const retained = (await db.query('SELECT * FROM completed_transfer WHERE id = $1', [`outbound:${identity.queue}:9`])).rows[0];
     assert.equal(retained.matched, false); assert.equal(retained.legacy_matched, true);
     assert.deepEqual(retained.outbound_receipt, outbound); assert.equal(retained.receipt_auth, null);
+    const unmatched = (await db.query("SELECT * FROM completed_transfer WHERE id = 'legacy-unmatched'")).rows[0];
+    assert.equal(unmatched.matched, false); assert.equal(unmatched.legacy_matched, false);
+    assert.equal(unmatched.receipt_auth, null); assert.deepEqual(unmatched.outbound_receipt, { ...outbound, nonce: '999' });
     const other = (await db.query("SELECT * FROM completed_transfer WHERE id = 'unrelated-completion'")).rows[0];
     assert.equal(other.matched, true); assert.equal(other.legacy_matched, null);
     assert.deepEqual((await db.query('SELECT id, deposit FROM receipt_settlement ORDER BY id')).rows, depositsBefore);
@@ -219,6 +225,71 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     assert.equal(apiRows.get(id).completedAt, null);
     assert.equal(apiRows.get(id).status.toLowerCase(), 'bridging', 'existing API claim predicate remains visible');
   }
+
+  await t.test('legacy backlog missing historical receipts does not wedge live SQL batches or certify operator skips', async () => {
+    const localEnv = { ...fixture.env, ETH_RPC_ONLY: 'true', ETH_BRIDGING_PAYMENT: `0x${'33'.repeat(20)}` };
+    const oldEnv = Object.fromEntries(Object.keys(localEnv).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, localEnv);
+    await import('reflect-metadata');
+    const { Store } = await import('@subsquid/typeorm-store');
+    const { default: configured } = await import('../lib/model/dataSource.js');
+    const { handleBatch } = await import('../lib/eth/handler.js');
+    const queue = await import('../lib/eth/abi/message-queue.js');
+    const { createEthereumEvidenceClients, destroyEthereumEvidenceClients } = await import('../lib/eth/finality.js');
+    const database = new DataSource({ ...configured.options, url: url.href, synchronize: false,
+      migrationsRun: false, dropSchema: false, logging: false });
+    const legacyRows = (await db.query('SELECT * FROM completed_transfer ORDER BY id')).rows;
+    const legacyTransfer = await transfer('20-retained');
+    const root = { ...fixture.receipts[0].logs[1],
+      ...queue.abi.encodeEventLog(queue.abi.getEvent('MerkleRoot'), [12n, hash('f1')]), logIndex: '0x2' };
+    fixture.receipts[0].logs.push(root);
+    const quiet = { child() { return this; }, info() {}, debug() {}, warn() {}, error() {} };
+    const live = () => database.transaction('SERIALIZABLE', async (manager) => {
+      const clients = createEthereumEvidenceClients();
+      await handleBatch({ store: new Store(() => manager), log: quiet,
+        _chain: { client: { call: clients.primaryCall } },
+        blocks: [{ header: { height: 11, hash: fixture.headers[11].hash, timestamp: 1_700_000_011_000 },
+          logs: [{ ...root, logIndex: 2, transactionIndex: 0 }] }] });
+    });
+    try {
+      await database.initialize();
+      fixture.state.fault = ({ method, result }) => method === 'eth_getTransactionReceipt' ? null : result;
+      const beforeFailure = await snapshot();
+      await assert.rejects(live(), /HOLD: consumed event lacks a finalized successful receipt/);
+      assert.deepEqual(await snapshot(), beforeFailure, 'current-batch qualification remains mandatory and atomic');
+      fixture.state.fault = ({ method, params, result }) =>
+        method === 'eth_getTransactionReceipt' && params[0] === fixture.txHashes[1] ? null : result;
+      fixture.state.requests.length = 0;
+      await live();
+      assert.equal((await db.query('SELECT count(*)::int AS count FROM merkle_root_in_message_queue')).rows[0].count, 1);
+      assert.deepEqual((await db.query('SELECT * FROM completed_transfer ORDER BY id')).rows, legacyRows);
+      assert.deepEqual(await transfer('20-retained'), legacyTransfer);
+      assert.ok(!fixture.state.requests.some(({ method, params }) =>
+        method === 'eth_getTransactionReceipt' && params[0] === fixture.txHashes[1]),
+      'both true and false migration markers exclude unauthenticated backlog before the live page is fetched');
+      const committed = await snapshot();
+      for (const args of [[], ['--apply']]) {
+        const failure = await run('vara-to-eth', ['--after', '10-direct', '--limit', '1', ...args], false);
+        assert.match(failure.stderr, /original retained completion receipt unavailable/);
+        assert.ok(failure.stderr.includes(fixtureId('20-retained')), 'repair identifies the held original');
+        assert.deepEqual(await snapshot(), committed, 'HOLD has no committed cursor or partial evidence');
+      }
+      const skipped = await run('vara-to-eth', ['--after', '20-retained', '--limit', '1']);
+      assert.equal(skipped.lastExaminedId, '30-near'); assert.equal(skipped.qualified, 0);
+      assert.deepEqual(await snapshot(), committed, 'an operator page skip does not certify the held row');
+      const visible = (await graphQL(port)).get('20-retained');
+      assert.equal(visible.status.toLowerCase(), 'bridging'); assert.equal(visible.completedAt, null);
+      assert.equal(visible.completedAtBlock, null); assert.equal(visible.completedAtTxHash, null);
+    } finally {
+      fixture.state.fault = undefined;
+      fixture.receipts[0].logs.pop();
+      destroyEthereumEvidenceClients();
+      if (database.isInitialized) await database.destroy();
+      for (const [key, value] of Object.entries(oldEnv)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+  });
 
   await t.test('dry-run, malformed arguments and missing configuration never write, even checkpoints', async () => {
     const saved = await snapshot();

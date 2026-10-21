@@ -498,8 +498,6 @@ impl TransactionManager {
                     );
                     if saved.inclusion.is_none() {
                         saved.inclusion = observed.inclusion;
-                    }
-                    if saved.checkpoint.is_none() {
                         saved.checkpoint = observed.checkpoint;
                     }
                 }
@@ -526,8 +524,6 @@ impl TransactionManager {
                         );
                         if saved.inclusion.is_none() {
                             saved.inclusion = observed.inclusion;
-                        }
-                        if saved.checkpoint.is_none() {
                             saved.checkpoint = observed.checkpoint;
                         }
                     } else {

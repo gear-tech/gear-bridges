@@ -63,7 +63,7 @@ export async function reconcileReceiptSettlements(
       if (settlement.matched) throw new Error('HOLD: matched settlement lost its original transfer');
       continue;
     }
-    const transfer = changed.get(original.id) ?? new Transfer({ ...original });
+    const transfer = changed.get(original.id) ?? new Transfer(original);
     const conflict = () => {
       if (transfer.completionAuth || settlement.matched) throw new Error('HOLD: authenticated receipt settlement effect changed');
     };

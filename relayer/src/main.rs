@@ -654,13 +654,11 @@ async fn create_eth_killswitch_client(args: &EthereumKillSwitchArgs) -> AnyResul
     })?;
     let observer_pk_str = format!("0x{}", hex::encode(buf.as_ref()));
 
-    let observer_api = create_eth_signer_client(&EthereumSignerArgs {
+    create_eth_signer_client(&EthereumSignerArgs {
         ethereum_args: args.ethereum_args.clone(),
         eth_fee_payer: observer_pk_str,
     })
-    .await?;
-
-    Ok(observer_api)
+    .await
 }
 
 async fn create_eth_client(args: &EthereumArgs) -> AnyResult<EthApi> {

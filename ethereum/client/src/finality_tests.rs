@@ -1,5 +1,6 @@
 //! Independent transports and real signed transaction/receipt roots; no proof bypasses.
 use super::*;
+use super::tests::header_chain as chain;
 use alloy::{
     consensus::{proofs::{calculate_receipt_root, calculate_transaction_root}, SignableTransaction, TxEip1559, TxEnvelope},
     eips::Encodable2718,
@@ -19,6 +20,8 @@ struct State {
     chain_id: u64,
     missing: BTreeSet<u64>,
     unavailable: bool,
+    http_failure: Option<(&'static str, u16)>,
+    rpc_failure: Option<&'static str>,
     receipt: Option<TransactionReceipt>,
     receipts: Vec<TransactionReceipt>,
     nonce: u64,
@@ -41,6 +44,7 @@ impl Fixture {
         let url = format!("http://{}", listener.local_addr()?);
         let state = Arc::new(std::sync::Mutex::new(State {
             chain, tip, chain_id: 560048, missing: BTreeSet::new(), unavailable: false,
+            http_failure: None, rpc_failure: None,
             receipt: None, receipts: vec![], nonce: 7, processed: true,
             root: B256::repeat_byte(67), requests: vec![],
         }));
@@ -65,10 +69,20 @@ impl Fixture {
                             break serde_json::from_slice::<Value>(&buffer[end + 4..end + 4 + length]).unwrap();
                         }
                     };
-                    let response = {
+                    let http_failure = {
                         let mut state = shared.lock().unwrap();
                         state.requests.push(request.clone());
-                        if state.unavailable {
+                        state.http_failure.filter(|(method, _)| request["method"] == *method)
+                    };
+                    if let Some((_, status)) = http_failure {
+                        let _ = socket.write_all(format!(
+                            "HTTP/1.1 {status} Fixture failure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        ).as_bytes()).await;
+                        return;
+                    }
+                    let response = {
+                        let state = shared.lock().unwrap();
+                        if state.unavailable || state.rpc_failure == request["method"].as_str() {
                             json!({"jsonrpc":"2.0", "id":request["id"], "error":{"code":-32000,"message":"fixture unavailable"}})
                         } else {
                             let result = match request["method"].as_str().unwrap() {
@@ -110,19 +124,6 @@ impl Fixture {
         Ok(EthApi::new(&self.url, &format!("{:#x}", Address::repeat_byte(9)), None, None, None).await?
             .with_finality_witness(&witness.url, 560048, genesis).await?)
     }
-}
-
-fn chain(seed: u8, height: u64) -> Vec<Block> {
-    let mut parent = B256::ZERO;
-    (0..=height).map(|number| {
-        let mut block: Block = Block::default();
-        block.header.inner.number = number;
-        block.header.inner.parent_hash = parent;
-        block.header.inner.extra_data = Bytes::from(vec![seed]);
-        block.header.hash = block.header.inner.hash_slow();
-        parent = block.header.hash;
-        block
-    }).collect()
 }
 
 fn temp_archive(genesis: B256) -> super::tests::Cleanup {
@@ -614,5 +615,231 @@ async fn every_unfinished_common_generation_remains_a_fence() -> AnyResult<()> {
     assert!(api.verified_finalized_view().await.is_err());
     primary.state.lock().unwrap().missing.clear();
     assert!(matches!(api.is_message_processed([1; 32]).await, Err(Error::FinalizedAncestryConflict)));
+    Ok(())
+}
+
+#[tokio::test]
+async fn advertised_tip_skew_is_rejected_before_common_or_ancestry_requests() -> AnyResult<()> {
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    for (seed, low_primary) in [(180, true), (181, false)] {
+        let chain = chain(seed, 1);
+        let cleanup = temp_archive(chain[0].header.hash);
+        let primary = Fixture::new(chain.clone(), 1).await?;
+        let witness = Fixture::new(chain.clone(), 1).await?;
+        let api = primary.api(&witness).await?;
+        let accepted = api.verified_finalized_view_with_archive(
+            &cleanup.directory, chain[0].header.hash,
+        ).await?;
+        let checkpoint = accepted.checkpoint().clone();
+        let fence = std::fs::read(cleanup.directory.join("fence.json"))?;
+        let (low, high) = if low_primary { (&primary, &witness) } else { (&witness, &primary) };
+        low.state.lock().unwrap().tip = 0;
+        {
+            // Self-consistent advertised header: the guard must run before asking
+            // for its (deliberately unavailable) intervening historical headers.
+            let mut state = high.state.lock().unwrap();
+            state.chain[1].header.inner.number = 100_006;
+            state.chain[1].header.hash = state.chain[1].header.inner.hash_slow();
+        }
+        for fixture in [&primary, &witness] {
+            fixture.state.lock().unwrap().requests.clear();
+        }
+        assert!(api.verified_finalized_view().await.is_err());
+        for fixture in [&primary, &witness] {
+            let state = fixture.state.lock().unwrap();
+            assert_eq!(state.requests.len(), 3, "skew must HOLD after identity and advertised tip only: {:?}", state.requests);
+            assert_eq!(state.requests[0]["method"], "eth_chainId");
+            assert_eq!(state.requests[1]["params"][0], "0x0");
+            assert_eq!(state.requests[2]["params"][0], "finalized");
+        }
+        assert_eq!(std::fs::read(cleanup.directory.join("fence.json"))?, fence);
+        assert_eq!(accepted.checkpoint(), &checkpoint);
+        for fixture in [&primary, &witness] {
+            let mut state = fixture.state.lock().unwrap();
+            state.chain = chain.clone(); state.tip = 1;
+        }
+        assert_eq!(api.verified_finalized_view().await?.checkpoint(), &checkpoint);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn advertised_tip_skew_boundary_still_accepts_normal_lag() -> AnyResult<()> {
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    let chain = chain(182, 258);
+    let _owned = super::tests::ClearOwnedChains([chain[0].header.hash]);
+    let primary = Fixture::new(chain.clone(), 257).await?;
+    let witness = Fixture::new(chain.clone(), 1).await?;
+    let api = primary.api(&witness).await?;
+    assert_eq!(api.verified_finalized_view().await?.block_number(), 1);
+    primary.state.lock().unwrap().tip = 258;
+    assert!(api.verified_finalized_view().await.is_err(), "257 headers of advertised lag must HOLD");
+    primary.state.lock().unwrap().tip = 1;
+    witness.state.lock().unwrap().tip = 257;
+    assert_eq!(api.verified_finalized_view().await?.block_number(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn inclusion_fetch_failures_preserve_typed_transport_and_retry_classification() -> AnyResult<()> {
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    let (chain, receipt, raw) = receipt_chain(183, true).await?;
+    let _owned = super::tests::ClearOwnedChains([chain[0].header.hash]);
+    let primary = Fixture::new(chain.clone(), 1).await?;
+    let witness = Fixture::new(chain.clone(), 1).await?;
+    {
+        let mut state = primary.state.lock().unwrap();
+        state.receipt = Some(receipt.clone()); state.receipts = vec![receipt.clone()];
+    }
+    let api = primary.api(&witness).await?;
+    let polling = PollingEthApi::new(&primary.url).await?
+        .with_finality_witness(&witness.url, 560048, chain[0].header.hash).await?;
+    for method in ["eth_getBlockByHash", "eth_getBlockReceipts"] {
+        for status in [503, 401] {
+            primary.state.lock().unwrap().http_failure = Some((method, status));
+            let error = api.get_finalized_receipt(receipt.transaction_hash).await.unwrap_err();
+            assert!(matches!(&error, Error::ErrorInHTTPTransport(_)), "{method} HTTP {status}: {error:?}");
+            assert_eq!(error::is_transient_rpc_cause(&error), status == 503);
+            let error = polling.get_finalized_receipt(receipt.transaction_hash).await.unwrap_err();
+            assert!(matches!(error.downcast_ref::<Error>(), Some(Error::ErrorInHTTPTransport(_))), "{error:?}");
+            assert_eq!(error::is_transient_rpc_error(&error), status == 503);
+        }
+        primary.state.lock().unwrap().http_failure = None;
+        primary.state.lock().unwrap().rpc_failure = Some(method);
+        let error = api.get_finalized_receipt(receipt.transaction_hash).await.unwrap_err();
+        assert!(matches!(&error, Error::ErrorInHTTPTransport(RpcError::ErrorResp(_))), "{error:?}");
+        assert!(!error::is_transient_rpc_cause(&error), "JSON-RPC rejection is not a network outage");
+        primary.state.lock().unwrap().rpc_failure = None;
+    }
+    let authenticated = api.get_finalized_receipt(receipt.transaction_hash).await?.unwrap();
+    assert_eq!(authenticated.inclusion.raw_transaction, raw);
+    assert!(authenticated.inclusion.receipt.status());
+    let mut changed = serde_json::to_value(&receipt)?;
+    changed["status"] = json!("0x0");
+    primary.state.lock().unwrap().receipts = vec![serde_json::from_value(changed)?];
+    let error = api.get_finalized_receipt(receipt.transaction_hash).await.unwrap_err();
+    assert!(matches!(&error, Error::InvalidFinalityEvidence(_)), "{error:?}");
+    assert!(!error::is_transient_rpc_cause(&error));
+    assert!(api.get_tx_status(receipt.transaction_hash).await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn finality_endpoint_policy_rejects_insecure_and_canonical_duplicates_without_rpc() -> AnyResult<()> {
+    let chain = chain(184, 1);
+    let fixture = Fixture::new(chain.clone(), 1).await?;
+    let api = EthApi::new(&fixture.url, &format!("{:#x}", Address::repeat_byte(9)), None, None, None).await?;
+    let polling = PollingEthApi::new(&fixture.url).await?;
+    fixture.state.lock().unwrap().requests.clear();
+    let port = Url::parse(&fixture.url)?.port().unwrap();
+    let pairs = [
+        ("http://primary.example/rpc".to_owned(), "https://witness.example/rpc".to_owned()),
+        ("ws://primary.example/rpc".to_owned(), "https://witness.example/rpc".to_owned()),
+        ("https://primary.example/rpc".to_owned(), "http://witness.example/rpc".to_owned()),
+        ("https://primary.example/rpc".to_owned(), "http://192.168.1.1/rpc".to_owned()),
+        ("https://primary.example/rpc".to_owned(), "http://localhost.example/rpc".to_owned()),
+        ("https://RPC.example/rpc".to_owned(), "https://rpc.example:443/rpc/".to_owned()),
+        ("https://rpc.example./rpc///".to_owned(), "https://rpc.example/rpc".to_owned()),
+        ("https://alice:secret@rpc.example/rpc#one".to_owned(), "https://bob:other@rpc.example/rpc/#two".to_owned()),
+        ("wss://rpc.example/rpc".to_owned(), "https://rpc.example:443/rpc/".to_owned()),
+        ("ws://localhost/rpc".to_owned(), "http://127.0.0.1:80/rpc/".to_owned()),
+        (fixture.url.clone(), format!("http://localhost:{port}/")),
+        (fixture.url.clone(), format!("http://127.1.2.3:{port}/")),
+        (fixture.url.clone(), format!("http://[::1]:{port}/")),
+        (fixture.url.clone(), format!("http://LOCALHOST.:{port}/")),
+    ];
+    for (primary, witness) in pairs {
+        // The transport is already owned; exercise public witness configuration
+        // with each configured URL without contacting external test domains.
+        let mut signer = api.clone(); signer.url = Url::parse(&primary)?;
+        let mut reader = polling.clone(); reader.url = Url::parse(&primary)?;
+        assert!(signer.with_finality_witness(&witness, 560048, chain[0].header.hash).await.is_err(),
+            "signer accepted {primary} + {witness}");
+        assert!(reader.with_finality_witness(&witness, 560048, chain[0].header.hash).await.is_err(),
+            "polling accepted {primary} + {witness}");
+    }
+    assert!(fixture.state.lock().unwrap().requests.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn finality_endpoint_policy_accepts_secure_and_distinct_loopback_configuration() -> AnyResult<()> {
+    let chain = chain(185, 1);
+    let primary = Fixture::new(chain.clone(), 1).await?;
+    let witness = Fixture::new(chain.clone(), 1).await?;
+    let api = primary.api(&witness).await?;
+    let polling = PollingEthApi::new(&primary.url).await?;
+    for (primary_url, witness_url) in [
+        ("https://primary.example/rpc", "https://witness.example/rpc"),
+        ("wss://primary.example/rpc", "https://witness.example/rpc"),
+        ("https://rpc.example/one", "https://rpc.example/two"),
+        ("https://rpc.example/rpc?tenant=one", "https://rpc.example/rpc?tenant=two"),
+        (primary.url.as_str(), witness.url.as_str()),
+    ] {
+        let mut signer = api.clone(); signer.url = Url::parse(primary_url)?;
+        let mut reader = polling.clone(); reader.url = Url::parse(primary_url)?;
+        assert_eq!(signer.with_finality_witness(witness_url, 560048, chain[0].header.hash).await?.finality_identity()?,
+            (560048, chain[0].header.hash));
+        assert_eq!(reader.with_finality_witness(witness_url, 560048, chain[0].header.hash).await?.finality_identity()?,
+            (560048, chain[0].header.hash));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn finality_endpoint_policy_rejects_websocket_configuration_before_connecting() -> AnyResult<()> {
+    let chain = chain(186, 1);
+    let fixture = Fixture::new(chain.clone(), 1).await?;
+    let api = EthApi::new(&fixture.url, &format!("{:#x}", Address::repeat_byte(9)), None, None, None).await?;
+    let polling = PollingEthApi::new(&fixture.url).await?;
+    let trap = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = trap.local_addr()?.port();
+    for (primary, witness) in [
+        (format!("http://127.0.0.1:{port}/rpc"), format!("ws://localhost:{port}/rpc/")),
+        (format!("https://127.0.0.1:{port}/rpc"), format!("wss://localhost:{port}/rpc/")),
+        ("https://primary.example/rpc".into(), format!("ws://0.0.0.0:{port}/rpc")),
+    ] {
+        let mut signer = api.clone(); signer.url = Url::parse(&primary)?;
+        let mut reader = polling.clone(); reader.url = Url::parse(&primary)?;
+        let configure = async {
+            for result in [
+                signer.with_finality_witness(&witness, 560048, chain[0].header.hash).await.map(|_| ()),
+                reader.with_finality_witness(&witness, 560048, chain[0].header.hash).await.map(|_| ()),
+            ] {
+                let error = result.expect_err("unsafe websocket configuration accepted");
+                assert!(error.to_string().starts_with("HOLD:"), "transport failure is not configuration rejection: {error:?}");
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::select! {
+                _ = configure => {},
+                _ = trap.accept() => panic!("rejected configuration opened a websocket connection"),
+            }
+        }).await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn finality_endpoint_policy_rejects_insecure_primary_before_initial_rpc() -> AnyResult<()> {
+    let trap = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = trap.local_addr()?.port();
+    let queue = format!("{:#x}", Address::repeat_byte(9));
+    for scheme in ["http", "ws"] {
+        let url = format!("{scheme}://0.0.0.0:{port}");
+        let configure = async {
+            let error = PollingEthApi::new(&url).await.err().expect("insecure polling endpoint accepted");
+            assert!(matches!(error.downcast_ref::<Error>(), Some(Error::WrongNodeUrl)));
+            let error = EthApi::new(&url, &queue, None, None, None).await.err()
+                .expect("insecure signer endpoint accepted");
+            assert!(matches!(error, Error::WrongNodeUrl));
+        };
+        tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::select! {
+                _ = configure => {},
+                _ = trap.accept() => panic!("insecure primary contacted before endpoint validation"),
+            }
+        }).await?;
+    }
     Ok(())
 }

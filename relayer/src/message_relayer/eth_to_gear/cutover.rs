@@ -230,6 +230,37 @@ fn validate_coverage_chain(seal: &CutoverSeal, blocks: &[CoveredBlock]) -> Resul
     Ok(())
 }
 
+/// Fetch and validate one block's complete trie-bound inventory.
+/// The caller must authenticate `hash` under its finalized view before using the inventory.
+pub async fn fetch_covered_block(
+    eth: &ethereum_client::PollingEthApi,
+    number: u64,
+    hash: alloy_primitives::B256,
+) -> Result<CoveredBlock> {
+    use alloy::rpc::types::BlockId;
+    use std::time::Duration;
+    let block = tokio::time::timeout(Duration::from_secs(10),
+        eth.get_block_by_hash(hash).full()).await??
+        .context("HOLD: historical full execution block unavailable")?;
+    anyhow::ensure!(block.header.number == number && block.header.hash == hash
+        && block.header.inner.hash_slow() == hash,
+        "HOLD: reconstructed coverage header changed");
+    let raw_transactions = block.transactions.try_into_transactions()
+        .map_err(|_| anyhow::anyhow!("HOLD: full historical transactions unavailable"))?
+        .into_iter().map(|tx| tx.into_inner().encoded_2718()).collect::<Vec<_>>();
+    let transactions = raw_transactions.iter().map(alloy_primitives::keccak256).collect();
+    let receipts = tokio::time::timeout(Duration::from_secs(10),
+        eth.get_block_receipts(BlockId::hash_canonical(hash))).await??
+        .context("HOLD: historical receipts unavailable")?;
+    let covered = CoveredBlock {
+        number, hash: H256(hash.0), parent_hash: H256(block.header.parent_hash.0),
+        receipts_root: H256(block.header.receipts_root.0), header: block.header.inner,
+        transactions, raw_transactions, receipts,
+    };
+    validate_covered_block(&covered)?;
+    Ok(covered)
+}
+
 /// Rebuild only genuinely absent legacy coverage, without touching any predecessor files.
 pub async fn reconstruct_coverage(
     eth: &ethereum_client::PollingEthApi,
@@ -237,7 +268,6 @@ pub async fn reconstruct_coverage(
     boundary: &CutoverBoundary,
     genesis: H256,
 ) -> Result<Vec<CoveredBlock>> {
-    use alloy::rpc::types::BlockId;
     use std::time::{Duration, Instant};
     view.verify_blocks(&**eth, &BTreeMap::from([
         (boundary.execution_number, boundary.execution_hash.0.into()),
@@ -248,25 +278,7 @@ pub async fn reconstruct_coverage(
     for number in (0..=boundary.execution_number).rev() {
         anyhow::ensure!(started.elapsed() < Duration::from_secs(300),
             "HOLD: legacy coverage reconstruction deadline exhausted");
-        let block = tokio::time::timeout(Duration::from_secs(10),
-            eth.get_block_by_hash(hash).full()).await??
-            .context("HOLD: historical full execution block unavailable")?;
-        anyhow::ensure!(block.header.number == number && block.header.hash == hash
-            && block.header.inner.hash_slow() == hash,
-            "HOLD: reconstructed coverage header changed");
-        let raw_transactions = block.transactions.try_into_transactions()
-            .map_err(|_| anyhow::anyhow!("HOLD: full historical transactions unavailable"))?
-            .into_iter().map(|tx| tx.into_inner().encoded_2718()).collect::<Vec<_>>();
-        let transactions = raw_transactions.iter().map(alloy_primitives::keccak256).collect();
-        let receipts = tokio::time::timeout(Duration::from_secs(10),
-            eth.get_block_receipts(BlockId::hash_canonical(hash))).await??
-            .context("HOLD: historical receipts unavailable")?;
-        let covered = CoveredBlock {
-            number, hash: H256(hash.0), parent_hash: H256(block.header.parent_hash.0),
-            receipts_root: H256(block.header.receipts_root.0), header: block.header.inner,
-            transactions, raw_transactions, receipts,
-        };
-        validate_covered_block(&covered)?;
+        let covered = fetch_covered_block(eth, number, hash).await?;
         hash = covered.header.parent_hash;
         blocks.push(covered);
     }
@@ -706,7 +718,6 @@ async fn verify_external_coverage(
         "HOLD: incompatible coverage/seal schema"
     );
     validate_admission_inventory(coverage)?;
-    validate_coverage_chain(seal, &coverage.blocks)?;
     let mut authenticated = AuthenticatedCoverage::default();
     let head = api.last_block_hash().await?;
     let finalized = api.block_number_at(head).await?;

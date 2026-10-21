@@ -63,9 +63,9 @@ function settle(transfer: Transfer, row: CompletedTransfer, original: Authentica
     throw new Error('HOLD: unauthenticated terminal outbound projection; migrate before processing');
   }
   row.matched = true;
-  return new Transfer({ ...transfer, status: Status.Completed, completedAt: timestamp,
+  return auth ? undefined : new Transfer({ ...transfer, status: Status.Completed, completedAt: timestamp,
     completedAtBlock: BigInt(row.blockNumber), completedAtTxHash: row.txHash,
-    completionAuth: auth ?? { version: 1, kind: 'ethereum-receipt', checkpointId: row.receiptAuth!.checkpointId,
+    completionAuth: { version: 1, kind: 'ethereum-receipt', checkpointId: row.receiptAuth!.checkpointId,
       completionId: row.id, processedLogIndex: match.processedLogIndex } });
 }
 
@@ -141,11 +141,14 @@ export async function handleBatch(ctx: Context): Promise<void> {
     }
   }
 
-  // One bounded keyset page per transaction; the standalone repair also scans direct legacy projections.
+  // Repair owns migrated unauthenticated history (legacyMatched can be true or false).
+  // Exclude it before pagination so it cannot starve current qualified observations.
   let cursor = pendingCompletionStart;
   const load = () => ctx.store.find(CompletedTransfer, {
-    where: { srcNetwork: Network.Vara, destNetwork: Network.Ethereum, matched: false,
-      outboundReceipt: Not(IsNull()), ...(cursor ? { id: MoreThan(cursor) } : {}) },
+    where: [{ legacyMatched: IsNull() }, { receiptAuth: Not(IsNull()) }].map((evidence) => ({
+      srcNetwork: Network.Vara, destNetwork: Network.Ethereum, matched: false,
+      outboundReceipt: Not(IsNull()), ...(cursor ? { id: MoreThan(cursor) } : {}), ...evidence,
+    })),
     order: { id: 'ASC' }, take: 1000,
   });
   let pending = await load();
@@ -156,9 +159,9 @@ export async function handleBatch(ctx: Context): Promise<void> {
     if (!prior.outboundReceipt || prior.txHash.toLowerCase() !== current.txHash ||
         BigInt(prior.blockNumber) !== BigInt(current.blockNumber) || prior.outboundReceipt.logIndex !== current.outboundReceipt!.logIndex ||
         prior.outboundReceipt.nonce !== current.outboundReceipt!.nonce) throw new Error('HOLD: conflicting retained outbound completion');
-    observations.set(prior.id, new CompletedTransfer({ ...prior }));
+    observations.set(prior.id, new CompletedTransfer(prior));
   }
-  for (const row of pending) if (!observations.has(row.id)) observations.set(row.id, new CompletedTransfer({ ...row }));
+  for (const row of pending) if (!observations.has(row.id)) observations.set(row.id, new CompletedTransfer(row));
   const transfers = observations.size ? await ctx.store.find(Transfer, {
     where: { nonce: In([...observations.values()].map((row) => row.outboundReceipt!.nonce)), sourceNetwork: Network.Vara },
   }) : [];
@@ -194,7 +197,7 @@ export async function handleBatch(ctx: Context): Promise<void> {
       continue;
     }
     const update = settle(transfer, row, original);
-    if (update && !transfer.completionAuth) updates.push(update);
+    if (update) updates.push(update);
   }
   await qualifyFinality(clients, checkpoint);
   await retainCheckpoint(ctx.store, checkpoint);

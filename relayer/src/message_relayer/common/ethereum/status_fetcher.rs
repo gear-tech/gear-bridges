@@ -265,8 +265,7 @@ pub fn validate_receipt_authentication(
         );
     }
     anyhow::ensure!(
-        receipt.clone().into_primitives_receipt().inner.encoded_2718()
-            == inclusion.receipt.encoded_2718(),
+        receipt.inner.clone().into_primitives_receipt() == inclusion.receipt,
         "HOLD: saved receipt contents differ from included envelope"
     );
     verify_indexed_value(inclusion.header.transactions_root, inclusion.index,
@@ -985,10 +984,10 @@ pub(crate) mod tests {
                 "eth_getBlockReceipts" => {
                     let hash = params[0].get("blockHash").unwrap_or(&params[0]);
                     if hash == &json!(self.chain[101].header.hash) {
-                        Ok(json!([self.canonical_second.clone()]))
+                        Ok(json!([self.canonical_second]))
                     } else {
                         assert_eq!(hash, &json!(self.chain[100].header.hash));
-                        Ok(json!([self.canonical_receipt.clone()]))
+                        Ok(json!([self.canonical_receipt]))
                     }
                 }
                 "eth_getTransactionReceipt" if fault == RpcFault::Receipt => {
@@ -1468,11 +1467,7 @@ pub(crate) mod tests {
         let rpc = watch_rpc(true).await?;
         let request = rpc.state.request.clone();
         let signed = request.submission.as_ref().unwrap();
-        let mut forged = serde_json::to_value(evidence(&request.message, signed, true).receipt)?;
-        forged["blockHash"] = json!(rpc.state.chain[100].header.hash);
-        for log in forged["logs"].as_array_mut().unwrap() {
-            log["blockHash"] = json!(rpc.state.chain[100].header.hash);
-        }
+        let mut forged = rpc.state.canonical_receipt.clone();
         // The locator looks plausible, but its cumulative gas is not in the receipt trie.
         forged["cumulativeGasUsed"] = json!("0x9999");
         *rpc.state.receipt.lock().unwrap() = forged;

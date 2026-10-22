@@ -131,20 +131,21 @@ fn native_and_simplified_proofs_reject_corruption() {
             leaf_count: case.leaf_count,
             items: case.mmr_items.iter().map(|h| hash(h)).collect(),
         };
-        assert!(verify_native_mmr_proof(root, &proof, leaf).unwrap());
-        let simplified = convert_mmr_proof(&proof).unwrap();
+        let simplified = verify_native_mmr_proof(root, &proof, leaf).unwrap();
         assert!(verify_simplified_mmr(root, leaf, &simplified).unwrap());
         let mut wrong_leaf = leaf;
         wrong_leaf[0] ^= 1;
-        assert!(!verify_native_mmr_proof(root, &proof, wrong_leaf).unwrap());
+        assert!(verify_native_mmr_proof(root, &proof, wrong_leaf).is_err());
         assert!(!verify_simplified_mmr(root, wrong_leaf, &simplified).unwrap());
         let mut extra = proof.clone();
         extra.items.push([0; 32]);
         assert!(convert_mmr_proof(&extra).is_err());
+        assert!(verify_native_mmr_proof(root, &extra, leaf).is_err());
         if !proof.items.is_empty() {
             let mut missing = proof.clone();
             missing.items.pop();
             assert!(convert_mmr_proof(&missing).is_err());
+            assert!(verify_native_mmr_proof(root, &missing, leaf).is_err());
             let mut changed = simplified.clone();
             changed.items[0][0] ^= 1;
             assert!(!verify_simplified_mmr(root, leaf, &changed).unwrap());
@@ -163,7 +164,7 @@ fn native_and_simplified_proofs_reject_corruption() {
         if proof.leaf_count > 1 {
             invalid = proof.clone();
             invalid.leaf_indices[0] = (case.leaf_index + 1) % case.leaf_count;
-            assert!(!verify_native_mmr_proof(root, &invalid, leaf).unwrap_or(false));
+            assert!(verify_native_mmr_proof(root, &invalid, leaf).is_err());
             invalid = proof.clone();
             invalid.leaf_count += 1;
             assert!(validate_mmr_coordinates(
@@ -329,7 +330,7 @@ fn authority_proofs_cover_positions_and_size_bounds() {
         let root = hash(&case.authority_root);
         assert_eq!(authority_root(&addresses).unwrap(), root);
         for index in [0, keys.len() / 2, keys.len() - 1] {
-            let proof = authority_proof(&keys, index).unwrap();
+            let proof = authority_proof(&addresses, index).unwrap();
             assert!(verify_authority_proof(&root, &proof, keys.len()));
             assert_eq!(
                 proof.siblings,

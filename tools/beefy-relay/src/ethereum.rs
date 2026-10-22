@@ -33,7 +33,7 @@ use tokio::time::{sleep, timeout, Instant};
 use std::os::unix::fs::PermissionsExt;
 
 use crate::{
-    authority_proof, keccak256, source::CapturedCommitment, Hash32, QueueSnapshot, RuntimeLeaf,
+    authority_addresses, authority_proof, keccak256, source::CapturedCommitment, Hash32, QueueSnapshot, RuntimeLeaf,
     SimplifiedMmrProof, SNAPSHOT_VERSION,
 };
 
@@ -1738,6 +1738,7 @@ impl Ethereum {
             .map(|key| key.as_slice().try_into().context("invalid fixture authority key"))
             .collect::<Result<Vec<[u8; 33]>>>()?;
         ensure!(!wire_keys.is_empty() && wire_keys.len() <= 256, "invalid fixture authority count");
+        let addresses = authority_addresses(&wire_keys)?;
         let mut bitfield = vec![U256::ZERO];
         for index in &validated.signed_indices {
             ensure!((*index as usize) < wire_keys.len(), "fixture signer outside authority set");
@@ -1749,7 +1750,7 @@ impl Ethereum {
                 .context("interactive selection has no signature")?;
             let raw: &[u8] = signature.as_ref();
             ensure!(raw.len() == 65 && raw[64] <= 1, "invalid fixture signature");
-            let authority = authority_proof(&wire_keys, index)?;
+            let authority = authority_proof(&addresses, index)?;
             Ok(BeefyClient::ValidatorProof {
                 v: raw[64] + 27,
                 r: B256::from_slice(&raw[..32]),
@@ -1860,6 +1861,7 @@ impl Ethereum {
             wire_keys.len() <= 256,
             "BEEFY authority set exceeds uint256 bitfield"
         );
+        let addresses = authority_addresses(&wire_keys)?;
         let mut bitfield = vec![U256::ZERO];
         let available: BTreeSet<usize> = validated
             .signed_indices
@@ -1910,7 +1912,7 @@ impl Ethereum {
                     raw.len() == 65 && raw[64] <= 1,
                     "unsupported BEEFY ECDSA recovery id"
                 );
-                let authority = authority_proof(&wire_keys, index)?;
+                let authority = authority_proof(&addresses, index)?;
                 let mut r = [0; 32];
                 let mut s = [0; 32];
                 r.copy_from_slice(&raw[..32]);

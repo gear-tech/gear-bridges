@@ -16,7 +16,7 @@ import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
 import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
-import {BinaryMerkleTree} from "src/libraries/BinaryMerkleTree.sol";
+import {SubstrateMerkleProof} from "src/beefy/utils/SubstrateMerkleProof.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 
 /**
@@ -598,7 +598,7 @@ contract MessageQueue is
         }
 
         bytes32 messageHash = message.hashCalldata();
-        if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {
+        if (!SubstrateMerkleProof.verify(merkleRoot, messageHash, leafIndex, totalLeaves, proof)) {
             revert InvalidMerkleProof();
         }
 

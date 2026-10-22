@@ -3,7 +3,6 @@ pragma solidity ^0.8.37;
 
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
-import {ScaleCodec} from "src/beefy/utils/ScaleCodec.sol";
 import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 
@@ -164,12 +163,12 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
         }
 
         bytes32 leafHash = keccak256(
-            bytes.concat(
-                ScaleCodec.encodeU8(leaf.version),
-                ScaleCodec.encodeU32(leaf.parentNumber),
+            VaraBridgeMetadata.encodeMMRLeaf(
+                leaf.version,
+                leaf.parentNumber,
                 leaf.parentHash,
-                ScaleCodec.encodeU64(leaf.nextAuthoritySetID),
-                ScaleCodec.encodeU32(leaf.nextAuthoritySetLen),
+                leaf.nextAuthoritySetID,
+                leaf.nextAuthoritySetLen,
                 leaf.nextAuthoritySetRoot,
                 leaf.parachainHeadsRoot
             )

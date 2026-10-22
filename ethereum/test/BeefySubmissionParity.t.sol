@@ -4,7 +4,6 @@ pragma solidity ^0.8.37;
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
-import {Uint16Array} from "src/beefy/utils/Uint16Array.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 
 contract BeefySubmissionParityTest is BeefyFixtureTest {
@@ -12,7 +11,7 @@ contract BeefySubmissionParityTest is BeefyFixtureTest {
         fixtures = vm.readFile("test/fixtures/beefy-interop.json");
     }
 
-    function testBothProtocolsRotateCountersEmitAndPreserveFailedTickets() public {
+    function testBothProtocolsRotateSetsEmitAndPreserveFailedTickets() public {
         uint256 index = caseIndex("synthetic-mmr-3-primary");
         for (uint256 mode; mode < 2; mode++) {
             bool interactive = mode == 1;
@@ -26,9 +25,6 @@ contract BeefySubmissionParityTest is BeefyFixtureTest {
             BeefyClient.ValidatorProof[] memory proofs = _proofs(interactive, client, c, index, bits);
             bytes32 digest = client.computeCommitmentHash(c);
             bytes32 ticketId = keccak256(abi.encode(address(this), digest));
-            (,,, Uint16Array memory beforeCounters) = client.nextValidatorSet();
-            uint256 expectedCounter = interactive ? 1 : 0;
-            assertEq(beforeCounters.data[0], expectedCounter);
             bytes32 beforeState = stateHash(client);
 
             leaf.parentHash ^= bytes32(uint256(1));
@@ -43,20 +39,14 @@ contract BeefySubmissionParityTest is BeefyFixtureTest {
             vm.expectEmit(false, false, false, true, address(client));
             emit BeefyClient.NewMMRRoot(root, 103);
             finishUpdate(interactive, client, c, bits, proofs, leaf, s, new bytes32[](0), 0);
-            (uint128 currentId, uint128 currentLength, bytes32 currentRoot, Uint16Array memory currentCounters) =
-                client.currentValidatorSet();
-            (uint128 nextId, uint128 nextLength, bytes32 nextRoot, Uint16Array memory nextCounters) =
-                client.nextValidatorSet();
+            (uint128 currentId, uint128 currentLength, bytes32 currentRoot) = client.currentValidatorSet();
+            (uint128 nextId, uint128 nextLength, bytes32 nextRoot) = client.nextValidatorSet();
             assertEq(currentId, 1);
             assertEq(currentLength, 3);
             assertEq(currentRoot, fixtureHash(index, "authorityRoot"));
-            assertEq(currentCounters.length, 3);
-            assertEq(currentCounters.data[0], expectedCounter);
             assertEq(nextId, 2);
             assertEq(nextLength, 3);
             assertEq(nextRoot, leaf.nextAuthoritySetRoot);
-            assertEq(nextCounters.length, 3);
-            assertEq(nextCounters.data[0], 0);
             assertEq(client.latestMMRRoot(), root);
             assertEq(client.latestBeefyBlock(), 103);
             assertEq(client.lastAuthenticatedSourceTimestampMs(), s.sourceTimestampMs);

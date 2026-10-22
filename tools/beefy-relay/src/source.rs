@@ -20,7 +20,7 @@ use tokio::time::Instant;
 use tokio::time::{timeout, Duration};
 
 use crate::{
-    authority_addresses, authority_root, convert_mmr_proof, decode_authority_list,
+    authority_addresses, authority_root, decode_authority_list,
     decode_beefy_digest, decode_mmr_leaves, decode_mmr_proof, decode_outer_leaf,
     decode_validator_set, decode_versioned_finality_proof, keccak256, outer_leaf_hash,
     validate_mmr_coordinates, validate_signed_commitment, verify_native_mmr_proof, Hash32,
@@ -803,11 +803,8 @@ impl Source {
             "MMR API root differs from signed BEEFY root"
         );
         let leaf_hash = outer_leaf_hash(&leaf)?;
-        ensure!(
-            verify_native_mmr_proof(root, &proof, leaf_hash)?,
-            "native MMR proof validation failed"
-        );
-        let simplified = convert_mmr_proof(&proof)?;
+        let simplified = verify_native_mmr_proof(root, &proof, leaf_hash)
+            .context("native MMR proof validation failed")?;
         Ok(SourceProof {
             source,
             source_hash,
@@ -1036,10 +1033,8 @@ async fn discover_source_identity(api: &GearApi, at: H256) -> Result<SourceIdent
         mmr_root(api, first_at).await? == leaf_hash,
         "first insertion root differs from first leaf hash"
     );
-    ensure!(
-        verify_native_mmr_proof(root, &proof, leaf_hash)?,
-        "first leaf is not included in common finalized MMR root"
-    );
+    verify_native_mmr_proof(root, &proof, leaf_hash)
+        .context("first leaf is not included in common finalized MMR root")?;
     // S can precede the session that installs real BEEFY keys. This leaf is
     // geometry evidence, not an acceptance authority set; authenticate its exact
     // historical tuple without requiring today's nonempty authority checkpoint.

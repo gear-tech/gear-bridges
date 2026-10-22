@@ -209,8 +209,12 @@ pub fn authority_root(addresses: &[[u8; 20]]) -> Result<Hash32> {
     Ok(merkle_root::<KeccakHasher, _>(addresses.iter()))
 }
 
-pub fn authority_proof(keys: &[[u8; 33]], index: usize) -> Result<AuthorityProof> {
-    let addresses = authority_addresses(keys)?;
+/// Build a positional proof from the set validated by `authority_addresses`.
+pub fn authority_proof(addresses: &[[u8; 20]], index: usize) -> Result<AuthorityProof> {
+    ensure!(
+        (1..=MAX_VALIDATORS).contains(&addresses.len()),
+        "authority count must be between 1 and {MAX_VALIDATORS}"
+    );
     ensure!(index < addresses.len(), "authority index outside set");
     let proof = merkle_proof::<KeccakHasher, _, _>(addresses.iter(), index);
     Ok(AuthorityProof {
@@ -731,7 +735,7 @@ pub fn verify_native_mmr_proof(
     root: Hash32,
     proof: &RuntimeLeafProof,
     leaf_hash: Hash32,
-) -> Result<bool> {
+) -> Result<SimplifiedMmrProof> {
     ensure!(
         proof.leaf_indices.len() == 1,
         "MMR proof must contain exactly one leaf"
@@ -747,19 +751,25 @@ pub fn verify_native_mmr_proof(
     );
     let size = mmr_size(proof.leaf_count)?;
     let position = leaf_index_to_position(index)?;
+    let simplified = convert_mmr_proof(proof)?;
     if proof.leaf_count == 1 {
         ensure!(
             index == 0 && proof.items.is_empty(),
             "single-leaf MMR proof is not canonical"
         );
-        return Ok(root == leaf_hash);
+        ensure!(root == leaf_hash, "native MMR proof validation failed");
+    } else {
+        let native = mmr_lib::MerkleProof::<Hash32, KeccakMerge>::new(size, proof.items.clone());
+        let valid = native
+            .verify(root, vec![(position, leaf_hash)])
+            .map_err(|error| anyhow::anyhow!("native MMR proof verification failed: {error:?}"))?;
+        ensure!(valid, "native MMR proof validation failed");
     }
-    let simplified = convert_mmr_proof(proof)?;
-    let native = mmr_lib::MerkleProof::<Hash32, KeccakMerge>::new(size, proof.items.clone());
-    let valid = native
-        .verify(root, vec![(position, leaf_hash)])
-        .map_err(|error| anyhow::anyhow!("native MMR proof verification failed: {error:?}"))?;
-    Ok(valid && verify_simplified_mmr(root, leaf_hash, &simplified)?)
+    ensure!(
+        verify_simplified_mmr(root, leaf_hash, &simplified)?,
+        "converted MMR proof validation failed"
+    );
+    Ok(simplified)
 }
 
 pub fn convert_mmr_proof(proof: &RuntimeLeafProof) -> Result<SimplifiedMmrProof> {
@@ -984,10 +994,13 @@ mod tests {
         let addresses = authority_addresses(&keys).expect("valid keys");
         let root = authority_root(&addresses).expect("root");
         for index in 0..keys.len() {
-            let proof = authority_proof(&keys, index).expect("proof");
+            let proof = authority_proof(&addresses, index).expect("proof");
             assert!(verify_authority_proof(&root, &proof, keys.len()));
         }
         assert!(authority_addresses(&[]).is_err());
+        assert!(authority_addresses(&[keys[0], keys[0]]).is_err());
+        assert!(authority_proof(&addresses, addresses.len()).is_err());
+        assert!(authority_proof(&[], 0).is_err());
         assert!(!verify_authority_proof(
             &root,
             &AuthorityProof {

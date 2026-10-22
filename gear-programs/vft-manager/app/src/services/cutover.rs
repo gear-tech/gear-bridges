@@ -358,17 +358,6 @@ pub(super) async fn upgrade(service: &mut VftManager, destination: ActorId) {
             service.state_mut().custody_completed.insert(token);
             continue;
         }
-        if service
-            .state()
-            .custody_latest
-            .get(&token)
-            .is_some_and(|&index| {
-                service.state().custody_transfers[index].outcome
-                    == CustodyTransferOutcome::Completed
-            })
-        {
-            panic!("Completed token has nonzero remaining custody");
-        }
         let reply = msg::send_bytes_with_gas_for_reply(
             token,
             Transfer::encode_call(destination, amount),

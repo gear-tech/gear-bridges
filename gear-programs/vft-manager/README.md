@@ -171,6 +171,10 @@ terminal attempts cannot be rewritten. Queries and transfers use the frozen
 configured token-operation gas, reply deposit and block deadline. A timeout
 ends only the wait, not original custody ownership. Lifecycle commands return
 unit; operators must read status to distinguish pending custody from retirement.
+A residual balance observed after a completed transfer can be swept by a later
+`Upgrade` to the same frozen successor. It appends a distinct child/amount/outcome
+without rewriting the completed original. In-flight or ambiguous children still
+fence another sweep, and retirement still requires every final balance to be zero.
 No new lifecycle events are invented: original settlement/request events remain
 unchanged, and lifecycle progress is read through these retained queries.
 

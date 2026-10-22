@@ -5783,6 +5783,52 @@ async fn test_custody_timeout_late_reply_and_concurrent_upgrade_keep_one_origina
 }
 
 #[tokio::test]
+async fn test_custody_donation_appends_residual_attempt_and_preserves_original() {
+    use vft_manager_client::{CustodyTransferOutcome, CutoverPhase};
+    let (remoting, source, destination, token) = custody_mailbox_fixture().await;
+    let amount = U256::from(17u32);
+    let donation = U256::from(3u32);
+    let mailbox = remoting.system().get_mailbox(token);
+    let mut success = vft_client::vft::io::Transfer::ROUTE.to_vec();
+    true.encode_to(&mut success);
+    start_custody_upgrade(&remoting, source, destination);
+    reply_custody_balance(&remoting, source, token, amount);
+    mailbox.reply_bytes(
+        custody_transfer_log(source, destination, token, amount), success.clone(), 0,
+    ).unwrap();
+    // The completed original has moved its custody, but an unsolicited balance
+    // arrives before the final zero check. Retirement must remain blocked.
+    reply_custody_balance(&remoting, source, token, donation);
+    let admin = VftManagerC::new(remoting.clone());
+    let original = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
+    assert_eq!(original.len(), 1);
+    assert_eq!(original[0].outcome, CustodyTransferOutcome::Completed);
+    assert_eq!(admin.cutover_status().recv(source).await.unwrap().phase, CutoverPhase::Transferring);
+
+    start_custody_upgrade(&remoting, source, destination);
+    reply_custody_balance(&remoting, source, token, donation);
+    let residual = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
+    assert_eq!(residual.len(), 2, "completed custody must not permanently fence residual sweeps");
+    assert_eq!(residual[0], original[0]);
+    assert_eq!(residual[1].token, token);
+    assert_eq!(residual[1].amount, donation);
+    assert_ne!(residual[1].child, original[0].child);
+    assert_eq!(residual[1].outcome, CustodyTransferOutcome::InFlight);
+    start_custody_upgrade(&remoting, source, destination);
+    for _ in 0..3 { remoting.run_next_block(); }
+    assert_eq!(admin.cutover_transfers(0, 10).recv(source).await.unwrap(), residual);
+    mailbox.reply_bytes(
+        custody_transfer_log(source, destination, token, donation), success, 0,
+    ).unwrap();
+    reply_custody_balance(&remoting, source, token, U256::zero());
+    let completed = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
+    assert_eq!(completed[0], original[0]);
+    assert_eq!(completed[1].child, residual[1].child);
+    assert_eq!(completed[1].outcome, CustodyTransferOutcome::Completed);
+    assert_eq!(admin.cutover_status().recv(source).await.unwrap().phase, CutoverPhase::Retired);
+}
+
+#[tokio::test]
 async fn test_custody_exact_false_archives_before_retry_and_malformed_true_stays_held() {
     for malformed in [false, true] {
         use vft_manager_client::CustodyTransferOutcome;

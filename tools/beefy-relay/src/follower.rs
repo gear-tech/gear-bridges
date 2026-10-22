@@ -5802,7 +5802,10 @@ mod tests {
             publisher["roots"] = json!({});
             let accepted = accepted_tx(&publisher, &ethereum, &advanced).await?
                 .context("latest native interactive anchor missing")?;
-            record_external_commitment(&mut ethereum, &approved_dir, &mut publisher,
+            // The child must own its writable archive; seed through a separate parent journal.
+            let seed_dir = approved_dir.join("parent-seed");
+            fs::create_dir(&seed_dir)?;
+            record_external_commitment(&mut ethereum, &seed_dir, &mut publisher,
                 &advanced, &advanced_proof, accepted).await?;
             let publication_block = advanced_proof.source;
             ensure!(publication_block > root_block, "new root smoke must not reuse the accepted original's height");

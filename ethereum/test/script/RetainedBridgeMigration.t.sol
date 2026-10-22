@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
@@ -8,8 +8,8 @@ import {MessageQueue} from "src/MessageQueue.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
-import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 import {

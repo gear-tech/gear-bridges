@@ -24,7 +24,7 @@ RUN cargo install wasm-opt
 
 # Install foundry
 RUN curl -L https://foundry.paradigm.xyz | bash && \
-    /root/.foundry/bin/foundryup --install v1.8.5
+    /root/.foundry/bin/foundryup --install v1.8.6
 ENV PATH="/root/.foundry/bin:${PATH}"
 
 COPY . .

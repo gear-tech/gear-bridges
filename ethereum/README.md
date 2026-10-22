@@ -191,7 +191,7 @@ validation cannot consume overlapping build-info; fixture cases reuse the cache.
 Existing test Anvils and public networks are not modified.
 Do not run two benchmark writers against the same output directory/build cache.
 
-Measured with Forge/Anvil 1.7.1, Solc 0.8.37, optimizer + via-IR, Osaka (2026-10-15):
+Measured with Forge/Anvil 1.7.1, Solc 0.8.38, optimizer + via-IR, Osaka (2026-10-15):
 
 | Signing validators | Selected signatures | First saved-fixture update | Ordinary update | Largest measured handover |
 |---:|---:|---:|---:|---:|
@@ -392,7 +392,7 @@ Use `script/RetainedBridgeMigration.sol:RetainedBridgeMigrationScript`, with
 same chain as `--rpc-url`. The fresh deployment entrypoint deliberately rejects
 this mode. Preparation, verification and reconciliation do not read a signing key.
 No replacement queue, manager, token or governance authority is deployed.
-Use Foundry v1.8.5, matching CI: v1.7.1 can compile the scripts but lacks their
+Use Foundry v1.8.6, matching CI: v1.7.1 can compile the scripts but lacks their
 required RPC cheatcode overload. Add `-vvvv` to preparation runs to inspect the
 `RetainedMigrationPrepared` event containing the migration calldata and upgrade payload.
 

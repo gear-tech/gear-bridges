@@ -167,7 +167,7 @@ def main():
             "sourceSha256": {str(path): hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in (
                 Path("src/beefy/BeefyClient.sol"), Path("src/MessageQueue.sol"), Path("src/ERC20Manager.sol"),
                 Path("script/BeefyFullTransactionBenchmark.s.sol"), Path("script/benchmark-full-transactions.py"))},
-            "compilerSettings": {"solc": "0.8.37", "viaIR": True, "optimizer": True, "evmVersion": "osaka"},
+            "compilerSettings": {"solc": "0.8.38", "viaIR": True, "optimizer": True, "evmVersion": "osaka"},
             "postState": {"queue": queue, "manager": manager, "token": token,
                           "message702Processed": True, "managerBalance": 20, "recipientBalance": 10},
             "measurements": rows, "allReceipts": all_receipts,

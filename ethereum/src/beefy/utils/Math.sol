@@ -3,7 +3,7 @@
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
 // Code from https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/math/Math.sol
 // Modified for the Vara bridge; upstream provenance and licenses: ethereum/README.md.
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 /**
  * @dev Standard math utilities missing in the Solidity language.

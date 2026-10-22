@@ -28,7 +28,7 @@ For a native build, install the toolchains used by the workspace:
 
 - Rust, using the repository's [rust-toolchain.toml](../rust-toolchain.toml).
 - Approved source/archive RPCs and independently reviewed deployment/bootstrap identities.
-- Foundry v1.8.5 (forge/cast, matching CI) for the Ethereum contracts and deployment tooling.
+- Foundry v1.8.6 (forge/cast, matching CI) for the Ethereum contracts and deployment tooling.
 - The native build dependencies listed in [Dockerfile](../Dockerfile), including a C compiler, OpenSSL development files, CMake, protobuf compiler, and Clang.
 
 The root README also calls out the [ring build instructions](https://github.com/gear-tech/ring/blob/main/BUILDING.md). Follow those instructions when a native build fails while compiling `ring`.

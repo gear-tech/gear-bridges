@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
@@ -65,10 +65,16 @@ contract ERC20ManagerTest is Test, Base {
         uint256 deadline = block.timestamp + 1;
         bytes32 digest = MessageHashUtils.toTypedDataHash(
             IERC20Permit(address(circleToken)).DOMAIN_SEPARATOR(),
-            keccak256(abi.encode(
-                keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
-                owner, address(erc20Manager), amount, nonce, deadline
-            ))
+            keccak256(
+                abi.encode(
+                    keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"),
+                    owner,
+                    address(erc20Manager),
+                    amount,
+                    nonce,
+                    deadline
+                )
+            )
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         for (uint256 variant; variant < 4; variant++) {
@@ -93,8 +99,7 @@ contract ERC20ManagerTest is Test, Base {
             Vm.Log[] memory logs = vm.getRecordedLogs();
             for (uint256 i; i < logs.length; i++) {
                 assertFalse(
-                    logs[i].emitter == address(erc20Manager)
-                        && logs[i].topics.length != 0
+                    logs[i].emitter == address(erc20Manager) && logs[i].topics.length != 0
                         && logs[i].topics[0] == IERC20Manager.BridgingRequested.selector
                 );
             }
@@ -166,9 +171,7 @@ contract ERC20ManagerTest is Test, Base {
                 address(wrappedVara), amount, bytes32(uint256(1)), address(bridgingPayment)
             );
         } else if (variant == 2) {
-            erc20Manager.requestBridgingWithPermit(
-                address(wrappedVara), amount, bytes32(uint256(1)), deadline, v, r, s
-            );
+            erc20Manager.requestBridgingWithPermit(address(wrappedVara), amount, bytes32(uint256(1)), deadline, v, r, s);
         } else {
             erc20Manager.requestBridgingPayingFeeWithPermit{value: fee}(
                 address(wrappedVara), amount, bytes32(uint256(1)), deadline, v, r, s, address(bridgingPayment)

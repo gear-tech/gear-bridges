@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {BeefyFixtureTest} from "./BeefyInterop.t.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
@@ -557,9 +557,8 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         bytes32 vftManager = bytes32(uint256(0x909));
         // This token-stack fixture needs its own native identity; the queue-only
         // governance above intentionally has no token stack.
-        GovernanceAdmin tokenAdmin = new GovernanceAdmin(
-            bytes32(uint256(33)), new WrappedVara(), queue, ERC20Manager(address(0))
-        );
+        GovernanceAdmin tokenAdmin =
+            new GovernanceAdmin(bytes32(uint256(33)), new WrappedVara(), queue, ERC20Manager(address(0)));
         ERC20Manager manager = ERC20Manager(
             address(
                 new ERC1967Proxy(

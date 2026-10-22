@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2023 Snowfork <hello@snowfork.com>
 // Code from https://github.com/ethereum/solidity-examples
 // Modified for the Vara bridge; upstream provenance and licenses: ethereum/README.md.
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 library Bits {
     uint256 internal constant ONE = uint256(1);

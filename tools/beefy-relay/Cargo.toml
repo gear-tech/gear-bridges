@@ -67,3 +67,4 @@ bridging-payment-client = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3.23.0"
+tokio-tungstenite = "0.26.2"

@@ -1538,7 +1538,8 @@ impl Ethereum {
         anchor: &CapturedCommitment,
         snapshot: &QueueSnapshot,
     ) -> Result<(u64, B256)> {
-        use alloy::sol_types::SolValue;
+        // Live callers also use this while the original is only mined. Do not
+        // turn their canonical-receipt check into a finalized-proof requirement.
         let receipt = self
             .api
             .raw_provider()
@@ -1566,13 +1567,90 @@ impl Ethereum {
             .context("accepted signed transaction unavailable; HOLD")?
             .into_inner();
         let raw = signed.encoded_2718();
-        let (_, identity) = signed_transaction(&raw, tx_hash, signed.nonce(), self.client_address)?;
         ensure!(
-            signed.chain_id() == Some(self.api.raw_provider().get_chain_id().await?)
-                && identity.from == receipt.from,
+            B256::from(keccak256(&raw)) == tx_hash,
+            "accepted signed transaction hash changed; HOLD"
+        );
+        let sender = self.validate_accepted_commitment(
+            &signed,
+            self.api.raw_provider().get_chain_id().await?,
+            receipt.status(),
+            receipt.as_ref().logs().iter().map(|log| &log.inner),
+            anchor,
+            snapshot,
+        )?;
+        ensure!(
+            sender == receipt.from,
             "accepted signed transaction changed sender or chain; HOLD"
         );
-        let call = validate_commitment_call(&signed, &anchor.raw)?;
+        self.verify_accepted_checkpoint(number, hash, anchor, snapshot).await
+    }
+
+    /// Authenticate a retained original without discovering its receipt, body or
+    /// transaction again. The caller supplies the exact journal entry and its
+    /// archive-backed finality view; corrupt evidence has no live fallback.
+    pub(crate) async fn verify_accepted_commitment_evidence(
+        &self,
+        tx_hash: B256,
+        raw: &[u8],
+        proof: &RecordedReceiptProof,
+        checkpoint: &ethereum_client::FinalityCheckpoint,
+        view: &mut ethereum_client::FinalizedView,
+        anchor: &CapturedCommitment,
+        snapshot: &QueueSnapshot,
+    ) -> Result<(u64, B256)> {
+        let (chain, genesis) = self.api.finality_identity()?;
+        ensure!(
+            checkpoint.chain_id == chain
+                && checkpoint.genesis_hash == genesis
+                && view.genesis_hash() == genesis
+                && checkpoint.common_header.number >= proof.header.number,
+            "retained commitment checkpoint identity or inclusion changed; HOLD"
+        );
+        view.verify_checkpoint(self.api.raw_provider(), checkpoint).await
+            .context("authenticate retained commitment checkpoint")?;
+        let number = proof.header.number;
+        let hash = proof.header.hash_slow();
+        view.verify_blocks(
+            self.api.raw_provider(),
+            &std::collections::BTreeMap::from([(number, hash)]),
+        ).await.context("authenticate retained commitment inclusion header")?;
+        proof.verify_original_inclusion(view, raw, tx_hash)?;
+        let mut encoded = raw;
+        let signed = TxEnvelope::decode_2718(&mut encoded)?;
+        ensure!(
+            encoded.is_empty() && signed.encoded_2718() == raw,
+            "retained commitment signed bytes are noncanonical; HOLD"
+        );
+        self.validate_accepted_commitment(
+            &signed,
+            chain,
+            proof.receipt.status(),
+            proof.receipt.logs().iter(),
+            anchor,
+            snapshot,
+        )?;
+        let included = self.verify_accepted_checkpoint(number, hash, anchor, snapshot).await?;
+        view.recheck(self.api.raw_provider()).await.context("recheck retained commitment finality pin")?;
+        Ok(included)
+    }
+
+    fn validate_accepted_commitment<'a>(
+        &self,
+        signed: &TxEnvelope,
+        chain: u64,
+        status: bool,
+        mut logs: impl Iterator<Item = &'a alloy::primitives::Log>,
+        anchor: &CapturedCommitment,
+        snapshot: &QueueSnapshot,
+    ) -> Result<Address> {
+        use alloy::sol_types::SolValue;
+        ensure!(
+            status && signed.to() == Some(self.client_address) && signed.chain_id() == Some(chain),
+            "accepted signed transaction changed client, chain or status; HOLD"
+        );
+        let sender = signed.recover_signer().context("invalid accepted transaction signature")?;
+        let call = validate_commitment_call(signed, &anchor.raw)?;
         ensure!(
             call.snapshot.abi_encode() == to_sol_snapshot(snapshot).abi_encode()
                 && call.leaf.parentNumber.checked_add(1) == Some(anchor.block)
@@ -1584,17 +1662,27 @@ impl Ethereum {
         );
         let event = B256::from(keccak256(b"NewMMRRoot(bytes32,uint64)"));
         ensure!(
-            receipt.as_ref().logs().iter().any(|log| {
-                let data = log.data().data.as_ref();
-                log.address() == self.client_address
-                    && log.topic0() == Some(&event)
-                    && log.topics().len() == 1
+            logs.any(|log| {
+                let data = log.data.data.as_ref();
+                log.address == self.client_address
+                    && log.data.topics().first() == Some(&event)
+                    && log.data.topics().len() == 1
                     && data.len() == 64
                     && data[..32] == anchor.validated.mmr_root
                     && U256::from_be_slice(&data[32..]) == U256::from(anchor.block)
             }),
             "accepted receipt does not authenticate source commitment"
         );
+        Ok(sender)
+    }
+
+    async fn verify_accepted_checkpoint(
+        &self,
+        number: u64,
+        hash: B256,
+        anchor: &CapturedCommitment,
+        snapshot: &QueueSnapshot,
+    ) -> Result<(u64, B256)> {
         let latest = self.checkpoint().await?;
         // Public Hoodi RPC prunes historical state; the unchanged latest checkpoint is equivalent.
         let checkpoint = if latest.block == u64::from(anchor.block) {
@@ -2532,6 +2620,9 @@ mod tests {
                 .collect::<Result<_>>()?,
             proof_order: freshness.proof_order.parse::<B256>()?.0,
         };
+        // Each independent fixture is a distinct chain, not a reorg sharing the
+        // process-wide genesis-keyed authenticated ancestry.
+        static FIXTURE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let anvil = Anvil::new()
             .host("127.0.0.1")
             .port(0u16)
@@ -2539,7 +2630,7 @@ mod tests {
             .arg("--slots-in-an-epoch")
             .arg("1")
             .arg("--timestamp")
-            .arg((snapshot.source_timestamp_ms / 1_000).to_string())
+            .arg((snapshot.source_timestamp_ms / 1_000 + 1 + FIXTURE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).to_string())
             .try_spawn()?;
         let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
         let queue: Address = case.destination_queue.parse()?;
@@ -2739,6 +2830,85 @@ mod tests {
             let original = recorded_commitment_transaction(&raw, &anchor.raw)?;
             assert_eq!(original.encoded_2718(), raw);
             assert_eq!(original.input()[..4], <BeefyClient::submitFinalCall as alloy::sol_types::SolCall>::SELECTOR);
+            let finalized = ethereum.api.get_finalized_receipt(hash).await
+                .context("retain interactive original receipt")?
+                .context("interactive original is not finalized")?;
+            let mut view = ethereum.api.verified_finalized_view().await.context("reopen interactive finality view")?;
+            assert_eq!(
+                ethereum.verify_accepted_commitment_evidence(
+                    hash, &raw, &finalized.inclusion, &finalized.checkpoint,
+                    &mut view, &anchor, &snapshot,
+                ).await?,
+                included,
+            );
+            for bad in [
+                {
+                    let mut bad = finalized.inclusion.clone();
+                    bad.receipt_proof.clear();
+                    bad
+                },
+                {
+                    let mut bad = finalized.inclusion.clone();
+                    bad.transaction_proof.clear();
+                    bad
+                },
+                {
+                    let mut bad = finalized.inclusion.clone();
+                    bad.raw_transaction.push(0);
+                    bad
+                },
+                {
+                    let mut bad = finalized.inclusion.clone();
+                    bad.index += 1;
+                    bad
+                },
+            ] {
+                assert!(ethereum.verify_accepted_commitment_evidence(
+                    hash, &raw, &bad, &finalized.checkpoint, &mut view, &anchor, &snapshot,
+                ).await.is_err());
+            }
+            let mut changed_raw = raw.clone();
+            changed_raw.push(0);
+            for (expected_hash, original_raw) in [(B256::ZERO, &raw), (hash, &changed_raw)] {
+                assert!(ethereum.verify_accepted_commitment_evidence(
+                    expected_hash, original_raw, &finalized.inclusion, &finalized.checkpoint,
+                    &mut view, &anchor, &snapshot,
+                ).await.is_err());
+            }
+            let mut changed_checkpoint = finalized.checkpoint.clone();
+            changed_checkpoint.chain_id += 1;
+            assert!(ethereum.verify_accepted_commitment_evidence(
+                hash, &raw, &finalized.inclusion, &changed_checkpoint,
+                &mut view, &anchor, &snapshot,
+            ).await.is_err());
+            let mut changed_snapshot = snapshot.clone();
+            changed_snapshot.source_timestamp_ms += 1;
+            assert!(ethereum.verify_accepted_commitment_evidence(
+                hash, &raw, &finalized.inclusion, &finalized.checkpoint,
+                &mut view, &anchor, &changed_snapshot,
+            ).await.is_err());
+            anchor.next.id += 1;
+            assert!(ethereum.verify_accepted_commitment_evidence(
+                hash, &raw, &finalized.inclusion, &finalized.checkpoint,
+                &mut view, &anchor, &snapshot,
+            ).await.is_err());
+            anchor.next.id -= 1;
+            let client = ethereum.client_address;
+            ethereum.client_address = Address::ZERO;
+            assert!(ethereum.verify_accepted_commitment_evidence(
+                hash, &raw, &finalized.inclusion, &finalized.checkpoint,
+                &mut view, &anchor, &snapshot,
+            ).await.is_err());
+            ethereum.client_address = client;
+            for (chain, status, logs) in [
+                (31_338, true, finalized.inclusion.receipt.logs()),
+                (31_337, false, finalized.inclusion.receipt.logs()),
+                (31_337, true, &[][..]),
+            ] {
+                assert!(ethereum.validate_accepted_commitment(
+                    &original, chain, status, logs.iter(), &anchor, &snapshot,
+                ).is_err());
+            }
         }
         Ok(())
     }

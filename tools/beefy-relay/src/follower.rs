@@ -4340,6 +4340,13 @@ mod tests {
                 B256::from(array::<32>(&intent["acceptedCheckpoint"]["blockHash"])?),
             ),
         );
+        let retained_anchor = journal["commitments"].as_array().context("commitments missing")?
+            .iter().find(|entry| commitment_transaction(entry).is_ok_and(|tx| tx["txHash"] == published["acceptedAnchorTx"]))
+            .context("original accepted anchor missing")?;
+        let source = Source::connect(GearApi::new(&std::env::var("BEEFY_TEST_SOURCE_RPC")?, 3).await?).await?;
+        let captured_anchor = source.recapture(anchor.0, decode(&retained_anchor["rawScale"])?).await?;
+        let newest = source.proof(captured_anchor.block - 1, &captured_anchor).await?;
+        let publisher_state = fixture.join("follower-original.json");
         for _ in 0..2 {
             let outcome = tokio::time::timeout(
                 std::time::Duration::from_secs(25),
@@ -4351,6 +4358,7 @@ mod tests {
                     "merkleRoot",
                     root,
                     anchor,
+                    (&publisher_state, retained_anchor, &captured_anchor, &newest.snapshot),
                 ),
             )
             .await
@@ -4469,6 +4477,7 @@ mod tests {
             "merkleRoot",
             root,
             anchor,
+            (&publisher_state, retained_anchor, &captured_anchor, &newest.snapshot),
         )
         .await?;
         ensure!(
@@ -4597,7 +4606,7 @@ mod tests {
             atomic::{AtomicUsize, Ordering},
             Arc,
         };
-        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+        use futures::{SinkExt, StreamExt};
 
         // Forward the owned fixture's existing transports; these are not
         // operationally independent production providers.
@@ -4613,7 +4622,7 @@ mod tests {
                 reject_receipts: bool,
             ) -> Result<Self> {
                 let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-                let url = format!("http://{}", listener.local_addr()?);
+                let url = format!("ws://{}", listener.local_addr()?);
                 let blocked_receipts = Arc::new(AtomicUsize::new(0));
                 let blocked = blocked_receipts.clone();
                 let server = tokio::spawn(async move {
@@ -4625,28 +4634,22 @@ mod tests {
                                 let upstream = upstream.clone();
                                 let blocked = blocked.clone();
                                 clients.spawn(async move {
-                                    let mut stream = BufReader::new(stream);
-                                    let mut length = None;
-                                    loop {
-                                        let mut line = String::new();
-                                        // Anvil may close an idle connection without sending a request.
-                                        if stream.read_line(&mut line).await? == 0 {
-                                            return Ok(());
-                                        }
-                                        if line == "\r\n" {
-                                            break;
-                                        }
-                                        if let Some((name, value)) = line.split_once(':') {
-                                            if name.eq_ignore_ascii_case("content-length") {
-                                                length = Some(value.trim().parse::<usize>()?);
-                                            }
-                                        }
-                                    }
-                                    let mut body = vec![0; length.context("RPC content length missing")?];
-                                    stream.read_exact(&mut body).await?;
-                                    let request: Value = serde_json::from_slice(&body)?;
+                                    let mut stream = tokio_tungstenite::accept_async(stream).await?;
+                                    while let Some(message) = stream.next().await {
+                                        let message = match message {
+                                            Ok(message) => message,
+                                            Err(tokio_tungstenite::tungstenite::Error::Protocol(
+                                                tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+                                            )) => break,
+                                            Err(error) => return Err(error.into()),
+                                        };
+                                        if message.is_close() { break; }
+                                        if !message.is_text() { continue; }
+                                        let request: Value = serde_json::from_str(message.to_text()?)?;
                                     let method = request["method"].as_str().context("RPC method missing")?;
-                                    let response = if reject_receipts && method == "eth_getTransactionReceipt" {
+                                    let unavailable = matches!(method, "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getBlockReceipts")
+                                        || (matches!(method, "eth_getBlockByHash" | "eth_getBlockByNumber") && request["params"][1] == true);
+                                    let response = if reject_receipts && unavailable {
                                         blocked.fetch_add(1, Ordering::SeqCst);
                                         json!({"jsonrpc":"2.0", "id":request["id"],
                                             "error":{"code":-32000, "message":"receipt bodies unavailable"}})
@@ -4655,14 +4658,10 @@ mod tests {
                                             .request(method.to_owned(), request["params"].clone()).await?;
                                         json!({"jsonrpc":"2.0", "id":request["id"], "result":result})
                                     };
-                                    let body = serde_json::to_vec(&response)?;
-                                    let headers = format!(
-                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                                        body.len()
-                                    );
-                                    stream.get_mut().write_all(headers.as_bytes()).await?;
-                                    stream.get_mut().write_all(&body).await?;
-                                    stream.get_mut().shutdown().await?;
+                                        stream.send(tokio_tungstenite::tungstenite::Message::Text(
+                                            serde_json::to_string(&response)?.into(),
+                                        )).await?;
+                                    }
                                     Ok::<_, anyhow::Error>(())
                                 });
                             }
@@ -4754,6 +4753,10 @@ mod tests {
                 );
             }
             let proof = source.proof(anchor.block - 1, &anchor).await?;
+            let destination_time = provider.get_block_by_number(alloy::eips::BlockNumberOrTag::Latest)
+                .await?.context("fixture destination head missing")?.header.timestamp;
+            provider.client().request::<_, Value>("evm_setNextBlockTimestamp",
+                (proof.snapshot.source_timestamp_ms.div_ceil(1_000).max(destination_time + 1),)).await?;
             state["submission"] = json!({"blockHash": bytes(anchor.block_hash), "root": bytes(anchor.validated.mmr_root)});
             let interrupted = ethereum
                 .submit_commitment(
@@ -5149,11 +5152,88 @@ mod tests {
         );
         crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
         state["roots"] = roots.clone();
+        let advanced = loop {
+            let candidate = source.next_commitment().await?;
+            if candidate.block > root_anchor.block { break candidate; }
+        };
+        let advanced_proof = source.proof(advanced.block - 1, &advanced).await?;
+        let destination_time = provider.get_block_by_number(alloy::eips::BlockNumberOrTag::Latest)
+            .await?.context("fixture destination head missing")?.header.timestamp;
+        provider.client().request::<_, Value>("evm_setNextBlockTimestamp",
+            (advanced_proof.snapshot.source_timestamp_ms.div_ceil(1_000).max(destination_time + 1),)).await?;
+        ethereum.submit_interactive_fixture(&advanced, &advanced_proof.leaf,
+            &advanced_proof.snapshot, &advanced_proof.simplified).await?;
+        ensure!(ethereum.checkpoint().await?.block > u64::from(root_anchor.block),
+            "root recovery fixture did not advance past the original anchor");
 
         {
+            use std::os::unix::fs::PermissionsExt;
+            alloy::sol! {
+                #[sol(rpc)]
+                interface RecoveryGovernance {
+                    function erc20Manager() external view returns (address);
+                }
+                #[sol(rpc)]
+                interface RecoveryManager {
+                    function vftManagers() external view returns (bytes32[] memory);
+                }
+            }
             let restart_directory = tempfile::tempdir()?;
-            let restart_path = restart_directory.path().join("original.json");
+            let restart_path = restart_directory.path().join("root-publications/original.json");
+            fs::create_dir_all(restart_path.parent().context("root directory")?)?;
+            let publisher_state = restart_directory.path().join("state.json");
+            let manifest_path = restart_directory.path().join("deployment.json");
+            let wallet_path = restart_directory.path().join("wallet.json");
+            fs::write(&wallet_path, serde_json::to_vec(&json!({
+                "address":format!("{root_sender:#x}"),"private_key":format!("0x{}",hex::encode([19u8;32]))
+            }))?)?;
+            fs::set_permissions(&wallet_path, fs::Permissions::from_mode(0o600))?;
+            let (chain_id, genesis) = ethereum.api.finality_identity()?;
+            let fixture = crate::ethereum::OwnedFixtureNetwork {
+                schema_version: 1, ethereum_chain_id: chain_id, ethereum_genesis_hash: genesis,
+                // Only the existing owned-Anvil approval path is under test here;
+                // this marker is not Beacon-finality qualification.
+                beacon_genesis_validators_root: B256::from([1;32]), beacon_genesis_time: 1,
+            };
+            let governance = queue.governanceAdmin().call().await?;
+            let manager = RecoveryGovernance::new(governance, provider.clone()).erc20Manager().call().await?;
+            let gear_managers = RecoveryManager::new(manager, provider.clone()).vftManagers().call().await?;
+            let mock_receiver = std::mem::replace(&mut ethereum.receiver_address, manager);
+            let mut token_ethereum = ethereum.manifest().await?;
+            ethereum.receiver_address = mock_receiver;
+            token_ethereum["sourceGenesis"] = json!(bytes(source.source_genesis));
+            let token_deployment = json!({
+                "mode":"hoodi-token-stack","localRehearsal":false,"ownedFixtureNetwork":fixture,
+                "gearManager":format!("{:#x}",gear_managers.first().context("fixture VFT manager missing")?),
+                "anchor":{"sourceGenesis":bytes(source.source_genesis),"bridgeDomain":bytes(source.bridge_domain),"sourceIdentity":source.identity},
+                "ethereum":token_ethereum
+            });
+            fs::write(&manifest_path, serde_json::to_vec(&token_deployment)?)?;
+            let registration = json!({
+                "status":"pending","publication":restart_path,"block":root_block,"blockHash":bytes(root_proof.source_hash),
+                "queueId":root_proof.snapshot.queue_id,"kind":"merkleRoot","queueRoot":bytes(expected_root)
+            });
+            let mut publisher = state.clone();
+            publisher["mode"] = json!("hoodi-token-follow");
+            publisher["localRehearsal"] = json!(false);
+            publisher["deployment"] = token_deployment.clone();
+            publisher["activeEthereum"] = token_ethereum;
+            publisher["followerSigner"] = json!(format!("{:#x}",provider.default_signer_address()));
+            publisher["rootPublisherSigner"] = json!(format!("{root_sender:#x}"));
+            publisher["roots"] = json!({"original":registration});
+            fs::write(&publisher_state, serde_json::to_vec(&publisher)?)?;
+            let anchor_entry = &publisher["commitments"][2];
+            let anchor_tx = B256::from(array::<32>(&anchor_entry["txHash"])?);
+            let cache_name = format!("{}.json",hex::encode(anchor_tx));
+            let retained_dir = restart_directory.path().join("finality-history/receipts");
+            fs::create_dir_all(&retained_dir)?;
+            fs::copy(directory.join("finality-history/receipts").join(&cache_name), retained_dir.join(&cache_name))?;
+            let anchor_newest = source.proof(root_anchor.block - 1, &root_anchor).await?;
+            let anchor_pins = (root_anchor.block, root_anchor.validated.mmr_root, anchor_tx,
+                (number(&anchor_entry["destinationBlock"])?, B256::from(array::<32>(&anchor_entry["destinationHash"])?)));
             let mut restart_intent = root_intent.clone();
+            restart_intent["localRehearsal"] = json!(false);
+            restart_intent["ownedFixtureNetwork"] = serde_json::to_value(&fixture)?;
             restart_intent["publicationReceipt"] = json!({
                 "block": finalized_root.included_block_number,
                 "blockHash": format!("{:#x}", finalized_root.included_block_hash),
@@ -5170,7 +5250,7 @@ mod tests {
             let primary_rpc = RecoveryRpc::new(provider.root().clone(), true).await?;
             let witness_rpc =
                 RecoveryRpc::new(ethereum.api.raw_witness_provider()?.clone(), false).await?;
-            let (chain_id, genesis) = ethereum.api.finality_identity()?;
+            let source_witness_rpc = std::env::var("BEEFY_TEST_WITNESS_RPC")?;
             let restarted_api = ethereum_client::EthApi::new(
                 &primary_rpc.url,
                 &format!("{:#x}", ethereum.queue_address),
@@ -5191,6 +5271,21 @@ mod tests {
                     )
                     .await?,
                     "finalized original was archived on restart"
+                );
+                ensure!(
+                    crate::root_publication::wait_for_root_receipt(
+                        &ethereum, &restart_path, &mut restart_intent, root_block, "merkleRoot",
+                        expected_root, anchor_pins, (&publisher_state, anchor_entry, &root_anchor, &anchor_newest.snapshot),
+                    ).await? == crate::root_publication::RootPublicationState::Accepted,
+                    "waiting entrypoint did not accept the retained finalized original"
+                );
+                ensure!(
+                    crate::root_publication::publish_root_locked(
+                        &rpc, &source_witness_rpc, &primary_rpc.url, &witness_rpc.url,
+                        &wallet_path, &manifest_path, &publisher_state, &registration, &restart_path,
+                        Some(&fixture), crate::ethereum::PublicEthereumNetwork::Hoodi,
+                    ).await? == crate::root_publication::RootPublicationState::Accepted,
+                    "full publisher did not recover the retained original"
                 );
                 ensure!(
                     restart_intent == saved_intent && fs::read(&restart_path)? == saved_bytes,
@@ -5227,6 +5322,20 @@ mod tests {
                     && fs::read(&corrupt_path)? == corrupt_bytes
                     && primary_rpc.blocked_receipts.load(Ordering::SeqCst) == 0,
                 "corrupt proof rewrote the original or fell back to receipt bodies"
+            );
+            let corrupt_anchor_path = retained_dir.join(&cache_name);
+            let original_anchor_bytes = fs::read(&corrupt_anchor_path)?;
+            let mut corrupt_anchor: Value = serde_json::from_slice(&original_anchor_bytes)?;
+            corrupt_anchor["proof"] = json!({});
+            fs::write(&corrupt_anchor_path, serde_json::to_vec(&corrupt_anchor)?)?;
+            ensure!(
+                crate::root_publication::publish_root_locked(
+                    &rpc, &source_witness_rpc, &primary_rpc.url, &witness_rpc.url,
+                    &wallet_path, &manifest_path, &publisher_state, &registration, &restart_path,
+                    Some(&fixture), crate::ethereum::PublicEthereumNetwork::Hoodi,
+                ).await.is_err() && fs::read(&restart_path)? == saved_bytes
+                    && primary_rpc.blocked_receipts.load(Ordering::SeqCst) == 0,
+                "corrupt anchor proof triggered fallback or changed the signed original"
             );
             ethereum.api = original_api;
         }

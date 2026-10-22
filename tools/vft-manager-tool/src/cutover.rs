@@ -5934,9 +5934,11 @@ mod tests {
     async fn legacy_work_requalification_checks_every_fence_and_archives_exact_bytes() -> Result<()> {
         let (mut work, chain) = interrupted_coverage_fixture().await;
         let rpc = WorkEvidenceRpc::new(chain.clone()).await;
+        let witness = WorkEvidenceRpc::new(chain.clone()).await;
         let beacon = work_beacon_fixture(&chain).await?;
         let eth = PollingEthApi::new(&rpc.url).await?
-            .with_beacon_finality(beacon.config.clone(), &beacon.directory).await?;
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory).await?
+            .with_data_witness(&witness.url, 31337, chain[0].hash.0.into()).await?;
         let mut view = eth.verified_finalized_view().await?;
         let header = chain.last().unwrap().header.clone();
         work.schema_version = 3;

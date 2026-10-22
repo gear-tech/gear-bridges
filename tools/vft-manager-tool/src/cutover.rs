@@ -871,12 +871,7 @@ async fn authenticate_work_ethereum(
     let mut recovered = Vec::with_capacity(missing.len());
     if !missing.is_empty() {
         view.verify_blocks(&**eth, &missing).await?;
-        let started = std::time::Instant::now();
         for (number, hash) in missing {
-            ensure!(
-                started.elapsed() < Duration::from_secs(300),
-                "HOLD: mutable coverage recovery deadline exhausted"
-            );
             recovered.push(seal::fetch_covered_block(eth, number, hash).await?);
         }
     }
@@ -6469,6 +6464,10 @@ mod tests {
 
     impl WorkEvidenceRpc {
         async fn new(chain: Vec<CoveredBlock>) -> Self {
+            Self::with_body_delay(chain, Duration::ZERO).await
+        }
+
+        async fn with_body_delay(chain: Vec<CoveredBlock>, delay: Duration) -> Self {
             use serde_json::{json, Value};
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -6520,12 +6519,19 @@ mod tests {
                         };
                         observed.lock().unwrap().push(request.clone());
                         let params = &request["params"];
+                        if !delay.is_zero()
+                            && (request["method"] == "eth_getBlockReceipts"
+                                || (request["method"] == "eth_getBlockByHash"
+                                    && params[1] == true))
+                        {
+                            tokio::time::sleep(delay).await;
+                        }
                         let result = match request["method"].as_str().unwrap() {
                             "eth_chainId" => json!("0x1"),
                             "eth_getBlockByNumber" | "eth_getBlockByHash" => {
                                 let block = if request["method"] == "eth_getBlockByNumber" {
                                     let number = if params[0] == "finalized" {
-                                        8
+                                        chain.last().unwrap().number
                                     } else {
                                         u64::from_str_radix(
                                             params[0].as_str().unwrap().trim_start_matches("0x"),
@@ -6599,6 +6605,70 @@ mod tests {
                 server,
             }
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "exercises real elapsed recovery beyond the former 300-second deadline"]
+    async fn long_legacy_coverage_restarts_after_body_pruning() -> Result<()> {
+        let (mut work, fixture) = interrupted_coverage_fixture().await;
+        let mut chain = Vec::with_capacity(101);
+        let mut parent = H256::zero();
+        for number in 0..=100 {
+            let mut block = fixture[0].clone();
+            block.number = number;
+            block.parent_hash = parent;
+            block.header.number = number;
+            block.header.parent_hash = parent.0.into();
+            block.header.timestamp = number * 12;
+            block.hash = H256(block.header.hash_slow().0);
+            parent = block.hash;
+            chain.push(block);
+        }
+        let primary = WorkEvidenceRpc::with_body_delay(
+            chain.clone(), Duration::from_millis(1_600),
+        ).await;
+        let witness = WorkEvidenceRpc::new(chain.clone()).await;
+        let eth = PollingEthApi::new(&primary.url).await?
+            .with_finality_witness(&witness.url, 1, chain[0].hash.0.into()).await?;
+        let mut view = eth.verified_finalized_view().await?;
+        work.intent.boundary.execution_number = 100;
+        work.intent.boundary.execution_hash = chain[100].hash;
+        work.intent.boundary_execution_timestamp = 1_200;
+        work.intent.boundary.slot = 3_000;
+        work.intent.old_identity.ethereum_genesis_hash = chain[0].hash;
+        let started = std::time::Instant::now();
+        work.blocks = seal::reconstruct_coverage(
+            &eth, &mut view, &work.intent.boundary, chain[0].hash,
+        ).await?;
+        assert!(started.elapsed() > Duration::from_secs(300));
+        assert_eq!(work.blocks.len(), chain.len());
+        for (actual, expected) in work.blocks.iter().zip(&chain) {
+            assert_eq!(actual.header, expected.header);
+            assert_eq!(actual.hash, expected.hash);
+        }
+        work.schema_version = 3;
+        work.ethereum_authentication = Some(view.checkpoint().clone());
+        work.admissions.clear();
+        let directory = std::env::temp_dir().join(format!("cutover-long-{}", Uuid::now_v7()));
+        fs::create_dir(&directory)?;
+        let path = work_path(&directory);
+        save(&path, &work)?;
+        let original = fs::read(&path)?;
+        primary.bodies.lock().unwrap().clear();
+        witness.bodies.lock().unwrap().clear();
+        primary.requests.lock().unwrap().clear();
+        let mut restarted = read_work(&path)?;
+        authenticate_work_ethereum(&eth, &mut view, &mut restarted).await?;
+        assert_eq!(serde_json::to_vec(&restarted)?, original);
+        assert_eq!(fs::read(&path)?, original);
+        assert!(primary.requests.lock().unwrap().iter().all(|request|
+            request["method"] != "eth_getBlockReceipts"
+                && !(request["method"] == "eth_getBlockByHash"
+                    && request["params"][1] == true)));
+        println!("Recovered all 101 legacy blocks in {:.2}s; retained restart used no bodies",
+            started.elapsed().as_secs_f64());
+        fs::remove_dir_all(directory)?;
+        Ok(())
     }
 
     async fn assert_interrupted_coverage_recovers_without_unneeded_bodies(

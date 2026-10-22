@@ -218,6 +218,11 @@ only when the source is already `Retired` at the same finalized Gear hash used
 to read wrapper obligations. Zero blocking obligations remain mandatory in every
 phase. Retained role originals are reconciled and persisted before role guards.
 
+Legacy missing coverage reconstructs every block from genesis through the frozen
+boundary without an aggregate recovery deadline. Individual full-block and receipt
+requests retain their ten-second limits. Recovering a missing admitted block does
+not advance the scanned prefix or certify unrecorded sibling deposits.
+
 
 Local regression command (actual gtest WASM, no node required):
 `cargo test --release -p tests vft_manager::gtest:: -- --test-threads=1`.

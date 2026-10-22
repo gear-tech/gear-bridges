@@ -300,20 +300,14 @@ pub async fn reconstruct_coverage(
     boundary: &CutoverBoundary,
     genesis: H256,
 ) -> Result<Vec<CoveredBlock>> {
-    use std::time::{Duration, Instant};
     view.verify_blocks(
         &**eth,
         &BTreeMap::from([(boundary.execution_number, boundary.execution_hash.0.into())]),
     )
     .await?;
-    let started = Instant::now();
     let mut hash = alloy_primitives::B256::from(boundary.execution_hash.0);
     let mut blocks = Vec::new();
     for number in (0..=boundary.execution_number).rev() {
-        anyhow::ensure!(
-            started.elapsed() < Duration::from_secs(300),
-            "HOLD: legacy coverage reconstruction deadline exhausted"
-        );
         let covered = fetch_covered_block(eth, number, hash).await?;
         hash = covered.header.parent_hash;
         blocks.push(covered);

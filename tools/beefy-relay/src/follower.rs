@@ -5811,6 +5811,9 @@ mod tests {
             let signer = alloy::signers::local::PrivateKeySigner::from_bytes(&B256::from([18;32]))?;
             let sender = signer.address();
             provider.client().request::<_, Value>("anvil_setBalance", (sender, "0xde0b6b3a7640000")).await?;
+            // Anvil's direct balance edit changes the current block's proof database.
+            // Finalize a mined post-funding state before the child authenticates accounts.
+            provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
             let wallet = approved_dir.join("wallet.json");
             fs::write(&wallet, serde_json::to_vec(&json!({"address":format!("{sender:#x}"),
                 "private_key":format!("0x{}",hex::encode([18u8;32]))}))?)?;

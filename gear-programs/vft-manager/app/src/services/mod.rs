@@ -1,6 +1,7 @@
 use ::gstd::{static_mut, static_ref};
 use gstd::exec::{self};
 use sails_rs::{
+    calls::ActionIo,
     gstd::{self, msg},
     prelude::*,
 };
@@ -23,6 +24,25 @@ mod request_bridging;
 pub mod submit_receipt;
 
 pub use submit_receipt::{abi as eth_abi, ReceiptRejectionEvidence};
+
+fn decode_complete_reply<Action: ActionIo>(
+    bytes: &[u8],
+    map_decode_error: impl FnOnce(sails_rs::errors::Error) -> Error,
+) -> Result<Action::Reply, Error>
+where
+    Action::Reply: Encode,
+{
+    let reply = Action::decode_reply(bytes).map_err(map_decode_error)?;
+    let route_len = if Action::is_empty_tuple::<Action::Reply>() {
+        0
+    } else {
+        Action::ROUTE.len()
+    };
+    if bytes.len() != route_len + reply.encoded_size() {
+        return Err(Error::InvalidReply);
+    }
+    Ok(reply)
+}
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
 /// Two days at Vara's three-second block time.

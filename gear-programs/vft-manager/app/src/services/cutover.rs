@@ -1,6 +1,6 @@
-use super::{Config, TokenSupply, VftManager};
+use super::{decode_complete_reply, Config, Error, TokenSupply, VftManager};
 use ethereum_common::{hash_db::Hasher, keccak_hasher::KeccakHasher};
-use sails_rs::{calls::ActionIo, gstd::msg, prelude::*};
+use sails_rs::{gstd::msg, prelude::*};
 use vft_client::vft::io::{BalanceOf, Transfer};
 
 #[derive(Clone, Copy, Debug, Default, Encode, Decode, TypeInfo, PartialEq, Eq)]
@@ -302,13 +302,8 @@ async fn balance(token: ActorId, config: &Config) -> U256 {
     .expect("Balance query timeout installation failed")
     .await
     .expect("Balance query failed");
-    let amount = BalanceOf::decode_reply(&bytes).expect("Invalid balance reply");
-    assert_eq!(
-        bytes.len(),
-        BalanceOf::ROUTE.len() + amount.encoded_size(),
-        "Trailing balance bytes"
-    );
-    amount
+    decode_complete_reply::<BalanceOf>(&bytes, |error| panic!("Invalid balance reply: {error:?}"))
+        .expect("Trailing balance bytes")
 }
 
 pub(super) async fn upgrade(service: &mut VftManager, destination: ActorId) {
@@ -439,9 +434,7 @@ pub fn handle_upgrade_reply() {
     let outcome = match msg::reply_code() {
         Ok(ReplyCode::Error(_)) => CustodyTransferOutcome::Rejected,
         Ok(ReplyCode::Success(_)) => match msg::load_bytes().ok().and_then(|bytes| {
-            Transfer::decode_reply(&bytes)
-                .ok()
-                .filter(|reply| bytes.len() == Transfer::ROUTE.len() + reply.encoded_size())
+            decode_complete_reply::<Transfer>(&bytes, |_| Error::InvalidReply).ok()
         }) {
             Some(true) => CustodyTransferOutcome::Completed,
             Some(false) => CustodyTransferOutcome::Rejected,

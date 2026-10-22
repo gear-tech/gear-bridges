@@ -1,4 +1,4 @@
-use crate::services::{Config, Error};
+use crate::services::{decode_complete_reply, Config, Error};
 use core::cell::Cell;
 use gstd::{errors::Error as GStdError, msg};
 use sails_rs::{calls::ActionIo, prelude::*, rc::Rc};
@@ -164,7 +164,7 @@ where
     if !authenticated {
         return Err(Error::InvalidReply);
     }
-    decode_complete::<Action>(&bytes)
+    decode_complete_reply::<Action>(&bytes, |e| Error::Internal(format!("{e:?}")))
 }
 
 async fn send<Action>(
@@ -263,12 +263,12 @@ pub fn handle_persistent_reply() {
         }
         let bytes = msg::load_bytes().map_err(|e| Error::GasForReplyTooLow(format!("{e:?}")))?;
         match data.action {
-            ChildAction::Mint => decode_complete::<Mint>(&bytes).map(|_| false),
-            ChildAction::Unlock => decode_complete::<TransferFrom>(&bytes)?
+            ChildAction::Mint => decode_complete_reply::<Mint>(&bytes, |e| Error::Internal(format!("{e:?}"))).map(|_| false),
+            ChildAction::Unlock => decode_complete_reply::<TransferFrom>(&bytes, |e| Error::Internal(format!("{e:?}")))?
                 .then_some(false)
                 .ok_or(Error::TokenOperationRejected),
             ChildAction::Native => {
-                let r = decode_complete::<RedeemEscrow>(&bytes)?;
+                let r = decode_complete_reply::<RedeemEscrow>(&bytes, |e| Error::Internal(format!("{e:?}")))?;
                 if (r.from, r.to, r.amount) != (Syscall::program_id(), data.receiver, data.amount)
                     || r.child.is_zero()
                     || r.child == child
@@ -322,22 +322,6 @@ pub fn handle_persistent_reply() {
     } else if let Some((payout_child, returned_value)) = refund {
         super::emit_refunded(key, log_index, payout_child, returned_value);
     }
-}
-
-fn decode_complete<Action: ActionIo>(bytes: &[u8]) -> Result<Action::Reply, Error>
-where
-    Action::Reply: Encode,
-{
-    let reply = Action::decode_reply(bytes).map_err(|e| Error::Internal(format!("{e:?}")))?;
-    let route_len = if Action::is_empty_tuple::<Action::Reply>() {
-        0
-    } else {
-        Action::ROUTE.len()
-    };
-    if bytes.len() != route_len + reply.encoded_size() {
-        return Err(Error::InvalidReply);
-    }
-    Ok(reply)
 }
 
 pub(super) async fn mint_log(
@@ -559,25 +543,25 @@ mod tests {
 
     #[test]
     fn complete_reply_decoding_preserves_unit_wire_and_rejects_trailing_native_state() {
-        assert_eq!(decode_complete::<Mint>(&[]), Ok(()));
+        assert_eq!(decode_complete_reply::<Mint>(&[], |e| Error::Internal(format!("{e:?}"))), Ok(()));
         assert_eq!(
-            decode_complete::<Mint>(Mint::ROUTE),
+            decode_complete_reply::<Mint>(Mint::ROUTE, |e| Error::Internal(format!("{e:?}"))),
             Err(Error::InvalidReply)
         );
         let mut unlock_false = TransferFrom::ROUTE.to_vec();
         false.encode_to(&mut unlock_false);
-        assert_eq!(decode_complete::<TransferFrom>(&unlock_false), Ok(false));
+        assert_eq!(decode_complete_reply::<TransferFrom>(&unlock_false, |e| Error::Internal(format!("{e:?}"))), Ok(false));
         unlock_false.push(0);
         assert_eq!(
-            decode_complete::<TransferFrom>(&unlock_false),
+            decode_complete_reply::<TransferFrom>(&unlock_false, |e| Error::Internal(format!("{e:?}"))),
             Err(Error::InvalidReply),
         );
         let mut reply = GetRedemption::ROUTE.to_vec();
         None::<Redemption>.encode_to(&mut reply);
-        assert_eq!(decode_complete::<GetRedemption>(&reply), Ok(None));
+        assert_eq!(decode_complete_reply::<GetRedemption>(&reply, |e| Error::Internal(format!("{e:?}"))), Ok(None));
         reply.push(0);
         assert_eq!(
-            decode_complete::<GetRedemption>(&reply),
+            decode_complete_reply::<GetRedemption>(&reply, |e| Error::Internal(format!("{e:?}"))),
             Err(Error::InvalidReply)
         );
     }

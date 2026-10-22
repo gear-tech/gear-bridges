@@ -1965,6 +1965,7 @@ mod tests {
                 first.finalized_height,
                 started.elapsed().as_millis()
             );
+            println!("source-catchup original_scan={}", fs::read_to_string(&path)?);
 
             // Lose the caller before it journals acceptance; only the scan file survives.
             drop(source);
@@ -2026,6 +2027,7 @@ mod tests {
                 previous_block = next.block;
                 previous_set = set;
             }
+            println!("source-catchup final_scan={}", fs::read_to_string(&path)?);
             Ok::<(), anyhow::Error>(())
         })
         .await

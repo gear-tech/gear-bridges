@@ -1139,13 +1139,17 @@ async fn revalidate_terminal_roots(
     Ok(())
 }
 
-async fn reconcile_root_original(
+pub(crate) async fn reconcile_root_original(
     ethereum: &crate::ethereum::Ethereum,
     output: &Path,
     intent: &mut Value,
 ) -> Result<bool> {
     use alloy::providers::Provider;
     if intent["txHash"].is_null() {
+        return Ok(false);
+    }
+    if intent["publicationReceipt"]["finalized"] == true {
+        validate_root_publication(ethereum, output, intent).await?;
         return Ok(false);
     }
     let signed = signed_publication_identity(intent, ethereum.queue_address)?;

@@ -131,6 +131,8 @@ Use `beefy-relay tokens-history-audit` to authenticate retained follower history
 
 A standalone `tokens-publish-root` must use the original follower registration, publisher state, wallet identity and registered output path. Stop the existing owner first; the deployment lock is exclusive. Preserve all inventoried publications and unresolved nonce ownership. See [Merkle roots](merkle-roots.md) for the executable command shape and finalized acceptance distinctions.
 
+A finalized original root publication is recovered from its retained receipt proof, inclusion, checkpoint and signed transaction, with canonical header/ancestry and historical-state validation. Recovery does not fetch a fresh receipt body or reinterpret the original as nonce-consumed; repeated reconciliation preserves the intent and original ownership. Missing or corrupt retained evidence, or a changed pinned inclusion, remains HOLD. Preserve the original journal and proof material rather than replacing, relabeling or re-signing it.
+
 New commitment and root-publication requests bind the configured finality chain before signing. Before signed bytes enter a journal, the relay checks the recovered sender, reserved nonce, destination and original call semantics; root calls also require exact calldata and zero value. A failed check preserves the unsigned nonce reservation and does not broadcast. Resuming a commitment checks the original signed chain against that same configured identity, not a fresh RPC chain-ID response. A wrong-chain original remains HOLD: do not relabel, delete or re-sign it.
 
 ## Monitoring and common holds

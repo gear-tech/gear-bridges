@@ -3502,11 +3502,134 @@ mod tests {
                     "initialBlock":initial.block,"candidateBlock":candidate.block,
                     "sameSetSkipped":skipped,"authoritySet":candidate.current.id,
                     "candidateHash":bytes(candidate.block_hash),"idlePaidUpdates":0,
+                    "freshness":freshness_evidence(&proof)?,
+                    "signedCommitmentScale":bytes(&candidate.raw),"mmrRoot":bytes(candidate.validated.mmr_root),
                     "coveringDemandAccepted":true,"sourceWrites":false,"ethereumWrites":false})
                 );
                 return Ok(());
             }
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires paired owned native empty-queue archives, original bootstrap, and owned Anvil"]
+    async fn live_native_empty_heartbeat_before_original_expiry() -> Result<()> {
+        let rpc = std::env::var("BEEFY_TEST_SOURCE_RPC")?;
+        let witness_rpc = std::env::var("BEEFY_TEST_WITNESS_RPC")?;
+        ensure!(
+            crate::local_source_rpc(&rpc) && crate::local_source_rpc(&witness_rpc),
+            "native heartbeat smoke requires owned loopback source RPCs"
+        );
+        let journal = std::env::var("BEEFY_TEST_SOURCE_JOURNAL")?;
+        let recorded: Value = serde_json::from_slice(&fs::read(&journal)?)?;
+        let bootstrap = &recorded["commitments"][0];
+        let directory = Path::new(&journal).with_extension("heartbeat");
+        fs::create_dir(&directory).context("heartbeat evidence directory must be new")?;
+        let (mut source, witness) = Source::connect_pair(
+            GearApi::new(&rpc, 3).await?,
+            GearApi::new(&witness_rpc, 3).await?,
+        )
+        .await?;
+        let initial = source
+            .recapture(
+                number(&bootstrap["block"])?.try_into()?,
+                decode(&bootstrap["rawScale"])?,
+            )
+            .await?;
+        let initial_proof = source.proof(initial.block - 1, &initial).await?;
+        ensure!(
+            initial_proof.snapshot.initialized && initial_proof.snapshot.queue_root == [0; 32],
+            "native heartbeat requires an authenticated initialized-empty bootstrap"
+        );
+        let mut ethereum = Ethereum::prepare(
+            &directory,
+            &initial,
+            &initial_proof.snapshot,
+            source.mmr_start_block,
+        )
+        .await?;
+        let before = ethereum.checkpoint().await?;
+        let original_expiry_ms = before.source_timestamp_ms + 24 * 60 * 60 * 1_000;
+        let due_seconds = before.source_timestamp_ms.div_ceil(1_000) + 12 * 60 * 60;
+        let provider = ethereum.api.raw_provider().clone();
+        // Advance only the disposable destination clock; native slots and source timestamps stay real.
+        provider
+            .client()
+            .request::<_, Value>("evm_setNextBlockTimestamp", (due_seconds,))
+            .await?;
+        provider.client().request::<_, Value>("anvil_mine", ("0x1",)).await?;
+        ensure!(
+            client_heartbeat_due(before.source_timestamp_ms, due_seconds * 1_000),
+            "original source timestamp did not make the heartbeat due"
+        );
+        source.seek_from(initial.block.checked_add(1).context("source height overflow")?)?;
+        let anchor = source.next_commitment().await?;
+        let witnessed = witness.recapture(anchor.block, anchor.raw.clone()).await?;
+        ensure!(
+            anchor.block_hash == witnessed.block_hash
+                && anchor.current == witnessed.current
+                && anchor.next == witnessed.next
+                && anchor.current.id == before.current_id,
+            "native heartbeat must be an independently witnessed same-set update"
+        );
+        let proof = source.proof(anchor.block - 1, &anchor).await?;
+        let second = witness.proof(anchor.block - 1, &anchor).await?;
+        ensure!(
+            proof.snapshot == second.snapshot
+                && proof.raw_leaf == second.raw_leaf
+                && proof.snapshot.initialized
+                && proof.snapshot.queue_root == [0; 32],
+            "heartbeat snapshot is not a witnessed native initialized-empty queue"
+        );
+        let mut state = json!({"submission":null});
+        ethereum
+            .submit_commitment(
+                &anchor,
+                &proof.leaf,
+                &proof.snapshot,
+                &proof.simplified,
+                None,
+                |transaction, receipt| {
+                    state["submission"] = transaction.clone();
+                    if let Some(receipt) = receipt {
+                        state["receipt"] = serde_json::to_value(receipt)?;
+                    }
+                    save(&directory, &mut state, None)
+                },
+            )
+            .await?;
+        let tx_hash = B256::from(array::<32>(&state["submission"]["txHash"])?);
+        let (destination_block, destination_hash) = ethereum
+            .verify_accepted_commitment(tx_hash, &anchor, &proof.snapshot)
+            .await?;
+        let inclusion = provider
+            .get_block_by_hash(destination_hash)
+            .await?
+            .context("native heartbeat inclusion block")?;
+        ensure!(
+            inclusion.header.timestamp * 1_000 < original_expiry_ms,
+            "native heartbeat was not included before the original source deadline"
+        );
+        let after = ethereum.checkpoint().await?;
+        ensure!(
+            after.source_timestamp_ms == proof.snapshot.source_timestamp_ms
+                && after.source_timestamp_ms < inclusion.header.timestamp * 1_000,
+            "heartbeat renewed freshness from destination time instead of authenticated source time"
+        );
+        state["evidence"] = json!({
+            "sourceGenesis":bytes(source.source_genesis),"sourceWrites":false,
+            "destinationClockAdvanceSeconds":12 * 60 * 60,
+            "bootstrapBlock":initial.block,"block":anchor.block,
+            "signedCommitmentScale":bytes(&anchor.raw),"mmrRoot":bytes(anchor.validated.mmr_root),
+            "freshness":freshness_evidence(&proof)?,
+            "originalSourceTimestampMs":before.source_timestamp_ms,
+            "originalExpiryMs":original_expiry_ms,
+            "destinationBlock":destination_block,"destinationHash":bytes(destination_hash),
+            "inclusionTimestampMs":inclusion.header.timestamp * 1_000,"txHash":bytes(tx_hash)
+        });
+        save(&directory, &mut state, None)?;
+        println!("native_empty_heartbeat={}", state["evidence"]);
+        Ok(())
     }
 
     #[test]
@@ -4284,7 +4407,101 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires archived Gear RPC, Foundry, and owned Anvil"]
     async fn interrupted_commitment_recovers_without_replacement() -> Result<()> {
-        use alloy::{eips::Encodable2718, providers::WalletProvider};
+        use alloy::{
+            eips::Encodable2718, primitives::U256, providers::WalletProvider, sol_types::SolEvent,
+        };
+        use ethereum_client::abi::IMessageQueue;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        // Forward the owned fixture's existing transports; these are not
+        // operationally independent production providers.
+        struct RecoveryRpc {
+            url: String,
+            blocked_receipts: Arc<AtomicUsize>,
+            server: tokio::task::JoinHandle<()>,
+        }
+
+        impl RecoveryRpc {
+            async fn new(
+                upstream: alloy::providers::RootProvider,
+                reject_receipts: bool,
+            ) -> Result<Self> {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+                let url = format!("http://{}", listener.local_addr()?);
+                let blocked_receipts = Arc::new(AtomicUsize::new(0));
+                let blocked = blocked_receipts.clone();
+                let server = tokio::spawn(async move {
+                    let mut clients = tokio::task::JoinSet::new();
+                    loop {
+                        tokio::select! {
+                            accepted = listener.accept() => {
+                                let Ok((stream, _)) = accepted else { break };
+                                let upstream = upstream.clone();
+                                let blocked = blocked.clone();
+                                clients.spawn(async move {
+                                    let mut stream = BufReader::new(stream);
+                                    let mut length = None;
+                                    loop {
+                                        let mut line = String::new();
+                                        // Anvil may close an idle connection without sending a request.
+                                        if stream.read_line(&mut line).await? == 0 {
+                                            return Ok(());
+                                        }
+                                        if line == "\r\n" {
+                                            break;
+                                        }
+                                        if let Some((name, value)) = line.split_once(':') {
+                                            if name.eq_ignore_ascii_case("content-length") {
+                                                length = Some(value.trim().parse::<usize>()?);
+                                            }
+                                        }
+                                    }
+                                    let mut body = vec![0; length.context("RPC content length missing")?];
+                                    stream.read_exact(&mut body).await?;
+                                    let request: Value = serde_json::from_slice(&body)?;
+                                    let method = request["method"].as_str().context("RPC method missing")?;
+                                    let response = if reject_receipts && method == "eth_getTransactionReceipt" {
+                                        blocked.fetch_add(1, Ordering::SeqCst);
+                                        json!({"jsonrpc":"2.0", "id":request["id"],
+                                            "error":{"code":-32000, "message":"receipt bodies unavailable"}})
+                                    } else {
+                                        let result: Value = upstream.client()
+                                            .request(method.to_owned(), request["params"].clone()).await?;
+                                        json!({"jsonrpc":"2.0", "id":request["id"], "result":result})
+                                    };
+                                    let body = serde_json::to_vec(&response)?;
+                                    let headers = format!(
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                        body.len()
+                                    );
+                                    stream.get_mut().write_all(headers.as_bytes()).await?;
+                                    stream.get_mut().write_all(&body).await?;
+                                    stream.get_mut().shutdown().await?;
+                                    Ok::<_, anyhow::Error>(())
+                                });
+                            }
+                            joined = clients.join_next(), if !clients.is_empty() => {
+                                joined.expect("forwarder task missing")
+                                    .expect("recovery RPC forwarding panicked")
+                                    .expect("recovery RPC forwarding failed");
+                            }
+                        }
+                    }
+                });
+                Ok(Self { url, blocked_receipts, server })
+            }
+        }
+
+        impl Drop for RecoveryRpc {
+            fn drop(&mut self) {
+                self.server.abort();
+            }
+        }
+
         let rpc = std::env::var("BEEFY_TEST_SOURCE_RPC")?;
         let witness_rpc = std::env::var("BEEFY_TEST_WITNESS_RPC")?;
         let journal = std::env::var("BEEFY_TEST_SOURCE_JOURNAL")?;
@@ -4747,6 +4964,199 @@ mod tests {
         crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
         state["roots"] = roots.clone();
 
+        {
+            let restart_directory = tempfile::tempdir()?;
+            let restart_path = restart_directory.path().join("original.json");
+            let mut restart_intent = root_intent.clone();
+            restart_intent["publicationReceipt"] = json!({
+                "block": finalized_root.included_block_number,
+                "blockHash": format!("{:#x}", finalized_root.included_block_hash),
+                "kind": "merkleRoot",
+                "finalized": true,
+                "finalizedBlock": finalized_root.finalized_block_number,
+                "finalizedBlockHash": format!("{:#x}", finalized_root.finalized_block_hash),
+                "receiptProof": &finalized_root.inclusion,
+                "checkpoint": &finalized_root.checkpoint,
+            });
+            let saved_intent = restart_intent.clone();
+            let saved_bytes = serde_json::to_vec(&restart_intent)?;
+            fs::write(&restart_path, &saved_bytes)?;
+            let primary_rpc = RecoveryRpc::new(provider.root().clone(), true).await?;
+            let witness_rpc =
+                RecoveryRpc::new(ethereum.api.raw_witness_provider()?.clone(), false).await?;
+            let (chain_id, genesis) = ethereum.api.finality_identity()?;
+            let restarted_api = ethereum_client::EthApi::new(
+                &primary_rpc.url,
+                &format!("{:#x}", ethereum.queue_address),
+                None,
+                None,
+                None,
+            )
+            .await?
+            .with_finality_witness(&witness_rpc.url, chain_id, genesis)
+            .await?;
+            let original_api = std::mem::replace(&mut ethereum.api, restarted_api);
+            for _ in 0..2 {
+                ensure!(
+                    !crate::root_publication::reconcile_root_original(
+                        &ethereum,
+                        &restart_path,
+                        &mut restart_intent,
+                    )
+                    .await?,
+                    "finalized original was archived on restart"
+                );
+                ensure!(
+                    restart_intent == saved_intent && fs::read(&restart_path)? == saved_bytes,
+                    "restart changed signed original, nonce, inclusion or ownership disposition"
+                );
+                ensure!(
+                    restart_intent["terminalSubmissions"].is_null()
+                        && restart_intent["originalDisposition"].is_null()
+                        && primary_rpc.blocked_receipts.load(Ordering::SeqCst) == 0,
+                    "finalized recovery fetched a receipt body or recorded terminal/nonceConsumed history"
+                );
+            }
+            let corrupt_path = restart_directory.path().join("corrupt.json");
+            let mut corrupt_intent = saved_intent.clone();
+            let mut corrupt_proof = finalized_root.inclusion.clone();
+            corrupt_proof.receipt_proof.clear();
+            corrupt_intent["publicationReceipt"]["receiptProof"] = serde_json::to_value(corrupt_proof)?;
+            let corrupt_original = corrupt_intent.clone();
+            let corrupt_bytes = serde_json::to_vec(&corrupt_intent)?;
+            fs::write(&corrupt_path, &corrupt_bytes)?;
+            ensure!(
+                crate::root_publication::reconcile_root_original(
+                    &ethereum,
+                    &corrupt_path,
+                    &mut corrupt_intent,
+                )
+                .await
+                .is_err(),
+                "corrupt retained receipt proof was accepted"
+            );
+            ensure!(
+                corrupt_intent == corrupt_original
+                    && fs::read(&corrupt_path)? == corrupt_bytes
+                    && primary_rpc.blocked_receipts.load(Ordering::SeqCst) == 0,
+                "corrupt proof rewrote the original or fell back to receipt bodies"
+            );
+            ethereum.api = original_api;
+        }
+
+        // Isolate consumer clock/claim changes from the original recovery and reorg fixture.
+        {
+            let upstream = RecoveryRpc::new(provider.root().clone(), false).await?;
+            let fork_url = upstream.url.clone();
+            let fork_block = provider.get_block_number().await?;
+            let claim_node = tokio::task::spawn_blocking(move || {
+                alloy::node_bindings::Anvil::new()
+                    .fork(fork_url)
+                    .fork_block_number(fork_block)
+                    .chain_id(31_337)
+                    .port(0_u16)
+                    .try_spawn()
+            })
+            .await??;
+            let provider = alloy::providers::ProviderBuilder::new()
+                .connect_http(claim_node.endpoint_url());
+            let queue = IMessageQueue::new(ethereum.queue_address, provider.clone());
+            // Historical consumers schedule from the publication block, not a root-keyed getter.
+            let root_event = IMessageQueue::MerkleRoot {
+                blockNumber: U256::from(root_block),
+                merkleRoot: B256::from(expected_root),
+            }
+            .encode_log_data();
+            ensure!(
+                receipt.inner.logs().iter().any(|log| {
+                    log.address() == ethereum.queue_address && log.inner.data == root_event
+                }),
+                "native publication lost the historical MerkleRoot event"
+            );
+            let claimant = *provider
+                .get_accounts()
+                .await?
+                .get(2)
+                .context("third owned Anvil account")?;
+            let message_nonce = U256::from_be_bytes(root_message.message.nonce_be);
+            let claim = queue
+                .processMessage(
+                    U256::from(root_block),
+                    U256::from(root_message.inclusion.num_leaves),
+                    U256::from(root_message.inclusion.leaf_index),
+                    IMessageQueue::VaraMessage {
+                        nonce: message_nonce,
+                        source: B256::from(root_message.message.source),
+                        destination: Address::from(root_message.message.destination),
+                        payload: root_message.message.payload.into(),
+                    },
+                    root_message.inclusion.proof.into_iter().map(B256::from).collect(),
+                )
+                .from(claimant);
+            let early = claim.call().await.err().context("unmatured native claim succeeded")?;
+            ensure!(
+                matches!(
+                    early.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>(),
+                    Some(IMessageQueue::IMessageQueueErrors::MerkleRootDelayNotPassed(_))
+                ),
+                "early claim failed for a reason other than historical maturity"
+            );
+            let publication = provider
+                .get_block_by_hash(receipt.block_hash.context("root inclusion hash")?)
+                .await?
+                .context("root publication block")?;
+            let maturity = publication.header.timestamp
+                + queue.PROCESS_USER_MESSAGE_DELAY().call().await?.to::<u64>();
+            provider
+                .client()
+                .request::<_, Value>("evm_setNextBlockTimestamp", (maturity,))
+                .await?;
+            provider.client().request::<_, Value>("anvil_mine", ("0x1",)).await?;
+            claim.call().await?;
+            let claim_hash: B256 = provider
+                .client()
+                .request("eth_sendTransaction", (claim.clone().into_transaction_request(),))
+                .await?;
+            let claimed = alloy::providers::PendingTransactionBuilder::new(
+                provider.root().clone(),
+                claim_hash,
+            )
+            .get_receipt()
+            .await
+            .context("native message claim receipt")?;
+            let processed_event = IMessageQueue::MessageProcessed {
+                blockNumber: U256::from(root_block),
+                messageHash: B256::from(root_message.message_hash),
+                messageNonce: message_nonce,
+                messageDestination: ethereum.receiver_address,
+            }
+            .encode_log_data();
+            ensure!(
+                claimed.status()
+                    && queue.isProcessed(message_nonce).call().await?
+                    && claimed.inner.logs().iter().any(|log| {
+                        log.address() == ethereum.queue_address && log.inner.data == processed_event
+                    }),
+                "mature native claim lost replay state or the historical MessageProcessed event"
+            );
+            let duplicate = claim.call().await.err().context("duplicate native claim succeeded")?;
+            ensure!(
+                matches!(
+                    duplicate.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>(),
+                    Some(IMessageQueue::IMessageQueueErrors::MessageAlreadyProcessed(error))
+                        if error.messageNonce == message_nonce
+                ),
+                "duplicate native claim did not reject its original nonce"
+            );
+            println!(
+                "historical_queue_interface={}",
+                json!({"scope":"genuine native proof and isolated owned Anvil fork; historical interface, not deployed consumer artifact",
+                    "sourceBlock":root_block,"rootTransaction":root_hash,"claimTransaction":claim_hash,
+                    "messageNonce":message_nonce.to_string(),"publicationTimestamp":publication.header.timestamp,
+                    "maturityTimestamp":maturity,"early":"MerkleRootDelayNotPassed","duplicate":"MessageAlreadyProcessed"})
+            );
+        }
+
         let snapshot: Value = provider.client().request("evm_snapshot", ()).await?;
         let anchor = source.next_commitment().await?;
         let proof = source.proof(anchor.block - 1, &anchor).await?;
@@ -5012,7 +5422,8 @@ mod tests {
             &state,
             &directory.join("finality-history"),
         )
-        .await?;
+        .await
+        .context("revalidating finalized original after reinclusion")?;
         record_mined_commitment(
             &mut ethereum,
             directory,
@@ -5021,8 +5432,11 @@ mod tests {
             &proof,
             hash,
         )
-        .await?;
-        promote_finality(&mut source, &mut ethereum, directory, &mut interrupted).await?;
+        .await
+        .context("replaying receipt-only recovery after finality")?;
+        promote_finality(&mut source, &mut ethereum, directory, &mut interrupted)
+            .await
+            .context("promoting receipt-only recovery after finality")?;
         ensure!(
             interrupted["commitments"]
                 .as_array()
@@ -5039,7 +5453,8 @@ mod tests {
         let reverted: bool = provider
             .client()
             .request("evm_revert", (root_snapshot,))
-            .await?;
+            .await
+            .context("reverting original root snapshot")?;
         ensure!(
             reverted
                 && crate::root_publication::validate_registered_root_publications(
@@ -5058,11 +5473,25 @@ mod tests {
             .client()
             .request::<_, Value>("anvil_mine", ("0x1",))
             .await?;
-        root_provider
+        // The explicit Anvil rewind invalidates Alloy's cached confirmation history.
+        let reinclusion_provider: alloy::providers::RootProvider =
+            alloy::providers::RootProvider::new(alloy::rpc::client::RpcClient::new(
+                root_provider.client().transport().clone(),
+                root_provider.client().is_local(),
+            ));
+        let reincluded_root = reinclusion_provider
             .send_raw_transaction(&raw_root)
-            .await?
+            .await
+            .context("rebroadcasting identical root after explicit test reorg")?
             .get_receipt()
-            .await?;
+            .await
+            .context("waiting for identical root reinclusion")?;
+        ensure!(
+            reincluded_root.status()
+                && reincluded_root.transaction_hash == root_hash
+                && reincluded_root.block_hash != receipt.block_hash,
+            "identical root did not succeed in a different inclusion"
+        );
         ensure!(
             crate::root_publication::validate_registered_root_publications(&ethereum, &roots)
                 .await
@@ -5082,7 +5511,8 @@ mod tests {
                     "evm_revert",
                     (finalized_reorg_snapshot.context("finalized reorg snapshot missing")?,)
                 )
-                .await?,
+                .await
+                .context("reverting finalized commitment snapshot")?,
             "finalized reorg snapshot did not revert"
         );
         ensure!(

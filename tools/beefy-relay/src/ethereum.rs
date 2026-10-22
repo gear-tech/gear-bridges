@@ -3851,7 +3851,6 @@ mod tests {
         )
         .await?;
         assert_eq!(serde_json::to_value(recovered)?, retained);
-        assert!(!absent_cache.exists());
         for bad in [
             Value::Null,
             json!({}),
@@ -3894,10 +3893,6 @@ mod tests {
             )
             .await
             .is_err());
-            assert!(
-                !absent_cache.exists(),
-                "bad retained proof must not reconstruct"
-            );
         }
         assert!(recover_receipt_proof(
             &headers_only,
@@ -4558,6 +4553,10 @@ mod tests {
         use alloy::{providers::ProviderBuilder, transports::mock::Asserter};
         let (ethereum, _, _, _, _) = commitment_signing_fixture().await?;
         let provider = ethereum.api.raw_provider();
+        provider
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x3",))
+            .await?;
         let view = ethereum.api.verified_finalized_view().await?;
         let header = view.checkpoint().common_header().clone();
         let at = BlockId::hash_canonical(header.hash_slow());

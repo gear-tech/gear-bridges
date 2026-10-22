@@ -5856,6 +5856,7 @@ mod tests {
                     .kill_on_drop(true).output()).await
                 .context("production root entrypoint timed out")??;
             provider.client().request::<_, Value>("anvil_setIntervalMining", (0u64,)).await?;
+            provider.client().request::<_, Value>("evm_setAutomine", (true,)).await?;
             fs::write(approved_dir.join("publisher.stdout"), &result.stdout)?;
             fs::write(approved_dir.join("publisher.stderr"), &result.stderr)?;
             ensure!(result.status.success(), "production root entrypoint failed; inspect retained publisher.stderr");

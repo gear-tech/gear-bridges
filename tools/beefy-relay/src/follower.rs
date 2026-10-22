@@ -2357,21 +2357,16 @@ async fn scan_token_roots(
             witness.api.block_number_to_hash(block).await? == hash,
             "source and witness disagree at finalized root-scan block {block}"
         );
-        let registration =
-            source::has_event(&source.api, hash, "GearEthBridge", "QueueMerkleRootChanged").await?;
+        let (registration, witnessed_registration) = tokio::try_join!(
+            source::has_event(&source.api, hash, "GearEthBridge", "QueueMerkleRootChanged"),
+            source::has_event(&witness.api, hash, "GearEthBridge", "QueueMerkleRootChanged")
+        )?;
+        ensure!(
+            registration == witnessed_registration,
+            "source and witness disagree on the finalized queue registration event at block {block}"
+        );
         let at_floor = u64::from(block) == number(&state["rootMinimum"])?;
         if registration || at_floor {
-            ensure!(
-                !registration
-                    || source::has_event(
-                        &witness.api,
-                        hash,
-                        "GearEthBridge",
-                        "QueueMerkleRootChanged"
-                    )
-                    .await?,
-                "witness is missing the finalized queue registration event"
-            );
             let (first, second) = tokio::try_join!(
                 source::queue_snapshot_at(&source.api, hash),
                 source::queue_snapshot_at(&witness.api, hash)
@@ -3346,6 +3341,94 @@ mod tests {
         assert!(!is_transient_follower_error(
             &gsdk::Error::ClientError(rejection).into()
         ));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires paired owned native archive RPCs and SOURCE_SCAN_QUEUED_BLOCK; read-only fault injection"]
+    async fn native_root_scan_faults_preserve_cursor() -> Result<()> {
+        use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
+        use subxt_rpcs::client::{RawRpcFuture, RawRpcSubscription, RawValue, RpcClient, RpcClientT};
+
+        // Forward the existing archive, changing only the pinned event-storage response.
+        struct EventRpc {
+            upstream: RpcClient,
+            hash: H256,
+            events_key: String,
+            hide: Option<bool>,
+            observations: Arc<AtomicUsize>,
+        }
+        impl RpcClientT for EventRpc {
+            fn request_raw<'a>(&'a self, method: &'a str, params: Option<Box<RawValue>>) -> RawRpcFuture<'a, Box<RawValue>> {
+                Box::pin(async move {
+                    if method == "chain_getFinalizedHead" {
+                        return Ok(serde_json::value::to_raw_value(&self.hash).map_err(subxt_rpcs::Error::Deserialization)?);
+                    }
+                    let arguments: Value = serde_json::from_str(params.as_ref().map_or("[]", |p| p.get())).map_err(subxt_rpcs::Error::Deserialization)?;
+                    if matches!(method, "state_getStorage" | "state_getStorageAt")
+                        && arguments[0] == self.events_key
+                        && arguments[1] == json!(self.hash)
+                    {
+                        self.observations.fetch_add(1, Ordering::SeqCst);
+                        match self.hide {
+                            Some(true) => return Ok(serde_json::value::to_raw_value("0x00").map_err(subxt_rpcs::Error::Deserialization)?),
+                            None => return Err(subxt_rpcs::Error::User(subxt_rpcs::UserError::method_not_found())),
+                            Some(false) => {}
+                        }
+                    }
+                    self.upstream.request_raw(method, params).await
+                })
+            }
+            fn subscribe_raw<'a>(&'a self, sub: &'a str, params: Option<Box<RawValue>>, unsub: &'a str) -> RawRpcFuture<'a, RawRpcSubscription> {
+                self.upstream.subscribe_raw(sub, params, unsub)
+            }
+        }
+
+        let rpc = std::env::var("BEEFY_TEST_SOURCE_RPC")?;
+        let witness_rpc = std::env::var("BEEFY_TEST_WITNESS_RPC")?;
+        ensure!(rpc != witness_rpc && crate::local_source_rpc(&rpc) && crate::local_source_rpc(&witness_rpc), "paired owned loopback archives required");
+        let queued: u32 = std::env::var("SOURCE_SCAN_QUEUED_BLOCK")?.parse()?;
+        ensure!(queued > 1, "queued block must have a predecessor");
+        let (mut source, mut witness) = Source::connect_pair(GearApi::new(&rpc, 3).await?, GearApi::new(&witness_rpc, 3).await?).await?;
+        let primary_api = source.api.clone();
+        let witness_api = witness.api.clone();
+        let hash = primary_api.block_number_to_hash(queued).await?;
+        let previous = primary_api.block_number_to_hash(queued - 1).await?;
+        ensure!(source::has_event(&primary_api, hash, "GearEthBridge", "QueueMerkleRootChanged").await?
+            && source::has_event(&witness_api, hash, "GearEthBridge", "QueueMerkleRootChanged").await?, "fixture requires a genuine finalized queue registration");
+        let events_key = bytes([sp_core::twox_128(b"System"), sp_core::twox_128(b"Events")].concat());
+        for at_floor in [false, true] {
+            for (primary, secondary) in [(Some(true), Some(false)), (Some(false), Some(true)), (Some(true), None), (None, Some(true))] {
+                let observations = Arc::new(AtomicUsize::new(0));
+                for (target, upstream, hide) in [(&mut source, &primary_api, primary), (&mut witness, &witness_api, secondary)] {
+                    target.api = GearApi { api: gsdk::Api::from_rpc_client(RpcClient::new(EventRpc {
+                        upstream: upstream.api.rpc().clone(), hash, events_key: events_key.clone(), hide, observations: observations.clone(),
+                    })).await? };
+                }
+                let directory = tempfile::tempdir()?;
+                let mut state = json!({"rootMinimum":if at_floor {queued} else {1},"rootScan":{"block":queued - 1,"blockHash":bytes(previous.0)},"roots":{}});
+                save(directory.path(), &mut state, None)?;
+                let original = state.clone();
+                let disk = fs::read(directory.path().join("state.json"))?;
+                let error = scan_token_roots(&source, &witness, directory.path(), &mut state).await.unwrap_err();
+                ensure!(observations.load(Ordering::SeqCst) > 0, "fault did not reach actual event RPC");
+                if primary.is_some() && secondary.is_some() {
+                    ensure!(error.to_string().contains("disagree on the finalized queue registration event"), "unexpected scan failure: {error:#}");
+                    ensure!(observations.load(Ordering::SeqCst) == 2, "both event observations were not requested");
+                }
+                ensure!(state == original && fs::read(directory.path().join("state.json"))? == disk, "fault advanced cursor or retained a root");
+            }
+        }
+        for (target, upstream) in [(&mut source, &primary_api), (&mut witness, &witness_api)] {
+            target.api = GearApi { api: gsdk::Api::from_rpc_client(RpcClient::new(EventRpc {
+                upstream: upstream.api.rpc().clone(), hash, events_key: events_key.clone(), hide: Some(false), observations: Arc::new(AtomicUsize::new(0)),
+            })).await? };
+        }
+        let directory = tempfile::tempdir()?;
+        let mut state = json!({"rootMinimum":queued,"rootScan":{"block":queued - 1,"blockHash":bytes(previous.0)},"roots":{}});
+        scan_token_roots(&source, &witness, directory.path(), &mut state).await?;
+        ensure!(number(&state["rootScan"]["block"])? >= u64::from(queued)
+            && state["roots"].as_object().context("roots")?.values().any(|root| root["block"] == queued), "matching real observations did not retain the queued root");
+        Ok(())
     }
 
     #[tokio::test]
@@ -4413,6 +4496,93 @@ mod tests {
             "independentCommitment":next_hash,"independentSourceBlock":next["block"],
             "originalDisposition":intent["originalDisposition"],"publicWrites":false})
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires paired owned native archives, source/handover journals, Foundry and owned Anvil"]
+    async fn interactive_external_progress_adopts_handover_and_restarts() -> Result<()> {
+        use alloy::providers::WalletProvider;
+        let rpc = std::env::var("BEEFY_TEST_SOURCE_RPC")?;
+        let witness_rpc = std::env::var("BEEFY_TEST_WITNESS_RPC")?;
+        ensure!(rpc != witness_rpc && crate::local_source_rpc(&rpc) && crate::local_source_rpc(&witness_rpc), "paired owned loopback archives required");
+        let journal = std::env::var("BEEFY_TEST_SOURCE_JOURNAL")?;
+        let recorded: Value = serde_json::from_slice(&fs::read(&journal)?)?;
+        let handovers: Value = serde_json::from_slice(&fs::read(std::env::var("BEEFY_TEST_HANDOVER_JOURNAL")?)?)?;
+        let handovers = handovers["commitments"].as_array().context("missing genuine handover originals")?;
+        ensure!(handovers.len() >= 2, "two archived authority handovers required; no synthetic native fallback");
+        let directory = Path::new(&journal).with_extension("interactive-recovery");
+        fs::create_dir(&directory).context("interactive evidence directory must be new")?;
+        let (mut source, witness) = Source::connect_pair(GearApi::new(&rpc, 3).await?, GearApi::new(&witness_rpc, 3).await?).await?;
+        let initial = source.recapture(number(&recorded["commitments"][0]["block"] )?.try_into()?, decode(&recorded["commitments"][0]["rawScale"]) ?).await?;
+        let initial_proof = source.proof(initial.block - 1, &initial).await?;
+        let mut ethereum = Ethereum::prepare(&directory, &initial, &initial_proof.snapshot, source.mmr_start_block).await?;
+        let provider = ethereum.api.raw_provider().clone();
+        provider.client().request::<_, Value>("anvil_setIntervalMining", (0u64,)).await?;
+        provider.client().request::<_, Value>("evm_setAutomine", (true,)).await?;
+        let deployment = json!({"anchor":{"sourceGenesis":bytes(source.source_genesis),"bridgeDomain":bytes(source.bridge_domain)},"ethereum":ethereum.manifest().await?});
+        let head = source.api.latest_finalized_block().await?;
+        let height = source.api.block_hash_to_number(head).await?;
+        let mut state = json!({"schemaVersion":4,"terminalSubmissions":[],"mode":"hoodi-message-demo","sourceGenesis":bytes(source.source_genesis),"bridgeDomain":bytes(source.bridge_domain),"ethereum":deployment["ethereum"],"deployment":deployment,"bootstrap":bootstrap_record(&initial, &initial_proof)?,"commitments":[],"transactions":ethereum.transactions,"submission":null,"roots":{},"rootMinimum":1,"rootScan":{"block":height,"blockHash":bytes(head.0)}});
+        source.seek_from(initial.block.checked_add(1).context("bootstrap overflow")?)?;
+        let owned = source.next_commitment().await?;
+        ensure!(u64::from(owned.block) < number(&handovers[0]["block"])?, "owned original must precede unrelated external handover");
+        let owned_proof = source.proof(owned.block - 1, &owned).await?;
+        let stopped = ethereum.submit_commitment(&owned, &owned_proof.leaf, &owned_proof.snapshot, &owned_proof.simplified, None, |transaction, _| {
+            state["submission"] = transaction.clone();
+            state["submission"]["blockHash"] = json!(bytes(owned.block_hash));
+            state["submission"]["root"] = json!(bytes(owned.validated.mmr_root));
+            save(&directory, &mut state, None)?;
+            if !transaction["rawTransaction"].is_null() {
+                bail!("injected stop before original broadcast");
+            }
+            Ok(())
+        }).await.unwrap_err();
+        ensure!(stopped.to_string().contains("injected stop before original broadcast"), "original preparation failed: {stopped:#}");
+        let original = state["submission"].clone();
+        let original_hash = B256::from(array::<32>(&original["txHash"])?);
+        let nonce = number(&original["nonce"])?;
+        let own_transactions = ethereum.transactions.clone();
+        let sender = provider.default_signer_address();
+
+        for (index, retained) in handovers.iter().enumerate() {
+            let anchor = source.recapture(number(&retained["block"])?.try_into()?, decode(&retained["rawScale"]) ?).await?;
+            ensure!(anchor.block_hash == array::<32>(&retained["blockHash"])?
+                && anchor.current.id == ethereum.checkpoint().await?.next_id, "fixture is not the next genuine authority handover");
+            let proof = source.proof(anchor.block - 1, &anchor).await?;
+            provider.client().request::<_, Value>(
+                "evm_setNextBlockTimestamp",
+                (proof.snapshot.source_timestamp_ms.div_ceil(1_000),),
+            ).await?;
+            let accepted = ethereum.submit_interactive_fixture(&anchor, &proof.leaf, &proof.snapshot, &proof.simplified).await?;
+            ensure!(accepted["sender"] != format!("{sender:#x}"), "competitor used owned signer");
+            let (mut adopter, adopter_witness) = Source::connect_pair(GearApi::new(&rpc, 3).await?, GearApi::new(&witness_rpc, 3).await?).await?;
+            adopter.seek_from(anchor.block)?;
+            // Restart from the durable journal before adopting the next external handover.
+            state = read_state_file(&directory.join("state.json"))?;
+            migrate_commitment_journal(&mut state)?;
+            revalidate_finalized_commitments(&adopter, &adopter_witness, &ethereum, &state, &directory.join("finality-history")).await?;
+            follow_external_progress(&mut adopter, &adopter_witness, &mut ethereum, &directory, &mut state).await?;
+            let entries = state["commitments"].as_array().context("adopted commitments")?;
+            let entry = entries.last().context("missing interactive adoption")?;
+            ensure!(entries.len() == index + 1 && entry["origin"] == "external" && entry["finalized"] == true
+                && entry["block"] == anchor.block && entry["txHash"] == accepted["txHash"]
+                && commitment_transaction(entry)?["rawTransaction"] == accepted["rawTransaction"], "interactive handover was converted, lost or duplicated");
+            ensure!(state["submission"] == original && state["terminalSubmissions"] == json!([])
+                && ethereum.transactions == own_transactions && state["follower"]["lastSuccessfulUpdate"].is_null()
+                && provider.get_transaction_count(sender).await? == nonce
+                && provider.get_transaction_by_hash(original_hash).await?.is_none(), "external adoption released, broadcast or replaced the unrelated owned original");
+        }
+        let mut restored = read_state_file(&directory.join("state.json"))?;
+        let (mut restarted, restart_witness) = Source::connect_pair(GearApi::new(&rpc, 3).await?, GearApi::new(&witness_rpc, 3).await?).await?;
+        restarted.seek_from(number(&restored["commitments"].as_array().context("commitments")?.last().context("last commitment")?["block"])?.try_into()?)?;
+        require_saved_submission(&restored["submission"], &owned, original_hash.into(), ethereum.client_address, deployment_client(&restored)?)?;
+        revalidate_finalized_commitments(&restarted, &restart_witness, &ethereum, &restored, &directory.join("finality-history")).await?;
+        reconcile_original_submission(&mut ethereum, &directory, &mut restored).await?;
+        follow_external_progress(&mut restarted, &restart_witness, &mut ethereum, &directory, &mut restored).await?;
+        ensure!(restored == state && provider.get_transaction_count(sender).await? == nonce
+            && provider.get_transaction_by_hash(original_hash).await?.is_none(), "restart altered external history or consumed owned original");
+        revalidate_finalized_commitments(&source, &witness, &ethereum, &restored, &directory.join("finality-history")).await?;
         Ok(())
     }
 

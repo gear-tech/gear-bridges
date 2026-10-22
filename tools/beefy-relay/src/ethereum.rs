@@ -149,13 +149,46 @@ pub(crate) fn recorded_commitment_transaction(raw: &[u8], source_raw: &[u8]) -> 
     Ok(signed)
 }
 
+pub(crate) struct AcceptedCommitmentCall {
+    pub commitment: BeefyClient::Commitment,
+    pub snapshot: VaraBridgeMetadata::Snapshot,
+    pub leaf: BeefyClient::MMRLeaf,
+}
+
 pub(crate) fn validate_commitment_call(
     signed: &TxEnvelope,
     source_raw: &[u8],
-) -> Result<BeefyClient::submitFiatShamirCall> {
+) -> Result<AcceptedCommitmentCall> {
     use alloy::sol_types::{SolCall, SolValue};
-    let call = BeefyClient::submitFiatShamirCall::abi_decode(signed.input())
-        .context("original transaction is not the saved Fiat-Shamir submission; HOLD")?;
+    let input = signed.input().as_ref();
+    let selector = input.get(..4).context("original commitment selector is missing; HOLD")?;
+    let call = if selector == BeefyClient::submitFiatShamirCall::SELECTOR {
+        let call = BeefyClient::submitFiatShamirCall::abi_decode(input)
+            .context("malformed original Fiat-Shamir submission; HOLD")?;
+        ensure!(
+            call.abi_encode() == input,
+            "noncanonical original Fiat-Shamir calldata; HOLD"
+        );
+        AcceptedCommitmentCall {
+            commitment: call.commitment,
+            snapshot: call.snapshot,
+            leaf: call.leaf,
+        }
+    } else if selector == BeefyClient::submitFinalCall::SELECTOR {
+        let call = BeefyClient::submitFinalCall::abi_decode(input)
+            .context("malformed original interactive submission; HOLD")?;
+        ensure!(
+            call.abi_encode() == input,
+            "noncanonical original interactive calldata; HOLD"
+        );
+        AcceptedCommitmentCall {
+            commitment: call.commitment,
+            snapshot: call.snapshot,
+            leaf: call.leaf,
+        }
+    } else {
+        anyhow::bail!("unknown original commitment selector; HOLD");
+    };
     let original = crate::decode_versioned_finality_proof(source_raw)?;
     let expected = BeefyClient::Commitment {
         blockNumber: original.commitment.block_number,
@@ -1593,6 +1626,104 @@ impl Ethereum {
         Ok((number, hash))
     }
 
+    #[cfg(test)]
+    pub(crate) async fn submit_interactive_fixture(
+        &mut self,
+        anchor: &CapturedCommitment,
+        freshness_leaf: &RuntimeLeaf,
+        snapshot: &QueueSnapshot,
+        freshness: &SimplifiedMmrProof,
+    ) -> Result<Value> {
+        let anvil = self._anvil.as_ref().context("interactive fixture requires owned Anvil")?;
+        let external = EthApi::new(
+            &anvil.ws_endpoint(),
+            &address_string(self.queue_address),
+            Some(&format!("0x{}", hex::encode(anvil.keys()[1].to_bytes()))),
+            None,
+            None,
+        ).await?;
+        let validated = &anchor.validated;
+        let wire_keys = anchor
+            .current
+            .keys
+            .iter()
+            .map(|key| key.as_slice().try_into().context("invalid fixture authority key"))
+            .collect::<Result<Vec<[u8; 33]>>>()?;
+        ensure!(!wire_keys.is_empty() && wire_keys.len() <= 256, "invalid fixture authority count");
+        let mut bitfield = vec![U256::ZERO];
+        for index in &validated.signed_indices {
+            ensure!((*index as usize) < wire_keys.len(), "fixture signer outside authority set");
+            bitfield[0] |= U256::from(1) << *index as usize;
+        }
+        let validator_proof = |index: usize| -> Result<BeefyClient::ValidatorProof> {
+            let signature = validated.signed.signatures[index]
+                .as_ref()
+                .context("interactive selection has no signature")?;
+            let raw: &[u8] = signature.as_ref();
+            ensure!(raw.len() == 65 && raw[64] <= 1, "invalid fixture signature");
+            let authority = authority_proof(&wire_keys, index)?;
+            Ok(BeefyClient::ValidatorProof {
+                v: raw[64] + 27,
+                r: B256::from_slice(&raw[..32]),
+                s: B256::from_slice(&raw[32..64]),
+                index: U256::from(index),
+                account: Address::from(authority.address),
+                proof: authority.siblings.into_iter().map(B256::from).collect(),
+            })
+        };
+        let commitment = BeefyClient::Commitment {
+            blockNumber: validated.signed.commitment.block_number,
+            validatorSetID: validated.signed.commitment.validator_set_id,
+            payload: commitment_payload(&validated.signed.commitment.payload)?,
+        };
+        let provider = external.raw_provider();
+        let sender = provider.default_signer_address();
+        let client = BeefyClient::new(self.client_address, provider.clone());
+        let digest = client.computeCommitmentHash(commitment.clone()).call().await?;
+        let initial_index = *validated.signed_indices.first().context("fixture has no signers")? as usize;
+        let initial = client
+            .submitInitial(commitment.clone(), bitfield.clone(), validator_proof(initial_index)?)
+            .send().await?.get_receipt().await?;
+        ensure!(initial.status(), "interactive initial submission reverted");
+        let delay = client.randaoCommitDelay().call().await?;
+        provider.client().request::<_, Value>("anvil_mine", (format!("{delay:#x}"),)).await?;
+        let randao = client.commitPrevRandao(digest).send().await?.get_receipt().await?;
+        ensure!(randao.status(), "interactive randomness submission reverted");
+        let selected = client.createFinalBitfield(digest, bitfield.clone())
+            .from(sender).call().await?;
+        ensure!(selected.len() == 1 && selected[0] != U256::ZERO, "invalid interactive selection");
+        let proofs = (0..wire_keys.len())
+            .filter(|index| selected[0].bit(*index))
+            .map(validator_proof)
+            .collect::<Result<Vec<_>>>()?;
+        let call = client.submitFinal(
+            commitment,
+            bitfield,
+            proofs,
+            to_sol_leaf(freshness_leaf)?,
+            to_sol_snapshot(snapshot),
+            freshness.items.iter().copied().map(B256::from).collect(),
+            U256::from_be_bytes(freshness.proof_order),
+        );
+        let chain_id = self.api.finality_identity()?.0;
+        let filled = provider.fill(call.into_transaction_request().with_chain_id(chain_id)).await?;
+        let signed = filled.as_envelope().context("interactive fixture was not signed")?;
+        validate_commitment_call(signed, &anchor.raw)?;
+        let raw = signed.encoded_2718();
+        let receipt = provider.send_raw_transaction(&raw).await?.get_receipt().await?;
+        ensure!(receipt.status(), "interactive final submission reverted");
+        provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
+        let mut transaction = receipt_value("submitFinal", &receipt, None);
+        transaction["block"] = json!(anchor.block);
+        transaction["rawScale"] = json!(bytes(&anchor.raw));
+        transaction["rawTransaction"] = json!(bytes(&raw));
+        transaction["nonce"] = json!(signed.nonce());
+        transaction["sender"] = json!(format!("{sender:#x}"));
+        transaction["chainId"] = json!(chain_id);
+        transaction["clientAddress"] = json!(format!("{:#x}", self.client_address));
+        Ok(transaction)
+    }
+
     pub async fn submit_commitment(
         &mut self,
         anchor: &CapturedCommitment,
@@ -2340,6 +2471,7 @@ mod tests {
         network::TxSigner,
         primitives::TxKind,
     };
+    use sp_core::crypto::UncheckedFrom;
 
     async fn commitment_signing_fixture() -> Result<(
         Ethereum,
@@ -2480,6 +2612,135 @@ mod tests {
             transactions: Vec::new(),
         };
         Ok((ethereum, anchor, leaf, snapshot, proof))
+    }
+
+    #[tokio::test]
+    async fn commitment_call_requires_exact_protocol_calldata_and_source() -> Result<()> {
+        use alloy::sol_types::{SolCall, SolValue};
+        let mut fixtures = crate::fixtures::generate_fixtures()?.cases;
+        let case = fixtures.remove(0);
+        let source_raw = hex::decode(case.signed_commitment.trim_start_matches("0x"))?;
+        let original = crate::decode_versioned_finality_proof(&source_raw)?;
+        let other_raw = hex::decode(fixtures[0].signed_commitment.trim_start_matches("0x"))?;
+        let leaf = crate::decode_outer_leaf(&hex::decode(
+            case.freshness_proof.outer_leaf.trim_start_matches("0x"),
+        )?)?;
+        let snapshot = QueueSnapshot::decode(&hex::decode(
+            case.freshness_proof.snapshot_preimage.trim_start_matches("0x"),
+        )?)?;
+        let call = BeefyClient::submitFiatShamirCall {
+            commitment: BeefyClient::Commitment {
+                blockNumber: original.commitment.block_number,
+                validatorSetID: original.commitment.validator_set_id,
+                payload: commitment_payload(&original.commitment.payload)?,
+            },
+            bitfield: vec![U256::from(7)],
+            proofs: Vec::new(),
+            leaf: to_sol_leaf(&leaf)?,
+            snapshot: to_sol_snapshot(&snapshot),
+            leafProof: Vec::new(),
+            leafProofOrder: U256::ZERO,
+        };
+        let signer = PrivateKeySigner::from_bytes(&B256::from([7; 32]))?;
+        for selector in [
+            BeefyClient::submitFiatShamirCall::SELECTOR,
+            BeefyClient::submitFinalCall::SELECTOR,
+        ] {
+            let mut canonical = call.abi_encode();
+            canonical[..4].copy_from_slice(&selector);
+            let signed = signed_test_transaction(&signer, 0, Address::ZERO, 1_000_000, canonical.clone()).await?;
+            let accepted = validate_commitment_call(&signed, &source_raw)?;
+            assert_eq!(accepted.commitment.abi_encode(), call.commitment.abi_encode());
+            assert_eq!(accepted.snapshot.abi_encode(), call.snapshot.abi_encode());
+            assert_eq!(accepted.leaf.abi_encode(), call.leaf.abi_encode());
+            assert!(validate_commitment_call(&signed, &other_raw).is_err());
+            assert_eq!(
+                recorded_commitment_transaction(&signed.encoded_2718(), &source_raw)?.encoded_2718(),
+                signed.encoded_2718(),
+            );
+
+            let mut trailing = canonical.clone();
+            trailing.extend_from_slice(&[0; 32]);
+            // Insert an unused ABI word before the dynamic tail and shift every
+            // top-level dynamic pointer. Decodable semantics, noncanonical bytes.
+            let mut noncanonical = canonical.clone();
+            let head_size = U256::from_be_slice(&canonical[4..36]).to::<usize>();
+            noncanonical.splice(4 + head_size..4 + head_size, [0u8; 32]);
+            let leaf_proof_word = 3 + 7 + 6; // three offsets, static leaf, static snapshot
+            for word in [0, 1, 2, leaf_proof_word] {
+                let start = 4 + word * 32;
+                let offset = U256::from_be_slice(&canonical[start..start + 32]) + U256::from(32);
+                noncanonical[start..start + 32].copy_from_slice(&offset.to_be_bytes::<32>());
+            }
+            let mut unknown = canonical.clone();
+            unknown[..4].copy_from_slice(&[0xff; 4]);
+            for malformed in [
+                trailing,
+                noncanonical,
+                canonical[..canonical.len() - 1].to_vec(),
+                canonical[..3].to_vec(),
+                unknown,
+            ] {
+                let signed = signed_test_transaction(&signer, 0, Address::ZERO, 1_000_000, malformed).await?;
+                assert!(validate_commitment_call(&signed, &source_raw).is_err());
+                assert!(recorded_commitment_transaction(&signed.encoded_2718(), &source_raw).is_err());
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn interactive_commitment_acceptance_and_handover() -> Result<()> {
+        for handover in [false, true] {
+            let (mut ethereum, mut anchor, mut leaf, snapshot, proof) = commitment_signing_fixture().await?;
+            if handover {
+                anchor.current.id = 1;
+                anchor.next.id = 2;
+                leaf.beefy_next_authority_set.id = 2;
+                let mut root = keccak256(&crate::encode_outer_leaf(&leaf)?);
+                let order = U256::from_be_bytes(proof.proof_order);
+                for (index, sibling) in proof.items.iter().enumerate() {
+                    let pair = if order.bit(index) { [*sibling, root] } else { [root, *sibling] };
+                    root = keccak256(&pair.concat());
+                }
+                let mut signed = crate::decode_versioned_finality_proof(&anchor.raw)?;
+                signed.commitment.validator_set_id = 1;
+                signed.commitment.payload = Decode::decode(
+                    &mut vec![(*b"mh", root.to_vec())].encode().as_slice(),
+                )?;
+                let digest = keccak256(&signed.commitment.encode());
+                for (index, signature) in signed.signatures.iter_mut().enumerate() {
+                    let (value, recovery) = crate::fixtures::signing_key(index as u16 + 1)
+                        .sign_prehash_recoverable(&digest)?;
+                    let mut raw = [0; 65];
+                    raw[..64].copy_from_slice(&value.to_bytes());
+                    raw[64] = recovery.to_byte();
+                    *signature = Some(sp_consensus_beefy::ecdsa_crypto::Signature::unchecked_from(raw));
+                }
+                anchor.raw = sp_consensus_beefy::VersionedFinalityProof::V1(signed).encode();
+                let keys = anchor.current.keys.iter()
+                    .map(|key| key.as_slice().try_into().expect("fixture key length"))
+                    .collect::<Vec<[u8; 33]>>();
+                anchor.validated = crate::validate_signed_commitment(
+                    &anchor.raw, &keys, Some(1), Some(anchor.block),
+                )?;
+            }
+            let owner = ethereum.api.raw_provider().default_signer_address();
+            let nonce = ethereum.api.raw_provider().get_transaction_count(owner).await?;
+            let transaction = ethereum.submit_interactive_fixture(&anchor, &leaf, &snapshot, &proof).await?;
+            let hash = transaction["txHash"].as_str().context("missing interactive hash")?.parse()?;
+            let included = ethereum.verify_accepted_commitment(hash, &anchor, &snapshot).await?;
+            assert_eq!(Some(included.0), transaction["blockNumber"].as_u64());
+            assert_eq!(ethereum.api.raw_provider().get_transaction_count(owner).await?, nonce);
+            let checkpoint = ethereum.checkpoint().await?;
+            assert_eq!(checkpoint.current_id, if handover { 1 } else { 0 });
+            assert_eq!(checkpoint.next_id, if handover { 2 } else { 1 });
+            let raw = hex::decode(transaction["rawTransaction"].as_str().unwrap().trim_start_matches("0x"))?;
+            let original = recorded_commitment_transaction(&raw, &anchor.raw)?;
+            assert_eq!(original.encoded_2718(), raw);
+            assert_eq!(original.input()[..4], <BeefyClient::submitFinalCall as alloy::sol_types::SolCall>::SELECTOR);
+        }
+        Ok(())
     }
 
     #[tokio::test]

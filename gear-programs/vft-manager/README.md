@@ -205,6 +205,19 @@ read-only; successor journals bind the exact seal and begin discovery at the
 boundary execution block + 1. No rollback to an active source is supported
 after custody transfer starts.
 
+Finalization freezes the authenticated coverage checkpoint, lifecycle originals,
+retirement/readiness pins and original-journal digests in `pending_seal` before
+publishing either report. Restart reauthenticates those exact projections without
+advancing their checkpoint; matching immutable `.new` files or final links are
+completed before the seal is published last. Conflicting artifacts or changed
+originals HOLD without overwrite, signing or activation. A mutable work `.new`
+file remains a HOLD, not a recoverable immutable report.
+
+An intentionally paused native wrapper is permitted during role-handoff recovery
+only when the source is already `Retired` at the same finalized Gear hash used
+to read wrapper obligations. Zero blocking obligations remain mandatory in every
+phase. Retained role originals are reconciled and persisted before role guards.
+
 
 Local regression command (actual gtest WASM, no node required):
 `cargo test --release -p tests vft_manager::gtest:: -- --test-threads=1`.

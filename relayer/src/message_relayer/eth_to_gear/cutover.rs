@@ -173,7 +173,7 @@ fn validate_report_versions(
         }
     }
     anyhow::ensure!(
-        matches!(version, 1 | 2 | 3)
+        matches!(version, 1..=3)
             && coverage
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
@@ -201,9 +201,21 @@ fn validate_report_versions(
 }
 
 fn read_coverage(seal: &CutoverSeal) -> Result<ExternalCoverageReport> {
-    let coverage = serde_json::from_slice(&committed_bytes(&seal.coverage.path)?)?;
-    let lifecycle = serde_json::from_slice(&committed_bytes(&seal.lifecycle_evidence.path)?)?;
-    validate_report_versions(seal.schema_version, &coverage, &lifecycle)?;
+    parse_coverage(
+        seal.schema_version,
+        &committed_bytes(&seal.coverage.path)?,
+        &committed_bytes(&seal.lifecycle_evidence.path)?,
+    )
+}
+
+fn parse_coverage(
+    version: u32,
+    coverage_bytes: &[u8],
+    lifecycle_bytes: &[u8],
+) -> Result<ExternalCoverageReport> {
+    let coverage = serde_json::from_slice(coverage_bytes)?;
+    let lifecycle = serde_json::from_slice(lifecycle_bytes)?;
+    validate_report_versions(version, &coverage, &lifecycle)?;
     Ok(serde_json::from_value(coverage)?)
 }
 
@@ -813,7 +825,7 @@ impl AuthenticatedCoverage {
 
 fn validate_admission_inventory(coverage: &ExternalCoverageReport) -> Result<()> {
     anyhow::ensure!(
-        matches!(coverage.schema_version, 1 | 2 | 3)
+        matches!(coverage.schema_version, 1..=3)
             && (matches!(coverage.schema_version, 2 | 3)
                 || coverage
                     .admissions
@@ -1246,10 +1258,14 @@ impl CutoverSeal {
         }
     }
     pub fn validate(&self) -> Result<()> {
+        self.validate_paths(false)
+    }
+
+    fn validate_paths(&self, pending_reports: bool) -> Result<()> {
         let old = &self.old_identity;
         let new = &self.new_identity;
         anyhow::ensure!(
-            matches!(self.schema_version, 1 | 2 | 3)
+            matches!(self.schema_version, 1..=3)
                 && self.new_manager_code_id != H256::zero()
                 && self.config_fingerprint != H256::zero()
                 && self.boundary.beacon_root != H256::zero()
@@ -1317,7 +1333,12 @@ impl CutoverSeal {
             anyhow::ensure!(
                 file.path.is_absolute()
                     && file.digest != H256::zero()
-                    && fs::canonicalize(&file.path)? == file.path
+                    && if pending_reports && index >= 3 && !entry_exists(&file.path)? {
+                        let parent = file.path.parent().context("HOLD: missing report directory")?;
+                        fs::canonicalize(parent)? == parent
+                    } else {
+                        fs::canonicalize(&file.path)? == file.path
+                    }
                     && files[..index]
                         .iter()
                         .all(|previous| previous.path != file.path),
@@ -1569,6 +1590,7 @@ pub fn read_original_journal(path: &Path) -> Result<OriginalJournal> {
 }
 async fn verify_original_lane(
     seal: &CutoverSeal,
+    mut coverage: ExternalCoverageReport,
     provider: ApiProviderConnection,
     api: &GearApi,
     eth: &ethereum_client::PollingEthApi,
@@ -1610,7 +1632,6 @@ async fn verify_original_lane(
         String::new(),
         seal.old_identity.erc20_manager_address,
     );
-    let mut coverage = read_coverage(seal)?;
     authenticate_coverage(seal, &mut coverage, eth, view).await?;
     let authenticated = verify_external_coverage(seal, &journal, &coverage, &sender, api).await?;
     anyhow::ensure!(
@@ -1722,6 +1743,75 @@ pub fn predecessor_seal_path(transactions: &Path) -> Result<Option<PathBuf>> {
     Ok(Some(intent.seal_path))
 }
 
+fn verify_old_journal_digests(seal: &CutoverSeal) -> Result<()> {
+    for file in [&seal.old_state, &seal.old_blocks, &seal.old_discovery] {
+        anyhow::ensure!(
+            sealed_file(&file.path)? == *file,
+            "HOLD: sealed original evidence changed: {}",
+            file.path.display()
+        );
+    }
+    Ok(())
+}
+
+fn pending_coverage(
+    seal: &CutoverSeal,
+    coverage_bytes: &[u8],
+    lifecycle_bytes: &[u8],
+) -> Result<ExternalCoverageReport> {
+    seal.validate_paths(true)?;
+    anyhow::ensure!(
+        digest(coverage_bytes) == seal.coverage.digest
+            && digest(lifecycle_bytes) == seal.lifecycle_evidence.digest,
+        "HOLD: pending report bytes differ from sealed projections"
+    );
+    let coverage = parse_coverage(seal.schema_version, coverage_bytes, lifecycle_bytes)?;
+    verify_old_journal_digests(seal)?;
+    Ok(coverage)
+}
+
+fn validate_predecessor(seal: &CutoverSeal, prior: &CutoverSeal) -> Result<()> {
+    anyhow::ensure!(
+        seal.source_receipt_floor
+            == prior
+                .boundary
+                .slot
+                .checked_add(1)
+                .context("HOLD: predecessor boundary overflow")?
+            && decode_status(&seal.retirement)?.predecessor
+                == Some(prior.old_identity.vft_manager_address.0.into()),
+        "HOLD: later cutover changed its original predecessor/floor"
+    );
+    Ok(())
+}
+
+/// Authenticate frozen report projections before publication, without writing or signing.
+/// The caller retains original writer ownership through publication of the final seal.
+pub async fn verify_pending_originals(
+    seal: &CutoverSeal,
+    coverage_bytes: &[u8],
+    lifecycle_bytes: &[u8],
+    provider: ApiProviderConnection,
+    api: &GearApi,
+    eth: &ethereum_client::PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
+) -> Result<()> {
+    let coverage = pending_coverage(seal, coverage_bytes, lifecycle_bytes)?;
+    verify_original_lane(seal, coverage, provider.clone(), api, eth, view).await?;
+    if let Some(previous) = predecessor_seal_path(
+        seal.old_state
+            .path
+            .parent()
+            .context("HOLD: missing original directory")?,
+    )? {
+        let (prior, _) = verify_markers(&previous)?;
+        validate_predecessor(seal, &prior)?;
+        verify_originals_read_only(&previous, provider, api, eth, view).await?;
+    }
+    view.recheck(&**eth).await?;
+    verify_old_journal_digests(seal)
+}
+
 pub async fn verify_originals_read_only(
     path: &Path,
     provider: ApiProviderConnection,
@@ -1738,7 +1828,8 @@ pub async fn verify_originals_read_only(
             seen.insert(hash),
             "HOLD: cyclic predecessor cutover manifests"
         );
-        verify_original_lane(&seal, provider.clone(), api, eth, view).await?;
+        let coverage = read_coverage(&seal)?;
+        verify_original_lane(&seal, coverage, provider.clone(), api, eth, view).await?;
         retained.push((path.clone(), hash));
         let predecessor = predecessor_seal_path(
             seal.old_state
@@ -1758,17 +1849,7 @@ pub async fn verify_originals_read_only(
             return Ok(());
         };
         let (prior, _) = verify_markers(&previous)?;
-        anyhow::ensure!(
-            seal.source_receipt_floor
-                == prior
-                    .boundary
-                    .slot
-                    .checked_add(1)
-                    .context("HOLD: predecessor boundary overflow")?
-                && decode_status(&seal.retirement)?.predecessor
-                    == Some(prior.old_identity.vft_manager_address.0.into()),
-            "HOLD: later cutover changed its original predecessor/floor"
-        );
+        validate_predecessor(&seal, &prior)?;
         path = previous;
     }
 }
@@ -3091,6 +3172,59 @@ mod tests {
             fs::write(base.join(name), br#"{"schema_version":1,"admissions":[]}"#).unwrap();
         }
         let seal = fixture_seal(&base, identity());
+        let coverage_bytes = fs::read(&seal.coverage.path).unwrap();
+        let lifecycle_bytes = fs::read(&seal.lifecycle_evidence.path).unwrap();
+        fs::remove_file(&seal.coverage.path).unwrap();
+        fs::remove_file(&seal.lifecycle_evidence.path).unwrap();
+        // The pre-authority gate checks exact projections without requiring publication.
+        assert!(pending_coverage(&seal, &coverage_bytes, &lifecycle_bytes).is_ok());
+        assert!(!seal.coverage.path.exists());
+        assert!(!seal.lifecycle_evidence.path.exists());
+        assert!(
+            seal.validate().is_err(),
+            "sealed readers still require both reports"
+        );
+        let mut changed_bytes = coverage_bytes.clone();
+        changed_bytes.push(b'\n');
+        assert!(pending_coverage(&seal, &changed_bytes, &lifecycle_bytes).is_err());
+        assert!(pending_coverage(&seal, &coverage_bytes, &changed_bytes).is_err());
+        let changed_lifecycle = br#"{"schema_version":2,"admissions":[]}"#;
+        let mut changed = seal.clone();
+        changed.lifecycle_evidence.digest = digest(changed_lifecycle);
+        assert!(pending_coverage(&changed, &coverage_bytes, changed_lifecycle).is_err());
+        changed = seal.clone();
+        changed.new_identity.ethereum_chain_id += 1;
+        assert!(pending_coverage(&changed, &coverage_bytes, &lifecycle_bytes).is_err());
+        changed = seal.clone();
+        changed.readiness.status.push(0);
+        assert!(pending_coverage(&changed, &coverage_bytes, &lifecycle_bytes).is_err());
+        changed = seal.clone();
+        changed.coverage.path = seal
+            .coverage
+            .path
+            .parent()
+            .unwrap()
+            .join("absent/cutover-coverage.json");
+        assert!(pending_coverage(&changed, &coverage_bytes, &lifecycle_bytes).is_err());
+        for file in [&seal.old_state, &seal.old_blocks, &seal.old_discovery] {
+            let original = fs::read(&file.path).unwrap();
+            let mut changed = original.clone();
+            changed.push(b'\n');
+            fs::write(&file.path, changed).unwrap();
+            assert!(pending_coverage(&seal, &coverage_bytes, &lifecycle_bytes).is_err());
+            fs::write(&file.path, &original).unwrap();
+            let temp = PathBuf::from(format!("{}.new", file.path.display()));
+            fs::write(&temp, &original).unwrap();
+            assert!(
+                pending_coverage(&seal, &coverage_bytes, &lifecycle_bytes).is_err(),
+                "mutable original journal temps must not be recovered by pending verification"
+            );
+            fs::remove_file(temp).unwrap();
+        }
+        assert!(pending_coverage(&seal, &coverage_bytes, &lifecycle_bytes).is_ok());
+        fs::write(&seal.coverage.path, &coverage_bytes).unwrap();
+        fs::write(&seal.lifecycle_evidence.path, &lifecycle_bytes).unwrap();
+        seal.validate().unwrap();
         let first = empty_covered_block(0, H256::zero());
         let last = empty_covered_block(1, first.hash);
         let mut chain_seal = seal.clone();
@@ -3103,7 +3237,7 @@ mod tests {
         chain_seal.boundary.execution_hash = last.hash;
         chain_seal.validate().unwrap();
         validate_coverage_chain(&chain_seal, &[first.clone(), last.clone()]).unwrap();
-        assert!(validate_coverage_chain(&chain_seal, &[last.clone()]).is_err());
+        assert!(validate_coverage_chain(&chain_seal, std::slice::from_ref(&last)).is_err());
         let wrong_parent = empty_covered_block(1, H256::repeat_byte(3));
         chain_seal.boundary.execution_hash = wrong_parent.hash;
         assert!(validate_coverage_chain(&chain_seal, &[first.clone(), wrong_parent]).is_err());

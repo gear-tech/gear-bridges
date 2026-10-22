@@ -336,6 +336,8 @@ struct Work {
     schema_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ethereum_authentication: Option<ethereum_client::FinalityCheckpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_seal: Option<CutoverSeal>,
     intent: Intent,
     #[serde(default)]
     blocks: Vec<CoveredBlock>,
@@ -701,7 +703,7 @@ fn work_path(directory: &Path) -> PathBuf {
 }
 fn validate_work_version(work: &Work) -> Result<()> {
     ensure!(
-        matches!(work.schema_version, 1 | 2 | 3),
+        matches!(work.schema_version, 1..=3),
         "HOLD: unsupported cutover work schema"
     );
     ensure!(
@@ -959,6 +961,7 @@ async fn authenticate_work_ethereum(
 
 async fn upgrade_work(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
     let mut work = read_work(path)?;
+    ensure_unfrozen(path, &work)?;
     let mut view = eth.verified_finalized_view().await?;
     authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     authenticate_source_emitter(eth, &work.intent.old_identity, work.intent.erc20_manager).await?;
@@ -995,7 +998,7 @@ async fn upgrade_work(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result
 fn read_versioned_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
     ensure!(
-        matches!(value["schema_version"].as_u64(), Some(1 | 2 | 3)),
+        matches!(value["schema_version"].as_u64(), Some(1..=3)),
         "HOLD: unsupported cutover evidence schema"
     );
     if value["schema_version"] != 3 {
@@ -1036,14 +1039,10 @@ fn read_work(path: &Path) -> Result<Work> {
     Ok(work)
 }
 fn atomic_json<T: Serialize>(path: &Path, value: &T, immutable: bool) -> Result<()> {
-    let bytes = serde_json::to_vec(value)?;
-    if immutable && path.exists() {
-        ensure!(
-            fs::read(path)? == bytes,
-            "HOLD: immutable cutover evidence changed"
-        );
-        return Ok(());
+    if immutable {
+        return gear_common::durable::immutable_json(path, value);
     }
+    let bytes = serde_json::to_vec(value)?;
     let temporary = PathBuf::from(format!("{}.new", path.display()));
     let mut file = OpenOptions::new()
         .write(true)
@@ -1053,17 +1052,216 @@ fn atomic_json<T: Serialize>(path: &Path, value: &T, immutable: bool) -> Result<
     file.write_all(&bytes)?;
     file.sync_all()?;
     drop(file);
-    if immutable {
-        fs::hard_link(&temporary, path)?;
-        fs::remove_file(&temporary)?;
-    } else {
-        fs::rename(&temporary, path)?;
-    }
+    fs::rename(&temporary, path)?;
     File::open(path.parent().context("Missing cutover parent")?)?.sync_all()?;
     Ok(())
 }
 fn save(path: &Path, work: &Work) -> Result<()> {
+    if path.exists() {
+        let mut previous = read_work(path)?;
+        if sealing_started(path, &previous)? {
+            let frozen = pending_projection(path, &mut previous)?.0;
+            ensure!(
+                work.pending_seal.as_ref() == Some(&frozen),
+                "HOLD: pending seal cannot be removed or changed"
+            );
+            let mut proposed = work.clone();
+            ensure!(
+                pending_projection(path, &mut proposed)?.0 == frozen
+                    && report_bytes(&previous)? == report_bytes(&proposed)?,
+                "HOLD: frozen cutover projection changed"
+            );
+        }
+    }
     atomic_json(path, work, false)
+}
+
+fn report_projections(work: &Work) -> Result<(CoverageReport, LifecycleReport)> {
+    Ok((
+        CoverageReport {
+            schema_version: work.schema_version,
+            ethereum_authentication: work.ethereum_authentication.clone(),
+            intent: work.intent.clone(),
+            blocks: work.blocks.clone(),
+            admissions: work.admissions.clone(),
+        },
+        LifecycleReport {
+            schema_version: work.schema_version,
+            intent: work.intent.clone(),
+            // Activation is subsequent mutable work, never part of the Ready seal.
+            calls: work.calls.iter()
+                .filter(|call| call.step != CutoverStep::DestinationUnpause)
+                .cloned().collect(),
+            role_pins: work.role_pins.clone(),
+            registration: work.registration.clone().context("HOLD: registration missing")?,
+        },
+    ))
+}
+
+fn report_bytes(work: &Work) -> Result<(Vec<u8>, Vec<u8>)> {
+    let (coverage, lifecycle) = report_projections(work)?;
+    Ok((serde_json::to_vec(&coverage)?, serde_json::to_vec(&lifecycle)?))
+}
+
+fn pending_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.new", path.display()))
+}
+
+fn sealing_started(path: &Path, work: &Work) -> Result<bool> {
+    if work.pending_seal.is_some() {
+        return Ok(true);
+    }
+    let directory = path.parent().context("Missing cutover parent")?;
+    for name in ["cutover-coverage.json", "cutover-calls.json", "cutover.json"] {
+        let artifact = directory.join(name);
+        if gear_common::durable::entry_exists(&artifact)?
+            || gear_common::durable::entry_exists(&pending_path(&artifact))?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn ensure_unfrozen(path: &Path, work: &Work) -> Result<()> {
+    ensure!(
+        !sealing_started(path, work)?,
+        "HOLD: reports are frozen; resume finalize-cutover without modifying originals"
+    );
+    Ok(())
+}
+
+// Inspect both links before any publication: a conflicting second report must not
+// cause the first report to be committed or an exact temporary to be removed.
+fn retained_artifact(path: &Path) -> Result<Option<Vec<u8>>> {
+    let mut retained = None;
+    for candidate in [path.to_path_buf(), pending_path(path)] {
+        if !gear_common::durable::entry_exists(&candidate)? {
+            continue;
+        }
+        ensure!(
+            fs::symlink_metadata(&candidate)?.file_type().is_file(),
+            "HOLD: immutable evidence is not a regular file"
+        );
+        let bytes = fs::read(&candidate)?;
+        ensure!(
+            retained.as_ref().is_none_or(|previous| previous == &bytes),
+            "HOLD: immutable final and temporary evidence conflict"
+        );
+        retained = Some(bytes);
+    }
+    Ok(retained)
+}
+
+fn pending_projection(
+    path: &Path,
+    work: &mut Work,
+) -> Result<(CutoverSeal, CoverageReport, LifecycleReport)> {
+    let directory = fs::canonicalize(path.parent().context("Missing cutover parent")?)?;
+    let coverage_path = directory.join("cutover-coverage.json");
+    let calls_path = directory.join("cutover-calls.json");
+    let retained_coverage = retained_artifact(&coverage_path)?;
+    let retained_calls = retained_artifact(&calls_path)?;
+    if work.pending_seal.is_none() {
+        ensure!(
+            retained_calls.is_none() || retained_coverage.is_some(),
+            "HOLD: historical lifecycle report lacks its original coverage checkpoint"
+        );
+        if let Some(bytes) = &retained_coverage {
+            let report: CoverageReport = serde_json::from_slice(bytes)?;
+            // Historical partial publication owns its checkpoint, even if a previous
+            // restart already advanced the mutable Work checkpoint.
+            work.ethereum_authentication = report.ethereum_authentication;
+        }
+    }
+    validate_work_version(work)?;
+    let (coverage, lifecycle) = report_projections(work)?;
+    let coverage_bytes = serde_json::to_vec(&coverage)?;
+    let lifecycle_bytes = serde_json::to_vec(&lifecycle)?;
+    ensure!(
+        retained_coverage.as_ref().is_none_or(|bytes| bytes == &coverage_bytes)
+            && retained_calls.as_ref().is_none_or(|bytes| bytes == &lifecycle_bytes),
+        "HOLD: partial report differs from completed Work"
+    );
+    let sealed = CutoverSeal {
+        schema_version: work.schema_version,
+        old_identity: work.intent.old_identity.clone(),
+        new_identity: work.intent.new_identity.clone(),
+        new_manager_code_id: work.intent.new_manager_code_id,
+        source_receipt_floor: work.intent.source_receipt_floor,
+        boundary: work.intent.boundary.clone(),
+        config_fingerprint: work.intent.config_fingerprint,
+        old_state: seal::sealed_file(&work.intent.old_transactions.join("state.json"))?,
+        old_blocks: seal::sealed_file(&work.intent.old_transactions.join("blocks.json"))?,
+        old_discovery: seal::sealed_file(&work.intent.old_discovery)?,
+        coverage: seal::SealedFile { path: coverage_path, digest: seal::digest(&coverage_bytes) },
+        lifecycle_evidence: seal::SealedFile { path: calls_path, digest: seal::digest(&lifecycle_bytes) },
+        retirement: work.retirement.clone().context("HOLD: retirement pin missing")?,
+        readiness: work.readiness.clone().context("HOLD: readiness pin missing")?,
+    };
+    ensure!(
+        work.pending_seal.as_ref().is_none_or(|pending| pending == &sealed),
+        "HOLD: frozen reports, originals or cutover pins changed"
+    );
+    let seal_path = directory.join("cutover.json");
+    let seal_bytes = serde_json::to_vec(&sealed)?;
+    if let Some(bytes) = retained_artifact(&seal_path)? {
+        ensure!(bytes == seal_bytes, "HOLD: retained seal changed");
+    }
+    let marker = serde_json::to_vec(&seal::CutoverMarker {
+        seal_path,
+        manifest_digest: seal::digest(&seal_bytes),
+    })?;
+    for path in [
+        seal::marker_path(sealed.old_state.path.parent().context("Missing original parent")?),
+        seal::marker_path(&sealed.old_discovery.path),
+    ] {
+        if let Some(bytes) = retained_artifact(&path)? {
+            ensure!(bytes == marker, "HOLD: retained seal marker changed");
+        }
+    }
+    Ok((sealed, coverage, lifecycle))
+}
+
+async fn finish_pending_seal(
+    api: &GearApi,
+    eth: &PollingEthApi,
+    provider: ApiProviderConnection,
+    path: &Path,
+) -> Result<()> {
+    let mut work = read_work(path)?;
+    let (sealed, coverage, lifecycle) = pending_projection(path, &mut work)?;
+    let coverage_bytes = serde_json::to_vec(&coverage)?;
+    let lifecycle_bytes = serde_json::to_vec(&lifecycle)?;
+    let mut view = eth.verified_finalized_view().await?;
+    seal::verify_pending_originals(
+        &sealed, &coverage_bytes, &lifecycle_bytes, provider.clone(), api, eth, &mut view,
+    ).await?;
+    let mut verification_work = work.clone();
+    verification_work.calls = lifecycle.calls.clone();
+    let mut authenticated = authenticate_completed_work(api, eth, provider, &mut view, verification_work).await?;
+    if work.blocks.is_empty() && matches!(work.schema_version, 1 | 2) {
+        // Verification reconstructs legacy inventory in memory, not in immutable reports.
+        authenticated.blocks.clear();
+    }
+    ensure!(
+        report_bytes(&authenticated)? == (coverage_bytes, lifecycle_bytes),
+        "HOLD: authentication would change frozen report projections"
+    );
+    work.pending_seal = Some(sealed.clone());
+    // Durable freeze precedes either immutable report, including historical partials.
+    save(path, &work)?;
+    let sealed = publish_pending_reports(path, &mut work)?;
+    seal::seal_cutover(&path.parent().context("Missing cutover parent")?.join("cutover.json"), &sealed)?;
+    Ok(())
+}
+
+fn publish_pending_reports(path: &Path, work: &mut Work) -> Result<CutoverSeal> {
+    ensure!(work.pending_seal.is_some(), "HOLD: durable pending seal missing");
+    let (sealed, coverage, lifecycle) = pending_projection(path, work)?;
+    gear_common::durable::immutable_json(&sealed.coverage.path, &coverage)?;
+    gear_common::durable::immutable_json(&sealed.lifecycle_evidence.path, &lifecycle)?;
+    Ok(sealed)
 }
 async fn release_draining_hold(
     api: &GearApi,
@@ -2008,6 +2206,14 @@ async fn run_cutover_request(
     payload: &[u8],
 ) -> Result<FinalizedCutoverCall> {
     let mut work = read_work(work_path)?;
+    let frozen = sealing_started(work_path, &work)?;
+    if frozen {
+        ensure!(
+            step == CutoverStep::DestinationUnpause && work.pending_seal.is_some(),
+            "HOLD: frozen cutover permits only post-seal activation"
+        );
+        seal::verify_markers(&work_path.parent().context("Missing cutover parent")?.join("cutover.json"))?;
+    }
     let mut view = eth.verified_finalized_view().await?;
     authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     let signer: gsdk::signer::Signer = api.clone().into();
@@ -2032,6 +2238,10 @@ async fn run_cutover_request(
     for index in 0..work.calls.len() {
         let call = &mut work.calls[index];
         validate_fixed_intent(&work.intent, call)?;
+        if frozen && call.step != CutoverStep::DestinationUnpause {
+            verify_lifecycle_original(api, &scanner, &work.intent, call).await?;
+            continue;
+        }
         let result = reconcile_call(api, &scanner, call, false).await;
         if no_effect(&call.original) {
             call.archived_no_effect = true;
@@ -3077,6 +3287,7 @@ async fn scan_coverage(
     sponsor: bool,
 ) -> Result<()> {
     let mut work = read_work(path)?;
+    ensure_unfrozen(path, &work)?;
     let mut view = eth.verified_finalized_view().await?;
     authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     let originals = seal::read_original_journal(&work.intent.old_transactions)?;
@@ -3373,6 +3584,7 @@ async fn drain(
     sponsor: bool,
 ) -> Result<()> {
     let mut work = read_work(path)?;
+    ensure_unfrozen(path, &work)?;
     let mut view = eth.verified_finalized_view().await?;
     authenticate_work_ethereum(eth, &mut view, &mut work).await?;
     let signer: gsdk::signer::Signer = api.clone().into();
@@ -3773,6 +3985,9 @@ pub async fn prepare(
 ) -> Result<()> {
     let _work_owner = lock_work(&args.cutover_dir)?;
     let path = work_path(&args.cutover_dir);
+    if path.exists() {
+        ensure_unfrozen(&path, &read_work(&path)?)?;
+    }
     let old_transactions = fs::canonicalize(&args.old_transactions)?;
     let old_discovery = fs::canonicalize(&args.old_discovery)?;
     let _journals = seal::lock_original_journals(&old_transactions, &old_discovery)?;
@@ -4030,6 +4245,7 @@ pub async fn prepare(
             &Work {
                 schema_version: 3,
                 ethereum_authentication: Some(view.checkpoint().clone()),
+                pending_seal: None,
                 intent: intent.clone(),
                 blocks: vec![],
                 admissions: vec![],
@@ -4082,6 +4298,7 @@ async fn drain_discovery(eth: &PollingEthApi, path: &Path) -> Result<()> {
         BlockCursor, JSONBlockStorage,
     };
     let work = read_work(path)?;
+    ensure_unfrozen(path, &work)?;
     let predecessor =
         seal::read_original_journal(&work.intent.old_transactions)?.predecessor_cutover;
     let storage = JSONBlockStorage::new_bound(
@@ -4113,6 +4330,7 @@ async fn drain_discovery(eth: &PollingEthApi, path: &Path) -> Result<()> {
 }
 async fn drain_source(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
     let work = read_work(path)?;
+    ensure_unfrozen(path, &work)?;
     let manager = VftManager::new(GClientRemoting::new(api.clone()));
     let source = actor(work.intent.old_identity.vft_manager_address);
     let mut start = 0u32;
@@ -4145,12 +4363,18 @@ async fn drain_source(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result
     if let Some(wrapper) = work.intent.native_wrapper {
         let at = api.last_block_hash().await?;
         let roles = read_role_pin(api, wrapper, true, Some(H256::from_slice(at.as_ref()))).await?;
+        let phase = manager
+            .cutover_status()
+            .at_block(sails_rs::H256::from_slice(at.as_ref()))
+            .recv(source)
+            .await?
+            .phase;
         ensure!(
             zero_blocking(&roles, work.schema_version)?,
             "HOLD: original native payouts remain blocking"
         );
         ensure!(
-            !roles.paused,
+            phase == CutoverPhase::Retired || !roles.paused,
             "HOLD: resume wrapper after retaining holds and before source custody transfer"
         );
     }
@@ -4437,6 +4661,7 @@ fn validate_lifecycle_report(work: &Work) -> Result<()> {
 }
 async fn reconcile_retained_role_calls(api: &GearApi, path: &Path) -> Result<()> {
     let mut work = read_work(path)?;
+    ensure_unfrozen(path, &work)?;
     let signer: gsdk::signer::Signer = api.clone().into();
     let scanner = sender(
         ApiProviderConnection::from_api(signer.api().clone()),
@@ -4470,22 +4695,10 @@ async fn reconcile_retained_role_calls(api: &GearApi, path: &Path) -> Result<()>
     Ok(())
 }
 
-async fn handoff_after_reconciliation<R, F, H>(reconciliation: R, handoff: F) -> Result<()>
-where
-    R: std::future::Future<Output = Result<()>>,
-    F: FnOnce() -> H,
-    H: std::future::Future<Output = Result<()>>,
-{
-    reconciliation.await?;
-    handoff().await
-}
-
 async fn handoff_roles(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
     // Delay all role readback/guards until retained originals are persisted.
-    handoff_after_reconciliation(reconcile_retained_role_calls(api, path), || {
-        handoff_roles_reconciled(api, eth, path)
-    })
-    .await
+    reconcile_retained_role_calls(api, path).await?;
+    handoff_roles_reconciled(api, eth, path).await
 }
 
 async fn handoff_roles_reconciled(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result<()> {
@@ -4849,17 +5062,8 @@ pub async fn finalize(
             .await?;
     }
     let seal_path = args.cutover_dir.join("cutover.json");
-    if seal_path.exists() {
-        let (existing, _) = seal::verify_seal_files(&seal_path)?;
-        ensure!(
-            existing.old_identity == work.intent.old_identity
-                && existing.new_identity == work.intent.new_identity,
-            "HOLD: seal/work identity changed"
-        );
-        seal::install_seal_markers(&seal_path)?;
-        seal::verify_originals_read_only(&seal_path, provider.clone(), api, &eth, &mut view)
-            .await?;
-        upgrade_work(api, &eth, &path).await?;
+    if sealing_started(&path, &work)? {
+        finish_pending_seal(api, &eth, provider.clone(), &path).await?;
     } else {
         upgrade_work(api, &eth, &path).await?;
         scan_coverage(api, &eth, &beacon, &path, args.sponsor_unpaid).await?;
@@ -4966,48 +5170,7 @@ pub async fn finalize(
             work.readiness = Some(readiness);
         }
         save(&path, &work)?;
-        validate_lifecycle_report(&read_work(&path)?)?;
-        let coverage_path = args.cutover_dir.join("cutover-coverage.json");
-        let calls_path = args.cutover_dir.join("cutover-calls.json");
-        atomic_json(
-            &coverage_path,
-            &CoverageReport {
-                schema_version: 3,
-                ethereum_authentication: work.ethereum_authentication.clone(),
-                intent: work.intent.clone(),
-                blocks: work.blocks.clone(),
-                admissions: work.admissions.clone(),
-            },
-            true,
-        )?;
-        atomic_json(
-            &calls_path,
-            &LifecycleReport {
-                schema_version: 3,
-                intent: work.intent.clone(),
-                calls: work.calls.clone(),
-                role_pins: work.role_pins.clone(),
-                registration: work.registration.clone().context("Missing registration")?,
-            },
-            true,
-        )?;
-        let sealed = CutoverSeal {
-            schema_version: 3,
-            old_identity: work.intent.old_identity.clone(),
-            new_identity: work.intent.new_identity.clone(),
-            new_manager_code_id: work.intent.new_manager_code_id,
-            source_receipt_floor: work.intent.source_receipt_floor,
-            boundary: work.intent.boundary.clone(),
-            config_fingerprint: work.intent.config_fingerprint,
-            old_state: seal::sealed_file(&work.intent.old_transactions.join("state.json"))?,
-            old_blocks: seal::sealed_file(&work.intent.old_transactions.join("blocks.json"))?,
-            old_discovery: seal::sealed_file(&work.intent.old_discovery)?,
-            coverage: seal::sealed_file(&coverage_path)?,
-            lifecycle_evidence: seal::sealed_file(&calls_path)?,
-            retirement: work.retirement.clone().context("Missing retirement pin")?,
-            readiness: work.readiness.clone().context("Missing readiness pin")?,
-        };
-        seal::seal_cutover(&seal_path, &sealed)?;
+        finish_pending_seal(api, &eth, provider.clone(), &path).await?;
     }
     let mut view = eth.verified_finalized_view().await?;
     seal::verify_originals_read_only(&seal_path, provider, api, &eth, &mut view).await?;
@@ -5158,9 +5321,10 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     authenticate_environment(&api, &eth, &report.intent).await?;
     authenticate_boundary(&api, &beacon, &report.intent).await?;
     seal::verify_originals_read_only(&args.seal, provider.clone(), &api, &eth, &mut view).await?;
-    let mut work = Work {
+    let work = Work {
         schema_version: sealed.schema_version,
         ethereum_authentication: report.ethereum_authentication,
+        pending_seal: None,
         intent: report.intent.clone(),
         blocks: report.blocks,
         admissions: report.admissions,
@@ -5172,6 +5336,21 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
         new_transactions: None,
         new_discovery: None,
     };
+    let work = authenticate_completed_work(&api, &eth, provider.clone(), &mut view, work).await?;
+    let scanner = sender(provider, &work.intent.old_identity, Some(work.intent.erc20_manager));
+    verify_activation(&api, &scanner, &work.intent, &args.seal).await?;
+    seal::verify_markers(&args.seal)?;
+    println!("Verified original sealed journals, canonical coverage, lifecycle originals and historical economic settlement (strictly read-only).");
+    Ok(())
+}
+
+async fn authenticate_completed_work(
+    api: &GearApi,
+    eth: &PollingEthApi,
+    provider: ApiProviderConnection,
+    mut view: &mut ethereum_client::FinalizedView,
+    mut work: Work,
+) -> Result<Work> {
     if work.blocks.is_empty() && matches!(work.schema_version, 1 | 2) {
         work.blocks = seal::reconstruct_coverage(
             &eth,
@@ -5317,15 +5496,14 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
         "HOLD: sealed actual authorized EVM original unavailable"
     );
     verify_current_registrations(&eth, &work.intent).await?;
-    verify_activation(&api, &scanner, &work.intent, &args.seal).await?;
-    seal::verify_markers(&args.seal)?;
-    println!("Verified original sealed journals, canonical coverage, lifecycle originals and historical economic settlement (strictly read-only).");
-    Ok(())
+    view.recheck(&**eth).await?;
+    Ok(work)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("cutover/native_fixture.rs");
 
     fn cutover_identity() -> InboundRuntimeIdentity {
         InboundRuntimeIdentity {
@@ -5957,225 +6135,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn first_role_guard_waits_for_durable_original_reconciliation() {
-        let directory = std::env::temp_dir().join(format!("cutover-role-order-{}", Uuid::now_v7()));
-        fs::create_dir(&directory).unwrap();
-        let path = directory.join("call.json");
-        let token = H256::repeat_byte(8);
-        let new = actor(H256::repeat_byte(9));
-        let call = FinalizedCutoverCall {
-            step: CutoverStep::TokenMinter(token),
-            attempt: 0,
-            target: token,
-            payload: vft_client::vft_admin::io::SetMinter::encode_call(new),
-            gas: 1,
-            value: 0,
-            original: original_with_reply(None),
-            archived_no_effect: false,
-        };
-        atomic_json(&path, &call, false).unwrap();
-        let before = call.original.clone();
-        let readback_started = std::cell::Cell::new(false);
-        handoff_after_reconciliation(
-            async {
-                // Yield so polling the role callback too early deterministically fails its guard.
-                tokio::task::yield_now().await;
-                let mut saved: FinalizedCutoverCall = serde_json::from_slice(&fs::read(&path)?)?;
-                ensure!(
-                    !readback_started.get(),
-                    "role readback preceded original recovery"
-                );
-                saved.original.finalized_reply = original_with_reply(Some(vec![])).finalized_reply;
-                validate_call_reply(&saved)?;
-                atomic_json(&path, &saved, false)
-            },
-            || async {
-                readback_started.set(true);
-                // The actual role is already the successor, but completion needs the saved original.
-                let live_role = new;
-                let saved: FinalizedCutoverCall = serde_json::from_slice(&fs::read(&path)?)?;
-                ensure!(
-                    live_role == new && complete(&saved.original),
-                    "unjournaled role handoff"
-                );
-                ensure!(
-                    saved.original.same_request(&before),
-                    "original identity replaced"
-                );
-                validate_call_reply(&saved)
-            },
-        )
-        .await
-        .unwrap();
-        assert!(readback_started.get());
-        readback_started.set(false);
-        let held =
-            handoff_after_reconciliation(async { bail!("HOLD: original unresolved") }, || async {
-                readback_started.set(true);
-                Ok(())
-            })
-            .await;
-        assert!(held.is_err());
-        assert!(
-            !readback_started.get(),
-            "failed reconciliation must not query roles or sign"
-        );
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    #[ignore = "read-only owned native stack and two loopback archives required"]
-    async fn owned_native_first_minter_original_replays_before_role_guard() -> Result<()> {
-        use vft_client::traits::VftAdmin as _;
-        let stack_path = std::env::var("CUTOVER_NATIVE_STACK")?;
-        let source = std::env::var("CUTOVER_NATIVE_SOURCE")?;
-        let witness = std::env::var("CUTOVER_NATIVE_WITNESS")?;
-        for rpc in [&source, &witness] {
-            ensure!(
-                rpc.starts_with("ws://127.0.0.1:") && rpc[15..].bytes().all(|b| b.is_ascii_digit()),
-                "only owned loopback archives may run this no-signature replay"
-            );
-        }
-        let stack: serde_json::Value = serde_json::from_slice(&fs::read(stack_path)?)?;
-        let message = stack["configuration"]["actions"]
-            .as_object()
-            .context("actions missing")?
-            .iter()
-            .filter(|(key, _)| key.ends_with(".minter"))
-            .map(|(_, action)| &action["messages"][0])
-            .min_by_key(|message| message["target"].as_str().unwrap_or_default())
-            .context("retained first token SetMinter missing")?;
-        let submission = &message["submission"];
-        let string = |value: &serde_json::Value| -> Result<String> {
-            Ok(value
-                .as_str()
-                .context("missing retained string")?
-                .to_owned())
-        };
-        let target = H256::from_str(&string(&message["target"])?)?;
-        let payload = hex::decode(string(&message["payload"])?.trim_start_matches("0x"))?;
-        let mut params = payload
-            .strip_prefix(vft_client::vft_admin::io::SetMinter::ROUTE)
-            .context("not the original SetMinter route")?;
-        let successor = ActorId::decode(&mut params)?;
-        ensure!(params.is_empty(), "SetMinter trailing bytes");
-        let prepared = u32::try_from(
-            submission["scanFromNumber"]
-                .as_u64()
-                .context("scan pin missing")?,
-        )?;
-        let pin = string(&submission["scanFromHash"])?;
-        // Setup journals encode public account bytes as hex; SignedSubmission uses SS58.
-        let sender = subxt::utils::AccountId32(H256::from_str(&string(&submission["sender"])?)?.0);
-        let mut call = FinalizedCutoverCall {
-            step: CutoverStep::TokenMinter(target),
-            attempt: 0,
-            target,
-            payload: payload.clone(),
-            gas: message["gasLimit"].as_u64().context("gas missing")?,
-            value: 0,
-            archived_no_effect: false,
-            original: SignedSubmission {
-                chain_genesis_hash: string(&stack["sourceGenesis"])?,
-                manager: format!("{target:#x}"),
-                historical_proxy: format!("{target:#x}"),
-                sender: sender.to_string(),
-                receipt_key: (0, 0),
-                payload_hash: format!("{:#x}", alloy_primitives::keccak256(&payload)),
-                nonce: submission["nonce"].as_u64().context("nonce missing")?,
-                extrinsic_hash: string(&submission["extrinsicHash"])?,
-                raw_extrinsic: hex::decode(
-                    string(&submission["rawExtrinsic"])?.trim_start_matches("0x"),
-                )?,
-                prepared_finalized_number: prepared,
-                prepared_finalized_hash: pin.clone(),
-                scanned_finalized_number: prepared,
-                scanned_finalized_hash: pin.clone(),
-                reply_scanned_finalized_number: prepared,
-                reply_scanned_finalized_hash: pin,
-                inclusion_block_number: Some(u32::try_from(
-                    message["inclusionEvidence"]["blockNumber"]
-                        .as_u64()
-                        .context("inclusion missing")?,
-                )?),
-                inclusion_block_hash: Some(string(&message["inclusionEvidence"]["blockHash"])?),
-                message_id: None,
-                finalized_dispatch_error: None,
-                finalized_reply: None,
-                native_reconciliation: None,
-                native_reconciliation_attempts: vec![],
-                finalized_nonce_consumed: None,
-                finalized_reply_error: None,
-            },
-        };
-        let before = call.original.clone();
-        let directory =
-            std::env::temp_dir().join(format!("cutover-native-readonly-{}", Uuid::now_v7()));
-        fs::create_dir(&directory)?;
-        let path = directory.join("first-role.json");
-        atomic_json(&path, &call, false)?;
-        // Both archives reauthenticate the same original; no call preparation, signing or broadcast.
-        for rpc in [source, witness] {
-            call.original = before.clone();
-            let provider = ApiProvider::new(rpc, 0).await?;
-            let connection = provider.connection();
-            let mut readonly = connection.clone();
-            let api = readonly.gclient();
-            let scanner =
-                MessageSender::new(target, vec![], target, connection, String::new(), None);
-            handoff_after_reconciliation(
-                async {
-                    let result = reconcile_call(&api, &scanner, &mut call, false).await;
-                    atomic_json(&path, &call, false)?;
-                    result?;
-                    validate_call_reply(&call)
-                },
-                || async {
-                    let recovered: FinalizedCutoverCall =
-                        serde_json::from_slice(&fs::read(&path)?)?;
-                    ensure!(
-                        recovered.original.same_request(&before) && complete(&recovered.original),
-                        "retained original not recovered before role guard"
-                    );
-                    let reply = recovered
-                        .original
-                        .finalized_reply
-                        .as_ref()
-                        .context("reply absent")?;
-                    ensure!(
-                        reply.payload.is_empty(),
-                        "native unit reply is not exactly empty"
-                    );
-                    ensure!(
-                        reply.observation.finalized_block_hash
-                            == string(&message["replyEvidence"]["blockHash"])?
-                            && recovered.original.message_id.as_deref()
-                                == message["messageId"].as_str(),
-                        "original native reply linkage/pin changed"
-                    );
-                    let hash = H256::from_str(&reply.observation.finalized_block_hash)?;
-                    let minter = vft_client::VftAdmin::new(GClientRemoting::new(api.clone()))
-                        .minter()
-                        .at_block(sails_rs::H256::from_slice(hash.as_bytes()))
-                        .recv(actor(target))
-                        .await?;
-                    ensure!(minter == successor, "authenticated successor role differs");
-                    println!(
-                        "Read-only original {} nonce {} recovered before first-role guard at {}",
-                        recovered.original.extrinsic_hash,
-                        recovered.original.nonce,
-                        reply.observation.finalized_block_hash
-                    );
-                    Ok(())
-                },
-            )
-            .await?;
-        }
-        fs::remove_dir_all(directory)?;
-        Ok(())
-    }
-
     #[test]
     fn original_empty_minter_reply_survives_restart_without_replacement() {
         let token = H256::repeat_byte(8);
@@ -6323,6 +6282,7 @@ mod tests {
         Work {
             schema_version: 2,
             ethereum_authentication: None,
+            pending_seal: None,
             intent: Intent {
                 old_identity: identity.clone(),
                 new_identity: identity.clone(),
@@ -6705,10 +6665,10 @@ mod tests {
         let requests = primary.requests.lock().unwrap().clone();
         let body_hashes = requests
             .iter()
-            .filter_map(|request| {
-                (request["method"] == "eth_getBlockByHash" && request["params"][1] == true)
-                    .then(|| request["params"][0].clone())
+            .filter(|request| {
+                request["method"] == "eth_getBlockByHash" && request["params"][1] == true
             })
+            .map(|request| request["params"][0].clone())
             .collect::<Vec<_>>();
         assert_eq!(fs::read(&path).unwrap(), original);
         assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
@@ -7744,6 +7704,170 @@ mod tests {
             !accepted_external_parent(&proof, &exception),
             "exception admission must use independent exclusion authentication"
         );
+    }
+
+    // Persistence-only fixture: these projections are not protocol-qualified evidence.
+    async fn pending_report_fixture() -> (PathBuf, Work) {
+        let directory = std::env::temp_dir().join(format!("cutover-pending-{}", Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let mut work = terminal_coverage_fixture().await;
+        work.schema_version = 3;
+        let header = work.blocks[0].header.clone();
+        work.intent.old_identity.ethereum_genesis_hash = H256(header.hash_slow().0);
+        work.ethereum_authentication = Some(ethereum_client::FinalityCheckpoint {
+            schema_version: 1,
+            policy: "independent-two-el-v1".into(),
+            chain_id: work.intent.old_identity.ethereum_chain_id,
+            genesis_hash: header.hash_slow(),
+            common_header: header.clone(),
+            primary_finalized_header: header.clone(),
+            witness_finalized_header: header,
+        });
+        work.intent.old_transactions = directory.join("originals");
+        work.intent.old_discovery = directory.join("discovery.json");
+        fs::create_dir(&work.intent.old_transactions).unwrap();
+        for path in [
+            work.intent.old_transactions.join("state.json"),
+            work.intent.old_transactions.join("blocks.json"),
+            work.intent.old_discovery.clone(),
+        ] {
+            fs::write(path, b"{}").unwrap();
+        }
+        work.registration = Some(Registration {
+            hash: B256::ZERO,
+            block: Block::default(),
+            raw_transactions: vec![],
+            receipts: vec![],
+            included_number: 0,
+            included_hash: B256::ZERO,
+            finalized_number: 0,
+            finalized_hash: B256::ZERO,
+        });
+        work.retirement = Some(FinalizedCutoverStatus {
+            block_number: 1, block_hash: H256::repeat_byte(21), status: vec![],
+        });
+        work.readiness = Some(FinalizedCutoverStatus {
+            block_number: 2, block_hash: H256::repeat_byte(22), status: vec![],
+        });
+        let path = work_path(&directory);
+        save(&path, &work).unwrap();
+        (path, work)
+    }
+
+    #[tokio::test]
+    async fn pending_reports_recover_every_exact_temp_and_link_without_repinning() {
+        for pending in [false, true] {
+            for coverage_state in 0..4 {
+                for calls_state in 0..4 {
+                    let (path, mut work) = pending_report_fixture().await;
+                    let (sealed, coverage, lifecycle) = pending_projection(&path, &mut work).unwrap();
+                    let coverage_bytes = serde_json::to_vec(&coverage).unwrap();
+                    let calls_bytes = serde_json::to_vec(&lifecycle).unwrap();
+                    let checkpoint = work.ethereum_authentication.clone();
+                    if pending {
+                        work.pending_seal = Some(sealed.clone());
+                        save(&path, &work).unwrap();
+                    }
+                    for (file, bytes, state) in [
+                        (&sealed.coverage.path, &coverage_bytes, coverage_state),
+                        (&sealed.lifecycle_evidence.path, &calls_bytes, calls_state),
+                    ] {
+                        if state & 1 != 0 { fs::write(pending_path(file), bytes).unwrap(); }
+                        if state & 2 != 0 { fs::write(file, bytes).unwrap(); }
+                    }
+                    let mut restarted = read_work(&path).unwrap();
+                    if !pending && coverage_state == 0 && calls_state != 0 {
+                        assert!(pending_projection(&path, &mut restarted).is_err());
+                    } else {
+                        assert_eq!(pending_projection(&path, &mut restarted).unwrap().0, sealed);
+                        restarted.pending_seal = Some(sealed.clone());
+                        save(&path, &restarted).unwrap();
+                        publish_pending_reports(&path, &mut restarted).unwrap();
+                        assert_eq!(fs::read(&sealed.coverage.path).unwrap(), coverage_bytes);
+                        assert_eq!(fs::read(&sealed.lifecycle_evidence.path).unwrap(), calls_bytes);
+                        assert!(!pending_path(&sealed.coverage.path).exists());
+                        assert!(!pending_path(&sealed.lifecycle_evidence.path).exists());
+                        assert_eq!(restarted.ethereum_authentication, checkpoint);
+                        assert!(ensure_unfrozen(&path, &restarted).is_err());
+                    }
+                    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn historical_partial_coverage_owns_checkpoint_and_freezes_missing_lifecycle() {
+        let (path, mut work) = pending_report_fixture().await;
+        let (sealed, coverage, _) = pending_projection(&path, &mut work).unwrap();
+        let original_checkpoint = work.ethereum_authentication.clone();
+        let mut newer = work.clone();
+        newer.ethereum_authentication.as_mut().unwrap().common_header.number += 1;
+        save(&path, &newer).unwrap();
+        fs::write(pending_path(&sealed.coverage.path), serde_json::to_vec(&coverage).unwrap()).unwrap();
+        let mut restarted = read_work(&path).unwrap();
+        assert_eq!(pending_projection(&path, &mut restarted).unwrap().0, sealed);
+        assert_eq!(restarted.ethereum_authentication, original_checkpoint);
+        restarted.pending_seal = Some(sealed.clone());
+        save(&path, &restarted).unwrap();
+        let mut changed = restarted.clone();
+        changed.ethereum_authentication = newer.ethereum_authentication;
+        assert!(save(&path, &changed).is_err());
+        publish_pending_reports(&path, &mut restarted).unwrap();
+        assert_eq!(read_work(&path).unwrap().ethereum_authentication, original_checkpoint);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn pending_conflicts_hold_before_either_publication_or_work_mutation() {
+        for conflict in ["coverage", "calls", "seal", "marker", "journal", "journal-temp", "missing-original", "pin", "identity", "checkpoint"] {
+            let (path, mut work) = pending_report_fixture().await;
+            let (sealed, coverage, _) = pending_projection(&path, &mut work).unwrap();
+            work.pending_seal = Some(sealed.clone());
+            save(&path, &work).unwrap();
+            let original_work = fs::read(&path).unwrap();
+            let coverage_bytes = serde_json::to_vec(&coverage).unwrap();
+            fs::write(pending_path(&sealed.coverage.path), &coverage_bytes).unwrap();
+            match conflict {
+                "coverage" => fs::write(&sealed.coverage.path, b"conflict").unwrap(),
+                "calls" => fs::write(pending_path(&sealed.lifecycle_evidence.path), b"conflict").unwrap(),
+                "seal" => fs::write(pending_path(&path.parent().unwrap().join("cutover.json")), b"conflict").unwrap(),
+                "marker" => fs::write(pending_path(&seal::marker_path(&sealed.old_discovery.path)), b"conflict").unwrap(),
+                "journal-temp" => fs::write(pending_path(&sealed.old_state.path), b"{}").unwrap(),
+                "journal" => fs::write(&sealed.old_state.path, b"changed").unwrap(),
+                "missing-original" => fs::remove_file(&sealed.old_state.path).unwrap(),
+                "pin" => work.retirement.as_mut().unwrap().block_number += 1,
+                "identity" => work.intent.new_manager_code_id = H256::repeat_byte(77),
+                "checkpoint" => work.ethereum_authentication.as_mut().unwrap().common_header.number += 1,
+                _ => unreachable!(),
+            }
+            assert!(publish_pending_reports(&path, &mut work).is_err(), "{conflict}");
+            assert!(save(&path, &work).is_err(), "{conflict}");
+            assert_eq!(fs::read(&path).unwrap(), original_work);
+            assert_eq!(fs::read(pending_path(&sealed.coverage.path)).unwrap(), coverage_bytes);
+            assert!(!sealed.lifecycle_evidence.path.exists());
+            fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_seal_cannot_be_cleared_and_mutable_temp_remains_fail_closed() {
+        let (path, mut work) = pending_report_fixture().await;
+        let sealed = pending_projection(&path, &mut work).unwrap().0;
+        work.pending_seal = Some(sealed);
+        save(&path, &work).unwrap();
+        let original = fs::read(&path).unwrap();
+        let mut changed = work.clone();
+        changed.pending_seal = None;
+        assert!(save(&path, &changed).is_err());
+        changed = work.clone();
+        changed.new_transactions = Some(path.parent().unwrap().join("successor"));
+        save(&path, &changed).unwrap();
+        fs::write(pending_path(&path), &original).unwrap();
+        assert!(read_work(&path).is_err());
+        assert!(save(&path, &work).is_err());
+        assert_eq!(fs::read(pending_path(&path)).unwrap(), original);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     #[test]

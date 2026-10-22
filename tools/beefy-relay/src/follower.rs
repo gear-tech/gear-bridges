@@ -5651,7 +5651,7 @@ mod tests {
             .await?
             .with_beacon_finality(
                 beacon.config.clone().with_proof_sources(vec![beacon.directory.clone()])?,
-                restart_directory.path().join("readonly-beacon"),
+                &finality.ethereum_finality_store,
             )
             .await?
             .with_data_witness(&witness_rpc.url, chain_id, genesis)

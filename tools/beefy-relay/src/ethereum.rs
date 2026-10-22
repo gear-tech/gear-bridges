@@ -849,6 +849,11 @@ impl Ethereum {
             .header
             .hash;
         let witness = AnvilWitness::new(anvil.port()).await?;
+        // Authenticate the complete deployment, including the last receiver transaction.
+        api.raw_provider()
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x3",))
+            .await?;
         let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::from_provider(
             api.raw_provider().root().clone(), BlockNumberOrTag::Finalized,
         ).await?;

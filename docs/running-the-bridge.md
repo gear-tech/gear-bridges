@@ -29,6 +29,7 @@ For a native build, install the toolchains used by the workspace:
 - Rust, using the repository's [rust-toolchain.toml](../rust-toolchain.toml).
 - Approved source/archive RPCs and independently reviewed deployment/bootstrap identities.
 - Foundry v1.8.5 (forge/cast, matching CI) for the Ethereum contracts and deployment tooling.
+- Binaryen 123, matching both CI workflows, with `wasm-opt` on `PATH` before building Gear programs. A missing optimizer is only a build warning, but the resulting VFT manager can exceed the node's code-size limit and fail deployment with `Gear(CodeTooLarge)`.
 - The native build dependencies listed in [Dockerfile](../Dockerfile), including a C compiler, OpenSSL development files, CMake, protobuf compiler, and Clang.
 
 The root README also calls out the [ring build instructions](https://github.com/gear-tech/ring/blob/main/BUILDING.md). Follow those instructions when a native build fails while compiling `ring`.
@@ -740,7 +741,7 @@ yarn workspace indexer migration:run
 
 Only resume upgraded processes. The single migration transaction preserves legacy resolution coordinates/flags and original receipt/deposit JSON, demotes unauthenticated Vara→Ethereum Completed and Ethereum→Vara Completed/Refunded projections to Bridging, clears their live completion coordinates, and resets unqualified matching flags. This includes old direct completions without an observation. Other directions, amounts, source identities, nonterminal/Failed rows, role maps and native/refund children are untouched. NULL authorization never qualifies an outcome. Rollback refuses to discard preserved or qualified evidence.
 
-After invalidation, refresh already-open clients: their completed-transfer polling may have stopped. Claim visibility requires `completedAt == null` and AwaitingPayment/Bridging; the API may resume while bounded repair restores independently authenticated outcomes. Preserve the separate [event-coordinate reindex requirements](internals.md); migration alone does not authenticate old rows.
+After invalidation, refresh already-open clients: their completed-transfer polling may have stopped. Claim visibility requires `completedAt == null` and AwaitingPayment/Bridging; the API may resume while bounded repair restores independently authenticated outcomes. Preserve the separate [event-coordinate recovery and reindex requirements](internals.md); migration alone does not authenticate old rows.
 
 ~~~sh
 yarn workspace indexer reconcile --direction vara-to-eth --limit 1
@@ -750,11 +751,15 @@ yarn workspace indexer reconcile --direction eth-to-vara --limit 1 --apply
 yarn workspace indexer reconcile --direction vara-to-eth --limit 1000 --after "$LAST_EXAMINED_ID" --apply
 ~~~
 
+Inbound repair recovers missing transaction and receipt-local log indices only from a uniquely matching deposit in the independently authenticated original receipt. Known coordinates and existing authorizations are never overwritten; ambiguous matches HOLD. `--apply` can retain recovered source coordinates/evidence while the row remains pending for its original Gear relay/settlement. Dry runs and aborted pages retain no backfill. Recovery does not fabricate absent settlement history or change the original transfer identity.
+
 Standalone reconciliation owns migrated, unauthenticated outbound observations: a non-NULL `legacyMatched` (true **or false**) with NULL `receiptAuth` excludes that row from the live pending page before pagination. A pruned legacy receipt therefore cannot block unrelated live batches. Current-batch events, unmarked observations and previously authenticated observations remain fail-closed; the marker never bypasses their qualification.
 
 Each invocation examines one keyset-ordered page (default 1000, allowed 1–1000) and reports `lastExaminedId`, `hasMore`, qualified/pending counts and held IDs. Default is reporting-only: migrations are disabled, the transaction is read-only, and no checkpoint/projection/cursor is written. `--apply` uses one SERIALIZABLE transaction. Missing counterparts advance only the external scan hint, not verification. Outage, conflicting evidence or serialization failure aborts the entire page without a success cursor. Retain `heldIds`, restore the original historical evidence and rerun that page. To schedule unrelated later rows, explicitly use `--after` with the reviewed held ID and retain the failed row for repair: skipping never authenticates it or suppresses its claim. Concurrent checkpoint insertion never overwrites the winner; live ingestion retries its complete transaction, while repair aborts its page.
 
 Periodic reruns include already-matched/terminal rows and revalidate the original receipt, effects, settlement/completion binding and coordinates. New finality may advance without replacing original authorization/checkpoint references. Refunded remains distinct from Completed. Legacy direct outbound recovery uses its preserved original completion hash/block, never the Gear source transaction hash or an arbitrary same-nonce success. Missing original evidence remains pending/HOLD, never an inferred delivery.
+
+Indexer retained-checkpoint ancestry walks have fixed endpoints and a ten-second timeout per advancing header request, not a five-minute limit on the whole historical walk. Both providers must still prove every parent link, and the pinned anchor is rechecked afterward. Initial current-tip qualification remains bounded. Page size bounds rows, not elapsed time: old checkpoints can take longer, and an interrupted attempt repeats verification without changing original authorization.
 
 If original history cannot be recovered, leave the row pending/HOLD. Never delete its observation, clear its legacy marker, replace its original hash or synthesize authorization to unblock indexing. `legacyResolution` remains exposed historical, unauthenticated metadata; neither it nor `legacyMatched` is proof of delivery. Consumers must use the current qualified projection, not the preserved legacy claim.
 

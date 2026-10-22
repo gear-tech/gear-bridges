@@ -730,7 +730,10 @@ impl JSONStorage {
                 );
             }
             if !completed
-                && matches!(tx.status, TxStatus::SubmitMessage | TxStatus::PreparingSubmission)
+                && matches!(
+                    tx.status,
+                    TxStatus::SubmitMessage | TxStatus::PreparingSubmission
+                )
             {
                 let receipt = tx.receipt.as_ref().expect("receipt evidence was validated");
                 anyhow::ensure!(

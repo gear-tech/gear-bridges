@@ -8,8 +8,8 @@ import {MessageQueue} from "src/MessageQueue.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
-import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
+import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 import {

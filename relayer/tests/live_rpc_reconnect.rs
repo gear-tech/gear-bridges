@@ -244,8 +244,12 @@ async fn live_ethereum_polling_reconnect_keeps_finalized_queries() -> anyhow::Re
     let api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
             .await?
-            .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-                env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+            .with_finality_witness(
+                &env::var("ETH_WITNESS_RPC")?,
+                env::var("ETH_CHAIN_ID")?.parse()?,
+                env::var("ETH_GENESIS_HASH")?.parse()?,
+            )
+            .await?;
 
     let before = api.finalized_block().await?.header.number;
     let api = api.reconnect().await?;
@@ -266,8 +270,12 @@ async fn live_ethereum_polling_survives_repeated_reconnects() -> anyhow::Result<
     let mut api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
             .await?
-            .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-                env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+            .with_finality_witness(
+                &env::var("ETH_WITNESS_RPC")?,
+                env::var("ETH_CHAIN_ID")?.parse()?,
+                env::var("ETH_GENESIS_HASH")?.parse()?,
+            )
+            .await?;
 
     let baseline = api.finalized_block().await?.header.number;
     for attempt in 0..3 {
@@ -289,8 +297,12 @@ async fn live_ethereum_worker_queries_while_sibling_reconnects() -> anyhow::Resu
     let worker_api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
             .await?
-            .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-                env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+            .with_finality_witness(
+                &env::var("ETH_WITNESS_RPC")?,
+                env::var("ETH_CHAIN_ID")?.parse()?,
+                env::var("ETH_GENESIS_HASH")?.parse()?,
+            )
+            .await?;
     let mut reconnect_api = worker_api.clone();
 
     let worker = tokio::spawn(async move {
@@ -344,8 +356,12 @@ async fn live_ethereum_contract_reconnect_keeps_queries_and_subscriptions() -> a
         None,
     )
     .await?
-    .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+    .with_finality_witness(
+        &env::var("ETH_WITNESS_RPC")?,
+        env::var("ETH_CHAIN_ID")?.parse()?,
+        env::var("ETH_GENESIS_HASH")?.parse()?,
+    )
+    .await?;
 
     let max_block_number = api.max_block_number().await?;
     let finalized = api.finalized_block_number().await?;
@@ -413,8 +429,12 @@ async fn live_ethereum_contract_range_queries_survive_repeated_reconnects() -> a
         None,
     )
     .await?
-    .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+    .with_finality_witness(
+        &env::var("ETH_WITNESS_RPC")?,
+        env::var("ETH_CHAIN_ID")?.parse()?,
+        env::var("ETH_GENESIS_HASH")?.parse()?,
+    )
+    .await?;
 
     let finalized = api.finalized_block_number().await?;
     let from = finalized.saturating_sub(256);

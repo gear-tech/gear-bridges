@@ -189,6 +189,11 @@ curl -L https://foundry.paradigm.xyz | bash
 foundryup
 ```
 
+Install [Binaryen 123](https://github.com/WebAssembly/binaryen/releases/tag/version_123)
+and put `wasm-opt` on `PATH` before building Gear programs. See the
+[native build prerequisites](docs/running-the-bridge.md#prerequisites); an
+unoptimized VFT manager can compile successfully but exceed the node's code-size limit.
+
 > [!NOTE]
 > To build `ring` crate follow [BUILDING.md](https://github.com/gear-tech/ring/blob/main/BUILDING.md).
 

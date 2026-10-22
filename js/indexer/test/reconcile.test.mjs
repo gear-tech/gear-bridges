@@ -30,6 +30,7 @@ function storeOf(...initial) {
       return equal(expected);
     }));
   return { rows, writes, queries,
+    snapshot() { return [...rows].map(([entity, values]) => [entity.name, structuredClone([...values])]); },
     async find(entity, opts) {
       queries.push({ entity, opts });
       let result = [...(rows.get(entity)?.values() ?? [])].filter((r) => matches(r, opts?.where));
@@ -262,4 +263,140 @@ test('legacy observation JSON and timestamp survive independently reconstructed 
   assert.equal(saved.timestamp.getTime(), 1);
   assert.equal(saved.receiptAuth.receipt.transactionIndex, '0x0');
   assert.equal(store.rows.get(Transfer).get(f.transfer.id).completedAt.getTime(), 1700000001000);
+});
+
+function legacyInbound(outcome) {
+  const f = inbound(outcome);
+  f.transfer.sourceTransactionIndex = null;
+  f.transfer.sourceLogIndex = null;
+  f.receipt.transactionIndex = '0x2';
+  f.headers[1].transactions = [hash('cc'), hash('dd'), f.receipt.transactionHash];
+  const deposit = { ...f.receipt.logs[0], transactionIndex: '0x2', logIndex: '0x7' };
+  f.receipt.logs = [{ ...deposit, address: addr('99'), logIndex: '0x6' }, deposit];
+  f.relay.id = '200:2';
+  f.settlement.id = '200:2:1';
+  f.settlement.deposit.transaction_index = '2';
+  f.settlement.deposit.log_index = '1';
+  return f;
+}
+
+test('base-era inbound coordinates recover from the unique original receipt without dry-run mutation', async () => {
+  for (const outcome of ['Completed', 'Refunded']) {
+    for (const known of ['neither', 'transaction', 'log']) {
+      const f = legacyInbound(outcome);
+      if (known === 'transaction') f.transfer.sourceTransactionIndex = 2n;
+      if (known === 'log') f.transfer.sourceLogIndex = 1n;
+      const store = storeOf(f.transfer, f.relay, f.settlement), before = store.snapshot();
+      const args = { ...options, direction: 'eth-to-vara' };
+      assert.equal((await reconcilePage(store, f.clients, args, queueAddress, managerAddress)).qualified, 1);
+      assert.equal(store.writes.length, 0);
+      assert.deepEqual(store.snapshot(), before);
+      assert.equal(f.transfer.sourceTransactionIndex, known === 'transaction' ? 2n : null);
+      assert.equal(f.transfer.sourceLogIndex, known === 'log' ? 1n : null);
+      await reconcilePage(store, f.clients, { ...args, apply: true }, queueAddress, managerAddress);
+      const saved = structuredClone(store.rows.get(Transfer).get(f.transfer.id));
+      assert.equal(saved.status, outcome);
+      assert.equal(saved.sourceTransactionIndex, 2n);
+      assert.equal(saved.sourceLogIndex, 1n, 'use receipt-relative offset, never block-global logIndex 7');
+      assert.equal(saved.sourceReceiptAuth.localLogIndex, 1);
+      assert.equal(saved.completionAuth.receiptSettlementId, '200:2:1');
+      await reconcilePage(store, f.clients, { ...args, apply: true }, queueAddress, managerAddress);
+      assert.deepEqual(structuredClone(store.rows.get(Transfer).get(f.transfer.id)), saved);
+    }
+  }
+});
+
+test('authenticated coordinate backfill persists while settlement is pending and feeds the live tuple lookup', async () => {
+  const f = legacyInbound(), store = storeOf(f.transfer, f.relay);
+  const args = { ...options, direction: 'eth-to-vara', apply: true };
+  const report = await reconcilePage(store, f.clients, args, queueAddress, managerAddress);
+  assert.equal(report.pending, 1);
+  const saved = structuredClone(store.rows.get(Transfer).get(f.transfer.id));
+  assert.equal(saved.sourceTransactionIndex, 2n);
+  assert.equal(saved.sourceLogIndex, 1n);
+  assert.equal(saved.status, Status.Bridging);
+  assert.ok(saved.sourceReceiptAuth);
+  assert.equal(saved.completionAuth, undefined);
+  await reconcilePage(store, f.clients, args, queueAddress, managerAddress);
+  assert.deepEqual(structuredClone(store.rows.get(Transfer).get(f.transfer.id)), saved);
+  // The Gear batch uses this exact lookup without the repair-only staged row.
+  const { reconcileReceiptSettlements } = await import('../lib/gear/receipt-reconciliation.js');
+  const { authenticateSourceReceipt } = await import('../lib/eth/completion.js');
+  const { qualifyFinality } = await import('../lib/eth/finality.js');
+  const checkpoint = await qualifyFinality(f.clients);
+  const updates = await reconcileReceiptSettlements(store, [f.settlement],
+    (row) => authenticateSourceReceipt(f.clients, row, managerAddress, checkpoint));
+  assert.equal(updates.transfers[0].status, Status.Completed);
+  assert.deepEqual(updates.transfers[0].sourceReceiptAuth, saved.sourceReceiptAuth);
+});
+
+test('coordinate recovery never guesses missing receipts, conflicting known indices or mismatched deposits', async () => {
+  for (const fault of ['missing', 'transaction', 'log', 'manager', 'sender', 'receiver', 'source', 'amount']) {
+    const f = legacyInbound();
+    if (fault === 'missing') {
+      const call = f.clients.primaryCall;
+      f.clients.primaryCall = f.clients.witnessCall = (m, p) => m === 'eth_getTransactionReceipt' ? Promise.resolve(null) : call(m, p);
+    } else if (fault === 'transaction') f.transfer.sourceTransactionIndex = 0n;
+    else if (fault === 'log') f.transfer.sourceLogIndex = 7n;
+    else if (fault === 'manager') f.receipt.logs[1].address = addr('99');
+    else f.transfer[fault] = fault === 'amount' ? '11' : fault === 'receiver' ? hash('99') : addr('99');
+    const store = storeOf(f.transfer, f.relay, f.settlement), before = structuredClone(store.rows.get(Transfer).get(f.transfer.id));
+    const result = await reconcilePage(store, f.clients, { ...options, direction: 'eth-to-vara', apply: true }, queueAddress, managerAddress);
+    assert.equal(result.qualified, 0, fault);
+    assert.equal(result.pending, 1, fault);
+    assert.deepEqual(structuredClone(store.rows.get(Transfer).get(f.transfer.id)), before, fault);
+    assert.equal(store.rows.get(ReceiptSettlement).get(f.settlement.id).matched, false);
+  }
+});
+
+test('ambiguous receipt deposits and recovered transfer tuples HOLD without writes', async () => {
+  for (const fault of ['deposit', 'storedTuple', 'pageTuple']) {
+    const f = legacyInbound(), duplicate = new Transfer({ ...f.transfer, id: 'c6b59062-10e4-4461-82d6-e18e35e163fa' });
+    if (fault === 'deposit') f.receipt.logs.push({ ...f.receipt.logs[1], logIndex: '0x8' });
+    if (fault === 'storedTuple') { duplicate.sourceTransactionIndex = 2n; duplicate.sourceLogIndex = 1n; }
+    const store = storeOf(f.transfer, f.relay, f.settlement, ...(fault === 'deposit' ? [] : [duplicate]));
+    const before = store.snapshot();
+    await assert.rejects(reconcilePage(store, f.clients,
+      { ...options, direction: 'eth-to-vara', limit: 2, apply: true }, queueAddress, managerAddress), /HOLD: ambiguous/);
+    assert.equal(store.writes.length, 0);
+    assert.deepEqual(store.snapshot(), before);
+  }
+});
+
+test('coordinate recovery is staged until the complete page and final checkpoint succeed', async () => {
+  for (const fault of ['laterTransfer', 'finalCheckpoint']) {
+    const f = legacyInbound(), second = new Transfer({ ...f.transfer, id: 'c6b59062-10e4-4461-82d6-e18e35e163fa', txHash: hash('cc') });
+    const store = storeOf(f.transfer, f.relay, f.settlement, ...(fault === 'laterTransfer' ? [second] : []));
+    const before = store.snapshot(), call = f.clients.witnessCall;
+    let finalized = 0;
+    f.clients.witnessCall = (method, params) => {
+      if ((fault === 'laterTransfer' && method === 'eth_getTransactionReceipt' && params[0] === second.txHash) ||
+          (fault === 'finalCheckpoint' && method === 'eth_getBlockByNumber' && params[0] === 'finalized' && ++finalized > 1)) {
+        throw new Error('HOLD: later evidence unavailable');
+      }
+      return call(method, params);
+    };
+    await assert.rejects(reconcilePage(store, f.clients,
+      { ...options, direction: 'eth-to-vara', limit: 2, apply: true }, queueAddress, managerAddress), /HOLD/);
+    assert.equal(store.writes.length, 0);
+    assert.deepEqual(store.snapshot(), before);
+  }
+});
+
+test('missing or conflicting coordinates on previously authenticated sources cannot be repaired', async () => {
+  for (const terminal of [false, true]) {
+    for (const coordinate of ['sourceTransactionIndex', 'sourceLogIndex']) {
+      for (const value of [null, 9n]) {
+        const f = legacyInbound(), store = storeOf(f.transfer, f.relay, ...(terminal ? [f.settlement] : []));
+        const args = { ...options, direction: 'eth-to-vara', apply: true };
+        await reconcilePage(store, f.clients, args, queueAddress, managerAddress);
+        store.rows.get(Transfer).get(f.transfer.id)[coordinate] = value;
+        const before = store.snapshot();
+        store.writes.length = 0;
+        await assert.rejects(reconcilePage(store, f.clients, args, queueAddress, managerAddress), /HOLD/);
+        assert.equal(store.writes.length, 0);
+        assert.deepEqual(store.snapshot(), before);
+      }
+    }
+  }
 });

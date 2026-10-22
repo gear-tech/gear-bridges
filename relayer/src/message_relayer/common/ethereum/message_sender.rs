@@ -414,7 +414,10 @@ async fn retry_original(
     // Receipt finality takes precedence over a consumed nonce or a competitor's processed bit.
     if let Some(included) = api.get_finalized_receipt(signed.hash).await? {
         super::status_fetcher::validate_receipt_authentication(
-            signed, &included.receipt, &included.inclusion, &included.checkpoint,
+            signed,
+            &included.receipt,
+            &included.inclusion,
+            &included.checkpoint,
         )?;
         anyhow::ensure!(
             included.receipt.block_number == Some(included.included_block_number)
@@ -814,10 +817,15 @@ mod tests {
         let tag = uuid::Uuid::new_v4();
         let original = original(36).await;
         let failure = super::super::status_fetcher::tests::reverted_evidence(
-            &original.message, &original.submission,
+            &original.message,
+            &original.submission,
         );
         let (chain, receipt, _, _) = super::super::status_fetcher::tests::authenticated_fixture(
-            &original.submission, failure.receipt, tag.as_bytes(), 1, 1,
+            &original.submission,
+            failure.receipt,
+            tag.as_bytes(),
+            1,
+            1,
         );
         let (broadcasts, received) = tokio::sync::mpsc::unbounded_channel();
         let state = Arc::new(RetryState {
@@ -912,7 +920,9 @@ mod tests {
                 return Err(error.into());
             }
         };
-        let api = api.with_finality_witness(&witness_url, 560048, state.chain[0].header.hash).await?;
+        let api = api
+            .with_finality_witness(&witness_url, 560048, state.chain[0].header.hash)
+            .await?;
         state.calls.lock().unwrap().clear();
         Ok(RetryRpc {
             api,
@@ -939,8 +949,14 @@ mod tests {
         );
         let calls = rpc.state.calls.lock().unwrap().clone();
         assert!(
-            calls.iter().position(|method| method == "eth_getTransactionReceipt").unwrap()
-                < calls.iter().position(|method| method == "eth_getTransactionCount").unwrap(),
+            calls
+                .iter()
+                .position(|method| method == "eth_getTransactionReceipt")
+                .unwrap()
+                < calls
+                    .iter()
+                    .position(|method| method == "eth_getTransactionCount")
+                    .unwrap(),
             "receipt must precede nonce/processed observations"
         );
         assert!(
@@ -1080,7 +1096,9 @@ mod tests {
         let guard = rpc.api.reserve_submission().await;
         retry_original(&rpc.api, &guard, &original).await?;
         let calls = rpc.state.calls.lock().unwrap().clone();
-        assert!(calls.iter().any(|method| method == "eth_getTransactionReceipt"));
+        assert!(calls
+            .iter()
+            .any(|method| method == "eth_getTransactionReceipt"));
         assert!(!calls
             .iter()
             .any(|method| method == "eth_getTransactionCount" || method == "eth_call"));
@@ -1098,7 +1116,10 @@ mod tests {
                 _ => json!(alloy::primitives::Address::ZERO),
             };
             *rpc.state.receipt.lock().unwrap() = forged;
-            assert!(retry_original(&rpc.api, &guard, &original).await.is_err(), "{field}");
+            assert!(
+                retry_original(&rpc.api, &guard, &original).await.is_err(),
+                "{field}"
+            );
             assert!(futures::poll!(Box::pin(rpc.api.reserve_submission())).is_pending());
             assert!(rpc.broadcasts.try_recv().is_err());
             *rpc.state.receipt.lock().unwrap() = valid;

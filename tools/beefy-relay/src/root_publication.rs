@@ -1,5 +1,7 @@
-use alloy::primitives::{Address, B256, U256};
-use alloy::sol_types::SolEvent;
+use alloy::{
+    primitives::{Address, B256, U256},
+    sol_types::SolEvent,
+};
 use anyhow::{anyhow, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::{
@@ -388,12 +390,8 @@ fn signed_publication_identity(
             .context("saved root transaction bytes missing")?
             .trim_start_matches("0x"),
     )?;
-    let (signed, identity) = crate::ethereum::signed_transaction(
-        &raw,
-        hash,
-        saved_publication_nonce(intent)?,
-        queue,
-    )?;
+    let (signed, identity) =
+        crate::ethereum::signed_transaction(&raw, hash, saved_publication_nonce(intent)?, queue)?;
     let sender: Address = intent["sender"]
         .as_str()
         .context("saved root publisher missing")?
@@ -468,7 +466,8 @@ async fn sign_and_persist_root(
     let mut candidate = intent.clone();
     candidate["rawTransaction"] = json!(format!("0x{}", hex::encode(&raw)));
     candidate["txHash"] = json!(format!("0x{}", hex::encode(crate::keccak256(&raw))));
-    candidate["status"] = json!("signed original root transaction; broadcast outcome not yet known");
+    candidate["status"] =
+        json!("signed original root transaction; broadcast outcome not yet known");
     let signed = signed_publication_identity(&candidate, queue)?;
     ensure!(
         candidate["sourceIdentity"]["destinationChainId"].as_u64() == Some(chain_id)
@@ -795,7 +794,8 @@ async fn validate_observed_progress(
         "external root transaction",
     )?);
     let proof =
-        authenticated_root_receipt(ethereum, path, hash, included, finalized, Some(observed)).await?;
+        authenticated_root_receipt(ethereum, path, hash, included, finalized, Some(observed))
+            .await?;
     ensure!(
         proof.receipt.status(),
         "external root authenticated receipt changed; HOLD"
@@ -838,13 +838,14 @@ async fn validate_observed_progress(
     // Historical state must agree at the same authenticated inclusion hash.
     if kind == "emptyProgress" {
         ensure!(
-            ethereum.queue_max_block_at(included.1).await?
-                >= U256::from(target),
+            ethereum.queue_max_block_at(included.1).await? >= U256::from(target),
             "external receipt does not cover empty target; HOLD"
         );
     } else {
         ensure!(
-            ethereum.queue_root_at(U256::from(target), included.1).await?
+            ethereum
+                .queue_root_at(U256::from(target), included.1)
+                .await?
                 == B256::from(root),
             "external receipt did not register exact historical root; HOLD"
         );
@@ -883,10 +884,7 @@ async fn observe_finalized_progress(
     kind: &str,
     root: [u8; 32],
 ) -> Result<bool> {
-    use alloy::{
-        providers::Provider,
-        rpc::types::Filter,
-    };
+    use alloy::{providers::Provider, rpc::types::Filter};
     if !intent["observedProgress"].is_null() {
         validate_observed_progress(ethereum, output, intent).await?;
         if adopt_authenticated_progress(intent)? {
@@ -898,7 +896,9 @@ async fn observe_finalized_progress(
     let provider = ethereum.api.raw_provider();
     // Neither a provider's state response nor a raw finalized tag authorizes progress.
     if kind == "merkleRoot" {
-        let stored = ethereum.queue_root_at(U256::from(target), finalized_hash).await?;
+        let stored = ethereum
+            .queue_root_at(U256::from(target), finalized_hash)
+            .await?;
         ensure!(
             stored.is_zero() || stored == B256::from(root),
             "conflicting finalized queue root; HOLD"
@@ -1002,13 +1002,14 @@ async fn observe_finalized_progress(
         "receiptProof":serde_json::to_value(&proof)?});
     if kind == "emptyProgress" {
         ensure!(
-            ethereum.queue_max_block_at(block_hash).await?
-                >= U256::from(target),
+            ethereum.queue_max_block_at(block_hash).await? >= U256::from(target),
             "external receipt did not cover empty target; HOLD"
         );
     } else {
         ensure!(
-            ethereum.queue_root_at(U256::from(target), block_hash).await?
+            ethereum
+                .queue_root_at(U256::from(target), block_hash)
+                .await?
                 == B256::from(root),
             "external receipt did not register exact historical root; HOLD"
         );
@@ -1085,9 +1086,15 @@ async fn revalidate_terminal_roots(
                     "failure finalized hash",
                 )?),
             );
-            let proof =
-                authenticated_root_receipt(ethereum, path, signed.hash, included, finalized, Some(evidence))
-                    .await?;
+            let proof = authenticated_root_receipt(
+                ethereum,
+                path,
+                signed.hash,
+                included,
+                finalized,
+                Some(evidence),
+            )
+            .await?;
             ensure!(
                 !proof.receipt.status()
                     && format!("0x{}", hex::encode(&proof.raw_transaction))
@@ -1195,7 +1202,9 @@ pub(crate) async fn reconcile_root_original(
             ethereum.finality_genesis().await?,
         )
         .await?;
-    let nonce = ethereum.account_nonce_at(signed.from, view.block_hash()).await?;
+    let nonce = ethereum
+        .account_nonce_at(signed.from, view.block_hash())
+        .await?;
     if nonce > signed.nonce {
         // Receipt availability may advance during the pinned nonce query. Keep
         // original ownership and reconcile that receipt before recording an unknown outcome.
@@ -1274,7 +1283,9 @@ pub(crate) async fn validate_root_publication(
                 "original finalized root proof changed signed bytes or status; HOLD"
             );
             ensure!(
-                ethereum.queue_root_at(U256::from(target), included.1).await?
+                ethereum
+                    .queue_root_at(U256::from(target), included.1)
+                    .await?
                     == B256::from(root)
                     && (kind != "emptyProgress"
                         || ethereum.queue_max_block_at(included.1).await? >= U256::from(target)),
@@ -1353,10 +1364,7 @@ async fn canonical_root_inclusion(
     kind: &str,
     expected_root: [u8; 32],
 ) -> Result<Option<(u64, B256)>> {
-    use alloy::{
-        providers::Provider,
-        rpc::types::BlockNumberOrTag,
-    };
+    use alloy::{providers::Provider, rpc::types::BlockNumberOrTag};
 
     let signed = signed_publication_identity(intent, ethereum.queue_address)?;
     let hash = signed.hash;
@@ -1425,7 +1433,9 @@ async fn canonical_root_inclusion(
     if block > ethereum.api.verified_finalized_view().await?.block_number() {
         return Ok(Some((block, block_hash)));
     }
-    let stored = ethereum.queue_root_at(U256::from(source_block), block_hash).await?;
+    let stored = ethereum
+        .queue_root_at(U256::from(source_block), block_hash)
+        .await?;
     ensure!(
         stored == B256::from(expected_root)
             && (kind != "emptyProgress"
@@ -1865,10 +1875,13 @@ pub(crate) async fn publish_root_locked(
         public_network,
     )
     .await?;
-    ethereum.api.enable_finality_archive(
-        &state_directory(output).join("finality-history/headers"),
-        ethereum.api.finality_identity()?.1,
-    ).await?;
+    ethereum
+        .api
+        .enable_finality_archive(
+            &state_directory(output).join("finality-history/headers"),
+            ethereum.api.finality_identity()?.1,
+        )
+        .await?;
     ethereum
         .verify_token_bindings(decode_hash(&manifest["gearManager"], "gearManager")?)
         .await?;
@@ -2266,9 +2279,7 @@ mod root_publication_tests {
     #[tokio::test]
     async fn root_signing_binds_configured_chain_before_persisting_either_kind() -> Result<()> {
         use alloy::{
-            consensus::Transaction,
-            network::TransactionBuilder,
-            node_bindings::Anvil,
+            consensus::Transaction, network::TransactionBuilder, node_bindings::Anvil,
             providers::Provider,
         };
 
@@ -2317,8 +2328,13 @@ mod root_publication_tests {
             None,
         )
         .await?;
-        let genesis = ethereum_client::get_block(api.raw_provider(), 0).await?.header.hash;
-        let api = api.with_finality_witness(&witness_url, 31_337, genesis).await?;
+        let genesis = ethereum_client::get_block(api.raw_provider(), 0)
+            .await?
+            .header
+            .hash;
+        let api = api
+            .with_finality_witness(&witness_url, 31_337, genesis)
+            .await?;
         let provider = api.raw_provider();
         let publisher = anvil.addresses()[0];
         // Change the real RPC answer after configuration, before the first fill.
@@ -2398,7 +2414,10 @@ mod root_publication_tests {
                     let signed = result?;
                     assert_eq!(serde_json::from_slice::<Value>(&fs::read(&path)?)?, intent);
                     let raw = hex::decode(
-                        intent["rawTransaction"].as_str().unwrap().trim_start_matches("0x"),
+                        intent["rawTransaction"]
+                            .as_str()
+                            .unwrap()
+                            .trim_start_matches("0x"),
                     )?;
                     let (envelope, identity) =
                         crate::ethereum::signed_transaction(&raw, signed.hash, 0, queue)?;
@@ -2406,9 +2425,15 @@ mod root_publication_tests {
                     assert_eq!(identity, signed);
                     assert_eq!(identity.from, publisher);
                     assert_eq!(signed_publication_identity(&intent, queue)?, signed);
-                    assert!(provider.get_transaction_by_hash(signed.hash).await?.is_none());
+                    assert!(provider
+                        .get_transaction_by_hash(signed.hash)
+                        .await?
+                        .is_none());
                 }
-                assert_eq!(provider.get_transaction_count(publisher).pending().await?, 0);
+                assert_eq!(
+                    provider.get_transaction_count(publisher).pending().await?,
+                    0
+                );
             }
         }
         Ok(())
@@ -2416,11 +2441,7 @@ mod root_publication_tests {
 
     #[tokio::test]
     async fn restart_inventory_fences_signed_and_unsigned_owners_without_a_mempool() -> Result<()> {
-        use alloy::{
-            eips::Encodable2718,
-            signers::local::PrivateKeySigner,
-            sol_types::SolCall,
-        };
+        use alloy::{eips::Encodable2718, signers::local::PrivateKeySigner, sol_types::SolCall};
         let directory = tempfile::tempdir()?;
         let publications = directory.path().join("root-publications");
         fs::create_dir(&publications)?;
@@ -2641,11 +2662,7 @@ mod root_publication_tests {
 
     #[tokio::test]
     async fn mined_root_precedes_acceptance_and_keeps_the_original_signed_intent() -> Result<()> {
-        use alloy::{
-            eips::Encodable2718,
-            signers::local::PrivateKeySigner,
-            sol_types::SolCall,
-        };
+        use alloy::{eips::Encodable2718, signers::local::PrivateKeySigner, sol_types::SolCall};
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("root.json");
         let queue = Address::from([4; 20]);

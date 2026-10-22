@@ -538,9 +538,7 @@ impl TransactionManager {
             return Ok(());
         };
         let receipt = tx.receipt.as_mut().ok_or_else(|| {
-            anyhow::anyhow!(
-                "Response arrived before its original receipt evidence for {tx_uuid}"
-            )
+            anyhow::anyhow!("Response arrived before its original receipt evidence for {tx_uuid}")
         })?;
         let receipt_key = receipt.receipt_key;
         match &status {
@@ -607,7 +605,9 @@ impl TransactionManager {
             }
         }
         if let Some(evidence) = &submission {
-            receipt.initial_response.get_or_insert_with(|| evidence.clone());
+            receipt
+                .initial_response
+                .get_or_insert_with(|| evidence.clone());
         }
         if let Some(signed) = signed_submission {
             receipt.signed_submission = Some(signed);
@@ -741,8 +741,7 @@ impl TransactionManager {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use super::super::storage::tests::runtime_identity;
-    use super::*;
+    use super::{super::storage::tests::runtime_identity, *};
     use crate::message_relayer::common::EthereumSlotNumber;
     use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel};
 
@@ -1729,52 +1728,49 @@ pub(super) mod tests {
         decoder.read_to_end(&mut decoded).unwrap();
         let mut fixtures: Vec<Fixture> = serde_json::from_slice(&decoded).unwrap();
         fixtures.sort_by_key(|fixture| fixture.tx_hash);
-        fixtures
-            .into_iter()
-            .take(2)
-            .map(|fixture| {
-                let receipts = fixture
-                    .receipts
-                    .result
-                    .iter()
-                    .map(|receipt| {
-                        (
-                            receipt.transaction_index.unwrap(),
-                            utils::map_receipt_envelope(receipt.as_ref()),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let merkle = utils::generate_merkle_proof(fixture.tx_index, &receipts).unwrap();
-                let mut receipt_rlp = Vec::new();
-                Encodable::encode(&merkle.receipt, &mut receipt_rlp);
-                let block = fixture.block.data.message;
-                let event = EthToVaraEvent {
-                    proof_block: BlockInclusionProof {
-                        block: BlockGenericForBlockBody {
-                            slot: block.slot,
-                            proposer_index: block.proposer_index,
-                            parent_root: block.parent_root,
-                            state_root: block.state_root,
-                            body: block.body.into(),
-                        },
-                        headers: fixture
-                            .headers
-                            .into_iter()
-                            .map(|header| header.data.header.message)
-                            .collect(),
+        fixtures.into_iter().take(2).map(|fixture| {
+            let receipts = fixture
+                .receipts
+                .result
+                .iter()
+                .map(|receipt| {
+                    (
+                        receipt.transaction_index.unwrap(),
+                        utils::map_receipt_envelope(receipt.as_ref()),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let merkle = utils::generate_merkle_proof(fixture.tx_index, &receipts).unwrap();
+            let mut receipt_rlp = Vec::new();
+            Encodable::encode(&merkle.receipt, &mut receipt_rlp);
+            let block = fixture.block.data.message;
+            let event = EthToVaraEvent {
+                proof_block: BlockInclusionProof {
+                    block: BlockGenericForBlockBody {
+                        slot: block.slot,
+                        proposer_index: block.proposer_index,
+                        parent_root: block.parent_root,
+                        state_root: block.state_root,
+                        body: block.body.into(),
                     },
-                    proof: merkle.proof,
-                    transaction_index: fixture.tx_index,
-                    receipt_rlp,
-                };
-                (
-                    TxHashWithSlot {
-                        slot_number: EthereumSlotNumber(fixture.slot_number),
-                        tx_hash: fixture.tx_hash,
-                    },
-                    event,
-                )
-            })
+                    headers: fixture
+                        .headers
+                        .into_iter()
+                        .map(|header| header.data.header.message)
+                        .collect(),
+                },
+                proof: merkle.proof,
+                transaction_index: fixture.tx_index,
+                receipt_rlp,
+            };
+            (
+                TxHashWithSlot {
+                    slot_number: EthereumSlotNumber(fixture.slot_number),
+                    tx_hash: fixture.tx_hash,
+                },
+                event,
+            )
+        })
     }
 
     #[tokio::test]

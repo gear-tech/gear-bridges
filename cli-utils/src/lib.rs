@@ -51,16 +51,21 @@ mod tests {
     #[test]
     fn ethereum_finality_requires_independent_endpoint_and_approved_identity() {
         let complete = [
-            "test", "--ethereum-witness-rpc", "wss://witness.example",
-            "--ethereum-chain-id", "560048", "--ethereum-genesis-hash",
+            "test",
+            "--ethereum-witness-rpc",
+            "wss://witness.example",
+            "--ethereum-chain-id",
+            "560048",
+            "--ethereum-genesis-hash",
             "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         ];
         let cli = TestFinalityCli::try_parse_from(complete).unwrap();
         assert_eq!(cli.finality.ethereum_witness_rpc, "wss://witness.example");
         assert_eq!(cli.identity.ethereum_chain_id, 560048);
         for missing in [1, 3, 5] {
-            let args = complete.iter().enumerate()
-                .filter_map(|(index, value)| (!(missing..=missing + 1).contains(&index)).then_some(*value));
+            let args = complete.iter().enumerate().filter_map(|(index, value)| {
+                (!(missing..=missing + 1).contains(&index)).then_some(*value)
+            });
             assert!(TestFinalityCli::try_parse_from(args).is_err());
         }
     }

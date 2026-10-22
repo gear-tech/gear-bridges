@@ -154,11 +154,12 @@ async function agreedHeader(clients: EthereumEvidenceClients, number: bigint, de
   if (!sameHeader(primary, witness)) hold(`independent Ethereum headers disagree at ${number}`);
   return primary;
 }
-async function descend(call: RpcCall, tip: Header, ancestor: Header, deadline: number): Promise<void> {
+async function descend(call: RpcCall, tip: Header, ancestor: Header, deadline?: number): Promise<void> {
   let current = tip;
   if (BigInt(current.number) < BigInt(ancestor.number)) hold('finalized Ethereum head regressed');
   while (BigInt(current.number) > BigInt(ancestor.number)) {
-    const parent = await numbered(call, BigInt(current.number) - 1n, deadline);
+    // Retained history is finite; bound each advancing request, not the checkpoint's age.
+    const parent = await numbered(call, BigInt(current.number) - 1n, deadline ?? Date.now() + RPC_TIMEOUT);
     if (parent.hash !== current.parentHash) hold('broken finalized Ethereum ancestry');
     current = parent;
   }
@@ -234,11 +235,11 @@ export async function qualifyFinality(clients: EthereumEvidenceClients, previous
   };
   if (previous) {
     await Promise.all([
-      descend(clients.primaryCall, checkpoint, previous, deadline),
-      descend(clients.witnessCall, checkpoint, previous, deadline),
+      descend(clients.primaryCall, checkpoint, previous),
+      descend(clients.witnessCall, checkpoint, previous),
     ]);
   }
-  await recheck(clients, checkpoint, deadline);
+  await recheck(clients, checkpoint, Date.now() + RPC_TIMEOUT);
   return checkpoint;
 }
 

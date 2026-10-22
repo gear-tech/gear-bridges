@@ -95,6 +95,7 @@ export async function reconcilePage(
     lastExaminedId: page.at(-1)?.id ?? null, hasMore: selected.length > options.limit, qualified: 0, pending: 0, heldIds: [] };
   const changedTransfers = new Map<string, Transfer>(), changedCompletions = new Map<string, CompletedTransfer>();
   const changedSettlements = new Map<string, ReceiptSettlement>();
+  const sourceTuples = new Set<string>();
   let examining: string | undefined;
   try {
     const checkpoint = await qualifyFinality(clients, await loadCheckpoint(store, clients));
@@ -123,11 +124,20 @@ export async function reconcilePage(
         const source = await authenticateSourceReceipt(clients, transfer, manager, checkpoint, authenticate);
         if (transfer.sourceReceiptAuth) referenceCheckpoint(references, transfer.sourceReceiptAuth.checkpointId, transfer.blockNumber);
         if (transfer.completionAuth) referenceCheckpoint(references, transfer.completionAuth.sourceCheckpointId, transfer.blockNumber);
+        const recovered = source ? new Transfer({ ...transfer,
+          sourceTransactionIndex: transfer.sourceTransactionIndex ?? BigInt(source.receipt.transactionIndex),
+          sourceLogIndex: transfer.sourceLogIndex ?? BigInt(source.localLogIndex) }) : transfer;
+        if (source) {
+          const tuple = `${recovered.blockNumber}:${recovered.sourceTransactionIndex}:${recovered.sourceLogIndex}`;
+          if (sourceTuples.has(tuple)) throw new Error('HOLD: ambiguous original receipt transfer tuple');
+          sourceTuples.add(tuple);
+          changedTransfers.set(transfer.id, new Transfer({ ...recovered, sourceReceiptAuth: source }));
+        }
         const ids = new Set<string>();
-        if (transfer.sourceTransactionIndex != null && transfer.sourceLogIndex != null) {
+        if (recovered.sourceTransactionIndex != null && recovered.sourceLogIndex != null) {
           const relays = await store.find(ReceiptRelay, { where: { blockNumber: transfer.blockNumber } });
           for (const relay of relays) {
-            if (relay.id.split(':')[1] === String(transfer.sourceTransactionIndex)) ids.add(`${relay.id}:${transfer.sourceLogIndex}`);
+            if (relay.id.split(':')[1] === String(recovered.sourceTransactionIndex)) ids.add(`${relay.id}:${recovered.sourceLogIndex}`);
           }
         }
         if (transfer.completionAuth) ids.add(transfer.completionAuth.receiptSettlementId);
@@ -138,7 +148,7 @@ export async function reconcilePage(
         const updates = await reconcileReceiptSettlements(store, settlements, async (candidate) => {
           if (candidate.id !== transfer.id) throw new Error('HOLD: receipt settlement points outside the selected original');
           return source;
-        });
+        }, source ? recovered : undefined);
         const repaired = updates.transfers.find((row) => row.id === transfer.id);
         if (!repaired) {
           if (transfer.completionAuth) throw new Error('HOLD: original qualified inbound outcome no longer matches');

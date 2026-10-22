@@ -96,12 +96,8 @@ pub fn commitment_transaction(entry: &Value) -> Result<&Value> {
         .or_else(|| entry["clientAddress"].as_str())
         .context("transaction client missing; HOLD")?
         .parse()?;
-    let (signed, identity) = crate::ethereum::signed_transaction(
-        &raw,
-        hash,
-        number(&transaction["nonce"])?,
-        client,
-    )?;
+    let (signed, identity) =
+        crate::ethereum::signed_transaction(&raw, hash, number(&transaction["nonce"])?, client)?;
     if entry["origin"] == "external" || !transaction["sender"].is_null() {
         ensure!(
             transaction["sender"] == format!("{:#x}", identity.from),
@@ -191,10 +187,7 @@ pub(crate) fn migrate_commitment_journal(state: &mut Value) -> Result<()> {
                 "commitment chain metadata differs; HOLD"
             );
         }
-        crate::ethereum::validate_commitment_call(
-            &signed,
-            &decode(&entry["rawScale"])?,
-        )?;
+        crate::ethereum::validate_commitment_call(&signed, &decode(&entry["rawScale"])?)?;
         if legacy || entry["origin"] == "own" {
             ensure!(
                 signer.is_none_or(|signer| signer == identity.from),
@@ -889,7 +882,12 @@ async fn authenticate_reinclusion(
         };
         let directory = output.join("finality-history");
         let view = finalized_receipt_view(ethereum, &directory, finalized).await?;
-        crate::ethereum::retain_finalized_receipt(finalized, &view, &original, &directory.join("receipts"))
+        crate::ethereum::retain_finalized_receipt(
+            finalized,
+            &view,
+            &original,
+            &directory.join("receipts"),
+        )
     })
     .await
     .context(
@@ -912,8 +910,14 @@ async fn finalized_receipt_view(
     view.verify_blocks(
         ethereum.api.raw_provider(),
         &std::collections::BTreeMap::from([
-            (finalized.included_block_number, finalized.included_block_hash),
-            (finalized.finalized_block_number, finalized.finalized_block_hash),
+            (
+                finalized.included_block_number,
+                finalized.included_block_hash,
+            ),
+            (
+                finalized.finalized_block_number,
+                finalized.finalized_block_hash,
+            ),
         ]),
     )
     .await?;
@@ -1318,10 +1322,7 @@ async fn authenticate_external_commitment(
             && receipt.receipt.status(),
         "external signed receipt domain or status changed; HOLD"
     );
-    crate::ethereum::validate_commitment_call(
-        &signed,
-        &anchor.raw,
-    )?;
+    crate::ethereum::validate_commitment_call(&signed, &anchor.raw)?;
     let original = crate::ethereum::OriginalCommitmentReceipt {
         hash: hash.into(),
         raw: receipt.raw_transaction.clone(),
@@ -1329,7 +1330,12 @@ async fn authenticate_external_commitment(
         mmr_root: anchor.validated.mmr_root,
         client: ethereum.client_address,
     };
-    crate::ethereum::retain_finalized_receipt(&finalized, &view, &original, &directory.join("receipts"))?;
+    crate::ethereum::retain_finalized_receipt(
+        &finalized,
+        &view,
+        &original,
+        &directory.join("receipts"),
+    )?;
     let destination = ethereum
         .verify_accepted_commitment(hash.into(), anchor, &proof.snapshot)
         .await?;
@@ -1663,7 +1669,9 @@ async fn reconcile_original_submission(
         terminal["outcome"] = json!("finalized-revert");
         terminal["failureEvidence"] = json!({"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash),"inclusion":finalized.inclusion,"checkpoint":finalized.checkpoint});
     } else {
-        let account_nonce = ethereum.account_nonce_at(identity.from, view.block_hash()).await?;
+        let account_nonce = ethereum
+            .account_nonce_at(identity.from, view.block_hash())
+            .await?;
         if account_nonce <= identity.nonce {
             return Ok(());
         }
@@ -1720,10 +1728,7 @@ async fn revalidate_terminal_submissions(
             signed.chain_id() == Some(journal_chain_id(state)?),
             "terminal submission chain changed; HOLD"
         );
-        crate::ethereum::validate_commitment_call(
-            &signed,
-            &decode(&submission["rawScale"])?,
-        )?;
+        crate::ethereum::validate_commitment_call(&signed, &decode(&submission["rawScale"])?)?;
         let block: u32 = number(&submission["block"])?.try_into()?;
         let anchor = source
             .recapture(block, decode(&submission["rawScale"])?)
@@ -1828,7 +1833,9 @@ async fn revalidate_terminal_submissions(
                         ]),
                     )
                     .await?;
-                    receipt.inclusion.verify_original_inclusion(&view, &raw, identity.hash)?;
+                    receipt
+                        .inclusion
+                        .verify_original_inclusion(&view, &raw, identity.hash)?;
                 }
             }
             _ => anyhow::bail!("invalid original terminal disposition; HOLD"),
@@ -3557,12 +3564,20 @@ mod tests {
             .client()
             .request::<_, Value>("evm_setNextBlockTimestamp", (due_seconds,))
             .await?;
-        provider.client().request::<_, Value>("anvil_mine", ("0x1",)).await?;
+        provider
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x1",))
+            .await?;
         ensure!(
             client_heartbeat_due(before.source_timestamp_ms, due_seconds * 1_000),
             "original source timestamp did not make the heartbeat due"
         );
-        source.seek_from(initial.block.checked_add(1).context("source height overflow")?)?;
+        source.seek_from(
+            initial
+                .block
+                .checked_add(1)
+                .context("source height overflow")?,
+        )?;
         let anchor = source.next_commitment().await?;
         let witnessed = witness.recapture(anchor.block, anchor.raw.clone()).await?;
         ensure!(
@@ -3661,11 +3676,7 @@ mod tests {
     #[tokio::test]
     async fn queue_publication_hold_preserves_intent_and_schedules_heartbeat_and_handover(
     ) -> Result<()> {
-        use alloy::{
-            eips::Encodable2718,
-            signers::local::PrivateKeySigner,
-            sol_types::SolCall,
-        };
+        use alloy::{eips::Encodable2718, signers::local::PrivateKeySigner, sol_types::SolCall};
         let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(7))?;
         let input = ethereum_client::abi::IMessageQueue::submitMerkleRootCall {
             blockNumber: alloy::primitives::U256::from(99),
@@ -3674,7 +3685,11 @@ mod tests {
         }
         .abi_encode();
         let raw = crate::ethereum::signed_test_transaction(
-            &signer, 4, Address::repeat_byte(4), 100_000, input,
+            &signer,
+            4,
+            Address::repeat_byte(4),
+            100_000,
+            input,
         )
         .await?
         .encoded_2718();
@@ -3760,10 +3775,7 @@ mod tests {
     #[tokio::test]
     async fn provenance_accessor_preserves_original_and_rejects_mixed_external_identity(
     ) -> Result<()> {
-        use alloy::{
-            eips::Encodable2718,
-            signers::local::PrivateKeySigner,
-        };
+        use alloy::{eips::Encodable2718, signers::local::PrivateKeySigner};
         let signer = PrivateKeySigner::from_bytes(&B256::from([7; 32]))?;
         let client = Address::from([3; 20]);
         let raw = crate::ethereum::signed_test_transaction(&signer, 36, client, 21_000, vec![])
@@ -4492,7 +4504,11 @@ mod tests {
                         }
                     }
                 });
-                Ok(Self { url, blocked_receipts, server })
+                Ok(Self {
+                    url,
+                    blocked_receipts,
+                    server,
+                })
             }
         }
 
@@ -5021,7 +5037,8 @@ mod tests {
             let mut corrupt_intent = saved_intent.clone();
             let mut corrupt_proof = finalized_root.inclusion.clone();
             corrupt_proof.receipt_proof.clear();
-            corrupt_intent["publicationReceipt"]["receiptProof"] = serde_json::to_value(corrupt_proof)?;
+            corrupt_intent["publicationReceipt"]["receiptProof"] =
+                serde_json::to_value(corrupt_proof)?;
             let corrupt_original = corrupt_intent.clone();
             let corrupt_bytes = serde_json::to_vec(&corrupt_intent)?;
             fs::write(&corrupt_path, &corrupt_bytes)?;
@@ -5058,8 +5075,8 @@ mod tests {
                     .try_spawn()
             })
             .await??;
-            let provider = alloy::providers::ProviderBuilder::new()
-                .connect_http(claim_node.endpoint_url());
+            let provider =
+                alloy::providers::ProviderBuilder::new().connect_http(claim_node.endpoint_url());
             let queue = IMessageQueue::new(ethereum.queue_address, provider.clone());
             // Historical consumers schedule from the publication block, not a root-keyed getter.
             let root_event = IMessageQueue::MerkleRoot {
@@ -5090,10 +5107,19 @@ mod tests {
                         destination: Address::from(root_message.message.destination),
                         payload: root_message.message.payload.into(),
                     },
-                    root_message.inclusion.proof.into_iter().map(B256::from).collect(),
+                    root_message
+                        .inclusion
+                        .proof
+                        .into_iter()
+                        .map(B256::from)
+                        .collect(),
                 )
                 .from(claimant);
-            let early = claim.call().await.err().context("unmatured native claim succeeded")?;
+            let early = claim
+                .call()
+                .await
+                .err()
+                .context("unmatured native claim succeeded")?;
             ensure!(
                 matches!(
                     early.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>(),
@@ -5111,11 +5137,17 @@ mod tests {
                 .client()
                 .request::<_, Value>("evm_setNextBlockTimestamp", (maturity,))
                 .await?;
-            provider.client().request::<_, Value>("anvil_mine", ("0x1",)).await?;
+            provider
+                .client()
+                .request::<_, Value>("anvil_mine", ("0x1",))
+                .await?;
             claim.call().await?;
             let claim_hash: B256 = provider
                 .client()
-                .request("eth_sendTransaction", (claim.clone().into_transaction_request(),))
+                .request(
+                    "eth_sendTransaction",
+                    (claim.clone().into_transaction_request(),),
+                )
                 .await?;
             let claimed = alloy::providers::PendingTransactionBuilder::new(
                 provider.root().clone(),
@@ -5139,7 +5171,11 @@ mod tests {
                     }),
                 "mature native claim lost replay state or the historical MessageProcessed event"
             );
-            let duplicate = claim.call().await.err().context("duplicate native claim succeeded")?;
+            let duplicate = claim
+                .call()
+                .await
+                .err()
+                .context("duplicate native claim succeeded")?;
             ensure!(
                 matches!(
                     duplicate.as_decoded_interface_error::<IMessageQueue::IMessageQueueErrors>(),

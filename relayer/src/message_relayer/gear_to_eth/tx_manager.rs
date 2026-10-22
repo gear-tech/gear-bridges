@@ -119,8 +119,9 @@ impl Transaction {
             && self.ethereum_submission.is_some()
         {
             anyhow::ensure!(
-                self.failure_evidence.as_ref().is_some_and(|evidence|
-                    evidence.inclusion.is_some() && evidence.checkpoint.is_some()),
+                self.failure_evidence.as_ref().is_some_and(
+                    |evidence| evidence.inclusion.is_some() && evidence.checkpoint.is_some()
+                ),
                 "HOLD: version 5 signed failure lacks authenticated original revert"
             );
         }
@@ -481,16 +482,31 @@ impl TransactionManager {
             if let Some(signed) = &tx.ethereum_submission {
                 if let Some(saved) = &mut tx.completion {
                     Self::verify_saved_receipt(
-                        api, &mut view, signed, &saved.receipt,
-                        saved.finalized_block_number, saved.finalized_block_hash,
-                        saved.inclusion.as_ref(), saved.checkpoint.as_ref(),
-                    ).await?;
-                    let receipt = api.get_finalized_receipt(signed.hash).await?
-                        .ok_or_else(|| anyhow::anyhow!(
-                            "HOLD: saved completion has no original finalized receipt"))?;
+                        api,
+                        &mut view,
+                        signed,
+                        &saved.receipt,
+                        saved.finalized_block_number,
+                        saved.finalized_block_hash,
+                        saved.inclusion.as_ref(),
+                        saved.checkpoint.as_ref(),
+                    )
+                    .await?;
+                    let receipt =
+                        api.get_finalized_receipt(signed.hash)
+                            .await?
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "HOLD: saved completion has no original finalized receipt"
+                                )
+                            })?;
                     let observed = status_fetcher::completion_evidence(
-                        api, &tx.message.message, signed, receipt,
-                    ).await?;
+                        api,
+                        &tx.message.message,
+                        signed,
+                        receipt,
+                    )
+                    .await?;
                     anyhow::ensure!(
                         Self::same_original_receipt(&observed.receipt, &saved.receipt)
                             && observed.token_delivery == saved.token_delivery,
@@ -504,17 +520,28 @@ impl TransactionManager {
                 if matches!(tx.status, TxStatus::Failed { .. }) {
                     if let Some(saved) = &tx.failure_evidence {
                         Self::verify_saved_receipt(
-                            api, &mut view, signed, &saved.receipt,
-                            saved.finalized_block_number, saved.finalized_block_hash,
-                            saved.inclusion.as_ref(), saved.checkpoint.as_ref(),
-                        ).await?;
+                            api,
+                            &mut view,
+                            signed,
+                            &saved.receipt,
+                            saved.finalized_block_number,
+                            saved.finalized_block_hash,
+                            saved.inclusion.as_ref(),
+                            saved.checkpoint.as_ref(),
+                        )
+                        .await?;
                     }
-                    let receipt = api.get_finalized_receipt(signed.hash).await?
-                        .ok_or_else(|| anyhow::anyhow!(
-                            "HOLD: signed failed original receipt is unavailable"))?;
-                    let observed = status_fetcher::failure_evidence(
-                        api, &tx.message.message, signed, receipt,
-                    ).await?;
+                    let receipt =
+                        api.get_finalized_receipt(signed.hash)
+                            .await?
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "HOLD: signed failed original receipt is unavailable"
+                                )
+                            })?;
+                    let observed =
+                        status_fetcher::failure_evidence(api, &tx.message.message, signed, receipt)
+                            .await?;
                     if let Some(saved) = &mut tx.failure_evidence {
                         anyhow::ensure!(
                             Self::same_original_receipt(&observed.receipt, &saved.receipt)
@@ -532,8 +559,11 @@ impl TransactionManager {
                 }
                 if let Some(saved) = &tx.nonce_disposition {
                     api.verify_finalized_submission_snapshot(
-                        signed.nonce, tx.message.message.nonce_be, saved,
-                    ).await?;
+                        signed.nonce,
+                        tx.message.message.nonce_be,
+                        saved,
+                    )
+                    .await?;
                 }
             }
             tx.journal_version = 5;
@@ -545,7 +575,9 @@ impl TransactionManager {
         // Existing save.pending protocol durably writes UUID records before acknowledgements.
         self.storage.save(self).await?;
         for tx in self.completed.read().await.values() {
-            self.storage.ack_event_pair(tx.message.message.nonce_be).await?;
+            self.storage
+                .ack_event_pair(tx.message.message.nonce_be)
+                .await?;
         }
         Ok(())
     }
@@ -579,13 +611,24 @@ impl TransactionManager {
                 || receipt.block_hash == Some(finalized_hash),
             "HOLD: saved finality and inclusion conflict at the same height"
         );
-        view.verify_blocks(api.raw_provider(), &BTreeMap::from([
-            (finalized_number, finalized_hash),
-            (receipt.block_number.ok_or_else(|| anyhow::anyhow!("HOLD: missing inclusion height"))?,
-             receipt.block_hash.ok_or_else(|| anyhow::anyhow!("HOLD: missing inclusion hash"))?),
-        ])).await?;
+        view.verify_blocks(
+            api.raw_provider(),
+            &BTreeMap::from([
+                (finalized_number, finalized_hash),
+                (
+                    receipt
+                        .block_number
+                        .ok_or_else(|| anyhow::anyhow!("HOLD: missing inclusion height"))?,
+                    receipt
+                        .block_hash
+                        .ok_or_else(|| anyhow::anyhow!("HOLD: missing inclusion hash"))?,
+                ),
+            ]),
+        )
+        .await?;
         if let Some(checkpoint) = checkpoint {
-            view.verify_checkpoint(api.raw_provider(), checkpoint).await?;
+            view.verify_checkpoint(api.raw_provider(), checkpoint)
+                .await?;
         }
         if let Some(inclusion) = inclusion {
             inclusion.verify_original_inclusion(view, &signed.raw_transaction, signed.hash)?;
@@ -1298,25 +1341,43 @@ mod tests {
         let signed = signed_content(&tx, 36).await;
         tx.remember_attempt(signed.hash);
         tx.ethereum_submission = Some(signed.clone());
-        tx.status = TxStatus::Failed { diagnostic: "saved legacy failure".into() };
+        tx.status = TxStatus::Failed {
+            diagnostic: "saved legacy failure".into(),
+        };
         tx.journal_version = 4;
         tx.validate_journal().unwrap();
         tx.journal_version = 5;
-        assert!(tx.validate_journal().is_err(), "signed failure needs original reverted inclusion");
-        tx.failure_evidence = Some(status_fetcher::tests::reverted_evidence(&tx.message.message, &signed));
+        assert!(
+            tx.validate_journal().is_err(),
+            "signed failure needs original reverted inclusion"
+        );
+        tx.failure_evidence = Some(status_fetcher::tests::reverted_evidence(
+            &tx.message.message,
+            &signed,
+        ));
         tx.validate_journal().unwrap();
         tx.failure_evidence.as_mut().unwrap().checkpoint = None;
-        assert!(tx.validate_journal().is_err(), "partial authentication cannot qualify a failure");
+        assert!(
+            tx.validate_journal().is_err(),
+            "partial authentication cannot qualify a failure"
+        );
 
         tx.failure_evidence = None;
         tx.status = TxStatus::Completed;
         tx.ethereum_tx_hash = Some(signed.hash);
-        tx.completion = Some(status_fetcher::tests::evidence(&tx.message.message, &signed, false));
+        tx.completion = Some(status_fetcher::tests::evidence(
+            &tx.message.message,
+            &signed,
+            false,
+        ));
         tx.validate_journal().unwrap();
         let evidence = tx.completion.as_mut().unwrap();
         evidence.inclusion = None;
         evidence.checkpoint = None;
-        assert!(tx.validate_journal().is_err(), "version five cannot accept legacy completion");
+        assert!(
+            tx.validate_journal().is_err(),
+            "version five cannot accept legacy completion"
+        );
         for version in 2..=4 {
             tx.journal_version = version;
             tx.validate_journal().unwrap();

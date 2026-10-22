@@ -416,20 +416,30 @@ struct FinalityWitness {
 
 // URL spelling cannot establish operator independence; reject obvious aliases.
 fn finality_endpoint_identity(url: &Url) -> AnyResult<(&str, &str, u16, &str, Option<&str>)> {
-    let host = url.host_str().context("HOLD: Ethereum endpoint has no host")?
+    let host = url
+        .host_str()
+        .context("HOLD: Ethereum endpoint has no host")?
         .trim_end_matches('.');
-    let address = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')).unwrap_or(host);
+    let address = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
     let loopback = host == "localhost"
-        || address.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
+        || address
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
     let scheme = match url.scheme() {
         "https" | "wss" => "https",
         "http" | "ws" if loopback => "http",
-        _ => bail!("HOLD: Ethereum endpoints require HTTPS/WSS except literal loopback or localhost"),
+        _ => {
+            bail!("HOLD: Ethereum endpoints require HTTPS/WSS except literal loopback or localhost")
+        }
     };
     Ok((
         scheme,
         if loopback { "localhost" } else { host },
-        url.port_or_known_default().context("HOLD: Ethereum endpoint has no port")?,
+        url.port_or_known_default()
+            .context("HOLD: Ethereum endpoint has no port")?,
         url.path().trim_end_matches('/'),
         url.query(),
     ))
@@ -496,7 +506,8 @@ impl PollingEthApi {
 
     pub async fn reconnect(&self) -> AnyResult<Self> {
         let mut connected =
-            Self::new_with_retries(self.url.as_str(), self.ws_max_retry, self.ws_retry_interval).await?;
+            Self::new_with_retries(self.url.as_str(), self.ws_max_retry, self.ws_retry_interval)
+                .await?;
         connected.finality = self.finality.clone();
         Ok(connected)
     }
@@ -507,10 +518,17 @@ impl PollingEthApi {
         expected_chain_id: u64,
         expected_genesis: B256,
     ) -> AnyResult<Self> {
-        self.finality = Some(FinalityWitness::connect(
-            &self.url, witness_url, expected_chain_id, expected_genesis,
-            self.ws_max_retry, self.ws_retry_interval,
-        ).await?);
+        self.finality = Some(
+            FinalityWitness::connect(
+                &self.url,
+                witness_url,
+                expected_chain_id,
+                expected_genesis,
+                self.ws_max_retry,
+                self.ws_retry_interval,
+            )
+            .await?,
+        );
         Ok(self)
     }
 
@@ -532,15 +550,21 @@ impl PollingEthApi {
         directory: &std::path::Path,
         expected_genesis: B256,
     ) -> AnyResult<()> {
-        ensure!(self.finality_identity()?.1 == expected_genesis, "archive approval mismatch");
+        ensure!(
+            self.finality_identity()?.1 == expected_genesis,
+            "archive approval mismatch"
+        );
         enable_finality_archive(&self.provider, directory, expected_genesis).await
     }
 
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
-        Ok(
-            finalized_ancestor(&self.provider, require_witness(&self.finality)?, number, B256::from(hash.0))
-                .await?,
+        Ok(finalized_ancestor(
+            &self.provider,
+            require_witness(&self.finality)?,
+            number,
+            B256::from(hash.0),
         )
+        .await?)
     }
 
     pub async fn chain_id(&self) -> AnyResult<u64> {
@@ -549,9 +573,15 @@ impl PollingEthApi {
 
     pub async fn finalized_block(&self) -> AnyResult<Block> {
         let view = self.verified_finalized_view().await?;
-        let block = self.provider.get_block_by_hash(view.block_hash()).await?
+        let block = self
+            .provider
+            .get_block_by_hash(view.block_hash())
+            .await?
             .context("qualified block unavailable")?;
-        ensure!(valid_header(&block, view.block_number(), view.block_hash()), "qualified block changed");
+        ensure!(
+            valid_header(&block, view.block_number(), view.block_hash()),
+            "qualified block changed"
+        );
         view.recheck(&self.provider).await?;
         Ok(block)
     }
@@ -561,7 +591,14 @@ impl PollingEthApi {
         &self,
         tx_hash: TxHash,
     ) -> AnyResult<Option<FinalizedTransactionReceipt>> {
-        Ok(finalized_transaction_receipt(&self.provider, require_witness(&self.finality)?, tx_hash).await?)
+        Ok(
+            finalized_transaction_receipt(
+                &self.provider,
+                require_witness(&self.finality)?,
+                tx_hash,
+            )
+            .await?,
+        )
     }
     pub async fn get_transaction_block_number(&self, hash: TxHash) -> AnyResult<Option<u64>> {
         transaction_identity(&self.provider, hash)
@@ -655,7 +692,6 @@ impl Deref for PollingEthApi {
         &self.provider
     }
 }
-
 
 pub async fn latest_block(provider: impl Provider) -> AnyResult<Block> {
     provider
@@ -785,7 +821,8 @@ async fn qualified_header(
     tag: BlockNumberOrTag,
 ) -> Result<Header, Error> {
     let block = timeout(Duration::from_secs(10), provider.get_block_by_number(tag))
-        .await.map_err(|_| Error::FinalizedAncestryPending)??
+        .await
+        .map_err(|_| Error::FinalizedAncestryPending)??
         .ok_or(Error::FinalizedAncestryPending)?;
     let number = match tag {
         BlockNumberOrTag::Number(number) => number,
@@ -805,7 +842,8 @@ async fn finality_pin(
     let mut tips = Vec::with_capacity(2);
     for endpoint in [provider.root(), &witness.provider] {
         let chain_id = timeout(Duration::from_secs(10), endpoint.get_chain_id())
-            .await.map_err(|_| Error::FinalizedAncestryPending)??;
+            .await
+            .map_err(|_| Error::FinalizedAncestryPending)??;
         let genesis = qualified_header(endpoint, BlockNumberOrTag::Number(0)).await?;
         if chain_id != witness.chain_id || genesis.hash != witness.genesis {
             return Err(Error::FinalizedAncestryConflict);
@@ -826,9 +864,8 @@ async fn finality_pin(
         return Err(Error::FinalizedAncestryConflict);
     }
     for (endpoint, tip) in [provider.root(), &witness.provider].into_iter().zip(&tips) {
-        let (number, hash, _) = walk_ancestors(
-            endpoint, (tip.number, tip.hash), height, started, &[], None,
-        ).await?;
+        let (number, hash, _) =
+            walk_ancestors(endpoint, (tip.number, tip.hash), height, started, &[], None).await?;
         if number != height || started.elapsed() >= MAX_PROOF_DURATION {
             return Err(Error::FinalizedAncestryPending);
         }
@@ -997,7 +1034,8 @@ impl FinalizedView {
     /// Recheck the exact pin, never replace staged evidence with a newer head.
     pub async fn recheck(&self, provider: &impl Provider) -> Result<(), Error> {
         for endpoint in [provider.root(), &self.witness.provider] {
-            let header = qualified_header(endpoint, BlockNumberOrTag::Number(self.block_number())).await?;
+            let header =
+                qualified_header(endpoint, BlockNumberOrTag::Number(self.block_number())).await?;
             if header.inner != self.checkpoint.common_header || header.hash != self.block_hash() {
                 return Err(Error::FinalizedAncestryConflict);
             }
@@ -1010,7 +1048,8 @@ impl FinalizedView {
         provider: &impl Provider,
         checkpoint: &FinalityCheckpoint,
     ) -> Result<(), Error> {
-        if checkpoint.schema_version != 1 || checkpoint.policy != "independent-two-el-v1"
+        if checkpoint.schema_version != 1
+            || checkpoint.policy != "independent-two-el-v1"
             || checkpoint.chain_id != self.checkpoint.chain_id
             || checkpoint.genesis_hash != self.genesis
             || checkpoint.common_header.number > checkpoint.primary_finalized_header.number
@@ -1018,9 +1057,14 @@ impl FinalizedView {
         {
             return Err(Error::FinalizedAncestryConflict);
         }
-        self.verify_blocks(provider, &BTreeMap::from([(
-            checkpoint.common_header.number, checkpoint.common_header.hash_slow(),
-        )])).await
+        self.verify_blocks(
+            provider,
+            &BTreeMap::from([(
+                checkpoint.common_header.number,
+                checkpoint.common_header.hash_slow(),
+            )]),
+        )
+        .await
     }
 
     pub fn block_number(&self) -> u64 {
@@ -1107,22 +1151,42 @@ async fn verified_finalized_view(
     let (header, checkpoint) = finality_pin(provider, witness, started).await?;
     let genesis = checkpoint.genesis_hash;
     let head = (header.number, header.hash);
-    if finalized_ancestor_at(provider, head.0, head.1, &header, genesis, started, Some(&checkpoint)).await?.is_none() {
+    if finalized_ancestor_at(
+        provider,
+        head.0,
+        head.1,
+        &header,
+        genesis,
+        started,
+        Some(&checkpoint),
+    )
+    .await?
+    .is_none()
+    {
         return Err(Error::FinalizedAncestryConflict);
     }
     let view = FinalizedView {
-        header, genesis, checkpoint, witness: witness.clone(),
+        header,
+        genesis,
+        checkpoint,
+        witness: witness.clone(),
         blocks: BTreeMap::from([head]),
     };
     view.recheck(provider).await?;
     let _verification = finality_lock(genesis).lock_owned().await;
-    let current = FINALIZED_ANCESTRY.get_or_init(Default::default)
-        .lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if !current.get(&genesis).is_some_and(|cache| cache.head == head && cache.required_heads.is_empty()) {
+    let current = FINALIZED_ANCESTRY
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !current
+        .get(&genesis)
+        .is_some_and(|cache| cache.head == head && cache.required_heads.is_empty())
+    {
         return Err(Error::FinalizedAncestryPending);
     }
     for archive in archives_for(genesis) {
-        archive.complete(&view.checkpoint)
+        archive
+            .complete(&view.checkpoint)
             .map_err(|_| Error::FinalizedAncestryPending)?;
     }
     Ok(view)
@@ -1138,7 +1202,10 @@ async fn finalized_ancestor(
     if number > view.block_number() {
         return Err(Error::FinalizedAncestryPending);
     }
-    match view.verify_blocks(provider, &BTreeMap::from([(number, hash)])).await {
+    match view
+        .verify_blocks(provider, &BTreeMap::from([(number, hash)]))
+        .await
+    {
         Ok(()) => Ok(true),
         Err(Error::FinalizedAncestryConflict) => Ok(false),
         Err(error) => Err(error),
@@ -1377,16 +1444,30 @@ async fn finalized_transaction_receipt(
         return Ok(None);
     };
     let invalid = |error: anyhow::Error| Error::InvalidFinalityEvidence(error.to_string());
-    let (included_block_number, included_block_hash) = receipt.block_number.zip(receipt.block_hash)
-        .ok_or_else(|| Error::InvalidFinalityEvidence("receipt inclusion coordinates missing".into()))?;
+    let (included_block_number, included_block_hash) = receipt
+        .block_number
+        .zip(receipt.block_hash)
+        .ok_or_else(|| {
+            Error::InvalidFinalityEvidence("receipt inclusion coordinates missing".into())
+        })?;
     if included_block_number > view.block_number() {
         view.recheck(&provider).await?;
         return Ok(None);
     }
-    view.verify_blocks(&provider, &BTreeMap::from([(included_block_number, included_block_hash)])).await?;
+    view.verify_blocks(
+        &provider,
+        &BTreeMap::from([(included_block_number, included_block_hash)]),
+    )
+    .await?;
     let (inclusion, first_log_index) = inclusion::prove_transaction_receipt_with_log_index(
-        &provider, &view, included_block_number, included_block_hash, tx_hash,
-    ).await.map_err(|error| match error.downcast::<Error>() {
+        &provider,
+        &view,
+        included_block_number,
+        included_block_hash,
+        tx_hash,
+    )
+    .await
+    .map_err(|error| match error.downcast::<Error>() {
         Ok(error) => error,
         Err(error) => match error.downcast::<TransportError>() {
             Ok(error) => Error::from(error),
@@ -1394,8 +1475,15 @@ async fn finalized_transaction_receipt(
         },
     })?;
     validate_receipt_locator(&receipt, &inclusion, tx_hash).map_err(invalid)?;
-    if receipt.inner.logs().first().is_some_and(|log| log.log_index != Some(first_log_index)) {
-        return Err(Error::InvalidFinalityEvidence("receipt global log index differs from included predecessors".into()));
+    if receipt
+        .inner
+        .logs()
+        .first()
+        .is_some_and(|log| log.log_index != Some(first_log_index))
+    {
+        return Err(Error::InvalidFinalityEvidence(
+            "receipt global log index differs from included predecessors".into(),
+        ));
     }
     view.recheck(&provider).await?;
     Ok(Some(FinalizedTransactionReceipt {
@@ -1428,23 +1516,36 @@ fn validate_receipt_locator(
     );
     let mut bytes = proof.raw_transaction.as_slice();
     let transaction = TxEnvelope::decode_2718(&mut bytes)?;
-    ensure!(bytes.is_empty() && alloy::primitives::keccak256(&proof.raw_transaction) == hash,
-        "invalid exact signed envelope");
+    ensure!(
+        bytes.is_empty() && alloy::primitives::keccak256(&proof.raw_transaction) == hash,
+        "invalid exact signed envelope"
+    );
     let signer = transaction.recover_signer()?;
-    ensure!(signer == receipt.from && transaction.to() == receipt.to,
-        "receipt sender/destination differs from signed original");
+    ensure!(
+        signer == receipt.from && transaction.to() == receipt.to,
+        "receipt sender/destination differs from signed original"
+    );
     let created = (transaction.to().is_none() && proof.receipt.status())
         .then(|| signer.create(transaction.nonce()));
-    ensure!(receipt.contract_address == created, "receipt creation address differs from signed original");
+    ensure!(
+        receipt.contract_address == created,
+        "receipt creation address differs from signed original"
+    );
     let mut previous = None;
     for log in receipt.inner.logs() {
-        ensure!(!log.removed && log.block_hash == receipt.block_hash
-            && log.block_number == receipt.block_number
-            && log.transaction_hash == Some(hash)
-            && log.transaction_index == Some(proof.index), "misbound or removed receipt log");
+        ensure!(
+            !log.removed
+                && log.block_hash == receipt.block_hash
+                && log.block_number == receipt.block_number
+                && log.transaction_hash == Some(hash)
+                && log.transaction_index == Some(proof.index),
+            "misbound or removed receipt log"
+        );
         let index = log.log_index.context("missing global log index")?;
-        ensure!(previous.is_none_or(|previous: u64| previous.checked_add(1) == Some(index)),
-            "noncontiguous receipt log indices");
+        ensure!(
+            previous.is_none_or(|previous: u64| previous.checked_add(1) == Some(index)),
+            "noncontiguous receipt log indices"
+        );
         previous = Some(index);
     }
     Ok(())
@@ -1587,11 +1688,21 @@ impl EthApi {
         expected_chain_id: u64,
         expected_genesis: B256,
     ) -> AnyResult<Self> {
-        ensure!(self.chain_id == expected_chain_id, "HOLD: signer network differs from approved identity");
-        self.contracts.finality = Some(FinalityWitness::connect(
-            &self.url, witness_url, expected_chain_id, expected_genesis,
-            self.ws_max_retry, self.ws_retry_interval,
-        ).await?);
+        ensure!(
+            self.chain_id == expected_chain_id,
+            "HOLD: signer network differs from approved identity"
+        );
+        self.contracts.finality = Some(
+            FinalityWitness::connect(
+                &self.url,
+                witness_url,
+                expected_chain_id,
+                expected_genesis,
+                self.ws_max_retry,
+                self.ws_retry_interval,
+            )
+            .await?,
+        );
         Ok(self)
     }
 
@@ -1631,7 +1742,11 @@ impl EthApi {
     /// authenticated progress. Do not wrap the complete proof in an RPC timeout:
     /// cancelling it can discard a partially verified ancestry frontier.
     pub async fn verified_finalized_view(&self) -> Result<FinalizedView, Error> {
-        verified_finalized_view(self.raw_provider(), require_witness(&self.contracts.finality)?).await
+        verified_finalized_view(
+            self.raw_provider(),
+            require_witness(&self.contracts.finality)?,
+        )
+        .await
     }
 
     /// Attach an independently owned archive without replacing same-chain owners.
@@ -1642,7 +1757,8 @@ impl EthApi {
         directory: &std::path::Path,
         expected_genesis: B256,
     ) -> AnyResult<FinalizedView> {
-        self.enable_finality_archive(directory, expected_genesis).await?;
+        self.enable_finality_archive(directory, expected_genesis)
+            .await?;
         Ok(self.verified_finalized_view().await?)
     }
 
@@ -1651,7 +1767,10 @@ impl EthApi {
         directory: &std::path::Path,
         expected_genesis: B256,
     ) -> AnyResult<()> {
-        ensure!(self.finality_identity()?.1 == expected_genesis, "archive approval mismatch");
+        ensure!(
+            self.finality_identity()?.1 == expected_genesis,
+            "archive approval mismatch"
+        );
         enable_finality_archive(self.raw_provider(), directory, expected_genesis).await
     }
 
@@ -1859,15 +1978,23 @@ impl EthApi {
         &self,
         tx_hash: TxHash,
     ) -> Result<Option<FinalizedTransactionReceipt>, Error> {
-        finalized_transaction_receipt(self.raw_provider(), require_witness(&self.contracts.finality)?, tx_hash).await
+        finalized_transaction_receipt(
+            self.raw_provider(),
+            require_witness(&self.contracts.finality)?,
+            tx_hash,
+        )
+        .await
     }
     /// Revalidate a saved historical snapshot against the same finalized ancestry as receipts.
     /// An unfinished or unavailable proof is an error, not a conflicting block.
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
-        Ok(
-            finalized_ancestor(self.raw_provider(), require_witness(&self.contracts.finality)?, number, B256::from(hash.0))
-                .await?,
+        Ok(finalized_ancestor(
+            self.raw_provider(),
+            require_witness(&self.contracts.finality)?,
+            number,
+            B256::from(hash.0),
         )
+        .await?)
     }
 
     pub async fn read_finalized_merkle_root(
@@ -1905,7 +2032,10 @@ impl EthApi {
         if witness.chain_id != view.checkpoint.chain_id || witness.genesis != view.genesis {
             return Err(Error::FinalizedAncestryConflict);
         }
-        let root = self.contracts.read_merkle_root_at(U256::from(gear_block), view.block_id()).await?;
+        let root = self
+            .contracts
+            .read_merkle_root_at(U256::from(gear_block), view.block_id())
+            .await?;
         view.recheck(self.raw_provider()).await?;
         Ok(root)
     }
@@ -1995,9 +2125,16 @@ impl EthApi {
             "HOLD: saved nonce disposition has no block hash"
         );
         let mut view = self.verified_finalized_view().await?;
-        view.verify_blocks(self.raw_provider(), &BTreeMap::from([(saved.block_number, saved.block_hash)])).await?;
+        view.verify_blocks(
+            self.raw_provider(),
+            &BTreeMap::from([(saved.block_number, saved.block_hash)]),
+        )
+        .await?;
         let block_id = BlockId::hash_canonical(saved.block_hash);
-        let account_nonce = self.contracts.agreed_account_nonce(self.public_key, block_id).await?;
+        let account_nonce = self
+            .contracts
+            .agreed_account_nonce(self.public_key, block_id)
+            .await?;
         let processed = self
             .contracts
             .is_message_processed_at(U256::from_be_bytes(message_nonce), block_id)
@@ -2054,13 +2191,21 @@ impl Contracts {
     }
 
     async fn scheduling_value<C: alloy::sol_types::SolCall>(&self, call: C) -> Result<U256, Error> {
-        let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
+        let view =
+            verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
         let request = alloy::rpc::types::TransactionRequest::default()
             .to(*self.message_queue_instance.address())
             .input(Bytes::from(call.abi_encode()).into());
-        let primary = self.provider.call(request.clone()).block(view.block_id()).await?;
-        let witness = require_witness(&self.finality)?.provider
-            .call(request).block(view.block_id()).await?;
+        let primary = self
+            .provider
+            .call(request.clone())
+            .block(view.block_id())
+            .await?;
+        let witness = require_witness(&self.finality)?
+            .provider
+            .call(request)
+            .block(view.block_id())
+            .await?;
         if primary != witness || primary.len() != 32 {
             return Err(Error::FinalizedAncestryConflict);
         }
@@ -2069,28 +2214,38 @@ impl Contracts {
     }
 
     pub async fn max_block_number(&self) -> Result<u32, Error> {
-        self.scheduling_value(IMessageQueue::maxBlockNumberCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("max block exceeds u32".into()))
+        self.scheduling_value(IMessageQueue::maxBlockNumberCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("max block exceeds u32".into()))
     }
 
     pub async fn max_block_distance(&self) -> Result<u32, Error> {
-        self.scheduling_value(IMessageQueue::MAX_BLOCK_DISTANCECall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("max distance exceeds u32".into()))
+        self.scheduling_value(IMessageQueue::MAX_BLOCK_DISTANCECall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("max distance exceeds u32".into()))
     }
 
     pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
-        self.scheduling_value(IMessageQueue::PROCESS_ADMIN_MESSAGE_DELAYCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("admin delay exceeds u64".into()))
+        self.scheduling_value(IMessageQueue::PROCESS_ADMIN_MESSAGE_DELAYCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("admin delay exceeds u64".into()))
     }
 
     pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
-        self.scheduling_value(IMessageQueue::PROCESS_PAUSER_MESSAGE_DELAYCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("pauser delay exceeds u64".into()))
+        self.scheduling_value(IMessageQueue::PROCESS_PAUSER_MESSAGE_DELAYCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("pauser delay exceeds u64".into()))
     }
 
     pub async fn process_user_message_delay(&self) -> Result<u64, Error> {
-        self.scheduling_value(IMessageQueue::PROCESS_USER_MESSAGE_DELAYCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("user delay exceeds u64".into()))
+        self.scheduling_value(IMessageQueue::PROCESS_USER_MESSAGE_DELAYCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("user delay exceeds u64".into()))
     }
 
     pub async fn get_approx_balance(&self, address: Address) -> Result<f64, Error> {
@@ -2297,14 +2452,20 @@ impl Contracts {
         block_tag: BlockNumberOrTag,
     ) -> Result<Option<[u8; 32]>, Error> {
         if block_tag == BlockNumberOrTag::Finalized {
-            let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
+            let view =
+                verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
             let root = self.read_merkle_root_at(block, view.block_id()).await?;
             view.recheck(&self.provider).await?;
             Ok(root)
         } else {
-            let root = self.message_queue_instance.getMerkleRoot(block)
-                .block(BlockId::Number(block_tag)).call().await
-                .map_err(Error::ErrorDuringContractExecution)?.0;
+            let root = self
+                .message_queue_instance
+                .getMerkleRoot(block)
+                .block(BlockId::Number(block_tag))
+                .call()
+                .await
+                .map_err(Error::ErrorDuringContractExecution)?
+                .0;
             Ok((root != [0; 32]).then_some(root))
         }
     }
@@ -2324,9 +2485,15 @@ impl Contracts {
             .map_err(Error::ErrorDuringContractExecution)?
             .0;
         let other = IMessageQueue::new(*self.message_queue_instance.address(), &witness.provider)
-            .getMerkleRoot(block).block(block_id).call().await
-            .map_err(Error::ErrorDuringContractExecution)?.0;
-        if root != other { return Err(Error::FinalizedAncestryConflict); }
+            .getMerkleRoot(block)
+            .block(block_id)
+            .call()
+            .await
+            .map_err(Error::ErrorDuringContractExecution)?
+            .0;
+        if root != other {
+            return Err(Error::FinalizedAncestryConflict);
+        }
 
         Ok((root != [0; 32]).then_some(root))
     }
@@ -2336,10 +2503,19 @@ impl Contracts {
         ethereum_block_number: u64,
         ethereum_block_hash: B256,
     ) -> Result<Option<[u8; 32]>, Error> {
-        let mut view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
-        if ethereum_block_number > view.block_number() { return Ok(None); }
-        view.verify_blocks(&self.provider, &BTreeMap::from([(ethereum_block_number, ethereum_block_hash)])).await?;
-        let root = self.read_merkle_root_at(block, BlockId::hash_canonical(ethereum_block_hash)).await?;
+        let mut view =
+            verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
+        if ethereum_block_number > view.block_number() {
+            return Ok(None);
+        }
+        view.verify_blocks(
+            &self.provider,
+            &BTreeMap::from([(ethereum_block_number, ethereum_block_hash)]),
+        )
+        .await?;
+        let root = self
+            .read_merkle_root_at(block, BlockId::hash_canonical(ethereum_block_hash))
+            .await?;
         view.recheck(&self.provider).await?;
         Ok(root)
     }
@@ -2350,7 +2526,8 @@ impl Contracts {
         pinned_nonce: u64,
         message_nonce: U256,
     ) -> Result<Option<FinalizedSubmissionSnapshot>, Error> {
-        let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
+        let view =
+            verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
         let block_number = view.block_number();
         let block_hash = view.block_hash();
         let block_id = view.block_id();
@@ -2370,7 +2547,8 @@ impl Contracts {
     }
 
     pub async fn is_message_processed(&self, nonce: U256) -> Result<bool, Error> {
-        let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
+        let view =
+            verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
         let processed = self.is_message_processed_at(nonce, view.block_id()).await?;
         view.recheck(&self.provider).await?;
         Ok(processed)
@@ -2386,23 +2564,44 @@ impl Contracts {
             .await
             .map_err(Error::ErrorDuringContractExecution)?;
         let other = IMessageQueue::new(*self.message_queue_instance.address(), &witness.provider)
-            .isProcessed(nonce).block(block_id).call().await
+            .isProcessed(nonce)
+            .block(block_id)
+            .call()
+            .await
             .map_err(Error::ErrorDuringContractExecution)?;
-        if processed != other { return Err(Error::FinalizedAncestryConflict); }
+        if processed != other {
+            return Err(Error::FinalizedAncestryConflict);
+        }
 
         Ok(processed)
     }
 
     async fn agreed_account_nonce(&self, account: Address, block: BlockId) -> Result<u64, Error> {
         let witness = require_witness(&self.finality)?;
-        let nonce = self.provider.get_transaction_count(account).block_id(block).await?;
-        let other = witness.provider.get_transaction_count(account).block_id(block).await?;
-        if nonce != other { return Err(Error::FinalizedAncestryConflict); }
+        let nonce = self
+            .provider
+            .get_transaction_count(account)
+            .block_id(block)
+            .await?;
+        let other = witness
+            .provider
+            .get_transaction_count(account)
+            .block_id(block)
+            .await?;
+        if nonce != other {
+            return Err(Error::FinalizedAncestryConflict);
+        }
         Ok(nonce)
     }
 
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
-        let Some(receipt) = finalized_transaction_receipt(&self.provider, require_witness(&self.finality)?, tx_hash).await? else {
+        let Some(receipt) = finalized_transaction_receipt(
+            &self.provider,
+            require_witness(&self.finality)?,
+            tx_hash,
+        )
+        .await?
+        else {
             return Ok(TxStatus::Pending);
         };
 
@@ -2702,14 +2901,15 @@ mod tests {
     // Exercise the ancestry/cache algorithm independently of finality qualification.
     // Production acceptance and receipt proof regressions use two transports in finality_tests.
     async fn ancestry_only(
-        provider: &impl Provider, number: u64, hash: B256,
+        provider: &impl Provider,
+        number: u64,
+        hash: B256,
     ) -> Result<Option<(u64, B256)>, Error> {
         let started = Instant::now();
         let head = qualified_header(provider, BlockNumberOrTag::Finalized).await?;
         let genesis = qualified_header(provider, BlockNumberOrTag::Number(0)).await?;
         finalized_ancestor_at(provider, number, hash, &head, genesis.hash, started, None).await
     }
-
 
     #[tokio::test]
     async fn finalized_ancestry_rejects_a_numbered_block_from_another_backend() -> AnyResult<()> {
@@ -2883,8 +3083,6 @@ mod tests {
         assert!(asserter.read_q().is_empty());
         Ok(())
     }
-
-
 
     #[tokio::test]
     async fn interrupted_interior_frontier_survives_the_recent_ancestor_bound() -> AnyResult<()> {

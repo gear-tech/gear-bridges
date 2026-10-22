@@ -139,14 +139,14 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     completed_at_tx_hash: fixture.txHashes[0] };
   const inbound = { ...base, source_network: 'Ethereum', dest_network: 'Vara', source: identity.token,
     destination: identity.varaToken, sender: identity.receiver, receiver: identity.sender, block_number: '11',
-    source_log_index: '0', completed_at_block: '300', completed_at_tx_hash: hash('d0') };
+    source_log_index: null, completed_at_block: '300', completed_at_tx_hash: hash('d0') };
   const seeds = [
     { ...base, id: '00-pending', status: 'Bridging', nonce: '700', completed_at: null, completed_at_block: null, completed_at_tx_hash: null },
     { ...base, id: '10-direct' },
     { ...base, id: '20-retained', nonce: '9', completed_at_tx_hash: fixture.txHashes[1] },
     { ...base, id: '30-near', nonce: '888', eth_bridge_built_in_msg_hash: hash('99') },
-    { ...inbound, id: '40-inbound', tx_hash: fixture.txHashes[2], source_transaction_index: '2', receipt_slot: '200' },
-    { ...inbound, id: '50-refund', tx_hash: fixture.txHashes[3], source_transaction_index: '3', receipt_slot: '201', status: 'Refunded' },
+    { ...inbound, id: '40-inbound', tx_hash: fixture.txHashes[2], source_transaction_index: null },
+    { ...inbound, id: '50-refund', tx_hash: fixture.txHashes[3], source_transaction_index: null, status: 'Refunded' },
     { ...base, id: '60-awaiting', status: 'AwaitingPayment', nonce: '701', completed_at: null, completed_at_block: null, completed_at_tx_hash: null },
     { ...base, id: '61-bridging', status: 'Bridging', nonce: '702', completed_at: null, completed_at_block: null, completed_at_tx_hash: null },
     { ...base, id: '62-failed', status: 'Failed', nonce: '703' },
@@ -293,7 +293,13 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
 
   await t.test('dry-run, malformed arguments and missing configuration never write, even checkpoints', async () => {
     const saved = await snapshot();
-    for (const direction of ['vara-to-eth', 'eth-to-vara']) await run(direction);
+    await run('vara-to-eth');
+    const inbound = await run('eth-to-vara');
+    assert.equal(inbound.qualified, 2, 'base-era NULL coordinates qualify against the original receipts without writes');
+    for (const id of ['40-inbound', '50-refund']) {
+      assert.equal((await transfer(id)).source_transaction_index, null);
+      assert.equal((await transfer(id)).source_log_index, null);
+    }
     for (const args of [['--limit', '0'], ['--limit', '1001'], ['--unknown'], ['--after', '']]) await run('vara-to-eth', args, false);
     await run('invalid', [], false);
     const missing = { ...env, ETH_WITNESS_RPC: '' }; // Do not let a local .env fill a deliberately missing witness.
@@ -321,6 +327,17 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     assert.deepEqual(await snapshot(), saved);
   });
 
+  await t.test('late inbound disagreement rolls back staged base-era coordinate recovery', async () => {
+    const saved = await snapshot();
+    fixture.state.fault = ({ side, method, params, result }) =>
+      side === 'witness' && method === 'eth_getTransactionReceipt' && params[0] === fixture.txHashes[3]
+        ? { ...result, status: '0x0' } : result;
+    try {
+      await run('eth-to-vara', ['--limit', '2', '--apply'], false);
+      assert.deepEqual(await snapshot(), saved);
+    } finally { fixture.state.fault = undefined; }
+  });
+
   await t.test('apply restores only original effects, preserves legacy JSON and distinguishes native refund', async () => {
     const first = await run('vara-to-eth', ['--after', '00-pending', '--limit', '1', '--apply']);
     assert.equal(first.lastExaminedId, '10-direct'); assert.equal(first.qualified, 1); assert.equal(first.hasMore, true);
@@ -341,6 +358,11 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     assert.equal(direct.completion_auth.completionId, `outbound:${identity.queue}:8`);
     assert.equal((await transfer('40-inbound')).source_receipt_auth.localLogIndex, 0, 'receipt-local index is not global log index 4');
     assert.equal((await transfer('50-refund')).completion_auth.outcome, 'Refunded');
+    for (const [id, index] of [['40-inbound', '2'], ['50-refund', '3']]) {
+      const row = await transfer(id);
+      assert.equal(row.source_transaction_index, index);
+      assert.equal(row.source_log_index, '0', 'backfill the receipt-relative index, not block-global 4 or 5');
+    }
     assert.deepEqual((await db.query('SELECT id, deposit FROM receipt_settlement ORDER BY id')).rows, depositsBefore);
     assert.deepEqual((await db.query('SELECT outbound_receipt FROM completed_transfer WHERE id = $1', [`outbound:${identity.queue}:9`])).rows[0].outbound_receipt, outbound);
     assert.equal((await transfer('30-near')).status, 'Bridging');

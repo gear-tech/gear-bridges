@@ -1,7 +1,7 @@
 use clap::Args;
 pub use cli_utils::{
-    BeaconConnectionArgs, EthereumChainIdentityArgs, EthereumConnectionArgs,
-    EthereumFinalityArgs, EthereumTxArgs, GearConnectionArgs, GearSignerArgs, PrometheusArgs,
+    BeaconConnectionArgs, EthereumChainIdentityArgs, EthereumConnectionArgs, EthereumFinalityArgs,
+    EthereumTxArgs, GearConnectionArgs, GearSignerArgs, PrometheusArgs,
 };
 use std::path::PathBuf;
 

@@ -168,8 +168,12 @@ async fn podman_ethereum_contract_read_recovers_after_real_proxy_outage() -> any
         None,
     )
     .await?
-    .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+    .with_finality_witness(
+        &env::var("ETH_WITNESS_RPC")?,
+        env::var("ETH_CHAIN_ID")?.parse()?,
+        env::var("ETH_GENESIS_HASH")?.parse()?,
+    )
+    .await?;
 
     let baseline = api.max_block_number().await?;
     proxy.stop_container().await?;
@@ -226,8 +230,12 @@ async fn podman_ethereum_polling_recovers_after_real_proxy_outage() -> anyhow::R
         Some(Duration::from_millis(250)),
     )
     .await?
-    .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+    .with_finality_witness(
+        &env::var("ETH_WITNESS_RPC")?,
+        env::var("ETH_CHAIN_ID")?.parse()?,
+        env::var("ETH_GENESIS_HASH")?.parse()?,
+    )
+    .await?;
     let mut worker_api = api.clone();
     let mut sibling_api = api;
 

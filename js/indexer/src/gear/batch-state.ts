@@ -3,7 +3,7 @@ import { Store } from '@subsquid/typeorm-store';
 import { createPairHash } from 'gear-bridge-common';
 import { In, MoreThan } from 'typeorm';
 
-import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer, ReceiptRelay, ReceiptSettlement, Status } from '../model/index.js';
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer, ReceiptRelay, ReceiptSettlement } from '../model/index.js';
 import { BaseBatchState, mapKeys, mapValues, setValues } from '../common/index.js';
 import {
   getEthTokenDecimals,

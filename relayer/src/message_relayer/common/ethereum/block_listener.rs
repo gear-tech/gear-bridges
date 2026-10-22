@@ -303,9 +303,12 @@ mod tests {
         .run();
         let server_handle = server.handle();
         tokio::spawn(server);
-        let api = PollingEthApi::new(&endpoint).await.unwrap()
+        let api = PollingEthApi::new(&endpoint)
+            .await
+            .unwrap()
             .with_finality_witness(&witness_endpoint, 560048, blocks[0].header.hash)
-            .await.unwrap();
+            .await
+            .unwrap();
         let path =
             std::env::temp_dir().join(format!("listener-aged-{}.json", uuid::Uuid::now_v7()));
         let mut bound = identity();

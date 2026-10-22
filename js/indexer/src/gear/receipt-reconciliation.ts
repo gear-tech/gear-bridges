@@ -17,6 +17,7 @@ export function validateReceiptSettlement(deposit: ReceiptDepositEffect): void {
 export async function reconcileReceiptSettlements(
   store: Store, pending: readonly ReceiptSettlement[],
   authenticateSource: (transfer: Transfer) => Promise<SourceReceiptAuth | undefined>,
+  recovered?: Transfer,
 ): Promise<{ transfers: Transfer[]; settlements: ReceiptSettlement[] }> {
   if (!pending.length) return { transfers: [], settlements: [] };
   const receiptIds = [...new Set(pending.map(({ deposit: d }) => `${d.slot}:${d.transaction_index}`))];
@@ -27,6 +28,9 @@ export async function reconcileReceiptSettlements(
       sourceTransactionIndex: BigInt(d.transaction_index), sourceLogIndex: BigInt(d.log_index) }] : [];
   });
   const originals = tuples.length ? await store.find(Transfer, { where: tuples }) : [];
+  // The repair page has authenticated these coordinates but must not write them
+  // before the entire page passes. Still include DB matches to detect ambiguity.
+  if (recovered && !originals.some((row) => row.id === recovered.id)) originals.push(recovered);
   const transfersByTuple = new Map<string, Transfer>();
   for (const transfer of originals) {
     const key = `${transfer.blockNumber}:${transfer.sourceTransactionIndex}:${transfer.sourceLogIndex}`;

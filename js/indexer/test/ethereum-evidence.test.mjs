@@ -8,7 +8,7 @@ const address = `0x${'11'.repeat(20)}`;
 const txHash = hash(500);
 const hex = (n) => `0x${n.toString(16)}`;
 function fixture(primaryTip = 4, witnessTip = 3) {
-  const chain = Array.from({ length: 6 }, (_, n) => ({ number: hex(n), hash: hash(n + 1),
+  const chain = Array.from({ length: Math.max(6, primaryTip + 1, witnessTip + 1) }, (_, n) => ({ number: hex(n), hash: hash(n + 1),
     parentHash: hash(n), stateRoot: hash(100 + n), transactionsRoot: hash(200 + n),
     receiptsRoot: hash(300 + n), timestamp: hex(1_700_000_000 + n), transactions: [txHash] }));
   const receipt = { transactionHash: txHash, blockHash: chain[2].hash, blockNumber: '0x2',
@@ -72,11 +72,62 @@ test('retained checkpoint cannot regress, change fields, or fall off ancestry', 
 });
 
 test('retained continuity walks every intervening parent, not only its endpoint', async () => {
-  const f = fixture(3, 3);
+  for (const side of ['primary', 'witness']) {
+    const f = fixture(3, 3);
+    const previous = await evidence.qualifyFinality(f.clients);
+    f.primary.tip = f.witness.tip = 5;
+    f[side].chain[4].parentHash = hash(999);
+    await assert.rejects(evidence.qualifyFinality(f.clients, previous), /HOLD: broken finalized Ethereum ancestry/);
+  }
+});
+
+test('retained history can exceed five minutes while each advancing RPC stays bounded', async (t) => {
+  const f = fixture(3603, 3603);
+  f.primary.tip = f.witness.tip = 3;
   const previous = await evidence.qualifyFinality(f.clients);
-  f.primary.tip = f.witness.tip = 5;
-  f.primary.chain[4].parentHash = f.witness.chain[4].parentHash = hash(999);
-  await assert.rejects(evidence.qualifyFinality(f.clients, previous));
+  const saved = structuredClone(previous);
+  f.primary.tip = f.witness.tip = 3603;
+  f.calls.length = 0;
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  const primaryCall = f.clients.primaryCall;
+  f.clients.primaryCall = async (method, params) => {
+    const response = await primaryCall(method, params);
+    // Both providers respond within this 100ms step; no real-time sleep is needed.
+    now += 100;
+    return response;
+  };
+  const checkpoint = await evidence.qualifyFinality(f.clients, previous);
+  assert.equal(checkpoint.number, '3603');
+  assert.ok(now > 300_000);
+  assert.deepEqual(previous, saved);
+  const expected = ['0x0', 'finalized', hex(3603),
+    ...Array.from({ length: 3600 }, (_, n) => hex(3602 - n)), hex(3603)];
+  for (const side of [f.primary, f.witness]) {
+    assert.deepEqual(f.calls.filter((call) => call.side === side && call.method === 'eth_getBlockByNumber')
+      .map(({ params }) => params[0]), expected);
+  }
+});
+
+test('a stalled retained-history RPC still HOLDs at the per-request timeout', async (t) => {
+  for (const side of ['primaryCall', 'witnessCall']) {
+    await t.test(side, async (t) => {
+      const f = fixture(3, 3);
+      const previous = await evidence.qualifyFinality(f.clients);
+      f.primary.tip = f.witness.tip = 5;
+      const call = f.clients[side];
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      f.clients[side] = (method, params) => {
+        if (method === 'eth_getBlockByNumber' && params[0] === '0x4') {
+          // Let the healthy provider finish and clear its timers before expiring this request.
+          setImmediate(() => t.mock.timers.tick(10_000));
+          return new Promise(() => {});
+        }
+        return call(method, params);
+      };
+      await assert.rejects(evidence.qualifyFinality(f.clients, previous), /HOLD: Ethereum RPC timed out/);
+    });
+  }
 });
 
 test('fresh finality pin must survive post-acquisition explicit-height recheck', async () => {
@@ -211,7 +262,7 @@ test('checkpoint insertion compares complete record without upsert and retries o
   await assert.rejects(evidence.retainCheckpoint(store([], unrelated), checkpoint), (error) => error === unrelated);
 });
 
-test('RPC and shared ancestry deadlines HOLD rather than bypassing witness', async (t) => {
+test('RPC and initial qualification deadlines HOLD rather than bypassing witness', async (t) => {
   const f = fixture();
   t.mock.method(globalThis, 'setTimeout', (fn) => { queueMicrotask(fn); return 0; });
   f.clients.witnessCall = () => new Promise(() => {});

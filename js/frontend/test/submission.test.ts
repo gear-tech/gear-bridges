@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { mock } from 'node:test';
+
+import type { ISubmittableResult } from '@polkadot/types/types';
 
 import {
   assertBridgeReply,
   assertSuccessfulReceipt,
+  signAndSendFinalized,
   submitVaraBridgeRequest,
   waitForFinalizedReplies,
 } from '../src/features/swap/submission.ts';
@@ -198,6 +202,156 @@ for (const failedRequest of [
     /Original request failed|Bridge reply failed/,
   );
 }
+
+// Exercise the same subscription lifecycle used by the hook without a React renderer.
+mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+try {
+  const timeout = 44 * 60 * 1000;
+  type Result = ISubmittableResult;
+  const result = (type: string) =>
+    ({
+      txHash: codec('0xsigned-original'),
+      status: {
+        type,
+        isFinalized: type === 'Finalized',
+        isDropped: type === 'Dropped',
+        isInvalid: type === 'Invalid',
+        isUsurped: type === 'Usurped',
+        isFinalityTimeout: type === 'FinalityTimeout',
+        asFinalized: codec(hash(1n)),
+      },
+      events: [],
+    }) as unknown as Result;
+  function submissionFixture() {
+    let callback!: (value: Result) => void;
+    let admit!: (value: () => void) => void;
+    let rejectSigning!: (reason: Error) => void;
+    const wallet = new Promise<() => void>((resolve, reject) => {
+      admit = resolve;
+      rejectSigning = reject;
+    });
+    const unsubscribe = mock.fn();
+    const extrinsic = {
+      isSigned: false,
+      get hash() {
+        return codec(this.isSigned ? '0xsigned-original' : '0xunsigned');
+      },
+      signAndSend: mock.fn((_address: unknown, _options: unknown, cb: (value: Result) => void) => {
+        callback = cb;
+        return wallet;
+      }),
+    };
+    const start = (deadline = Date.now() + timeout) =>
+      signAndSendFinalized(
+        extrinsic as unknown as Parameters<typeof signAndSendFinalized>[0],
+        'account',
+        {},
+        deadline,
+      );
+    const emit = (type: string) => {
+      extrinsic.isSigned = true;
+      const value = result(type);
+      callback(value);
+      return value;
+    };
+    return { start, emit, extrinsic, admit: () => admit(unsubscribe), rejectSigning, unsubscribe };
+  }
+  const stalled = submissionFixture();
+  let settled = false;
+  const stalledPromise = stalled.start().finally(() => {
+    settled = true;
+  });
+  const stalledRejection = assert.rejects(
+    stalledPromise,
+    /HOLD:.*deadline expired; transaction outcome is unknown.*Original transaction 0xsigned-original.*Do not submit another transaction; reconcile/,
+  );
+  stalled.emit('InBlock');
+  mock.timers.tick(timeout - 1);
+  await Promise.resolve();
+  assert.equal(settled, false, 'InBlock alone cannot settle the mutation');
+  mock.timers.tick(1);
+  await stalledRejection;
+  stalled.emit('Finalized');
+  stalled.admit();
+  await Promise.resolve();
+  assert.equal(stalled.unsubscribe.mock.callCount(), 1, 'Late unsubscribe must still be called exactly once');
+
+  const normal = submissionFixture();
+  const normalPromise = normal.start();
+  const finalizedResult = normal.emit('Finalized');
+  assert.equal(await normalPromise, finalizedResult, 'Normal finality must preserve the original result');
+  normal.emit('Invalid');
+  normal.admit();
+  await Promise.resolve();
+  assert.equal(normal.unsubscribe.mock.callCount(), 1);
+
+  const admitted = submissionFixture();
+  const admittedPromise = admitted.start();
+  const admittedRejection = assert.rejects(admittedPromise, /Original transaction 0xsigned-original/);
+  admitted.extrinsic.isSigned = true;
+  admitted.admit();
+  await Promise.resolve();
+  mock.timers.tick(timeout);
+  await admittedRejection;
+  assert.equal(admitted.unsubscribe.mock.callCount(), 1, 'Expiry must unsubscribe an admitted silent submission');
+
+  const unsigned = submissionFixture();
+  const unsignedPromise = unsigned.start();
+  const unsignedRejection = assert.rejects(unsignedPromise, (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /Signed transaction hash unavailable; the pending wallet request may still complete/);
+    assert.match(error.message, /Do not submit another transaction; reconcile/);
+    assert.ok(!error.message.includes('0xunsigned'), 'Unsigned bytes must not be reported as an original tx hash');
+    return true;
+  });
+  mock.timers.tick(timeout);
+  await unsignedRejection;
+  unsigned.emit('Finalized');
+  unsigned.admit();
+  await Promise.resolve();
+  assert.equal(unsigned.unsubscribe.mock.callCount(), 1, 'Signing after expiry must only clean up, not succeed');
+
+  const racing = submissionFixture();
+  const racingPromise = racing.start();
+  const racingRejection = assert.rejects(racingPromise, /deadline expired.*Original transaction 0xsigned-original/);
+  // Advance wall time without running the timer: a queued callback must enforce the deadline too.
+  mock.timers.setTime(Date.now() + timeout);
+  racing.emit('Finalized');
+  await racingRejection;
+  racing.admit();
+  await Promise.resolve();
+  assert.equal(racing.unsubscribe.mock.callCount(), 1);
+
+  for (const status of ['Dropped', 'Invalid', 'Usurped', 'FinalityTimeout']) {
+    const terminal = submissionFixture();
+    const pending = terminal.start();
+    const rejection = assert.rejects(pending, new RegExp(`0xsigned-original: ${status}`));
+    terminal.admit();
+    await Promise.resolve();
+    terminal.emit(status);
+    await rejection;
+    assert.equal(terminal.unsubscribe.mock.callCount(), 1);
+    terminal.emit('Finalized');
+  }
+  for (const synchronous of [false, true]) {
+    const rejected = submissionFixture();
+    if (synchronous)
+      rejected.extrinsic.signAndSend.mock.mockImplementation(() => {
+        throw new Error('Wallet rejected');
+      });
+    const pending = rejected.start();
+    const rejection = assert.rejects(pending, /Wallet rejected/);
+    if (!synchronous) rejected.rejectSigning(new Error('Wallet rejected'));
+    await rejection;
+    assert.equal(rejected.unsubscribe.mock.callCount(), 0);
+  }
+  const expired = submissionFixture();
+  await assert.rejects(expired.start(Date.now()), /deadline expired/);
+  assert.equal(expired.extrinsic.signAndSend.mock.callCount(), 0, 'An expired request must not enter the wallet');
+} finally {
+  mock.restoreAll();
+  mock.timers.reset();
+}
 console.log(
-  'Submission assertions passed: finalized original nonce then ordinary fees, manual claims, fee recovery, original hashes and canonical replies',
+  'Submission assertions passed: finalized inclusion deadline and cleanup, original nonce then fees, fee recovery, original hashes and canonical replies',
 );

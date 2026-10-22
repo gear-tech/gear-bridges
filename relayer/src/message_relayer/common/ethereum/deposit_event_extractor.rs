@@ -246,10 +246,19 @@ mod tests {
                 .unwrap(),
         );
         let extractor = DepositEventExtractor::new(
-            PollingEthApi::new(&endpoint).await.unwrap()
-                .with_finality_witness(&witness_endpoint, 560048,
-                    super::super::block_storage::tests::identity().ethereum_genesis_hash.0.into())
-                .await.unwrap(),
+            PollingEthApi::new(&endpoint)
+                .await
+                .unwrap()
+                .with_finality_witness(
+                    &witness_endpoint,
+                    560048,
+                    super::super::block_storage::tests::identity()
+                        .ethereum_genesis_hash
+                        .0
+                        .into(),
+                )
+                .await
+                .unwrap(),
             H160::zero(),
             Arc::new(NoStorage::new()),
             0,

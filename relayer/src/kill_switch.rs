@@ -328,7 +328,8 @@ async fn scan_roots(
     );
     let witness_queue = IMessageQueue::new(
         Address::from_slice(api.message_queue_address().as_bytes()),
-        api.raw_witness_provider().map_err(ScanForEventsError::Other)?,
+        api.raw_witness_provider()
+            .map_err(ScanForEventsError::Other)?,
     );
     for observation in &events {
         let source = u32::try_from(observation.entry.block_number)
@@ -424,7 +425,9 @@ async fn require_canonical_head(
         .await
         .map_err(downcast_anyhow_to_ethereum_client)?;
     let witness = ethereum_client::get_block(
-        api.raw_witness_provider().map_err(ScanForEventsError::Other)?, number,
+        api.raw_witness_provider()
+            .map_err(ScanForEventsError::Other)?,
+        number,
     )
     .await
     .map_err(downcast_anyhow_to_ethereum_client)?;
@@ -915,7 +918,8 @@ mod tests {
             .await
             .unwrap()
             .with_finality_witness(&witness_endpoint, 560048, chains[0][0].header.hash)
-            .await.unwrap();
+            .await
+            .unwrap();
         let mut view = api.verified_finalized_view().await.unwrap();
         let metrics = Metrics::new();
         let mut state = State::ScanForEvents;
@@ -934,10 +938,14 @@ mod tests {
         for fault in [1, 2] {
             witness_fault.store(fault, Ordering::SeqCst);
             state = State::ScanForEvents;
-            let disagreement = scan_roots(&api, &mut view, cursor.unwrap(), &metrics, async |entry| {
-                compare_source_root(entry, 50, Ok((42, [7; 32].into())))
-            }).await;
-            assert!(state.complete_scan(&mut cursor, view.block_number(), disagreement).is_err());
+            let disagreement =
+                scan_roots(&api, &mut view, cursor.unwrap(), &metrics, async |entry| {
+                    compare_source_root(entry, 50, Ok((42, [7; 32].into())))
+                })
+                .await;
+            assert!(state
+                .complete_scan(&mut cursor, view.block_number(), disagreement)
+                .is_err());
             assert_eq!((state, cursor), (State::ScanForEvents, Some(2)));
         }
         witness_fault.store(0, Ordering::SeqCst);
@@ -948,8 +956,11 @@ mod tests {
             let changed_pin = scan_roots(&api, &mut view, cursor.unwrap(), &metrics, async |_| {
                 witness_fault.store(3, Ordering::SeqCst);
                 Ok(!mismatch)
-            }).await;
-            assert!(state.complete_scan(&mut cursor, view.block_number(), changed_pin).is_err());
+            })
+            .await;
+            assert!(state
+                .complete_scan(&mut cursor, view.block_number(), changed_pin)
+                .is_err());
             assert_eq!((state, cursor), (State::ScanForEvents, Some(2)));
             witness_fault.store(0, Ordering::SeqCst);
         }

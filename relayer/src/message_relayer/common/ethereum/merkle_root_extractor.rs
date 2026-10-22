@@ -1146,12 +1146,14 @@ mod tests {
                                         u64::from_str_radix(tag.trim_start_matches("0x"), 16)
                                             .unwrap()
                                     };
-                                    let gate =
-                                        if number > 1 && number < head.load(Ordering::SeqCst) && !matches!(tag, "finalized" | "latest") {
-                                            historical_requests.lock().unwrap().clone()
-                                        } else {
-                                            None
-                                        };
+                                    let gate = if number > 1
+                                        && number < head.load(Ordering::SeqCst)
+                                        && !matches!(tag, "finalized" | "latest")
+                                    {
+                                        historical_requests.lock().unwrap().clone()
+                                    } else {
+                                        None
+                                    };
                                     if let Some(gate) = gate {
                                         let (release, wait) = tokio::sync::oneshot::channel();
                                         gate.send((number, release)).unwrap();
@@ -1188,9 +1190,10 @@ mod tests {
             .run();
             let handle = server.handle();
             tokio::spawn(server);
-            let api =
-                EthApi::new(&endpoint, &format!("{:#x}", birth.queue), None, None, None).await?
-                    .with_finality_witness(&witness_endpoint, 560048, birth.genesis_hash).await?;
+            let api = EthApi::new(&endpoint, &format!("{:#x}", birth.queue), None, None, None)
+                .await?
+                .with_finality_witness(&witness_endpoint, 560048, birth.genesis_hash)
+                .await?;
             Ok(Self {
                 api,
                 head,
@@ -1524,7 +1527,8 @@ mod tests {
             &std::env::var("ETH_WITNESS_RPC")?,
             std::env::var("ETH_CHAIN_ID")?.parse()?,
             std::env::var("ROOT_DISCOVERY_ETH_GENESIS")?.parse()?,
-        ).await?;
+        )
+        .await?;
         let view = api.verified_finalized_view().await?;
         anyhow::ensure!(
             format!("{:#x}", view.genesis_hash()) == std::env::var("ROOT_DISCOVERY_ETH_GENESIS")?,

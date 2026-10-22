@@ -88,7 +88,10 @@ impl HeaderArchive {
     /// Retain every unresolved witnessed generation. A restart must bridge these
     /// exact tips, not merely reach an old numeric height on a different branch.
     pub(crate) fn witness(
-        &self, genesis: B256, head: &Header, approved: Option<&crate::FinalityCheckpoint>,
+        &self,
+        genesis: B256,
+        head: &Header,
+        approved: Option<&crate::FinalityCheckpoint>,
     ) -> Result<Vec<(u64, B256)>> {
         let path = self.directory.join("fence.json");
         let mut fence = if path.exists() {
@@ -117,7 +120,10 @@ impl HeaderArchive {
                     && checkpoint.policy == "independent-two-el-v1"
                     && checkpoint.genesis_hash == genesis
                     && approved.is_some_and(|fresh| fresh.chain_id == checkpoint.chain_id)
-                    && fence.tips.iter().any(|tip| tip == &checkpoint.common_header),
+                    && fence
+                        .tips
+                        .iter()
+                        .any(|tip| tip == &checkpoint.common_header),
                 "invalid retained quorum checkpoint; HOLD"
             );
         }

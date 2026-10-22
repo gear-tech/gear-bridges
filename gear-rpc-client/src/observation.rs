@@ -57,9 +57,11 @@ pub async fn find_reply(
             let Some(event) = event?.as_event::<gear::gear::events::UserMessageSent>()? else {
                 continue;
             };
-            if event.message.details().is_some_and(|details| {
-                details.to_message_id().as_ref() == message_id.as_bytes()
-            }) {
+            if event
+                .message
+                .details()
+                .is_some_and(|details| details.to_message_id().as_ref() == message_id.as_bytes())
+            {
                 scanned(number, block_hash);
                 return Ok(Some(LocatedReply {
                     number,

@@ -97,11 +97,7 @@ pub fn transaction_proof(
 }
 
 impl RecordedReceiptProof {
-    pub fn verify_inclusion(
-        &self,
-        view: &crate::FinalizedView,
-        hash: B256,
-    ) -> Result<()> {
+    pub fn verify_inclusion(&self, view: &crate::FinalizedView, hash: B256) -> Result<()> {
         ensure!(
             self.genesis == view.genesis_hash()
                 && view.contains(self.header.number, self.header.hash_slow()),
@@ -226,20 +222,26 @@ pub async fn authenticated_receipt_block(
         );
         for log in receipt.inner.logs() {
             ensure!(
-                !log.removed && log.block_number == Some(block_number)
+                !log.removed
+                    && log.block_number == Some(block_number)
                     && log.block_hash == Some(block_hash)
                     && log.transaction_hash == Some(receipt.transaction_hash)
                     && log.transaction_index == Some(index as u64)
                     && log.log_index == Some(global_log_index),
                 errors.coordinates
             );
-            global_log_index = global_log_index.checked_add(1).context(errors.coordinates)?;
+            global_log_index = global_log_index
+                .checked_add(1)
+                .context(errors.coordinates)?;
         }
         envelopes.push((index as u64, receipt.into_primitives_receipt().inner));
     }
     ensure!(
         alloy::consensus::proofs::calculate_receipt_root(
-            &envelopes.iter().map(|(_, receipt)| receipt).collect::<Vec<_>>()
+            &envelopes
+                .iter()
+                .map(|(_, receipt)| receipt)
+                .collect::<Vec<_>>()
         ) == block.header.receipts_root,
         errors.root
     );
@@ -287,7 +289,11 @@ pub async fn prove_transaction_receipt(
     block_hash: B256,
     hash: B256,
 ) -> Result<RecordedReceiptProof> {
-    Ok(prove_transaction_receipt_with_log_index(provider, view, block_number, block_hash, hash).await?.0)
+    Ok(
+        prove_transaction_receipt_with_log_index(provider, view, block_number, block_hash, hash)
+            .await?
+            .0,
+    )
 }
 
 pub(crate) async fn prove_transaction_receipt_with_log_index(
@@ -321,11 +327,15 @@ pub(crate) async fn prove_transaction_receipt_with_log_index(
         .iter()
         .position(|tx| B256::from(keccak256(&tx.encoded_2718())) == hash)
         .context("signed transaction absent from inclusion; HOLD")? as u64;
-    let first_log_index = envelopes.iter().take(index as usize)
-        .try_fold(0u64, |total, (_, receipt)| {
-            total.checked_add(u64::try_from(receipt.logs().len())?)
-                .context("receipt log index overflow")
-        })?;
+    let first_log_index =
+        envelopes
+            .iter()
+            .take(index as usize)
+            .try_fold(0u64, |total, (_, receipt)| {
+                total
+                    .checked_add(u64::try_from(receipt.logs().len())?)
+                    .context("receipt log index overflow")
+            })?;
     let receipt = ethereum_common::utils::generate_merkle_proof(index, &envelopes)?;
     let proof = RecordedReceiptProof {
         genesis: view.genesis_hash(),
@@ -397,7 +407,10 @@ mod tests {
                 },
             )
             .await;
-            assert_eq!(result.err().map(|error| error.to_string()).as_deref(), expected);
+            assert_eq!(
+                result.err().map(|error| error.to_string()).as_deref(),
+                expected
+            );
         }
         Ok(())
     }

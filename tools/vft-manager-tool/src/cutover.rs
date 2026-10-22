@@ -842,7 +842,11 @@ async fn authenticate_work_ethereum(
     // multiple blocks, and scan_coverage must still visit every height from genesis.
     let mut missing = std::collections::BTreeMap::new();
     for admission in &work.admissions {
-        if work.blocks.iter().any(|block| block.hash == admission.original_block_hash) {
+        if work
+            .blocks
+            .iter()
+            .any(|block| block.hash == admission.original_block_hash)
+        {
             continue;
         }
         let mut bytes = admission.proof.as_slice();
@@ -856,7 +860,9 @@ async fn authenticate_work_ethereum(
         );
         let hash = B256::from(admission.original_block_hash.0);
         ensure!(
-            missing.insert(number, hash).is_none_or(|previous| previous == hash),
+            missing
+                .insert(number, hash)
+                .is_none_or(|previous| previous == hash),
             "HOLD: saved admissions contradict each other's block"
         );
     }
@@ -865,8 +871,10 @@ async fn authenticate_work_ethereum(
         view.verify_blocks(&**eth, &missing).await?;
         let started = std::time::Instant::now();
         for (number, hash) in missing {
-            ensure!(started.elapsed() < Duration::from_secs(300),
-                "HOLD: mutable coverage recovery deadline exhausted");
+            ensure!(
+                started.elapsed() < Duration::from_secs(300),
+                "HOLD: mutable coverage recovery deadline exhausted"
+            );
             recovered.push(seal::fetch_covered_block(eth, number, hash).await?);
         }
     }
@@ -6363,7 +6371,10 @@ mod tests {
         // mark this whole block scanned and silently skip its second receipt.
         let signer = PrivateKeySigner::from_bytes(&B256::from([17; 32])).unwrap();
         let mut transaction = TxLegacy {
-            chain_id: Some(1), nonce: 1, gas_price: 1, gas_limit: 21_000,
+            chain_id: Some(1),
+            nonce: 1,
+            gas_price: 1,
+            gas_limit: 21_000,
             to: TxKind::Call(work.intent.erc20_manager.0.into()),
             ..Default::default()
         };
@@ -6382,13 +6393,21 @@ mod tests {
         }
         deposit.transactions.push(hash);
         deposit.raw_transactions.push(raw);
-        deposit.receipts.push(serde_json::from_value(receipt).unwrap());
-        let transactions = deposit.raw_transactions.iter()
-            .map(|raw| TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap()).collect::<Vec<_>>();
-        let envelopes = deposit.receipts.iter()
+        deposit
+            .receipts
+            .push(serde_json::from_value(receipt).unwrap());
+        let transactions = deposit
+            .raw_transactions
+            .iter()
+            .map(|raw| TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap())
+            .collect::<Vec<_>>();
+        let envelopes = deposit
+            .receipts
+            .iter()
             .map(|receipt| ethereum_common::utils::map_receipt_envelope(receipt.as_ref()))
             .collect::<Vec<_>>();
-        deposit.header.transactions_root = alloy::consensus::proofs::calculate_transaction_root(&transactions);
+        deposit.header.transactions_root =
+            alloy::consensus::proofs::calculate_transaction_root(&transactions);
         deposit.header.receipts_root = alloy::consensus::proofs::calculate_receipt_root(&envelopes);
         deposit.header.gas_used = 42_000;
         deposit.receipts_root = H256(deposit.header.receipts_root.0);
@@ -6429,9 +6448,14 @@ mod tests {
                 deposit.clone()
             } else {
                 CoveredBlock {
-                    number, hash: H256(hash.0), parent_hash: H256(parent.0),
-                    receipts_root: H256(header.receipts_root.0), header,
-                    transactions: vec![], raw_transactions: vec![], receipts: vec![],
+                    number,
+                    hash: H256(hash.0),
+                    parent_hash: H256(parent.0),
+                    receipts_root: H256(header.receipts_root.0),
+                    header,
+                    transactions: vec![],
+                    raw_transactions: vec![],
+                    receipts: vec![],
                 }
             };
             validate_covered_block(&block).unwrap();
@@ -6441,17 +6465,24 @@ mod tests {
         let admission = &mut work.admissions[0];
         admission.original_block_hash = deposit.hash;
         admission.exclusion = None;
-        let mut proof = eth_events_electra_client::EthToVaraEvent::decode(
-            &mut admission.proof.as_slice(),
-        ).unwrap();
+        let mut proof =
+            eth_events_electra_client::EthToVaraEvent::decode(&mut admission.proof.as_slice())
+                .unwrap();
         let payload = &mut proof.proof_block.block.body.execution_payload;
         payload.block_number = 2;
-        payload.block_hash.0.0 = deposit.hash.0;
-        payload.receipts_root.0.0 = deposit.receipts_root.0;
+        payload.block_hash.0 .0 = deposit.hash.0;
+        payload.receipts_root.0 .0 = deposit.receipts_root.0;
         payload.timestamp = 24;
         proof.proof = ethereum_common::utils::generate_merkle_proof(
-            0, &envelopes.into_iter().enumerate().map(|(index, receipt)| (index as u64, receipt)).collect::<Vec<_>>(),
-        ).unwrap().proof;
+            0,
+            &envelopes
+                .into_iter()
+                .enumerate()
+                .map(|(index, receipt)| (index as u64, receipt))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+        .proof;
         admission.proof = proof.encode();
         work.intent.old_identity.ethereum_genesis_hash = chain[0].hash;
         work.intent.boundary.execution_number = 8;
@@ -6478,18 +6509,22 @@ mod tests {
 
     impl WorkEvidenceRpc {
         async fn new(chain: Vec<CoveredBlock>) -> Self {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
             use serde_json::{json, Value};
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
-            let bodies = Arc::new(std::sync::Mutex::new(chain.iter().map(|b| b.number).collect::<BTreeSet<_>>()));
+            let bodies = Arc::new(std::sync::Mutex::new(
+                chain.iter().map(|b| b.number).collect::<BTreeSet<_>>(),
+            ));
             let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
             let available = bodies.clone();
             let observed = requests.clone();
             let chain = Arc::new(chain);
             let server = tokio::spawn(async move {
                 loop {
-                    let Ok((mut socket, _)) = listener.accept().await else { break };
+                    let Ok((mut socket, _)) = listener.accept().await else {
+                        break;
+                    };
                     let chain = chain.clone();
                     let available = available.clone();
                     let observed = observed.clone();
@@ -6498,15 +6533,29 @@ mod tests {
                         let request = loop {
                             let mut chunk = [0; 4096];
                             let count = socket.read(&mut chunk).await.unwrap();
-                            if count == 0 { return; }
+                            if count == 0 {
+                                return;
+                            }
                             buffer.extend_from_slice(&chunk[..count]);
-                            let Some(end) = buffer.windows(4).position(|b| b == b"\r\n\r\n") else { continue };
+                            let Some(end) = buffer.windows(4).position(|b| b == b"\r\n\r\n") else {
+                                continue;
+                            };
                             let headers = std::str::from_utf8(&buffer[..end]).unwrap();
-                            let length: usize = headers.lines().find_map(|line| line.split_once(':')
-                                .filter(|(key, _)| key.eq_ignore_ascii_case("content-length"))
-                                .map(|(_, value)| value.trim().parse().unwrap())).unwrap();
+                            let length: usize = headers
+                                .lines()
+                                .find_map(|line| {
+                                    line.split_once(':')
+                                        .filter(|(key, _)| {
+                                            key.eq_ignore_ascii_case("content-length")
+                                        })
+                                        .map(|(_, value)| value.trim().parse().unwrap())
+                                })
+                                .unwrap();
                             if buffer.len() >= end + 4 + length {
-                                break serde_json::from_slice::<Value>(&buffer[end + 4..end + 4 + length]).unwrap();
+                                break serde_json::from_slice::<Value>(
+                                    &buffer[end + 4..end + 4 + length],
+                                )
+                                .unwrap();
                             }
                         };
                         observed.lock().unwrap().push(request.clone());
@@ -6515,14 +6564,23 @@ mod tests {
                             "eth_chainId" => json!("0x1"),
                             "eth_getBlockByNumber" | "eth_getBlockByHash" => {
                                 let block = if request["method"] == "eth_getBlockByNumber" {
-                                    let number = if params[0] == "finalized" { 8 }
-                                    else { u64::from_str_radix(params[0].as_str().unwrap().trim_start_matches("0x"), 16).unwrap() };
+                                    let number = if params[0] == "finalized" {
+                                        8
+                                    } else {
+                                        u64::from_str_radix(
+                                            params[0].as_str().unwrap().trim_start_matches("0x"),
+                                            16,
+                                        )
+                                        .unwrap()
+                                    };
                                     chain.iter().find(|b| b.number == number)
                                 } else {
                                     chain.iter().find(|b| json!(b.hash) == params[0])
                                 };
                                 block.map_or(Value::Null, |block| {
-                                    if params[1] == true && !available.lock().unwrap().contains(&block.number) {
+                                    if params[1] == true
+                                        && !available.lock().unwrap().contains(&block.number)
+                                    {
                                         return Value::Null;
                                     }
                                     let mut header: alloy::rpc::types::Header = Default::default();
@@ -6530,29 +6588,43 @@ mod tests {
                                     header.hash = block.hash.0.into();
                                     let mut value = serde_json::to_value(header).unwrap();
                                     value["transactions"] = if params[1] == true {
-                                        json!(block.raw_transactions.iter().enumerate().map(|(index, raw)| {
-                                            let tx = TxEnvelope::decode_2718(&mut raw.as_slice()).unwrap();
-                                            let mut tx = serde_json::to_value(tx).unwrap();
-                                            tx["blockHash"] = json!(block.hash);
-                                            tx["blockNumber"] = json!(format!("0x{:x}", block.number));
-                                            tx["transactionIndex"] = json!(format!("0x{index:x}"));
-                                            tx["from"] = json!(block.receipts[index].from);
-                                            tx
-                                        }).collect::<Vec<_>>())
-                                    } else { json!(block.transactions) };
+                                        json!(block
+                                            .raw_transactions
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(index, raw)| {
+                                                let tx =
+                                                    TxEnvelope::decode_2718(&mut raw.as_slice())
+                                                        .unwrap();
+                                                let mut tx = serde_json::to_value(tx).unwrap();
+                                                tx["blockHash"] = json!(block.hash);
+                                                tx["blockNumber"] =
+                                                    json!(format!("0x{:x}", block.number));
+                                                tx["transactionIndex"] =
+                                                    json!(format!("0x{index:x}"));
+                                                tx["from"] = json!(block.receipts[index].from);
+                                                tx
+                                            })
+                                            .collect::<Vec<_>>())
+                                    } else {
+                                        json!(block.transactions)
+                                    };
                                     value["uncles"] = json!([]);
                                     value
                                 })
                             }
                             "eth_getBlockReceipts" => {
                                 let hash = params[0].get("blockHash").unwrap_or(&params[0]);
-                                chain.iter().find(|b| json!(b.hash) == *hash)
+                                chain
+                                    .iter()
+                                    .find(|b| json!(b.hash) == *hash)
                                     .filter(|b| available.lock().unwrap().contains(&b.number))
                                     .map_or(Value::Null, |b| json!(b.receipts))
                             }
                             method => panic!("unexpected work recovery RPC {method}"),
                         };
-                        let response = json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
+                        let response =
+                            json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string();
                         let _ = socket.write_all(format!(
                             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
                             response.len(),
@@ -6560,19 +6632,31 @@ mod tests {
                     });
                 }
             });
-            Self { url, bodies, requests, server }
+            Self {
+                url,
+                bodies,
+                requests,
+                server,
+            }
         }
     }
 
-    async fn assert_interrupted_coverage_recovers_without_unneeded_bodies(version: u32, empty_inventory: bool) {
+    async fn assert_interrupted_coverage_recovers_without_unneeded_bodies(
+        version: u32,
+        empty_inventory: bool,
+    ) {
         let (mut work, chain) = interrupted_coverage_fixture().await;
         if empty_inventory {
             work.blocks.clear();
         }
         let primary = WorkEvidenceRpc::new(chain.clone()).await;
         let witness = WorkEvidenceRpc::new(chain.clone()).await;
-        let eth = PollingEthApi::new(&primary.url).await.unwrap()
-            .with_finality_witness(&witness.url, 1, chain[0].hash.0.into()).await.unwrap();
+        let eth = PollingEthApi::new(&primary.url)
+            .await
+            .unwrap()
+            .with_finality_witness(&witness.url, 1, chain[0].hash.0.into())
+            .await
+            .unwrap();
         let mut view = eth.verified_finalized_view().await.unwrap();
         work.schema_version = version;
         if version == 3 {
@@ -6585,39 +6669,58 @@ mod tests {
         save(&path, &work).unwrap();
         let original = fs::read(&path).unwrap();
         let mut restarted = read_work(&path).unwrap();
-        authenticate_work_ethereum(&eth, &mut view, &mut restarted).await.unwrap();
+        authenticate_work_ethereum(&eth, &mut view, &mut restarted)
+            .await
+            .unwrap();
         assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
         let mut falsely_advanced = restarted.clone();
         falsely_advanced.blocks = chain.clone();
-        assert!(completed_coverage(&falsely_advanced).unwrap_err().to_string().contains("omitted a deposit"),
-            "recovery must not certify the other deposit in a partially scanned block");
+        assert!(
+            completed_coverage(&falsely_advanced)
+                .unwrap_err()
+                .to_string()
+                .contains("omitted a deposit"),
+            "recovery must not certify the other deposit in a partially scanned block"
+        );
 
         let mut changed_original = restarted.clone();
         changed_original.admissions[0].original_tx_hash = B256::repeat_byte(99);
-        assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed_original).await.is_err(),
-            "recovery must still bind the saved original to the authenticated receipt");
+        assert!(
+            authenticate_work_ethereum(&eth, &mut view, &mut changed_original)
+                .await
+                .is_err(),
+            "recovery must still bind the saved original to the authenticated receipt"
+        );
 
         // A missing original body still HOLDs; retained signatures/admissions are not replaced.
         primary.bodies.lock().unwrap().clear();
-        assert!(authenticate_work_ethereum(&eth, &mut view, &mut restarted).await.is_err());
+        assert!(authenticate_work_ethereum(&eth, &mut view, &mut restarted)
+            .await
+            .is_err());
         assert_eq!(fs::read(&path).unwrap(), original);
         assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
         primary.bodies.lock().unwrap().insert(2);
         primary.requests.lock().unwrap().clear();
         let result = authenticate_work_ethereum(&eth, &mut view, &mut restarted).await;
         let requests = primary.requests.lock().unwrap().clone();
-        let body_hashes = requests.iter().filter_map(|request| {
-            (request["method"] == "eth_getBlockByHash" && request["params"][1] == true)
-                .then(|| request["params"][0].clone())
-        }).collect::<Vec<_>>();
+        let body_hashes = requests
+            .iter()
+            .filter_map(|request| {
+                (request["method"] == "eth_getBlockByHash" && request["params"][1] == true)
+                    .then(|| request["params"][0].clone())
+            })
+            .collect::<Vec<_>>();
         assert_eq!(fs::read(&path).unwrap(), original);
         assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
         fs::remove_dir_all(directory).unwrap();
         assert!(result.is_ok(),
             "a saved prefix plus its one in-progress admitted block must recover without old/future bodies: {result:?}; requests={body_hashes:?}");
         assert_eq!(body_hashes, vec![serde_json::json!(chain[2].hash)]);
-        assert_eq!(restarted.blocks.len(), if empty_inventory { 0 } else { 2 },
-            "authentication must not advance the scan past unrecorded sibling deposits");
+        assert_eq!(
+            restarted.blocks.len(),
+            if empty_inventory { 0 } else { 2 },
+            "authentication must not advance the scan past unrecorded sibling deposits"
+        );
     }
 
     #[tokio::test]
@@ -6641,19 +6744,29 @@ mod tests {
     async fn committed_coverage_block_retains_all_pending_originals_on_restart() {
         let (mut work, chain) = interrupted_coverage_fixture().await;
         let block = &chain[2];
-        let envelopes = block.receipts.iter().enumerate().map(|(index, receipt)| {
-            (index as u64, ethereum_common::utils::map_receipt_envelope(receipt.as_ref()))
-        }).collect::<Vec<_>>();
+        let envelopes = block
+            .receipts
+            .iter()
+            .enumerate()
+            .map(|(index, receipt)| {
+                (
+                    index as u64,
+                    ethereum_common::utils::map_receipt_envelope(receipt.as_ref()),
+                )
+            })
+            .collect::<Vec<_>>();
         let mut second = work.admissions[0].clone();
         second.receipt_key.1 = 1;
         second.original_tx_hash = block.transactions[1];
         second.signed = None;
-        let mut proof = eth_events_electra_client::EthToVaraEvent::decode(
-            &mut second.proof.as_slice(),
-        ).unwrap();
+        let mut proof =
+            eth_events_electra_client::EthToVaraEvent::decode(&mut second.proof.as_slice())
+                .unwrap();
         proof.transaction_index = 1;
         proof.receipt_rlp = alloy_rlp::encode(&envelopes[1].1);
-        proof.proof = ethereum_common::utils::generate_merkle_proof(1, &envelopes).unwrap().proof;
+        proof.proof = ethereum_common::utils::generate_merkle_proof(1, &envelopes)
+            .unwrap()
+            .proof;
         second.proof = proof.encode();
         work.admissions.push(second);
         work.blocks = chain[..3].to_vec();
@@ -6663,12 +6776,17 @@ mod tests {
         work.intent.boundary_execution_timestamp = 24;
         let primary = WorkEvidenceRpc::new(chain.clone()).await;
         let witness = WorkEvidenceRpc::new(chain.clone()).await;
-        let eth = PollingEthApi::new(&primary.url).await.unwrap()
-            .with_finality_witness(&witness.url, 1, chain[0].hash.0.into()).await.unwrap();
+        let eth = PollingEthApi::new(&primary.url)
+            .await
+            .unwrap()
+            .with_finality_witness(&witness.url, 1, chain[0].hash.0.into())
+            .await
+            .unwrap();
         let mut view = eth.verified_finalized_view().await.unwrap();
         work.schema_version = 3;
         work.ethereum_authentication = Some(view.checkpoint().clone());
-        let directory = std::env::temp_dir().join(format!("cutover-block-commit-{}", Uuid::now_v7()));
+        let directory =
+            std::env::temp_dir().join(format!("cutover-block-commit-{}", Uuid::now_v7()));
         fs::create_dir(&directory).unwrap();
         let path = work_path(&directory);
         // One durable save contains the cursor and BOTH pending deposits, including
@@ -6678,18 +6796,38 @@ mod tests {
         let mut restarted = read_work(&path).unwrap();
         primary.bodies.lock().unwrap().clear();
         witness.bodies.lock().unwrap().clear();
-        authenticate_work_ethereum(&eth, &mut view, &mut restarted).await.unwrap();
-        assert_eq!(restarted.blocks.last().unwrap().number, restarted.intent.boundary.execution_number);
+        authenticate_work_ethereum(&eth, &mut view, &mut restarted)
+            .await
+            .unwrap();
+        assert_eq!(
+            restarted.blocks.last().unwrap().number,
+            restarted.intent.boundary.execution_number
+        );
         assert_eq!(restarted.admissions.len(), 2);
-        assert!(restarted.admissions.iter().all(|row| row.settlement.is_none() && row.exclusion.is_none()));
+        assert!(restarted
+            .admissions
+            .iter()
+            .all(|row| row.settlement.is_none() && row.exclusion.is_none()));
         assert!(restarted.admissions[0].signed.is_some());
         assert!(restarted.admissions[1].signed.is_none());
-        assert!(completed_coverage(&restarted).unwrap_err().to_string().contains("undrained"),
-            "a committed scan cursor is not an economic settlement");
+        assert!(
+            completed_coverage(&restarted)
+                .unwrap_err()
+                .to_string()
+                .contains("undrained"),
+            "a committed scan cursor is not an economic settlement"
+        );
         assert_eq!(serde_json::to_vec(&restarted).unwrap(), original);
         assert_eq!(fs::read(&path).unwrap(), original);
-        fs::write(PathBuf::from(format!("{}.new", path.display())), b"interrupted").unwrap();
-        assert!(read_work(&path).is_err(), "an incomplete atomic write must still HOLD");
+        fs::write(
+            PathBuf::from(format!("{}.new", path.display())),
+            b"interrupted",
+        )
+        .unwrap();
+        assert!(
+            read_work(&path).is_err(),
+            "an incomplete atomic write must still HOLD"
+        );
         assert_eq!(fs::read(&path).unwrap(), original);
         fs::remove_dir_all(directory).unwrap();
     }

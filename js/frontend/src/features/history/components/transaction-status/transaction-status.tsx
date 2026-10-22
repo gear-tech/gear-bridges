@@ -14,6 +14,7 @@ const STATUS_SVG = {
   [StatusType.AwaitingPayment]: WarningSVG,
   [StatusType.Failed]: ErrorSVG,
   [StatusType.Bridging]: ClockSVG,
+  [StatusType.Refunded]: WarningSVG,
 } as const;
 
 const STATUS_CLASSNAME = {
@@ -21,6 +22,7 @@ const STATUS_CLASSNAME = {
   [StatusType.AwaitingPayment]: styles.awaitingPayment,
   [StatusType.Failed]: styles.failed,
   [StatusType.Bridging]: styles.bridging,
+  [StatusType.Refunded]: styles.awaitingPayment,
 };
 
 const STATUS_TEXT = {
@@ -28,6 +30,7 @@ const STATUS_TEXT = {
   [StatusType.AwaitingPayment]: 'Awaiting Payment',
   [StatusType.Failed]: 'Failed',
   [StatusType.Bridging]: 'Bridging',
+  [StatusType.Refunded]: 'Refunded (wrapped)',
 } as const;
 
 function TransactionStatus({ status }: Pick<Transfer, 'status'>) {

@@ -1,4 +1,4 @@
-import { GearApi, HexString } from '@gear-js/api';
+import { GearApi, HexString, type GearCoreMessageUserUserMessage } from '@gear-js/api';
 import { hexToU8a } from '@polkadot/util';
 
 import { VaraMessage, Proof } from './types.js';
@@ -6,30 +6,35 @@ import { VaraMessage, Proof } from './types.js';
 export class GearClient {
   constructor(private _api: GearApi) {}
 
-  public async getAuthoritySetIdByBlockNumber(bn: bigint): Promise<bigint> {
-    const [blockHash, prevBlockHash] = await Promise.all([
-      this._api.blocks.getBlockHash(Number(bn)),
-      this._api.blocks.getBlockHash(Number(bn) - 1),
-    ]);
-
-    const [apiAt, prevApiAt] = await Promise.all([
-      this._api.at(blockHash.toHex()),
-      this._api.at(prevBlockHash.toHex()),
-    ]);
-    const [setId, prevSetId] = await Promise.all([
-      apiAt.query.grandpa.currentSetId(),
-      prevApiAt.query.grandpa.currentSetId(),
-    ]);
-
-    if (prevSetId !== setId) {
-      return prevSetId.toBigInt();
-    } else {
-      return setId.toBigInt();
+  /** Walk every covered block, including the original block; callers authenticate the head and application evidence. */
+  public async *finalizedReplyBlocks(from: bigint, through: bigint, messageIds: ReadonlySet<string>, deadline: number,
+    previousHash?: string, errors = {
+      deadline: 'Original finalized reply deadline expired; reconcile before retrying',
+      history: 'Finalized source reply history changed or has a gap',
+    }) {
+    const api = this._api;
+    for (let number = from; number <= through; number++) {
+      if (Date.now() >= deadline) throw new Error(errors.deadline);
+      const hash = (await this._api.blocks.getBlockHash(number)).toHex();
+      const header = await this._api.rpc.chain.getHeader(hash);
+      if (header.number.toBigInt() !== number || (previousHash && header.parentHash.toHex() !== previousHash)) {
+        throw new Error(errors.history);
+      }
+      const events = await this._api.blocks.getEvents(hash);
+      // Keep routing after the caller's original signed-request authentication.
+      yield { number, hash, events, *replies() {
+        for (const { event } of events) {
+          if (!api.events.gear.UserMessageSent.is(event)) continue;
+          const message = event.data[0] as unknown as GearCoreMessageUserUserMessage;
+          if (message.details.isNone || !messageIds.has(message.details.unwrap().to.toHex())) continue;
+          yield message;
+        }
+      } };
+      previousHash = hash;
     }
   }
 
-  public async fetchMerkleProof(blockNumber: number, messageHash: HexString): Promise<Proof> {
-    const blockHash = await this._api.blocks.getBlockHash(blockNumber);
+  public async fetchMerkleProof(blockHash: HexString, messageHash: HexString): Promise<Proof> {
     const proof = await this._api.ethBridge.merkleProof(messageHash, blockHash);
 
     return {
@@ -40,18 +45,20 @@ export class GearClient {
     };
   }
 
-  public async findMessageQueuedEvent(blockNumber: number, nonce: bigint): Promise<VaraMessage | null> {
-    const msg = await this._api.ethBridge.events.findGearEthBridgeMessageByNonce({ nonce, fromBlock: blockNumber });
-
-    if (!msg) {
-      return null;
-    }
-
+  public async findMessageQueuedEvent(blockHash: HexString, nonce: bigint): Promise<VaraMessage | null> {
+    const events = await this._api.blocks.getEvents(blockHash);
+    const messages = events
+      .filter(({ event }) => event.section === 'gearEthBridge' && event.method === 'MessageQueued')
+      .map(({ event }) => event.data[0] as unknown as import('./types.js').EthBridgeMessage)
+      .filter((message) => message.nonce.toBigInt() === nonce);
+    if (messages.length === 0) return null;
+    if (messages.length !== 1) throw new Error('Ambiguous source MessageQueued evidence');
+    const [message] = messages;
     return {
-      nonce: msg.nonce,
-      source: hexToU8a(msg.source),
-      destination: hexToU8a(msg.destination),
-      payload: hexToU8a(msg.payload),
+      nonce: message.nonce.toBigInt(),
+      source: hexToU8a(message.source.toHex()),
+      destination: hexToU8a(message.destination.toHex()),
+      payload: message.payload.toU8a(true),
     };
   }
 }

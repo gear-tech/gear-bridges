@@ -1,12 +1,12 @@
 use super::{
+    cutover::{self, JournalOwnership},
     message_sender, proof_composer,
-    storage::{JSONStorage, Storage},
+    storage::{InboundRuntimeIdentity, JSONStorage, Storage},
     tx_manager,
 };
 use crate::message_relayer::common::{
     ethereum::{
-        self, block_listener::BlockListener as EthereumBlockListener,
-        block_storage::UnprocessedBlockStorage,
+        block_listener::BlockListener as EthereumBlockListener,
         message_paid_event_extractor::MessagePaidEventExtractor,
         transaction_data_extractor::TransactionDataExtractor,
     },
@@ -44,6 +44,7 @@ pub struct Relayer {
     tx_events_receiver: Option<UnboundedReceiver<TxHashWithSlot>>,
 
     storage: Arc<dyn Storage>,
+    _journal_ownership: Arc<JournalOwnership>,
 }
 
 impl MeteredService for Relayer {
@@ -72,42 +73,83 @@ impl Relayer {
         mut api_provider: ApiProviderConnection,
         storage_path: String,
         genesis_time: u64,
-        eth_unprocessed_block_storage_path: Option<String>,
+        from_eth_block: u64,
+        eth_unprocessed_block_storage_path: String,
         http_receiver: Option<UnboundedReceiver<EthTransaction>>,
+        cutover_seal: Option<std::path::PathBuf>,
+        approved_manager_code: Option<H256>,
     ) -> anyhow::Result<Self> {
-        let block_storage: Arc<dyn UnprocessedBlockStorage> =
-            if let Some(path) = eth_unprocessed_block_storage_path {
-                Arc::new(ethereum::block_storage::JSONBlockStorage::new(path.into()).await?)
-            } else {
-                Arc::new(ethereum::block_storage::NoStorage)
-            };
-
-        let from_eth_block = eth_api.finalized_block().await?.header.number;
-
-        let ethereum_block_listener =
-            EthereumBlockListener::new(eth_api.clone(), from_eth_block, block_storage);
+        cutover::reject_sealed(std::path::Path::new(&storage_path))?;
+        cutover::reject_sealed(std::path::Path::new(&eth_unprocessed_block_storage_path))?;
+        let journal_ownership = Arc::new(cutover::lock_original_journals(
+            std::path::Path::new(&storage_path),
+            std::path::Path::new(&eth_unprocessed_block_storage_path),
+        )?);
+        anyhow::ensure!(
+            std::path::Path::new(&storage_path).join("state.json").try_exists()?
+                == std::path::Path::new(&eth_unprocessed_block_storage_path).try_exists()?,
+            "HOLD: inbound transaction/discovery journal pair is incomplete; reconcile the original deployment coverage"
+        );
 
         let gear_block_listener = GearBlockListener::new(
             api_provider.clone(),
             Arc::new(crate::message_relayer::common::gear::block_storage::NoStorage),
         );
 
-        let storage = Arc::new(JSONStorage::new(storage_path));
+        let storage = Arc::new(
+            JSONStorage::new(&storage_path).with_journal_ownership(journal_ownership.clone()),
+        );
 
         let tx_manager = TransactionManager::new(storage.clone());
-
-        let message_paid_event_extractor = MessagePaidEventExtractor::new(
-            eth_api.clone(),
-            bridging_payment_address,
-            storage.clone(),
-            genesis_time,
-        );
 
         let checkpoints_extractor = CheckpointsExtractor::new(checkpoint_light_client_address);
 
         let client = api_provider
             .gclient_client(&suri)
             .expect("failed to create gclient");
+
+        let gear_genesis_hash = crate::rpc::retry_gear(
+            &mut api_provider,
+            "inbound Gear genesis",
+            |api| async move { api.block_number_to_hash(0).await },
+        )
+        .await?;
+        let (ethereum_chain_id, ethereum_genesis_hash) = eth_api.finality_identity()?;
+        let identity = InboundRuntimeIdentity {
+            ethereum_chain_id,
+            ethereum_genesis_hash: ethereum_genesis_hash.0.into(),
+            ethereum_start_block: from_eth_block,
+            erc20_manager_address: None,
+            bridging_payment_address: Some(bridging_payment_address),
+            gear_genesis_hash,
+            vft_manager_address,
+            checkpoint_light_client_address,
+            historical_proxy_address,
+            gear_sender: client.account_id().clone().into(),
+        };
+        let (block_storage, signer_ownership, minimum_receipt_slot, last_receipt_slot) =
+            super::bind_runtime(
+                identity,
+                &storage,
+                &storage_path,
+                eth_unprocessed_block_storage_path,
+                &journal_ownership,
+                &eth_api,
+                &client,
+                cutover_seal.as_deref(),
+                approved_manager_code,
+            )
+            .await?;
+        let ethereum_block_listener =
+            EthereumBlockListener::new(eth_api.clone(), block_storage.clone())
+                .with_last_receipt_slot(genesis_time, last_receipt_slot);
+        let message_paid_event_extractor = MessagePaidEventExtractor::new(
+            eth_api.clone(),
+            bridging_payment_address,
+            storage.clone(),
+            genesis_time,
+            block_storage,
+        );
 
         let latest_checkpoint =
             super::get_latest_checkpoint(checkpoint_light_client_address, client).await;
@@ -121,7 +163,9 @@ impl Relayer {
             historical_proxy_address,
             api_provider.clone(),
             suri.clone(),
-        );
+            None,
+        )
+        .with_signer_ownership(signer_ownership);
 
         let proof_composer = proof_composer::ProofComposer::new(
             api_provider,
@@ -139,7 +183,8 @@ impl Relayer {
                     genesis_time,
                     tx_events_sender.downgrade(),
                     http_receiver,
-                );
+                )
+                .with_receipt_domain(minimum_receipt_slot, last_receipt_slot);
                 (
                     Some(extractor),
                     Some(tx_events_sender),
@@ -150,6 +195,7 @@ impl Relayer {
             };
 
         Ok(Self {
+            _journal_ownership: journal_ownership,
             gear_block_listener,
             ethereum_block_listener,
 
@@ -170,12 +216,10 @@ impl Relayer {
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
+        self.storage.load(&self.tx_manager).await?;
+
         let [gear_blocks] = self.gear_block_listener.run().await;
         let ethereum_blocks = self.ethereum_block_listener.spawn();
-
-        if let Err(err) = self.storage.load(&self.tx_manager).await {
-            log::warn!("Failed to load transaction and block status from storage: {err:?}")
-        }
 
         let message_paid_events = if let Some(sender) = self.tx_events_sender {
             self.message_paid_event_extractor

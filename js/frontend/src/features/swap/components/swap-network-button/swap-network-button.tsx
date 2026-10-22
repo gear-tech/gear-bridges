@@ -1,3 +1,5 @@
+import { useNetworkType } from '@/context/network-type';
+
 import SwapSVG from '../../assets/swap.svg?react';
 import { useBridgeContext } from '../../context';
 import { isEthToVaraUsdcBridgeDisabled } from '../../utils';
@@ -5,8 +7,9 @@ import { isEthToVaraUsdcBridgeDisabled } from '../../utils';
 import styles from './swap-network-button.module.scss';
 
 function SwapNetworkButton() {
+  const { isMainnet } = useNetworkType();
   const { network, destinationToken } = useBridgeContext();
-  const isSwitchDisabled = isEthToVaraUsdcBridgeDisabled(destinationToken);
+  const isSwitchDisabled = isEthToVaraUsdcBridgeDisabled(destinationToken, isMainnet);
 
   return (
     <button

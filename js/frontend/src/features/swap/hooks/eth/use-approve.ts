@@ -9,6 +9,7 @@ import { definedAssert } from '@/utils';
 
 import { FUNCTION_NAME } from '../../consts/eth';
 import { useBridgeContext } from '../../context';
+import { assertSuccessfulReceipt } from '../../submission';
 
 const abi = ERC20_ABI;
 
@@ -39,7 +40,7 @@ function useApprove() {
 
     const hash = await writeContractAsync({ address, abi, functionName, args });
 
-    return waitForTransactionReceipt(config, { hash });
+    return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };
 
   return { ...useMutation({ mutationFn: approve }), getGasLimit };

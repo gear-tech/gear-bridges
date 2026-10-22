@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {Test} from "forge-std/Test.sol";
 import {GovernanceConstants} from "src/GovernanceConstants.sol";
@@ -17,7 +17,7 @@ contract GovernanceAdminTest is Test, Base {
     using GovernancePacker for PauseProxyMessage;
 
     function setUp() public {
-        deployBridgeDependsOnEnvironment();
+        deployBridgeFromConstants();
     }
 
     function test_HandleMessageWithInvalidSender() public {
@@ -38,7 +38,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -70,7 +70,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -104,7 +104,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -139,7 +139,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -177,7 +177,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -211,7 +211,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -244,7 +244,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -276,7 +276,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -310,7 +310,7 @@ contract GovernanceAdminTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)

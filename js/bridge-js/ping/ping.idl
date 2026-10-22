@@ -1,14 +1,61 @@
+type BridgeConfig = struct {
+  builtin: actor_id,
+  fee_bridge: u128,
+  gas_to_send_request_to_builtin: u64,
+  gas_for_reply_deposit: u64,
+  reply_timeout: u32,
+};
+
+type QueuedDelivery = struct {
+  block_number: u32,
+  hash: h256,
+  nonce: u256,
+  queue_id: u64,
+};
+
+type PingError = enum {
+  NotHistoricalProxy,
+  NotOwner,
+  InvalidReceipt,
+  UnsupportedEvent,
+  WrongSender,
+  WrongDestination,
+  InvalidPayload,
+  AmbiguousDelivery,
+  AlreadyProcessed,
+  AlreadyReceived,
+  AlreadyRequested,
+  BuiltinFailure,
+  BuiltinDecode,
+};
+
+type Delivery = struct {
+  application_id: h256,
+  payload: vec u8,
+};
+
+type OutboundStatus = enum {
+  Pending,
+  Queued: QueuedDelivery,
+};
+
 constructor {
-  New : ();
+  New : (historical_proxy: actor_id, ethereum_emitter: h160, ethereum_sender: h160, ethereum_receiver: h160, bridge_config: BridgeConfig);
 };
 
 service Ping {
-  SubmitReceipt : (slot: u64, transaction_index: u32, _receipt_rlp: vec u8) -> result (null, str);
+  SendMessage : (application_id: h256, payload: vec u8) -> result (QueuedDelivery, PingError);
+  SubmitReceipt : (slot: u64, transaction_index: u64, receipt_rlp: vec u8) -> result (Delivery, PingError);
+  query Outbound : (application_id: h256) -> opt OutboundStatus;
+  query PayloadOf : (application_id: h256) -> opt vec u8;
+  query Received : (slot: u64, transaction_index: u64) -> opt Delivery;
 
   events {
     ReceiptSubmitted: struct {
-      u64,
-      u32,
+      slot: u64,
+      transaction_index: u64,
+      application_id: h256,
+      payload: vec u8,
     };
   }
 };

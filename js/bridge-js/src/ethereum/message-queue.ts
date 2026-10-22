@@ -1,9 +1,11 @@
-import { Account, PublicClient, WalletClient, zeroHash, parseEventLogs } from 'viem';
+import { Account, PublicClient, WalletClient, TransactionSerializable, zeroHash, parseEventLogs, encodeFunctionData, TransactionReceiptNotFoundError, ContractFunctionRevertedError, BaseError, keccak256 } from 'viem';
 import { bytesToHex } from '@ethereumjs/util';
+import { HexString } from '@gear-js/api';
 
 import { MerkleRootLog, MerkleRootLogArgs, MessageProcessResult } from './types.js';
 import { Proof, VaraMessage } from '../vara/types.js';
-import { StatusCb } from '../util.js';
+import { StatusCb, withOriginalDeadline } from '../util.js';
+import { messageHash } from '../vara-to-eth/util.js';
 
 const MerkleRootEventAbi = [
   {
@@ -56,8 +58,9 @@ export const MessageQueueAbi = [
     stateMutability: 'view',
   },
   { type: 'error', name: 'EmergencyStop', inputs: [] },
+  { type: 'error', name: 'MerkleRootDelayNotPassed', inputs: [] },
   { type: 'error', name: 'InvalidMerkleProof', inputs: [] },
-  { type: 'error', name: 'InvalidPlonkProof', inputs: [] },
+  { type: 'error', name: 'InvalidQueueRootProof', inputs: [] },
   {
     type: 'error',
     name: 'MerkleRootAlreadySet',
@@ -114,6 +117,135 @@ export const getProcessMessageArgs = (blockNumber: bigint, varaMessage: VaraMess
   ];
 };
 
+export const BridgedEventAbi = [{ type: 'event', name: 'Bridged', anonymous: false, inputs: [
+  { name: 'from', type: 'bytes32', indexed: true }, { name: 'to', type: 'address', indexed: true },
+  { name: 'token', type: 'address', indexed: true }, { name: 'amount', type: 'uint256', indexed: false },
+] }] as const;
+
+export type OutboundEffect = { readonly kind: 'application' } | {
+  readonly kind: 'token'; readonly managerAddress: HexString; readonly sourceActorId: HexString;
+  readonly token: HexString; readonly sender: HexString; readonly receiver: HexString; readonly amount: bigint;
+};
+
+function assertTokenMessage(message: VaraMessage, effect: OutboundEffect): void {
+  if (!effect || !['application', 'token'].includes(effect.kind)) throw new Error('HOLD: an explicit expected outbound effect is required');
+  if (effect.kind !== 'token') return;
+  const payload = effect.sender + effect.receiver.slice(2) + effect.token.slice(2) + effect.amount.toString(16).padStart(64, '0');
+  if (effect.amount <= 0n || effect.amount >= 1n << 256n ||
+      bytesToHex(message.source).toLowerCase() !== effect.sourceActorId.toLowerCase() ||
+      bytesToHex(message.destination).toLowerCase() !== effect.managerAddress.toLowerCase() ||
+      bytesToHex(message.payload).toLowerCase() !== payload.toLowerCase()) {
+    throw new Error('Original token message does not match the expected source and packed economic effect');
+  }
+}
+
+export type FinalizedMessageReceiptParams = {
+  ethereumPublicClient: PublicClient;
+  messageQueueAddress: HexString;
+  transactionHash: HexString;
+  blockNumber: bigint;
+  message: VaraMessage;
+  proof: Proof;
+  sender: HexString;
+  deadline: number;
+  expectedEffect: OutboundEffect;
+  statusCb?: StatusCb;
+};
+
+export type FinalizedMessageProcessResult = MessageProcessResult & {
+  success: true;
+  receiptBlockHash: HexString;
+  receiptBlockNumber: bigint;
+  transactionIndex: number;
+};
+
+/** Shared by fresh submissions and original-intent resume; never accepts a replacement transaction. */
+export function validateFinalizedMessageReceipt(params: FinalizedMessageReceiptParams): Promise<FinalizedMessageProcessResult> {
+  return withOriginalDeadline(params.deadline, () => validateOriginalFinalizedMessageReceipt(params));
+}
+
+async function validateOriginalFinalizedMessageReceipt(params: FinalizedMessageReceiptParams): Promise<FinalizedMessageProcessResult> {
+  const { ethereumPublicClient: client, messageQueueAddress: address, transactionHash: hash, blockNumber, message, proof,
+    sender, deadline } = params;
+  const input = encodeFunctionData({ abi: MessageQueueAbi, functionName: 'processMessage',
+    args: getProcessMessageArgs(blockNumber, message, proof) });
+  assertTokenMessage(message, params.expectedEffect);
+  let reportedReceipt: HexString | undefined, reportedFinalized: bigint | undefined;
+  while (Date.now() < deadline) {
+    let receipt;
+    try {
+      receipt = await client.getTransactionReceipt({ hash });
+    } catch (error) {
+      if (!(error instanceof TransactionReceiptNotFoundError)) throw error;
+    }
+    if (receipt) {
+      if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) throw new Error('Original receipt transaction hash mismatch');
+      const finalized = await client.getBlock({ blockTag: 'finalized' });
+      if (receipt.blockNumber > finalized.number &&
+          (reportedReceipt !== receipt.blockHash || reportedFinalized !== finalized.number)) {
+        reportedReceipt = receipt.blockHash; reportedFinalized = finalized.number;
+        params.statusCb?.(`Original processMessage mined in block ${receipt.blockNumber}; waiting for Ethereum finality (finalized block ${finalized.number}). Finality can take several minutes.`,
+          { txHash: hash, receiptBlockNumber: receipt.blockNumber.toString(), finalizedBlockNumber: finalized.number.toString() });
+      }
+      if (receipt.blockNumber <= finalized.number) {
+        const canonical = await client.getBlock({ blockNumber: receipt.blockNumber });
+        if (canonical.hash !== receipt.blockHash) throw new Error('Original receipt is not canonical finalized history');
+        if (receipt.status !== 'success') throw new Error('Original finalized processMessage transaction reverted');
+        const transaction = await client.getTransaction({ hash });
+        if (transaction.hash.toLowerCase() !== hash.toLowerCase() || transaction.blockHash !== receipt.blockHash ||
+            transaction.blockNumber !== receipt.blockNumber || transaction.transactionIndex !== receipt.transactionIndex ||
+            transaction.to?.toLowerCase() !== address.toLowerCase() || transaction.from.toLowerCase() !== sender.toLowerCase() ||
+            transaction.input.toLowerCase() !== input.toLowerCase() || transaction.value !== 0n) {
+          throw new Error('Original finalized transaction does not match the submitted queue call');
+        }
+        const events = parseEventLogs({ abi: MessageQueueAbi, eventName: 'MessageProcessed', strict: true,
+          logs: receipt.logs.filter((log) => log.address.toLowerCase() === address.toLowerCase()) });
+        if (events.length !== 1) throw new Error('Expected exactly one configured queue MessageProcessed event');
+        const [event] = events;
+        const expectedHash = messageHash(message);
+        const { args } = event;
+        if (event.removed || event.blockHash !== receipt.blockHash || event.blockNumber !== receipt.blockNumber ||
+            event.transactionHash?.toLowerCase() !== hash.toLowerCase() || event.transactionIndex !== receipt.transactionIndex ||
+            args.blockNumber !== blockNumber || args.messageNonce !== message.nonce ||
+            args.messageDestination.toLowerCase() !== bytesToHex(message.destination).toLowerCase() ||
+            args.messageHash.toLowerCase() !== expectedHash.toLowerCase()) {
+          throw new Error('Configured queue MessageProcessed does not match the original authenticated message');
+        }
+        if (params.expectedEffect.kind === 'token') {
+          const effect = params.expectedEffect;
+          const transfers = parseEventLogs({ abi: BridgedEventAbi, eventName: 'Bridged', strict: true,
+            logs: receipt.logs.filter(log => log.address.toLowerCase() === effect.managerAddress.toLowerCase()) });
+          if (transfers.length !== 1) throw new Error('Expected exactly one same-receipt ERC20Manager.Bridged event');
+          const transfer = transfers[0];
+          if (transfer.removed || transfer.blockHash !== receipt.blockHash || transfer.blockNumber !== receipt.blockNumber ||
+              transfer.transactionHash?.toLowerCase() !== hash.toLowerCase() || transfer.transactionIndex !== receipt.transactionIndex ||
+              transfer.args.from.toLowerCase() !== effect.sender.toLowerCase() || transfer.args.to.toLowerCase() !== effect.receiver.toLowerCase() ||
+              transfer.args.token.toLowerCase() !== effect.token.toLowerCase() || transfer.args.amount !== effect.amount) {
+            throw new Error('Same-receipt ERC20Manager.Bridged differs from the original token effect');
+          }
+        }
+        const [processed, root] = await Promise.all([
+          client.readContract({ address, abi: MessageQueueAbi, functionName: 'isProcessed', args: [message.nonce],
+            blockNumber: receipt.blockNumber }),
+          client.readContract({ address, abi: MessageQueueAbi, functionName: 'getMerkleRoot', args: [blockNumber],
+            blockNumber: receipt.blockNumber }),
+        ]);
+        if (processed !== true || root === zeroHash || root.toLowerCase() !== proof.root.toLowerCase()) {
+          throw new Error('Original finalized queue state does not prove processed nonce and selected stored root');
+        }
+        if ((await client.getBlock({ blockNumber: receipt.blockNumber })).hash !== receipt.blockHash) {
+          throw new Error('Original finalized receipt pin changed during queue readback');
+        }
+        params.statusCb?.('Original processMessage receipt finalized', { txHash: hash, receiptBlockHash: receipt.blockHash });
+        return { success: true, transactionHash: hash, ...args, receiptBlockHash: receipt.blockHash,
+          receiptBlockNumber: receipt.blockNumber, transactionIndex: receipt.transactionIndex };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, Math.min(client.pollingInterval, deadline - Date.now()))));
+  }
+  throw new Error('Original relay deadline expired without a canonical finalized processMessage receipt');
+}
+
 export class MessageQueueClient {
   constructor(
     private _address: `0x${string}`,
@@ -122,19 +254,12 @@ export class MessageQueueClient {
     private _account?: Account,
   ) {}
 
-  public async getMerkleRoot(blockNumber: bigint): Promise<`0x${string}` | null> {
-    const result = (await this._client.readContract({
-      address: this._address,
-      abi: MessageQueueAbi,
-      functionName: 'getMerkleRoot',
-      args: [blockNumber],
-    })) as `0x${string}`;
-
-    if (result === zeroHash) {
-      return null;
-    } else {
-      return result;
-    }
+  public async getMerkleRoot(blockNumber: bigint, ethereumBlockNumber?: bigint): Promise<HexString | null> {
+    const result = await this._client.readContract({
+      address: this._address, abi: MessageQueueAbi, functionName: 'getMerkleRoot', args: [blockNumber],
+      ...(ethereumBlockNumber === undefined ? { blockTag: 'finalized' as const } : { blockNumber: ethereumBlockNumber }),
+    });
+    return result === zeroHash ? null : result;
   }
 
   public async waitForMerkleRoot(
@@ -145,50 +270,72 @@ export class MessageQueueClient {
     const merkleRoot = await this.getMerkleRoot(bn);
     if (merkleRoot) return { blockNumber: bn, merkleRoot };
 
-    const latestBlock = await this._client.getBlockNumber();
+    const latestBlock = await this._client.getBlockNumber({ cacheTime: 0 });
+    let settled = false;
+    const selectRoot = (logs: readonly { removed?: boolean; args?: Partial<MerkleRootLogArgs> }[]) => {
+      let selected: MerkleRootLogArgs | undefined;
+      for (const { removed, args } of logs) {
+        if (!removed && args?.blockNumber !== undefined && args.blockNumber >= bn &&
+            args.merkleRoot && args.merkleRoot !== zeroHash &&
+            (!selected || args.blockNumber < selected.blockNumber)) {
+          selected = { blockNumber: args.blockNumber, merkleRoot: args.merkleRoot };
+        }
+      }
+      return selected;
+    };
+    const scan = async (start: bigint, finish: bigint) => {
+      for (let end = finish; end >= start && !settled;) {
+        const from = end - 1999n > start ? end - 1999n : start;
+        const root = selectRoot(await this.getMerkleRootLogsInRange(from, end));
+        if (root) return root;
+        end = from - 1n;
+      }
+    };
+    const historicalRoot = await scan(fromBlock ?? 0n, latestBlock);
+    if (historicalRoot) return historicalRoot;
 
     return new Promise<MerkleRootLogArgs>((resolve, reject) => {
+      let unwatch: (() => void) | undefined;
+      const settle = (error: unknown, root?: MerkleRootLogArgs) => {
+        if (settled) return;
+        settled = true;
+        unwatch?.();
+        if (root) resolve(root);
+        else reject(error);
+      };
       statusCb(`Subscribing to merkle root events`);
-      const unwatch = this._client.watchContractEvent({
-        address: this._address,
-        abi: MerkleRootEventAbi,
-        eventName: 'MerkleRoot',
-        fromBlock: fromBlock || latestBlock,
-        onLogs: (logs) => {
-          for (const log of logs) {
-            if ('args' in log) {
-              const { blockNumber, merkleRoot } = log.args as MerkleRootLogArgs;
-              statusCb(`Received merkle root`, { blockNumber: blockNumber.toString(), merkleRoot });
-              if (blockNumber >= bn) {
-                unwatch();
-                return resolve({ blockNumber, merkleRoot });
-              }
-            }
-          }
-        },
-        onError: (error) => {
-          if (unwatch) {
-            unwatch();
-          }
-          reject(error);
-        },
-      });
+      try {
+        unwatch = this._client.watchContractEvent({
+          address: this._address,
+          abi: MerkleRootEventAbi,
+          eventName: 'MerkleRoot',
+          fromBlock: latestBlock,
+          onLogs: (logs) => {
+            const root = selectRoot(logs);
+            if (root) settle(undefined, root);
+          },
+          onError: (error) => settle(error),
+        });
+        // A watcher can deliver logs or an error before returning its cleanup function.
+        if (settled) {
+          unwatch();
+          return;
+        }
+        // Inclusive catch-up closes the history/watch gap even when the captured head is unchanged.
+        void (async () => {
+          const head = await this._client.getBlockNumber({ cacheTime: 0 });
+          if (settled) return;
+          const root = await scan(latestBlock, head);
+          if (root) settle(undefined, root);
+        })().catch((error) => settle(error));
+      } catch (error) {
+        settle(error);
+      }
     });
   }
 
   async getMerkleRootLogsInRange(fromBlock: bigint, toBlock: bigint) {
-    const filter = await this._client.createEventFilter({
-      address: this._address,
-      event: MerkleRootEventAbi[0],
-      fromBlock,
-      toBlock,
-    });
-
-    const logs = await this._client.getFilterLogs({
-      filter,
-    });
-
-    return logs;
+    return this._client.getLogs({ address: this._address, event: MerkleRootEventAbi[0], fromBlock, toBlock, strict: true });
   }
 
   async findMerkleRootInRangeOfBlocks(
@@ -229,86 +376,81 @@ export class MessageQueueClient {
     blockNumber: bigint,
     varaMessage: VaraMessage,
     merkleProof: Proof,
-    statusCb: StatusCb,
+    expectedEffect: OutboundEffect,
+    statusCb: StatusCb = () => {},
+    deadline = Date.now() + 44 * 60 * 1000,
+    options: { wait?: boolean } = {},
   ): Promise<MessageProcessResult> {
-    if (!this._walletClient || !this._account) {
-      throw new Error('Wallet client must be provided');
-    }
+    const wallet = this._walletClient, account = this._account;
+    if (!wallet || !account) throw new Error('Wallet client must be provided');
+    let hash: HexString = '0x';
+    let submissionStarted = false;
     try {
-      const { request } = await this._client.simulateContract({
-        address: this._address,
-        abi: MessageQueueAbi,
-        functionName: 'processMessage',
-        args: getProcessMessageArgs(blockNumber, varaMessage, merkleProof),
-        account: this._account,
-      });
-
-      statusCb(`Sending processMessage transaction`, {
-        args: JSON.stringify(request.args, (_, value) => {
-          if (typeof value === 'bigint') {
-            return value.toString();
+      if (!Number.isSafeInteger(deadline) || Date.now() >= deadline) throw new Error('Original relay deadline expired');
+      const args = getProcessMessageArgs(blockNumber, varaMessage, merkleProof);
+      assertTokenMessage(varaMessage, expectedEffect);
+      let maturityAnchor: { height: bigint; hash: HexString } | undefined;
+      for (;;) {
+        if (maturityAnchor) {
+          const finalized = await withOriginalDeadline(deadline, () => this._client.getBlock({ blockTag: 'finalized' }));
+          if (typeof finalized.number !== 'bigint' || finalized.number < maturityAnchor.height ||
+              !/^0x[0-9a-f]{64}$/i.test(finalized.hash ?? '') ||
+              (await withOriginalDeadline(deadline, () => this._client.getBlock({ blockNumber: maturityAnchor!.height }))).hash !== maturityAnchor.hash ||
+              (await withOriginalDeadline(deadline, () => this.getMerkleRoot(blockNumber, finalized.number)))?.toLowerCase() !== merkleProof.root.toLowerCase() ||
+              (await withOriginalDeadline(deadline, () => this._client.getBlock({ blockNumber: finalized.number }))).hash !== finalized.hash) {
+            throw new Error('HOLD: finalized queue root or maturity anchor changed');
           }
-          return value;
-        }),
-      });
-
-      const hash = await this._walletClient.writeContract({
-        address: this._address,
-        abi: MessageQueueAbi,
-        functionName: 'processMessage',
-        args: getProcessMessageArgs(blockNumber, varaMessage, merkleProof),
-        account: this._account,
-        chain: this._walletClient.chain,
-      });
-
-      statusCb(`Waiting for transaction receipt`, { txHash: hash });
-
-      const receipt = await this._client.waitForTransactionReceipt({ hash });
-
-      statusCb(`Transaction receipt received`, { txHash: hash });
-
-      const [messageProcessed] = parseEventLogs({
-        abi: MessageQueueAbi,
-        eventName: 'MessageProcessed',
-        logs: receipt.logs,
-      });
-
-      if (messageProcessed) {
-        statusCb(`Message processed event received`, { txHash: hash });
-
-        const { args } = messageProcessed;
-
-        return {
-          success: true,
-          transactionHash: hash,
-          blockNumber: args.blockNumber,
-          messageHash: args.messageHash,
-          messageNonce: args.messageNonce,
-          messageDestination: args.messageDestination,
-        };
-      } else {
-        statusCb(`Message processed event not found in transaction receipt`, { txHash: hash });
-        return {
-          success: false,
-          transactionHash: hash,
-          error: 'MessageProcessed event not found in transaction receipt',
-        };
+          maturityAnchor = { height: finalized.number, hash: finalized.hash };
+        }
+        try {
+          await withOriginalDeadline(deadline, () => this._client.simulateContract({ address: this._address, abi: MessageQueueAbi, functionName: 'processMessage',
+            args, account: this._account }));
+          break;
+        } catch (error) {
+          const revert = error instanceof BaseError ? error.walk(cause => cause instanceof ContractFunctionRevertedError) : undefined;
+          if (!options.wait || !(revert instanceof ContractFunctionRevertedError) || revert.data?.errorName !== 'MerkleRootDelayNotPassed') throw error;
+          if (!maturityAnchor) {
+            const finalized = await withOriginalDeadline(deadline, () => this._client.getBlock({ blockTag: 'finalized' }));
+            if (typeof finalized.number !== 'bigint' || finalized.number < 0n || !/^0x[0-9a-f]{64}$/i.test(finalized.hash ?? '')) {
+              throw new Error('HOLD: malformed finalized maturity anchor');
+            }
+            maturityAnchor = { height: finalized.number, hash: finalized.hash };
+          }
+          statusCb('Waiting for the selected root block maturity delay', { blockNumber: blockNumber.toString() });
+          await withOriginalDeadline(deadline, () => new Promise(resolve => setTimeout(resolve,
+            Math.max(1, Math.min(this._client.pollingInterval, deadline - Date.now())))));
+        }
       }
-    } catch (error: any) {
-      statusCb(`Error processing message queue transaction`, {
-        error: error.message,
-        args: JSON.stringify(error.args, (_, value) => {
-          if (typeof value === 'bigint') {
-            return value.toString();
-          }
-          return value;
-        }),
-      });
-      return {
-        success: false,
-        transactionHash: '0x' as `0x${string}`,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      };
+      statusCb('Sending processMessage transaction');
+      if (Date.now() >= deadline) throw new Error('Original relay deadline expired before broadcasting');
+      if (account.type === 'local') {
+        const request = await withOriginalDeadline(deadline, () => wallet.prepareTransactionRequest({
+          account, to: this._address, data: encodeFunctionData({ abi: MessageQueueAbi,
+            functionName: 'processMessage', args }), value: 0n, chain: wallet.chain,
+        }));
+        const signed = await withOriginalDeadline(deadline, () => account.signTransaction(request as TransactionSerializable,
+          { serializer: wallet.chain?.serializers?.transaction }));
+        hash = keccak256(signed);
+        if (Date.now() >= deadline) throw new Error('Original relay deadline expired before raw submission');
+        submissionStarted = true;
+        const submittedHash = await withOriginalDeadline(deadline, () => wallet.sendRawTransaction({ serializedTransaction: signed }));
+        if (submittedHash.toLowerCase() !== hash.toLowerCase()) throw new Error('HOLD: broadcast hash differs from original signed transaction');
+      } else {
+        submissionStarted = true;
+        hash = await withOriginalDeadline(deadline, () => wallet.writeContract({ address: this._address,
+          abi: MessageQueueAbi, functionName: 'processMessage', args, account, chain: wallet.chain }));
+      }
+      statusCb('Waiting for original processMessage transaction to be mined', { txHash: hash });
+      return await validateFinalizedMessageReceipt({ ethereumPublicClient: this._client, messageQueueAddress: this._address,
+        transactionHash: hash, blockNumber, message: varaMessage, proof: merkleProof, sender: account.address,
+        deadline, statusCb, expectedEffect });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error processing original message';
+      const reason = submissionStarted && hash === '0x'
+        ? 'HOLD: original wallet submission outcome unresolved; it may still broadcast; reconcile the original account/nonce. ' + message
+        : message;
+      statusCb('Original message not proven finalized', { txHash: hash, error: reason });
+      return { success: false, transactionHash: hash, error: reason };
     }
   }
 }

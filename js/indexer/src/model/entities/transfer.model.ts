@@ -1,6 +1,19 @@
 import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
 import { Network } from './_network.js';
 import { Status } from './_status.js';
+import type { SourceReceiptAuth } from '../../eth/finality.js';
+
+export type CompletionAuth =
+  | { version: 1; kind: 'ethereum-receipt'; checkpointId: string; completionId: string; processedLogIndex: number }
+  | { version: 1; kind: 'gear-settlement'; sourceCheckpointId: string; receiptRelayId: string;
+      receiptSettlementId: string; outcome: 'Completed' | 'Refunded' };
+
+export interface LegacyResolution {
+  status: Status;
+  completedAt: string | null;
+  completedAtBlock: string | null;
+  completedAtTxHash: string | null;
+}
 
 @Entity({ name: 'transfer' })
 export class Transfer {
@@ -17,10 +30,31 @@ export class Transfer {
   @Column('bigint', { nullable: false, name: 'block_number' })
   blockNumber!: bigint;
 
+  @Column('bigint', { nullable: true, name: 'source_transaction_index' })
+  sourceTransactionIndex?: bigint;
+
+  @Column('bigint', { nullable: true, name: 'source_log_index' })
+  sourceLogIndex?: bigint;
+
+  @Index('IDX_transfer_receipt_slot')
+  @Column('bigint', { nullable: true, name: 'receipt_slot' })
+  receiptSlot?: bigint;
+
+  @Column('jsonb', { nullable: true, name: 'source_receipt_auth' })
+  sourceReceiptAuth?: SourceReceiptAuth | null;
+
+  @Column('jsonb', { nullable: true, name: 'completion_auth' })
+  completionAuth?: CompletionAuth | null;
+
+  /** Original projection, preserved once before fail-closed invalidation. */
+  @Column('jsonb', { nullable: true, name: 'legacy_resolution' })
+  legacyResolution?: LegacyResolution | null;
+
   @Index()
   @Column('timestamp with time zone', { nullable: false })
   timestamp!: Date;
 
+  /** Finalized terminal resolution coordinates; Refunded is wrapped recovery, not native delivery. */
   @Column('timestamp with time zone', { nullable: true, name: 'completed_at' })
   completedAt?: Date;
 

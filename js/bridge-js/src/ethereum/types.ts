@@ -87,6 +87,7 @@ export interface IBeaconBlockBody {
 }
 
 export interface IBeaconBlock {
+  readonly fork: string;
   readonly slot: string;
   readonly proposer_index: string;
   readonly parent_root: `0x${string}`;

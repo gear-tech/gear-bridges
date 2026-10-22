@@ -4,11 +4,58 @@ type Mainnet = enum {
   No,
 };
 
+type Redemption = struct {
+  from: actor_id,
+  to: actor_id,
+  amount: u256,
+  child: message_id,
+  status: PayoutStatus,
+  /// Native value actually returned by the original payout child.
+  returned_value: u128,
+};
+
+type PayoutStatus = enum {
+  Queued,
+  Delivered,
+  Returned,
+  Ambiguous,
+  /// Returned backing covers wrapped tokens credited exactly once at the
+  /// original amount. Excess remains native backing; this is not delivery.
+  Refunded,
+};
+
 constructor {
   New : (network: Mainnet);
 };
 
 service Vft {
+  Approve : (spender: actor_id, value: u256) -> bool;
+  Transfer : (to: actor_id, value: u256) -> bool;
+  TransferFrom : (from: actor_id, to: actor_id, value: u256) -> bool;
+  query Allowance : (owner: actor_id, spender: actor_id) -> u256;
+  query BalanceOf : (account: actor_id) -> u256;
+  /// Returns the number of decimals of the VFT.
+  query Decimals : () -> u8;
+  query Name : () -> str;
+  /// Returns the symbol of the VFT.
+  query Symbol : () -> str;
+  query TotalSupply : () -> u256;
+
+  events {
+    Approval: struct {
+      owner: actor_id,
+      spender: actor_id,
+      value: u256,
+    };
+    Transfer: struct {
+      from: actor_id,
+      to: actor_id,
+      value: u256,
+    };
+  }
+};
+
+service Vft2 {
   Approve : (spender: actor_id, value: u256) -> bool;
   Transfer : (to: actor_id, value: u256) -> bool;
   TransferFrom : (from: actor_id, to: actor_id, value: u256) -> bool;
@@ -31,11 +78,12 @@ service Vft {
 };
 
 service VftAdmin {
+  Exit : (inheritor: actor_id) -> null;
+  SetMinimumBalance : (value: u256) -> null;
   AppendAllowancesShard : (capacity: u32) -> null;
   AppendBalancesShard : (capacity: u32) -> null;
   ApproveFrom : (owner: actor_id, spender: actor_id, value: u256) -> bool;
   Burn : (from: actor_id, value: u256) -> null;
-  Exit : (inheritor: actor_id) -> null;
   Mint : (to: actor_id, value: u256) -> null;
   MintList : (list: vec struct { actor_id, u256 }) -> null;
   Pause : () -> null;
@@ -43,7 +91,6 @@ service VftAdmin {
   SetAdmin : (admin: actor_id) -> null;
   SetBurner : (burner: actor_id) -> null;
   SetExpiryPeriod : (period: u32) -> null;
-  SetMinimumBalance : (value: u256) -> null;
   SetMinter : (minter: actor_id) -> null;
   SetPauser : (pauser: actor_id) -> null;
   query Admin : () -> actor_id;
@@ -107,3 +154,19 @@ service VftNativeExchangeAdmin {
     };
   }
 };
+
+service NativeEscrow {
+  ConfigureManager : (manager: actor_id) -> null;
+  /// Assume the original liability without credit, redispatch or settlement.
+  HoldRedemption : (operation_id: h256, expected: Redemption, acknowledge_irreversible_hold: bool) -> Redemption;
+  /// This acknowledgement proves only enqueueing. Settlement requires the original
+  /// payout reply; a user mailbox entry is still an outstanding native obligation.
+  RedeemEscrow : (operation_id: h256, from: actor_id, to: actor_id, amount: u256) -> Redemption;
+  /// Financial obligations remain outstanding even when explicitly held for handoff.
+  query BlockingRedemptions : () -> u64;
+  query HeldRedemption : (operation_id: h256) -> opt Redemption;
+  query Manager : () -> opt actor_id;
+  query OutstandingRedemptions : () -> u64;
+  query Redemption : (operation_id: h256) -> opt Redemption;
+};
+

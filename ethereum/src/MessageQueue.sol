@@ -1,16 +1,20 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
+import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
+import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {BinaryMerkleTree} from "src/libraries/BinaryMerkleTree.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
@@ -59,6 +63,10 @@ contract MessageQueue is
     mapping(bytes32 merkleRoot => uint256 timestamp) private _merkleRootTimestamps;
     mapping(uint256 messageNonce => bool isProcessed) private _processedMessages;
 
+    uint256 public beefyRootMinimum;
+    mapping(uint256 blockNumber => uint256 timestamp) private _blockRootTimestamps;
+    address public beefyRecoveryTimelock;
+
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
      */
@@ -70,50 +78,82 @@ contract MessageQueue is
      * @dev Initializes the MessageQueue contract with the Verifier address.
      *      GovernanceAdmin contract is used to upgrade, pause/unpause the MessageQueue contract.
      *      GovernancePauser contract is used to pause/unpause the MessageQueue contract.
+     * @dev Fresh BEEFY deployments validate the MessageQueue binding and pin the authenticated source floor.
      * @param governanceAdmin_ The address of the GovernanceAdmin contract that will process messages.
      * @param governancePauser_ The address of the GovernanceAdmin contract that will process pauser messages.
      * @param emergencyStopAdmin_ The address of EOA that will control `submitMerkleRoot` and `processMessage`
      *                            in case of an emergency stop.
      * @param verifier_ The address of the Verifier contract that will verify merkle roots.
      */
-    function initialize(
+    function initializeBeefy(
         IGovernance governanceAdmin_,
         IGovernance governancePauser_,
         address emergencyStopAdmin_,
         address[] memory emergencyStopObservers_,
-        IVerifier verifier_
+        IVerifier verifier_,
+        address recoveryTimelock_
     ) public initializer {
-        __AccessControl_init();
-        __Pausable_init();
-
-        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin_));
-
-        _grantRole(PAUSER_ROLE, address(governanceAdmin_));
-        _grantRole(PAUSER_ROLE, address(governancePauser_));
-
-        if (emergencyStopAdmin_ == address(0)) {
-            revert InvalidEmergencyStopAdmin();
-        }
-
-        _governanceAdmin = governanceAdmin_;
-        _governancePauser = governancePauser_;
-        _emergencyStopAdmin = emergencyStopAdmin_;
-
-        for (uint256 i = 0; i < emergencyStopObservers_.length; i++) {
-            _emergencyStopObservers.add(emergencyStopObservers_[i]);
-        }
-
-        _verifier = verifier_;
+        _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
+        (, uint64 mmrStartBlock) = _validateBeefyVerifier();
+        beefyRootMinimum = mmrStartBlock;
+        _setBeefyRecoveryTimelock(recoveryTimelock_);
     }
 
-    /**
-     * @custom:oz-upgrades-validate-as-initializer
-     */
-    function reinitialize() public onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {
-        address multiSigWallet = 0x1111111111111111111111111111111111111111;
+    /// @dev Atomically switch a paused legacy proxy without resetting custody, roles, roots or replay state.
+    function migrateToBeefy(
+        IVerifier expectedLegacyVerifier,
+        IVerifier beefyVerifier,
+        uint256 expectedLegacyMaxBlock,
+        uint256 firstBeefyBlock,
+        address recoveryTimelock_
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(8) {
+        _requirePaused();
+        if (
+            beefyRootMinimum != 0 || _genesisBlock == 0 || address(_verifier) != address(expectedLegacyVerifier)
+                || _maxBlockNumber != expectedLegacyMaxBlock
+        ) {
+            revert InvalidBeefyMigration();
+        }
 
-        _grantRole(DEFAULT_ADMIN_ROLE, multiSigWallet);
-        _grantRole(PAUSER_ROLE, multiSigWallet);
+        _verifier = beefyVerifier;
+        (BeefyClient client, uint64 mmrStartBlock) = _validateBeefyVerifier();
+        if (
+            firstBeefyBlock <= expectedLegacyMaxBlock || firstBeefyBlock > type(uint32).max
+                || firstBeefyBlock < mmrStartBlock || firstBeefyBlock > expectedLegacyMaxBlock + MAX_BLOCK_DISTANCE
+                || !client.isLive() || client.latestMMRRoot() == bytes32(0)
+                || client.latestBeefyBlock() <= firstBeefyBlock
+        ) {
+            revert InvalidBeefyMigration();
+        }
+        beefyRootMinimum = firstBeefyBlock;
+        _setBeefyRecoveryTimelock(recoveryTimelock_);
+        emit MigratedToBeefy(
+            address(expectedLegacyVerifier), address(beefyVerifier), expectedLegacyMaxBlock, firstBeefyBlock
+        );
+    }
+
+    /// @dev Independently scheduled recovery only after expiry; retained claims and replay state are unchanged.
+    function recoverBeefyVerifier(IVerifier expectedVerifier, IVerifier replacementVerifier, uint256 expectedMaxBlock)
+        external
+    {
+        if (msg.sender != beefyRecoveryTimelock) revert NotBeefyRecoveryTimelock();
+        if (
+            beefyRootMinimum == 0 || address(_verifier) != address(expectedVerifier)
+                || _maxBlockNumber != expectedMaxBlock || TimelockController(payable(msg.sender)).getMinDelay() == 0
+        ) revert InvalidBeefyRecovery();
+        (BeefyClient previous, uint64 start) = _validateBeefyVerifier();
+        if (previous.isLive()) revert InvalidBeefyRecovery();
+
+        _verifier = replacementVerifier;
+        (BeefyClient replacement, uint64 replacementStart) = _validateBeefyVerifier();
+        if (
+            replacementStart != start || replacement.sourceDomain() != previous.sourceDomain() || !replacement.isLive()
+                || replacement.latestMMRRoot() == bytes32(0)
+                || replacement.latestBeefyBlock() <= previous.latestBeefyBlock()
+                || replacement.latestBeefyBlock() <= _maxBlockNumber
+        ) revert InvalidBeefyRecovery();
+        if (!paused()) _pause();
+        emit BeefyVerifierRecovered(address(expectedVerifier), address(replacementVerifier), expectedMaxBlock);
     }
 
     /**
@@ -162,7 +202,8 @@ contract MessageQueue is
      */
     function isChallengingRoot() public view returns (bool) {
         // forge-lint: disable-next-item(block-timestamp)
-        return block.timestamp < _challengingRootTimestamp + CHALLENGE_ROOT_DELAY;
+        return block.timestamp < _challengingRootTimestamp
+            || block.timestamp - _challengingRootTimestamp < CHALLENGE_ROOT_DELAY;
     }
 
     /**
@@ -328,14 +369,16 @@ contract MessageQueue is
      *
      * @param blockNumber Block number on Vara Network.
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number.
-     * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
+     * @param proof Canonical v2 BEEFY-authenticated MMR queue proof envelope.
      * @dev Reverts if challenging root status is enabled and caller is not emergency stop admin with `ChallengeRoot` error.
      * @dev Reverts if emergency stop status is set and caller is not emergency stop admin with `EmergencyStop` error.
-     * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
-     * @dev Reverts if block number is before genesis block with `BlockNumberBeforeGenesis` error.
+     * @dev Reverts if the queue proof is invalid or malformed with `InvalidQueueRootProof`.
      * @dev Reverts if block number is too far from max block number with `BlockNumberTooFar` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
+        if (merkleRoot == bytes32(0)) {
+            revert InvalidMerkleRoot();
+        }
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
 
         if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
@@ -346,37 +389,17 @@ contract MessageQueue is
             revert EmergencyStop();
         }
 
-        if (_genesisBlock == 0) {
-            _genesisBlock = blockNumber;
-            _maxBlockNumber = blockNumber;
-        } else {
-            if (blockNumber < _genesisBlock) {
-                revert BlockNumberBeforeGenesis(blockNumber, _genesisBlock);
-            }
-
-            if (blockNumber > _maxBlockNumber + MAX_BLOCK_DISTANCE) {
-                revert BlockNumberTooFar(blockNumber, _maxBlockNumber + MAX_BLOCK_DISTANCE);
-            }
-        }
-
-        if (blockNumber > type(uint32).max) {
-            revert BlockNumberOverflow(blockNumber);
-        }
-
-        uint256[] memory publicInputs = new uint256[](2);
-        publicInputs[0] = uint256(merkleRoot) >> 64;
-        publicInputs[1] = ((uint256(merkleRoot) & uint256(type(uint64).max)) << 128)
-            | ((blockNumber & uint256(type(uint32).max)) << 96);
-
-        if (!_verifier.safeVerifyProof(proof, publicInputs)) {
-            revert InvalidPlonkProof();
-        }
-
         bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
+        _checkSubmissionBlock(blockNumber, false);
+
+        if (!_verifier.safeVerifyProof(blockNumber, merkleRoot, proof)) {
+            revert InvalidQueueRootProof();
+        }
+
         if (previousMerkleRoot != 0) {
             if (previousMerkleRoot != merkleRoot) {
                 delete _blockNumbers[blockNumber];
-                delete _merkleRootTimestamps[previousMerkleRoot];
+                delete _blockRootTimestamps[blockNumber];
 
                 if (!_emergencyStop) {
                     _emergencyStop = true;
@@ -394,7 +417,8 @@ contract MessageQueue is
             }
         } else {
             _blockNumbers[blockNumber] = merkleRoot;
-            _merkleRootTimestamps[merkleRoot] = block.timestamp;
+            _blockRootTimestamps[blockNumber] = block.timestamp;
+            if (_genesisBlock == 0) _genesisBlock = blockNumber;
 
             if (blockNumber > _maxBlockNumber) {
                 _maxBlockNumber = blockNumber;
@@ -414,14 +438,83 @@ contract MessageQueue is
         return _blockNumbers[blockNumber];
     }
 
-    /**
-     * @dev Returns timestamp when merkle root was set.
-     *      Returns `0` if merkle root was not provided for specified block number.
-     * @param merkleRoot Target merkle root.
-     * @return timestamp Timestamp when merkle root was set.
-     */
+    /// @dev Retained legacy root-keyed history. New registrations never write this mapping.
     function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256) {
         return _merkleRootTimestamps[merkleRoot];
+    }
+
+    /// @dev Effective maturity for a registered block; absent roots return zero.
+    function getMerkleRootTimestampForBlock(uint256 blockNumber) external view returns (uint256) {
+        return _effectiveRootTimestamp(blockNumber);
+    }
+
+    function _effectiveRootTimestamp(uint256 blockNumber) private view returns (uint256 timestamp) {
+        bytes32 root = _blockNumbers[blockNumber];
+        if (root == bytes32(0)) {
+            return 0;
+        }
+        timestamp = _blockRootTimestamps[blockNumber];
+        if (timestamp == 0 && (beefyRootMinimum == 0 || blockNumber < beefyRootMinimum)) {
+            timestamp = _merkleRootTimestamps[root];
+        }
+        if (timestamp == 0) {
+            revert MerkleRootTimestampNotFound(blockNumber);
+        }
+    }
+
+    function _checkSubmissionBlock(uint256 sourceBlock, bool emptyProgress) private view {
+        if (beefyRootMinimum == 0) {
+            revert InvalidBeefyVerifier();
+        }
+        if (sourceBlock > type(uint32).max) {
+            revert BlockNumberOverflow(sourceBlock);
+        }
+        if (sourceBlock == 0) {
+            revert InvalidSourceBlock();
+        }
+        if (sourceBlock < beefyRootMinimum) {
+            revert BlockNumberBelowMinimum(sourceBlock, beefyRootMinimum);
+        }
+        if (_genesisBlock == 0) {
+            if (emptyProgress) {
+                revert EmptyQueueNotInitialized();
+            }
+            return;
+        }
+        if (emptyProgress && sourceBlock <= _maxBlockNumber) {
+            revert EmptyQueueProgressNotForward();
+        }
+        uint256 maxAllowedBlockNumber = _maxBlockNumber + MAX_BLOCK_DISTANCE;
+        if (sourceBlock > maxAllowedBlockNumber) {
+            revert BlockNumberTooFar(sourceBlock, maxAllowedBlockNumber);
+        }
+    }
+
+    /// @dev Move the authenticated empty queue height without creating a root or changing any maturity timestamp.
+    function submitEmptyQueueProgress(uint256 sourceBlock, bytes calldata authenticatedSnapshotProof) external {
+        bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
+
+        if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
+            revert ChallengeRoot();
+        }
+        if (_emergencyStop && !isFromEmergencyStopAdmin) {
+            revert EmergencyStop();
+        }
+        _checkSubmissionBlock(sourceBlock, true);
+
+        bool valid;
+        try IQueueProgressVerifier(address(_verifier))
+            .safeVerifyEmptyQueueProgress(sourceBlock, authenticatedSnapshotProof) returns (
+            bool verified
+        ) {
+            valid = verified;
+        } catch {}
+        if (!valid) {
+            revert InvalidEmptyQueueProgressProof();
+        }
+
+        _maxBlockNumber = sourceBlock;
+        emit EmptyQueueProgress(sourceBlock);
     }
 
     /**
@@ -498,9 +591,9 @@ contract MessageQueue is
             messageDelay = PROCESS_USER_MESSAGE_DELAY;
         }
 
-        uint256 timestamp = _merkleRootTimestamps[merkleRoot];
+        uint256 timestamp = _effectiveRootTimestamp(blockNumber);
         // forge-lint: disable-next-item(block-timestamp)
-        if (block.timestamp < timestamp + messageDelay) {
+        if (block.timestamp < timestamp || block.timestamp - timestamp < messageDelay) {
             revert MerkleRootDelayNotPassed();
         }
 
@@ -524,5 +617,58 @@ contract MessageQueue is
      */
     function isProcessed(uint256 messageNonce) external view returns (bool) {
         return _processedMessages[messageNonce];
+    }
+
+    function _initialize(
+        IGovernance governanceAdmin_,
+        IGovernance governancePauser_,
+        address emergencyStopAdmin_,
+        address[] memory emergencyStopObservers_,
+        IVerifier verifier_
+    ) private {
+        __AccessControl_init();
+        __Pausable_init();
+
+        _grantRole(DEFAULT_ADMIN_ROLE, address(governanceAdmin_));
+
+        _grantRole(PAUSER_ROLE, address(governanceAdmin_));
+        _grantRole(PAUSER_ROLE, address(governancePauser_));
+
+        if (emergencyStopAdmin_ == address(0)) {
+            revert InvalidEmergencyStopAdmin();
+        }
+
+        _governanceAdmin = governanceAdmin_;
+        _governancePauser = governancePauser_;
+        _emergencyStopAdmin = emergencyStopAdmin_;
+
+        for (uint256 i = 0; i < emergencyStopObservers_.length; i++) {
+            _emergencyStopObservers.add(emergencyStopObservers_[i]);
+        }
+
+        _verifier = verifier_;
+    }
+
+    function _validateBeefyVerifier() private view returns (BeefyClient, uint64) {
+        if (address(_verifier).code.length == 0) {
+            revert InvalidBeefyVerifier();
+        }
+        VaraQueueRootVerifier rootVerifier = VaraQueueRootVerifier(address(_verifier));
+        if (rootVerifier.messageQueue() != address(this) || rootVerifier.destinationChainId() != block.chainid) {
+            revert InvalidBeefyVerifier();
+        }
+        address clientAddress = address(rootVerifier.beefyClient());
+        if (clientAddress.code.length == 0) {
+            revert InvalidBeefyVerifier();
+        }
+        BeefyClient client = BeefyClient(clientAddress);
+        return (client, client.mmrStartBlock());
+    }
+
+    function _setBeefyRecoveryTimelock(address recoveryTimelock) private {
+        if (recoveryTimelock.code.length == 0 || TimelockController(payable(recoveryTimelock)).getMinDelay() == 0) {
+            revert InvalidBeefyRecoveryTimelock();
+        }
+        beefyRecoveryTimelock = recoveryTimelock;
     }
 }

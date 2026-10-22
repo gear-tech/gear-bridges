@@ -1,37 +1,15 @@
 /* eslint-disable */
-
+import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
+import { TypeRegistry } from '@polkadot/types';
 import {
-  ActorId,
   TransactionBuilder,
-  H256,
+  ActorId,
   QueryBuilder,
   getServiceNamePrefix,
   getFnNamePrefix,
   ZERO_ADDRESS,
+  H256,
 } from 'sails-js';
-import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
-import { TypeRegistry } from '@polkadot/types';
-
-/**
- * Global state of the Bridging Payment service.
- */
-export interface State {
-  /**
-   * Admin of this service. Admin is in charge of:
-   * - Changing fee
-   * - Withdrawing collected fees from the program address
-   * - Updating [State] of this service
-   */
-  admin_address: ActorId;
-  /**
-   * Fee amount that will be charged from users.
-   */
-  fee: number | string | bigint;
-  /**
-   * Priority fee amount that will be charged from users.
-   */
-  priority_fee: number | string | bigint;
-}
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
@@ -131,29 +109,6 @@ export class BridgingPayment {
   }
 
   /**
-   * Pay fees for priority message processing to the admin.
-   *
-   * This method requires that **exactly** [State::priority_fee] must be
-   * attached as a value when sending message to this method.
-   *
-   * Current fee amount can be retrieved by calling `get_state`.
-   */
-  public payPriorityFees(block: H256, nonce: number | string | bigint): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'BridgingPayment',
-      'PayPriorityFees',
-      [block, nonce],
-      '(H256, U256)',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  /**
    * Withdraw fees that were collected from user requests.
    *
    * This method can be called only by admin.
@@ -207,27 +162,6 @@ export class BridgingPayment {
       'BridgingPayment',
       'SetFee',
       fee,
-      'u128',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  /**
-   * Set fee that this program will take for processing priority
-   * requests.
-   *
-   * This method can be called only by admin.
-   */
-  public setPriorityFee(priority_fee: number | string | bigint): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'BridgingPayment',
-      'SetPriorityFee',
-      priority_fee,
       'u128',
       'Null',
       this._program.programId,
@@ -291,8 +225,8 @@ export class BridgingPayment {
   }
 
   /**
-   * Fee for the message processing by relayer was paid
-   * and priority bridging was requested.
+   * Historical payment event retained only for decoding already-paid messages.
+   * This program version does not emit it or offer priority processing.
    */
   public subscribeToPriorityBridgingPaidEvent(
     callback: (data: { block: H256; nonce: number | string | bigint }) => void | Promise<void>,
@@ -312,4 +246,25 @@ export class BridgingPayment {
       }
     });
   }
+}
+/**
+ * Global state of the Bridging Payment service.
+ */
+export interface State {
+  /**
+   * Admin of this service. Admin is in charge of:
+   * - Changing fee
+   * - Withdrawing collected fees from the program address
+   * - Updating [State] of this service
+   */
+  admin_address: ActorId;
+  /**
+   * Fee amount that will be charged from users.
+   */
+  fee: number | string | bigint;
+  /**
+   * Read-only historical field reserved in this encoded position.
+   * New actors initialize it to zero; no priority payment product is available.
+   */
+  priority_fee: number | string | bigint;
 }

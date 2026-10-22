@@ -26,14 +26,28 @@ pub struct BlockInclusionProof {
     pub headers: Vec<BeaconBlockHeader>,
 }
 
-#[derive(Clone, Debug, Decode, TypeInfo)]
-#[codec(crate = sails_rs::scale_codec)]
+#[derive(Clone, Debug, TypeInfo)]
 #[scale_info(crate = sails_rs::scale_info)]
 pub struct EthToVaraEvent {
     pub proof_block: BlockInclusionProof,
     pub proof: Vec<Vec<u8>>,
     pub transaction_index: u64,
     pub receipt_rlp: Vec<u8>,
+}
+
+impl Decode for EthToVaraEvent {
+    fn decode<I: sails_rs::scale_codec::Input>(input: &mut I) -> Result<Self, sails_rs::scale_codec::Error> {
+        let event = Self {
+            proof_block: Decode::decode(input)?,
+            proof: Decode::decode(input)?,
+            transaction_index: Decode::decode(input)?,
+            receipt_rlp: Decode::decode(input)?,
+        };
+        if input.remaining_len()? != Some(0) {
+            return Err("Trailing or unbounded receipt proof frame".into());
+        }
+        Ok(event)
+    }
 }
 
 pub struct Service<'a> {
@@ -64,6 +78,7 @@ impl<'a> Service<'a> {
 
         Proofs {
             checkpoint_light_client_address: self.checkpoint_light_client_address(),
+            electra: ELECTRA_FRAME,
             slot: block.slot,
             block_root: block.tree_hash_root(),
             receipts_root: H256::from(block.body.execution_payload.receipts_root.0 .0),

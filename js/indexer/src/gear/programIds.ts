@@ -33,15 +33,15 @@ export async function init(programs: Record<string, string>): Promise<Map<string
     console.log('Table gear_programs created.');
   }
 
+  // Configuration seeds missing roles; finalized on-chain rotations remain authoritative.
   for (const [name, id] of Object.entries(programs)) {
     await client.query(
       `INSERT INTO gear_programs (name, program_id)
        VALUES ($1, $2)
-       ON CONFLICT (name)
-       DO UPDATE SET program_id = EXCLUDED.program_id`,
+       ON CONFLICT (name) DO NOTHING`,
       [name, id],
     );
-    console.log(`Program ${name} set to ${id}`);
+    console.log(`Program ${name} initialized`);
   }
 
   const ids = await client.query('SELECT name, program_id FROM gear_programs WHERE name = ANY($1::text[])', [
@@ -68,5 +68,4 @@ export async function updateId(name: string, programId: string) {
   await client.connect();
   await client.query('UPDATE gear_programs SET program_id = $1 WHERE name = $2', [programId, name]);
   await client.end();
-  programs[name] = programId;
 }

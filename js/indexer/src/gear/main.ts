@@ -14,20 +14,30 @@ import {
   handleProgramChangedEvent,
 } from './handlers/index.js';
 import { config } from './config.js';
+import { authenticateManagerRouting } from './manager-routing.js';
 import { queryVftManagerPairs } from './rpc-queries.js';
-import { Network, Pair } from '../model/index.js';
+import { GearManagerHandoff, Network, Pair } from '../model/index.js';
 import { createPairHash } from 'gear-bridge-common';
-
+import { requireFinalizedBatch } from './finality.js';
 const state = new BatchState();
 
 let isFirstRun = true;
 
 const handler = async (ctx: ProcessorContext) => {
+  await requireFinalizedBatch(ctx);
   await state.new(ctx);
+  if (!ctx.blocks.length) return;
+  const history = await ctx.store.find(GearManagerHandoff, {});
+  const managerRoot = () => {
+    const id = [...programs].find(([, name]) => name === ProgramName.VftManager)?.[0];
+    if (!id) throw new Error('HOLD: authenticated manager root missing');
+    return id;
+  };
+  let routing = await authenticateManagerRouting(ctx, ctx.blocks[0].header, managerRoot(), history);
 
   if (ctx.isHead && isFirstRun) {
     ctx.log.info('First run of the processor, syncing active pairs from VFT Manager');
-    const activePairs = await queryVftManagerPairs(ctx._chain.rpc, config.vftManager, ctx.blocks[0].header.hash);
+    const activePairs = await queryVftManagerPairs(ctx._chain.rpc, routing.current, ctx.blocks[0].header.hash);
 
     const pairs = await ctx.store.find(Pair);
 
@@ -80,9 +90,16 @@ const handler = async (ctx: ProcessorContext) => {
   }
 
   for (const block of ctx.blocks) {
+    if (block !== ctx.blocks[0]) {
+      routing = await authenticateManagerRouting(ctx, block.header, managerRoot(), history);
+    }
+    const retained = config.retainedCutoverFromBlock !== undefined && block.header.height >= config.retainedCutoverFromBlock;
     for (const event of block.events) {
       if (isProgramChanged(event)) {
-        handleProgramChangedEvent({
+        if (retained && routing.domains.has(event.args.id) && event.args.change.__kind === 'Inactive') {
+          throw new Error('HOLD: retained manager unexpectedly exited');
+        }
+        await handleProgramChangedEvent({
           state,
           blockHeader: block.header,
           event,
@@ -93,14 +110,10 @@ const handler = async (ctx: ProcessorContext) => {
       }
 
       if (isUserMessageSent(event)) {
-        if (!programs.has(event.args.message.source)) continue;
+        const source = event.args.message.source;
+        const name = retained && routing.domains.has(source) ? ProgramName.VftManager : programs.get(source);
+        if (!name) continue;
 
-        const name = programs.get(event.args.message.source);
-
-        if (!name) {
-          ctx.log.error({ programId: event.args.message.source }, 'Failed to get program name and decoder');
-          continue;
-        }
 
         const decoder = getDecoder(name);
 
@@ -112,6 +125,7 @@ const handler = async (ctx: ProcessorContext) => {
           decoder,
           event,
           log: ctx.log,
+          receiptDomain: retained ? routing.domains.get(source) : undefined,
         };
 
         if (name === ProgramName.VftManager) await handleVftManagerEvents(eventCtx);
@@ -130,7 +144,8 @@ const handler = async (ctx: ProcessorContext) => {
 
         if (event.call!.name !== `Gear.send_message`) continue;
 
-        const name = programs.get(event.args.destination);
+        const name = retained && routing.domains.has(event.args.destination)
+          ? ProgramName.VftManager : programs.get(event.args.destination);
 
         if (name === ProgramName.VftManager) {
           const decoder = getDecoder(name);
@@ -165,7 +180,7 @@ const runProcessor = async () => {
   await initDecoders();
 
   const db = new TypeormDatabase({
-    supportHotBlocks: true,
+    supportHotBlocks: false,
     stateSchema: 'gear_processor',
   });
 

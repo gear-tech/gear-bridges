@@ -17,6 +17,39 @@ env:
   __GEAR_WASM_BUILDER_NO_FEATURES_TRACKING: 1
 
 jobs:
+  retained-migration-qualification:
+    runs-on: ubuntu-latest
+    env:
+      MAINNET_MIGRATION_RPC_URL: ${{ secrets.MAINNET_MIGRATION_RPC_URL || 'https://eth-mainnet.public.blastapi.io' }}
+      REQUIRE_MAINNET_MIGRATION: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.6
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+      - name: Install Solidity dependencies
+        run: forge soldeer install
+        working-directory: ./ethereum
+      - name: Qualify retained mainnet state
+        working-directory: ./ethereum
+        run: |
+          test -n "$MAINNET_MIGRATION_RPC_URL"
+          set -o pipefail
+          forge test --threads 1 --match-contract MainnetBridgeMigrationTest -vv | tee migration-qualification.log
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retained-migration-qualification
+          path: ethereum/migration-qualification.log
+          if-no-files-found: error
+
   check-frontend-changes:
     runs-on: ubuntu-latest
     outputs:
@@ -57,15 +90,10 @@ jobs:
         with:
           cache: false
 
-      - name: Install golang
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.20.1'
-
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.3
+          version: v1.8.6
 
       - name: Install dependencies
         run: forge soldeer install
@@ -91,7 +119,7 @@ jobs:
         working-directory: ./ethereum
 
       - name: Build
-        run: cargo build --release --all-targets
+        run: cargo build --locked --release --all-targets --features beefy-relay/deployment
 
       - name: Force build ethereum smart-contracts
         run: forge build --force --no-cache --root ethereum
@@ -106,11 +134,15 @@ jobs:
             "./api/ethereum/ERC20Manager.json"
             "./api/ethereum/MessageQueue.json"
             "./api/ethereum/BridgingPayment.json"
+            "./api/ethereum/BeefyClient.json"
+            "./api/ethereum/VaraQueueRootVerifier.json"
 
             "./api/gear/bridging_payment.idl"
             "./api/gear/eth_events_deneb.idl"
             "./api/gear/eth_events_electra.idl"
             "./api/gear/vft_manager.idl"
+            "./api/gear/vft.idl"
+            "./api/gear/vft_vara.idl"
             "./api/gear/historical_proxy.idl"
             "./api/gear/checkpoint_light_client.idl"
           )
@@ -123,11 +155,15 @@ jobs:
             "./ethereum/out/ERC20Manager.sol/ERC20Manager.json"
             "./ethereum/out/MessageQueue.sol/MessageQueue.json"
             "./ethereum/out/BridgingPayment.sol/BridgingPayment.json"
+            "./ethereum/out/BeefyClient.sol/BeefyClient.json"
+            "./ethereum/out/VaraQueueRootVerifier.sol/VaraQueueRootVerifier.json"
 
             "./target/wasm32-gear/release/bridging_payment.idl"
             "./target/wasm32-gear/release/eth_events_deneb.idl"
             "./target/wasm32-gear/release/eth_events_electra.idl"
             "./target/wasm32-gear/release/vft_manager.idl"
+            "./target/wasm32-gear/release/vft.idl"
+            "./target/wasm32-gear/release/vft_vara.idl"
             "./target/wasm32-gear/release/historical_proxy.idl"
             "./target/wasm32-gear/release/checkpoint_light_client.idl"
           )
@@ -158,15 +194,10 @@ jobs:
         with:
           cache: false
 
-      - name: Install golang
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.20.1'
-
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.3
+          version: v1.8.6
 
       - name: Install dependencies
         run: forge soldeer install
@@ -192,7 +223,7 @@ jobs:
         working-directory: ./ethereum
 
       - name: Run clippy
-        run: cargo clippy --release --all-targets -- -D warnings $(cat .lints | cut -f1 -d"#" | tr '\n' ' ')
+        run: cargo clippy --locked --release --all-targets --features beefy-relay/deployment -- -D warnings
 
       - name: Run rustfmt
         run: cargo fmt -- --check
@@ -217,15 +248,10 @@ jobs:
         with:
           cache: false
 
-      - name: Install golang
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.20.1'
-
       - name: Install foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.8.3
+          version: v1.8.6
 
       - name: Install dependencies
         run: forge soldeer install
@@ -252,69 +278,18 @@ jobs:
 
       - name: Pull & run Gear node container
         run: |
-          docker pull ghcr.io/gear-tech/node:v1.9.0
-          docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v1.9.0 gear --dev --tmp --rpc-external
+          docker pull ghcr.io/gear-tech/node:v2.1.1
+          docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v2.1.1 gear --dev --tmp --rpc-external
 
       - name: Run tests
-        run: cargo test --release --workspace
-          --exclude prover
-          --exclude plonky2_blake2b256
-          --exclude plonky2_ecdsa
-          --exclude plonky2_ed25519
-          --exclude plonky2_sha512
-          --exclude plonky2_u32 || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs $NODE_CONTAINER_NAME; docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
-
-      - name: Run prover asserting tests
-        run: cargo test --release --package prover assert_constants
+        run: cargo test --locked --release --workspace --features beefy-relay/deployment
+          || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs $NODE_CONTAINER_NAME; docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
 
       - name: Run solidity tests
         run: |
           cd ethereum
-          forge test --force
+          forge test --force --threads 1
 
       - name: Stop Gear node container (if any)
         continue-on-error: true
         run: docker stop $NODE_CONTAINER_NAME
-
-  check-zk-circuits-changed:
-    runs-on: ubuntu-latest
-    outputs:
-      circuits_changed: ${{ steps.filter.outputs.circuits }}
-      prover_changed: ${{ steps.filter.outputs.prover }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Filter files
-        id: filter
-        uses: dorny/paths-filter@v4
-        with:
-          filters: |
-            circuits:
-              - 'circuits/**'
-            prover:
-              - 'prover/**'
-
-  zk-tests:
-    runs-on: zk-tests
-    # Disabled because the job consumes too much RAM.
-    if: false
-    env:
-      VBLAKE2_CACHE_PATH: "/VariativeBlake2"
-    needs: check-zk-circuits-changed
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache: false
-
-      - name: Run tests
-        run: cargo test --release
-          -p prover
-          -p plonky2_blake2b256
-          -p plonky2_ecdsa
-          -p plonky2_ed25519
-          -p plonky2_sha512
-          -p plonky2_u32

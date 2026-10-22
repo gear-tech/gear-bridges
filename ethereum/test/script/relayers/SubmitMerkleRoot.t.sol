@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {Test} from "forge-std/Test.sol";
 import {SubmitMerkleRootScript} from "script/relayers/SubmitMerkleRoot.s.sol";
@@ -15,7 +15,7 @@ contract SubmitMerkleRootScriptTest is Test, Base {
         vm.setEnv("MESSAGE_QUEUE", vm.toString(address(messageQueue)));
         vm.setEnv("BLOCK_NUMBER", "1");
         vm.setEnv("MERKLE_ROOT", vm.toString(bytes32(uint256(1))));
-        vm.setEnv("PLONKY2_PROOF", "0x");
+        vm.setEnv("MMR_PROOF", vm.toString(_rootProof(1, bytes32(uint256(1)))));
         // forge-lint: disable-end(unsafe-cheatcode)
 
         SubmitMerkleRootScript relayingScript = new SubmitMerkleRootScript();

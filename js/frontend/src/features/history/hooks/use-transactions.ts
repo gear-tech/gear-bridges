@@ -32,6 +32,7 @@ function useTransactions(filter: TransferFilter | undefined) {
     initialPageParam: 0,
 
     getNextPageParam,
+    refetchInterval: 60000,
 
     select: ({ pages }) => ({
       transactions: pages.flatMap(({ allTransfers }) => allTransfers?.nodes || []),

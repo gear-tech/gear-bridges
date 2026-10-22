@@ -1,5 +1,9 @@
-import { Entity, Column, PrimaryColumn } from 'typeorm';
+import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
+import type { Receipt } from '../../eth/completion.js';
 import { Network } from './_network.js';
+import type { SourceReceiptAuth } from '../../eth/finality.js';
+
+export type ReceiptAuth = Omit<SourceReceiptAuth, 'localLogIndex'>;
 
 @Entity({ name: 'completed_transfer' })
 export class CompletedTransfer {
@@ -24,4 +28,18 @@ export class CompletedTransfer {
 
   @Column('bigint', { nullable: false, name: 'block_number' })
   blockNumber!: bigint;
+
+  // Legacy rows without a canonical receipt never authorize completion.
+  @Column('jsonb', { nullable: true, name: 'outbound_receipt' })
+  outboundReceipt?: { receipt: Receipt; logIndex: number; nonce: string; queue: string; manager: string };
+
+  @Column('jsonb', { nullable: true, name: 'receipt_auth' })
+  receiptAuth?: ReceiptAuth | null;
+
+  @Column('boolean', { nullable: true, name: 'legacy_matched' })
+  legacyMatched?: boolean | null;
+
+  @Index('IDX_completed_transfer_matched')
+  @Column({ default: false })
+  matched!: boolean;
 }

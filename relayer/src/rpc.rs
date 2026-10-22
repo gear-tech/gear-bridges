@@ -56,7 +56,7 @@ impl RetryPolicy {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.subsec_nanos() as u64 % jitter_bound)
             .unwrap_or_default();
-        delay + Duration::from_millis(jitter_ms)
+        (delay + Duration::from_millis(jitter_ms)).min(self.max_delay)
     }
 }
 
@@ -80,7 +80,7 @@ pub fn classify_anyhow(err: &anyhow::Error) -> RetryDecision {
         return RetryDecision::Retry;
     }
 
-    if err.chain().any(is_recoverable_error_text) {
+    if ethereum_client::is_transient_rpc_error(err) {
         return RetryDecision::Retry;
     }
 
@@ -108,65 +108,34 @@ pub(crate) fn classify_gear_transport_error(err: &anyhow::Error) -> RetryDecisio
         }
     }
 
+    if let Some(err) = err.downcast_ref::<gsdk::ext::subxt_rpcs::Error>() {
+        if is_recoverable_gear_rpc(err) {
+            return RetryDecision::Retry;
+        }
+    }
+
     RetryDecision::Fail
 }
 
 pub fn classify_ethereum_error(err: &ethereum_client::Error) -> RetryDecision {
-    match err {
-        ethereum_client::Error::ErrorInHTTPTransport(err) => classify_alloy_rpc(err),
-        ethereum_client::Error::ErrorDuringContractExecution(err)
-        | ethereum_client::Error::ErrorQueryingEvent(err) => match err {
-            alloy::contract::Error::TransportError(err) => classify_alloy_rpc(err),
-            _ => RetryDecision::Fail,
-        },
-        _ => RetryDecision::Fail,
+    if ethereum_client::error::is_transient_rpc_cause(err) {
+        RetryDecision::Retry
+    } else {
+        RetryDecision::Fail
     }
 }
 
 pub fn classify_alloy_rpc(err: &RpcError<TransportErrorKind>) -> RetryDecision {
-    match err {
-        RpcError::Transport(transport) => match transport {
-            TransportErrorKind::MissingBatchResponse(_) | TransportErrorKind::BackendGone => {
-                RetryDecision::Retry
-            }
-            TransportErrorKind::HttpError(err)
-                if matches!(err.status, 408 | 429 | 500 | 502 | 503 | 504) =>
-            {
-                RetryDecision::Retry
-            }
-            TransportErrorKind::Custom(message) if is_recoverable_error_text(message) => {
-                RetryDecision::Retry
-            }
-            _ => RetryDecision::Fail,
-        },
-        RpcError::ErrorResp(_) => RetryDecision::Fail,
-        RpcError::NullResp => RetryDecision::Retry,
-        _ => RetryDecision::Fail,
+    if ethereum_client::error::is_transient_rpc_cause(err) {
+        RetryDecision::Retry
+    } else {
+        RetryDecision::Fail
     }
-}
-
-pub fn is_recoverable_error_text(message: impl std::fmt::Display) -> bool {
-    let message = message.to_string().to_ascii_lowercase();
-    message.contains("background task closed")
-        || message.contains("connection closed")
-        || message.contains("disconnectedwillreconnect")
-        || message.contains("disconnected will reconnect")
-        || message.contains("restart required")
-        || message.contains("backend gone")
-        || message.contains("backend connection task has stopped")
-        || message.contains("transport error")
-        || message.contains("subscription dropped")
-        || message.contains("connection refused")
-        || message.contains("connection reset")
-        || message.contains("broken pipe")
-        || message.contains("timed out")
-        || message.contains("timeout")
 }
 
 /// Retry an Ethereum operation without dropping its in-memory work item.
 ///
-/// This helper intentionally waits until a recoverable outage ends. Callers in a
-/// multiplexed event loop should use [`retry_eth_bounded`] instead.
+/// This helper intentionally waits until a recoverable outage ends.
 pub async fn retry_eth<T, F, Fut>(
     api: &mut ethereum_client::EthApi,
     operation: &'static str,
@@ -187,32 +156,32 @@ where
     )
     .await
 }
-/// Reconnect a polling Ethereum client and retain the replacement provider.
-pub async fn reconnect_polling_eth(api: &mut ethereum_client::PollingEthApi) -> anyhow::Result<()> {
-    *api = api.reconnect().await?;
-    Ok(())
-}
-
-pub(crate) async fn retry_eth_bounded<T, F, Fut>(
-    api: &mut ethereum_client::EthApi,
+/// Retry a read without unwinding the listener's cursor or queued work.
+pub async fn retry_polling_eth<T, F, Fut>(
+    api: &mut ethereum_client::PollingEthApi,
     operation: &'static str,
-    max_retries: u32,
     f: F,
-) -> Result<T, ethereum_client::Error>
+) -> anyhow::Result<T>
 where
-    F: FnMut(ethereum_client::EthApi) -> Fut,
-    Fut: Future<Output = Result<T, ethereum_client::Error>>,
+    F: FnMut(ethereum_client::PollingEthApi) -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
 {
     retry(
         api,
         operation,
         RetryPolicy::default(),
-        Some(max_retries),
+        None,
         f,
         |api| async move { api.reconnect().await },
-        classify_ethereum_error,
+        classify_anyhow,
     )
     .await
+}
+
+/// Reconnect a polling Ethereum client and retain the replacement provider.
+pub async fn reconnect_polling_eth(api: &mut ethereum_client::PollingEthApi) -> anyhow::Result<()> {
+    *api = api.reconnect().await?;
+    Ok(())
 }
 
 async fn retry<T, A, E, F, Fut, R, ReconnectFut, C>(
@@ -342,13 +311,27 @@ fn is_recoverable_subxt(err: &subxt::Error) -> bool {
         return true;
     }
 
-    matches!(
-        err,
-        subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped)
-            | subxt::Error::Rpc(subxt::error::RpcError::ClientError(
-                gsdk::ext::subxt_rpcs::Error::DisconnectedWillReconnect(_)
-            ))
-    )
+    match err {
+        subxt::Error::Rpc(subxt::error::RpcError::SubscriptionDropped) => true,
+        subxt::Error::Rpc(subxt::error::RpcError::ClientError(err)) => is_recoverable_gear_rpc(err),
+        _ => false,
+    }
+}
+
+fn is_recoverable_gear_rpc(err: &gsdk::ext::subxt_rpcs::Error) -> bool {
+    use gsdk::ext::{jsonrpsee::core::client::Error as ClientError, subxt_rpcs::Error};
+    match err {
+        Error::DisconnectedWillReconnect(_) => true,
+        Error::Client(err) => matches!(
+            err.downcast_ref::<ClientError>(),
+            Some(
+                ClientError::Transport(_)
+                    | ClientError::RestartNeeded(_)
+                    | ClientError::RequestTimeout
+            )
+        ),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -356,12 +339,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classifies_known_disconnect_text_as_recoverable() {
+    fn classifies_raw_and_wrapped_gear_disconnects_but_not_semantic_errors() {
+        use gsdk::ext::{jsonrpsee::core::client::Error as ClientError, subxt_rpcs::Error};
+        let recoverable: [fn() -> Error; 4] = [
+            || Error::DisconnectedWillReconnect("disconnected".into()),
+            || {
+                Error::Client(Box::new(ClientError::Transport(Box::new(
+                    std::io::Error::from(std::io::ErrorKind::ConnectionReset),
+                ))))
+            },
+            || {
+                Error::Client(Box::new(ClientError::RestartNeeded(std::sync::Arc::new(
+                    ClientError::RequestTimeout,
+                ))))
+            },
+            || Error::Client(Box::new(ClientError::RequestTimeout)),
+        ];
+        let permanent: [fn() -> Error; 2] = [
+            || Error::Client(Box::new(ClientError::Custom("restart required".into()))),
+            || {
+                Error::User(
+                    serde_json::from_str(r#"{"code":-32000,"message":"request timed out"}"#)
+                        .unwrap(),
+                )
+            },
+        ];
+        for (factories, expected) in [
+            (recoverable.as_slice(), RetryDecision::Retry),
+            (permanent.as_slice(), RetryDecision::Fail),
+        ] {
+            for make_error in factories {
+                for wrapper in 0..4 {
+                    let raw = make_error();
+                    let error: anyhow::Error = if wrapper == 0 {
+                        raw.into()
+                    } else {
+                        let subxt = subxt::Error::Rpc(subxt::error::RpcError::ClientError(raw));
+                        match wrapper {
+                            1 => subxt.into(),
+                            2 => gsdk::Error::Subxt(Box::new(subxt)).into(),
+                            _ => {
+                                gclient::Error::GearSDK(gsdk::Error::Subxt(Box::new(subxt))).into()
+                            }
+                        }
+                    };
+                    assert_eq!(classify_anyhow(&error.context("source query")), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn does_not_classify_untyped_disconnect_text_as_rpc() {
         let err = anyhow::anyhow!(
             "RPC error: client error: The background task closed connection closed; restart required"
         );
 
-        assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+        assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
     }
 
     #[test]
@@ -391,6 +425,79 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn classifies_http_errors_from_actual_event_readers() {
+        for (status, expected) in [(429, RetryDecision::Retry), (401, RetryDecision::Fail)] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let app = axum::Router::new().route(
+                "/",
+                axum::routing::post(move || async move {
+                    (
+                        axum::http::StatusCode::from_u16(status).unwrap(),
+                        "RPC unavailable",
+                    )
+                }),
+            );
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let api = ethereum_client::PollingEthApi::new_with_retries(&endpoint, None, None)
+                .await
+                .unwrap();
+            let paid = api
+                .fetch_fee_paid_events_txs_at(Default::default(), 1, Default::default())
+                .await
+                .unwrap_err();
+            let deposit = api
+                .fetch_deposit_events_at(Default::default(), 1, Default::default())
+                .await
+                .unwrap_err();
+            let signing_client = ethereum_client::EthApi::new(
+                &endpoint,
+                "0x0000000000000000000000000000000000000001",
+                None,
+                None,
+                None,
+            )
+            .await
+            .err()
+            .expect("HTTP status must reject signing-client initialization");
+            assert_eq!(
+                classify_anyhow(&anyhow::Error::new(signing_client)),
+                expected
+            );
+            server.abort();
+            assert_eq!(classify_anyhow(&paid), expected);
+            assert_eq!(classify_anyhow(&deposit), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn retries_nested_socket_resets_from_actual_http_readers() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                // Leave the rest of the HTTP request unread so closing resets the connection.
+                let _ = socket.read_exact(&mut [0; 1]).await;
+            }
+        });
+        let api = ethereum_client::PollingEthApi::new(&endpoint)
+            .await
+            .unwrap()
+            .with_finality_witness(&format!("{endpoint}/witness"), 560048,
+                alloy::primitives::B256::repeat_byte(1))
+            .await.unwrap();
+        let block = api.finalized_block().await.unwrap_err();
+        let deposit = api
+            .fetch_deposit_events_at(Default::default(), 1, Default::default())
+            .await
+            .unwrap_err();
+        server.abort();
+        for error in [block, deposit] {
+            assert_eq!(classify_anyhow(&error), RetryDecision::Retry, "{error:#}");
+        }
+    }
     #[test]
     fn treats_missing_pubsub_support_as_permanent() {
         let err = TransportErrorKind::pubsub_unavailable();
@@ -464,17 +571,78 @@ mod tests {
     }
 
     #[test]
-    fn classifies_backend_task_stopped_text_as_recoverable() {
+    fn does_not_classify_untyped_backend_text_as_rpc() {
         let err = anyhow::anyhow!("backend connection task has stopped");
 
-        assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+        assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
     }
 
     #[test]
-    fn classifies_real_socket_failures_as_recoverable() {
+    fn does_not_classify_untyped_socket_text_as_rpc() {
         let err = anyhow::anyhow!("transport error: connection refused");
 
-        assert_eq!(classify_anyhow(&err), RetryDecision::Retry);
+        assert_eq!(classify_anyhow(&err), RetryDecision::Fail);
+    }
+
+    #[test]
+    fn retries_unreachable_network_transports_but_not_rpc_rejections() {
+        for kind in [
+            std::io::ErrorKind::AddrNotAvailable,
+            std::io::ErrorKind::NetworkDown,
+            std::io::ErrorKind::NetworkUnreachable,
+            std::io::ErrorKind::HostUnreachable,
+        ] {
+            let transport = RpcError::Transport(TransportErrorKind::Custom(Box::new(
+                std::io::Error::from(kind),
+            )));
+            assert_eq!(
+                classify_alloy_rpc(&transport),
+                RetryDecision::Retry,
+                "{kind:?}"
+            );
+            let rejection = RpcError::ErrorResp(
+                serde_json::from_value(
+                    serde_json::json!({"code": -32603, "message": format!("{kind:?}")}),
+                )
+                .unwrap(),
+            );
+            assert_eq!(classify_alloy_rpc(&rejection), RetryDecision::Fail);
+            let send = ethereum_client::Error::ErrorSendingTransaction(
+                alloy::contract::Error::TransportError(transport),
+            );
+            assert_eq!(classify_ethereum_error(&send), RetryDecision::Fail);
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_stops_on_permanent_reconnect_failure_without_replaying_work() {
+        let mut api = 17;
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = retry(
+            &mut api,
+            "listener reconnect",
+            RetryPolicy {
+                base_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+            },
+            None,
+            |_| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { Err::<(), _>("disconnected") }
+            },
+            |_| async { Err("unauthorized") },
+            |error| {
+                if *error == "disconnected" {
+                    RetryDecision::Retry
+                } else {
+                    RetryDecision::Fail
+                }
+            },
+        )
+        .await;
+        assert_eq!(result, Err("unauthorized"));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(api, 17);
     }
 
     #[tokio::test]
@@ -563,5 +731,43 @@ mod tests {
 
         assert_eq!(err, "reconnect unavailable");
         assert_eq!(reconnect_calls.load(Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn bounded_retry_budget_is_fresh_for_each_operation() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        for _ in 0..2 {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let observed = calls.clone();
+            let mut api = 0u32;
+            let result = retry(
+                &mut api,
+                "independent operation",
+                RetryPolicy {
+                    base_delay: Duration::ZERO,
+                    max_delay: Duration::ZERO,
+                },
+                Some(1),
+                move |_| {
+                    let attempt = calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        if attempt == 0 {
+                            Err("disconnected")
+                        } else {
+                            Ok(17)
+                        }
+                    }
+                },
+                |api| async move { Ok(api + 1) },
+                |_| RetryDecision::Retry,
+            )
+            .await
+            .unwrap();
+            assert_eq!(result, 17);
+            assert_eq!(observed.load(Ordering::SeqCst), 2);
+        }
     }
 }

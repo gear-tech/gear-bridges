@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -212,6 +212,10 @@ contract ERC20Manager is
         bytes32 vftManager,
         TokenInfo[] memory tokens_
     ) public initializer {
+        if (address(governanceAdmin_.wrappedVara()) == address(0)) {
+            revert InvalidWrappedVara();
+        }
+
         __AccessControl_init();
         __Pausable_init();
 
@@ -457,10 +461,23 @@ contract ERC20Manager is
      * @param amount Amount of tokens to bridge.
      * @param to Destination address.
      * @dev Reverts if token is not registered with `InvalidTokenType` error.
+     * @dev Native amounts must fit the Vara balance representation (`uint80`).
      */
     function requestBridging(address token, uint256 amount, bytes32 to) public whenNotPaused {
         if (amount == 0) {
             revert InvalidAmount();
+        }
+        if (to == bytes32(0)) {
+            revert InvalidRecipient();
+        }
+        if (amount > type(uint80).max) {
+            address wrappedVara = address(_governanceAdmin.wrappedVara());
+            if (wrappedVara == address(0)) {
+                revert InvalidWrappedVara();
+            }
+            if (token == wrappedVara) {
+                revert InvalidAmount();
+            }
         }
 
         (, TokenType tokenType) = _tokens.tryGet(token);

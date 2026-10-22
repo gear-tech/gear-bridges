@@ -24,6 +24,7 @@ const STATUS_OPTIONS = [
   { label: 'Failed', value: Status.Failed },
   { label: 'Awaiting Payment', value: Status.AwaitingPayment },
   { label: 'Bridging', value: Status.Bridging },
+  { label: 'Refunded (wrapped)', value: Status.Refunded },
 ];
 
 const DEFAULT_VALUES = {

@@ -3,12 +3,14 @@ name = "relayer"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "relayer"
+path = "src/main.rs"
+
 [dependencies]
 bridging-payment-client.workspace = true
 ethereum-client.workspace = true
-gear_proof_storage = { workspace = true, features = ["std"] }
 gear-rpc-client.workspace = true
-prover.workspace = true
 
 alloy.workspace = true
 alloy-consensus.workspace = true
@@ -27,33 +29,27 @@ dotenv.workspace = true
 eth-events-electra-client.workspace = true
 historical-proxy-client.workspace = true
 vft-manager-client.workspace = true
+vft-vara-client.workspace = true
 ethereum_beacon_client.workspace = true
 ethereum-common.workspace = true
 futures.workspace = true
 gear-core.workspace = true
 gear-common.workspace = true
 gclient.workspace = true
-humantime.workspace = true
 hex.workspace = true
 keccak-hash.workspace = true
-lazy_static.workspace = true
 libc.workspace = true
 log.workspace = true
-num = { workspace = true, features = ["serde"] }
 parity-scale-codec.workspace = true
 pretty_env_logger.workspace = true
 primitive-types = { workspace = true, features = ["std"] }
 prometheus.workspace = true
-rand.workspace = true
-rayon.workspace = true
 reqwest.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 serde.workspace = true
 serde_json.workspace = true
-sled.workspace = true
 thiserror = { workspace = true, features = ["std"] }
 tokio.workspace = true
-toml.workspace = true
 utils-prometheus.workspace = true
 url.workspace = true
 subxt.workspace = true
@@ -65,10 +61,9 @@ actix-web.workspace = true
 async-trait.workspace = true
 sp-consensus-grandpa = { workspace = true, features = ["std"] }
 
-[build-dependencies]
-cgo_oligami.workspace = true
-
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 hex-literal.workspace = true
 ruzstd.workspace = true
 sp-core = { workspace = true, features = ["std"] }
+tokio-tungstenite = { version = "=0.26.2", default-features = false, features = ["handshake"] }

@@ -35,12 +35,24 @@ pub async fn verify(
     } = sync_update;
 
     let update_slot_finalized = finalized_header.slot;
-    if !(signature_slot > attested_header.slot && attested_header.slot >= update_slot_finalized) {
+    let current_slot = network
+        .current_slot(Syscall::block_timestamp())
+        .ok_or(SyncCommitteeUpdateError::InvalidTimestamp)?;
+    if !(current_slot >= signature_slot
+        && signature_slot > attested_header.slot
+        && attested_header.slot >= update_slot_finalized)
+    {
         return Err(SyncCommitteeUpdateError::InvalidTimestamp);
     }
 
     let store_period = eth_utils::calculate_period(stored_finalized_slot);
     let update_sig_period = eth_utils::calculate_period(signature_slot);
+    if eth_utils::calculate_period(update_slot_finalized) > store_period.saturating_add(1) {
+        return Err(SyncCommitteeUpdateError::InvalidPeriod);
+    }
+    if eth_utils::calculate_epoch(attested_header.slot) < network.epoch_deneb() {
+        return Err(SyncCommitteeUpdateError::InvalidPeriod);
+    }
     let sync_committee = if update_sig_period == store_period + 1 {
         stored_sync_committee_next
     } else if update_sig_period == store_period {
@@ -102,6 +114,13 @@ pub async fn verify(
         }
     };
 
+    // The stored keys always describe the finalized period and its successor.
+    if eth_utils::calculate_period(update_slot_finalized) > store_period
+        && committee_update.is_none()
+    {
+        return Err(SyncCommitteeUpdateError::InvalidNextSyncCommitteeProof);
+    }
+
     if finalized_header_update.is_none() && committee_update.is_none() {
         return Err(SyncCommitteeUpdateError::NotActual);
     }
@@ -127,35 +146,38 @@ impl<'a> SyncUpdate<'a> {
         sync_update: SyncCommitteeUpdate,
         sync_aggregate_encoded: Vec<u8>,
     ) -> Result<(), SyncCommitteeUpdateError> {
-        let (network, slot, sync_committee_current, sync_committee_next) = {
+        let (network, slot, sync_committee_current, sync_committee_next, revision) = {
             let state = self.state.borrow();
+
+            if state.replay_back.is_some()
+                || eth_utils::calculate_epoch(state.finalized_header.slot) + MAX_EPOCHS_GAP
+                    <= eth_utils::calculate_epoch(sync_update.finalized_header.slot)
+            {
+                return Err(SyncCommitteeUpdateError::ReplayBackRequired {
+                    replay_back: state.replay_back.as_ref().map(|replay_back| ReplayBack {
+                        finalized_header: replay_back.finalized_header.slot,
+                        last_header: replay_back.last_header.slot,
+                    }),
+                    checkpoint: state
+                        .checkpoints
+                        .last()
+                        .expect("The program should be initialized so there is a checkpoint"),
+                });
+            }
 
             (
                 state.network.clone(),
                 state.finalized_header.slot,
                 Rc::clone(&state.sync_committee_current),
                 Rc::clone(&state.sync_committee_next),
+                state.revision,
             )
         };
 
-        if eth_utils::calculate_epoch(slot) + MAX_EPOCHS_GAP
-            <= eth_utils::calculate_epoch(sync_update.finalized_header.slot)
-        {
-            let state = self.state.borrow();
-            return Err(SyncCommitteeUpdateError::ReplayBackRequired {
-                replay_back: state.replay_back.as_ref().map(|replay_back| ReplayBack {
-                    finalized_header: replay_back.finalized_header.slot,
-                    last_header: replay_back.last_header.slot,
-                }),
-                checkpoint: state
-                    .checkpoints
-                    .last()
-                    .expect("The program should be initialized so there is a checkpoint"),
-            });
-        }
-
-        let sync_aggregate = Decode::decode(&mut &sync_aggregate_encoded[..])
-            .map_err(|_| SyncCommitteeUpdateError::InvalidSyncAggregate)?;
+        let sync_aggregate = <SyncAggregate as sails_rs::scale_codec::DecodeAll>::decode_all(
+            &mut &sync_aggregate_encoded[..],
+        )
+        .map_err(|_| SyncCommitteeUpdateError::InvalidSyncAggregate)?;
         let (finalized_header_update, committee_update) = verify(
             &network,
             slot,
@@ -167,15 +189,20 @@ impl<'a> SyncUpdate<'a> {
         .await?;
 
         let mut state = self.state.borrow_mut();
+        if state.revision != revision {
+            return Err(SyncCommitteeUpdateError::StateChanged);
+        }
 
         if let Some(finalized_header) = finalized_header_update {
+            let tree_hash_root = finalized_header.tree_hash_root();
             state
                 .checkpoints
-                .push(finalized_header.slot, finalized_header.tree_hash_root());
+                .push(finalized_header.slot, tree_hash_root)
+                .map_err(|_| SyncCommitteeUpdateError::NotActual)?;
 
             self.emit_event(Event::NewCheckpoint {
                 slot: finalized_header.slot,
-                tree_hash_root: finalized_header.tree_hash_root(),
+                tree_hash_root,
             })
             .expect("failed to send event");
             state.finalized_header = finalized_header;
@@ -185,6 +212,10 @@ impl<'a> SyncUpdate<'a> {
             state.sync_committee_current =
                 core::mem::replace(&mut state.sync_committee_next, sync_committee_next);
         }
+        state.revision = state
+            .revision
+            .checked_add(1)
+            .expect("State revision overflow");
 
         Ok(())
     }

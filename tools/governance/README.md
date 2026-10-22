@@ -71,13 +71,16 @@ cargo run --package governance-tool --release -- --ethereum-endpoint $RPC_URL Go
 PROXY_MQ="MessageQueue"
 NEW_IMPLEMENTATION="0x0000000000000000000000000000000000000000" # must exist on https://etherscan.io
 cargo run --package governance-tool --release -- --ethereum-endpoint $RPC_URL GovernanceAdmin UpgradeProxy $PROXY_MQ $NEW_IMPLEMENTATION 0x
-cargo run --package governance-tool --release -- --ethereum-endpoint $RPC_URL GovernanceAdmin UpgradeProxy $PROXY_MQ $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
+MIGRATION_DATA=$(cast calldata "migrateToBeefy(address,address,uint256,uint256,address)" "$LEGACY_VERIFIER" "$BEEFY_VERIFIER" "$LEGACY_MAX_BLOCK" "$FIRST_BEEFY_BLOCK" "$BEEFY_RECOVERY_TIMELOCK")
+cargo run --package governance-tool --release -- --ethereum-endpoint "$RPC_URL" GovernanceAdmin UpgradeProxy "$PROXY_MQ" "$NEW_IMPLEMENTATION" "$MIGRATION_DATA"
 
 PROXY_ERC20MNGR="ERC20Manager"
 NEW_IMPLEMENTATION="0x0000000000000000000000000000000000000000" # must exist on https://etherscan.io
 cargo run --package governance-tool --release -- --ethereum-endpoint $RPC_URL GovernanceAdmin UpgradeProxy $PROXY_ERC20MNGR $NEW_IMPLEMENTATION 0x
 cargo run --package governance-tool --release -- --ethereum-endpoint $RPC_URL GovernanceAdmin UpgradeProxy $PROXY_ERC20MNGR $NEW_IMPLEMENTATION $(cast calldata "function reinitialize()")
 ```
+
+For an existing ZK queue, use the migration payload only after the [mainnet release gates](../../ethereum/README.md#mainnet-custody-preserving-migration-candidate), with the queue paused and the independent recovery timelock's code, multisig roles and positive delay approved. Empty upgrade data is not a ZK-to-BEEFY verifier cutover. Payload generation does not authorize governance execution.
 
 ---
 

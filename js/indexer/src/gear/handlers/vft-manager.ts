@@ -4,6 +4,8 @@ import { setPrograms, updateId } from '../programIds.js';
 import { gearNonce } from '../../common/index.js';
 import {
   BridgingRequested,
+  ReceiptDepositSettled,
+  ReceiptDepositRefunded,
   HistoricalProxyAddressChanged,
   MessageQueuedContext,
   TokenMappingAdded,
@@ -19,6 +21,18 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
   const msg = event.args.message;
 
   switch (method) {
+    case VftManagerMethods.ReceiptDepositSettled: {
+      const deposit = decoder.decodeEvent<ReceiptDepositSettled>(service, method, msg.payload);
+      requireReceiptDomain(ctx, deposit.slot);
+      state.recordReceiptSettlement(deposit, new Date(blockHeader.timestamp!), blockNumber, event.extrinsic!.hash);
+      return;
+    }
+    case VftManagerMethods.ReceiptDepositRefunded: {
+      const deposit = decoder.decodeEvent<ReceiptDepositRefunded>(service, method, msg.payload);
+      requireReceiptDomain(ctx, deposit.slot);
+      state.recordReceiptRefund(deposit, new Date(blockHeader.timestamp!), blockNumber, event.extrinsic!.hash);
+      return;
+    }
     case VftManagerMethods.BridgingRequested: {
       const { nonce, vara_token_id, sender, receiver, amount, queue_id, hash } = decoder.decodeEvent<BridgingRequested>(
         service,
@@ -84,6 +98,14 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
       }
       return;
     }
+  }
+}
+
+function requireReceiptDomain(ctx: UserMessageSentHandlerContext, receiptSlot: string | number) {
+  if (!ctx.receiptDomain) return;
+  const slot = BigInt(receiptSlot);
+  if (slot < ctx.receiptDomain.minimum || (ctx.receiptDomain.last !== undefined && slot > ctx.receiptDomain.last)) {
+    throw new Error('HOLD: receipt event outside authenticated manager deployment domain');
   }
 }
 

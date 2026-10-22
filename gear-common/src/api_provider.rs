@@ -29,17 +29,26 @@ struct ApiConnectionResponse {
 /// Each connection has a session number which is used to identify the connection. When
 /// a connection is cloned the session number is reset to `None`.
 pub struct ApiProviderConnection {
-    sender: UnboundedSender<ApiConnectionRequest>,
+    sender: Option<UnboundedSender<ApiConnectionRequest>>,
     session: u64,
     api: Api,
 }
 
 impl ApiProviderConnection {
-    /// Check whether the connection is still alive.
-    ///
-    /// Internally checks that the underlying sender channel is still open.
+    /// Reuse a caller-owned API; reconnecting remains the caller's responsibility.
+    pub fn from_api(api: Api) -> Self {
+        Self {
+            sender: None,
+            session: 0,
+            api,
+        }
+    }
+    /// Whether the reconnecting provider service is available (not an API liveness probe).
+    /// Externally managed connections have no provider service.
     pub fn is_alive(&self) -> bool {
-        !self.sender.is_closed()
+        self.sender
+            .as_ref()
+            .is_some_and(|sender| !sender.is_closed())
     }
 
     /// Explicit reconnect reqest to the [`ApiProvider`]. This will
@@ -49,12 +58,16 @@ impl ApiProviderConnection {
     /// When this function errors it indicates that the provider
     /// has failed and no further connections can be made.
     pub async fn reconnect(&mut self) -> anyhow::Result<()> {
+        let sender = self
+            .sender
+            .as_ref()
+            .context("externally managed API connection cannot request provider reconnect")?;
         let (tx, rx) = oneshot::channel();
         let request = ApiConnectionRequest {
             session: self.session,
             receiver: tx,
         };
-        self.sender
+        sender
             .send(request)
             .context("failed to send API connection request")?;
 
@@ -127,7 +140,7 @@ impl ApiProvider {
 
     pub fn connection(&self) -> ApiProviderConnection {
         ApiProviderConnection {
-            sender: self.sender.clone(),
+            sender: Some(self.sender.clone()),
             session: self.session,
             api: self.api.clone(),
         }

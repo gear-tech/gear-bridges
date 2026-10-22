@@ -15,6 +15,21 @@ pub struct EthereumConnectionArgs {
     pub retry_interval_ms: Option<u64>,
 }
 
+/// Execution endpoints must be operated independently; different URLs alone do not prove this.
+#[derive(Args, Clone, Debug)]
+pub struct EthereumFinalityArgs {
+    #[arg(long = "ethereum-witness-rpc", env = "ETH_WITNESS_RPC")]
+    pub ethereum_witness_rpc: String,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct EthereumChainIdentityArgs {
+    #[arg(long = "ethereum-chain-id", env = "ETH_CHAIN_ID")]
+    pub ethereum_chain_id: u64,
+    #[arg(long = "ethereum-genesis-hash", env = "ETH_GENESIS_HASH")]
+    pub ethereum_genesis_hash: String,
+}
+
 #[derive(Args, Clone, Debug)]
 pub struct EthereumTxArgs {
     /// Max fee per gas (in wei) for transactions sent to Ethereum. Default is

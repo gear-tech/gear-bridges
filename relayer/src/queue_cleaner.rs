@@ -1,7 +1,6 @@
-use crate::message_relayer::common::GearBlock;
+use crate::message_relayer::common::{BridgeEvent, GearBlock};
 use futures::StreamExt;
 use gear_common::api_provider::ApiProviderConnection;
-use gsdk::Event;
 
 pub async fn queue_cleaner(
     mut api_provider: ApiProviderConnection,
@@ -106,12 +105,10 @@ async fn reset_overflowed_queue_from_storage(
 }
 
 fn queue_overflowed(block: &GearBlock) -> bool {
-    block.events().iter().any(|event| {
-        matches!(
-            event,
-            Event::GearEthBridge(gsdk::gear::gear_eth_bridge::Event::QueueOverflowed)
-        )
-    })
+    block
+        .bridge_events()
+        .iter()
+        .any(|event| matches!(event, BridgeEvent::QueueOverflowed(_)))
 }
 
 async fn reset_overflowed_queue(

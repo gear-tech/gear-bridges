@@ -1,9 +1,16 @@
-import { GearApi, BaseGearProgram } from '@gear-js/api';
+import { GearApi } from '@gear-js/api';
 import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
 import { H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 import { StatusCb } from '../util';
 
 export type CheckpointError = 'OutDated' | 'NotPresent';
+
+export type Network =
+    | { Mainnet: null }
+    | { Sepolia: null }
+    | { Holesky: null }
+    | { Hoodi: null }
+    | { LocalFixture: { genesis_time: number | string | bigint; genesis_validators_root: H256 } };
 
 export type Order = 'Direct' | 'Reverse';
 
@@ -31,23 +38,22 @@ export class CheckpointClient {
   public readonly serviceCheckpointFor: ServiceCheckpointFor;
   public readonly serviceSyncUpdate: ServiceSyncUpdate;
   public readonly serviceState: ServiceState;
-  private _program: BaseGearProgram;
 
   constructor(
     public api: GearApi,
-    programId: `0x${string}`,
+    private readonly _programId: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       CheckpointError: { _enum: ['OutDated', 'NotPresent'] },
       ReplayBack: { finalized_header: 'u64', last_header: 'u64' },
       Order: { _enum: ['Direct', 'Reverse'] },
+      Network: {"_enum":{"Mainnet":"Null","Sepolia":"Null","Holesky":"Null","Hoodi":"Null","LocalFixture":{"genesis_time":"u64","genesis_validators_root":"H256"}}},
       StateData: { checkpoints: 'Vec<(u64, H256)>', replay_back: 'Option<ReplayBack>' },
     };
 
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
-    this._program = new BaseGearProgram(programId, api);
 
     this.serviceCheckpointFor = new ServiceCheckpointFor(this);
     this.serviceState = new ServiceState(this);
@@ -55,8 +61,7 @@ export class CheckpointClient {
   }
 
   public get programId(): `0x${string}` {
-    if (!this._program) throw new Error(`Program ID is not set`);
-    return this._program.id;
+    return this._programId;
   }
 }
 
@@ -136,6 +141,11 @@ export class ServiceSyncUpdate {
 
 export class ServiceState {
   constructor(private _program: CheckpointClient) {}
+  public network(): QueryBuilder<Network> {
+    return new QueryBuilder(this._program.api, this._program.registry, this._program.programId,
+      'ServiceState', 'Network', null, null, 'Network');
+  }
+
 
   public getLatestSlot(): Promise<StateData> {
     const query = new QueryBuilder<StateData>(

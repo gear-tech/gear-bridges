@@ -25,3 +25,22 @@
     justify-content: center;
   }
 }
+
+.isolated {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+
+  button {
+    justify-self: start;
+  }
+
+  p {
+    margin: 4px 0;
+  }
+}
+
+.transaction {
+  overflow-wrap: anywhere;
+}

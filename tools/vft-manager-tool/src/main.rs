@@ -2,14 +2,13 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::{Args, Parser, Subcommand};
 use cli_utils::GearSignerArgs;
 use gclient::GearApi;
-use gear_core::ids::prelude::*;
 use sails_rs::{
     calls::*,
     gclient::calls::{GClientRemoting, QueryExtGClient},
     prelude::*,
 };
-use vft_manager::WASM_BINARY;
-use vft_manager_client::{traits::*, vft_manager::io, InitConfig, Order};
+use vft_manager_client::{traits::*, vft_manager::io, Order};
+mod cutover;
 
 const SIZE_MIGRATE_BATCH: u32 = 100;
 
@@ -27,8 +26,12 @@ struct Cli {
 #[allow(clippy::enum_variant_names)]
 #[derive(Subcommand)]
 enum CliCommands {
-    DeployUpgraded(DeployUpgraded),
-    MigrateTransactions(MigrateTransactions),
+    /// Authenticate boundary, cover every receipt, and drain original pre-boundary work.
+    PrepareCutover(cutover::PrepareCutover),
+    /// Resume custody/role handoff, seal originals, initialize successor lanes, and activate.
+    FinalizeCutover(cutover::FinalizeCutover),
+    /// Authenticate sealed historical originals without signing or mutating any journal.
+    VerifyCutover(cutover::VerifyCutover),
     ReadTransactions(ReadTransactions),
     HexEncodedMessage(HexEncodedMessageArgs),
 }
@@ -54,35 +57,21 @@ enum HexEncodedMessage {
     RemoveVaraToEthAddress {
         vara_token_id: ActorId,
     },
-}
-
-#[derive(Args)]
-struct DeployUpgraded {
-    #[arg(long, help = format!("Size of migration batch. Default: {SIZE_MIGRATE_BATCH}"))]
-    size_batch: Option<u32>,
-
-    /// Flag determines whether to ignore non empty list of failed bridging requests
-    #[arg(long)]
-    ignore_non_empty_message_tracker: bool,
-
-    /// ActorId of the source VFT-manager contract
-    #[arg(long)]
-    vft_manager: String,
-}
-
-#[derive(Args)]
-struct MigrateTransactions {
-    #[arg(long, help = format!("Size of migration batch. Default: {SIZE_MIGRATE_BATCH}"))]
-    size_batch: Option<u32>,
-
-    /// ActorId of the source VFT-manager contract (old)
-    #[arg(long)]
-    old_vft_manager: String,
-
-    /// ActorId of the destination VFT-manager contract (new). Provided Gear parameters should have an account
-    /// with admin priveleges
-    #[arg(long)]
-    new_vft_manager: String,
+    /// Encode bounded manager resolution without broadcasting.
+    ResolveReceiptDeposit {
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        operation_id: H256,
+        child: Option<MessageId>,
+    },
+    /// Encode a hold using the raw SCALE Redemption snapshot, without its route.
+    HoldNativeRedemption {
+        operation_id: H256,
+        expected_redemption_hex: String,
+        #[arg(long)]
+        acknowledge_irreversible_hold: bool,
+    },
 }
 
 #[derive(Args)]
@@ -99,7 +88,7 @@ struct ReadTransactions {
 }
 
 fn str_to_actorid(s: String) -> AnyResult<ActorId> {
-    let s = if &s[..2] == "0x" { &s[2..] } else { &s };
+    let s = s.strip_prefix("0x").unwrap_or(&s);
     let data = hex::decode(s)?;
 
     Ok(ActorId::new(data.try_into().map_err(|_| {
@@ -107,7 +96,7 @@ fn str_to_actorid(s: String) -> AnyResult<ActorId> {
     })?))
 }
 
-fn print_encoded_message(message: HexEncodedMessage) {
+fn print_encoded_message(message: HexEncodedMessage) -> AnyResult<()> {
     use HexEncodedMessage::*;
 
     let (label, encoded_call) = match message {
@@ -145,9 +134,50 @@ fn print_encoded_message(message: HexEncodedMessage) {
             "RemoveVaraToEthAddress",
             io::RemoveVaraToEthAddress::encode_call(vara_token_id),
         ),
+        ResolveReceiptDeposit {
+            slot,
+            transaction_index,
+            log_index,
+            operation_id,
+            child,
+        } => (
+            "ResolveReceiptDeposit",
+            io::ResolveReceiptDeposit::encode_call(
+                slot,
+                transaction_index,
+                log_index,
+                operation_id,
+                child,
+            ),
+        ),
+        HoldNativeRedemption {
+            operation_id,
+            expected_redemption_hex,
+            acknowledge_irreversible_hold,
+        } => {
+            let bytes = hex::decode(
+                expected_redemption_hex
+                    .strip_prefix("0x")
+                    .unwrap_or(&expected_redemption_hex),
+            )
+            .context("Invalid Redemption hex")?;
+            let mut input = bytes.as_slice();
+            let expected = vft_vara_client::Redemption::decode(&mut input)
+                .context("Invalid SCALE Redemption")?;
+            anyhow::ensure!(input.is_empty(), "Trailing bytes after SCALE Redemption");
+            (
+                "HoldRedemption",
+                vft_vara_client::native_escrow::io::HoldRedemption::encode_call(
+                    operation_id,
+                    expected,
+                    acknowledge_irreversible_hold,
+                ),
+            )
+        }
     };
 
     println!(r#"{label}: "{}""#, hex::encode(encoded_call));
+    Ok(())
 }
 
 #[tokio::main]
@@ -163,10 +193,12 @@ async fn main() -> AnyResult<()> {
 
     let cli = Cli::parse();
     if let CliCommands::HexEncodedMessage(args) = cli.command {
-        print_encoded_message(args.message);
-        return Ok(());
+        return print_encoded_message(args.message);
     }
 
+    if let CliCommands::VerifyCutover(args) = &cli.command {
+        return cutover::verify(&cli.gear.connection, args).await;
+    }
     let endpoint = cli.gear.connection.get_endpoint().expect("Invalid URL");
     let gear_api = GearApi::builder()
         .suri(cli.gear.suri)
@@ -176,30 +208,13 @@ async fn main() -> AnyResult<()> {
         .context("Failed to initialize GearApi")?;
 
     match cli.command {
-        CliCommands::MigrateTransactions(args) => {
-            let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
-            let vft_manager_old = str_to_actorid(args.old_vft_manager)
-                .context("Unable to parse address of the old VftManager")?;
-            let vft_manager_new = str_to_actorid(args.new_vft_manager)
-                .context("Unable to parse address of the new VftManager")?;
-
-            let gas_limit = gear_api
-                .block_gas_limit()
-                .context("Unable to get block gas limit")?;
-            let remoting = GClientRemoting::new(gear_api);
-
-            gear_common::migrate_transactions(
-                gas_limit,
-                size_batch,
-                remoting.clone(),
-                vft_manager_old,
-                remoting,
-                vft_manager_new,
-            )
-            .await?;
+        CliCommands::PrepareCutover(args) => {
+            cutover::prepare(&cli.gear.connection, &gear_api, &args).await?
         }
-
-        CliCommands::DeployUpgraded(args) => deploy_upgraded(gear_api, args).await?,
+        CliCommands::FinalizeCutover(args) => {
+            cutover::finalize(&cli.gear.connection, &gear_api, &args).await?
+        }
+        CliCommands::VerifyCutover(_) => unreachable!("read-only command handled before signer"),
 
         CliCommands::ReadTransactions(args) => {
             let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
@@ -245,143 +260,6 @@ async fn main() -> AnyResult<()> {
 
         CliCommands::HexEncodedMessage(..) => {}
     }
-
-    Ok(())
-}
-
-async fn deploy_upgraded(gear_api: GearApi, args: DeployUpgraded) -> AnyResult<()> {
-    let DeployUpgraded {
-        size_batch,
-        ignore_non_empty_message_tracker,
-        vft_manager,
-    } = args;
-    let vft_manager_old = str_to_actorid(vft_manager)?;
-
-    let gas_limit = gear_api
-        .block_gas_limit()
-        .context("Unable to get block gas limit")?;
-    let remoting = GClientRemoting::new(gear_api.clone());
-    let mut service = vft_manager_client::VftManager::new(remoting.clone());
-    let is_paused = service
-        .is_paused()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    if !is_paused {
-        return Err(anyhow!("VftManager is running"));
-    }
-
-    let msg_tracker = service
-        .request_briding_msg_tracker_state(0, 1)
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    if !ignore_non_empty_message_tracker && !msg_tracker.is_empty() {
-        return Err(anyhow!("VftManager has non empty message tracker"));
-    }
-
-    let historical_proxy_address = service
-        .historical_proxy_address()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    let gear_bridge_builtin = service
-        .gear_bridge_builtin()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    let config = service
-        .get_config()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    let erc20_manager_address = service
-        .erc_20_manager_address()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    let vara_to_eth_addresses = service
-        .vara_to_eth_addresses()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    let admin_pause = service
-        .pause_admin()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    let admin = service
-        .admin()
-        .recv(vft_manager_old)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    let code_id = gear_api
-        .upload_code(WASM_BINARY)
-        .await
-        .map(|(code_id, ..)| code_id)
-        .unwrap_or_else(|err| {
-            log::debug!("Failed to upload code: {err}");
-            CodeId::generate(WASM_BINARY)
-        });
-
-    let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
-    let vft_manager_new = factory
-        .new(InitConfig {
-            gear_bridge_builtin,
-            historical_proxy_address,
-            config,
-        })
-        .with_gas_limit(gas_limit)
-        .send_recv(code_id, [])
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    let size_batch = size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
-    gear_common::migrate_transactions(
-        gas_limit,
-        size_batch,
-        remoting.clone(),
-        vft_manager_old,
-        remoting,
-        vft_manager_new,
-    )
-    .await?;
-
-    if let Some(erc20_manager_address) = erc20_manager_address {
-        service
-            .update_erc_20_manager_address(erc20_manager_address)
-            .with_gas_limit(gas_limit)
-            .send_recv(vft_manager_new)
-            .await
-            .map_err(|e| anyhow!("{e:?}"))?;
-    }
-
-    for (vara_token_id, eth_token_id, supply_type) in vara_to_eth_addresses {
-        service
-            .map_vara_to_eth_address(vara_token_id, eth_token_id, supply_type)
-            .with_gas_limit(gas_limit)
-            .send_recv(vft_manager_new)
-            .await
-            .map_err(|e| anyhow!("{e:?}"))?;
-    }
-
-    service
-        .set_pause_admin(admin_pause)
-        .with_gas_limit(gas_limit)
-        .send_recv(vft_manager_new)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    service
-        .set_admin(admin)
-        .with_gas_limit(gas_limit)
-        .send_recv(vft_manager_new)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-
-    log::info!("Address of the new VftManager: {vft_manager_new}");
 
     Ok(())
 }

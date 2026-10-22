@@ -16,6 +16,7 @@ deployment.toml
 
 .direnv/
 .worktrees/
+/.security-audit/
 
 # js
 node_modules/
@@ -33,3 +34,6 @@ js/**/*.log
 !.yarn/sdks
 !.yarn/versions
 js/bridge-js/js-test/contracts/broadcast/
+js/bridge-js/js-test/contracts/cache/
+js/bridge-js/js-test/contracts/out/
+__pycache__/

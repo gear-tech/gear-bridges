@@ -45,6 +45,7 @@ function useTransaction(id: string) {
     queryKey,
     queryFn: () => request(NETWORK_PRESET.INDEXER_ADDRESS, TRANSFER_QUERY, { id }),
     select: (data) => data.transferById,
+    refetchInterval: (query) => (query.state.data?.transferById?.completedAt ? false : 60000),
   });
 }
 

@@ -9,9 +9,43 @@ pub enum Network {
     Sepolia,
     Holesky,
     Hoodi,
+    LocalFixture {
+        genesis_time: u64,
+        genesis_validators_root: Hash256,
+    },
 }
 
 impl Network {
+    /// Consensus genesis timestamps (seconds), pinned independently of Beacon RPC.
+    pub const fn genesis_time(&self) -> u64 {
+        match self {
+            // eth-clients/mainnet@f6b7882618a5ad2c1d2731ae35e5d16a660d5bb7/metadata/genesis.ssz
+            Mainnet => 1_606_824_023,
+            // eth-clients/sepolia@b038b85c7db1cb4eb240dab6a2f0a6d61224848a/metadata/genesis.ssz
+            Sepolia => 1_655_733_600,
+            // eth-clients/holesky@874c199423ccd180607320c38cbaca05d9a1573a/metadata/genesis.ssz
+            Holesky => 1_695_902_400,
+            // eth-clients/hoodi@617ea32823e22ff78f66f8534abbb91cecd76962/metadata/genesis.ssz
+            Hoodi => 1_742_213_400,
+            LocalFixture { genesis_time, .. } => *genesis_time,
+        }
+    }
+
+    pub const fn epoch_deneb(&self) -> u64 {
+        match self {
+            Mainnet => 269_568,
+            Sepolia => 132_608,
+            Holesky => 29_696,
+            Hoodi => 0,
+            LocalFixture { .. } => 0,
+        }
+    }
+
+    pub fn current_slot(&self, timestamp_ms: u64) -> Option<u64> {
+        (timestamp_ms / 1_000)
+            .checked_sub(self.genesis_time())
+            .map(|elapsed| elapsed / SECONDS_PER_SLOT)
+    }
     pub fn genesis_validators_root(&self) -> Hash256 {
         match self {
             Mainnet => hex!("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
@@ -19,6 +53,10 @@ impl Network {
             Holesky => hex!("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
             // According to https://github.com/eth-clients/hoodi/blob/2b03cffba84b50759b3476a69334fac8412e217c/metadata/genesis_validators_root.txt
             Hoodi => hex!("212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f"),
+            LocalFixture {
+                genesis_validators_root,
+                ..
+            } => genesis_validators_root.0,
         }
         .into()
     }
@@ -95,6 +133,7 @@ impl Network {
 
                 hex!("50000910")
             }
+            LocalFixture { .. } => hex!("60003137"),
         }
     }
 
@@ -105,6 +144,7 @@ impl Network {
             Sepolia => 222_464,
             Holesky => 115_968,
             Hoodi => 2_048,
+            LocalFixture { .. } => 0,
         }
     }
 
@@ -121,6 +161,79 @@ impl Network {
 
             // https://github.com/eth-clients/hoodi/blob/21a110a60e6558a2ba7c819fa4b80029d49ab205/metadata/config.yaml#L43
             Hoodi => 50_688,
+            LocalFixture { .. } => u64::MAX,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixture_identity_is_explicit_and_preserves_public_network_encoding() {
+        for (index, network) in [Mainnet, Sepolia, Holesky, Hoodi].iter().enumerate() {
+            assert_eq!(network.encode(), [index as u8]);
+            assert_eq!(
+                Network::from_genesis_validators_root(network.genesis_validators_root().0)
+                    .unwrap()
+                    .encode(),
+                network.encode(),
+            );
+        }
+        let fixture = LocalFixture {
+            genesis_time: 1_800_000_000,
+            genesis_validators_root: Hash256::repeat_byte(1),
+        };
+        assert!(
+            Network::from_genesis_validators_root(fixture.genesis_validators_root().0).is_none()
+        );
+        let encoded = fixture.encode();
+        assert_eq!(encoded[0], 4);
+        assert_eq!(&encoded[1..9], &fixture.genesis_time().to_le_bytes());
+        assert_eq!(&encoded[9..], fixture.genesis_validators_root().as_bytes());
+        assert_eq!(
+            Network::decode(&mut &encoded[..]).unwrap().encode(),
+            encoded
+        );
+        assert_eq!(
+            fixture.current_slot(fixture.genesis_time() * 1_000 - 1),
+            None
+        );
+        assert_eq!(
+            fixture.current_slot(fixture.genesis_time() * 1_000 + 12_000),
+            Some(1)
+        );
+        assert_eq!(
+            (
+                fixture.epoch_deneb(),
+                fixture.epoch_electra(),
+                fixture.epoch_fulu()
+            ),
+            (0, 0, u64::MAX),
+        );
+        assert_eq!(crate::merkle::depth_index_current(&fixture, 0), (6, 22));
+        let domain = crate::signing_root::compute_domain(
+            DOMAIN_SYNC_COMMITTEE,
+            fixture.fork_version(8192),
+            fixture.genesis_validators_root(),
+        );
+        assert_eq!(fixture.fork_version(8192), hex!("60003137"));
+        assert_ne!(
+            domain,
+            crate::signing_root::compute_domain(
+                DOMAIN_SYNC_COMMITTEE,
+                Hoodi.fork_version(8192),
+                Hoodi.genesis_validators_root(),
+            )
+        );
+        assert_ne!(
+            domain,
+            crate::signing_root::compute_domain(
+                DOMAIN_SYNC_COMMITTEE,
+                fixture.fork_version(8192),
+                Hash256::repeat_byte(2),
+            )
+        );
     }
 }

@@ -27,10 +27,9 @@ function useVaraFee() {
 
   const vftManagerFee = coerce(vftManagerConfig.data?.fee_incoming);
   const bridgingFee = coerce(bridgingPaymentState.data?.fee);
-  const priorityFee = coerce(bridgingPaymentState.data?.priority_fee);
   const isLoading = vftManagerConfig.isPending || bridgingPaymentState.isPending;
 
-  return { bridgingFee, vftManagerFee, priorityFee, isLoading };
+  return { bridgingFee, vftManagerFee, isLoading };
 }
 
 export { useVaraFee };

@@ -1,13 +1,6 @@
-import { useSendEthTxs, useEthTxsEstimate, useEthFee, useRelayEthTx, useIsEthRelayAvailable } from './eth';
+import { useSendEthTxs, useEthTxsEstimate, useEthFee, useRelayEthTx } from './eth';
 import { useSwapForm } from './use-swap-form';
-import {
-  useVaraFee,
-  useSendVaraTxs,
-  useVaraTxsEstimate,
-  usePayVaraFee,
-  useRelayVaraTx,
-  useIsVaraRelayAvailable,
-} from './vara';
+import { useVaraFee, useSendVaraTxs, useVaraTxsEstimate, usePayVaraFee, useRelayVaraTx } from './vara';
 
 export {
   useSendEthTxs,
@@ -20,6 +13,4 @@ export {
   usePayVaraFee,
   useRelayVaraTx,
   useRelayEthTx,
-  useIsEthRelayAvailable,
-  useIsVaraRelayAvailable,
 };

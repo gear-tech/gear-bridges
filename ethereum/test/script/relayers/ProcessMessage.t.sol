@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {Test} from "forge-std/Test.sol";
 import {ProcessMessageScript} from "script/relayers/ProcessMessage.s.sol";
@@ -16,6 +16,7 @@ contract ProcessMessageScriptTest is Test, Base {
         bytes32 messageHash =
             keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
         bytes32 merkleRoot = keccak256(abi.encodePacked(bytes32(0), messageHash));
+        bytes memory rootProof = _rootProof(1, merkleRoot);
 
         // forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
@@ -31,7 +32,7 @@ contract ProcessMessageScriptTest is Test, Base {
         // forge-lint: disable-end(unsafe-cheatcode)
 
         vm.prank(address(this));
-        messageQueue.submitMerkleRoot(1, merkleRoot, "");
+        messageQueue.submitMerkleRoot(1, merkleRoot, rootProof);
         vm.warp(block.timestamp + 5 minutes);
 
         ProcessMessageScript relayingScript = new ProcessMessageScript();

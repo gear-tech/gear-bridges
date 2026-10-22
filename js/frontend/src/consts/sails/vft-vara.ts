@@ -1,38 +1,27 @@
 /* eslint-disable */
-
+import type { MessageId } from 'sails-js';
 import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import {
-  TransactionBuilder,
-  ActorId,
-  QueryBuilder,
-  getServiceNamePrefix,
-  getFnNamePrefix,
-  ZERO_ADDRESS,
-} from 'sails-js';
-
-/**
- * Specifies the network for deployment of VFT-VARA
- */
-export type Mainnet = 'Yes' | 'No';
+import { TransactionBuilder, ActorId, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS, H256 } from 'sails-js';
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
   public readonly vft: Vft;
+  public readonly vft2: Vft2;
   public readonly vftAdmin: VftAdmin;
   public readonly vftExtension: VftExtension;
   public readonly vftMetadata: VftMetadata;
   public readonly vftNativeExchange: VftNativeExchange;
   public readonly vftNativeExchangeAdmin: VftNativeExchangeAdmin;
-  private _program?: BaseGearProgram;
+  public readonly nativeEscrow: NativeEscrow;
+  private _program!: BaseGearProgram;
 
-  constructor(
-    public api: GearApi,
-    programId?: `0x${string}`,
-  ) {
+  constructor(public api: GearApi, programId?: `0x${string}`) {
     const types: Record<string, any> = {
-      Mainnet: { _enum: ['Yes', 'No'] },
-    };
+      Mainnet: {"_enum":["Yes","No"]},
+      Redemption: {"from":"[u8;32]","to":"[u8;32]","amount":"U256","child":"[u8;32]","status":"PayoutStatus","returned_value":"u128"},
+      PayoutStatus: {"_enum":["Queued","Delivered","Returned","Ambiguous","Refunded"]},
+    }
 
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
@@ -42,11 +31,13 @@ export class SailsProgram {
     }
 
     this.vft = new Vft(this);
+    this.vft2 = new Vft2(this);
     this.vftAdmin = new VftAdmin(this);
     this.vftExtension = new VftExtension(this);
     this.vftMetadata = new VftMetadata(this);
     this.vftNativeExchange = new VftNativeExchange(this);
     this.vftNativeExchangeAdmin = new VftNativeExchangeAdmin(this);
+    this.nativeEscrow = new NativeEscrow(this);
   }
 
   public get programId(): `0x${string}` {
@@ -65,9 +56,9 @@ export class SailsProgram {
       'Mainnet',
       'String',
       code,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -83,9 +74,9 @@ export class SailsProgram {
       'Mainnet',
       'String',
       codeId,
-      async (programId) => {
+      async (programId) =>  {
         this._program = await BaseGearProgram.new(programId, this.api);
-      },
+      }
     );
     return builder;
   }
@@ -165,6 +156,51 @@ export class Vft {
     );
   }
 
+  /**
+   * Returns the number of decimals of the VFT.
+  */
+  public decimals(): QueryBuilder<number> {
+    return new QueryBuilder<number>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft',
+      'Decimals',
+      null,
+      null,
+      'u8',
+    );
+  }
+
+  public name(): QueryBuilder<string> {
+    return new QueryBuilder<string>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft',
+      'Name',
+      null,
+      null,
+      'String',
+    );
+  }
+
+  /**
+   * Returns the symbol of the VFT.
+  */
+  public symbol(): QueryBuilder<string> {
+    return new QueryBuilder<string>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft',
+      'Symbol',
+      null,
+      null,
+      'String',
+    );
+  }
+
   public totalSupply(): QueryBuilder<bigint> {
     return new QueryBuilder<bigint>(
       this._program.api,
@@ -178,40 +214,142 @@ export class Vft {
     );
   }
 
-  public subscribeToApprovalEvent(
-    callback: (data: { owner: ActorId; spender: ActorId; value: number | string | bigint }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  public subscribeToApprovalEvent(callback: (data: { owner: ActorId; spender: ActorId; value: number | string | bigint }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'Vft' && getFnNamePrefix(payload) === 'Approval') {
-        callback(
-          this._program.registry
-            .createType('(String, String, {"owner":"[u8;32]","spender":"[u8;32]","value":"U256"})', message.payload)[2]
-            .toJSON() as unknown as { owner: ActorId; spender: ActorId; value: number | string | bigint },
-        );
+        callback(this._program.registry.createType('(String, String, {"owner":"[u8;32]","spender":"[u8;32]","value":"U256"})', message.payload)[2].toJSON() as unknown as { owner: ActorId; spender: ActorId; value: number | string | bigint });
       }
     });
   }
 
-  public subscribeToTransferEvent(
-    callback: (data: { from: ActorId; to: ActorId; value: number | string | bigint }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  public subscribeToTransferEvent(callback: (data: { from: ActorId; to: ActorId; value: number | string | bigint }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'Vft' && getFnNamePrefix(payload) === 'Transfer') {
-        callback(
-          this._program.registry
-            .createType('(String, String, {"from":"[u8;32]","to":"[u8;32]","value":"U256"})', message.payload)[2]
-            .toJSON() as unknown as { from: ActorId; to: ActorId; value: number | string | bigint },
-        );
+        callback(this._program.registry.createType('(String, String, {"from":"[u8;32]","to":"[u8;32]","value":"U256"})', message.payload)[2].toJSON() as unknown as { from: ActorId; to: ActorId; value: number | string | bigint });
+      }
+    });
+  }
+}
+
+export class Vft2 {
+  constructor(private _program: SailsProgram) {}
+
+  public approve(spender: ActorId, value: number | string | bigint): TransactionBuilder<boolean> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'Vft2',
+      'Approve',
+      [spender, value],
+      '([u8;32], U256)',
+      'bool',
+      this._program.programId,
+    );
+  }
+
+  public transfer(to: ActorId, value: number | string | bigint): TransactionBuilder<boolean> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'Vft2',
+      'Transfer',
+      [to, value],
+      '([u8;32], U256)',
+      'bool',
+      this._program.programId,
+    );
+  }
+
+  public transferFrom($from: ActorId, to: ActorId, value: number | string | bigint): TransactionBuilder<boolean> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'Vft2',
+      'TransferFrom',
+      [$from, to, value],
+      '([u8;32], [u8;32], U256)',
+      'bool',
+      this._program.programId,
+    );
+  }
+
+  public allowance(owner: ActorId, spender: ActorId): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft2',
+      'Allowance',
+      [owner, spender],
+      '([u8;32], [u8;32])',
+      'U256',
+    );
+  }
+
+  public balanceOf(account: ActorId): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft2',
+      'BalanceOf',
+      account,
+      '[u8;32]',
+      'U256',
+    );
+  }
+
+  public totalSupply(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'Vft2',
+      'TotalSupply',
+      null,
+      null,
+      'U256',
+    );
+  }
+
+  public subscribeToApprovalEvent(callback: (data: { owner: ActorId; spender: ActorId; value: number | string | bigint }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'Vft2' && getFnNamePrefix(payload) === 'Approval') {
+        callback(this._program.registry.createType('(String, String, {"owner":"[u8;32]","spender":"[u8;32]","value":"U256"})', message.payload)[2].toJSON() as unknown as { owner: ActorId; spender: ActorId; value: number | string | bigint });
+      }
+    });
+  }
+
+  public subscribeToTransferEvent(callback: (data: { from: ActorId; to: ActorId; value: number | string | bigint }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
+      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
+        return;
+      }
+
+      const payload = message.payload.toHex();
+      if (getServiceNamePrefix(payload) === 'Vft2' && getFnNamePrefix(payload) === 'Transfer') {
+        callback(this._program.registry.createType('(String, String, {"from":"[u8;32]","to":"[u8;32]","value":"U256"})', message.payload)[2].toJSON() as unknown as { from: ActorId; to: ActorId; value: number | string | bigint });
       }
     });
   }
@@ -219,6 +357,36 @@ export class Vft {
 
 export class VftAdmin {
   constructor(private _program: SailsProgram) {}
+
+  public exit(inheritor: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftAdmin',
+      'Exit',
+      inheritor,
+      '[u8;32]',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  public setMinimumBalance(value: number | string | bigint): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftAdmin',
+      'SetMinimumBalance',
+      value,
+      'U256',
+      'Null',
+      this._program.programId,
+    );
+  }
 
   public appendAllowancesShard(capacity: number): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
@@ -280,21 +448,6 @@ export class VftAdmin {
     );
   }
 
-  public exit(inheritor: ActorId): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'VftAdmin',
-      'Exit',
-      inheritor,
-      '[u8;32]',
-      'Null',
-      this._program.programId,
-    );
-  }
-
   public mint(to: ActorId, value: number | string | bigint): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
@@ -305,6 +458,21 @@ export class VftAdmin {
       'Mint',
       [to, value],
       '([u8;32], U256)',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  public mintList(list: Array<[ActorId, number | string | bigint]>): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'VftAdmin',
+      'MintList',
+      list,
+      'Vec<([u8;32], U256)>',
       'Null',
       this._program.programId,
     );
@@ -380,21 +548,6 @@ export class VftAdmin {
       'SetExpiryPeriod',
       period,
       'u32',
-      'Null',
-      this._program.programId,
-    );
-  }
-
-  public setMinimumBalance(value: number | string | bigint): TransactionBuilder<null> {
-    if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
-      this._program.api,
-      this._program.registry,
-      'send_message',
-      'VftAdmin',
-      'SetMinimumBalance',
-      value,
-      'U256',
       'Null',
       this._program.programId,
     );
@@ -496,75 +649,59 @@ export class VftAdmin {
   }
 
   public subscribeToAdminChangedEvent(callback: (data: ActorId) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftAdmin' && getFnNamePrefix(payload) === 'AdminChanged') {
-        callback(
-          this._program.registry
-            .createType('(String, String, [u8;32])', message.payload)[2]
-            .toJSON() as unknown as ActorId,
-        );
+        callback(this._program.registry.createType('(String, String, [u8;32])', message.payload)[2].toJSON() as unknown as ActorId);
       }
     });
   }
 
   public subscribeToBurnerChangedEvent(callback: (data: ActorId) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftAdmin' && getFnNamePrefix(payload) === 'BurnerChanged') {
-        callback(
-          this._program.registry
-            .createType('(String, String, [u8;32])', message.payload)[2]
-            .toJSON() as unknown as ActorId,
-        );
+        callback(this._program.registry.createType('(String, String, [u8;32])', message.payload)[2].toJSON() as unknown as ActorId);
       }
     });
   }
 
   public subscribeToMinterChangedEvent(callback: (data: ActorId) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftAdmin' && getFnNamePrefix(payload) === 'MinterChanged') {
-        callback(
-          this._program.registry
-            .createType('(String, String, [u8;32])', message.payload)[2]
-            .toJSON() as unknown as ActorId,
-        );
+        callback(this._program.registry.createType('(String, String, [u8;32])', message.payload)[2].toJSON() as unknown as ActorId);
       }
     });
   }
 
   public subscribeToPauserChangedEvent(callback: (data: ActorId) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftAdmin' && getFnNamePrefix(payload) === 'PauserChanged') {
-        callback(
-          this._program.registry
-            .createType('(String, String, [u8;32])', message.payload)[2]
-            .toJSON() as unknown as ActorId,
-        );
+        callback(this._program.registry.createType('(String, String, [u8;32])', message.payload)[2].toJSON() as unknown as ActorId);
       }
     });
   }
 
   public subscribeToBurnerTookPlaceEvent(callback: (data: null) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
@@ -577,7 +714,7 @@ export class VftAdmin {
   }
 
   public subscribeToMinterTookPlaceEvent(callback: (data: null) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
@@ -590,58 +727,46 @@ export class VftAdmin {
   }
 
   public subscribeToExpiryPeriodChangedEvent(callback: (data: number) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftAdmin' && getFnNamePrefix(payload) === 'ExpiryPeriodChanged') {
-        callback(
-          this._program.registry
-            .createType('(String, String, u32)', message.payload)[2]
-            .toNumber() as unknown as number,
-        );
+        callback(this._program.registry.createType('(String, String, u32)', message.payload)[2].toNumber() as unknown as number);
       }
     });
   }
 
   public subscribeToMinimumBalanceChangedEvent(callback: (data: bigint) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftAdmin' && getFnNamePrefix(payload) === 'MinimumBalanceChanged') {
-        callback(
-          this._program.registry
-            .createType('(String, String, U256)', message.payload)[2]
-            .toBigInt() as unknown as bigint,
-        );
+        callback(this._program.registry.createType('(String, String, U256)', message.payload)[2].toBigInt() as unknown as bigint);
       }
     });
   }
 
   public subscribeToExitedEvent(callback: (data: ActorId) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftAdmin' && getFnNamePrefix(payload) === 'Exited') {
-        callback(
-          this._program.registry
-            .createType('(String, String, [u8;32])', message.payload)[2]
-            .toJSON() as unknown as ActorId,
-        );
+        callback(this._program.registry.createType('(String, String, [u8;32])', message.payload)[2].toJSON() as unknown as ActorId);
       }
     });
   }
 
   public subscribeToPausedEvent(callback: (data: null) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
@@ -654,7 +779,7 @@ export class VftAdmin {
   }
 
   public subscribeToResumedEvent(callback: (data: null) => void | Promise<void>): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
@@ -758,10 +883,7 @@ export class VftExtension {
     );
   }
 
-  public allowances(
-    cursor: number,
-    len: number,
-  ): QueryBuilder<Array<[[ActorId, ActorId], [number | string | bigint, number]]>> {
+  public allowances(cursor: number, len: number): QueryBuilder<Array<[[ActorId, ActorId], [number | string | bigint, number]]>> {
     return new QueryBuilder<Array<[[ActorId, ActorId], [number | string | bigint, number]]>>(
       this._program.api,
       this._program.registry,
@@ -845,7 +967,7 @@ export class VftMetadata {
 
   /**
    * Returns the number of decimals of the VFT.
-   */
+  */
   public decimals(): QueryBuilder<number> {
     return new QueryBuilder<number>(
       this._program.api,
@@ -861,7 +983,7 @@ export class VftMetadata {
 
   /**
    * Returns the name of the VFT.
-   */
+  */
   public name(): QueryBuilder<string> {
     return new QueryBuilder<string>(
       this._program.api,
@@ -877,7 +999,7 @@ export class VftMetadata {
 
   /**
    * Returns the symbol of the VFT.
-   */
+  */
   public symbol(): QueryBuilder<string> {
     return new QueryBuilder<string>(
       this._program.api,
@@ -895,9 +1017,9 @@ export class VftMetadata {
 export class VftNativeExchange {
   constructor(private _program: SailsProgram) {}
 
-  public burn(value: number | string | bigint): TransactionBuilder<null> {
+  public burn(value: number | string | bigint): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
+    return new TransactionBuilder<boolean>(
       this._program.api,
       this._program.registry,
       'send_message',
@@ -905,14 +1027,14 @@ export class VftNativeExchange {
       'Burn',
       value,
       'U256',
-      'Null',
+      'bool',
       this._program.programId,
     );
   }
 
-  public burnAll(): TransactionBuilder<null> {
+  public burnAll(): TransactionBuilder<boolean> {
     if (!this._program.programId) throw new Error('Program ID is not set');
-    return new TransactionBuilder<null>(
+    return new TransactionBuilder<boolean>(
       this._program.api,
       this._program.registry,
       'send_message',
@@ -920,7 +1042,7 @@ export class VftNativeExchange {
       'BurnAll',
       null,
       null,
-      'Null',
+      'bool',
       this._program.programId,
     );
   }
@@ -959,22 +1081,158 @@ export class VftNativeExchangeAdmin {
     );
   }
 
-  public subscribeToFailedMintEvent(
-    callback: (data: { to: ActorId; value: number | string | bigint }) => void | Promise<void>,
-  ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+  public subscribeToFailedMintEvent(callback: (data: { to: ActorId; value: number | string | bigint }) => void | Promise<void>): Promise<() => void> {
+    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {;
       if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
         return;
       }
 
       const payload = message.payload.toHex();
       if (getServiceNamePrefix(payload) === 'VftNativeExchangeAdmin' && getFnNamePrefix(payload) === 'FailedMint') {
-        callback(
-          this._program.registry
-            .createType('(String, String, {"to":"[u8;32]","value":"U256"})', message.payload)[2]
-            .toJSON() as unknown as { to: ActorId; value: number | string | bigint },
-        );
+        callback(this._program.registry.createType('(String, String, {"to":"[u8;32]","value":"U256"})', message.payload)[2].toJSON() as unknown as { to: ActorId; value: number | string | bigint });
       }
     });
   }
 }
+
+export class NativeEscrow {
+  constructor(private _program: SailsProgram) {}
+
+  public configureManager(manager: ActorId): TransactionBuilder<null> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<null>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'NativeEscrow',
+      'ConfigureManager',
+      manager,
+      '[u8;32]',
+      'Null',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Assume the original liability without credit, redispatch or settlement.
+  */
+  public holdRedemption(operation_id: H256, expected: Redemption, acknowledge_irreversible_hold: boolean): TransactionBuilder<Redemption> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<Redemption>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'NativeEscrow',
+      'HoldRedemption',
+      [operation_id, expected, acknowledge_irreversible_hold],
+      '(H256, Redemption, bool)',
+      'Redemption',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * This acknowledgement proves only enqueueing. Settlement requires the original
+   * payout reply; a user mailbox entry is still an outstanding native obligation.
+  */
+  public redeemEscrow(operation_id: H256, $from: ActorId, to: ActorId, amount: number | string | bigint): TransactionBuilder<Redemption> {
+    if (!this._program.programId) throw new Error('Program ID is not set');
+    return new TransactionBuilder<Redemption>(
+      this._program.api,
+      this._program.registry,
+      'send_message',
+      'NativeEscrow',
+      'RedeemEscrow',
+      [operation_id, $from, to, amount],
+      '(H256, [u8;32], [u8;32], U256)',
+      'Redemption',
+      this._program.programId,
+    );
+  }
+
+  /**
+   * Financial obligations remain outstanding even when explicitly held for handoff.
+  */
+  public blockingRedemptions(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'BlockingRedemptions',
+      null,
+      null,
+      'u64',
+    );
+  }
+
+  public heldRedemption(operation_id: H256): QueryBuilder<Redemption | null> {
+    return new QueryBuilder<Redemption | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'HeldRedemption',
+      operation_id,
+      'H256',
+      'Option<Redemption>',
+    );
+  }
+
+  public manager(): QueryBuilder<ActorId | null> {
+    return new QueryBuilder<ActorId | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'Manager',
+      null,
+      null,
+      'Option<[u8;32]>',
+    );
+  }
+
+  public outstandingRedemptions(): QueryBuilder<bigint> {
+    return new QueryBuilder<bigint>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'OutstandingRedemptions',
+      null,
+      null,
+      'u64',
+    );
+  }
+
+  public redemption(operation_id: H256): QueryBuilder<Redemption | null> {
+    return new QueryBuilder<Redemption | null>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'NativeEscrow',
+      'Redemption',
+      operation_id,
+      'H256',
+      'Option<Redemption>',
+    );
+  }
+}
+/**
+ * Specifies the network for deployment of VFT-VARA
+*/
+export type Mainnet = "Yes" | "No";
+
+export interface Redemption {
+  from: ActorId;
+  to: ActorId;
+  amount: number | string | bigint;
+  child: MessageId;
+  status: PayoutStatus;
+  /**
+   * Native value actually returned by the original payout child.
+  */
+  returned_value: number | string | bigint;
+}
+
+export type PayoutStatus = "Queued" | "Delivered" | "Returned" | "Ambiguous" | "Refunded";

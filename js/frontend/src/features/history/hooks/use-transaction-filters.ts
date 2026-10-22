@@ -16,7 +16,7 @@ import { useAccountsFilter } from './use-accounts-filter';
 const SCHEMA = z.object({
   [FIELD_NAME.TIMESTAMP]: z.string(),
   [FIELD_NAME.STATUS]: asOptionalField(
-    z.enum([Status.Completed, Status.Failed, Status.AwaitingPayment, Status.Bridging]),
+    z.enum([Status.Completed, Status.Failed, Status.AwaitingPayment, Status.Bridging, Status.Refunded]),
   ),
   [FIELD_NAME.ASSET]: z.string(),
 

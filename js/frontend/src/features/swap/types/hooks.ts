@@ -16,14 +16,11 @@ type UseFee = () => {
   bridgingFee: bigint | undefined;
   isLoading: boolean;
   vftManagerFee?: bigint | undefined;
-  priorityFee?: bigint | undefined;
 };
 
 type UseSendTxs = (params: {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
-  priorityFee: bigint | undefined;
-  shouldPayPriorityFee: boolean;
   vftManagerFee: bigint | undefined;
   ftBalance: bigint | undefined;
   onTransactionStart: (values: FormattedValues) => void;
@@ -38,8 +35,6 @@ type UseTxsEstimate = (params: {
   formValues: FormattedValues | undefined;
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
-  priorityFee: bigint | undefined;
-  shouldPayPriorityFee: boolean;
   vftManagerFee: bigint | undefined;
   ftBalance: bigint | undefined;
 }) => {

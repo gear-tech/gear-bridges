@@ -34,6 +34,11 @@ impl<'a> State<'a> {
 #[sails_rs::service]
 impl<'a> State<'a> {
     #[export]
+    pub fn network(&self) -> ethereum_common::network::Network {
+        self.state.borrow().network.clone()
+    }
+
+    #[export]
     pub fn get(&self, order: Order, index_start: u32, count: u32) -> StateData {
         fn collect<'a, T: 'a + Copy>(
             index_start: u32,

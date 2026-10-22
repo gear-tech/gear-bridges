@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.37;
+pragma solidity ^0.8.38;
 
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
@@ -30,6 +30,11 @@ interface IERC20Manager is IPausable, IMessageHandler {
     error InvalidAmount();
 
     /**
+     * @dev Error thrown when governance has no wrapped native token configured.
+     */
+    error InvalidWrappedVara();
+
+    /**
      * @dev Error thrown when the token type is invalid (`TokenType.Unknown`).
      */
     error InvalidTokenType();
@@ -38,6 +43,11 @@ interface IERC20Manager is IPausable, IMessageHandler {
      * @dev Error thrown when the bridging payment is invalid (not created by `ERC20Manager`).
      */
     error InvalidBridgingPayment();
+
+    /**
+     * @dev Error thrown when the destination is zero.
+     */
+    error InvalidRecipient();
 
     /**
      * @dev Event emitted when bridging request is made.

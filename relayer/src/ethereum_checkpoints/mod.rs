@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result as AnyResult};
+use anyhow::{anyhow, ensure, Context, Result as AnyResult};
 use futures::{
     future::{self, Either},
     pin_mut,
@@ -17,7 +17,7 @@ use checkpoint_light_client_io::{
 };
 use ethereum_beacon_client::{slots_batch::Iter as SlotsBatchIter, BeaconClient};
 use ethereum_common::{utils as eth_utils, MAX_REQUEST_LIGHT_CLIENT_UPDATES};
-use sails_rs::{calls::*, gclient::calls::*};
+use sails_rs::calls::ActionIo;
 use utils_prometheus::MeteredService;
 
 mod metrics;
@@ -26,7 +26,6 @@ mod sync_update;
 
 const SIZE_CHANNEL: usize = 100_000;
 const COUNT_FAILURE: usize = 3;
-const DELAY_SECS_UPDATE_REQUEST: u64 = 30;
 
 struct SyncUpdate {
     sync_update: SyncCommitteeUpdate,
@@ -66,7 +65,7 @@ impl Relayer {
         }
     }
 
-    pub async fn run(self) {
+    pub async fn run(self) -> AnyResult<()> {
         log::info!("Started");
 
         let mut signal_interrupt =
@@ -85,56 +84,7 @@ impl Relayer {
         let gas_limit = gas_limit_block / 100 * 95;
         log::info!("Gas limit for extrinsics: {gas_limit}");
 
-        let SyncUpdate {
-            sync_update,
-            sync_aggregate_encoded,
-        } = receiver
-            .recv()
-            .await
-            .expect("Updates receiver should be open before the loop");
-
-        let mut slot_last = sync_update.finalized_header.slot;
-        let remoting = GClientRemoting::new(self.gear_api.clone());
-
-        match sync_update::try_to_apply(
-            &remoting,
-            self.program_id.0,
-            sync_update.clone(),
-            sync_aggregate_encoded.clone(),
-            gas_limit,
-        )
-        .await
-        {
-            Err(e) => {
-                log::error!("{e:?}");
-                return;
-            }
-            Ok(Err(Error::ReplayBackRequired {
-                replay_back,
-                checkpoint,
-            })) => {
-                if let Err(e) = replay_back::execute(replay_back::Args {
-                    beacon_client: &self.beacon_client,
-                    remoting: &remoting,
-                    program_id: self.program_id.0,
-                    gas_limit,
-                    replay_back,
-                    checkpoint,
-                    sync_update,
-                    size_batch: self.size_batch,
-                    sync_aggregate_encoded,
-                })
-                .await
-                {
-                    log::error!("{e:?}. Exiting");
-                    return;
-                }
-            }
-            Ok(Ok(_) | Err(Error::NotActual)) => (),
-            _ => {
-                slot_last = 0;
-            }
-        }
+        let mut slot_last = 0;
 
         update_total_balance(&self.gear_api, &self.metrics).await;
 
@@ -151,13 +101,12 @@ impl Relayer {
             } = match future::select(future_interrupt, future_update).await {
                 Either::Left((_interrupted, _)) => {
                     log::info!("Caught SIGINT. Exiting");
-                    return;
+                    return Ok(());
                 }
 
                 Either::Right((Some(sync_update), _)) => sync_update,
                 Either::Right((None, _)) => {
-                    log::info!("Updates receiver has been closed. Exiting");
-                    return;
+                    return Err(anyhow!("Checkpoint update receiver closed unexpectedly"));
                 }
             };
             let slot = sync_update.finalized_header.slot;
@@ -171,20 +120,41 @@ impl Relayer {
                 self.metrics.total_fetched_finality_updates.inc();
             }
 
-            if slot == slot_last {
+            if slot <= slot_last {
                 continue;
             }
 
-            match sync_update::try_to_apply(
-                &remoting,
+            let result = sync_update::try_to_apply(
+                &self.gear_api,
                 self.program_id.0,
-                sync_update,
-                sync_aggregate_encoded,
+                sync_update.clone(),
+                sync_aggregate_encoded.clone(),
                 gas_limit,
             )
-            .await
-            {
-                Ok(Ok(_)) => {
+            .await?;
+            let result = match result {
+                Err(Error::ReplayBackRequired {
+                    replay_back,
+                    checkpoint,
+                }) => {
+                    replay_back::execute(replay_back::Args {
+                        beacon_client: &self.beacon_client,
+                        gear_api: &self.gear_api,
+                        program_id: self.program_id.0,
+                        gas_limit,
+                        replay_back,
+                        checkpoint,
+                        sync_update,
+                        size_batch: self.size_batch,
+                        sync_aggregate_encoded,
+                    })
+                    .await?;
+                    Ok(())
+                }
+                result => result,
+            };
+            match result {
+                Ok(()) => {
                     slot_last = slot;
 
                     if committee_update {
@@ -193,25 +163,122 @@ impl Relayer {
                         self.metrics.processed_finality_updates.inc();
                     }
                 }
-                Ok(Err(Error::ReplayBackRequired { .. })) => {
-                    log::error!("Replay back within the main loop. Exiting");
-                    return;
+                Err(Error::StateChanged) => {
+                    log::info!(
+                        "Checkpoint state changed during verification; retrying fresh updates"
+                    );
                 }
-                Ok(Err(e)) => {
+                Err(e) => {
                     log::error!("The program failed with: {e:?}. Skipping");
                     if let Error::NotActual = e {
                         slot_last = slot;
                     }
-                }
-                Err(e) => {
-                    log::error!("{e:?}");
-                    return;
                 }
             }
 
             update_total_balance(&self.gear_api, &self.metrics).await;
         }
     }
+}
+
+async fn send_checkpoint_message(
+    api: &GearApi,
+    program_id: [u8; 32],
+    payload: Vec<u8>,
+    gas_limit: u64,
+) -> AnyResult<Vec<u8>> {
+    use gsdk::gear::{self, runtime_types::gear_common::event::MessageEntry};
+
+    let signer: gsdk::signer::Signer = api.clone().into();
+    let sender: &[u8] = signer.account_id().as_ref();
+    let target = gear_core::ids::ActorId::from(program_id);
+    let tx = signer
+        .process(
+            gear::tx()
+                .gear()
+                .send_message(target, payload, gas_limit, 0, false),
+        )
+        .await?;
+    let original_hash = tx.extrinsic_hash();
+    let result = async {
+    let included_hash = tx.block_hash();
+    let included_number = api.block_number_at(included_hash).await?;
+    let mut queued = None;
+    let mut success = false;
+    for event in tx.fetch_events().await?.iter() {
+        let event = event?;
+        if let Some(error) = gear_rpc_client::extrinsic_failure(&event)? {
+            anyhow::bail!("Original checkpoint {original_hash:#x} failed dispatch: {error}");
+        }
+        if event.pallet_name() == "System" && event.variant_name() == "ExtrinsicSuccess" {
+            ensure!(!success, "Duplicate checkpoint dispatch success; HOLD");
+            success = true;
+        }
+        if let Some(message) = event.as_event::<gear::gear::events::MessageQueued>()? {
+            ensure!(
+                queued.is_none()
+                    && message.source.0.as_slice() == sender
+                    && message.destination == target
+                    && message.entry == MessageEntry::Handle,
+                "Original checkpoint {original_hash:#x} queued identity changed; HOLD"
+            );
+            queued = Some(message.id);
+        }
+    }
+    ensure!(success, "Original checkpoint {original_hash:#x} lacks successful dispatch; HOLD");
+    let id = queued.ok_or_else(|| anyhow!("Original checkpoint {original_hash:#x} lacks queued message; HOLD"))?;
+    log::info!("Checkpoint original {original_hash:#x} finalized at {included_hash:#x}, message {id:?}");
+
+
+        let chain = gear_rpc_client::GearApi::from(signer.api().clone());
+        let mut next = included_number;
+        let mut previous = (included_number, included_hash);
+        loop {
+            let finalized_hash = api.last_block_hash().await?;
+            let finalized_number = api.block_number_at(finalized_hash).await?;
+            ensure!(
+                finalized_number >= previous.0
+                    && api.get_block_hash(previous.0).await? == previous.1
+                    && api.get_block_hash(included_number).await? == included_hash,
+                "Checkpoint finalized history changed; HOLD"
+            );
+            if let Some(found) = gear_rpc_client::observation::find_reply(
+                &chain,
+                next..=finalized_number,
+                id.into_bytes().into(),
+                |_, _| {},
+            )
+            .await?
+            {
+                let number = found.number;
+                let block_hash = found.block_hash;
+                let message = found.event.message;
+                let details = message.details().expect("discovered reply has details");
+                ensure!(
+                    message.source() == target && message.destination().as_ref() == sender,
+                    "Original checkpoint reply actor or recipient changed; HOLD"
+                );
+                ensure!(
+                    api.get_block_hash(number).await? == block_hash
+                        && api.get_block_hash(finalized_number).await? == finalized_hash,
+                    "Original checkpoint reply finalized pin changed; HOLD"
+                );
+                ensure!(details.to_reply_code().is_success(),
+                    "Original checkpoint terminal reply failed: {:?}, payload=0x{}; HOLD",
+                    details.to_reply_code(), hex::encode(message.payload_bytes()));
+                log::info!("Checkpoint original {original_hash:#x} reply finalized at {block_hash:#x}");
+                return Ok(message.payload_bytes().to_vec());
+            }
+            ensure!(api.get_block_hash(finalized_number).await? == finalized_hash,
+                "Checkpoint finality changed while waiting for original reply; HOLD");
+            previous = (finalized_number, finalized_hash);
+            next = finalized_number.checked_add(1).ok_or_else(|| anyhow!("Checkpoint source height overflow; HOLD"))?;
+            time::sleep(Duration::from_secs(3)).await;
+        }
+    }.await;
+    result.with_context(|| {
+        format!("Original checkpoint {original_hash:#x}; HOLD/reconcile before retry")
+    })
 }
 
 async fn update_total_balance(client: &GearApi, update_metrics: &metrics::Updates) {

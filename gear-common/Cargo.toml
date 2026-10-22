@@ -8,8 +8,13 @@ anyhow.workspace = true
 gclient.workspace = true
 gear-rpc-client.workspace = true
 gsdk.workspace = true
+hex = { workspace = true, features = ["std"] }
+libc.workspace = true
 log.workspace = true
+primitive-types = { workspace = true, features = ["std", "serde"] }
 sails-rs = { workspace = true, features = ["gclient"] }
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 vft-client.workspace = true
 vft-manager-client.workspace = true

@@ -2643,19 +2643,13 @@ dependencies = [
 name = "checkpoint-light-client-app"
 version = "1.2.0"
 dependencies = [
- "ark-bls12-381",
- "ark-ec",
- "ark-scale",
- "ark-serialize 0.4.2",
  "checkpoint-light-client-io",
  "circular-buffer",
  "ethereum-common",
- "gbuiltin-bls381",
  "getrandom 0.2.16",
  "hex-literal",
  "lazy_static",
  "sails-rs",
- "tree_hash_derive",
 ]
 
 [[package]]
@@ -2676,9 +2670,12 @@ name = "checkpoint-light-client-io"
 version = "1.2.0"
 dependencies = [
  "ark-bls12-381",
+ "ark-ec",
+ "ark-ff 0.4.2",
  "ark-scale",
  "ark-serialize 0.4.2",
  "ethereum-common",
+ "gbuiltin-bls381",
  "sails-rs",
 ]
 
@@ -4128,9 +4125,14 @@ dependencies = [
  "ahash 0.7.8",
  "alloy",
  "anyhow",
+ "builtins-common",
+ "checkpoint-light-client-io",
  "ethereum-common",
+ "ethereum_beacon_client",
+ "gear-common 1.2.0",
  "keccak-hash 0.10.0",
  "log",
+ "parity-scale-codec",
  "primitive-types 0.13.1",
  "reqwest 0.11.27",
  "serde",
@@ -4884,6 +4886,7 @@ version = "1.2.0"
 dependencies = [
  "anyhow",
  "gclient",
+ "gear-core",
  "gear-rpc-client",
  "gsdk",
  "hex",
@@ -4893,6 +4896,7 @@ dependencies = [
  "sails-rs",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "vft-client",
  "vft-manager-client",
@@ -9931,6 +9935,7 @@ dependencies = [
  "sails-rs",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sp-consensus-grandpa",
  "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
  "subxt",
@@ -9940,6 +9945,7 @@ dependencies = [
  "url",
  "utils-prometheus",
  "uuid",
+ "vft-client",
  "vft-manager-client",
  "vft-vara-client",
  "zeroize",
@@ -13577,6 +13583,7 @@ dependencies = [
  "sp-core 34.0.0 (git+https://github.com/gear-tech/polkadot-sdk.git?branch=gear-polkadot-stable2409-wasm32v1-none)",
  "sp-runtime 39.0.1",
  "tokio",
+ "uuid",
  "vft",
  "vft-client",
  "vft-manager",
@@ -13584,6 +13591,8 @@ dependencies = [
  "vft-manager-client",
  "vft-vara",
  "vft-vara-client",
+ "vft-vara-v1",
+ "vft-vara-v1-client",
 ]
 
 [[package]]
@@ -14535,6 +14544,7 @@ dependencies = [
 name = "vft-manager"
 version = "1.2.0"
 dependencies = [
+ "gear-wasm-builder",
  "sails-idl-gen",
  "sails-rs",
  "vft-manager-app",
@@ -14599,6 +14609,7 @@ dependencies = [
  "sails-rs",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "subxt",
  "tokio",
  "uuid",
@@ -14658,6 +14669,35 @@ dependencies = [
  "sails-idl-gen",
  "sails-rs",
  "vft-vara-app",
+]
+
+[[package]]
+name = "vft-vara-v1"
+version = "1.2.0"
+dependencies = [
+ "sails-idl-gen",
+ "sails-rs",
+ "vft-vara-v1-app",
+]
+
+[[package]]
+name = "vft-vara-v1-app"
+version = "1.2.0"
+dependencies = [
+ "awesome-sails-services",
+ "sails-rs",
+ "vft-common",
+]
+
+[[package]]
+name = "vft-vara-v1-client"
+version = "1.2.0"
+dependencies = [
+ "mockall 0.12.1",
+ "sails-client-gen",
+ "sails-idl-gen",
+ "sails-rs",
+ "vft-vara-v1-app",
 ]
 
 [[package]]

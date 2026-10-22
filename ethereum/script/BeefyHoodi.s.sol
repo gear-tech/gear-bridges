@@ -2,12 +2,13 @@
 pragma solidity ^0.8.37;
 
 import {Script} from "forge-std/Script.sol";
-import {Base, DeploymentArguments} from "test/Base.sol";
+import {DeploymentBase, DeploymentArguments} from "script/DeploymentBase.sol";
+import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 
 /**
  * @dev Isolated, message-only BEEFY deployment for Hoodi.
  */
-contract BeefyHoodi is Script, Base {
+contract BeefyHoodi is Script, DeploymentBase {
     uint256 internal constant HOODI_CHAIN_ID = 560048;
 
     function run()
@@ -34,9 +35,14 @@ contract BeefyHoodi is Script, Base {
             bridgingPaymentFee: 0
         });
         _validateDeploymentArguments(args);
+        deploymentArguments = args;
         address predictedQueue = _predictBeefyMessageQueue(deployer, args.overrides);
-        _deployBeefyClient(privateKey, predictedQueue);
+        _deployBeefyClient(privateKey, predictedQueue, _loadBeefyBootstrap(predictedQueue));
         deployBridge(args);
-        return (address(beefyClient), address(verifier), address(messageQueue), address(messageHandlerMock));
+        // Explicit test-chain receiver, not part of production bridge deployment.
+        vm.startBroadcast(privateKey);
+        MessageHandlerMock receiver = new MessageHandlerMock();
+        vm.stopBroadcast();
+        return (address(beefyClient), address(verifier), address(messageQueue), address(receiver));
     }
 }

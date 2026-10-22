@@ -9,11 +9,11 @@ import { useAccount } from '@gear-js/react-hooks';
 import { useMutation } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
 
-import { SailsProgram as NativeProgram } from '@/consts/sails/vft-vara';
 import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 import { SailsProgram, IDL_SHA256 } from '../../consts/sails/vft-manager';
+import { createNativeRedemptionReader } from '../../native-redemption';
 import { useHistoricalProxyContractAddress, useInitArchiveApi } from '../vara';
 
 type Params = {
@@ -50,9 +50,7 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
       archiveApi = await initArchiveApi();
 
       const manager = new SailsProgram(archiveApi, profile.consumer.programId);
-      const nativeWrapper = profile.nativeWrapper
-        ? new NativeProgram(archiveApi, profile.nativeWrapper.programId)
-        : undefined;
+      const readRedemption = createNativeRedemptionReader(archiveApi, profile);
       const result = await relayEthToVara({
         transactionHash: txHash,
         beaconRpcUrl: NETWORK_PRESET.ETH_BEACON_NODE_ADDRESS,
@@ -66,7 +64,7 @@ function useRelayEthTx(txHash: HexString, expectedEffect: InboundTokenEffect) {
           expectedEffect,
           readDeposits: (pin, proof) =>
             manager.vftManager.receiptDeposits(proof.proofBlock.block.slot, proof.transactionIndex).atBlock(pin).call(),
-          readRedemption: (operationId, pin) => nativeWrapper!.nativeEscrow.redemption(operationId).atBlock(pin).call(),
+          readRedemption,
           readReceiptStatus: (pin, proof) =>
             manager.vftManager.receiptStatus(proof.proofBlock.block.slot, proof.transactionIndex).atBlock(pin).call(),
         }),

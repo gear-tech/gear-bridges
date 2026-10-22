@@ -33,6 +33,7 @@ pub async fn relay(
     governance_admin: ActorId,
     governance_pauser: ActorId,
     storage_path: &Path,
+    lane_approvals: crate::lane_policy::LaneApprovals,
 ) -> anyhow::Result<()> {
     let (destination_chain_id, destination_genesis) = eth_api.finality_identity()?;
     let storage = Arc::new(JSONStorage::new(storage_path));
@@ -55,7 +56,8 @@ pub async fn relay(
             && storage.event_cursor(GearEventStream::Paid).await?.is_none(),
         "HOLD: manual relay requires its own journal, not an automatic worker journal"
     );
-    let tx_manager = TransactionManager::new(storage.clone());
+    let tx_manager = TransactionManager::new(storage.clone())
+        .with_lane_approvals(eth_api.clone(), lane_approvals);
     tx_manager.load_from_storage().await?;
     eth_api
         .enable_finality_archive(&storage_path.join("ethereum-finality"), destination_genesis)

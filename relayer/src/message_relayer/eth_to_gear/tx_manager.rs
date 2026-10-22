@@ -339,7 +339,9 @@ impl TransactionManager {
                     self.preparing_submissions.write().await.insert(tx_uuid);
                     *self.last_submission.write().await = Some(tx_uuid);
                     self.storage.save(self).await?;
-                    if !message_sender.prepare_message(tx_uuid, tx.tx.tx_hash, event) {
+                    let retry_original = tx.receipt.as_ref().and_then(|receipt|
+                        receipt.submission_attempts.last()).map(|attempt| attempt.signed_submission.clone());
+                    if !message_sender.prepare_message(tx_uuid, tx.tx.tx_hash, event, retry_original) {
                         log::info!("Message sender connection closed, exiting...");
                         return Ok(false);
                     }
@@ -598,6 +600,9 @@ impl TransactionManager {
                         .is_none_or(|reply| signed.finalized_reply.as_ref() == Some(reply)),
                     "Original finalized proof reply identity changed for {tx_uuid}"
                 );
+                anyhow::ensure!(previous.native_retry_qualification.as_ref().is_none_or(|pin|
+                    signed.native_retry_qualification.as_ref() == Some(pin)),
+                    "Original native retry qualification pin changed for {tx_uuid}");
                 anyhow::ensure!(
                     signed.preserves_reconciliation(previous),
                     "Original reconciliation history/bytes/reply changed for {tx_uuid}"
@@ -634,6 +639,26 @@ impl TransactionManager {
                 original.validate_settlement_order(pin)?;
                 anyhow::ensure!(tx.saved_settlement_observation.as_ref().is_none_or(|saved| saved == pin),
                     "HOLD: saved completion was queried at a different settlement pin");
+            }
+        }
+        if let MessageStatus::RetryableNoop { receipt_observation, .. } = &status {
+            let qualified = receipt.signed_submission.as_ref().is_some_and(|signed| {
+                (signed.inclusion_block_number.is_some()
+                    && signed.inclusion_block_hash.is_some()
+                    && signed.message_id.is_none()
+                    && signed.finalized_dispatch_error.is_some())
+                || (signed.has_finalized_dispatch_reply()
+                    && signed.native_retry_qualification.as_ref().is_some_and(|pin|
+                        pin.finalized_block_number.is_some()
+                            && receipt_observation.as_ref() == Some(pin)
+                            && signed.validate_settlement_order(pin).is_ok()))
+            });
+            if !qualified {
+                status = MessageStatus::NeedsReconciliation {
+                    receipt_key,
+                    diagnostic: "Retry omitted exact finalized dispatch failure or pinned native original qualification".into(),
+                    receipt_observation: receipt_observation.clone(),
+                };
             }
         }
         let mut tx = transactions
@@ -740,6 +765,10 @@ impl TransactionManager {
 }
 
 #[cfg(test)]
+#[path = "native_retry_fixture.rs"]
+mod native_retry_fixture;
+
+#[cfg(test)]
 pub(super) mod tests {
     use super::{super::storage::tests::runtime_identity, *};
     use crate::message_relayer::common::EthereumSlotNumber;
@@ -755,6 +784,8 @@ pub(super) mod tests {
             native_reconciliation_attempts: Vec::new(),
             finalized_nonce_consumed: None,
             finalized_reply_error: None,
+            native_wrapper_approval: None,
+            native_retry_qualification: None,
             chain_genesis_hash: "0x01".into(),
             manager: "0x02".into(),
             historical_proxy: "0x03".into(),
@@ -1336,7 +1367,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn finalized_retryable_noop_moves_exact_attempt_to_history() {
+    async fn status_only_retry_failure_stays_held_with_exact_original() {
         let manager = TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
         let receipt_key = (12, 8);
         let signed = signed_submission(receipt_key);
@@ -1384,18 +1415,10 @@ pub(super) mod tests {
 
         let transactions = manager.transactions.read().await;
         let stored = &transactions[&uuid];
-        assert!(matches!(
-            stored.status,
-            TxStatus::RetryableSubmission { .. }
-        ));
+        assert!(matches!(stored.status, TxStatus::NeedsReconciliation { .. }));
         let receipt = stored.receipt.as_ref().unwrap();
-        assert!(receipt.signed_submission.is_none());
-        assert_eq!(receipt.submission_attempts.len(), 1);
-        assert_eq!(receipt.submission_attempts[0].signed_submission, signed);
-        assert_eq!(
-            receipt.submission_attempts[0].response.as_ref(),
-            Some(&evidence)
-        );
+        assert_eq!(receipt.signed_submission.as_ref(), Some(&signed));
+        assert!(receipt.submission_attempts.is_empty());
     }
 
     #[tokio::test]
@@ -2084,7 +2107,7 @@ pub(super) mod tests {
         .expect("sender completion must wake the idle transaction manager");
         assert!(
             matches!(sent.try_recv(), Ok(message_sender::Request::PrepareMessage {
-            tx_uuid, tx_hash, payload,
+            tx_uuid, tx_hash, payload, ..
         }) if tx_uuid == uuids[1] && tx_hash == fixtures[1].0.tx_hash && payload.encode() == fixtures[1].1.encode())
         );
         restored.resume(&mut sender, &mut composer).await.unwrap();
@@ -2153,7 +2176,21 @@ pub(super) mod tests {
         let uuid = transaction.uuid;
         manager.add_transaction(transaction).await;
         manager.submit_message(uuid, event.clone()).await.unwrap();
-        let signed = signed_submission(receipt_key);
+        let mut signed = signed_submission(receipt_key);
+        // Persistence fixture: the sender authenticates this original and pin;
+        // this test exercises the journal/scheduler, not a substitute RPC verdict.
+        let qualification = message_sender::FinalizedReceiptObservation {
+            finalized_block_number: Some(55),
+            finalized_block_hash: format!("{:#x}", primitive_types::H256::repeat_byte(55)),
+        };
+        signed.inclusion_block_number = Some(51);
+        signed.inclusion_block_hash = Some(format!("{:#x}", primitive_types::H256::repeat_byte(51)));
+        signed.message_id = Some(format!("{:#x}", primitive_types::H256::repeat_byte(52)));
+        signed.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
+            payload: vec![1],
+            observation: qualification.clone(),
+        });
+        signed.native_retry_qualification = Some(qualification.clone());
         {
             let mut transactions = manager.transactions.write().await;
             let transaction = transactions.get_mut(&uuid).unwrap();
@@ -2178,10 +2215,10 @@ pub(super) mod tests {
                 status: MessageStatus::RetryableNoop {
                     receipt_key,
                     diagnostic: "finalized per-log failure".into(),
-                    receipt_observation: None,
+                    receipt_observation: Some(qualification.clone()),
                 },
                 submission: Some(evidence),
-                signed_submission: Some(signed),
+                signed_submission: Some(signed.clone()),
             })
             .await
             .unwrap();
@@ -2219,12 +2256,56 @@ pub(super) mod tests {
             original
         );
         restored.resume(&mut sender, &mut composer).await.unwrap();
-        assert!(
-            matches!(sent.try_recv(), Ok(message_sender::Request::PrepareMessage {
-            tx_uuid, payload, ..
-        }) if tx_uuid == uuid && payload.encode() == event.encode())
-        );
+        let request = sent.try_recv().unwrap();
+        assert!(matches!(request, message_sender::Request::PrepareMessage {
+            tx_uuid, ref payload, ref retry_original, ..
+        } if tx_uuid == uuid && payload.encode() == event.encode()
+            && retry_original.as_deref() == Some(&signed)));
         assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
+        let mut retry = signed_submission(receipt_key);
+        retry.nonce = signed.nonce + 1;
+        retry.raw_extrinsic = vec![5, 6, 7, 8];
+        retry.extrinsic_hash = "retry-original".into();
+        restored.finalize_transaction(message_sender::Response {
+            tx_uuid: uuid, status: MessageStatus::Prepared, submission: None,
+            signed_submission: Some(retry.clone()),
+        }).await.unwrap();
+        restored.resume(&mut sender, &mut composer).await.unwrap();
+        assert!(matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared { prepared, .. })
+            if prepared.1 == retry && prepared.0.encode() == event.encode()));
+        // Lost response/timeout: restart replays exactly these bytes, not another nonce.
+        drop(restored);
+        let restored = TransactionManager::new(storage.clone());
+        storage.load(&restored).await.unwrap();
+        restored.resume(&mut sender, &mut composer).await.unwrap();
+        assert!(matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared { prepared, .. })
+            if prepared.1 == retry));
+        retry.inclusion_block_number = Some(60);
+        retry.inclusion_block_hash = Some(format!("{:#x}", primitive_types::H256::repeat_byte(60)));
+        retry.message_id = Some(format!("{:#x}", primitive_types::H256::repeat_byte(61)));
+        let settled = message_sender::FinalizedReceiptObservation {
+            finalized_block_number: Some(62),
+            finalized_block_hash: format!("{:#x}", primitive_types::H256::repeat_byte(62)),
+        };
+        retry.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
+            payload: vec![0], observation: settled.clone(),
+        });
+        restored.finalize_transaction(message_sender::Response {
+            tx_uuid: uuid,
+            status: MessageStatus::Success { receipt_observation: Some(settled) },
+            submission: Some(message_sender::SubmissionEvidence {
+                observed_at_ms: 80, manager: primitive_types::H256::repeat_byte(4),
+                historical_proxy: primitive_types::H256::repeat_byte(6), sender: "source-signer".into(),
+                manager_reply: Some(vec![0]), error: None,
+            }),
+            signed_submission: Some(retry.clone()),
+        }).await.unwrap();
+        let completed = restored.completed.read().await;
+        let receipt = completed[&uuid].receipt.as_ref().unwrap();
+        assert_eq!(receipt.signed_submission.as_ref(), Some(&retry));
+        assert_eq!(receipt.submission_attempts.len(), 1);
+        assert_eq!(receipt.submission_attempts[0].signed_submission, signed);
+        drop(completed);
         tokio::fs::remove_dir_all(path).await.unwrap();
     }
     #[tokio::test]

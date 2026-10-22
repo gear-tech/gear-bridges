@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "fixtureOnly": true,
+  "allowedChainId": 31337,
+  "executionAuthorized": false,
+  "package": "@safe-global/safe-contracts",
+  "version": "1.4.1",
+  "license": "LGPL-3.0-only",
+  "description": "Official unmodified published Safe singleton and SafeProxy creation/runtime artifacts. Test data only; not a deployment approval, source inventory approval, or production/Hoodi/mainnet authorization.",
+  "artifacts": {
+    "Safe": {
+      "path": "Safe.json",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/build/artifacts/contracts/Safe.sol/Safe.json",
+      "sha256": "c36a5e99bc3f25c2d75ac5f7920b679200b3ce617c0d26e674b1321dbc6b0bdf",
+      "creationBytecodeSha256": "e3c129073285546f6ac30868a902a12c0cc432a26bcb024ed0115bcd8ab9af75",
+      "runtimeBytecodeSha256": "79756c276443953adde61bbc2bfa134c03b35cf45181dab9d4f9503df22f45c8",
+      "bytecodeField": ".bytecode",
+      "runtimeBytecodeField": ".deployedBytecode"
+    },
+    "SafeProxy": {
+      "path": "SafeProxy.json",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/build/artifacts/contracts/proxies/SafeProxy.sol/SafeProxy.json",
+      "sha256": "b05eaeaf7278097e52a9e9b38410de2a812c23fa3622373473e73eaa19646ecd",
+      "creationBytecodeSha256": "cdac0e1d7a8897472ab08d29d19e028896c4feaaff65bba661c2e5e49a39bf61",
+      "runtimeBytecodeSha256": "a8a0fbd3cdf49e751346664e01b529a58322a814cf8df8d85deb20e63bd6415e",
+      "bytecodeField": ".bytecode",
+      "runtimeBytecodeField": ".deployedBytecode"
+    }
+  },
+  "sources": [
+    {
+      "path": "contracts/Safe.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/Safe.sol",
+      "sha256": "efd3301ed5c6bf522fb3a7a43be4a27341e65dff6d1fee04f8567f304a67e365"
+    },
+    {
+      "path": "contracts/common/Singleton.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/common/Singleton.sol",
+      "sha256": "dd6e1eb6292caa256bcbc953a7f64ec26d3262c4b9e6893e002f0c602ec1985d"
+    },
+    {
+      "path": "contracts/base/OwnerManager.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/base/OwnerManager.sol",
+      "sha256": "5ba538135072d73ddbc23cbd72e7f2e8307710b195b0741127a238569fa4df05"
+    },
+    {
+      "path": "contracts/base/ModuleManager.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/base/ModuleManager.sol",
+      "sha256": "58defca0730ec1b30a34fe4539e5c4ed60c12025e7fba577cc0d4a26d12f00b2"
+    },
+    {
+      "path": "contracts/base/GuardManager.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/base/GuardManager.sol",
+      "sha256": "3faa2d7ebddf3ff217767865eec31fc5b7ec6ad6f4b5abeef66fb1f0f5654dcc"
+    },
+    {
+      "path": "contracts/base/FallbackManager.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/base/FallbackManager.sol",
+      "sha256": "209c67c9557153f2ff6f9d0a82f0c570e5eec5c2bef7735f69a1c60e8aa4058b"
+    },
+    {
+      "path": "contracts/common/SelfAuthorized.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/common/SelfAuthorized.sol",
+      "sha256": "482dc006038abf8f9bbd81428519f1051e58cc3166d980ca8d60ef81f88821ca"
+    },
+    {
+      "path": "contracts/base/Executor.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/base/Executor.sol",
+      "sha256": "8b72e40ac996a4ed5d9ac35721fdaae5272ca545ad5e3e6b77a6b83e2f3a5805"
+    },
+    {
+      "path": "contracts/common/NativeCurrencyPaymentFallback.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/common/NativeCurrencyPaymentFallback.sol",
+      "sha256": "896a5812e4b9bd8a7b36329c37fb74b742d65f751ce56a633a6a9d536be163fc"
+    },
+    {
+      "path": "contracts/common/SignatureDecoder.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/common/SignatureDecoder.sol",
+      "sha256": "40b553435701bfef8d10975e3e1a8c4d53be2a1060db8ab870a3218e0ea6a827"
+    },
+    {
+      "path": "contracts/common/SecuredTokenTransfer.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/common/SecuredTokenTransfer.sol",
+      "sha256": "12ee3d429a6d0804926ebe730face33c9ea5ead1f87729acb2608e405643ec14"
+    },
+    {
+      "path": "contracts/common/StorageAccessible.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/common/StorageAccessible.sol",
+      "sha256": "ad06db25e900974bba445ce033f3aa309187a4a2716148291d799beae9ec43dd"
+    },
+    {
+      "path": "contracts/interfaces/ISignatureValidator.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/interfaces/ISignatureValidator.sol",
+      "sha256": "72e20993af263b2c5c04ef5ac0923fb425ce1bd486a5ccb53c9c62ef028668d8"
+    },
+    {
+      "path": "LICENSE",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/LICENSE",
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+    },
+    {
+      "path": "contracts/proxies/SafeProxy.sol",
+      "url": "https://unpkg.com/@safe-global/safe-contracts@1.4.1/contracts/proxies/SafeProxy.sol",
+      "sha256": "a32e2bb41a928cc17ac82a7240571e7ad8b8230555f711c13343584d8a4802bb"
+    }
+  ],
+  "storageLayout": {
+    "basis": "Safe.sol inheritance: Singleton, ModuleManager, OwnerManager; other inherited contracts have no sequential state. See pinned source digests. SafeProxy stores its singleton at slot 0. Hash-addressed guard/fallback slots are source constants, not sequential slots.",
+    "singleton": {
+      "slot": "0",
+      "type": "address",
+      "source": "contracts/common/Singleton.sol"
+    },
+    "modules": {
+      "slot": "1",
+      "type": "mapping(address => address)",
+      "source": "contracts/base/ModuleManager.sol"
+    },
+    "owners": {
+      "slot": "2",
+      "type": "mapping(address => address)",
+      "source": "contracts/base/OwnerManager.sol"
+    },
+    "ownerCount": {
+      "slot": "3",
+      "type": "uint256",
+      "value": "2"
+    },
+    "threshold": {
+      "slot": "4",
+      "type": "uint256",
+      "value": "2"
+    },
+    "nonce": {
+      "slot": "5",
+      "type": "uint256",
+      "value": "0"
+    },
+    "guard": {
+      "slot": "0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8",
+      "value": "0",
+      "source": "contracts/base/GuardManager.sol"
+    },
+    "fallbackHandler": {
+      "slot": "0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5",
+      "value": "0",
+      "source": "contracts/base/FallbackManager.sol"
+    },
+    "mappingKeyEncoding": "keccak256(abi.encode(address key, uint256 mappingSlot))",
+    "sentinel": "0x0000000000000000000000000000000000000001",
+    "ownerLinks": [
+      "owners[sentinel] = recoverySigner",
+      "owners[recoverySigner] = secondOwner",
+      "owners[secondOwner] = sentinel"
+    ],
+    "moduleLinks": [
+      "modules[sentinel] = sentinel"
+    ],
+    "runtimeImmutables": false
+  },
+  "deployment": {
+    "script": "script/BeefyLocal.s.sol:BeefyLocal",
+    "recoverySigner": "vm.addr(LOCAL_RECOVERY_PRIVATE_KEY)",
+    "secondOwner": "vm.addr(LOCAL_RECOVERY_OWNER_PRIVATE_KEY)",
+    "owners": "[recoverySigner, secondOwner]; distinct from each other and bridge deployer",
+    "threshold": 2,
+    "recoverySignerTransactions": [
+      "nonce n: CREATE Safe singleton",
+      "nonce n+1: CREATE SafeProxy(singleton)",
+      "nonce n+2: SafeProxy.setup(owners,2,0x0,0x,0x0,0x0,0,0x0)",
+      "nonce n+3: CREATE TimelockController(3600,[safe],[safe],0x0)"
+    ],
+    "mainDeployerNonce": "unchanged by recovery deployments",
+    "timelock": {
+      "minimumDelaySeconds": 3600,
+      "proposers": [
+        "safe"
+      ],
+      "executors": [
+        "safe"
+      ],
+      "cancellers": [
+        "safe"
+      ],
+      "admins": [
+        "timelock itself"
+      ]
+    },
+    "namedScriptGetters": [
+      "recoverySafeSingleton()",
+      "recoverySafe()",
+      "recoveryTimelock()"
+    ],
+    "logLabels": [
+      "LOCAL_RECOVERY_SAFE_SINGLETON",
+      "LOCAL_RECOVERY_SAFE",
+      "BEEFY_RECOVERY_TIMELOCK"
+    ],
+    "environmentOutputs": "The same log labels are set through vm.setEnv inside the Forge process only; callers should use broadcast CREATE receipts/logs, not expect parent process environment mutation.",
+    "nativeManagerOverride": "LOCAL_NATIVE_MANAGER bytes32; defaults to BaseConstants.VFT_MANAGER when absent",
+    "evidence": "Actual receipts, eth_getCode and eth_getProof for deployed identities must be collected from the owned chain. This provenance manifest is not state proof."
+  }
+}

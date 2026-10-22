@@ -22,7 +22,7 @@ export const config = {
   checkpointClient: getEnv('GEAR_CHECKPOINT_CLIENT'),
   fromBlock: Number(getEnv('GEAR_FROM_BLOCK', '11000000')),
   ethRpcUrl: getEnv('ETH_HTTP_RPC_URL'),
-  ethereumEvidence: getEthereumEvidenceConfig(),
+  ethereumEvidence: getEthereumEvidenceConfig('gear'),
   erc20Manager: getEnv('ETH_ERC20_MANAGER').toLowerCase(),
   rateLimit: Number(getEnv('GEAR_RATE_LIMIT', '100')),
   apiPath,

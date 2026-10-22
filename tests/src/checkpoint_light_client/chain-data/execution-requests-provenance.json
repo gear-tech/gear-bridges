@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "description": "Genuine public Ethereum mainnet captures, not independently approved bootstrap or production deployment authorization. Finalized/canonical flags are recorded endpoint claims; these fixtures test SSZ, execution-header and MPT composition, not sync-committee authority.",
+  "captured_at_utc": "2026-10-22T19:09:17.397945+00:00",
+  "network": "mainnet",
+  "chain_id": 1,
+  "genesis_hash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3",
+  "fixtures": [
+    {
+      "fork": "electra",
+      "slot": 11649029,
+      "execution_number": 22431088,
+      "execution_hash": "0x9b716b17bd56abb37a16f3d83696f3d4c808504766aa1fd4cd94469c0feffab0",
+      "selected_transaction_index": 0,
+      "request_counts": {
+        "deposits": 0,
+        "withdrawals": 0,
+        "consolidations": 1
+      },
+      "files": {
+        "beacon_block": {
+          "path": "mainnet-electra-11649029-beacon-block.json",
+          "sha256": "27da1583a36301b1a38b556789357230a08375b0e7e14846afc5e07768bc8fe1",
+          "source": "https://ethereum-beacon-api.publicnode.com/eth/v2/beacon/blocks/11649029"
+        },
+        "beacon_header": {
+          "path": "mainnet-electra-11649029-beacon-header.json",
+          "sha256": "20391ac937942fd22a63e435b8a65cb107f68a2a01eb5f3382cd52f4e4c11319",
+          "source": "https://ethereum-beacon-api.publicnode.com/eth/v1/beacon/headers/11649029"
+        },
+        "execution_block": {
+          "path": "mainnet-electra-11649029-execution-block.json",
+          "sha256": "bcfdda7d88368bc33acd7be2b0ae6947853f299e251d523e4a32915023971424",
+          "source": "https://ethereum-rpc.publicnode.com",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByHash",
+            "params": [
+              "0x9b716b17bd56abb37a16f3d83696f3d4c808504766aa1fd4cd94469c0feffab0",
+              false
+            ]
+          }
+        },
+        "receipts": {
+          "path": "mainnet-electra-11649029-receipts.json",
+          "sha256": "b2d32f9a2f6da04eb5334ecc5320f041bc0e7459fc43aa9596f6bff72757023b",
+          "source": "https://ethereum-rpc.publicnode.com",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockReceipts",
+            "params": [
+              "0x9b716b17bd56abb37a16f3d83696f3d4c808504766aa1fd4cd94469c0feffab0"
+            ]
+          }
+        },
+        "inclusion_proof": {
+          "path": "mainnet-electra-11649029-inclusion-proof.json",
+          "sha256": "892e53707c9f26f9c25d2cf3fc510ae92f70de4715e4c27492c5039af99b7f64",
+          "source": "Derived locally from retained beacon_block raw transactions and all receipts using installed @ethereumjs/trie; not a new chain response.",
+          "inputs": [
+            "beacon_block",
+            "receipts"
+          ],
+          "selected_transaction_index": 0
+        }
+      },
+      "beacon_root": "0xf6cd82bcc0a4870351b762ecf7365d64b91fd131a48c395a8bef35300eacdc57"
+    },
+    {
+      "fork": "fulu",
+      "slot": 13164563,
+      "execution_number": 23935708,
+      "execution_hash": "0x7577c7c964adb30a9c48515d7e5ce65ee0398f81a8f283852ef77cdff7bbcb5d",
+      "selected_transaction_index": 0,
+      "request_counts": {
+        "deposits": 0,
+        "withdrawals": 0,
+        "consolidations": 1
+      },
+      "files": {
+        "beacon_block": {
+          "path": "mainnet-fulu-13164563-beacon-block.json",
+          "sha256": "e5a4f62963421ea3edd0bd4d663ade6aa01a1f96a375989f95db1449e17afc80",
+          "source": "https://ethereum-beacon-api.publicnode.com/eth/v2/beacon/blocks/13164563"
+        },
+        "beacon_header": {
+          "path": "mainnet-fulu-13164563-beacon-header.json",
+          "sha256": "e7e9bbe46ffccb07bf9200bf29e9378bd4468f9ef3291bfbe5801588f3630e65",
+          "source": "https://ethereum-beacon-api.publicnode.com/eth/v1/beacon/headers/13164563"
+        },
+        "execution_block": {
+          "path": "mainnet-fulu-13164563-execution-block.json",
+          "sha256": "1a10d130567ef6951f9a530fd7ae72cb89a5a752b0bcc321ff462499e73f9a6c",
+          "source": "https://ethereum-rpc.publicnode.com",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByHash",
+            "params": [
+              "0x7577c7c964adb30a9c48515d7e5ce65ee0398f81a8f283852ef77cdff7bbcb5d",
+              false
+            ]
+          }
+        },
+        "receipts": {
+          "path": "mainnet-fulu-13164563-receipts.json",
+          "sha256": "82a809808a9b521275eb6345a9649f1cfacfd879b478e42db4d92ea248e7f7a8",
+          "source": "https://ethereum-rpc.publicnode.com",
+          "request": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockReceipts",
+            "params": [
+              "0x7577c7c964adb30a9c48515d7e5ce65ee0398f81a8f283852ef77cdff7bbcb5d"
+            ]
+          }
+        },
+        "inclusion_proof": {
+          "path": "mainnet-fulu-13164563-inclusion-proof.json",
+          "sha256": "fcec1b7eef6553ce3daeeabd07015c28c3b1a7d8f799ea84cfddd9606b9487ba",
+          "source": "Derived locally from retained beacon_block raw transactions and all receipts using installed @ethereumjs/trie; not a new chain response.",
+          "inputs": [
+            "beacon_block",
+            "receipts"
+          ],
+          "selected_transaction_index": 0
+        }
+      },
+      "beacon_root": "0xb2c19490e509260d039bc4efeda0282a3a85b48ed8986fee686064771293223f"
+    }
+  ],
+  "hoodi_candidate": {
+    "slot": 4007903,
+    "execution_block": 3691035,
+    "execution_hash": "0x59b526a102a5e9d2e2161cae45c67e3ef9e3e848b8a621863212759459210831",
+    "execution_requests": {
+      "deposits": 0,
+      "withdrawals": 0,
+      "consolidations": 0
+    },
+    "source": "https://ethereum-hoodi-beacon-api.publicnode.com/eth/v2/beacon/blocks/4007903",
+    "response_sha256": "e70fbc5f3ff5cd6fbfa487e4d806fba0cbb394612e6bf69600b329254cfb24dc",
+    "disposition": "Not selected: empty execution requests."
+  }
+}

@@ -47,6 +47,11 @@ pub struct BeaconClient {
 }
 
 impl BeaconClient {
+    /// Reuse the acquisition/parsing API with a caller-owned transport policy.
+    pub fn with_client(rpc_url: String, client: Client, timeout: Option<Duration>) -> Self {
+        Self { client, rpc_url, timeout }
+    }
+
     pub async fn new(rpc_url: String, timeout: Option<Duration>) -> AnyResult<Self> {
         let client = ClientBuilder::new();
         let client = match timeout {
@@ -250,10 +255,12 @@ impl BeaconClient {
 }
 
 async fn get<R: DeserializeOwned>(request_builder: RequestBuilder) -> AnyResult<R> {
-    let bytes = request_builder
-        .send()
-        .await
-        .map_err(AnyError::from)?
+    let response = request_builder.send().await.map_err(AnyError::from)?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(ErrorNotFound.into());
+    }
+    let bytes = response
+        .error_for_status()?
         .bytes()
         .await
         .map_err(AnyError::from)?;

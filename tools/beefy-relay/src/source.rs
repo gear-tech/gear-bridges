@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use sp_consensus_beefy::{ecdsa_crypto::AuthorityId, mmr::BeefyAuthoritySet};
 use std::{
-    fs::{self, File},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
 };
 use subxt_rpcs::{client::RpcSubscription, rpc_params};
@@ -186,6 +185,16 @@ impl Source {
             ensure_runtime_binding(&legacy, &self.identity.runtime)?;
         } else {
             let pinned = &anchor["sourceIdentity"];
+            let height: u32 = pinned["finalizedHeight"].as_u64()
+                .context("source identity finalized height missing; HOLD")?.try_into()?;
+            ensure!(height <= self.identity.finalized_height, "source identity is not finalized; HOLD");
+            let at = self.api.block_number_to_hash(height).await?;
+            let mut historical = serde_json::to_value(discover_source_identity(&self.api, at).await?)?;
+            // Old immutable reports predate this explicit timestamp field.
+            if pinned.get("sourceTimestampMs").is_none() {
+                historical.as_object_mut().expect("identity object").remove("sourceTimestampMs");
+            }
+            ensure!(*pinned == historical, "native source identity report differs at its original finalized pin; HOLD");
             ensure_runtime_binding(&pinned["runtime"], &self.identity.runtime)?;
             ensure!(pinned["beefyActivationBlock"] == self.beefy_activation_block
                 && pinned["mmrStartBlock"] == self.mmr_start_block
@@ -334,10 +343,6 @@ impl Source {
         let Some(path) = &self.scan_path else {
             return Ok(());
         };
-        let directory = path.parent().context("source scan path has no parent")?;
-        fs::create_dir_all(directory)?;
-        let temporary = path.with_extension("json.tmp");
-        let mut file = std::io::BufWriter::new(File::create(&temporary)?);
         // Pending raw proofs are bounded; accepted raw proofs live only in the
         // caller's immutable submission journal, never an expanding RAM archive.
         struct Undispatched<'a> {
@@ -373,8 +378,8 @@ impl Source {
             pending: Undispatched<'a>,
             delivered: Option<(u32, &'a [u8])>,
         }
-        serde_json::to_writer(
-            &mut file,
+        ethereum_client::finality_archive::atomic_json(
+            path,
             &Saved {
                 genesis: self.source_genesis,
                 bridge_domain: self.bridge_domain,
@@ -390,12 +395,7 @@ impl Source {
                         .map(|(block, raw)| (*block, raw.as_slice()))
                 }),
             },
-        )?;
-        file.flush()?;
-        file.get_ref().sync_all()?;
-        fs::rename(temporary, path)?;
-        File::open(directory)?.sync_all()?;
-        Ok(())
+        )
     }
 
     /// Replay archived history before draining later durable originals, so late
@@ -823,6 +823,7 @@ pub struct SourceIdentity {
     pub source_genesis: Hash32,
     pub finalized_height: u32,
     pub finalized_hash: Hash32,
+    pub source_timestamp_ms: u64,
     pub runtime: JsonValue,
     pub current: AuthoritySet,
     pub next: AuthoritySet,
@@ -858,6 +859,7 @@ fn active_mmr_start(activation: Option<u32>, block: u32, count: u64) -> Result<(
         .filter(|s| *s > 0)
         .context("MMR count exceeds finalized source range")?;
     // MMR begins when this runtime is installed, possibly before BEEFY activation.
+    ensure!(u64::from(activation) >= start, "first BEEFY block precedes MMR start; HOLD");
     ensure!(
         count == expected_leaf_count(start, block)?,
         "noncontiguous MMR range"
@@ -1052,6 +1054,7 @@ async fn discover_source_identity(api: &GearApi, at: H256) -> Result<SourceIdent
         source_genesis: genesis.0,
         finalized_height: block,
         finalized_hash: at.0,
+        source_timestamp_ms: api.fetch_timestamp(at).await?,
         runtime,
         current,
         next,
@@ -1687,6 +1690,7 @@ mod tests {
             source_genesis: [1; 32],
             finalized_height: 100,
             finalized_hash: [2; 32],
+            source_timestamp_ms: 1_000,
             runtime: json!({"runtimeCodeSha256": "qualified upgraded code", "babe": {"epochLength": 2400}}),
             current: authority.clone(),
             next: AuthoritySet { id: 2, ..authority },

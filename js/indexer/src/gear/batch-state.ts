@@ -15,7 +15,7 @@ import {
   getVaraTokenSymbol,
 } from './rpc-queries.js';
 import type { Relayed, ReceiptDepositEffect, ReceiptDepositRefunded, ReceiptDepositSettled } from './types/index.js';
-import { createEthereumEvidenceClients, createReceiptAuthenticator, loadCheckpoint, qualifyFinality, retainCheckpoint,
+import { createEthereumEvidenceClients, createReceiptAuthenticator, qualifyStoredFinality, recheckFinality, retainCheckpoint,
   type SourceReceiptAuth } from '../eth/finality.js';
 import { authenticateSourceReceipt } from '../eth/completion.js';
 import { reconcileReceiptSettlements, validateReceiptSettlement } from './receipt-reconciliation.js';
@@ -255,9 +255,10 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   public async save() {
-    const clients = createEthereumEvidenceClients();
-    const checkpoint = await qualifyFinality(clients, await loadCheckpoint(this._ctx.store, clients));
+    const clients = createEthereumEvidenceClients('gear');
+    const checkpoint = await qualifyStoredFinality(this._ctx.store, clients);
     const authenticate = createReceiptAuthenticator(clients, checkpoint);
+    await recheckFinality(clients, checkpoint);
     if (this._transfersToRemove.size > 0) {
       await this._ctx.store.remove(setValues(this._transfersToRemove));
     }
@@ -269,7 +270,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this._processPriorityRequests();
     await this._saveTransfers();
     await this._saveInitiatedTransfers();
-    await qualifyFinality(clients, checkpoint);
+    await recheckFinality(clients, checkpoint);
     await retainCheckpoint(this._ctx.store, checkpoint);
   }
 

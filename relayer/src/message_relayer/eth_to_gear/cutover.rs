@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use gclient::GearApi;
 use gear_common::{
     api_provider::ApiProviderConnection,
+    native_wrapper::{ApprovedNativeWrapper, ManagerWrapperAbi, native_wrapper_at},
     durable::{committed_bytes, entry_exists, immutable_json},
 };
 use parity_scale_codec::{Decode, Encode};
@@ -109,6 +110,18 @@ struct ExternalCoverageReport {
 }
 #[derive(Deserialize)]
 struct ExternalCoverageIntent {
+    #[serde(default)]
+    native_wrapper: Option<H256>,
+    #[serde(default)]
+    native_wrapper_approval: Option<ApprovedNativeWrapper>,
+    #[serde(default)]
+    old_identity: Option<InboundRuntimeIdentity>,
+    #[serde(default)]
+    new_identity: Option<InboundRuntimeIdentity>,
+    #[serde(default)]
+    new_manager_code_id: Option<H256>,
+    #[serde(default)]
+    mappings: Vec<(H256, primitive_types::H160, u8)>,
     erc20_manager: primitive_types::H160,
     source_receipt_floor: u64,
     boundary: CutoverBoundary,
@@ -173,7 +186,7 @@ fn validate_report_versions(
         }
     }
     anyhow::ensure!(
-        matches!(version, 1..=3)
+        matches!(version, 1..=4)
             && coverage
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
@@ -182,12 +195,12 @@ fn validate_report_versions(
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
                 == Some(version.into())
-            && (matches!(version, 2 | 3)
+            && (matches!(version, 2..=4)
                 || (!has_field(coverage, "exclusion")
                     && !has_field(coverage, "blocking_redemptions")
                     && !has_field(lifecycle, "exclusion")
                     && !has_field(lifecycle, "blocking_redemptions")))
-            && if version == 3 {
+            && if version >= 3 {
                 coverage
                     .get("ethereum_authentication")
                     .is_some_and(|value| !value.is_null())
@@ -197,6 +210,7 @@ fn validate_report_versions(
             },
         "HOLD: seal/report schema disagreement or v2 evidence smuggled into v1"
     );
+    anyhow::ensure!(version >= 4 || (!has_field(coverage, "native_wrapper_approval") && !has_field(lifecycle, "native_wrapper_approval")), "HOLD: legacy report contains schema4 capability");
     Ok(())
 }
 
@@ -216,6 +230,10 @@ fn parse_coverage(
     let coverage = serde_json::from_slice(coverage_bytes)?;
     let lifecycle = serde_json::from_slice(lifecycle_bytes)?;
     validate_report_versions(version, &coverage, &lifecycle)?;
+    if version >= 4 {
+        anyhow::ensure!(coverage.get("intent").is_some_and(|intent| !intent.is_null())
+            && coverage.get("intent") == lifecycle.get("intent"), "HOLD: capability-bound report intents differ");
+    }
     Ok(serde_json::from_value(coverage)?)
 }
 
@@ -499,13 +517,13 @@ async fn authenticate_coverage(
     );
     if let Some(checkpoint) = &coverage.ethereum_authentication {
         anyhow::ensure!(
-            checkpoint.common_header.number >= seal.boundary.execution_number,
+            checkpoint.common_header().number >= seal.boundary.execution_number,
             "HOLD: saved coverage checkpoint predates its boundary"
         );
         view.verify_checkpoint(&**eth, checkpoint).await?;
     }
     anyhow::ensure!(
-        coverage.schema_version != 3 || coverage.ethereum_authentication.is_some(),
+        coverage.schema_version < 3 || coverage.ethereum_authentication.is_some(),
         "HOLD: v3 coverage has no Ethereum authentication"
     );
     view.verify_blocks(
@@ -680,6 +698,7 @@ pub fn validate_exclusion_copy(
 ) -> Result<()> {
     anyhow::ensure!(
         original.same_request(copy)
+            && original.native_retry_qualification.as_ref().is_none_or(|pin| copy.native_retry_qualification.as_ref() == Some(pin))
             && original
                 .inclusion_block_number
                 .is_none_or(|value| copy.inclusion_block_number == Some(value))
@@ -777,7 +796,9 @@ async fn authenticate_retained_checkpoints(
                     ))
                 })
                 .transpose()?,
-        ) {
+        ).chain(original.native_retry_qualification.as_ref().map(|pin| {
+            Ok::<_, anyhow::Error>((pin.finalized_block_number.context("HOLD: retained retry height absent")?, pin.finalized_block_hash.as_str()))
+        }).transpose()?) {
             let hash: H256 = hash.parse()?;
             anyhow::ensure!(
                 number <= maximum
@@ -819,8 +840,8 @@ impl AuthenticatedCoverage {
 
 fn validate_admission_inventory(coverage: &ExternalCoverageReport) -> Result<()> {
     anyhow::ensure!(
-        matches!(coverage.schema_version, 1..=3)
-            && (matches!(coverage.schema_version, 2 | 3)
+        matches!(coverage.schema_version, 1..=4)
+            && (matches!(coverage.schema_version, 2..=4)
                 || coverage
                     .admissions
                     .iter()
@@ -860,6 +881,20 @@ async fn verify_external_coverage(
         "HOLD: incompatible coverage/seal schema"
     );
     validate_admission_inventory(coverage)?;
+    if seal.schema_version >= 4 {
+        let intent = coverage.intent.as_ref().context("HOLD: capability intent missing")?;
+        anyhow::ensure!(intent.native_wrapper_approval == seal.native_wrapper_approval
+            && intent.old_identity.as_ref() == Some(&seal.old_identity)
+            && intent.new_identity.as_ref() == Some(&seal.new_identity)
+            && intent.new_manager_code_id == Some(seal.new_manager_code_id), "HOLD: capability report/seal identity changed");
+        match (intent.native_wrapper, &intent.native_wrapper_approval) {
+            (None, None) => (),
+            (Some(actor), Some(approved)) => anyhow::ensure!(approved.approval.wrapper.actor_id == actor
+                && intent.mappings.contains(&(actor, approved.approval.wrapper.ethereum_token, 1)),
+                "HOLD: native actor/token/mapping changed"),
+            _ => anyhow::bail!("HOLD: native capability approval missing or unexpected"),
+        }
+    }
     let mut authenticated = AuthenticatedCoverage::default();
     let head = api.last_block_hash().await?;
     let finalized = api.block_number_at(head).await?;
@@ -879,7 +914,7 @@ async fn verify_external_coverage(
             "HOLD: proof/key/block is outside original deployment coverage"
         );
         validate_admission_block(coverage, admission, &event)?;
-        if matches!(coverage.schema_version, 2 | 3) {
+        if matches!(coverage.schema_version, 2..=4) {
             anyhow::ensure!(
                 admission.fee_event_observed == admission.fee_emitter.is_some(),
                 "HOLD: fee evidence changed"
@@ -1191,6 +1226,8 @@ pub struct CutoverSeal {
     pub old_identity: InboundRuntimeIdentity,
     pub new_identity: InboundRuntimeIdentity,
     pub new_manager_code_id: H256,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_wrapper_approval: Option<ApprovedNativeWrapper>,
     pub source_receipt_floor: u64,
     pub boundary: CutoverBoundary,
     pub config_fingerprint: H256,
@@ -1259,7 +1296,7 @@ impl CutoverSeal {
         let old = &self.old_identity;
         let new = &self.new_identity;
         anyhow::ensure!(
-            matches!(self.schema_version, 1..=3)
+            matches!(self.schema_version, 1..=4)
                 && self.new_manager_code_id != H256::zero()
                 && self.config_fingerprint != H256::zero()
                 && self.boundary.beacon_root != H256::zero()
@@ -1292,6 +1329,20 @@ impl CutoverSeal {
                         .context("HOLD: execution boundary overflow")?,
             "HOLD: invalid cutover identity/domain"
         );
+        if self.schema_version < 4 {
+            anyhow::ensure!(self.native_wrapper_approval.is_none(), "HOLD: legacy seal cannot contain new capability evidence");
+        }
+        if let Some(approved) = &self.native_wrapper_approval {
+            approved.approval.validate()?;
+            let approval = &approved.approval;
+            anyhow::ensure!(!approved.approval_digest.is_zero()
+                && approval.gear_genesis_hash == old.gear_genesis_hash
+                && approval.source_manager.actor_id == old.vft_manager_address
+                && approval.replacement_manager.actor_id == new.vft_manager_address
+                && approval.replacement_manager.code_id == self.new_manager_code_id
+                && approval.replacement_manager.wrapper_abi == ManagerWrapperAbi::CapabilityBound,
+                "HOLD: capability approval does not bind sealed managers");
+        }
         let retirement = decode_status(&self.retirement)?;
         let readiness = decode_status(&self.readiness)?;
         anyhow::ensure!(
@@ -1328,7 +1379,10 @@ impl CutoverSeal {
                 file.path.is_absolute()
                     && file.digest != H256::zero()
                     && if pending_reports && index >= 3 && !entry_exists(&file.path)? {
-                        let parent = file.path.parent().context("HOLD: missing report directory")?;
+                        let parent = file
+                            .path
+                            .parent()
+                            .context("HOLD: missing report directory")?;
                         fs::canonicalize(parent)? == parent
                     } else {
                         fs::canonicalize(&file.path)? == file.path
@@ -1589,8 +1643,32 @@ async fn verify_original_lane(
     api: &GearApi,
     eth: &ethereum_client::PollingEthApi,
     view: &mut ethereum_client::FinalizedView,
+    approval: Option<&ApprovedNativeWrapper>,
 ) -> Result<()> {
     authenticate_status_pins(seal, api).await?;
+    let approved = if seal.schema_version >= 4 {
+        anyhow::ensure!(approval.is_none() || approval == seal.native_wrapper_approval.as_ref(), "HOLD: retained seal capability override");
+        seal.native_wrapper_approval.as_ref()
+    } else { approval };
+    if let Some(approved) = approved {
+        anyhow::ensure!(approved.approval.source_manager.actor_id == seal.old_identity.vft_manager_address
+            && approved.approval.replacement_manager.actor_id == seal.new_identity.vft_manager_address
+            && approved.approval.replacement_manager.code_id == seal.new_manager_code_id
+            && (seal.schema_version < 4 || approved.approval.replacement_manager.wrapper_abi == ManagerWrapperAbi::CapabilityBound),
+            "HOLD: historical capability approval targets a different predecessor/replacement");
+    }
+    let at = H256::from_slice(api.last_block_hash().await?.as_ref());
+    let source = native_wrapper_at(api, seal.old_identity.vft_manager_address, at, approved).await?;
+    let replacement = native_wrapper_at(api, seal.new_identity.vft_manager_address, at, approved).await?;
+    anyhow::ensure!(source == replacement, "HOLD: sealed native configuration differs");
+    if let Some(intent) = &coverage.intent {
+        anyhow::ensure!(intent.native_wrapper == source.as_ref().map(|binding| binding.actor_id),
+            "HOLD: coverage native actor differs from independently approved original");
+        if let Some(binding) = &source {
+            anyhow::ensure!(intent.mappings.contains(&(binding.actor_id, binding.ethereum_token, 1)),
+                "HOLD: coverage native token differs from independently approved original");
+        }
+    }
     let journal = read_original_journal(
         seal.old_state
             .path
@@ -1625,7 +1703,7 @@ async fn verify_original_lane(
         provider.clone(),
         String::new(),
         seal.old_identity.erc20_manager_address,
-    );
+    ).with_native_wrapper_approval(approved.cloned().map(std::sync::Arc::new));
     authenticate_coverage(seal, &mut coverage, eth, view).await?;
     let authenticated = verify_external_coverage(seal, &journal, &coverage, &sender, api).await?;
     anyhow::ensure!(
@@ -1789,9 +1867,10 @@ pub async fn verify_pending_originals(
     api: &GearApi,
     eth: &ethereum_client::PollingEthApi,
     view: &mut ethereum_client::FinalizedView,
+    approval: Option<&ApprovedNativeWrapper>,
 ) -> Result<()> {
     let coverage = pending_coverage(seal, coverage_bytes, lifecycle_bytes)?;
-    verify_original_lane(seal, coverage, provider.clone(), api, eth, view).await?;
+    verify_original_lane(seal, coverage, provider.clone(), api, eth, view, approval).await?;
     if let Some(previous) = predecessor_seal_path(
         seal.old_state
             .path
@@ -1800,7 +1879,7 @@ pub async fn verify_pending_originals(
     )? {
         let (prior, _) = verify_markers(&previous)?;
         validate_predecessor(seal, &prior)?;
-        verify_originals_read_only(&previous, provider, api, eth, view).await?;
+        verify_originals_read_only(&previous, provider, api, eth, view, if prior.schema_version >= 4 { None } else { approval }).await?;
     }
     view.recheck(&**eth).await?;
     verify_old_journal_digests(seal)
@@ -1812,6 +1891,7 @@ pub async fn verify_originals_read_only(
     api: &GearApi,
     eth: &ethereum_client::PollingEthApi,
     view: &mut ethereum_client::FinalizedView,
+    approval: Option<&ApprovedNativeWrapper>,
 ) -> Result<()> {
     let mut path = fs::canonicalize(path)?;
     let mut seen = std::collections::BTreeSet::new();
@@ -1823,7 +1903,9 @@ pub async fn verify_originals_read_only(
             "HOLD: cyclic predecessor cutover manifests"
         );
         let coverage = read_coverage(&seal)?;
-        verify_original_lane(&seal, coverage, provider.clone(), api, eth, view).await?;
+        // A prior schema4 seal owns its own capability; never redirect predecessor queries.
+        let original_approval = if retained.is_empty() || seal.schema_version < 4 { approval } else { None };
+        verify_original_lane(&seal, coverage, provider.clone(), api, eth, view, original_approval).await?;
         retained.push((path.clone(), hash));
         let predecessor = predecessor_seal_path(
             seal.old_state
@@ -1956,6 +2038,7 @@ pub async fn authenticate_startup(
     approved_code: Option<H256>,
     api: &GearApi,
     eth: &ethereum_client::PollingEthApi,
+    approval: Option<&ApprovedNativeWrapper>,
 ) -> Result<Option<PredecessorCutover>> {
     let at = api.last_block_hash().await?;
     let at_number = api.block_number_at(at).await?;
@@ -1974,7 +2057,7 @@ pub async fn authenticate_startup(
         let mut view = eth.verified_finalized_view().await?;
         let signer: gsdk::signer::Signer = api.clone().into();
         let provider = ApiProviderConnection::from_api(signer.api().clone());
-        verify_originals_read_only(path, provider, api, eth, &mut view).await?;
+        verify_originals_read_only(path, provider, api, eth, &mut view, approval).await?;
         let program = api
             .program_at(identity.vft_manager_address.0.into(), Some(at))
             .await?;
@@ -2074,6 +2157,7 @@ fn validate_disposition_bound(
                     .finalized_block_number
                     .is_some_and(|number| number <= maximum)
             })
+            && original.native_retry_qualification.as_ref().is_none_or(|pin| pin.finalized_block_number.is_some_and(|number| number <= maximum))
             && original.has_terminal_reconciliation(),
         "HOLD: original has no terminal nonce/reply disposition at or before exclusion"
     );
@@ -2167,6 +2251,40 @@ async fn authenticate_original_call(
     Ok(())
 }
 
+/// Authenticate a retained original and its pre-retry native qualification without preparing any call.
+pub async fn authenticate_archived_native_retry(
+    sender: &MessageSender,
+    payload: &eth_events_electra_client::EthToVaraEvent,
+    original: &super::message_sender::SignedSubmission,
+) -> Result<()> {
+    use super::message_sender::decode_complete_reply;
+    use historical_proxy_client::historical_proxy::io::Redirect;
+    use vft_manager_client::vft_manager::io::SubmitReceipt;
+    let pin = original.native_retry_qualification.as_ref().context("HOLD: archived native retry qualification missing")?;
+    anyhow::ensure!(original.native_wrapper_approval.as_ref().is_none_or(|saved|
+        sender.native_wrapper_approval.as_deref() == Some(saved)), "HOLD: archived original capability approval changed");
+    anyhow::ensure!(original.manager == format!("{:#x}", sender.receiver_address)
+        && original.historical_proxy == format!("{:#x}", sender.historical_proxy_address)
+        && original.receipt_key == (payload.proof_block.block.slot, payload.transaction_index)
+        && original.payload_hash == format!("{:#x}", alloy_primitives::keccak256(payload.encode())),
+        "HOLD: archived retry original identity differs");
+    let call = Redirect::encode_call(payload.proof_block.block.slot, payload.encode(), sender.receiver_address.0.into(), SubmitReceipt::ROUTE.to_vec());
+    authenticate_original_call(sender, &sender.api_provider, original, sender.historical_proxy_address, &call).await?;
+    let reply = original.finalized_reply.as_ref().context("HOLD: retry original reply absent")?;
+    anyhow::ensure!(pin.finalized_block_number.zip(reply.observation.finalized_block_number)
+        .is_some_and(|(qualified, replied)| qualified >= replied), "HOLD: retry qualification predates original error reply");
+    let (receipt, inner) = decode_complete_reply::<Redirect>(&reply.payload)?
+        .map_err(|_| anyhow::anyhow!("HOLD: retry proxy failed before manager"))?;
+    anyhow::ensure!(receipt == payload.receipt_rlp && matches!(decode_complete_reply::<SubmitReceipt>(&inner)?,
+        Ok(()) | Err(vft_manager_client::Error::NativeSettlementPending) | Err(vft_manager_client::Error::ReplyFailure(_))),
+        "HOLD: archived retry has no original native settlement reply");
+    let mut connection = sender.api_provider.clone();
+    let api = connection.gclient();
+    anyhow::ensure!(sender.receipt_retry_qualification(&api, payload, Some(pin)).await?.as_ref() == Some(pin),
+        "HOLD: exact original native retry cohort no longer authenticates at retained pin");
+    Ok(())
+}
+
 async fn verify_archived_proof(
     sender: &MessageSender,
     provider: &ApiProviderConnection,
@@ -2179,6 +2297,9 @@ async fn verify_archived_proof(
         "HOLD: archived owned proof signer changed"
     );
     validate_original_identity(identity, payload, original)?;
+    if original.message_id.is_some() {
+        return authenticate_archived_native_retry(sender, payload, original).await;
+    }
     for continuation in original
         .native_reconciliation_attempts
         .iter()
@@ -2358,6 +2479,7 @@ mod tests {
     }
 
     async fn evidence_rpc() -> (
+        ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture,
         ethereum_client::PollingEthApi,
         Arc<EvidenceRpc>,
         tokio::task::JoinHandle<()>,
@@ -2410,7 +2532,7 @@ mod tests {
                                 let request: Value = serde_json::from_str(&text).unwrap();
                                 let params = &request["params"];
                                 let result = match request["method"].as_str().unwrap() {
-                                    "eth_chainId" => json!("0x1"),
+                                    "eth_chainId" => json!("0x7a69"),
                                     "eth_getBlockByNumber" => {
                                         let tag = params[0].as_str().unwrap();
                                         let number = if tag == "finalized" {
@@ -2419,7 +2541,7 @@ mod tests {
                                             usize::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
                                         };
                                         let mut block = state.blocks[number].clone();
-                                        if witness && number != 0 && state.fork.load(Ordering::SeqCst) {
+                                        if !witness && number != 0 && state.fork.load(Ordering::SeqCst) {
                                             block.header.inner.extra_data = vec![99].into();
                                             block.header.hash = block.header.inner.hash_slow();
                                         }
@@ -2427,7 +2549,14 @@ mod tests {
                                     },
                                     "eth_getBlockByHash" => state.blocks.iter()
                                         .find(|block| json!(block.header.hash) == params[0])
-                                        .map(|block| json!(block)).unwrap_or(Value::Null),
+                                        .map(|block| {
+                                            let mut block = block.clone();
+                                            if !witness && block.header.number != 0 && state.fork.load(Ordering::SeqCst) {
+                                                block.header.inner.extra_data = vec![99].into();
+                                                block.header.hash = block.header.inner.hash_slow();
+                                            }
+                                            json!(block)
+                                        }).unwrap_or(Value::Null),
                                     "eth_getBlockReceipts" => {
                                         if state.missing_receipts.load(Ordering::SeqCst) { Value::Null }
                                         else { json!([]) }
@@ -2459,21 +2588,35 @@ mod tests {
                 }
             }
         });
+        let beacon_state = state.clone();
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            31337,
+            state.blocks[0].header.hash,
+            Arc::new(move || {
+                beacon_state.blocks[beacon_state.witness_height.load(Ordering::SeqCst)]
+                    .header.clone()
+            }),
+        )
+        .await
+        .unwrap();
         let eth = ethereum_client::PollingEthApi::new(&primary_url)
             .await
             .unwrap()
-            .with_finality_witness(&witness_url, 1, state.blocks[0].header.hash)
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await
+            .unwrap()
+            .with_data_witness(&witness_url, 31337, state.blocks[0].header.hash)
             .await
             .unwrap();
-        (eth, state, server)
+        (beacon, eth, state, server)
     }
 
     #[tokio::test]
-    async fn legacy_coverage_reconstructs_under_quorum_without_rewriting_and_rejects_partial_inventory(
+    async fn legacy_coverage_reconstructs_under_beacon_without_rewriting_and_rejects_partial_inventory(
     ) {
         use serde_json::json;
         use std::sync::atomic::Ordering;
-        let (eth, rpc, server) = evidence_rpc().await;
+        let (_beacon, eth, rpc, server) = evidence_rpc().await;
         let base = std::env::temp_dir().join(format!("cutover-legacy-evidence-{}", Uuid::now_v7()));
         fs::create_dir_all(base.join("old")).unwrap();
         for name in [
@@ -2486,7 +2629,7 @@ mod tests {
             fs::write(base.join(name), b"{}").unwrap();
         }
         let mut old = identity();
-        old.ethereum_chain_id = 1;
+        old.ethereum_chain_id = 31337;
         old.ethereum_genesis_hash = H256(rpc.blocks[0].header.hash.0);
         old.ethereum_start_block = 0;
         old.erc20_manager_address = Some(primitive_types::H160::repeat_byte(2));
@@ -2499,7 +2642,7 @@ mod tests {
         assert_eq!(
             view.block_number(),
             2,
-            "ordinary finalized-height lag is accepted"
+            "Beacon execution finality, not the higher EL finalized tag, authorizes coverage"
         );
         for version in [1, 2] {
             seal.schema_version = version;
@@ -2575,8 +2718,12 @@ mod tests {
         authenticate_coverage(&seal, &mut v3, &eth, &mut view)
             .await
             .unwrap();
-        v3.ethereum_authentication.as_mut().unwrap().common_header =
-            rpc.blocks[1].header.inner.clone();
+        let ethereum_client::beacon_finality::FinalityCheckpoint::Beacon(checkpoint) =
+            v3.ethereum_authentication.as_mut().unwrap()
+        else {
+            panic!("fixture must produce a native Beacon checkpoint");
+        };
+        checkpoint.common_header = rpc.blocks[1].header.inner.clone();
         assert!(authenticate_coverage(&seal, &mut v3, &eth, &mut view)
             .await
             .is_err());
@@ -2598,10 +2745,11 @@ mod tests {
         );
         seal.boundary = old_boundary;
         rpc.witness_height.store(1, Ordering::SeqCst);
-        assert!(
-            eth.verified_finalized_view().await.is_err(),
-            "saved common fence cannot regress"
-        );
+        let mut retained_view = eth.verified_finalized_view().await.unwrap();
+        assert_eq!(retained_view.block_number(), retained.common_header().number,
+            "a stale signed Beacon update must not regress the authenticated execution fence");
+        assert_eq!(retained_view.block_hash(), retained.common_header().hash_slow());
+        retained_view.verify_checkpoint(&*eth, &retained).await.unwrap();
         rpc.witness_height.store(2, Ordering::SeqCst);
         rpc.fork.store(true, Ordering::SeqCst);
         assert!(
@@ -2630,7 +2778,7 @@ mod tests {
         };
         use ethereum_client::abi::BridgingPayment;
         use std::sync::atomic::Ordering;
-        let (eth, rpc, server) = evidence_rpc().await;
+        let (_beacon, eth, rpc, server) = evidence_rpc().await;
         let payment = Address::repeat_byte(3);
         let log = Log {
             address: payment,
@@ -3087,6 +3235,7 @@ mod tests {
             old_identity: old,
             new_identity: new,
             new_manager_code_id: H256::repeat_byte(10),
+            native_wrapper_approval: None,
             source_receipt_floor: 0,
             boundary: CutoverBoundary {
                 slot: 32,

@@ -35,3 +35,7 @@ vft-vara-client.workspace = true
 eth-events-electra-client.workspace = true
 historical-proxy-client.workspace = true
 alloy-rlp.workspace = true
+
+[dev-dependencies]
+ethereum-client = { workspace = true, features = ["test-fixtures"] }
+sha2.workspace = true

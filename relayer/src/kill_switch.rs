@@ -850,7 +850,7 @@ mod tests {
                             TxHash::repeat_byte(if is_fork && source == 42 { 8 } else { 7 })
                         };
                         let result = match request["method"].as_str().unwrap() {
-                            "eth_chainId" => json!("0x88bb0"),
+                            "eth_chainId" => json!("0x7a69"),
                             "eth_getBlockByNumber" => {
                                 let tag = params[0].as_str().unwrap();
                                 let number = match tag {
@@ -860,7 +860,7 @@ mod tests {
                                 };
                                 if fault == 2 && number == 4 {
                                     json!(chains[0][number])
-                                } else if fault == 3 && number == 1 {
+                                } else if witness_fault.load(Ordering::SeqCst) == 3 && number == 1 {
                                     let mut changed = chain[number].clone();
                                     changed.header.inner.extra_data = vec![9].into();
                                     changed.header.hash = changed.header.inner.hash_slow();
@@ -914,10 +914,21 @@ mod tests {
         .run();
         let handle = server.handle();
         tokio::spawn(server);
+        let beacon_chains = chains.clone();
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            31337,
+            chains[0][0].header.hash,
+            Arc::new(move || beacon_chains[0][1].header.clone()),
+        )
+        .await
+        .unwrap();
         let api = EthApi::new(&endpoint, &format!("{queue:#x}"), None, None, None)
             .await
             .unwrap()
-            .with_finality_witness(&witness_endpoint, 560048, chains[0][0].header.hash)
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await
+            .unwrap()
+            .with_data_witness(&witness_endpoint, 31337, chains[0][0].header.hash)
             .await
             .unwrap();
         let mut view = api.verified_finalized_view().await.unwrap();
@@ -950,7 +961,7 @@ mod tests {
         }
         witness_fault.store(0, Ordering::SeqCst);
 
-        // Recheck the common pin before either a challenge or a clean cursor advance.
+        // Recheck the Beacon-authenticated primary pin before challenge or cursor advance.
         for mismatch in [false, true] {
             state = State::ScanForEvents;
             let changed_pin = scan_roots(&api, &mut view, cursor.unwrap(), &metrics, async |_| {

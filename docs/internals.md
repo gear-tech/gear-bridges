@@ -177,6 +177,28 @@ Bootstrap requires an independently trusted recent checkpoint root, not the depl
 
 Regular updates and replay enforce `current_slot >= signature_slot > attested_slot >= finalized_slot`, sequential authenticated committee transitions and the fork at the preceding signature slot. Replay headers must already be strictly ordered and chain to the authenticated interval; neither the relayer nor the actor sorts malformed input into validity. Revision compare-and-set, bounded checkpoint history and native BLS verification remain enforced.
 
+The actor and host Ethereum client share the consensus rules in
+`gear-programs/checkpoint-light-client/io/src/verification.rs`, with separate
+actor/native cryptographic backends. Host authority requires an independently
+hash-approved Beacon bootstrap and an owned durable proof store. Signed Beacon
+finality binds the complete execution header; execution RPC supplies data, not
+an alternative finality vote. Receipt and signer-account proofs use that
+authenticated header's trie roots. Legacy checkpoints and nonce snapshots must
+requalify their original pins before resuming; a consumed nonce alone never
+proves bridge completion. The indexer invokes the same native verifier rather
+than reimplementing consensus or MPT verification in JavaScript.
+
+Electra adds body-level `execution_requests`; its SSZ execution payload still has
+17 fields. Fulu retains that block layout. The execution header separately commits
+to EIP-7685 `requestsHash` through its complete RLP hash. Shared provenance-pinned
+mainnet captures at Electra slot 11649029 and Fulu slot 13164563 each contain a
+consolidation request. Rust and Lodestar checks cover full/light SSZ roots, request
+hashes, execution-header binding, transaction/receipt tries, retained-proof reload
+and independent mutations. Capture sources and SHA-256 digests are in
+`tests/src/checkpoint_light_client/chain-data/execution-requests-provenance.json`.
+These public captures qualify proof composition, not an independently approved
+sync-committee bootstrap or production finality authority.
+
 Checkpoint deployment, updates and native integration tests submit with 95% of the block gas limit. Deployment and native-test gas estimates must fit that ceiling; the exact RPC minimum is not an execution budget. It can exhaust gas during queued BLS execution even when the update is valid.
 
 This process is distinct from the Ethereum token relayer: one advances the light-client state, while the other submits user/event receipts through the programs that consume that state.

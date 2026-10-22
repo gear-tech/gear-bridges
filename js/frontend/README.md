@@ -23,6 +23,8 @@ Native payout rejection is a distinct terminal `Refunded` / GraphQL `REFUNDED` h
 
 Before serving the refund-aware API/UI, apply `js/indexer/db/migrations/1792022400000-native_refund.js`, restart the PostGraphile API to expose the appended status enum, then regenerate GraphQL artifacts with the command below and rebuild. Existing legacy rows are not reclassified by this migration; recover historical refunds only from authenticated finalized events and original receipt identities, never from old completion flags or balances. Rollback refuses to discard an already recorded refund.
 
+Native inbound profiles bind the unchanged wrapper ActorId, actual CodeId, Ethereum token, explicit `escrow-v1`/`held-escrow-v2` capability and its actual IDL digest. Missing mode or a modern IDL paired with v1 code HOLDs before signing. The claim adapter exposes only the `Redemption` read shared by the two exact IDLs, qualified against both artifacts; it never probes unavailable hold/blocking routes. V1 reconciliation requires exact-full returned backing and authenticates the same original's terminal Refunded evidence afterward; partial/excess/ambiguous v1 liabilities remain blocked.
+
 The Docker frontend build uses a 4 GiB Node heap; the default 2 GiB heap is insufficient for the current bundle.
 
 Vara wrapping, approval and bridge requests remain one `utility.batchAll`. Submissions wait for finalized inclusion and correlate ordered command replies to the original extrinsic's queued message IDs. The generated manager decoder supplies the exact nonce and mapped Ethereum token before ordinary `PayFees(nonce)` is submitted as a separate transaction for automatic claims; manual claims never submit that fee. A successful original bridge reply proves the requested spend even when approval reports no change. If fee payment fails, use the reported original transaction/message/nonce to recover from history—never resubmit the bridge request. Ethereum wrap, approval and transfer mutations reject reverted receipts with their original hashes.
@@ -37,6 +39,7 @@ Focused regression checks (repository root):
 
 ```sh
 node --experimental-strip-types js/frontend/test/submission.test.ts
+node --experimental-strip-types js/frontend/test/native-profile.test.ts
 yarn workspace @gear-js/bridge typecheck
 yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts --mode unit
 ```

@@ -161,7 +161,9 @@ pub(crate) fn validate_commitment_call(
 ) -> Result<AcceptedCommitmentCall> {
     use alloy::sol_types::{SolCall, SolValue};
     let input = signed.input().as_ref();
-    let selector = input.get(..4).context("original commitment selector is missing; HOLD")?;
+    let selector = input
+        .get(..4)
+        .context("original commitment selector is missing; HOLD")?;
     let call = if selector == BeefyClient::submitFiatShamirCall::SELECTOR {
         let call = BeefyClient::submitFiatShamirCall::abi_decode(input)
             .context("malformed original Fiat-Shamir submission; HOLD")?;
@@ -244,7 +246,7 @@ pub(crate) async fn recover_receipt_proof(
         let checkpoint: ethereum_client::FinalityCheckpoint =
             serde::Deserialize::deserialize(checkpoint)?;
         ensure!(
-            checkpoint.common_header.number >= included.0,
+            checkpoint.common_header().number >= included.0,
             "saved receipt checkpoint predates inclusion; HOLD"
         );
         view.verify_checkpoint(provider, &checkpoint).await?;
@@ -271,7 +273,30 @@ pub(crate) async fn recover_receipt_proof(
     );
     proof.verify_inclusion(view, hash)?;
     view.recheck(provider).await?;
+    retain_proof_qualification(directory,
+        &json!({"transactionHash":bytes(hash),"inclusion":included,
+            "checkpoint":checkpoint,"receiptProof":retained}),
+        &json!({"checkpoint":view.checkpoint(),
+            "receiptProofDigest":bytes(keccak256(&serde_json::to_vec(&proof)?))}))?;
     Ok(proof)
+}
+
+/// Append authority qualification without rewriting the original journal bytes.
+pub(crate) fn retain_proof_qualification(
+    directory: &Path,
+    original: &Value,
+    qualified: &Value,
+) -> Result<()> {
+    let original_digest = bytes(keccak256(&serde_json::to_vec(original)?));
+    let proof_digest = bytes(keccak256(&serde_json::to_vec(qualified)?));
+    let directory = directory.join("beacon-qualifications");
+    fs::create_dir_all(&directory)?;
+    gear_common::durable::immutable_json(
+        &directory.join(format!("{original_digest}-{proof_digest}.json")),
+        &json!({"schemaVersion":2,"originalDigest":original_digest,
+            "proofDigest":proof_digest,"qualification":qualified}),
+    )?;
+    Ok(())
 }
 
 /// Fetch a block once for every distinct original inclusion, then retain compact
@@ -288,16 +313,15 @@ pub(crate) async fn authenticate_recorded_receipts(
     let mut missing = Vec::new();
     for original in originals {
         let path = directory.join(format!("{:x}.json", original.hash));
-        let stored = fs::metadata(&path)
-            .ok()
-            .filter(|metadata| metadata.len() <= 64 * 1024 * 1024)
-            .and_then(|_| fs::read(&path).ok())
-            .and_then(|bytes| serde_json::from_slice::<RecordedReceiptProof>(&bytes).ok());
-        if stored.as_ref().is_some_and(|proof| {
-            proof.header.number == block_number
-                && proof.header.hash_slow() == block_hash
-                && verify_recorded_receipt(proof, view, original).is_ok()
-        }) {
+        if gear_common::durable::entry_exists(&path)? {
+            ensure!(gear_common::durable::committed_file(&path)?.len() <= 64 * 1024 * 1024,
+                "retained receipt proof is oversized; HOLD");
+            let proof: RecordedReceiptProof = serde_json::from_slice(&fs::read(&path)?)?;
+            ensure!(proof.header.number == block_number && proof.header.hash_slow() == block_hash,
+                "retained original inclusion changed; HOLD");
+            verify_recorded_receipt(&proof, view, original)?;
+            retain_proof_qualification(directory, &serde_json::to_value(&proof)?,
+                &json!({"transactionHash":bytes(original.hash),"checkpoint":view.checkpoint()}))?;
             continue;
         }
         missing.push((original, path));
@@ -344,6 +368,8 @@ pub(crate) async fn authenticate_recorded_receipts(
         };
         verify_recorded_receipt(&proof, view, original)?;
         store_receipt_proof(directory, &path, &proof)?;
+        retain_proof_qualification(directory, &serde_json::to_value(&proof)?,
+            &json!({"transactionHash":bytes(original.hash),"checkpoint":view.checkpoint()}))?;
     }
     Ok(())
 }
@@ -357,41 +383,14 @@ pub(crate) fn retain_finalized_receipt(
     verify_recorded_receipt(&finalized.inclusion, view, original)?;
     fs::create_dir_all(directory)?;
     let path = directory.join(format!("{:x}.json", original.hash));
-    if let Ok(bytes) = fs::read(&path) {
-        if serde_json::from_slice::<RecordedReceiptProof>(&bytes).is_ok_and(|saved| {
-            saved.genesis == finalized.inclusion.genesis
-                && saved.header == finalized.inclusion.header
-                && saved.index == finalized.inclusion.index
-                && saved.raw_transaction == finalized.inclusion.raw_transaction
-                && saved.receipt == finalized.inclusion.receipt
-                && saved.receipt_proof == finalized.inclusion.receipt_proof
-                && saved.transaction_proof == finalized.inclusion.transaction_proof
-        }) {
-            return Ok(());
-        }
-    }
-    store_receipt_proof(directory, &path, &finalized.inclusion)
+    store_receipt_proof(directory, &path, &finalized.inclusion)?;
+    retain_proof_qualification(directory, &serde_json::to_value(&finalized.inclusion)?,
+        &json!({"transactionHash":bytes(original.hash),"checkpoint":view.checkpoint()}))
 }
 
 fn store_receipt_proof(directory: &Path, path: &Path, proof: &RecordedReceiptProof) -> Result<()> {
-    if path.exists() {
-        let held = path.with_extension(format!(
-            "held-{}.json",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_nanos()
-        ));
-        fs::rename(path, held)?;
-        fs::File::open(directory)?.sync_all()?;
-    }
-    let temporary = path.with_extension("json.tmp");
-    let mut file = std::io::BufWriter::new(fs::File::create(&temporary)?);
-    serde_json::to_writer(&mut file, proof)?;
-    use std::io::Write;
-    file.flush()?;
-    file.get_ref().sync_all()?;
-    fs::rename(temporary, path)?;
-    fs::File::open(directory)?.sync_all()?;
+    fs::create_dir_all(directory)?;
+    gear_common::durable::immutable_json(path, proof)?;
     Ok(())
 }
 
@@ -654,12 +653,29 @@ impl Drop for AnvilWitness {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn test_finality_args(witness: String) -> Result<cli_utils::EthereumFinalityArgs> {
+    Ok(cli_utils::EthereumFinalityArgs {
+        ethereum_witness_rpc: Some(witness),
+        ethereum_finality_beacon_rpc: std::env::var("ETH_FINALITY_BEACON_RPC")?,
+        ethereum_finality_bootstrap: std::env::var("ETH_FINALITY_BOOTSTRAP")?.into(),
+        ethereum_finality_bootstrap_sha256: std::env::var("ETH_FINALITY_BOOTSTRAP_SHA256")?,
+        ethereum_finality_store: std::env::var("ETH_FINALITY_STORE")?.into(),
+        ethereum_finality_proof_sources: std::env::var_os("BEEFY_TEST_FINALITY_PROOF_SOURCES")
+            .map(|paths| std::env::split_paths(&paths).collect())
+            .unwrap_or_default(),
+    })
+}
+
 pub struct Ethereum {
     _anvil: Option<AnvilInstance>,
     #[cfg(test)]
     _witness: Option<AnvilWitness>,
+    #[cfg(test)]
+    pub(crate) _beacon: Option<ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture>,
     pub(crate) owned_fixture_network: Option<OwnedFixtureNetwork>,
     pub(crate) public_network: PublicEthereumNetwork,
+    pub(crate) execution: Option<crate::execution::ExecutionAuthority>,
     pub api: EthApi,
     pub client_address: Address,
     pub verifier_address: Address,
@@ -673,9 +689,15 @@ impl Ethereum {
     pub async fn prepare(
         output: &Path,
         checkpoint: &CapturedCommitment,
-        snapshot: &QueueSnapshot,
-        mmr_start_block: u64,
+        proof: &crate::source::SourceProof,
+        source: &crate::source::Source,
     ) -> Result<Self> {
+        let snapshot = &proof.snapshot;
+        let mmr_start_block = source.mmr_start_block;
+        let native_inventory = std::env::var_os("BEEFY_TEST_TOKEN_STACK")
+            .map(|path| -> Result<crate::execution::fixture::NativeInventory> {
+                Ok(serde_json::from_slice(&fs::read(path)?)?)
+            }).transpose()?;
         let initial_block = u64::from(checkpoint.block);
         ensure!(
             mmr_start_block > 0 && initial_block > mmr_start_block,
@@ -754,9 +776,15 @@ impl Ethereum {
             .current_dir(&root)
             .env("FOUNDRY_BROADCAST", &broadcast_dir)
             .env("PRIVATE_KEY", &private_key)
+            .envs(native_inventory.iter().map(|inventory|
+                ("LOCAL_NATIVE_MANAGER", format!("{:#x}", inventory.manager))))
             .env(
                 "LOCAL_RECOVERY_PRIVATE_KEY",
                 format!("0x{}", hex::encode(anvil.keys()[1].to_bytes())),
+            )
+            .env(
+                "LOCAL_RECOVERY_OWNER_PRIVATE_KEY",
+                format!("0x{}", hex::encode(anvil.keys()[2].to_bytes())),
             )
             .env("BEEFY_SOURCE_DOMAIN", bytes(source_domain))
             .env("BEEFY_BRIDGE_DOMAIN", bytes(snapshot.bridge_domain))
@@ -821,8 +849,13 @@ impl Ethereum {
             .header
             .hash;
         let witness = AnvilWitness::new(anvil.port()).await?;
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::from_provider(
+            api.raw_provider().root().clone(), BlockNumberOrTag::Finalized,
+        ).await?;
         let api = api
-            .with_finality_witness(&witness.url, 31_337, genesis)
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await?
+            .with_data_witness(&witness.url, 31_337, genesis)
             .await?;
         let transactions = deployment_transactions(&deployment)?;
         for address in [
@@ -842,11 +875,13 @@ impl Ethereum {
             );
         }
 
-        let ethereum = Self {
+        let mut ethereum = Self {
             _anvil: Some(anvil),
             _witness: Some(witness),
+            _beacon: Some(beacon),
             owned_fixture_network: None,
             public_network: PublicEthereumNetwork::Hoodi,
+            execution: None,
             api,
             client_address,
             verifier_address,
@@ -890,12 +925,68 @@ impl Ethereum {
                 && verifier.destinationChainId().call().await? == U256::from(31_337u64),
             "deployed adapter immutable bindings differ from MessageQueue/client/chain"
         );
+        ethereum.install_owned_native_approval(source, checkpoint, proof, output, None).await?;
         Ok(ethereum)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn install_owned_native_approval(
+        &mut self,
+        source: &crate::source::Source,
+        initial: &CapturedCommitment,
+        proof: &crate::source::SourceProof,
+        output: &Path,
+        native: Option<crate::execution::fixture::NativeInventory>,
+    ) -> Result<(Value, B256)> {
+        use crate::execution::fixture::{FixtureTopology, generate, load};
+        sol! {
+            #[sol(rpc)]
+            interface OwnedGovernanceTopology {
+                function governanceAdmin() external view returns (address);
+                function governancePauser() external view returns (address);
+                function erc20Manager() external view returns (address);
+                function beefyRecoveryTimelock() external view returns (address);
+            }
+        }
+        let anvil = self._anvil.as_ref().context("native approval needs its owned Anvil")?;
+        let recovery_owner = PrivateKeySigner::from_bytes(&B256::from_slice(&anvil.keys()[1].to_bytes()))?.address();
+        let second_owner = PrivateKeySigner::from_bytes(&B256::from_slice(&anvil.keys()[2].to_bytes()))?.address();
+        let beacon = self._beacon.as_ref().context("owned Beacon fixture missing")?;
+        let bootstrap: ethereum_client::beacon_finality::BootstrapApproval =
+            serde_json::from_slice(&fs::read(&beacon.approval_path)?)?;
+        let network = OwnedFixtureNetwork {
+            schema_version: 1, ethereum_chain_id: bootstrap.chain_id, ethereum_genesis_hash: bootstrap.genesis_hash,
+            beacon_genesis_validators_root: bootstrap.genesis_validators_root, beacon_genesis_time: bootstrap.genesis_time,
+        };
+        network.validate()?;
+        let provider = self.api.raw_provider();
+        // Getters discover candidates only; generate/load authenticate their code and
+        // every approved relationship against the Beacon-anchored account/storage trie.
+        let queue = OwnedGovernanceTopology::new(self.queue_address, provider.clone());
+        let governance_admin = queue.governanceAdmin().call().await?;
+        let governance_pauser = queue.governancePauser().call().await?;
+        let evm_manager = OwnedGovernanceTopology::new(governance_admin, provider.clone()).erc20Manager().call().await?;
+        let recovery = queue.beefyRecoveryTimelock().call().await?;
+        ensure!(recovery == recovery_owner.create(3), "owned recovery CREATE chronology changed");
+        let topology = FixtureTopology {
+            governance_admin, governance_pauser,
+            evm_manager: (evm_manager != Address::ZERO).then_some(evm_manager),
+            recovery, safe: recovery_owner.create(1), singleton: recovery_owner.create(0),
+            safe_owners: vec![recovery_owner, second_owner], min_delay: 3600, native,
+            owned_network: network.clone(), beacon_approval_sha256: beacon.approval_sha256,
+            beacon_approval_path: beacon.approval_path.clone(),
+        };
+        let (manifest, digest) = generate(self, source, initial, proof, output, &topology).await?;
+        let authority = load(&output.join("local-fixture-manifest.json"), digest,
+            topology.beacon_approval_sha256, self, source).await?;
+        self.execution = Some(authority);
+        self.owned_fixture_network = Some(network);
+        Ok((manifest, digest))
     }
 
     pub async fn connect(
         endpoint: &str,
-        witness_endpoint: &str,
+        finality: &cli_utils::EthereumFinalityArgs,
         wallet: &Path,
         manifest: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
@@ -903,7 +994,7 @@ impl Ethereum {
     ) -> Result<Self> {
         let ethereum = Self::connect_addresses(
             endpoint,
-            witness_endpoint,
+            finality,
             Some(wallet),
             manifest,
             fixture,
@@ -917,14 +1008,14 @@ impl Ethereum {
     /// Read the deployment only after independently approved network authentication.
     pub async fn token_manifest(
         endpoint: &str,
-        witness_endpoint: &str,
+        finality: &cli_utils::EthereumFinalityArgs,
         wallet: &Path,
         addresses: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
     ) -> Result<Value> {
         let ethereum = Self::connect_addresses(
             endpoint,
-            witness_endpoint,
+            finality,
             Some(wallet),
             addresses,
             fixture,
@@ -947,7 +1038,7 @@ impl Ethereum {
 
     async fn connect_addresses(
         endpoint: &str,
-        witness_endpoint: &str,
+        finality: &cli_utils::EthereumFinalityArgs,
         wallet: Option<&Path>,
         manifest: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
@@ -970,6 +1061,23 @@ impl Ethereum {
             manifest_u64(manifest, "chainId")? == chain_id,
             "deployment chain id differs from approved network; HOLD"
         );
+        let genesis = fixture.map_or(public_network.genesis(), |network| {
+            network.ethereum_genesis_hash
+        });
+        let witness_endpoint = finality.ethereum_witness_rpc.as_deref().context(
+            "BEEFY requires --ethereum-witness-rpc for DATA ONLY corroboration; Beacon authenticates finality",
+        )?;
+        let beacon = ethereum_client::BeaconFinalityConfig::load(
+            &finality.ethereum_finality_bootstrap,
+            finality.ethereum_finality_bootstrap_sha256.parse::<B256>()
+                .context("invalid independently approved Beacon bootstrap SHA-256")?,
+            &finality.ethereum_finality_beacon_rpc,
+        )?
+        .with_proof_sources(finality.ethereum_finality_proof_sources.clone())?;
+        ensure!(
+            beacon.identity() == (chain_id, genesis),
+            "Beacon bootstrap identity differs from approved Ethereum network; HOLD"
+        );
         if let Some(network) = fixture {
             network.validate_endpoint(endpoint)?;
             network.validate_endpoint(witness_endpoint)?;
@@ -979,14 +1087,7 @@ impl Ethereum {
         let queue_address = manifest_address(manifest, "queue")?;
         let receiver_address = manifest_address(manifest, "receiver")?;
         let endpoint = hoodi_rpc_endpoint(endpoint)?;
-        ensure_ethereum_network(
-            &endpoint,
-            chain_id,
-            fixture.map_or(public_network.genesis(), |network| {
-                network.ethereum_genesis_hash
-            }),
-        )
-        .await?;
+        ensure_ethereum_network(&endpoint, chain_id, genesis).await?;
         let private_key = wallet
             .map(read_hoodi_wallet)
             .transpose()?
@@ -1000,20 +1101,19 @@ impl Ethereum {
         )
         .await
         .context("connect Ethereum deployment")?
-        .with_finality_witness(
-            witness_endpoint,
-            chain_id,
-            fixture.map_or(public_network.genesis(), |network| {
-                network.ethereum_genesis_hash
-            }),
-        )
+        .with_beacon_finality(beacon, &finality.ethereum_finality_store)
+        .await?
+        .with_data_witness(witness_endpoint, chain_id, genesis)
         .await?;
         Ok(Self {
             _anvil: None,
             #[cfg(test)]
             _witness: None,
+            #[cfg(test)]
+            _beacon: None,
             owned_fixture_network: fixture.cloned(),
             public_network,
+            execution: None,
             api,
             client_address,
             verifier_address,
@@ -1025,14 +1125,14 @@ impl Ethereum {
 
     pub(crate) async fn connect_readonly(
         endpoint: &str,
-        witness_endpoint: &str,
+        finality: &cli_utils::EthereumFinalityArgs,
         manifest: &Value,
         fixture: Option<&OwnedFixtureNetwork>,
         public_network: PublicEthereumNetwork,
     ) -> Result<Self> {
         let ethereum = Self::connect_addresses(
             endpoint,
-            witness_endpoint,
+            finality,
             None,
             manifest,
             fixture,
@@ -1041,6 +1141,34 @@ impl Ethereum {
         .await?;
         verify_manifest(&ethereum, manifest).await?;
         Ok(ethereum)
+    }
+
+    /// Missing approval retains diagnosis/recovery access, never new signing authority.
+    pub async fn load_execution_approval(
+        &mut self,
+        manifest: &Path,
+        finality: &cli_utils::EthereumFinalityArgs,
+    ) -> Result<()> {
+        self.execution = crate::execution::ExecutionAuthority::load(manifest, finality)?;
+        if let Some(approval) = &self.execution {
+            approval.matches_ethereum(self)?;
+        }
+        Ok(())
+    }
+
+    pub async fn require_execution(&self) -> Result<B256> {
+        let approval = self.execution.as_ref().context(
+            "new signing requires strict schema-2 executionAuthorized=true and independent BEEFY_APPROVED_MANIFEST_SHA256; HOLD",
+        )?;
+        approval.verify(self).await?;
+        Ok(approval.digest)
+    }
+
+    pub async fn qualify_execution_source(&self, source: &crate::source::Source) -> Result<()> {
+        if let Some(approval) = &self.execution {
+            approval.verify_source(source).await?;
+        }
+        Ok(())
     }
 
     fn expected_chain_id(&self) -> u64 {
@@ -1293,27 +1421,67 @@ impl Ethereum {
         Ok(value)
     }
 
-    pub(crate) async fn account_nonce_at(&self, address: Address, hash: B256) -> Result<u64> {
-        let view = self.qualified_state_view(hash).await?;
-        let at = BlockId::hash_canonical(hash);
-        let value = self
-            .api
-            .raw_provider()
-            .get_transaction_count(address)
-            .block_id(at)
-            .await?;
+    /// Prove the original signer's nonce at this exact admitted header. Retained
+    /// proofs are never replaced on corruption; legacy observations are requalified.
+    pub(crate) async fn account_nonce_at(
+        &self,
+        raw: &[u8],
+        view: &mut ethereum_client::FinalizedView,
+        number: u64,
+        hash: B256,
+        retained: Option<&Value>,
+        directory: &Path,
+    ) -> Result<Value> {
+        let mut encoded = raw;
+        let signed = TxEnvelope::decode_2718(&mut encoded)?;
         ensure!(
-            value
-                == self
-                    .api
-                    .raw_witness_provider()?
-                    .get_transaction_count(address)
-                    .block_id(at)
-                    .await?,
-            "HOLD: Ethereum providers disagree on account nonce"
+            encoded.is_empty() && signed.chain_id() == Some(self.api.finality_identity()?.0),
+            "nonce disposition original encoding or chain changed; HOLD"
         );
+        let signer = signed.recover_signer()?;
+        view.verify_blocks(self.api.raw_provider(), &std::collections::BTreeMap::from([(number, hash)])).await?;
+        let original = json!({"transactionHash":bytes(signed.tx_hash()),"block":number,
+            "blockHash":bytes(hash),"nonceDisposition":retained});
+        let proof_directory = directory.join("nonce-proofs");
+        let proof_path = proof_directory.join(format!("{}.json", bytes(keccak256(&serde_json::to_vec(&original)?))));
+        let cached: Option<Value> = if gear_common::durable::entry_exists(&proof_path)? {
+            Some(serde_json::from_slice(&gear_common::durable::committed_bytes(&proof_path)?)?)
+        } else { None };
+        // A malformed versioned original cannot be repaired from an otherwise valid cache.
+        ensure!(retained.is_none_or(|pin| pin.get("accountProof").is_some()
+            || (pin.get("schemaVersion").is_none() && pin.get("checkpoint").is_none())),
+            "nonce proof missing from versioned disposition; HOLD");
+        let saved_pin = retained.filter(|pin| pin.get("accountProof").is_some()).or(cached.as_ref());
+        let mut checkpoint = view.checkpoint().clone();
+        let proof = if let Some(pin) = saved_pin {
+            ensure!(pin["schemaVersion"] == 2, "unsupported nonce proof schema; HOLD");
+            checkpoint = serde_json::from_value(pin["checkpoint"].clone())?;
+            ensure!(checkpoint.beacon().is_some(), "versioned nonce proof lacks Beacon authority; HOLD");
+            view.verify_checkpoint(self.api.raw_provider(), &checkpoint).await?;
+            serde_json::from_value::<ethereum_client::inclusion::RecordedAccountProof>(pin["accountProof"].clone())?
+        } else {
+            let header = ethereum_client::get_block(self.api.raw_provider(), number).await?.header;
+            ensure!(header.hash == hash, "nonce disposition header changed; HOLD");
+            ethereum_client::inclusion::prove_account(self.api.raw_provider(), view, header.inner, signer).await?
+        };
+        ensure!(proof.header.number == number && proof.header.hash_slow() == hash,
+            "nonce proof changed its original pin; HOLD");
+        let nonce = proof.verify(view, signer)?.map_or(0, |account| account.nonce);
+        let consumed = nonce > signed.nonce();
+        for saved in retained.into_iter().chain(cached.as_ref()) {
+            ensure!(saved["block"] == number && saved["blockHash"] == bytes(hash)
+                && saved["accountNonce"] == nonce
+                && saved.get("pinnedNonceConsumed").is_none_or(|value| *value == consumed),
+                "retained nonce observation differs from authenticated original state; HOLD");
+        }
         view.recheck(self.api.raw_provider()).await?;
-        Ok(value)
+        let qualified = json!({"schemaVersion":2,"block":number,"blockHash":bytes(hash),
+            "accountNonce":nonce,"pinnedNonceConsumed":consumed,"accountProof":proof,
+            "checkpoint":checkpoint});
+        fs::create_dir_all(&proof_directory)?;
+        gear_common::durable::immutable_json(&proof_path, &qualified)?;
+        retain_proof_qualification(directory, &original, &qualified)?;
+        Ok(qualified)
     }
 
     async fn qualified_state_view(&self, hash: B256) -> Result<ethereum_client::FinalizedView> {
@@ -1583,7 +1751,8 @@ impl Ethereum {
             sender == receipt.from,
             "accepted signed transaction changed sender or chain; HOLD"
         );
-        self.verify_accepted_checkpoint(number, hash, anchor, snapshot).await
+        self.verify_accepted_checkpoint(number, hash, anchor, snapshot)
+            .await
     }
 
     /// Authenticate a retained original without discovering its receipt, body or
@@ -1593,28 +1762,30 @@ impl Ethereum {
         &self,
         tx_hash: B256,
         raw: &[u8],
-        proof: &RecordedReceiptProof,
-        checkpoint: &ethereum_client::FinalityCheckpoint,
+        (proof, checkpoint): (&RecordedReceiptProof, &ethereum_client::FinalityCheckpoint),
         view: &mut ethereum_client::FinalizedView,
         anchor: &CapturedCommitment,
         snapshot: &QueueSnapshot,
     ) -> Result<(u64, B256)> {
         let (chain, genesis) = self.api.finality_identity()?;
         ensure!(
-            checkpoint.chain_id == chain
-                && checkpoint.genesis_hash == genesis
+            checkpoint.chain_id() == chain
+                && checkpoint.genesis_hash() == genesis
                 && view.genesis_hash() == genesis
-                && checkpoint.common_header.number >= proof.header.number,
+                && checkpoint.common_header().number >= proof.header.number,
             "retained commitment checkpoint identity or inclusion changed; HOLD"
         );
-        view.verify_checkpoint(self.api.raw_provider(), checkpoint).await
+        view.verify_checkpoint(self.api.raw_provider(), checkpoint)
+            .await
             .context("authenticate retained commitment checkpoint")?;
         let number = proof.header.number;
         let hash = proof.header.hash_slow();
         view.verify_blocks(
             self.api.raw_provider(),
             &std::collections::BTreeMap::from([(number, hash)]),
-        ).await.context("authenticate retained commitment inclusion header")?;
+        )
+        .await
+        .context("authenticate retained commitment inclusion header")?;
         proof.verify_original_inclusion(view, raw, tx_hash)?;
         let mut encoded = raw;
         let signed = TxEnvelope::decode_2718(&mut encoded)?;
@@ -1630,8 +1801,12 @@ impl Ethereum {
             anchor,
             snapshot,
         )?;
-        let included = self.verify_accepted_checkpoint(number, hash, anchor, snapshot).await?;
-        view.recheck(self.api.raw_provider()).await.context("recheck retained commitment finality pin")?;
+        let included = self
+            .verify_accepted_checkpoint(number, hash, anchor, snapshot)
+            .await?;
+        view.recheck(self.api.raw_provider())
+            .await
+            .context("recheck retained commitment finality pin")?;
         Ok(included)
     }
 
@@ -1649,7 +1824,9 @@ impl Ethereum {
             status && signed.to() == Some(self.client_address) && signed.chain_id() == Some(chain),
             "accepted signed transaction changed client, chain or status; HOLD"
         );
-        let sender = signed.recover_signer().context("invalid accepted transaction signature")?;
+        let sender = signed
+            .recover_signer()
+            .context("invalid accepted transaction signature")?;
         let call = validate_commitment_call(signed, &anchor.raw)?;
         ensure!(
             call.snapshot.abi_encode() == to_sol_snapshot(snapshot).abi_encode()
@@ -1722,26 +1899,40 @@ impl Ethereum {
         snapshot: &QueueSnapshot,
         freshness: &SimplifiedMmrProof,
     ) -> Result<Value> {
-        let anvil = self._anvil.as_ref().context("interactive fixture requires owned Anvil")?;
+        let anvil = self
+            ._anvil
+            .as_ref()
+            .context("interactive fixture requires owned Anvil")?;
         let external = EthApi::new(
             &anvil.ws_endpoint(),
             &address_string(self.queue_address),
             Some(&format!("0x{}", hex::encode(anvil.keys()[1].to_bytes()))),
             None,
             None,
-        ).await?;
+        )
+        .await?;
         let validated = &anchor.validated;
         let wire_keys = anchor
             .current
             .keys
             .iter()
-            .map(|key| key.as_slice().try_into().context("invalid fixture authority key"))
+            .map(|key| {
+                key.as_slice()
+                    .try_into()
+                    .context("invalid fixture authority key")
+            })
             .collect::<Result<Vec<[u8; 33]>>>()?;
-        ensure!(!wire_keys.is_empty() && wire_keys.len() <= 256, "invalid fixture authority count");
+        ensure!(
+            !wire_keys.is_empty() && wire_keys.len() <= 256,
+            "invalid fixture authority count"
+        );
         let addresses = authority_addresses(&wire_keys)?;
         let mut bitfield = vec![U256::ZERO];
         for index in &validated.signed_indices {
-            ensure!((*index as usize) < wire_keys.len(), "fixture signer outside authority set");
+            ensure!(
+                (*index as usize) < wire_keys.len(),
+                "fixture signer outside authority set"
+            );
             bitfield[0] |= U256::from(1) << *index as usize;
         }
         let validator_proof = |index: usize| -> Result<BeefyClient::ValidatorProof> {
@@ -1768,19 +1959,49 @@ impl Ethereum {
         let provider = external.raw_provider();
         let sender = provider.default_signer_address();
         let client = BeefyClient::new(self.client_address, provider.clone());
-        let digest = client.computeCommitmentHash(commitment.clone()).call().await?;
-        let initial_index = *validated.signed_indices.first().context("fixture has no signers")? as usize;
+        let digest = client
+            .computeCommitmentHash(commitment.clone())
+            .call()
+            .await?;
+        let initial_index = *validated
+            .signed_indices
+            .first()
+            .context("fixture has no signers")? as usize;
         let initial = client
-            .submitInitial(commitment.clone(), bitfield.clone(), validator_proof(initial_index)?)
-            .send().await?.get_receipt().await?;
+            .submitInitial(
+                commitment.clone(),
+                bitfield.clone(),
+                validator_proof(initial_index)?,
+            )
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
         ensure!(initial.status(), "interactive initial submission reverted");
         let delay = client.randaoCommitDelay().call().await?;
-        provider.client().request::<_, Value>("anvil_mine", (format!("{delay:#x}"),)).await?;
-        let randao = client.commitPrevRandao(digest).send().await?.get_receipt().await?;
-        ensure!(randao.status(), "interactive randomness submission reverted");
-        let selected = client.createFinalBitfield(digest, bitfield.clone())
-            .from(sender).call().await?;
-        ensure!(selected.len() == 1 && selected[0] != U256::ZERO, "invalid interactive selection");
+        provider
+            .client()
+            .request::<_, Value>("anvil_mine", (format!("{delay:#x}"),))
+            .await?;
+        let randao = client
+            .commitPrevRandao(digest)
+            .send()
+            .await?
+            .get_receipt()
+            .await?;
+        ensure!(
+            randao.status(),
+            "interactive randomness submission reverted"
+        );
+        let selected = client
+            .createFinalBitfield(digest, bitfield.clone())
+            .from(sender)
+            .call()
+            .await?;
+        ensure!(
+            selected.len() == 1 && selected[0] != U256::ZERO,
+            "invalid interactive selection"
+        );
         let proofs = (0..wire_keys.len())
             .filter(|index| selected[0].bit(*index))
             .map(validator_proof)
@@ -1795,13 +2016,24 @@ impl Ethereum {
             U256::from_be_bytes(freshness.proof_order),
         );
         let chain_id = self.api.finality_identity()?.0;
-        let filled = provider.fill(call.into_transaction_request().with_chain_id(chain_id)).await?;
-        let signed = filled.as_envelope().context("interactive fixture was not signed")?;
+        let filled = provider
+            .fill(call.into_transaction_request().with_chain_id(chain_id))
+            .await?;
+        let signed = filled
+            .as_envelope()
+            .context("interactive fixture was not signed")?;
         validate_commitment_call(signed, &anchor.raw)?;
         let raw = signed.encoded_2718();
-        let receipt = provider.send_raw_transaction(&raw).await?.get_receipt().await?;
+        let receipt = provider
+            .send_raw_transaction(&raw)
+            .await?
+            .get_receipt()
+            .await?;
         ensure!(receipt.status(), "interactive final submission reverted");
-        provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
+        provider
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x3",))
+            .await?;
         let mut transaction = receipt_value("submitFinal", &receipt, None);
         transaction["block"] = json!(anchor.block);
         transaction["rawScale"] = json!(bytes(&anchor.raw));
@@ -1820,6 +2052,33 @@ impl Ethereum {
         snapshot: &QueueSnapshot,
         freshness: &SimplifiedMmrProof,
         prior: Option<&Value>,
+        journal: impl FnMut(&Value, Option<&alloy::rpc::types::TransactionReceipt>) -> Result<()>,
+    ) -> Result<()> {
+        let approved_manifest = self.require_execution().await?;
+        self.submit_commitment_approved(anchor, freshness_leaf, snapshot, freshness, prior,
+            ("approvedManifestSha256", approved_manifest), journal).await
+    }
+
+    // Test-only synthetic signing mechanics, not the production writer entrypoint.
+    // A client-only fixture has no native source, custody inventory, queue or Safe.
+    #[cfg(test)]
+    async fn submit_synthetic_commitment(
+        &mut self, anchor: &CapturedCommitment, leaf: &RuntimeLeaf, snapshot: &QueueSnapshot,
+        proof: &SimplifiedMmrProof, prior: Option<&Value>,
+        journal: impl FnMut(&Value, Option<&alloy::rpc::types::TransactionReceipt>) -> Result<()>,
+    ) -> Result<()> {
+        ensure!(self._anvil.is_some() && self.verifier_address == Address::ZERO
+            && self.receiver_address == Address::ZERO && self.api.finality_identity()?.0 == 31_337,
+            "synthetic unit signer requires its owned client-only Anvil");
+        let fixtures = serde_json::to_vec(&crate::fixtures::generate_fixtures()?)?;
+        let digest = B256::from(sp_core::hashing::sha2_256(&fixtures));
+        self.submit_commitment_approved(anchor, leaf, snapshot, proof, prior,
+            ("approvedSyntheticFixtureSha256", digest), journal).await
+    }
+
+    async fn submit_commitment_approved(
+        &mut self, anchor: &CapturedCommitment, freshness_leaf: &RuntimeLeaf, snapshot: &QueueSnapshot,
+        freshness: &SimplifiedMmrProof, prior: Option<&Value>, approval: (&str, B256),
         mut journal: impl FnMut(&Value, Option<&alloy::rpc::types::TransactionReceipt>) -> Result<()>,
     ) -> Result<()> {
         let validated = &anchor.validated;
@@ -1949,6 +2208,9 @@ impl Ethereum {
         let mut transaction = prior
             .cloned()
             .unwrap_or_else(|| json!({"block": anchor.block, "rawScale": bytes(&anchor.raw)}));
+        ensure!(transaction[approval.0].is_null() || transaction[approval.0] == json!(approval.1),
+            "unsigned commitment belongs to a different approved manifest/fixture; HOLD");
+        transaction[approval.0] = json!(approval.1);
         let nonce = match transaction.get("nonce") {
             Some(nonce) => nonce.as_u64().context("invalid saved commitment nonce")?,
             None => {
@@ -2353,24 +2615,25 @@ async fn verify_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<()> {
     let bytecode_hashes = manifest
         .get("bytecodeHashes")
         .context("manifest is missing bytecode hashes")?;
+    let identity_view = ethereum.api.verified_finalized_view().await?;
+    let identity_header = identity_view.checkpoint().common_header().clone();
+    crate::execution::authenticate_code(
+        &provider, &identity_view, identity_header.clone(),
+        manifest_address(&manifest["recovery"], "address")?,
+        manifest_b256(&manifest["recovery"], "codeHash")?,
+    ).await?;
     for (name, address) in [
         ("client", ethereum.client_address),
         ("verifier", ethereum.verifier_address),
         ("queue", ethereum.queue_address),
         ("receiver", ethereum.receiver_address),
     ] {
-        let code = provider
-            .get_code_at(address)
-            .await
-            .with_context(|| format!("read Hoodi {name} bytecode"))?;
-        ensure!(!code.is_empty(), "Hoodi {name} has no deployed bytecode");
-        let actual = B256::from(keccak256(code.as_ref()));
-        let expected = manifest_b256(bytecode_hashes, name)?;
-        ensure!(
-            actual == expected,
-            "Hoodi {name} bytecode differs from manifest"
-        );
+        crate::execution::authenticate_code(
+            &provider, &identity_view, identity_header.clone(), address,
+            manifest_b256(bytecode_hashes, name)?,
+        ).await?;
     }
+    identity_view.recheck(&provider).await?;
     let current = ethereum.checkpoint().await?;
     ensure!(
         current.block > mmr_start_block
@@ -2632,7 +2895,12 @@ mod tests {
             .arg("--slots-in-an-epoch")
             .arg("1")
             .arg("--timestamp")
-            .arg((snapshot.source_timestamp_ms / 1_000 + 1 + FIXTURE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).to_string())
+            .arg(
+                (snapshot.source_timestamp_ms / 1_000
+                    + 1
+                    + FIXTURE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                .to_string(),
+            )
             .try_spawn()?;
         let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
         let queue: Address = case.destination_queue.parse()?;
@@ -2681,6 +2949,9 @@ mod tests {
             .header
             .hash;
         let witness = AnvilWitness::new(anvil.port()).await?;
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::from_provider(
+            deployer.raw_provider().root().clone(), BlockNumberOrTag::Finalized,
+        ).await?;
         // A fresh filler must not reuse the deployment's cached RPC chain ID.
         let api = EthApi::new(
             &anvil.ws_endpoint(),
@@ -2690,11 +2961,15 @@ mod tests {
             None,
         )
         .await?
-        .with_finality_witness(&witness.url, 31_337, genesis)
+        .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+        .await?
+        .with_data_witness(&witness.url, 31_337, genesis)
         .await?;
         let ethereum = Ethereum {
             _anvil: Some(anvil),
             _witness: Some(witness),
+            _beacon: Some(beacon),
+            execution: None,
             owned_fixture_network: None,
             api,
             public_network: PublicEthereumNetwork::Hoodi,
@@ -2719,7 +2994,9 @@ mod tests {
             case.freshness_proof.outer_leaf.trim_start_matches("0x"),
         )?)?;
         let snapshot = QueueSnapshot::decode(&hex::decode(
-            case.freshness_proof.snapshot_preimage.trim_start_matches("0x"),
+            case.freshness_proof
+                .snapshot_preimage
+                .trim_start_matches("0x"),
         )?)?;
         let call = BeefyClient::submitFiatShamirCall {
             commitment: BeefyClient::Commitment {
@@ -2741,14 +3018,20 @@ mod tests {
         ] {
             let mut canonical = call.abi_encode();
             canonical[..4].copy_from_slice(&selector);
-            let signed = signed_test_transaction(&signer, 0, Address::ZERO, 1_000_000, canonical.clone()).await?;
+            let signed =
+                signed_test_transaction(&signer, 0, Address::ZERO, 1_000_000, canonical.clone())
+                    .await?;
             let accepted = validate_commitment_call(&signed, &source_raw)?;
-            assert_eq!(accepted.commitment.abi_encode(), call.commitment.abi_encode());
+            assert_eq!(
+                accepted.commitment.abi_encode(),
+                call.commitment.abi_encode()
+            );
             assert_eq!(accepted.snapshot.abi_encode(), call.snapshot.abi_encode());
             assert_eq!(accepted.leaf.abi_encode(), call.leaf.abi_encode());
             assert!(validate_commitment_call(&signed, &other_raw).is_err());
             assert_eq!(
-                recorded_commitment_transaction(&signed.encoded_2718(), &source_raw)?.encoded_2718(),
+                recorded_commitment_transaction(&signed.encoded_2718(), &source_raw)?
+                    .encoded_2718(),
                 signed.encoded_2718(),
             );
 
@@ -2774,9 +3057,13 @@ mod tests {
                 canonical[..3].to_vec(),
                 unknown,
             ] {
-                let signed = signed_test_transaction(&signer, 0, Address::ZERO, 1_000_000, malformed).await?;
+                let signed =
+                    signed_test_transaction(&signer, 0, Address::ZERO, 1_000_000, malformed)
+                        .await?;
                 assert!(validate_commitment_call(&signed, &source_raw).is_err());
-                assert!(recorded_commitment_transaction(&signed.encoded_2718(), &source_raw).is_err());
+                assert!(
+                    recorded_commitment_transaction(&signed.encoded_2718(), &source_raw).is_err()
+                );
             }
         }
         Ok(())
@@ -2785,7 +3072,8 @@ mod tests {
     #[tokio::test]
     async fn interactive_commitment_acceptance_and_handover() -> Result<()> {
         for handover in [false, true] {
-            let (mut ethereum, mut anchor, mut leaf, snapshot, proof) = commitment_signing_fixture().await?;
+            let (mut ethereum, mut anchor, mut leaf, snapshot, proof) =
+                commitment_signing_fixture().await?;
             if handover {
                 anchor.current.id = 1;
                 anchor.next.id = 2;
@@ -2793,14 +3081,17 @@ mod tests {
                 let mut root = keccak256(&crate::encode_outer_leaf(&leaf)?);
                 let order = U256::from_be_bytes(proof.proof_order);
                 for (index, sibling) in proof.items.iter().enumerate() {
-                    let pair = if order.bit(index) { [*sibling, root] } else { [root, *sibling] };
+                    let pair = if order.bit(index) {
+                        [*sibling, root]
+                    } else {
+                        [root, *sibling]
+                    };
                     root = keccak256(&pair.concat());
                 }
                 let mut signed = crate::decode_versioned_finality_proof(&anchor.raw)?;
                 signed.commitment.validator_set_id = 1;
-                signed.commitment.payload = Decode::decode(
-                    &mut vec![(*b"mh", root.to_vec())].encode().as_slice(),
-                )?;
+                signed.commitment.payload =
+                    Decode::decode(&mut vec![(*b"mh", root.to_vec())].encode().as_slice())?;
                 let digest = keccak256(&signed.commitment.encode());
                 for (index, signature) in signed.signatures.iter_mut().enumerate() {
                     let (value, recovery) = crate::fixtures::signing_key(index as u16 + 1)
@@ -2808,39 +3099,86 @@ mod tests {
                     let mut raw = [0; 65];
                     raw[..64].copy_from_slice(&value.to_bytes());
                     raw[64] = recovery.to_byte();
-                    *signature = Some(sp_consensus_beefy::ecdsa_crypto::Signature::unchecked_from(raw));
+                    *signature = Some(sp_consensus_beefy::ecdsa_crypto::Signature::unchecked_from(
+                        raw,
+                    ));
                 }
                 anchor.raw = sp_consensus_beefy::VersionedFinalityProof::V1(signed).encode();
-                let keys = anchor.current.keys.iter()
+                let keys = anchor
+                    .current
+                    .keys
+                    .iter()
                     .map(|key| key.as_slice().try_into().expect("fixture key length"))
                     .collect::<Vec<[u8; 33]>>();
                 anchor.validated = crate::validate_signed_commitment(
-                    &anchor.raw, &keys, Some(1), Some(anchor.block),
+                    &anchor.raw,
+                    &keys,
+                    Some(1),
+                    Some(anchor.block),
                 )?;
             }
             let owner = ethereum.api.raw_provider().default_signer_address();
-            let nonce = ethereum.api.raw_provider().get_transaction_count(owner).await?;
-            let transaction = ethereum.submit_interactive_fixture(&anchor, &leaf, &snapshot, &proof).await?;
-            let hash = transaction["txHash"].as_str().context("missing interactive hash")?.parse()?;
-            let included = ethereum.verify_accepted_commitment(hash, &anchor, &snapshot).await?;
+            let nonce = ethereum
+                .api
+                .raw_provider()
+                .get_transaction_count(owner)
+                .await?;
+            let transaction = ethereum
+                .submit_interactive_fixture(&anchor, &leaf, &snapshot, &proof)
+                .await?;
+            let hash = transaction["txHash"]
+                .as_str()
+                .context("missing interactive hash")?
+                .parse()?;
+            let included = ethereum
+                .verify_accepted_commitment(hash, &anchor, &snapshot)
+                .await?;
             assert_eq!(Some(included.0), transaction["blockNumber"].as_u64());
-            assert_eq!(ethereum.api.raw_provider().get_transaction_count(owner).await?, nonce);
+            assert_eq!(
+                ethereum
+                    .api
+                    .raw_provider()
+                    .get_transaction_count(owner)
+                    .await?,
+                nonce
+            );
             let checkpoint = ethereum.checkpoint().await?;
             assert_eq!(checkpoint.current_id, if handover { 1 } else { 0 });
             assert_eq!(checkpoint.next_id, if handover { 2 } else { 1 });
-            let raw = hex::decode(transaction["rawTransaction"].as_str().unwrap().trim_start_matches("0x"))?;
+            let raw = hex::decode(
+                transaction["rawTransaction"]
+                    .as_str()
+                    .unwrap()
+                    .trim_start_matches("0x"),
+            )?;
             let original = recorded_commitment_transaction(&raw, &anchor.raw)?;
             assert_eq!(original.encoded_2718(), raw);
-            assert_eq!(original.input()[..4], <BeefyClient::submitFinalCall as alloy::sol_types::SolCall>::SELECTOR);
-            let finalized = ethereum.api.get_finalized_receipt(hash).await
+            assert_eq!(
+                original.input()[..4],
+                <BeefyClient::submitFinalCall as alloy::sol_types::SolCall>::SELECTOR
+            );
+            let finalized = ethereum
+                .api
+                .get_finalized_receipt(hash)
+                .await
                 .context("retain interactive original receipt")?
                 .context("interactive original is not finalized")?;
-            let mut view = ethereum.api.verified_finalized_view().await.context("reopen interactive finality view")?;
+            let mut view = ethereum
+                .api
+                .verified_finalized_view()
+                .await
+                .context("reopen interactive finality view")?;
             assert_eq!(
-                ethereum.verify_accepted_commitment_evidence(
-                    hash, &raw, &finalized.inclusion, &finalized.checkpoint,
-                    &mut view, &anchor, &snapshot,
-                ).await?,
+                ethereum
+                    .verify_accepted_commitment_evidence(
+                        hash,
+                        &raw,
+                        (&finalized.inclusion, &finalized.checkpoint),
+                        &mut view,
+                        &anchor,
+                        &snapshot,
+                    )
+                    .await?,
                 included,
             );
             for bad in [
@@ -2865,51 +3203,104 @@ mod tests {
                     bad
                 },
             ] {
-                assert!(ethereum.verify_accepted_commitment_evidence(
-                    hash, &raw, &bad, &finalized.checkpoint, &mut view, &anchor, &snapshot,
-                ).await.is_err());
+                assert!(ethereum
+                    .verify_accepted_commitment_evidence(
+                        hash,
+                        &raw,
+                        (&bad, &finalized.checkpoint),
+                        &mut view,
+                        &anchor,
+                        &snapshot,
+                    )
+                    .await
+                    .is_err());
             }
             let mut changed_raw = raw.clone();
             changed_raw.push(0);
             for (expected_hash, original_raw) in [(B256::ZERO, &raw), (hash, &changed_raw)] {
-                assert!(ethereum.verify_accepted_commitment_evidence(
-                    expected_hash, original_raw, &finalized.inclusion, &finalized.checkpoint,
-                    &mut view, &anchor, &snapshot,
-                ).await.is_err());
+                assert!(ethereum
+                    .verify_accepted_commitment_evidence(
+                        expected_hash,
+                        original_raw,
+                        (&finalized.inclusion, &finalized.checkpoint),
+                        &mut view,
+                        &anchor,
+                        &snapshot,
+                    )
+                    .await
+                    .is_err());
             }
             let mut changed_checkpoint = finalized.checkpoint.clone();
-            changed_checkpoint.chain_id += 1;
-            assert!(ethereum.verify_accepted_commitment_evidence(
-                hash, &raw, &finalized.inclusion, &changed_checkpoint,
-                &mut view, &anchor, &snapshot,
-            ).await.is_err());
+            match &mut changed_checkpoint {
+                ethereum_client::FinalityCheckpoint::Beacon(checkpoint) => checkpoint.chain_id += 1,
+                _ => panic!("fixture must retain signed Beacon authority"),
+            }
+            assert!(ethereum
+                .verify_accepted_commitment_evidence(
+                    hash,
+                    &raw,
+                    (&finalized.inclusion, &changed_checkpoint),
+                    &mut view,
+                    &anchor,
+                    &snapshot,
+                )
+                .await
+                .is_err());
             let mut changed_snapshot = snapshot.clone();
             changed_snapshot.source_timestamp_ms += 1;
-            assert!(ethereum.verify_accepted_commitment_evidence(
-                hash, &raw, &finalized.inclusion, &finalized.checkpoint,
-                &mut view, &anchor, &changed_snapshot,
-            ).await.is_err());
+            assert!(ethereum
+                .verify_accepted_commitment_evidence(
+                    hash,
+                    &raw,
+                    (&finalized.inclusion, &finalized.checkpoint),
+                    &mut view,
+                    &anchor,
+                    &changed_snapshot,
+                )
+                .await
+                .is_err());
             anchor.next.id += 1;
-            assert!(ethereum.verify_accepted_commitment_evidence(
-                hash, &raw, &finalized.inclusion, &finalized.checkpoint,
-                &mut view, &anchor, &snapshot,
-            ).await.is_err());
+            assert!(ethereum
+                .verify_accepted_commitment_evidence(
+                    hash,
+                    &raw,
+                    (&finalized.inclusion, &finalized.checkpoint),
+                    &mut view,
+                    &anchor,
+                    &snapshot,
+                )
+                .await
+                .is_err());
             anchor.next.id -= 1;
             let client = ethereum.client_address;
             ethereum.client_address = Address::ZERO;
-            assert!(ethereum.verify_accepted_commitment_evidence(
-                hash, &raw, &finalized.inclusion, &finalized.checkpoint,
-                &mut view, &anchor, &snapshot,
-            ).await.is_err());
+            assert!(ethereum
+                .verify_accepted_commitment_evidence(
+                    hash,
+                    &raw,
+                    (&finalized.inclusion, &finalized.checkpoint),
+                    &mut view,
+                    &anchor,
+                    &snapshot,
+                )
+                .await
+                .is_err());
             ethereum.client_address = client;
             for (chain, status, logs) in [
                 (31_338, true, finalized.inclusion.receipt.logs()),
                 (31_337, false, finalized.inclusion.receipt.logs()),
                 (31_337, true, &[][..]),
             ] {
-                assert!(ethereum.validate_accepted_commitment(
-                    &original, chain, status, logs.iter(), &anchor, &snapshot,
-                ).is_err());
+                assert!(ethereum
+                    .validate_accepted_commitment(
+                        &original,
+                        chain,
+                        status,
+                        logs.iter(),
+                        &anchor,
+                        &snapshot,
+                    )
+                    .is_err());
             }
         }
         Ok(())
@@ -2995,7 +3386,12 @@ mod tests {
             None,
         )
         .await?
-        .with_finality_witness(
+        .with_beacon_finality(
+            ethereum._beacon.as_ref().unwrap().config.clone(),
+            ethereum._beacon.as_ref().unwrap().directory.join("rpc-drift"),
+        )
+        .await?
+        .with_data_witness(
             &ethereum._witness.as_ref().unwrap().url,
             31_337,
             ethereum.api.finality_identity()?.1,
@@ -3008,7 +3404,7 @@ mod tests {
         let path = directory.path().join("commitment.json");
         let mut writes = Vec::new();
         let error = ethereum
-            .submit_commitment(
+            .submit_synthetic_commitment(
                 &anchor,
                 &leaf,
                 &snapshot,
@@ -3073,7 +3469,7 @@ mod tests {
         let path = directory.path().join("commitment.json");
         let mut writes = 0;
         let error = ethereum
-            .submit_commitment(
+            .submit_synthetic_commitment(
                 &anchor,
                 &leaf,
                 &snapshot,
@@ -3115,32 +3511,10 @@ mod tests {
     ) -> Result<()> {
         let (mut ethereum, anchor, leaf, snapshot, proof) = commitment_signing_fixture().await?;
         let provider = ethereum.api.raw_provider().clone();
-        provider
-            .client()
-            .request::<_, Value>("anvil_setChainId", (31_338u64,))
-            .await?;
-        let anvil = ethereum._anvil.as_ref().unwrap();
-        let key = format!("0x{}", hex::encode(anvil.first_key().to_bytes()));
-        let wrong_api = EthApi::new(
-            &anvil.ws_endpoint(),
-            &address_string(ethereum.queue_address),
-            Some(&key),
-            None,
-            None,
-        )
-        .await?
-        .with_finality_witness(
-            &ethereum._witness.as_ref().unwrap().url,
-            31_338,
-            ethereum.api.finality_identity()?.1,
-        )
-        .await?;
-        // Produce the durable original through the real production signing path.
-        let approved_api = std::mem::replace(&mut ethereum.api, wrong_api);
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("commitment.json");
         let error = ethereum
-            .submit_commitment(
+            .submit_synthetic_commitment(
                 &anchor,
                 &leaf,
                 &snapshot,
@@ -3162,9 +3536,29 @@ mod tests {
             error.to_string().contains("stop after signed persistence"),
             "{error:#}"
         );
-        ethereum.api = approved_api;
-        let original = fs::read(&path)?;
-        let saved: Value = serde_json::from_slice(&original)?;
+        let mut saved: Value = serde_json::from_slice(&fs::read(&path)?)?;
+        let raw = hex::decode(saved["rawTransaction"].as_str().unwrap().trim_start_matches("0x"))?;
+        let original = recorded_commitment_transaction(&raw, &anchor.raw)?;
+        let signer = PrivateKeySigner::from_bytes(&B256::from_slice(
+            &ethereum._anvil.as_ref().unwrap().first_key().to_bytes(),
+        ))?;
+        let mut wrong_chain = TxLegacy {
+            chain_id: Some(31_338),
+            nonce: original.nonce(),
+            gas_price: 1_000_000_000,
+            gas_limit: original.gas_limit(),
+            to: TxKind::Call(ethereum.client_address),
+            input: original.input().clone(),
+            ..Default::default()
+        };
+        let signature = signer.sign_transaction(&mut wrong_chain).await?;
+        let raw = TxEnvelope::Legacy(wrong_chain.into_signed(signature)).encoded_2718();
+        saved["rawTransaction"] = json!(bytes(&raw));
+        saved["txHash"] = json!(bytes(keccak256(&raw)));
+        saved["chainId"] = json!(31_338);
+        let original = serde_json::to_vec(&saved)?;
+        fs::write(&path, &original)?;
+        provider.client().request::<_, Value>("anvil_setChainId", (31_338u64,)).await?;
         assert_eq!(saved["chainId"], 31_338);
         assert_eq!(provider.get_chain_id().await?, 31_338);
         assert_eq!(ethereum.api.finality_identity()?.0, 31_337);
@@ -3225,8 +3619,13 @@ mod tests {
             .header
             .hash;
         let witness = AnvilWitness::new(anvil.port()).await?;
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::from_provider(
+            api.raw_provider().root().clone(), BlockNumberOrTag::Finalized,
+        ).await?;
         let api = api
-            .with_finality_witness(&witness.url, 31_337, genesis)
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await?
+            .with_data_witness(&witness.url, 31_337, genesis)
             .await?;
         let provider = api.raw_provider().clone();
         let arguments = (
@@ -3267,6 +3666,8 @@ mod tests {
         let ethereum = Ethereum {
             _anvil: Some(anvil),
             _witness: Some(witness),
+            _beacon: Some(beacon),
+            execution: None,
             owned_fixture_network: None,
             api,
             public_network: PublicEthereumNetwork::Hoodi,
@@ -3377,8 +3778,13 @@ mod tests {
             .header
             .hash;
         let witness = AnvilWitness::new(anvil.port()).await?;
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::from_provider(
+            api.raw_provider().root().clone(), BlockNumberOrTag::Finalized,
+        ).await?;
         let api = api
-            .with_finality_witness(&witness.url, 31_337, genesis)
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await?
+            .with_data_witness(&witness.url, 31_337, genesis)
             .await?;
         let receipt = api
             .raw_provider()
@@ -3404,6 +3810,16 @@ mod tests {
         );
         let retained = serde_json::to_value(&finalized.inclusion)?;
         let checkpoint = serde_json::to_value(&finalized.checkpoint)?;
+        assert_eq!(finalized.checkpoint.schema_version(), 2);
+        assert!(finalized.checkpoint.beacon().is_some());
+        let cache = tempfile::tempdir()?;
+        let cache_path = cache.path().join("original.json");
+        store_receipt_proof(cache.path(), &cache_path, &finalized.inclusion)?;
+        store_receipt_proof(cache.path(), &cache_path, &finalized.inclusion)?;
+        let corrupt_bytes = br#"{"corrupted":"retained original"}"#;
+        fs::write(&cache_path, corrupt_bytes)?;
+        assert!(store_receipt_proof(cache.path(), &cache_path, &finalized.inclusion).is_err());
+        assert_eq!(fs::read(&cache_path)?, corrupt_bytes);
         let mut view = api.verified_finalized_view().await?;
         view.verify_blocks(
             api.raw_provider(),
@@ -3506,7 +3922,7 @@ mod tests {
         .await
         .is_err());
         let mut bad_checkpoint = checkpoint.clone();
-        bad_checkpoint["schema_version"] = json!(2);
+        bad_checkpoint["schema_version"] = json!(99);
         assert!(recover_receipt_proof(
             &headers_only,
             &mut view,
@@ -3554,6 +3970,111 @@ mod tests {
         )
         .await?;
         assert_eq!(serde_json::to_value(cached)?, retained);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn retained_nonce_proof_requalifies_only_its_original_pin() -> Result<()> {
+        let (ethereum, _, _, _, _) = commitment_signing_fixture().await?;
+        let provider = ethereum.api.raw_provider();
+        let signer = PrivateKeySigner::from_bytes(&B256::from_slice(
+            &ethereum._anvil.as_ref().unwrap().first_key().to_bytes(),
+        ))?;
+        let nonce = provider.get_transaction_count(signer.address()).await?;
+        let mut transaction = TxLegacy {
+            chain_id: Some(31_337),
+            nonce,
+            gas_price: 1_000_000_000,
+            gas_limit: 21_000,
+            to: TxKind::Call(Address::repeat_byte(42)),
+            ..Default::default()
+        };
+        let signature = signer.sign_transaction(&mut transaction).await?;
+        let raw = TxEnvelope::Legacy(transaction.into_signed(signature)).encoded_2718();
+        provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
+        let mut view = ethereum.api.verified_finalized_view().await?;
+        let pin = (view.block_number(), view.block_hash());
+        let directory = tempfile::tempdir()?;
+        let saved = ethereum.account_nonce_at(
+            &raw, &mut view, pin.0, pin.1, None, directory.path(),
+        ).await?;
+        assert_eq!(saved["schemaVersion"], 2);
+        assert_eq!(saved["accountNonce"], nonce);
+        assert_eq!(saved["pinnedNonceConsumed"], false);
+        assert_eq!(saved["checkpoint"]["schema_version"], 2);
+        let original_path = directory.path().join("original.json");
+        let original_bytes = serde_json::to_vec(&saved)?;
+        fs::write(&original_path, &original_bytes)?;
+        let recovered = ethereum.account_nonce_at(
+            &raw, &mut view, pin.0, pin.1, Some(&saved), directory.path(),
+        ).await?;
+        assert_eq!(recovered, saved);
+
+        let proof: ethereum_client::inclusion::RecordedAccountProof =
+            serde_json::from_value(saved["accountProof"].clone())?;
+        for bad_proof in [
+            { let mut bad = proof.clone(); bad.account_proof.clear(); bad },
+            { let mut bad = proof.clone(); bad.address = Address::ZERO; bad },
+            { let mut bad = proof.clone(); bad.genesis = B256::ZERO; bad },
+            { let mut bad = proof.clone(); bad.header.number += 1; bad },
+        ] {
+            let mut bad = saved.clone();
+            bad["accountProof"] = serde_json::to_value(bad_proof)?;
+            assert!(ethereum.account_nonce_at(
+                &raw, &mut view, pin.0, pin.1, Some(&bad), directory.path(),
+            ).await.is_err());
+        }
+        for (pointer, value) in [
+            ("/accountNonce", json!(nonce + 1)),
+            ("/pinnedNonceConsumed", json!(true)),
+            ("/blockHash", json!(B256::ZERO)),
+            ("/checkpoint/beacon/proofDigest", json!(B256::ZERO)),
+            ("/accountProof", Value::Null),
+        ] {
+            let mut bad = saved.clone();
+            *bad.pointer_mut(pointer).context("fixture mutation path")? = value;
+            assert!(ethereum.account_nonce_at(
+                &raw, &mut view, pin.0, pin.1, Some(&bad), directory.path(),
+            ).await.is_err());
+        }
+        let mut missing = saved.clone();
+        missing.as_object_mut().unwrap().remove("accountProof");
+        assert!(ethereum.account_nonce_at(
+            &raw, &mut view, pin.0, pin.1, Some(&missing), directory.path(),
+        ).await.is_err());
+        assert!(ethereum.account_nonce_at(
+            &raw, &mut view, pin.0, B256::ZERO, Some(&saved), directory.path(),
+        ).await.is_err());
+        assert_eq!(fs::read(&original_path)?, original_bytes);
+
+        provider.send_raw_transaction(&raw).await?.get_receipt().await?;
+        provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
+        let mut newer = ethereum.api.verified_finalized_view().await?;
+        let latest_pin = (newer.block_number(), newer.block_hash());
+        assert!(latest_pin.0 > pin.0);
+        let consumed = ethereum.account_nonce_at(
+            &raw, &mut newer, latest_pin.0, latest_pin.1, None, directory.path(),
+        ).await?;
+        assert_eq!(consumed["accountNonce"], nonce + 1);
+        assert_eq!(consumed["pinnedNonceConsumed"], true);
+        let legacy = json!({
+            "block":pin.0,"blockHash":bytes(pin.1),"accountNonce":nonce,
+        });
+        let legacy_bytes = serde_json::to_vec(&legacy)?;
+        let legacy_path = directory.path().join("legacy.json");
+        fs::write(&legacy_path, &legacy_bytes)?;
+        for retained in [&saved, &legacy] {
+            let qualified = ethereum.account_nonce_at(
+                &raw, &mut newer, pin.0, pin.1, Some(retained), directory.path(),
+            ).await?;
+            for field in ["block", "blockHash", "accountNonce", "pinnedNonceConsumed", "accountProof"] {
+                assert_eq!(qualified[field], saved[field], "changed original {field}");
+            }
+            assert_eq!(qualified["checkpoint"]["schema_version"], 2);
+        }
+        assert_eq!(fs::read(&original_path)?, original_bytes);
+        assert_eq!(fs::read(&legacy_path)?, legacy_bytes);
+        assert!(directory.path().join("beacon-qualifications").is_dir());
         Ok(())
     }
 
@@ -3794,10 +4315,18 @@ mod tests {
                 .is_err(),
             "mainnet endpoint was admitted as Hoodi"
         );
+        let finality = test_finality_args(std::env::var("BEEFY_TEST_MAINNET_WITNESS_RPC")?)?;
+        let config = ethereum_client::BeaconFinalityConfig::load(
+            &finality.ethereum_finality_bootstrap,
+            finality.ethereum_finality_bootstrap_sha256.parse()?,
+            &finality.ethereum_finality_beacon_rpc,
+        )?.with_proof_sources(finality.ethereum_finality_proof_sources.clone())?;
         let api = EthApi::new(&endpoint, &address_string(Address::ZERO), None, None, None)
             .await?
-            .with_finality_witness(
-                &std::env::var("BEEFY_TEST_MAINNET_WITNESS_RPC")?,
+            .with_beacon_finality(config, &finality.ethereum_finality_store)
+            .await?
+            .with_data_witness(
+                finality.ethereum_witness_rpc.as_deref().unwrap(),
                 network.chain_id(),
                 network.genesis(),
             )
@@ -3851,7 +4380,14 @@ mod tests {
         }
         assert!(Ethereum::connect_readonly(
             "ws://127.0.0.1:1",
-            "ws://127.0.0.1:2",
+            &cli_utils::EthereumFinalityArgs {
+                ethereum_witness_rpc: Some("ws://127.0.0.1:2".into()),
+                ethereum_finality_beacon_rpc: "http://127.0.0.1:3".into(),
+                ethereum_finality_bootstrap: "missing-approved-bootstrap.json".into(),
+                ethereum_finality_bootstrap_sha256: format!("{:#x}", B256::repeat_byte(1)),
+                ethereum_finality_store: tempfile::tempdir()?.path().join("beacon"),
+                ethereum_finality_proof_sources: Vec::new(),
+            },
             &json!({"chainId":31337}),
             None,
             PublicEthereumNetwork::Hoodi
@@ -4018,6 +4554,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn authority_code_requires_account_proof_and_rejects_rpc_lookalikes() -> Result<()> {
+        use alloy::{providers::ProviderBuilder, transports::mock::Asserter};
+        let (ethereum, _, _, _, _) = commitment_signing_fixture().await?;
+        let provider = ethereum.api.raw_provider();
+        let view = ethereum.api.verified_finalized_view().await?;
+        let header = view.checkpoint().common_header().clone();
+        let at = BlockId::hash_canonical(header.hash_slow());
+        let proof = provider.get_proof(ethereum.client_address, vec![]).block_id(at).await?;
+        let code = provider.get_code_at(ethereum.client_address).block_id(at).await?;
+        let code_hash = alloy::primitives::keccak256(&code);
+        crate::execution::authenticate_code(provider, &view, header.clone(), ethereum.client_address, code_hash).await?;
+        // Identical getter answers cannot rescue different code: no eth_call is queried.
+        let asserter = Asserter::new();
+        let mock = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+        asserter.push_success(&proof);
+        asserter.push_success(&Bytes::from(vec![0x60, 0x00]));
+        assert!(crate::execution::authenticate_code(&mock, &view, header.clone(), ethereum.client_address, code_hash).await.is_err());
+        assert!(asserter.read_q().is_empty());
+        let asserter = Asserter::new();
+        let mock = ProviderBuilder::new().connect_mocked_client(asserter.clone());
+        let mut forged = proof;
+        forged.code_hash = B256::repeat_byte(9);
+        asserter.push_success(&forged);
+        assert!(crate::execution::authenticate_code(&mock, &view, header, ethereum.client_address, B256::repeat_byte(9)).await.is_err());
+        assert!(asserter.read_q().is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn owned_anvil_is_not_production_execution_authority() -> Result<()> {
+        let (ethereum, _, _, _, _) = commitment_signing_fixture().await?;
+        let error = ethereum.require_execution().await.unwrap_err();
+        assert!(error.to_string().contains("independent BEEFY_APPROVED_MANIFEST_SHA256"));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn disappeared_original_rebroadcasts_same_hash_or_holds_consumed_nonce() -> Result<()> {
         use alloy::{providers::ProviderBuilder, transports::mock::Asserter};
         let signer = PrivateKeySigner::from_bytes(&B256::from([9; 32]))?;
@@ -4027,6 +4600,17 @@ mod tests {
             .encoded_2718();
         let hash = B256::from(keccak256(&raw));
         let (_, signed) = signed_transaction(&raw, hash, 36, destination)?;
+        // This is the existing explicit failed-original retry lane, not fee replacement.
+        let previous = signed_test_transaction(&signer, 35, destination, 21_000, vec![])
+            .await?.encoded_2718();
+        let directory = tempfile::tempdir()?;
+        let journal = directory.path().join("retry.json");
+        let attempts = json!({"terminalSubmissions":[{
+            "disposition":"reverted","original":{"nonce":35,"rawTransaction":bytes(&previous),
+                "txHash":bytes(keccak256(&previous))}}],
+            "nonce":36,"rawTransaction":bytes(&raw),"txHash":bytes(hash)});
+        fs::write(&journal, serde_json::to_vec(&attempts)?)?;
+        let retained_bytes = fs::read(&journal)?;
         let asserter = Asserter::new();
         let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
         let seen = json!({"hash": format!("{hash:#x}"), "from": format!("{:#x}", signed.from),
@@ -4051,12 +4635,18 @@ mod tests {
             asserter.read_q().is_empty(),
             "original broadcast did not consume its response"
         );
+        assert_eq!(fs::read(&journal)?, retained_bytes);
+        let restarted: Value = serde_json::from_slice(&fs::read(&journal)?)?;
+        assert_eq!(restarted["terminalSubmissions"], attempts["terminalSubmissions"]);
+        let restart_raw = hex::decode(restarted["rawTransaction"].as_str().unwrap().trim_start_matches("0x"))?;
+        let (_, restarted_identity) = signed_transaction(&restart_raw, hash, 36, destination)?;
+        assert_eq!(restarted_identity, signed);
 
         asserter.push_success(&Option::<Value>::None);
         asserter.push_success(&Option::<Value>::None);
         asserter.push_success(&"0x25"); // another transaction consumed the reserved nonce
         asserter.push_success(&"0x25");
-        let hold = await_original_commitment(&provider, signed, &raw)
+        let hold = await_original_commitment(&provider, restarted_identity, &restart_raw)
             .await
             .unwrap_err();
         assert!(
@@ -4067,17 +4657,25 @@ mod tests {
             asserter.read_q().is_empty(),
             "no replacement submission may be attempted"
         );
+        assert_eq!(fs::read(&journal)?, retained_bytes);
         Ok(())
     }
     #[tokio::test]
     #[ignore = "read-only real Hoodi RPC smoke"]
     async fn original_hoodi_hash_has_canonical_signed_identity() -> Result<()> {
-        let endpoint = std::env::var("BEEFY_TEST_HOODI_RPC")
-            .unwrap_or_else(|_| "https://rpc.sentio.xyz/hoodi".to_owned());
+        let endpoint = std::env::var("BEEFY_TEST_HOODI_RPC")?;
+        let finality = test_finality_args(std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?)?;
+        let config = ethereum_client::BeaconFinalityConfig::load(
+            &finality.ethereum_finality_bootstrap,
+            finality.ethereum_finality_bootstrap_sha256.parse()?,
+            &finality.ethereum_finality_beacon_rpc,
+        )?.with_proof_sources(finality.ethereum_finality_proof_sources.clone())?;
         let api = PollingEthApi::new(&endpoint)
             .await?
-            .with_finality_witness(
-                &std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?,
+            .with_beacon_finality(config, &finality.ethereum_finality_store)
+            .await?
+            .with_data_witness(
+                finality.ethereum_witness_rpc.as_deref().unwrap(),
                 HOODI_CHAIN_ID,
                 HOODI_GENESIS_BLOCK,
             )

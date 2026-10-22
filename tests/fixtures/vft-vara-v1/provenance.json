@@ -1,0 +1,77 @@
+{
+  "revision": "83eafd9e8a143fdbf9ac3ea8574ec7a47f3744a6",
+  "purpose": "Test-only immutable v1 escrow compatibility; not evidence of any live deployed CodeId.",
+  "source": {
+    "git_path": "gear-programs/vft-vara/app/src/lib.rs",
+    "fixture_path": "app/src/lib.rs",
+    "sha256": "084fef163e4188c0c2c4529c02989f0853c791ecd19930866f99525cc15baf0c"
+  },
+  "idl": {
+    "git_path": "api/gear/vft_vara.idl",
+    "fixture_path": "../../../api/gear/vft_vara_v1.idl",
+    "sha256": "afd6509bb15544b1302dcd4c5659bd77ef07c7dfb98a292f0c4a99b59c73fca9"
+  },
+  "dependencies": [
+    {
+      "name": "awesome-sails-services",
+      "version": "0.1.0",
+      "source": "git+https://github.com/gear-tech/awesome-sails?branch=ap-backport-gear#0edcae96a6c16d050c844b2c4a460451679f8242",
+      "dependencies": [
+        "awesome-sails-vft-admin-service",
+        "awesome-sails-vft-extension-service",
+        "awesome-sails-vft-metadata-service",
+        "awesome-sails-vft-native-exchange-admin-service",
+        "awesome-sails-vft-native-exchange-service",
+        "awesome-sails-vft-service"
+      ]
+    },
+    {
+      "name": "sails-rs",
+      "version": "0.9.2",
+      "source": "git+https://github.com/gear-tech/sails.git?branch=backport-gear-ap#3cd30d98a22ad92f0c3ac3a1bf0c2fb360fb75c9",
+      "dependencies": [
+        "futures",
+        "gclient",
+        "gcore",
+        "gear-core",
+        "gear-core-errors",
+        "gear-wasm-builder",
+        "gprimitives",
+        "gstd",
+        "gtest",
+        "hashbrown 0.15.5",
+        "hex",
+        "log",
+        "mockall 0.12.1",
+        "parity-scale-codec",
+        "paste",
+        "pin-project-lite",
+        "sails-idl-gen",
+        "sails-idl-meta",
+        "sails-macros",
+        "scale-info",
+        "spin 0.9.8",
+        "thiserror 2.0.12"
+      ]
+    },
+    {
+      "name": "vft-common",
+      "version": "1.2.0",
+      "dependencies": [
+        "awesome-sails",
+        "awesome-sails-services",
+        "sails-rs"
+      ]
+    }
+  ],
+  "unchanged_workspace_source": {
+    "gear-programs/vft-common/src/lib.rs": "5871f5cfeef32915bf475be90ba14da0e7a7b1daaf76d5e787631a44952473b8"
+  },
+  "wasm": {
+    "build": "existing sails_rs::build_wasm wasm-binary feature",
+    "path_file": "tests/fixtures/vft-vara-v1/.binpath",
+    "sha256_record": "tests/fixtures/vft-vara-v1/wasm.sha256",
+    "artifact_path": "target/x86_64-apple-darwin/wasm32-gear/release/vft_vara_v1.opt.wasm",
+    "status": "Built from the pinned unchanged source; recorded Wasm digest is test-artifact provenance, not evidence of any live deployed CodeId."
+  }
+}

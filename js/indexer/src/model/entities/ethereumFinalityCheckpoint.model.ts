@@ -1,5 +1,5 @@
 import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
-import type { AgreedCheckpoint } from '../../eth/finality.js';
+import type { HistoricalCheckpoint } from '../../eth/finality.js';
 
 @Entity({ name: 'ethereum_finality_checkpoint' })
 export class EthereumFinalityCheckpoint {
@@ -13,5 +13,5 @@ export class EthereumFinalityCheckpoint {
   blockNumber!: bigint;
 
   @Column('jsonb')
-  checkpoint!: AgreedCheckpoint;
+  checkpoint!: HistoricalCheckpoint;
 }

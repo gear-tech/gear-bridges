@@ -34,12 +34,11 @@ function useSignAndSend({ programs }: Parameters) {
     const { address, signer } = account;
     const { addressOrPair } = { ...DEFAULT_OPTIONS, ...parameters };
     const deadline = Date.now() + 44 * 60 * 1000;
-    const { events, status, txHash: originalHash } = await signAndSendFinalized(
-      extrinsic,
-      addressOrPair ?? address,
-      addressOrPair ? {} : { signer },
-      deadline,
-    );
+    const {
+      events,
+      status,
+      txHash: originalHash,
+    } = await signAndSendFinalized(extrinsic, addressOrPair ?? address, addressOrPair ? {} : { signer }, deadline);
     const blockHash = status.asFinalized.toHex();
     const txHash = originalHash.toHex();
     try {
@@ -62,9 +61,7 @@ function useSignAndSend({ programs }: Parameters) {
       const replies = queued.map(({ destination, id }, index) => {
         const programId = destination.toHex();
         const messageId = id.toHex();
-        const program = programs.find(
-          (candidate) => candidate?.programId.toLowerCase() === programId.toLowerCase(),
-        );
+        const program = programs.find((candidate) => candidate?.programId.toLowerCase() === programId.toLowerCase());
         if (!program) throw new Error(`Program is not found: ${programId}`);
         try {
           const { details, payload } = finalizedReplies[index];

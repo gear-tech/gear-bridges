@@ -1,5 +1,6 @@
 pub mod api_provider;
 pub mod durable;
+pub mod native_wrapper;
 pub mod signer_ownership;
 
 use anyhow::anyhow;

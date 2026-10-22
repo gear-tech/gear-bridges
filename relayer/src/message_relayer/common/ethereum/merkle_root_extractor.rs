@@ -1058,6 +1058,7 @@ mod tests {
         historical_requests:
             Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<HistoricalRootRequest>>>>,
         server: actix_web::dev::ServerHandle,
+        _beacon: ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture,
     }
 
     impl HttpRoots {
@@ -1107,14 +1108,14 @@ mod tests {
             birth.genesis_hash = blocks[0].header.hash;
             let blocks = Arc::new(blocks);
             let calls = Arc::new(Mutex::new(Vec::new()));
-            let head = Arc::new(AtomicU64::new(head));
+            // Bootstrap below every requested head so tests may start at an earlier pin.
+            let requested_head = head;
+            let head = Arc::new(AtomicU64::new(1));
             let historical_requests = Arc::new(Mutex::new(
                 None::<tokio::sync::mpsc::UnboundedSender<(u64, tokio::sync::oneshot::Sender<()>)>>,
             ));
             let socket = std::net::TcpListener::bind("127.0.0.1:0")?;
             let endpoint = format!("http://{}", socket.local_addr()?);
-            let witness_socket = std::net::TcpListener::bind("127.0.0.1:0")?;
-            let witness_endpoint = format!("http://{}", witness_socket.local_addr()?);
             let server_blocks = blocks.clone();
             let server_calls = calls.clone();
             let server_head = head.clone();
@@ -1137,7 +1138,7 @@ mod tests {
                             calls.lock().unwrap().push(request.0.clone());
                             let params = &request["params"];
                             let result = match request["method"].as_str().unwrap() {
-                                "eth_chainId" => json!("0x88bb0"),
+                                "eth_chainId" => json!("0x7a69"),
                                 "eth_getBlockByNumber" => {
                                     let tag = params[0].as_str().unwrap();
                                     let number = if matches!(tag, "finalized" | "latest") {
@@ -1185,15 +1186,25 @@ mod tests {
             })
             .workers(1)
             .listen(socket)?
-            .listen(witness_socket)?
             .disable_signals()
             .run();
             let handle = server.handle();
             tokio::spawn(server);
+            let beacon_blocks = blocks.clone();
+            let beacon_head = head.clone();
+            let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+                31337,
+                birth.genesis_hash,
+                Arc::new(move || {
+                    beacon_blocks[beacon_head.load(Ordering::SeqCst) as usize].header.clone()
+                }),
+            )
+            .await?;
             let api = EthApi::new(&endpoint, &format!("{:#x}", birth.queue), None, None, None)
                 .await?
-                .with_finality_witness(&witness_endpoint, 560048, birth.genesis_hash)
+                .with_beacon_finality(beacon.config.clone(), &beacon.directory)
                 .await?;
+            head.store(requested_head, Ordering::SeqCst);
             Ok(Self {
                 api,
                 head,
@@ -1202,6 +1213,7 @@ mod tests {
                 birth,
                 historical_requests,
                 server: handle,
+                _beacon: beacon,
             })
         }
     }
@@ -1515,6 +1527,19 @@ mod tests {
                 == std::env::var("ROOT_DISCOVERY_GEAR_GENESIS")?,
             "Approved source genesis changed"
         );
+        let approval = ethereum_client::beacon_finality::BeaconFinalityConfig::load(
+            std::env::var("ETH_FINALITY_BOOTSTRAP")?,
+            std::env::var("ETH_FINALITY_BOOTSTRAP_SHA256")?.parse()?,
+            &std::env::var("ETH_FINALITY_BEACON_RPC")?,
+        )?;
+        anyhow::ensure!(
+            approval.identity()
+                == (
+                    std::env::var("ETH_CHAIN_ID")?.parse()?,
+                    std::env::var("ROOT_DISCOVERY_ETH_GENESIS")?.parse()?,
+                ),
+            "Approved Ethereum identity changed"
+        );
         let api = EthApi::new(
             &rpc,
             &std::env::var("ROOT_DISCOVERY_QUEUE")?,
@@ -1523,11 +1548,7 @@ mod tests {
             None,
         )
         .await?
-        .with_finality_witness(
-            &std::env::var("ETH_WITNESS_RPC")?,
-            std::env::var("ETH_CHAIN_ID")?.parse()?,
-            std::env::var("ROOT_DISCOVERY_ETH_GENESIS")?.parse()?,
-        )
+        .with_beacon_finality(approval, std::env::var("ETH_FINALITY_STORE")?)
         .await?;
         let view = api.verified_finalized_view().await?;
         anyhow::ensure!(
@@ -1592,7 +1613,7 @@ mod tests {
         };
         let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(17)).unwrap();
         let mut tx = TxEip1559 {
-            chain_id: 560048,
+            chain_id: 31337,
             nonce: 31,
             gas_limit: 100_000,
             max_fee_per_gas: 10,
@@ -1603,7 +1624,7 @@ mod tests {
         let signature = signer.sign_transaction(&mut tx).await.unwrap();
         let raw = TxEnvelope::Eip1559(tx.into_signed(signature)).encoded_2718();
         QueueDeployment {
-            chain_id: 560048,
+            chain_id: 31337,
             genesis_hash: B256::repeat_byte(1),
             queue: signer.address().create(31),
             transaction_hash: keccak256(&raw),

@@ -1,39 +1,27 @@
 import assert from 'node:assert/strict';
-import { test, beforeEach, after } from 'node:test';
+import { test, beforeEach, afterEach, after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { syncBuiltinESMExports } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { createServer } from 'node:http';
+import { createEvidenceFixture, addr } from './evidence-fixture.mjs';
 
-// Real loopback transports exercise ethers without weakening production qualification.
-let primaryRpc, witnessRpc;
-async function serveRpc(dispatch) {
-  const server = createServer(async (request, response) => {
-    try {
-      let body = '';
-      for await (const chunk of request) body += chunk;
-      const execute = async ({ id, method, params }) => {
-        try { return { jsonrpc: '2.0', id, result: await dispatch(method, params) }; }
-        catch (error) { return { jsonrpc: '2.0', id, error: { code: -32000, message: error.message } }; }
-      };
-      const input = JSON.parse(body);
-      response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify(Array.isArray(input) ? await Promise.all(input.map(execute)) : await execute(input)));
-    } catch (error) { response.writeHead(500).end(error.message); }
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
-  return `http://127.0.0.1:${server.address().port}`;
-}
-const primaryUrl = await serveRpc((method, params) => primaryRpc(method, params));
-const witnessUrl = await serveRpc((method, params) => witnessRpc(method, params));
-
-const addr = (byte) => `0x${byte.repeat(20)}`;
-const hash = (byte) => `0x${byte.repeat(32)}`;
+const aliases = new Map();
+const hash = (byte) => aliases.get(byte) ?? `0x${byte.repeat(32)}`;
+const selectedHeights = [0, 10, 11, 12, 13, 100, 101, 102];
+const initialFixture = await createEvidenceFixture({
+  receipts: [[11, 0], [100, 2], [101, 2]].map(([blockNumber, transactionIndex]) =>
+    ({ blockNumber, transactionIndex, logs: [] })),
+  finalizedHeight: 101, finalizedHeights: selectedHeights,
+});
+['bb', 'bc', 'bd'].forEach((alias, index) => aliases.set(alias, initialFixture.txHashes[index]));
+initialFixture.install();
+after(() => initialFixture.close());
+let nativeFixture = initialFixture, primaryRpc;
+let scenarios = new Map();
 Object.assign(process.env, {
   ETH_API_PATH: fileURLToPath(new URL('../../../api/ethereum', import.meta.url)),
   GEAR_API_PATH: fileURLToPath(new URL('../../../api/gear', import.meta.url)),
-  ETH_RPC_URL: primaryUrl, ETH_WITNESS_RPC: witnessUrl, ETH_CHAIN_ID: '1', ETH_GENESIS_HASH: hash('00'),
+  ...initialFixture.env,
   ETH_ERC20_MANAGER: addr('11'), ETH_MSQ_QUEUE: addr('22'),
   ETH_BRIDGING_PAYMENT: addr('33'), ETH_SQUID_API_KEY: 'local-test',
   GEAR_VFT_MANAGER: hash('11'), GEAR_HISTORICAL_PROXY: hash('22'), GEAR_BRIDGING_PAYMENT: hash('33'),
@@ -45,13 +33,13 @@ const queue = await import('../lib/eth/abi/message-queue.js');
 const payment = await import('../lib/eth/abi/bridging-payment.js');
 const { BatchState: GearState } = await import('../lib/gear/batch-state.js');
 const { requireFinalizedBatch: requireEthFinality, createEthereumEvidenceClients, qualifyFinality,
-  createReceiptAuthenticator } = await import('../lib/eth/finality.js');
+  qualifyStoredFinality, createReceiptAuthenticator } = await import('../lib/eth/finality.js');
 const { authenticateSourceReceipt } = await import('../lib/eth/completion.js');
 const { reconcileReceiptSettlements } = await import('../lib/gear/receipt-reconciliation.js');
 const { requireFinalizedBatch: requireGearFinality } = await import('../lib/gear/finality.js');
 const { Transfer, CompletedTransfer, MerkleRootInMessageQueue, EthereumFinalityCheckpoint, Pair, Network, Status, ReceiptRelay, ReceiptSettlement } = await import('../lib/model/index.js');
 const quiet = { child() { return this; }, info() {}, debug() {}, warn() {}, error() {} };
-const block = { height: 11, hash: hash('aa'), timestamp: 1_700_000_000_000 };
+const block = { height: 11, hash: initialFixture.headers[11].hash, timestamp: 1_700_000_011_000 };
 function memoryStore() {
   const rows = new Map(), queries = [], saves = [];
   const matches = (row, where) => !where || (Array.isArray(where)
@@ -112,104 +100,123 @@ function outbound(effect = [hash('44'), addr('55'), addr('66'), 10n]) {
   return { receipt, transfer };
 }
 function fullReceipt(logs, height = 11, transactionIndex = 0, transactionHash = txHash) {
-  return { transactionHash, blockHash: header(height).hash, blockNumber: `0x${height.toString(16)}`,
-    transactionIndex: `0x${transactionIndex.toString(16)}`, status: '0x1', type: '0x2',
-    cumulativeGasUsed: '0x5208', logsBloom: `0x${'00'.repeat(256)}`, logs };
+  const original = nativeFixture.receipts.find((receipt) => BigInt(receipt.blockNumber) === BigInt(height) &&
+    BigInt(receipt.transactionIndex) === BigInt(transactionIndex));
+  return { ...structuredClone(original), transactionHash, blockHash: header(height).hash,
+    blockNumber: `0x${height.toString(16)}`, transactionIndex: `0x${transactionIndex.toString(16)}`,
+    status: '0x1', logs };
 }
-function header(height) {
-  const identity = (n) => n === 11 ? block.hash : `0x${n.toString(16).padStart(64, '0')}`;
-  return { number: `0x${height.toString(16)}`, hash: identity(height),
-    parentHash: identity(Math.max(0, height - 1)), stateRoot: hash('01'),
-    transactionsRoot: hash('02'), receiptsRoot: hash('03'), timestamp: '0x6553f100' };
+function header(height) { return nativeFixture.headers[height]; }
+async function useScenario(receipts, finalizedHeight = 101) {
+  let fixture = scenarios.get(receipts[0]);
+  if (!fixture) {
+    fixture = await createEvidenceFixture({ receipts, finalizedHeight, finalizedHeights: selectedHeights });
+    scenarios.set(receipts[0], fixture);
+  }
+  nativeFixture = fixture;
+  fixture.install();
+  fixture.state.finalizedHeight = finalizedHeight;
+  fixture.state.fault = ({ side, method, params, result }) => side === 'primary'
+    ? primaryRpc?.(method, params, result) ?? result : result;
+  for (const receipt of receipts) {
+    const canonical = fixture.receipts.find((candidate) => candidate.blockNumber === receipt.blockNumber &&
+      candidate.transactionIndex === receipt.transactionIndex);
+    Object.assign(receipt, structuredClone(canonical));
+  }
+  block.hash = fixture.headers[11].hash;
+  primaryRpc = evidenceRpc(receipts, finalizedHeight);
+  return fixture;
 }
 function evidenceRpc(receipts, finalizedHeight = 11, canonicalHash) {
-  return async (method, params) => {
-    if (method === 'eth_chainId') return '0x1';
+  nativeFixture.state.finalizedHeight = finalizedHeight;
+  return async (method, params, original) => {
+    if (method === 'eth_chainId') return '0x7a69';
     if (method === 'eth_getTransactionReceipt') return receipts.find((r) => r.transactionHash === params[0]) ?? null;
-    if (method === 'eth_getBlockByNumber') {
-      const height = params[0] === 'finalized' ? finalizedHeight : Number(BigInt(params[0]));
-      const result = header(height);
-      if (height === 11 && canonicalHash) result.hash = canonicalHash;
-      result.transactions = [];
-      for (const receipt of receipts.filter((r) => BigInt(r.blockNumber) === BigInt(height))) {
-        const index = Number(BigInt(receipt.transactionIndex));
-        while (result.transactions.length < index) result.transactions.push(hash('ff'));
-        result.transactions[index] = receipt.transactionHash;
-      }
+    if (method === 'eth_getBlockReceipts') {
+      if (receipts.length === 0) return [];
+      return (original ?? nativeFixture.receipts).map((receipt) =>
+        structuredClone(receipts.find((candidate) => candidate.transactionHash === receipt.transactionHash) ?? receipt));
+    }
+    if (method === 'eth_getBlockByNumber' || method === 'eth_getBlockByHash') {
+      const result = structuredClone(original ?? (method === 'eth_getBlockByHash'
+        ? nativeFixture.headers.find((header) => header.hash === params[0])
+        : header(params[0] === 'finalized' ? finalizedHeight : Number(BigInt(params[0])))));
+      if (result?.number === '0xb' && canonicalHash) result.hash = canonicalHash;
       return result;
     }
-    throw new Error(`Unexpected RPC method ${method}`);
+    return original;
   };
 }
-function context(receipt, transfer, canonicalHash = block.hash, finalizedHeight = '0xb') {
+async function context(receipt, transfer, canonicalHash, finalizedHeight = '0xb', prefix = []) {
+  await useScenario([...prefix, receipt], Number(BigInt(finalizedHeight)));
   const store = memoryStore();
   store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
   if (transfer) store.rows.set(Transfer, new Map([[transfer.id, transfer]]));
   primaryRpc = evidenceRpc([receipt], Number(BigInt(finalizedHeight)), canonicalHash);
-  witnessRpc = evidenceRpc([receipt], Number(BigInt(finalizedHeight)));
-  const rpc = { call: (method, params) => primaryRpc(method, params),
-    batchCall: (calls) => Promise.all(calls.map(({ method, params }) => primaryRpc(method, params))) };
+  const rpc = { call: (method, params) => nativeFixture.call(method, params),
+    batchCall: (calls) => Promise.all(calls.map(({ method, params }) => nativeFixture.call(method, params))) };
   return { _chain: { client: rpc }, log: quiet, store,
     get saved() { return store.saves.flat(); },
-    blocks: [{ header: block, logs: [receipt.logs.at(-1)].map((l) => ({ ...l,
+    blocks: [{ header: { ...block }, logs: [receipt.logs.at(-1)].map((l) => ({ ...l,
       logIndex: Number(BigInt(l.logIndex)), transactionIndex: Number(BigInt(l.transactionIndex)) })) }],
   };
 }
 function stored(store, original) { return store.rows.get(original.constructor)?.get(original.id) ?? original; }
 function inboundReceipt(height = 100, transactionHash = hash('bc')) {
   const logs = Array.from({ length: 6 }, (_, index) => ({
-    ...event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11'), index + 20),
+    ...event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11'), index),
     transactionHash, blockHash: header(height).hash, blockNumber: `0x${height.toString(16)}`, transactionIndex: '0x2',
   }));
   return fullReceipt(logs, height, 2, transactionHash);
 }
-beforeEach(() => {
-  primaryRpc = evidenceRpc([inboundReceipt(), inboundReceipt(101, hash('bd'))], 101);
-  witnessRpc = primaryRpc;
+beforeEach(async () => {
+  scenarios = new Map();
+  await useScenario([inboundReceipt(), inboundReceipt(101, hash('bd'))], 101);
 });
-test('matching finalized headers cannot authorize different primary and witness receipts', async () => {
+afterEach(async () => {
+  for (const fixture of [...scenarios.values()].reverse()) await fixture.close();
+  nativeFixture = initialFixture;
+  initialFixture.install();
+});
+test('matching EL headers cannot authorize receipt effects outside the native receipt trie', async () => {
   const { receipt, transfer } = outbound();
-  const ctx = context(receipt, transfer);
-  const witnessReceipt = structuredClone(receipt);
-  witnessReceipt.logs[0] = { ...witnessReceipt.logs[0],
+  const ctx = await context(receipt, transfer);
+  const forgedReceipt = structuredClone(receipt);
+  forgedReceipt.logs[0] = { ...forgedReceipt.logs[0],
     ...manager.abi.encodeEventLog(manager.abi.getEvent('Bridged'), [hash('44'), addr('55'), addr('66'), 11n]) };
-  primaryRpc = evidenceRpc([receipt]);
-  witnessRpc = evidenceRpc([witnessReceipt]);
+  primaryRpc = evidenceRpc([forgedReceipt]);
   await assert.rejects(handleBatch(ctx), /HOLD:/);
   assert.equal(transfer.status, Status.Bridging);
   assert.equal(transfer.completedAt, undefined);
   assert.equal(ctx.saved.length, 0);
 });
 
-test('malformed original log coordinates HOLD rather than becoming unmatched success', async () => {
+test('malformed consumed log coordinates HOLD rather than becoming unmatched success', async () => {
   for (const mutate of [
-    (receipt) => { receipt.logs[0].transactionHash = hash('cc'); },
-    (receipt) => { receipt.logs[0].blockNumber = '0xa'; },
-    (receipt) => { receipt.logs[0].transactionIndex = '0x1'; },
-    (receipt) => { receipt.logs[0].removed = true; },
-    (receipt) => { receipt.logs[1].logIndex = '0x0'; },
+    (log) => { log.transactionHash = hash('cc'); },
+    (log) => { log.data = '0x'; },
+    (log) => { log.transactionIndex = 1; },
+    (log) => { log.topics = [...log.topics, hash('cc')]; },
+    (log) => { log.logIndex = 0; },
   ]) {
     const { receipt, transfer } = outbound();
-    mutate(receipt);
-    const ctx = context(receipt, transfer);
+    const ctx = await context(receipt, transfer);
+    mutate(ctx.blocks[0].logs[0]);
     await assert.rejects(handleBatch(ctx), /HOLD:/);
     assert.equal(transfer.status, Status.Bridging);
     assert.equal(ctx.saved.length, 0);
   }
 });
 
-test('deferred completion rereads both receipts, not merely their matching header', async () => {
+test('deferred completion rechecks immutable native receipt proof before any write', async () => {
   const { receipt, transfer } = outbound();
-  const ctx = context(receipt);
+  const ctx = await context(receipt);
   await handleBatch(ctx);
   const retained = [...ctx.store.rows.get(CompletedTransfer).values()][0];
   const original = structuredClone(retained);
   await ctx.store.save(transfer);
   ctx.blocks = [];
-  const forged = structuredClone(receipt);
-  forged.logs[0] = { ...forged.logs[0],
-    ...manager.abi.encodeEventLog(manager.abi.getEvent('Bridged'), [hash('44'), addr('55'), addr('66'), 11n]) };
-  witnessRpc = evidenceRpc([forged]);
+  await nativeFixture.corruptProof(txHash);
   ctx.store.saves.length = 0;
   await assert.rejects(handleBatch(ctx), /HOLD:/);
   assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
@@ -221,7 +228,7 @@ test('deferred completion rereads both receipts, not merely their matching heade
 for (const legacyMatched of [true, false]) {
   test(`legacy backlog with legacyMatched=${legacyMatched} cannot wedge fresh live completion`, async () => {
     const { receipt, transfer } = outbound();
-    const ctx = context(receipt, transfer);
+    const ctx = await context(receipt, transfer);
     const oldReceipt = structuredClone(receipt);
     oldReceipt.transactionHash = hash('ce');
     for (const log of oldReceipt.logs) log.transactionHash = oldReceipt.transactionHash;
@@ -236,10 +243,11 @@ for (const legacyMatched of [true, false]) {
     await ctx.store.save([legacy, oldTransfer]);
     const savedLegacy = structuredClone(legacy), savedTransfer = structuredClone(oldTransfer);
     const requests = [];
-    const dispatch = evidenceRpc([receipt]);
-    primaryRpc = witnessRpc = async (method, params) => {
-      if (method === 'eth_getTransactionReceipt') requests.push(params[0]);
-      return dispatch(method, params);
+    const clients = createEthereumEvidenceClients('eth');
+    const request = clients.native.request.bind(clients.native);
+    clients.native.request = (input) => {
+      if (input.op === 'receipts') requests.push(...input.originals.map(({ hash }) => hash));
+      return request(input);
     };
     ctx.store.saves.length = 0;
     await handleBatch(ctx);
@@ -252,9 +260,10 @@ for (const legacyMatched of [true, false]) {
 
 test('legacy backlog cannot consume the live pending page ahead of qualified counterpart-lag work', async () => {
   const { receipt, transfer } = outbound();
-  const ctx = context(receipt);
+  const ctx = await context(receipt);
   await handleBatch(ctx);
   const qualified = [...ctx.store.rows.get(CompletedTransfer).values()][0];
+  const originalAuthorization = structuredClone(qualified.receiptAuth);
   await ctx.store.save(transfer);
   await ctx.store.save(Array.from({ length: 1000 }, (_, index) => new CompletedTransfer({
     ...qualified, id: `legacy-${String(index).padStart(4, '0')}`, receiptAuth: null,
@@ -263,10 +272,13 @@ test('legacy backlog cannot consume the live pending page ahead of qualified cou
       receipt: { ...receipt, transactionHash: hash('ce') } },
   })));
   ctx.blocks = [];
+  nativeFixture.state.finalizedHeight = 12;
   const { handleBatch: restarted } = await import('../lib/eth/handler.js?legacy-backlog-page');
   await restarted(ctx);
   assert.equal(stored(ctx.store, transfer).status, Status.Completed);
   assert.equal(stored(ctx.store, qualified).matched, true);
+  assert.deepEqual(stored(ctx.store, qualified).receiptAuth, originalAuthorization);
+  assert.notEqual(stored(ctx.store, transfer).completionAuth.checkpointId, originalAuthorization.checkpointId);
   assert.equal([...ctx.store.rows.get(CompletedTransfer).values()].filter((row) => row.legacyMatched != null)
     .every((row) => !row.matched && row.receiptAuth == null), true);
 });
@@ -274,7 +286,7 @@ test('legacy backlog cannot consume the live pending page ahead of qualified cou
 test('legacy backlog exemption never skips qualified, unmarked or current-batch evidence', async () => {
   for (const mode of ['qualified', 'unmarked', 'current']) {
     const { receipt, transfer } = outbound();
-    const ctx = context(receipt);
+    const ctx = await context(receipt);
     await handleBatch(ctx);
     const retained = [...ctx.store.rows.get(CompletedTransfer).values()][0];
     retained.legacyMatched = mode === 'unmarked' ? null : false;
@@ -282,9 +294,9 @@ test('legacy backlog exemption never skips qualified, unmarked or current-batch 
     await ctx.store.save(transfer);
     if (mode !== 'current') ctx.blocks = [];
     const original = structuredClone(retained);
-    primaryRpc = witnessRpc = evidenceRpc([]);
+    await nativeFixture.removeProof(txHash);
     ctx.store.saves.length = 0;
-    await assert.rejects(handleBatch(ctx), /HOLD:.*receipt/i, mode);
+    await assert.rejects(handleBatch(ctx), /HOLD:/, mode);
     assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
     assert.deepEqual(structuredClone(stored(ctx.store, retained)), original);
     assert.equal(ctx.saved.length, 0);
@@ -300,7 +312,7 @@ test('every consumed manager, queue and payment event must occur in the qualifie
   ];
   for (const consumed of events) {
     const { receipt, transfer } = outbound();
-    const ctx = context(receipt, transfer);
+    const ctx = await context(receipt, transfer);
     ctx.blocks[0].logs = [{ ...consumed, logIndex: 2, transactionIndex: 0 }];
     await assert.rejects(handleBatch(ctx), /HOLD:/);
     assert.equal(transfer.status, Status.Bridging);
@@ -312,21 +324,20 @@ test('inbound creation uses qualified receipt-local coordinates and header time 
   const deposits = [0, 1].map((index) =>
     event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11'), 20 + index));
   const fee = event(payment.abi, 'FeePaid', [], addr('33'), 22);
-  const receipt = fullReceipt([...deposits, fee]);
-  const ctx = context(receipt);
+  const receipt = fullReceipt([...deposits, fee], 11, 1);
+  const prefix = fullReceipt(Array.from({ length: 20 }, () => ({
+    address: addr('99'), topics: [hash('99')], data: '0x',
+  })));
+  const ctx = await context(receipt, undefined, undefined, '0xb', [prefix]);
   ctx.store.rows.set(Pair, new Map([['pair', new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'), isRemoved: false })]]));
   ctx.blocks[0] = { header: { ...block, timestamp: 0 }, logs: receipt.logs.map((log) => ({
-    ...log, logIndex: Number(BigInt(log.logIndex)), transactionIndex: 0,
+    ...log, logIndex: Number(BigInt(log.logIndex)), transactionIndex: 1,
   })) };
-  let primaryReceipts = 0, witnessReceipts = 0;
+  let primaryReceipts = 0;
   const canonical = evidenceRpc([receipt]);
-  primaryRpc = async (method, params) => {
-    if (method === 'eth_getTransactionReceipt') primaryReceipts++;
-    return canonical(method, params);
-  };
-  witnessRpc = async (method, params) => {
-    if (method === 'eth_getTransactionReceipt') witnessReceipts++;
-    return canonical(method, params);
+  primaryRpc = async (method, params, result) => {
+    if (method === 'eth_getBlockReceipts') primaryReceipts++;
+    return canonical(method, params, result);
   };
   await handleBatch(ctx);
   const created = [...ctx.store.rows.get(Transfer).values()];
@@ -334,8 +345,8 @@ test('inbound creation uses qualified receipt-local coordinates and header time 
   assert.notEqual(created[0].nonce, created[1].nonce);
   assert.deepEqual(created.map((row) => row.sourceLogIndex), [0n, 1n]);
   for (const row of created) {
-    assert.equal(row.txHash, txHash);
-    assert.equal(row.sourceTransactionIndex, 0n);
+    assert.equal(row.txHash, receipt.transactionHash);
+    assert.equal(row.sourceTransactionIndex, 1n);
     assert.equal(row.timestamp.getTime(), block.timestamp);
     assert.equal(row.status, Status.Bridging);
     assert.equal(row.sourceReceiptAuth.localLogIndex, Number(row.sourceLogIndex));
@@ -343,13 +354,12 @@ test('inbound creation uses qualified receipt-local coordinates and header time 
       `0x${(20 + Number(row.sourceLogIndex)).toString(16)}`);
   }
   assert.equal(primaryReceipts, 1);
-  assert.equal(witnessReceipts, 1);
 });
 
 test('qualified outbound terminal binding survives advancing finality but rejects changed originals', async () => {
   for (const fault of ['none', 'receipt', 'effect', 'completion-id', 'height', 'time', 'tx-hash']) {
     const { receipt, transfer } = outbound();
-    const ctx = context(receipt, transfer);
+    const ctx = await context(receipt, transfer);
     await handleBatch(ctx);
     const completed = stored(ctx.store, transfer);
     if (fault === 'effect') completed.amount = '11';
@@ -360,11 +370,8 @@ test('qualified outbound terminal binding survives advancing finality but reject
     const retained = structuredClone(completed);
     const observation = [...ctx.store.rows.get(CompletedTransfer).values()][0];
     const savedObservation = structuredClone(observation);
-    const fresh = structuredClone(receipt);
-    if (fault === 'receipt') fresh.logs[0] = { ...fresh.logs[0],
-      ...manager.abi.encodeEventLog(manager.abi.getEvent('Bridged'), [hash('44'), addr('55'), addr('66'), 11n]) };
-    primaryRpc = evidenceRpc([fresh], 12);
-    witnessRpc = primaryRpc;
+    if (fault === 'receipt') await nativeFixture.corruptProof(txHash);
+    primaryRpc = evidenceRpc([receipt], 12);
     ctx.store.saves.length = 0;
     if (fault === 'none') {
       await handleBatch(ctx);
@@ -380,7 +387,7 @@ test('qualified outbound terminal binding survives advancing finality but reject
 });
 
 test('Gear settlement cannot authorize an invented or differently bound original deposit', async () => {
-  for (const fault of ['witness-effect', 'agreed-effect', 'missing', 'transaction-index', 'local-log', 'tx-hash']) {
+  for (const fault of ['proof-effect', 'agreed-effect', 'missing', 'transaction-index', 'local-log', 'tx-hash']) {
     const store = memoryStore(), state = new GearState();
     const transfer = new Transfer({ id: 'deposit', txHash: hash('bc'), sourceNetwork: Network.Ethereum,
       blockNumber: 100n, sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'),
@@ -392,15 +399,16 @@ test('Gear settlement cannot authorize an invented or differently bound original
     const receipt = inboundReceipt(), changed = structuredClone(receipt);
     changed.logs[3] = { ...changed.logs[3],
       ...manager.abi.encodeEventLog(manager.abi.getEvent('BridgingRequested'), [addr('55'), hash('44'), addr('66'), 11n]) };
-    primaryRpc = evidenceRpc(fault === 'missing' ? [] : [fault === 'agreed-effect' ? changed : receipt], 101);
-    witnessRpc = fault === 'witness-effect' ? evidenceRpc([changed], 101) : primaryRpc;
+    await useScenario([fault === 'agreed-effect' ? changed : receipt], 101);
+    primaryRpc = evidenceRpc(fault === 'missing' ? [] : [fault === 'proof-effect' ? changed
+      : fault === 'agreed-effect' ? changed : receipt], 101);
     await state.new({ store, log: quiet, blocks: [] });
     state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: Number(transfer.sourceTransactionIndex) });
     state.recordReceiptSettlement({ slot: '200', transaction_index: String(transfer.sourceTransactionIndex),
       log_index: String(transfer.sourceLogIndex), deposit_count: '1', operation_id: hash('88'),
       eth_token_id: addr('66'), vara_token_id: hash('77'), sender: addr('55'), receiver: hash('44'),
       amount: '10', native: true }, new Date(block.timestamp), 300n, hash('dd'));
-    if (fault === 'witness-effect') await assert.rejects(state.save(), /HOLD:/);
+    if (['proof-effect', 'missing', 'tx-hash'].includes(fault)) await assert.rejects(state.save(), /HOLD:/);
     else await state.save();
     assert.equal(stored(store, transfer).status, Status.Bridging, fault);
     assert.equal(stored(store, transfer).completedAt, undefined, fault);
@@ -414,8 +422,8 @@ test('inbound terminal revalidation preserves bindings and never mutates origina
     const transfer = new Transfer({ id: 'deposit', txHash: hash('bc'), sourceNetwork: Network.Ethereum,
       blockNumber: 100n, sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'),
       destination: hash('77'), sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });
-    primaryRpc = evidenceRpc([inboundReceipt()], 101);
-    witnessRpc = primaryRpc;
+    const originalReceipt = inboundReceipt();
+    await useScenario([originalReceipt], 101);
     await store.save(transfer);
     await state.new({ store, log: quiet, blocks: [] });
     state.recordReceiptRelay({ slot: '200', block_number: 100, transaction_index: 2 });
@@ -431,9 +439,8 @@ test('inbound terminal revalidation preserves bindings and never mutates origina
     assert.equal(transfer.status, Status.Bridging);
     assert.equal(completed.status, outcome);
     primaryRpc = evidenceRpc([inboundReceipt()], 102);
-    witnessRpc = primaryRpc;
-    const clients = createEthereumEvidenceClients();
-    const checkpoint = await qualifyFinality(clients);
+    const clients = createEthereumEvidenceClients('gear');
+    const checkpoint = await qualifyStoredFinality(store, clients);
     const authenticate = createReceiptAuthenticator(clients, checkpoint);
     const source = (row) => authenticateSourceReceipt(clients, row, addr('11'), checkpoint, authenticate);
     const revalidated = await reconcileReceiptSettlements(store, [settlement], source);
@@ -455,8 +462,7 @@ test('inbound terminal revalidation preserves bindings and never mutates origina
       assert.deepEqual(structuredClone(completed), original);
       assert.deepEqual(structuredClone(settlement), originalSettlement);
     }
-    primaryRpc = evidenceRpc([], 102);
-    witnessRpc = primaryRpc;
+    await nativeFixture.removeProof(hash('bc'), 'gear');
     const missing = createReceiptAuthenticator(clients, checkpoint);
     await assert.rejects(reconcileReceiptSettlements(store, [settlement],
       (row) => authenticateSourceReceipt(clients, row, addr('11'), checkpoint, missing)), /HOLD:/);
@@ -471,7 +477,7 @@ test('multicall cannot reuse an earlier token effect or select ambiguous matchin
       receipt.logs[1] = event(queue.abi, 'MessageProcessed', [9n, hash('99'), 7n, addr('11')], addr('22'), 1);
     }
     receipt.logs.push(event(queue.abi, 'MessageProcessed', [9n, hash('77'), 8n, addr('11')], addr('22'), 2));
-    const ctx = context(receipt, transfer);
+    const ctx = await context(receipt, transfer);
     if (duplicate) await assert.rejects(handleBatch(ctx), /HOLD:/);
     else await handleBatch(ctx);
     assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
@@ -494,14 +500,14 @@ test('finalized original same-receipt effect is the only outbound completion', a
   ]) {
     const { receipt, transfer } = outbound();
     mutate(receipt);
-    const ctx = context(receipt, transfer);
+    const ctx = await context(receipt, transfer);
     await handleBatch(ctx);
     assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
     assert.equal(ctx.saved.filter((row) => row instanceof Transfer).length, 0);
     assert.ok(ctx.saved.filter((row) => row instanceof CompletedTransfer).every((row) => !row.matched));
   }
   const { receipt, transfer } = outbound();
-  const ctx = context(receipt, transfer);
+  const ctx = await context(receipt, transfer);
   await handleBatch(ctx);
   const completed = stored(ctx.store, transfer);
   assert.equal(transfer.status, Status.Bridging, 'qualification stages a clone, not the loaded original');
@@ -514,7 +520,7 @@ test('finalized original same-receipt effect is the only outbound completion', a
   assert.equal(completed.completedAt.getTime(), block.timestamp);
   const later = outbound();
   later.receipt.logs[1] = event(queue.abi, 'MessageProcessed', [10n, hash('77'), 8n, addr('11')], addr('22'), 1);
-  const laterCtx = context(later.receipt, later.transfer);
+  const laterCtx = await context(later.receipt, later.transfer);
   await handleBatch(laterCtx);
   assert.equal(stored(laterCtx.store, later.transfer).status, Status.Completed);
 });
@@ -523,10 +529,10 @@ test('outbound completion survives counterpart lag and restart while unrelated r
   const { receipt, transfer } = outbound();
   const store = memoryStore();
   store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
-  const ctx = { ...context(receipt, undefined), store };
-  const root = event(queue.abi, 'MerkleRoot', [12n, hash('88')], addr('22'), 2);
-  receipt.logs.push(root);
-  ctx.blocks[0].logs.push({ ...root, logIndex: 2, transactionIndex: 0 });
+  receipt.logs.push(event(queue.abi, 'MerkleRoot', [12n, hash('88')], addr('22'), 2));
+  const ctx = { ...await context(receipt, undefined), store };
+  ctx.blocks[0].logs = receipt.logs.slice(1).map((log) => ({ ...log,
+    logIndex: Number(BigInt(log.logIndex)), transactionIndex: 0 }));
   await handleBatch(ctx);
   const retained = [...store.rows.get(CompletedTransfer).values()][0];
   assert.equal(retained.matched, false);
@@ -559,9 +565,9 @@ test('pending outbound completion reauthenticates canonical history before match
   const { receipt, transfer } = outbound();
   const store = memoryStore();
   store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
-  await handleBatch({ ...context(receipt, undefined), store });
+  await handleBatch({ ...await context(receipt, undefined), store });
   await store.save(transfer);
-  const changed = { ...context(receipt, transfer, hash('cc')), store, blocks: [] };
+  const changed = { ...await context(receipt, transfer, hash('cc')), store, blocks: [] };
   await assert.rejects(handleBatch(changed), /HOLD:/);
   assert.equal(transfer.status, Status.Bridging);
   assert.equal([...store.rows.get(CompletedTransfer).values()][0].matched, false);
@@ -573,19 +579,41 @@ test('legacy completion rows and mismatched deferred effects never complete a la
   store.findOneBy = async (entity, where) => (await store.find(entity, { where }))[0];
   await store.save(new CompletedTransfer({ id: 'legacy', srcNetwork: Network.Vara, destNetwork: Network.Ethereum,
     txHash, blockNumber: 11n, timestamp: new Date(block.timestamp), matched: false }));
-  await handleBatch({ ...context(receipt, undefined), store });
+  await handleBatch({ ...await context(receipt, undefined), store });
   await store.save(transfer);
-  await handleBatch({ ...context(receipt, transfer), store, blocks: [] });
+  await handleBatch({ ...await context(receipt, transfer), store, blocks: [] });
   assert.equal(transfer.status, Status.Bridging);
   assert.ok([...store.rows.get(CompletedTransfer).values()].every((row) => !row.matched));
 });
 
 test('noncanonical batch fails before effects or cursor-owning handler return', async () => {
   const { receipt, transfer } = outbound();
-  const ctx = context(receipt, transfer, hash('cc'));
+  const ctx = await context(receipt, transfer, hash('cc'));
   await assert.rejects(handleBatch(ctx), /HOLD:/);
   assert.equal(transfer.status, Status.Bridging);
   assert.equal(ctx.saved.length, 0);
+});
+
+test('raw processor RPC callbacks cannot grant or replace native finality authority', async () => {
+  for (const unavailable of [false, true]) {
+    const { receipt, transfer } = outbound();
+    const ctx = await context(receipt, transfer);
+    let rawCalls = 0;
+    ctx._chain.client.call = async () => { rawCalls++; return receipt; };
+    if (unavailable) nativeFixture.state.fault = ({ side, result }) => {
+      if (side === 'beacon') throw new Error('Beacon unavailable');
+      return result;
+    };
+    if (unavailable) {
+      await assert.rejects(handleBatch(ctx), /HOLD:/);
+      assert.equal(ctx.saved.length, 0);
+      assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
+    } else {
+      await handleBatch(ctx);
+      assert.equal(stored(ctx.store, transfer).status, Status.Completed);
+    }
+    assert.equal(rawCalls, 0);
+  }
 });
 
 function mockWait(t) {
@@ -621,62 +649,53 @@ function finalityContext(chain, heights, anchorHash) {
     get polls() { return polls; }, get batches() { return batches; } };
 }
 
-test('Ethereum lag HOLDs a batch without polling and completes on a fresh qualified attempt', async () => {
+test('Ethereum Beacon lag HOLDs without polling and succeeds on a fresh signed update', async () => {
   const { receipt, transfer } = outbound();
-  const ctx = context(receipt, transfer);
-  const primary = evidenceRpc([receipt], 12), witness = evidenceRpc([receipt], 10);
-  let polls = 0;
-  primaryRpc = async (method, params) => {
-    if (method === 'eth_getBlockByNumber' && params[0] === 'finalized') polls++;
-    return primary(method, params);
-  };
-  witnessRpc = witness;
+  const ctx = await context(receipt, transfer, undefined, '0xa');
   await assert.rejects(handleBatch(ctx), /HOLD:/);
-  assert.equal(polls, 1, 'Ethereum qualification is bounded, not a finality wait loop');
+  assert.equal(nativeFixture.state.requests.filter(({ method }) => method.endsWith('/finality_update')).length, 1);
   assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
   assert.equal(ctx.saved.length, 0);
-  witnessRpc = evidenceRpc([receipt], 11);
+  nativeFixture.state.finalizedHeight = 11;
   await handleBatch(ctx);
   assert.equal(stored(ctx.store, transfer).status, Status.Completed);
   assert.equal([...ctx.store.rows.get(EthereumFinalityCheckpoint).values()][0].blockNumber, 11n);
 });
 
-test('Ethereum reload rejects saved-head regression and a changed prior anchor', async () => {
+test('Ethereum reload never regresses a retained signed head and rejects a changed prior anchor', async () => {
   for (const fault of ['regression', 'anchor']) {
     const { receipt, transfer } = outbound();
-    const ctx = context(receipt, transfer);
+    const ctx = await context(receipt, transfer);
     await handleBatch(ctx);
     const original = structuredClone(stored(ctx.store, transfer));
     ctx.blocks = [];
-    const canonical = evidenceRpc([receipt], fault === 'regression' ? 10 : 12);
-    primaryRpc = async (method, params) => {
-      const result = await canonical(method, params);
-      if (fault === 'anchor' && method === 'eth_getBlockByNumber' && params[0] === '0xb') {
-        return { ...result, hash: hash('cc') };
-      }
-      return result;
-    };
-    witnessRpc = primaryRpc;
+    nativeFixture.state.finalizedHeight = fault === 'regression' ? 10 : 12;
+    if (fault === 'anchor') {
+      const retained = [...ctx.store.rows.get(EthereumFinalityCheckpoint).values()][0];
+      retained.checkpoint.hash = hash('cc');
+    }
     ctx.store.saves.length = 0;
-    await assert.rejects(handleBatch(ctx), /HOLD:/);
+    if (fault === 'regression') {
+      // A stale Beacon response cannot roll back an already verified native store.
+      await handleBatch(ctx);
+      assert.ok([...ctx.store.rows.get(EthereumFinalityCheckpoint).values()].every((row) => row.blockNumber >= 11n));
+    } else await assert.rejects(handleBatch(ctx), /HOLD:/);
     assert.deepEqual(structuredClone(stored(ctx.store, transfer)), original);
-    assert.equal(ctx.store.saves.length, 0);
+    if (fault === 'anchor') assert.equal(ctx.saved.length, 0);
   }
 });
 
-test('Ethereum fails closed on malformed, unavailable and noncanonical independent evidence', async () => {
+test('Ethereum fails closed on malformed Beacon, unavailable EL and noncanonical ancestry', async () => {
   for (const fault of ['finality', 'transport', 'missing-header', 'canonical', 'ancestry']) {
     const { receipt, transfer } = outbound();
-    const ctx = context(receipt, transfer);
-    const canonical = evidenceRpc([receipt], fault === 'ancestry' ? 12 : 11);
-    witnessRpc = async (method, params) => {
+    const ctx = await context(receipt, transfer);
+    nativeFixture.state.finalizedHeight = fault === 'ancestry' ? 13 : 11;
+    nativeFixture.state.fault = ({ side, method, result }) => {
       if (fault === 'transport') throw new Error('transport unavailable');
-      const result = await canonical(method, params);
-      if (method !== 'eth_getBlockByNumber') return result;
-      if (fault === 'finality' && params[0] === 'finalized') return null;
-      if (fault === 'missing-header' && params[0] === '0xb') return null;
-      if (fault === 'canonical' && params[0] === '0xb') return { ...result, hash: hash('cc') };
-      if (fault === 'ancestry' && params[0] === 'finalized') return { ...result, parentHash: hash('cc') };
+      if (fault === 'finality' && side === 'beacon' && method.endsWith('/finality_update')) return {};
+      if (fault === 'missing-header' && result?.number === '0xb') return null;
+      if (fault === 'canonical' && result?.number === '0xb') return { ...result, hash: hash('cc') };
+      if (fault === 'ancestry' && result?.number === '0xc') return { ...result, parentHash: hash('cc') };
       return result;
     };
     await assert.rejects(requireEthFinality(ctx), /HOLD:/, fault);

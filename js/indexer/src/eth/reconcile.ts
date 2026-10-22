@@ -9,7 +9,8 @@ import { reconcileReceiptSettlements } from '../gear/receipt-reconciliation.js';
 import { assertRetainedReceipt, authenticateSourceReceipt, qualifyOutboundCompletion } from './completion.js';
 import {
   checkpointId, createEthereumEvidenceClients, createReceiptAuthenticator, destroyEthereumEvidenceClients,
-  loadCheckpoint, qualifyFinality, retainCheckpoint,
+  qualifyStoredFinality, recheckFinality, retainCheckpoint, receiptDate, receiptAuthorization,
+  proofReference, assertReceiptAuthorization, assertAuthorizationCheckpoint, requalificationLinksFor,
   type AgreedCheckpoint, type EthereumEvidenceClients, type ReceiptAuthenticator,
 } from './finality.js';
 
@@ -62,11 +63,6 @@ function height(value: bigint | string | number): number {
   return Number(n);
 }
 
-function receiptDate(seconds: string): Date {
-  const millis = BigInt(seconds) * 1000n;
-  if (millis < 0n || millis > 8640000000000000n) throw new Error('HOLD: receipt timestamp is out of range');
-  return new Date(Number(millis));
-}
 
 function sameCoordinates(transfer: Transfer, timestamp: Date, blockNumber: bigint, txHash: string): boolean {
   return transfer.completedAt?.getTime() === timestamp.getTime() && transfer.completedAtBlock != null &&
@@ -98,16 +94,28 @@ export async function reconcilePage(
   const sourceTuples = new Set<string>();
   let examining: string | undefined;
   try {
-    const checkpoint = await qualifyFinality(clients, await loadCheckpoint(store, clients));
+    const checkpoint = await qualifyStoredFinality(store, clients);
     const authenticate = createReceiptAuthenticator(clients, checkpoint);
     const references = new Map<string, bigint>();
     for (const transfer of page) {
+      const legacyAuth = transfer.legacyEthereumAuth?.completionAuth;
       examining = transfer.id;
+      if (legacyAuth && legacyAuth.kind !== (options.direction === 'vara-to-eth' ? 'ethereum-receipt' : 'gear-settlement')) {
+        throw new Error('HOLD: archived completion has another evidence kind');
+      }
+      const legacyCheckpoint = legacyAuth?.kind === 'ethereum-receipt' ? legacyAuth.checkpointId : legacyAuth?.sourceCheckpointId;
+      if (legacyAuth) {
+        if (!legacyCheckpoint) throw new Error('HOLD: archived completion checkpoint reference missing');
+        assertAuthorizationCheckpoint(clients, legacyCheckpoint, options.direction === 'vara-to-eth'
+          ? BigInt(transfer.legacyEthereumAuth!.completedAtBlock ?? -1) : BigInt(transfer.blockNumber));
+        referenceCheckpoint(references, legacyCheckpoint, options.direction === 'vara-to-eth'
+          ? BigInt(transfer.legacyEthereumAuth!.completedAtBlock ?? -1) : BigInt(transfer.blockNumber));
+      }
       if ((transfer.status === Status.Completed || transfer.status === Status.Refunded) && !transfer.completionAuth) {
         throw new Error('HOLD: terminal projection lacks authentication; migrate before repair');
       }
       if (options.direction === 'vara-to-eth') {
-        const result = await reconcileOutbound(store, transfer, queue, manager, checkpoint, authenticate, references);
+        const result = await reconcileOutbound(store, clients, transfer, queue, manager, checkpoint, authenticate, references);
         if (result) {
           changedTransfers.set(transfer.id, result.transfer);
           changedCompletions.set(result.completion.id, result.completion);
@@ -141,9 +149,13 @@ export async function reconcilePage(
           }
         }
         if (transfer.completionAuth) ids.add(transfer.completionAuth.receiptSettlementId);
+        if (legacyAuth?.receiptSettlementId) ids.add(legacyAuth.receiptSettlementId);
         const settlements = ids.size ? await store.find(ReceiptSettlement, { where: { id: In([...ids]) } }) : [];
         if (binding && !settlements.some((s) => s.id === binding.receiptSettlementId)) {
           throw new Error('HOLD: missing original qualified receipt settlement');
+        }
+        if (legacyAuth && (!legacyAuth.receiptSettlementId || !settlements.some((row) => row.id === legacyAuth.receiptSettlementId))) {
+          throw new Error('HOLD: missing original archived receipt settlement');
         }
         const updates = await reconcileReceiptSettlements(store, settlements, async (candidate) => {
           if (candidate.id !== transfer.id) throw new Error('HOLD: receipt settlement points outside the selected original');
@@ -158,6 +170,10 @@ export async function reconcilePage(
         }
         if (!repaired.sourceReceiptAuth || !repaired.completionAuth || repaired.completionAuth.kind !== 'gear-settlement') {
           throw new Error('HOLD: settlement lacks qualified original source evidence');
+        }
+        if (legacyAuth && (repaired.completionAuth.receiptSettlementId !== legacyAuth.receiptSettlementId ||
+            repaired.completionAuth.receiptRelayId !== legacyAuth.receiptRelayId || repaired.completionAuth.outcome !== legacyAuth.outcome)) {
+          throw new Error('HOLD: archived inbound settlement identity changed');
         }
         if (transfer.completionAuth && (!isDeepStrictEqual(transfer.completionAuth, repaired.completionAuth) ||
             !isDeepStrictEqual(transfer.sourceReceiptAuth, repaired.sourceReceiptAuth) || transfer.status !== repaired.status ||
@@ -174,16 +190,17 @@ export async function reconcilePage(
     // to today's checkpoint. The fixed page checkpoint itself is inserted below.
     if (references.size) {
       const retained = await store.find(EthereumFinalityCheckpoint, { where: { id: In([...references.keys()]) } });
+      const byId = new Map(retained.map((row) => [row.id, row]));
       for (const [id, minimumHeight] of references) {
-        const row = retained.find((record) => record.id === id);
+        const row = byId.get(id);
         if (!row || checkpointId(row.checkpoint) !== id || BigInt(row.blockNumber) !== BigInt(row.checkpoint.number) ||
             BigInt(row.checkpoint.number) < minimumHeight) {
           throw new Error('HOLD: missing or contradictory original authorization checkpoint');
         }
-        await qualifyFinality(clients, row.checkpoint);
+        assertAuthorizationCheckpoint(clients, id, minimumHeight);
       }
     }
-    await qualifyFinality(clients, checkpoint);
+    await recheckFinality(clients, checkpoint);
     if (options.apply) {
       await retainCheckpoint(store, checkpoint);
       if (changedCompletions.size) await store.save([...changedCompletions.values()]);
@@ -192,26 +209,36 @@ export async function reconcilePage(
     }
     return report;
   } catch (error) {
-    const failure = new Error(error instanceof Error ? error.message : String(error), { cause: error });
+    const failure = error instanceof Error ? error : new Error('HOLD: Ethereum evidence reconciliation failed');
     Object.assign(failure, { heldIds: examining ? [examining] : page.map((row) => row.id) });
     throw failure;
   }
 }
 
 async function reconcileOutbound(
-  store: Store, transfer: Transfer, queue: string, manager: string, checkpoint: AgreedCheckpoint,
+  store: Store, clients: EthereumEvidenceClients, transfer: Transfer, queue: string, manager: string, checkpoint: AgreedCheckpoint,
   authenticate: ReceiptAuthenticator, references: Map<string, bigint>,
 ): Promise<{ transfer: Transfer; completion: CompletedTransfer } | undefined> {
   if (transfer.completionAuth && transfer.completionAuth.kind !== 'ethereum-receipt') {
     throw new Error('HOLD: original outbound completion has another evidence kind');
   }
   const id = `outbound:${queue}:${transfer.nonce}`;
+  const legacyBinding = transfer.legacyEthereumAuth?.completionAuth;
+  if (legacyBinding && legacyBinding.completionId !== id) throw new Error('HOLD: archived completion ID changed');
   if (transfer.completionAuth && transfer.completionAuth.completionId !== id) throw new Error('HOLD: original completion ID changed');
   const saved = await store.findOneBy(CompletedTransfer, { id });
   if (transfer.completionAuth && (!saved || !saved.receiptAuth)) throw new Error('HOLD: missing original qualified completion');
   if (saved && !saved.outboundReceipt) throw new Error('HOLD: missing retained original completion receipt evidence');
   if (saved?.receiptAuth) referenceCheckpoint(references, saved.receiptAuth.checkpointId, saved.blockNumber);
-  const legacy = transfer.legacyResolution;
+  const archived = saved?.legacyReceiptAuth;
+  if (archived) {
+    if (archived.txHash.toLowerCase() !== saved!.txHash.toLowerCase() || BigInt(archived.blockNumber) !== BigInt(saved!.blockNumber)) {
+      throw new Error('HOLD: archived original completion coordinates changed');
+    }
+    assertAuthorizationCheckpoint(clients, archived.receiptAuth.checkpointId, BigInt(saved!.blockNumber));
+    referenceCheckpoint(references, archived.receiptAuth.checkpointId, saved!.blockNumber);
+  }
+  const legacy = transfer.legacyEthereumAuth ?? transfer.legacyResolution;
   const originalHash = legacy?.completedAtTxHash ?? transfer.completedAtTxHash;
   const originalBlock = legacy?.completedAtBlock ?? transfer.completedAtBlock;
   if (saved && (saved.srcNetwork !== Network.Vara || saved.destNetwork !== Network.Ethereum ||
@@ -226,16 +253,21 @@ async function reconcileOutbound(
   if (evidence && (evidence.nonce !== transfer.nonce || evidence.queue.toLowerCase() !== queue || evidence.manager.toLowerCase() !== manager)) {
     throw new Error('HOLD: retained completion routing changed');
   }
-  const expectedHash = saved?.receiptAuth?.receipt.blockHash ?? evidence?.receipt.blockHash;
-  const original = await authenticate(txHash, { height: height(blockNumber), ...(expectedHash ? { hash: expectedHash } : {}) });
+  const expectedHash = saved?.receiptAuth?.receipt.blockHash ?? archived?.receiptAuth.receipt.blockHash ?? evidence?.receipt.blockHash;
+  const original = await authenticate(txHash, { height: height(blockNumber), ...(expectedHash ? { hash: expectedHash } : {}),
+    ...(saved?.receiptAuth ? { proofDigest: saved.receiptAuth.inclusionProofDigest } : {}) });
   if (!original) {
     if (saved || transfer.completionAuth) throw new Error('HOLD: original retained completion receipt unavailable');
     return undefined;
   }
   if (evidence) assertRetainedReceipt(evidence.receipt, original.receipt);
-  if (saved?.receiptAuth && (saved.receiptAuth.version !== 1 ||
-      saved.receiptAuth.blockTimestamp !== original.blockTimestamp || !isDeepStrictEqual(saved.receiptAuth.receipt, original.receipt))) {
-    throw new Error('HOLD: original qualified completion receipt changed');
+  const requalified = requalificationLinksFor(clients, original,
+    [archived?.receiptAuth.checkpointId], saved?.receiptAuth?.requalificationLinks);
+  if (saved?.receiptAuth) assertReceiptAuthorization(clients, saved.receiptAuth, original);
+  if (archived) {
+    assertRetainedReceipt(archived.receiptAuth.receipt, original.receipt);
+    if (archived.receiptAuth.version !== 1 || archived.receiptAuth.blockTimestamp !== original.blockTimestamp ||
+        !original.requalificationLinks.length) throw new Error('HOLD: archived completion lacks exact Beacon requalification');
   }
   const effect = qualifyOutboundCompletion(transfer, original, queue, manager);
   if (!effect) {
@@ -243,11 +275,18 @@ async function reconcileOutbound(
     return undefined;
   }
   if (evidence && evidence.logIndex !== effect.processedLogIndex) throw new Error('HOLD: original completion log changed');
+  if (legacyBinding && legacyBinding.processedLogIndex !== effect.processedLogIndex) {
+    throw new Error('HOLD: archived completion effect position changed');
+  }
   const timestamp = receiptDate(original.blockTimestamp), block = BigInt(original.receipt.blockNumber), hash = original.receipt.transactionHash;
-  const receiptAuth = saved?.receiptAuth ?? { version: 1 as const, checkpointId: checkpointId(checkpoint),
-    receipt: original.receipt, blockTimestamp: original.blockTimestamp };
-  const completionAuth = { version: 1 as const, kind: 'ethereum-receipt' as const,
-    checkpointId: receiptAuth.checkpointId, completionId: id, processedLogIndex: effect.processedLogIndex };
+  const receiptAuth = saved?.receiptAuth ?? receiptAuthorization(original, requalified);
+  const completionLinks = requalificationLinksFor(clients, original,
+    [legacyBinding?.checkpointId], transfer.completionAuth?.requalificationLinks);
+  const authorization = transfer.completionAuth ?? receiptAuthorization(original, completionLinks);
+  assertReceiptAuthorization(clients, { ...receiptAuth, ...authorization }, original);
+  const completionAuth = { version: 2 as const, kind: 'ethereum-receipt' as const,
+    checkpointId: authorization.checkpointId, completionId: id, processedLogIndex: effect.processedLogIndex,
+    ...proofReference(authorization) };
   if (transfer.completionAuth && (!isDeepStrictEqual(transfer.completionAuth, completionAuth) || transfer.status !== Status.Completed ||
       !sameCoordinates(transfer, timestamp, block, hash))) {
     throw new Error('HOLD: original qualified outbound resolution changed');
@@ -269,7 +308,7 @@ async function main(): Promise<void> {
     return value.toLowerCase();
   };
   const queue = address('ETH_MSQ_QUEUE'), manager = address('ETH_ERC20_MANAGER');
-  const clients = createEthereumEvidenceClients();
+  const clients = createEthereumEvidenceClients('repair');
   const database = new DataSource({ ...existing.options, migrationsRun: false, synchronize: false, dropSchema: false, logging: false });
   try {
     await database.initialize();

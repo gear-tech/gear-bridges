@@ -99,6 +99,22 @@ pub enum TokenSupply {
     Gear = 1,
 }
 
+/// Capabilities of the unchanged native wrapper approved by governance.
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
+pub enum NativeWrapperMode {
+    EscrowV1,
+    HeldEscrowV2,
+}
+
+/// Code identity is a governance assertion, independently authenticated offchain.
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
+pub struct NativeWrapperConfig {
+    pub actor_id: ActorId,
+    pub ethereum_token: H160,
+    pub code_id: H256,
+    pub mode: NativeWrapperMode,
+}
+
 /// Events emitted by VFT Manager service.
 #[event]
 #[derive(Encode, TypeInfo)]
@@ -250,7 +266,7 @@ pub struct State {
     historical_proxy_address: ActorId,
     /// Is the `vft-manager` currently on pause.
     is_paused: bool,
-    native_wrapper: Option<ActorId>,
+    native_wrapper: Option<NativeWrapperConfig>,
     cutover: CutoverStatus,
     frozen_mappings: Vec<(ActorId, H160, TokenSupply)>,
     custody_transfers: Vec<CustodyTransferAttempt>,
@@ -357,6 +373,24 @@ impl VftManager {
         submit_receipt::receipt_rejection((slot, transaction_index), log_index)
     }
 
+    /// Exact retained native error-child retry permission, not a status-only hint.
+    #[export]
+    pub fn receipt_retryable_native(
+        &self,
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        operation_id: H256,
+        child: MessageId,
+    ) -> bool {
+        submit_receipt::receipt_retryable_native(
+            (slot, transaction_index),
+            log_index,
+            operation_id,
+            child,
+        )
+    }
+
     /// Reconcile original native payout outcomes; this never starts an economic child.
     #[export]
     pub async fn reconcile_receipt(
@@ -389,53 +423,42 @@ impl VftManager {
         .await
     }
 
-    /// Settlement policy is explicit, and only changes at a paused boundary.
+    /// Settlement policy is explicit and cannot change after economic activity.
     #[export]
-    pub async fn configure_native_wrapper(&mut self, wrapper: Option<(ActorId, H160)>) {
+    pub async fn configure_native_wrapper(&mut self, wrapper: Option<NativeWrapperConfig>) {
         self.ensure_admin();
-        self.ensure_economic_mutable();
-        assert!(self.state().is_paused, "Not paused");
-        if let Some((wrapper, approved_wrapped_vara)) = wrapper {
-            assert!(!wrapper.is_zero(), "Invalid native wrapper");
-            assert!(
-                !approved_wrapped_vara.is_zero(),
-                "Invalid native Ethereum token"
-            );
-            assert_eq!(
-                self.state().token_map.get_eth_token_id(&wrapper),
-                Ok(approved_wrapped_vara),
-                "Native wrapper Ethereum mapping differs"
-            );
-            assert_eq!(
-                self.state().token_map.get_supply_type(&wrapper),
-                Ok(TokenSupply::Gear),
-                "Native wrapper must have Gear supply"
-            );
+        self.ensure_native_wrapper_configuration(wrapper);
+        if let Some(binding) = wrapper {
             let revision = self.state().economic_revision;
+            let admin = self.state().admin;
+            let config = self.config().clone();
             let minimum: U256 =
-                cutover::query(wrapper, "VftExtension", "MinimumBalance", self.config()).await;
+                cutover::query(binding.actor_id, "VftExtension", "MinimumBalance", &config).await;
             assert!(
                 minimum.is_zero(),
                 "Native wrapper requires zero minimum balance"
             );
             self.ensure_admin();
-            assert!(self.state().is_paused, "Not paused");
             assert_eq!(
-                self.state().cutover.phase,
-                CutoverPhase::Active,
-                "Economic configuration frozen"
+                self.state().admin,
+                admin,
+                "Wrapper approval authority changed"
             );
             assert_eq!(
                 self.state().economic_revision,
                 revision,
                 "Configuration changed while qualifying wrapper"
             );
+            self.ensure_native_wrapper_configuration(wrapper);
         }
-        self.state_mut().native_wrapper = wrapper.map(|(actor, _)| actor);
+        if self.state().native_wrapper != wrapper {
+            self.ensure_economic_mutable();
+            self.state_mut().native_wrapper = wrapper;
+        }
     }
 
     #[export]
-    pub fn native_wrapper(&self) -> Option<ActorId> {
+    pub fn native_wrapper(&self) -> Option<NativeWrapperConfig> {
         self.state().native_wrapper
     }
 
@@ -449,6 +472,12 @@ impl VftManager {
     ) {
         self.ensure_admin();
         self.ensure_economic_mutable();
+        if let Some(wrapper) = self.state().native_wrapper {
+            assert!(
+                vara_token_id != wrapper.actor_id && eth_token_id != wrapper.ethereum_token,
+                "Cannot overwrite native wrapper identity"
+            );
+        }
 
         self.state_mut()
             .token_map
@@ -469,7 +498,7 @@ impl VftManager {
         self.ensure_economic_mutable();
 
         assert_ne!(
-            self.state().native_wrapper,
+            self.state().native_wrapper.map(|wrapper| wrapper.actor_id),
             Some(vara_token_id),
             "Clear native wrapper configuration first"
         );
@@ -757,6 +786,14 @@ impl VftManager {
     pub async fn update_vfts(&mut self, vft_map: Vec<(ActorId, ActorId)>) {
         self.ensure_admin();
         self.ensure_economic_mutable();
+        if let Some(wrapper) = self.state().native_wrapper {
+            assert!(
+                vft_map.iter().all(|(old, new)| {
+                    (*old != wrapper.actor_id && *new != wrapper.actor_id) || old == new
+                }),
+                "Cannot overwrite native wrapper identity"
+            );
+        }
 
         let revision = self.state().economic_revision;
         let gas_required = self.config().gas_for_swap_token_maps;
@@ -949,6 +986,10 @@ impl VftManager {
     pub async fn calculate_gas_for_token_map_swap(&mut self) {
         self.ensure_admin();
         self.ensure_economic_mutable();
+        assert!(
+            self.state().native_wrapper.is_none(),
+            "Cannot overwrite native wrapper identity"
+        );
         #[cfg(feature = "mocks")]
         {
             self.state_mut()
@@ -962,6 +1003,43 @@ impl VftManager {
 }
 
 impl VftManager {
+    fn ensure_native_wrapper_configuration(&self, wrapper: Option<NativeWrapperConfig>) {
+        let state = self.state();
+        assert!(state.is_paused, "Not paused");
+        assert_eq!(
+            state.cutover.phase,
+            CutoverPhase::Active,
+            "Economic configuration frozen"
+        );
+        assert!(
+            !state.has_economic_activity || state.native_wrapper == wrapper,
+            "Native wrapper binding has economic activity"
+        );
+        if let Some(wrapper) = wrapper {
+            assert!(!wrapper.actor_id.is_zero(), "Invalid native wrapper");
+            assert!(
+                !wrapper.ethereum_token.is_zero(),
+                "Invalid native Ethereum token"
+            );
+            assert!(!wrapper.code_id.is_zero(), "Invalid native wrapper CodeId");
+            assert_eq!(
+                state.token_map.get_eth_token_id(&wrapper.actor_id),
+                Ok(wrapper.ethereum_token),
+                "Native wrapper Ethereum mapping differs"
+            );
+            assert_eq!(
+                state.token_map.get_vara_token_id(&wrapper.ethereum_token),
+                Ok(wrapper.actor_id),
+                "Native wrapper Gear mapping differs"
+            );
+            assert_eq!(
+                state.token_map.get_supply_type(&wrapper.actor_id),
+                Ok(TokenSupply::Gear),
+                "Native wrapper must have Gear supply"
+            );
+        }
+    }
+
     pub(crate) fn record_receipt_admission(&mut self, slot: u64) {
         let state = self.state_mut();
         state.has_economic_activity = true;

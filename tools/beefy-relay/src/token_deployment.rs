@@ -160,7 +160,7 @@ pub async fn manifest(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
-    ethereum_witness_rpc: &str,
+    finality: &cli_utils::EthereumFinalityArgs,
     wallet: &Path,
     anchor_path: &Path,
     stack_path: &Path,
@@ -282,7 +282,7 @@ pub async fn manifest(
     });
     let mut ethereum_manifest = Ethereum::token_manifest(
         ethereum_rpc,
-        ethereum_witness_rpc,
+        finality,
         wallet,
         &addresses,
         fixture.as_ref(),
@@ -291,7 +291,7 @@ pub async fn manifest(
     ethereum_manifest["sourceGenesis"] = anchor["sourceGenesis"].clone();
     let ethereum = Ethereum::connect(
         ethereum_rpc,
-        ethereum_witness_rpc,
+        finality,
         wallet,
         &ethereum_manifest,
         fixture.as_ref(),
@@ -341,6 +341,7 @@ pub async fn manifest(
         "source domain or destination differs from source genesis lane"
     );
     let mut deployment = json!({
+        "schemaVersion": 1, "executionAuthorized": false,
         "mode": "hoodi-token-stack", "localRehearsal": local_rehearsal, "manager": ethereum_manifest["receiver"],
         "gearManager": format!("0x{}", hex::encode(gear_manager.into_bytes())),
         "anchor": anchor, "ethereum": ethereum_manifest,
@@ -2318,7 +2319,7 @@ pub async fn configure(
     expected_genesis: &str,
     suri: &str,
     ethereum_rpc: &str,
-    ethereum_witness_rpc: &str,
+    finality: &cli_utils::EthereumFinalityArgs,
     wallet: &Path,
     deployment_manifest: &Path,
     token_stack: &Path,
@@ -2356,15 +2357,16 @@ pub async fn configure(
             && deployment["ethereum"]["chainId"] == chain_id,
         "tokens-configure requires a real approved network, never a local rehearsal"
     );
-    let ethereum = beefy_relay::ethereum::Ethereum::connect(
+    let mut ethereum = beefy_relay::ethereum::Ethereum::connect(
         ethereum_rpc,
-        ethereum_witness_rpc,
+        finality,
         wallet,
         &deployment["ethereum"],
         fixture.as_ref(),
         beefy_relay::ethereum::PublicEthereumNetwork::Hoodi,
     )
     .await?;
+    ethereum.load_execution_approval(deployment_manifest, finality).await?;
     let stack_path = fs::canonicalize(token_stack)?;
     let mut stack = read_config_stack(&stack_path)?;
     if !stack["configuration"]["identity"].is_null() {
@@ -2389,6 +2391,8 @@ pub async fn configure(
     )
     .await?;
     source.validate_attachment(&deployment["anchor"]).await?;
+    ethereum.qualify_execution_source(&source).await?;
+    ethereum.qualify_execution_source(&_witness).await?;
     ensure!(
         source.source_genesis == expected_genesis,
         "wrong source genesis"
@@ -2493,10 +2497,19 @@ pub async fn configure(
         .ok_or_else(|| anyhow!("native wrapper Ethereum token missing"))?
         .parse()?;
     ensure_native_pair(native_address, approved_wrapped_vara)?;
+    // Fresh Hoodi/owned-fixture stacks only; never a production VFT replacement path.
+    let native_config = vft_manager_client::NativeWrapperConfig {
+        actor_id: native_id,
+        ethereum_token: H160::from_slice(approved_wrapped_vara.as_slice()),
+        code_id: decode_hash(&stack["programs"]["nativeVft"]["codeId"], "native wrapper code")?.into(),
+        mode: vft_manager_client::NativeWrapperMode::HeldEscrowV2,
+    };
     let native_identity = json!({
         "manager": format!("0x{}", hex::encode(manager_id.into_bytes())),
         "wrapper": format!("0x{}", hex::encode(native_id.into_bytes())),
         "wrappedVara": format!("{approved_wrapped_vara:#x}"),
+        "codeId": format!("{:#x}", native_config.code_id),
+        "mode": "held-escrow-v2",
     });
     if !stack["configuration"]["identity"].is_null() {
         qualified_ethereum_configuration(
@@ -2756,7 +2769,10 @@ pub async fn configure(
         .recv(manager_id)
         .await?;
     let _ = missing_token_mappings(&current_mappings, &desired)?;
+    // Retained setup originals were reconciled above without granting new signing.
+    let approved_manifest = ethereum.require_execution().await?;
     let mut identity = json!({
+        "approvedManifestSha256": approved_manifest,
         "sourceRpc": source_rpc,
         "sourceGenesis": format!("0x{}", hex::encode(source.source_genesis)),
         "bridgeDomain": format!("0x{}", hex::encode(source.bridge_domain)),
@@ -2979,10 +2995,10 @@ pub async fn configure(
         "native wrapper names another manager"
     );
     ensure!(
-        manager_wrapper.is_none() || manager_wrapper == Some(native_id),
+        manager_wrapper.is_none() || manager_wrapper.as_ref() == Some(&native_config),
         "manager names another native wrapper"
     );
-    let native_bound = wrapper_manager == Some(manager_id) && manager_wrapper == Some(native_id);
+    let native_bound = wrapper_manager == Some(manager_id) && manager_wrapper.as_ref() == Some(&native_config);
     ensure!(
         !was_ready || (native_bound && !native_paused),
         "ready native configuration changed or was safety-paused"
@@ -3030,11 +3046,9 @@ pub async fn configure(
                 .recv(native_id)
                 .await?
         } else {
-            manager
-                .native_wrapper()
-                .at_block(sails_block_hash(at))
-                .recv(manager_id)
-                .await?
+            let configured = manager.native_wrapper().at_block(sails_block_hash(at)).recv(manager_id).await?;
+            ensure!(configured.as_ref().is_none_or(|binding| binding == &native_config), "native capability changed during configuration");
+            configured.map(|binding| binding.actor_id)
         };
         ensure!(
             current.is_none() || current == Some(expected),
@@ -3062,10 +3076,7 @@ pub async fn configure(
                     &stack_path,
                     key,
                 ))
-                .configure_native_wrapper(Some((
-                    native_id,
-                    H160::from_slice(approved_wrapped_vara.as_slice()),
-                )))
+                .configure_native_wrapper(Some(native_config.clone()))
                 .with_gas_limit(gas)
                 .send_recv(manager_id)
                 .await?;
@@ -3079,11 +3090,9 @@ pub async fn configure(
                 .recv(native_id)
                 .await?
         } else {
-            manager
-                .native_wrapper()
-                .at_block(sails_block_hash(at))
-                .recv(manager_id)
-                .await?
+            let configured = manager.native_wrapper().at_block(sails_block_hash(at)).recv(manager_id).await?;
+            ensure!(configured.as_ref().is_none_or(|binding| binding == &native_config), "native capability changed during configuration");
+            configured.map(|binding| binding.actor_id)
         };
         ensure!(
             observed == Some(expected),

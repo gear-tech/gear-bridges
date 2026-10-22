@@ -14,11 +14,12 @@ const CHUNK_HEADERS: usize = 512;
 /// Files are untrusted proof material, never a persisted finality verdict.
 /// A chunk is reusable only after every canonical RLP hash and parent link is checked.
 /// Ownership is per canonical directory, not per chain: independent journals can
-/// retain separate archives for one genesis. The client authenticates every
-/// registered directory's durable fence before completing any of them.
+/// retain separate archives for one genesis. Only the authority explicitly owning
+/// a directory authenticates and advances its durable fence.
 pub(crate) struct HeaderArchive {
     directory: PathBuf,
     chunks: Mutex<BTreeMap<u64, Vec<PathBuf>>>,
+    authority: Mutex<std::sync::Weak<crate::beacon_finality::BeaconAuthority>>,
     _owner: File,
 }
 
@@ -31,7 +32,8 @@ struct Fence {
     quorum_checkpoint: Option<crate::FinalityCheckpoint>,
 }
 
-pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
+/// Atomically replace a derived cache; never use for immutable originals or journals.
+pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let directory = path.parent().context("proof path has no parent")?;
     fs::create_dir_all(directory)?;
     let temporary = path.with_extension("json.tmp");
@@ -48,6 +50,17 @@ pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
 impl HeaderArchive {
     pub(crate) fn directory(&self) -> &Path {
         &self.directory
+    }
+
+    pub(crate) fn claim(&self, authority: &std::sync::Arc<crate::beacon_finality::BeaconAuthority>) -> Result<()> {
+        let mut owner = self.authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(previous) = owner.upgrade() {
+            ensure!(std::sync::Arc::ptr_eq(&previous, authority),
+                "another Beacon authority owns this writable header archive; HOLD");
+        } else {
+            *owner = std::sync::Arc::downgrade(authority);
+        }
+        Ok(())
     }
 
     pub(crate) fn open(directory: &Path) -> Result<Self> {
@@ -81,8 +94,16 @@ impl HeaderArchive {
         Ok(Self {
             directory: directory.to_owned(),
             chunks: Mutex::new(chunks),
+            authority: Default::default(),
             _owner: owner,
         })
+    }
+
+    pub(crate) fn retained_checkpoint(&self) -> Result<Option<crate::FinalityCheckpoint>> {
+        let path = self.directory.join("fence.json");
+        if !path.exists() { return Ok(None); }
+        ensure!(fs::metadata(&path)?.len() <= 64 * 1024 * 1024, "oversized finalized generation fence; HOLD");
+        Ok(serde_json::from_slice::<Fence>(&fs::read(path)?)?.quorum_checkpoint)
     }
 
     /// Retain every unresolved witnessed generation. A restart must bridge these
@@ -116,18 +137,28 @@ impl HeaderArchive {
         let hash = head.hash_slow();
         if let Some(checkpoint) = &fence.quorum_checkpoint {
             ensure!(
-                checkpoint.schema_version == 1
-                    && checkpoint.policy == "independent-two-el-v1"
-                    && checkpoint.genesis_hash == genesis
-                    && approved.is_some_and(|fresh| fresh.chain_id == checkpoint.chain_id)
-                    && fence
-                        .tips
-                        .iter()
-                        .any(|tip| tip == &checkpoint.common_header),
-                "invalid retained quorum checkpoint; HOLD"
+                checkpoint.genesis_hash() == genesis
+                    && approved.is_some_and(|fresh| fresh.chain_id() == checkpoint.chain_id())
+                    && fence.tips.iter().any(|tip| tip == checkpoint.common_header()),
+                "invalid retained finality checkpoint; HOLD"
             );
+            for (number, expected) in checkpoint.fences()? {
+                ensure!(number <= head.number, "Beacon head has not reached every retained historical fence; HOLD");
+                ensure!(number != head.number || expected == hash, "retained checkpoint conflicts with Beacon head; HOLD");
+            }
+            if checkpoint.legacy().is_some() {
+                let bytes = fs::read(&path)?;
+                let digest = B256::from(sp_core::hashing::sha2_256(&bytes));
+                gear_common::durable::immutable_json(
+                    &self.directory.join(format!("legacy-fence-{digest:x}.json")),
+                    &alloy::primitives::Bytes::from(bytes),
+                )?;
+            }
         }
         let mut required = Vec::with_capacity(fence.tips.len());
+        if let Some(checkpoint) = &fence.quorum_checkpoint {
+            required.extend(checkpoint.fences()?.into_iter().filter(|(_, expected)| *expected != hash));
+        }
         for tip in &fence.tips {
             ensure!(
                 tip.number <= head.number,
@@ -154,11 +185,12 @@ impl HeaderArchive {
     }
 
     pub(crate) fn complete(&self, checkpoint: &crate::FinalityCheckpoint) -> Result<()> {
+        ensure!(checkpoint.beacon().is_some(), "only Beacon checkpoints may complete an archive fence; HOLD");
         atomic_json(
             &self.directory.join("fence.json"),
             &Fence {
-                genesis: checkpoint.genesis_hash,
-                tips: vec![checkpoint.common_header.clone()],
+                genesis: checkpoint.genesis_hash(),
+                tips: vec![checkpoint.common_header().clone()],
                 quorum_checkpoint: Some(checkpoint.clone()),
             },
         )

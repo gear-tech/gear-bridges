@@ -7,6 +7,16 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      approved_commit:
+        description: Full commit independently approved in the protected qualification environment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,13 +28,26 @@ env:
 
 jobs:
   retained-migration-qualification:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    environment: bridge-retained-qualification
+    permissions:
+      contents: read
     env:
-      MAINNET_MIGRATION_RPC_URL: ${{ secrets.MAINNET_MIGRATION_RPC_URL || 'https://eth-mainnet.public.blastapi.io' }}
-      REQUIRE_MAINNET_MIGRATION: "true"
+      APPROVED_COMMIT: ${{ vars.APPROVED_QUALIFICATION_COMMIT }}
+      REQUESTED_COMMIT: ${{ inputs.approved_commit }}
     steps:
+      - name: Require independently approved exact commit
+        run: |
+          if [[ ! "$APPROVED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || [[ "$REQUESTED_COMMIT" != "$APPROVED_COMMIT" ]]; then
+            echo "A matching independently approved full commit is required" >&2
+            exit 1
+          fi
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ vars.APPROVED_QUALIFICATION_COMMIT }}
+          persist-credentials: false
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
@@ -38,19 +61,52 @@ jobs:
         working-directory: ./ethereum
       - name: Qualify retained mainnet state
         working-directory: ./ethereum
+        env:
+          MAINNET_MIGRATION_RPC_URL: ${{ secrets.MAINNET_MIGRATION_RPC_URL }}
+          REQUIRE_MAINNET_MIGRATION: "true"
         run: |
-          test -n "$MAINNET_MIGRATION_RPC_URL"
-          set -o pipefail
-          forge test --threads 1 --match-contract MainnetBridgeMigrationTest -vv | tee migration-qualification.log
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { spawnSync } = require('node:child_process');
+          const raw = process.env.MAINNET_MIGRATION_RPC_URL;
+          if (!raw) throw new Error('Missing independently approved archive endpoint');
+          const url = new URL(raw);
+          if (url.protocol !== 'https:') throw new Error('Approved archive must use HTTPS');
+          const sensitive = [raw, url.username, url.password, ...url.searchParams.values()]
+            .filter(Boolean).flatMap(value => [value, decodeURIComponent(value)])
+            .sort((a, b) => b.length - a.length);
+          const redact = value => sensitive.reduce((text, secret) => text.split(secret).join('[REDACTED]'), value);
+          const args = ['test', '--threads', '1', '--match-contract',
+            'MainnetBridgeMigrationTest|VaraQueueRootVerifierTest', '--json'];
+          const result = spawnSync('forge', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+          fs.writeFileSync('migration-qualification.json', redact(JSON.stringify({
+            commit: process.env.APPROVED_COMMIT, command: ['forge', ...args],
+            exit: result.status, stdout: result.stdout, stderr: result.stderr,
+          }, null, 2)));
+          if (result.stderr) process.stderr.write(redact(result.stderr));
+          if (result.error || result.status !== 0) throw new Error('Pinned archive qualification failed; see redacted evidence');
+          const suites = JSON.parse(result.stdout);
+          for (const [contract, test] of [
+            ['MainnetBridgeMigrationTest', 'test_DeploymentMainnetBeefyMigration()'],
+            ['VaraQueueRootVerifierTest', 'testMainnetForkMigrationPreservesCustodyAndRedeemsLegacyClaim()'],
+          ]) {
+            const matches = Object.entries(suites).filter(([name]) => name.endsWith(`:${contract}`));
+            if (matches.length !== 1 || matches[0][1].test_results[test]?.status !== 'Success') {
+              throw new Error(`Required retained-state scenario did not pass: ${contract}.${test}`);
+            }
+          }
+          console.log(`Qualified both retained-state scenarios at ${process.env.APPROVED_COMMIT}`);
+          NODE
       - name: Retain qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: retained-migration-qualification
-          path: ethereum/migration-qualification.log
+          name: retained-migration-qualification-${{ inputs.approved_commit }}
+          path: ethereum/migration-qualification.json
           if-no-files-found: error
 
   check-frontend-changes:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     outputs:
       frontend_changed: ${{ steps.filter.outputs.frontend }}
@@ -87,8 +143,8 @@ jobs:
 
       - name: "Install: binaryen"
         run: |
-          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
-          sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-version_133/bin/wasm-opt /usr/bin/
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -196,8 +252,8 @@ jobs:
 
       - name: "Install: binaryen"
         run: |
-          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
-          sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-version_133/bin/wasm-opt /usr/bin/
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -255,8 +311,8 @@ jobs:
 
       - name: "Install: binaryen"
         run: |
-          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
-          sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-version_133/bin/wasm-opt /usr/bin/
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -294,11 +350,15 @@ jobs:
       - name: Pull & run Gear node container
         run: |
           docker pull ghcr.io/gear-tech/node:v2.1.1
-          docker run --name $NODE_CONTAINER_NAME --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v2.1.1 gear --dev --tmp --rpc-external
+          docker run --name "$NODE_CONTAINER_NAME" --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v2.1.1 gear --dev --tmp --rpc-external
 
       - name: Run tests
-        run: cargo test --locked --release --workspace --features beefy-relay/deployment
-          || { exit_code=$?; if [ x$exit_code != x0 ]; then docker logs $NODE_CONTAINER_NAME; docker stop $NODE_CONTAINER_NAME; fi; exit $exit_code; }
+        run: |
+          cargo test --locked --release --workspace --features beefy-relay/deployment || {
+            exit_code=$?
+            docker logs "$NODE_CONTAINER_NAME"
+            exit "$exit_code"
+          }
 
       - name: Run solidity tests
         run: |
@@ -306,5 +366,6 @@ jobs:
           forge test --force --threads 1
 
       - name: Stop Gear node container (if any)
+        if: always()
         continue-on-error: true
-        run: docker stop $NODE_CONTAINER_NAME
+        run: docker stop "$NODE_CONTAINER_NAME"

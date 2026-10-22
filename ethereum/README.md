@@ -86,7 +86,7 @@ $ forge script script/Deployment.s.sol:DeploymentScript --rpc-url "$HOODI_RPC_UR
 
 Every fresh entrypoint uses BEEFY: `DeploymentScript`, `BeefyLocal`, `BeefyHoodi`
 and `BeefyTokens` share the existing full bridge environment and queue CREATE
-predictions in `test/Base.sol`. The generic environment entrypoint requires
+predictions in `script/DeploymentBase.sol`; `test/Base.sol` adds only test hooks and fixtures. The generic environment entrypoint requires
 `DEPLOYMENT_MODE=fresh-beefy`; it rejects the protective
 `retained-beefy-migration` default in `.env.example.mainnet`. Retained migration
 uses the separately gated existing-proxy workflow below, never generic fresh deployment.
@@ -109,8 +109,9 @@ CREATEs, complete existing-token overrides consume three, and governance,
 verifier and queue implementation consume four before the queue proxy. Thus queue
 offsets are `+12` for generated tokens, `+8` for complete token overrides and `+5`
 for message-only Hoodi. Partial, duplicate or code-less overrides fail before
-deployment. Mainnet requires all four canonical assets; test-token generation
-requires explicit `DEPLOY_TEST_TOKENS=true` on a supported test chain.
+deployment. Fresh chain-1 deployment is rejected before CREATE even with canonical
+asset overrides; mainnet uses only the separately approved retained migration.
+Test-token generation requires explicit `DEPLOY_TEST_TOKENS=true` on a supported test chain.
 `BeefyTokens` also checks its expected starting nonce. The configured bridge domain
 must match the predicted queue and chain; client/verifier bind that destination immutably.
 
@@ -120,9 +121,16 @@ test-only `BeefyClientMock`; queue envelopes and MMR inclusion are still verifie
 by the real `VaraQueueRootVerifier`. Consensus, real deployment, migration,
 recovery and transaction smoke use signed commitment admission.
 
-The interactive and Fiat-Shamir submissions share authenticated leaf acceptance,
-authority rotation, and ECDSA verification. Ticket handling, randomness, sampling,
-proof-check ordering, signature counts, and usage counters remain protocol-specific.
+Interactive and Fiat-Shamir submissions share authenticated leaf acceptance,
+authority rotation, ECDSA verification and a fixed signature bound: native quorum
+for sets of at most three, otherwise `floor(N / 3) + 1` (at most 86 for 256 validators).
+Usage counters and dynamic signature arithmetic are removed for new immutable
+deployments, not migrated into an existing deployment's storage. Ticket handling,
+randomness, sampling and proof-check ordering remain protocol-specific.
+
+The client and root adapter share one exact 113-byte MMR leaf encoder. Message
+proofs use the ordered, width-driven `SubstrateMerkleProof`, including odd-node
+promotion, index bounds and exact sibling consumption; this is not a commutative tree.
 
 Run the focused checks with installed dependencies/compiler caches:
 
@@ -168,14 +176,15 @@ local source snapshots, using the same fixture keys/Merkle proofs and the
 unchanged verifier. Handovers rotate through the real fixture authority roots
 and lengths (59→150→59, 150→256→150, 256→59→256), rather than measuring only
 same-root storage writes. The bridge/source domain remains the original client's
-domain throughout each sequence. No proof verifier, expiry, quorum or custody
-policy is bypassed. This is a local gas benchmark, not source-runtime activation
-or production BEEFY certification.
+domain throughout each sequence. Onchain proof, expiry, quorum and custody checks
+remain enabled. The explicitly owned synthetic deployment fixture does not satisfy
+the production execution-authority gate; this is a gas benchmark, not native
+source/runtime, governance or live-custody qualification.
 
-The queue/token smoke deploys through the same `Base` environment and
-`fresh-beefy` env validation, including all token registrations, governance and
-ordinary payment setup. Its recovery timelock is deployed before queue prediction.
-The runner supplies only its known disposable Anvil key and an owned-runner flag.
+The queue/token smoke deploys through `DeploymentBase`'s explicit local fixture
+path, including token registrations, governance and ordinary payment setup. Its
+recovery timelock is deployed before queue prediction. The runner supplies only
+its known disposable Anvil key and an owned-runner flag.
 
 
 `out/fulltx-benchmark/receipts.json` retains actual RPC transactions (including
@@ -191,34 +200,36 @@ validation cannot consume overlapping build-info; fixture cases reuse the cache.
 Existing test Anvils and public networks are not modified.
 Do not run two benchmark writers against the same output directory/build cache.
 
-Measured with Forge/Anvil 1.7.1, Solc 0.8.37, optimizer + via-IR, Osaka (2026-10-15):
+Measured before/after the bounded proof/decoder/counter cleanup with Forge/Anvil
+1.8.5, Solc 0.8.37, optimizer + via-IR and Osaka (2026-10-22). Each comparison
+matches the same validator count and transaction label in the retained full
+transaction reports; `Δ gas` is after minus before.
 
-| Signing validators | Selected signatures | First saved-fixture update | Ordinary update | Largest measured handover |
-|---:|---:|---:|---:|---:|
-| 59 | 20 | 361,162 | 345,430 | 450,484 |
-| 150 | 51 | 876,546 | 849,160 | 939,465 |
-| 256 | 86 | 1,421,390 | 1,409,880 | 1,514,546 |
+| Validators | Signatures | Case | Before gas | After gas | Δ gas | Calldata bytes | Intrinsic gas | EIP-7623 floor |
+|---:|---:|---|---:|---:|---:|---:|---:|---:|
+| 59 | 20 | First saved fixture | 361,162 | 360,466 | -696 | 10,052 | 130,892 | 295,730 |
+| 59 | 20 | Ordinary | 345,430 | 344,734 | -696 | 10,084 | 131,116 | 296,290 |
+| 59 | 20 | Handover | 401,374 | 353,237 | -48,137 | 10,020 | 130,008 | 293,520 |
+| 59 | 20 | Rotated handover | 450,484 | 355,961 | -94,523 | 10,052 | 130,436 | 294,590 |
+| 150 | 51 | First saved fixture | 876,546 | 875,106 | -1,440 | 26,852 | 337,496 | 812,240 |
+| 150 | 51 | Ordinary | 849,160 | 847,720 | -1,440 | 26,532 | 331,920 | 798,300 |
+| 150 | 51 | Handover | 939,465 | 863,253 | -76,212 | 26,756 | 335,564 | 807,410 |
+| 150 | 51 | Rotated handover | 938,915 | 868,713 | -70,202 | 26,788 | 336,100 | 808,750 |
+| 256 | 86 | First saved fixture | 1,421,390 | 1,419,110 | -2,280 | 45,220 | 560,044 | 1,368,610 |
+| 256 | 86 | Ordinary | 1,409,880 | 1,407,600 | -2,280 | 45,188 | 559,484 | 1,367,210 |
+| 256 | 86 | Handover | 1,510,632 | 1,418,007 | -92,625 | 45,188 | 559,460 | 1,367,150 |
+| 256 | 86 | Rotated handover | 1,514,546 | 1,416,155 | -98,391 | 45,188 | 559,472 | 1,367,180 |
+| 3 | 3 | Queue anchor | 115,059 | 114,771 | -288 | 2,116 | 37,888 | 63,220 |
+| — | — | Queue root publication | 160,789 | 160,698 | -91 | 740 | 27,020 | 36,050 |
+| — | — | ERC20 message execution | 133,431 | 133,451 | +20 | 484 | 23,860 | 28,150 |
 
-Every number above is receipt `gasUsed`, **not** a `gasleft()` delta. In
-particular the historical call-only 229,615 / 552,825 / 898,382 measurements are
-not transaction costs. The largest handover rows include changing roots and
-validator-count/counter-array transitions: 256→59→256, 150→150→256 and
-150→256→150 respectively (previous current → signing set → newly announced
-next set). They are maxima of these measured cases, not a protocol-wide gas
-upper bound. Ordinary/handover snapshots use a single authenticated MMR leaf;
-the first saved-fixture update has its fixture proof. Real source MMR depth,
-payloads, key bytes, storage state and transitions can change the receipt cost.
-
-| Transaction case | Calldata bytes | Standard intrinsic gas | EIP-7623 calldata floor | Actual receipt gas |
-|---|---:|---:|---:|---:|
-| 59 ordinary | 10,084 | 131,116 | 296,290 | 345,430 |
-| 59 largest handover | 10,052 | 130,436 | 294,590 | 450,484 |
-| 150 ordinary | 26,532 | 331,920 | 798,300 | 849,160 |
-| 150 largest handover | 26,756 | 335,564 | 807,410 | 939,465 |
-| 256 ordinary | 45,188 | 559,484 | 1,367,210 | 1,409,880 |
-| 256 largest handover | 45,188 | 559,472 | 1,367,180 | 1,514,546 |
-| Queue root publication | 740 | 27,020 | 36,050 | 161,983 |
-| Escrow-backed ERC20 message execution | 484 | 23,860 | 28,150 | 133,365 |
+Gas columns are actual receipt `gasUsed`, **not** `gasleft()` deltas or operation
+counts. The historical call-only 229,615 / 552,825 / 898,382 measurements are not
+transaction costs. Handovers change authority roots/counts; the unused usage
+counter arrays are removed. These are measured scenarios, not protocol-wide
+upper bounds. Ordinary/handover snapshots use one authenticated MMR leaf; the
+first saved-fixture update uses its fixture proof. Real MMR depth, payloads,
+key bytes, storage state and transitions can change receipt cost.
 
 For these non-creation transactions without access lists, let `T = zeroBytes +
 4 × nonzeroBytes`. Standard intrinsic gas is `21,000 + 4T`; the post-Pectra
@@ -230,8 +241,8 @@ floor/refund rules: **do not add either again**.
 
 The root/execution rows use the existing signed queue fixture construction and
 real queue/verifier/manager proxies plus CircleToken, not a verifier/handler
-mock. The separate three-validator anchor costs 116,697 gas and is not a
-59-validator update price. After the root's configured onchain delay, execution
+mock. The separate three-validator anchor is not a 59-validator update price.
+After the root's configured onchain delay, execution
 moves exactly 10 units from 30 units of manager escrow, leaves 20 there, and
 marks the original nonce processed. This measures an Ethereum-supply ERC20
 release, not every token/native path. Previously reported Hoodi receipts
@@ -259,7 +270,7 @@ includes RPC/archive/source services and relayer/follower hosting. If transactio
 classes have different effective prices, price and sum them separately.
 
 At 30 days and an assumed 12 handovers/day, the conservative measured
-59-validator handover scenario alone is **162,174,240 gas/month**. Add bounded
+59-validator handover scenario alone is **128,145,960 gas/month**. Add bounded
 traffic-triggered updates, roots and executions; do not multiply the historical
 call-only measurement by cadence. Neither 12/day nor a gas price/ETH exchange
 rate is a production guarantee: use the actual source schedule and explicitly
@@ -640,7 +651,7 @@ We use Docker image and slightly modified sources to produce coverage report in 
 $ docker build --tag gear-bridges/ethereum-contracts .
 $ docker run --rm -it --volume "$(pwd)":/files gear-bridges/ethereum-contracts
 
-$ sed -i '/if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {/{N;N;d;}' src/MessageQueue.sol
+$ sed -i '/if (!SubstrateMerkleProof.verify(merkleRoot, messageHash, leafIndex, totalLeaves, proof)) {/{N;N;d;}' src/MessageQueue.sol
 $ sed -i '/emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);/d' src/MessageQueue.sol
 $ sed -i '/function test_ProcessMessageWithInvalidMerkleProof()/,/^[[:space:]]*}[[:space:]]*$/d' test/MessageQueue.t.sol
 $ forge test

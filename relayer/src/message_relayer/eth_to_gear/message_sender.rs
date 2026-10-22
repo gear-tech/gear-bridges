@@ -3,6 +3,7 @@ use eth_events_electra_client::EthToVaraEvent;
 use futures::executor::block_on;
 use gclient::GearApi;
 use gear_common::{api_provider::ApiProviderConnection, UNITS};
+use gear_common::native_wrapper::{native_wrapper_at, ApprovedNativeWrapper, NativeWrapperBinding, NativeWrapperMode};
 use gsdk::{
     ext::subxt::{config::polkadot::PolkadotExtrinsicParamsBuilder, tx::SubmittableTransaction},
     gear::{self, runtime_types::gear_common::event::MessageEntry},
@@ -19,7 +20,7 @@ use sails_rs::{
     Decode, Encode,
 };
 use serde::{Deserialize, Serialize};
-use std::{ops::Deref, str::FromStr};
+use std::{ops::Deref, str::FromStr, sync::Arc};
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::spawn_blocking,
@@ -53,12 +54,14 @@ impl MessageSenderIo {
         tx_uuid: Uuid,
         tx_hash: FixedBytes<32>,
         payload: EthToVaraEvent,
+        retry_original: Option<SignedSubmission>,
     ) -> bool {
         self.requests_channel
             .send(Request::PrepareMessage {
                 tx_uuid,
                 tx_hash,
                 payload: Box::new(payload),
+                retry_original: retry_original.map(Box::new),
             })
             .inspect_err(|err| log::error!("Message sender failed: {err:?}"))
             .is_ok()
@@ -104,6 +107,7 @@ pub enum Request {
         payload: Box<EthToVaraEvent>,
         tx_hash: FixedBytes<32>,
         tx_uuid: Uuid,
+        retry_original: Option<Box<SignedSubmission>>,
     },
     SubmitPrepared {
         prepared: Box<(EthToVaraEvent, SignedSubmission)>,
@@ -155,6 +159,10 @@ pub struct SignedSubmission {
     pub finalized_nonce_consumed: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finalized_reply_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_wrapper_approval: Option<ApprovedNativeWrapper>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_retry_qualification: Option<FinalizedReceiptObservation>,
 }
 
 impl SignedSubmission {
@@ -170,6 +178,7 @@ impl SignedSubmission {
             && self.raw_extrinsic == other.raw_extrinsic
             && self.prepared_finalized_number == other.prepared_finalized_number
             && self.prepared_finalized_hash == other.prepared_finalized_hash
+            && self.native_wrapper_approval == other.native_wrapper_approval
     }
 
     pub fn validate_native_reconciliation(&self) -> anyhow::Result<()> {
@@ -736,6 +745,7 @@ fn native_payout_reconciliation_ready(
     row: &vft_manager_client::ReceiptDepositState,
     manager: H256,
     payout: &vft_vara_client::Redemption,
+    mode: NativeWrapperMode,
 ) -> bool {
     !row.amount.is_zero()
         && payout.from == sails_rs::ActorId::from(manager.0)
@@ -747,7 +757,10 @@ fn native_payout_reconciliation_ready(
             // The original rejection has returned all backing, but wrapped credit
             // still requires ReconcileReceipt -> the same RedeemEscrow operation.
             vft_vara_client::PayoutStatus::Queued => {
-                sails_rs::U256::from(payout.returned_value) >= row.amount
+                (match mode {
+                    NativeWrapperMode::EscrowV1 => sails_rs::U256::from(payout.returned_value) == row.amount,
+                    NativeWrapperMode::HeldEscrowV2 => sails_rs::U256::from(payout.returned_value) >= row.amount,
+                })
                     && matches!(
                         row.outcome,
                         vft_manager_client::ReceiptDepositOutcome::NativeQueued
@@ -762,7 +775,10 @@ fn native_payout_reconciliation_ready(
                     )
             }
             vft_vara_client::PayoutStatus::Refunded => {
-                sails_rs::U256::from(payout.returned_value) >= row.amount
+                (match mode {
+                    NativeWrapperMode::EscrowV1 => sails_rs::U256::from(payout.returned_value) == row.amount,
+                    NativeWrapperMode::HeldEscrowV2 => sails_rs::U256::from(payout.returned_value) >= row.amount,
+                })
                     && matches!(
                         row.outcome,
                         vft_manager_client::ReceiptDepositOutcome::Refunded
@@ -779,6 +795,7 @@ struct ReceiptEvidence {
     status: vft_manager_client::ReceiptStatus,
     deposits: Vec<vft_manager_client::ReceiptDepositState>,
     gas: u64,
+    native_wrapper: Option<NativeWrapperBinding>,
 }
 
 fn resolution_cohort(
@@ -962,6 +979,7 @@ pub struct MessageSender {
     pub api_provider: ApiProviderConnection,
     pub suri: String,
     ethereum_manager_address: Option<H160>,
+    pub(super) native_wrapper_approval: Option<Arc<ApprovedNativeWrapper>>,
 
     metrics: Metrics,
     // The actual detached worker owns the signer fence until its last original call exits.
@@ -993,11 +1011,17 @@ impl MessageSender {
 
             metrics: Metrics::new(),
             _signer_ownership: None,
+            native_wrapper_approval: None,
         }
     }
 
     pub fn with_signer_ownership(mut self, ownership: std::fs::File) -> Self {
         self._signer_ownership = Some(ownership);
+        self
+    }
+
+    pub fn with_native_wrapper_approval(mut self, approval: Option<Arc<ApprovedNativeWrapper>>) -> Self {
+        self.native_wrapper_approval = approval;
         self
     }
 
@@ -1101,8 +1125,24 @@ impl MessageSender {
                 tx_uuid,
                 payload,
                 tx_hash,
+                retry_original,
             } => {
                 self.update_balance_metric(gear_api).await?;
+                if let Some(original) = retry_original {
+                    let mut original = original.as_ref().clone();
+                    let (status, outcome) = self.reconcile_signed_submission(gear_api, payload, &mut original, None).await?;
+                    if !matches!(status, MessageStatus::RetryableNoop { .. }) {
+                        return Ok(responses.send(Response {
+                            tx_uuid: *tx_uuid,
+                            status,
+                            submission: outcome.map(|result| match result {
+                                Ok(reply) => self.submission_evidence(gear_api, None, Some(reply)),
+                                Err(error) => self.submission_evidence(gear_api, Some(error), None),
+                            }),
+                            signed_submission: Some(original),
+                        }).is_ok());
+                    }
+                }
                 let (status, signed_submission) =
                     match self.prepare_submission(gear_api, payload).await {
                         Ok(signed_submission) => (MessageStatus::Prepared, Some(signed_submission)),
@@ -1231,6 +1271,12 @@ impl MessageSender {
             signer.account_id().to_string() == gear_api.account_id().to_string(),
             "GSDK and GClient derived different submission accounts"
         );
+        let finalized_hash = chain.latest_finalized_block().await?;
+        let finalized_number = chain.block_hash_to_number(finalized_hash).await?;
+        if self.receiver_route == SubmitReceipt::ROUTE {
+            native_wrapper_at(gear_api, self.receiver_address, finalized_hash,
+                self.native_wrapper_approval.as_deref()).await?;
+        }
         let nonce = chain.api.tx().account_nonce(signer.account_id()).await?;
         let gas_limit = gear_api.block_gas_limit()? / 100 * 95;
         let call =
@@ -1246,8 +1292,6 @@ impl MessageSender {
                 PolkadotExtrinsicParamsBuilder::new().nonce(nonce).build(),
             )
             .await?;
-        let finalized_hash = chain.latest_finalized_block().await?;
-        let finalized_number = chain.block_hash_to_number(finalized_hash).await?;
         let finalized_hash = format!("{finalized_hash:#x}");
         Ok(SignedSubmission {
             chain_genesis_hash: format!("{:#x}", chain.api.genesis_hash()),
@@ -1274,6 +1318,8 @@ impl MessageSender {
             native_reconciliation_attempts: Vec::new(),
             finalized_nonce_consumed: None,
             finalized_reply_error: None,
+            native_wrapper_approval: self.native_wrapper_approval.as_deref().cloned(),
+            native_retry_qualification: None,
         })
     }
 
@@ -1305,6 +1351,9 @@ impl MessageSender {
         settlement_pin: Option<&FinalizedReceiptObservation>,
     ) -> anyhow::Result<(MessageStatus, Option<Result<Vec<u8>, String>>)> {
         signed.validate_native_reconciliation()?;
+        anyhow::ensure!(signed.native_wrapper_approval.as_ref().is_none_or(|saved|
+            self.native_wrapper_approval.as_deref() == Some(saved)),
+            "HOLD: original native capability approval changed");
         let receipt_key = (payload.proof_block.block.slot, payload.transaction_index);
         let chain = self.api_provider.client();
         anyhow::ensure!(
@@ -1348,7 +1397,7 @@ impl MessageSender {
                 .info_at(&signed.sender, Some(scanned_hash))
                 .await?;
             if u64::from(account.nonce) > signed.nonce {
-                return Ok((MessageStatus::RetryableNoop {
+                return Ok((MessageStatus::NeedsReconciliation {
                     receipt_key,
                     diagnostic: format!(
                         "Signed transaction {} is absent through finalized block {} and its nonce {} was consumed",
@@ -1484,7 +1533,8 @@ impl MessageSender {
             )
         } else {
             match decode_complete_reply::<SubmitReceipt>(&receiver_reply) {
-                Ok(Ok(())) | Ok(Err(vft_manager_client::Error::NativeSettlementPending)) => {
+                Ok(Ok(())) | Ok(Err(vft_manager_client::Error::NativeSettlementPending))
+                | Ok(Err(vft_manager_client::Error::ReplyFailure(_))) => {
                     let (status, native_ready) = self
                         .settlement_status(gear_api, payload, settlement_pin)
                         .await?;
@@ -1542,6 +1592,23 @@ impl MessageSender {
                         signed.native_reconciliation = Some(Box::new(continuation));
                         // Existing Prepared handshake persists the separate raw call before broadcast.
                         MessageStatus::Prepared
+                    } else if !matches!(status, MessageStatus::Success { .. }) {
+                        if let Some(saved) = &signed.native_retry_qualification {
+                            anyhow::ensure!(self.receipt_retry_qualification(gear_api, payload, Some(saved)).await?.as_ref() == Some(saved),
+                                "HOLD: original native retry qualification changed");
+                        }
+                        if let Some(pin) = self.receipt_retry_qualification(gear_api, payload, None).await? {
+                            anyhow::ensure!(settlement_pin.is_none(), "HOLD: historical completion cannot become retryable");
+                            let pin = signed.native_retry_qualification.get_or_insert(pin).clone();
+                            signed.validate_settlement_order(&pin)?;
+                            MessageStatus::RetryableNoop {
+                                receipt_key,
+                                diagnostic: "Exact original native error and complete sibling cohort qualify same-operation retry".into(),
+                                receipt_observation: Some(pin),
+                            }
+                        } else {
+                            status
+                        }
                     } else {
                         status
                     }
@@ -1729,18 +1796,8 @@ impl MessageSender {
                 .is_none_or(|expected| expected.0 == ethereum_manager.0),
             "Consumer Ethereum manager differs from the immutable source deployment"
         );
-        let _config = manager
-            .get_config()
-            .with_gas_limit(gas)
-            .at_block(hash.0.into())
-            .recv(self.receiver_address.0.into())
-            .await?;
-        let native_wrapper = manager
-            .native_wrapper()
-            .with_gas_limit(gas)
-            .at_block(hash.0.into())
-            .recv(self.receiver_address.0.into())
-            .await?;
+        let native_wrapper = native_wrapper_at(gear_api, self.receiver_address, hash,
+            self.native_wrapper_approval.as_deref()).await?;
         let deposits = manager
             .receipt_deposits(key.0, key.1)
             .with_gas_limit(gas)
@@ -1774,7 +1831,10 @@ impl MessageSender {
         )?;
         for row in &deposits {
             anyhow::ensure!(
-                row.native == (native_wrapper == Some(row.token_id)),
+                row.native == native_wrapper.as_ref().is_some_and(|binding|
+                    row.token_id == sails_rs::ActorId::from(binding.actor_id.0))
+                    && (!row.native || native_wrapper.as_ref().is_some_and(|binding|
+                        row.eth_token_id.0 == binding.ethereum_token.0)),
                 "Original native wrapper policy differs from receipt economic evidence"
             );
             anyhow::ensure!(
@@ -1793,6 +1853,7 @@ impl MessageSender {
             status,
             deposits,
             gas,
+            native_wrapper,
         })
     }
 
@@ -1828,6 +1889,7 @@ impl MessageSender {
             status,
             deposits,
             gas,
+            native_wrapper,
         } = self.receipt_evidence(gear_api, payload, query_pin).await?;
         resolution_cohort(&status, &deposits)?;
         let key = (payload.proof_block.block.slot, payload.transaction_index);
@@ -1863,7 +1925,8 @@ impl MessageSender {
                         .recv(row.token_id)
                         .await?;
                 effects_resolved &= payout.as_ref().is_some_and(|payout| {
-                    native_payout_reconciliation_ready(row, self.receiver_address, payout)
+                    native_payout_reconciliation_ready(row, self.receiver_address, payout,
+                        native_wrapper.as_ref().expect("native row qualified above").mode)
                 });
             } else {
                 effects_resolved &=
@@ -1878,6 +1941,59 @@ impl MessageSender {
             financial_settlement_status(key, &status, &deposits, effects_resolved, observation),
             native_ready,
         ))
+    }
+
+    /// Qualify terminal Native/ErrorReply using exact retained log/child identities.
+    /// Persist this pin with the original before allowing another manager request.
+    pub async fn receipt_retry_qualification(
+        &self,
+        gear_api: &GearApi,
+        payload: &EthToVaraEvent,
+        query_pin: Option<&FinalizedReceiptObservation>,
+    ) -> anyhow::Result<Option<FinalizedReceiptObservation>> {
+        use vft_manager_client::{ReceiptDepositOutcome as Outcome, ReceiptStatus};
+        use vft_vara_client::traits::NativeEscrow as _;
+        let ReceiptEvidence { hash, observation, status, deposits, gas, native_wrapper } =
+            self.receipt_evidence(gear_api, payload, query_pin).await?;
+        if !matches!(status, ReceiptStatus::Reserved) || deposits.is_empty() {
+            return Ok(None);
+        }
+        let key = (payload.proof_block.block.slot, payload.transaction_index);
+        let manager = VftManager::new(GClientRemoting::new(gear_api.clone()));
+        let wrapper = vft_vara_client::NativeEscrow::new(GClientRemoting::new(gear_api.clone()));
+        let mut retryable = false;
+        for row in &deposits {
+            if row.native && matches!(row.outcome, Outcome::Retryable) {
+                let Some(child) = row.child.filter(|child| !child.is_zero()) else { return Ok(None) };
+                // The getter proves original terminal Native/ErrorReply, not just Retryable.
+                if !manager.receipt_retryable_native(key.0, key.1, row.log_index, row.operation_id, child)
+                    .with_gas_limit(gas).at_block(hash.0.into()).recv(self.receiver_address.0.into()).await? {
+                    return Ok(None);
+                }
+                if wrapper.redemption(row.operation_id).with_gas_limit(gas).at_block(hash.0.into())
+                    .recv(row.token_id).await?.is_some() {
+                    return Ok(None);
+                }
+                if native_wrapper.as_ref().expect("native policy qualified").mode == NativeWrapperMode::HeldEscrowV2
+                    && wrapper.held_redemption(row.operation_id).with_gas_limit(gas).at_block(hash.0.into())
+                        .recv(row.token_id).await?.is_some() {
+                    return Ok(None);
+                }
+                retryable = true;
+            } else if row.native && matches!(row.outcome, Outcome::Settled | Outcome::Refunded) {
+                let payout = wrapper.redemption(row.operation_id).with_gas_limit(gas).at_block(hash.0.into())
+                    .recv(row.token_id).await?;
+                if !payout.as_ref().is_some_and(|payout| native_payout_reconciliation_ready(row,
+                    self.receiver_address, payout, native_wrapper.as_ref().expect("native policy qualified").mode)) {
+                    return Ok(None);
+                }
+            } else if row.child.is_none() || !matches!(row.outcome, Outcome::Settled) {
+                // Non-native Retryable siblings cannot borrow native retry authority.
+                return Ok(None);
+            }
+        }
+        self.recheck_receipt_pin(&observation).await?;
+        Ok(retryable.then_some(observation))
     }
 
     /// Authenticates terminal exceptions for handoff, never financial settlement.
@@ -1895,6 +2011,7 @@ impl MessageSender {
             status,
             deposits,
             gas,
+            native_wrapper,
         } = self.receipt_evidence(gear_api, payload, query_pin).await?;
         if !resolution_cohort(&status, &deposits)? {
             return Ok(None);
@@ -1917,6 +2034,8 @@ impl MessageSender {
                     validate_rejection(row, &reason)?;
                 }
                 Outcome::Held => {
+                    anyhow::ensure!(native_wrapper.as_ref().is_some_and(|binding| binding.mode == NativeWrapperMode::HeldEscrowV2),
+                        "HOLD: escrow-v1 does not support native holds");
                     let saved = wrapper
                         .held_redemption(row.operation_id)
                         .with_gas_limit(gas)
@@ -1965,6 +2084,7 @@ impl MessageSender {
                                     row,
                                     self.receiver_address,
                                     payout,
+                                    native_wrapper.as_ref().expect("native row qualified above").mode,
                                 )
                             }),
                             "Settled native sibling lacks exact original payout evidence"
@@ -2336,6 +2456,17 @@ async fn task(
 }
 
 #[cfg(test)]
+pub(super) async fn process_native_fixture(
+    sender: &mut MessageSender,
+    api: &GearApi,
+    request: &Request,
+) -> anyhow::Result<Response> {
+    let (mut responses, mut received) = unbounded_channel();
+    anyhow::ensure!(sender.process(&mut responses, api, request).await?, "fixture response channel closed");
+    received.recv().await.ok_or_else(|| anyhow::anyhow!("fixture sender omitted response"))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tokio::sync::mpsc::error::TryRecvError;
@@ -2496,6 +2627,8 @@ mod tests {
             native_reconciliation_attempts: vec![],
             finalized_nonce_consumed: None,
             finalized_reply_error: None,
+            native_wrapper_approval: None,
+            native_retry_qualification: None,
         };
         let reader = MessageSender::new(target, vec![], target, connection, "//Alice".into(), None);
         let payload = hex::decode(record["payload"].as_str().unwrap().trim_start_matches("0x"))?;
@@ -3044,7 +3177,7 @@ mod tests {
             ));
         }
         assert!(!native_payout_reconciliation_ready(
-            &rows[0], manager, &delivered
+            &rows[0], manager, &delivered, NativeWrapperMode::HeldEscrowV2
         ));
         assert_eq!(
             original_evidence,
@@ -3060,7 +3193,7 @@ mod tests {
         assert!(validate_held_redemption(&rows[0], manager, Some(&saved), Some(&live)).is_err());
         rows[0].child = original_child;
         assert!(!native_payout_reconciliation_ready(
-            &rows[0], manager, &live
+            &rows[0], manager, &live, NativeWrapperMode::HeldEscrowV2
         ));
         assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).unwrap());
         let pin = FinalizedReceiptObservation {
@@ -3238,41 +3371,43 @@ mod tests {
             status: vft_vara_client::PayoutStatus::Queued,
             returned_value: 0,
         };
-        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout, NativeWrapperMode::HeldEscrowV2));
         payout.status = vft_vara_client::PayoutStatus::Delivered;
-        assert!(native_payout_reconciliation_ready(row, manager, &payout));
+        assert!(native_payout_reconciliation_ready(row, manager, &payout, NativeWrapperMode::HeldEscrowV2));
         payout.returned_value = 1;
-        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout, NativeWrapperMode::HeldEscrowV2));
         payout.returned_value = 0;
         payout.to = ActorId::zero();
-        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout, NativeWrapperMode::HeldEscrowV2));
         payout.to = row.receiver;
         payout.status = vft_vara_client::PayoutStatus::Refunded;
         payout.returned_value = row.amount.as_u128();
-        assert!(!native_payout_reconciliation_ready(row, manager, &payout)); // Never relabel Settled as refunded.
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout, NativeWrapperMode::HeldEscrowV2)); // Never relabel Settled as refunded.
         let mut refunded = row.clone();
         refunded.outcome = ReceiptDepositOutcome::Refunded;
         assert!(native_payout_reconciliation_ready(
-            &refunded, manager, &payout
+            &refunded, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
+        assert!(native_payout_reconciliation_ready(&refunded, manager, &payout, NativeWrapperMode::EscrowV1));
         payout.returned_value += 1;
         assert!(native_payout_reconciliation_ready(
-            &refunded, manager, &payout
+            &refunded, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
-        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(&refunded, manager, &payout, NativeWrapperMode::EscrowV1));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout, NativeWrapperMode::HeldEscrowV2));
         payout.returned_value -= 1;
         payout.returned_value -= 1;
         assert!(!native_payout_reconciliation_ready(
-            &refunded, manager, &payout
+            &refunded, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
         payout.returned_value += 1;
         payout.status = vft_vara_client::PayoutStatus::Returned;
         assert!(!native_payout_reconciliation_ready(
-            &refunded, manager, &payout
+            &refunded, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
         payout.status = vft_vara_client::PayoutStatus::Ambiguous;
         assert!(!native_payout_reconciliation_ready(
-            &refunded, manager, &payout
+            &refunded, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
         // An authenticated full return is continuation-ready, not Refunded:
         // only the original operation can restore wrapped credit.
@@ -3282,21 +3417,23 @@ mod tests {
         payout.status = vft_vara_client::PayoutStatus::Queued;
         payout.returned_value = 0;
         assert!(!native_payout_reconciliation_ready(
-            &pending, manager, &payout
+            &pending, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
         payout.returned_value = pending.amount.as_u128();
         assert!(native_payout_reconciliation_ready(
-            &pending, manager, &payout
+            &pending, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
+        assert!(native_payout_reconciliation_ready(&pending, manager, &payout, NativeWrapperMode::EscrowV1));
         payout.returned_value += 1;
         assert!(native_payout_reconciliation_ready(
-            &pending, manager, &payout
+            &pending, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
+        assert!(!native_payout_reconciliation_ready(&pending, manager, &payout, NativeWrapperMode::EscrowV1));
         payout.returned_value -= 1;
         assert!(!native_payout_reconciliation_ready(
-            &refunded, manager, &payout
+            &refunded, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
-        assert!(!native_payout_reconciliation_ready(row, manager, &payout));
+        assert!(!native_payout_reconciliation_ready(row, manager, &payout, NativeWrapperMode::HeldEscrowV2));
         let original_child = payout.child;
         for field in [
             "partial",
@@ -3321,7 +3458,8 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(
-                !native_payout_reconciliation_ready(&pending, manager, &invalid),
+                !native_payout_reconciliation_ready(&pending, manager, &invalid, NativeWrapperMode::HeldEscrowV2)
+                    && !native_payout_reconciliation_ready(&pending, manager, &invalid, NativeWrapperMode::EscrowV1),
                 "{field}"
             );
         }
@@ -3329,16 +3467,16 @@ mod tests {
         // wrapper refund. Then the same payout child qualifies that wrapped effect.
         payout.status = vft_vara_client::PayoutStatus::Refunded;
         assert!(native_payout_reconciliation_ready(
-            &pending, manager, &payout
+            &pending, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
         pending.outcome = ReceiptDepositOutcome::Refunded;
         assert!(native_payout_reconciliation_ready(
-            &pending, manager, &payout
+            &pending, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
         assert_eq!(payout.child, original_child);
         payout.returned_value += 1;
         assert!(native_payout_reconciliation_ready(
-            &pending, manager, &payout
+            &pending, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
         assert_eq!(payout.child, original_child);
         pending.amount = 0.into();
@@ -3347,7 +3485,7 @@ mod tests {
         payout.status = vft_vara_client::PayoutStatus::Queued;
         pending.outcome = ReceiptDepositOutcome::NativeQueued;
         assert!(!native_payout_reconciliation_ready(
-            &pending, manager, &payout
+            &pending, manager, &payout, NativeWrapperMode::HeldEscrowV2
         ));
     }
 
@@ -3411,6 +3549,7 @@ mod tests {
             tx_uuid,
             tx_hash: FixedBytes::ZERO,
             payload: Box::new(payload),
+            retry_original: None,
         })?;
         drop(requests_tx);
 

@@ -1,0 +1,227 @@
+[workspace]
+
+members = [
+    "mock-contract",
+    "ethereum/client",
+    "gear-rpc-client",
+    "relayer",
+    "ethereum_beacon_client",
+    "ethereum-common",
+    "gear-programs/bridging-payment",
+    "gear-programs/bridging-payment/app",
+    "gear-programs/bridging-payment/client",
+    "gear-programs/vft-manager",
+    "gear-programs/vft-manager/app",
+    "gear-programs/vft-manager/client",
+    "gear-programs/*",
+    "gear-programs/checkpoint-light-client/app",
+    "gear-programs/checkpoint-light-client/client",
+    "gear-programs/eth-events-deneb/app",
+    "gear-programs/eth-events-deneb/client",
+    "gear-programs/eth-events-electra/app",
+    "gear-programs/eth-events-electra/client",
+    "gear-programs/historical-proxy",
+    "gear-programs/historical-proxy/app",
+    "gear-programs/historical-proxy/client",
+    "gear-programs/vft/app",
+    "gear-programs/vft/client",
+    "gear-programs/vft-vara/app",
+    "gear-programs/vft-vara/client",
+    "utils-prometheus",
+    "tools/checkpoints-tool",
+    "tools/vft-tool",
+    "tools/governance",
+    "tools/signed-block-id-tool",
+    "tests",
+    "gear-common",
+    "tools/vft-manager-tool",
+    "tools/beefy-relay",
+    "js/bridge-js/js-test",
+    "js/bridge-js/ping",
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "1.2.0"
+edition = "2021"
+
+[workspace.dependencies]
+actix-web = "4.11.0"
+mock-contract = { path = "./mock-contract" }
+relayer = { path = "./relayer" }
+gear-rpc-client = { path = "./gear-rpc-client" }
+ethereum-client = { path = "./ethereum/client" }
+ethereum_beacon_client = { path = "ethereum_beacon_client" }
+ethereum-common = { path = "ethereum-common", default-features = false }
+gear-common = { path = "gear-common" }
+cli-utils = { path = "cli-utils" }
+
+bridging-payment = { path = "gear-programs/bridging-payment" }
+bridging-payment-app = { path = "gear-programs/bridging-payment/app" }
+bridging-payment-client = { path = "gear-programs/bridging-payment/client" }
+vft-manager = { path = "gear-programs/vft-manager" }
+vft-manager-app = { path = "gear-programs/vft-manager/app" }
+vft-manager-client = { path = "gear-programs/vft-manager/client" }
+utils-prometheus = { path = "utils-prometheus" }
+checkpoint-light-client = { path = "gear-programs/checkpoint-light-client" }
+checkpoint-light-client-app = { path = "gear-programs/checkpoint-light-client/app" }
+checkpoint-light-client-client = { path = "gear-programs/checkpoint-light-client/client" }
+checkpoint-light-client-io = { path = "gear-programs/checkpoint-light-client/io", default-features = false }
+eth-events-common = { path = "gear-programs/eth-events-common" }
+eth-events-deneb = { path = "gear-programs/eth-events-deneb" }
+eth-events-deneb-app = { path = "gear-programs/eth-events-deneb/app" }
+eth-events-deneb-client = { path = "gear-programs/eth-events-deneb/client" }
+eth-events-electra = { path = "gear-programs/eth-events-electra" }
+eth-events-electra-app = { path = "gear-programs/eth-events-electra/app" }
+eth-events-electra-client = { path = "gear-programs/eth-events-electra/client" }
+historical-proxy-app = { path = "gear-programs/historical-proxy/app" }
+historical-proxy-client = { path = "gear-programs/historical-proxy/client" }
+historical-proxy = { path = "gear-programs/historical-proxy" }
+vft = { path = "gear-programs/vft" }
+vft-app = { path = "gear-programs/vft/app" }
+vft-client = { path = "gear-programs/vft/client" }
+vft-common = { path = "gear-programs/vft-common" }
+vft-vara = { path = "gear-programs/vft-vara" }
+vft-vara-app = { path = "gear-programs/vft-vara/app" }
+vft-vara-client = { path = "gear-programs/vft-vara/client" }
+
+# Contracts' deps
+
+ahash = "0.7.8"
+anyhow = "1.0.86"
+ark-bls12-381 = { version = "0.4.0", default-features = false }
+ark-serialize = { version = "0.4", default-features = false }
+ark-ec = { version = "0.4.2", default-features = false }
+ark-ff = { version = "0.4.2", default-features = false }
+ark-scale = { version = "0.0.12", default-features = false }
+axum = "0.7.5"
+bitvec = { version = "1.0.1", default-features = false, features = ["alloc"] }
+blake2 = "0.10.6"
+bytes = "1.6.0"
+circular-buffer = { version = "0.1.7", default-features = false, features = [
+    "alloc",
+] }
+clap = { version = "4.5.41", features = ["derive", "env"] }
+derive_more = "0.99.17"
+dotenv = "0.15.0"
+env_logger = "0.9.0"
+ethereum-types = { version = "0.14.1", default-features = false, features = [
+    "serialize",
+    "codec",
+    "rlp",
+] }
+futures = { version = "0.3.30", features = ["executor"] }
+futures-util = "0.3.28"
+getrandom = { version = "0.2", default-features = false }
+hash-db = { version = "0.15.2", default-features = false }
+hash256-std-hasher = { version = "0.15.2", default-features = false }
+hex = { version = "0.4.3", default-features = false }
+hex-literal = "0.4.1"
+itertools = "0.10.5"
+keccak-hash = "0.10.0"
+lazy_static = "1.4.0"
+libc = "0.2.153"
+log = "0.4.14"
+memory-db = { version = "0.27.0", default-features = false }
+mockall = "0.12"
+pretty_env_logger = "0.5.0"
+prometheus = { version = "0.13.0", default-features = false }
+rand = { version = "0.8.5", default-features = false, features = ["getrandom"] }
+reqwest = { version = "0.11.24", features = ["json"] }
+ring = { git = "https://github.com/gear-tech/ring.git", branch = "gear-v0.17.8", default-features = false, features = [
+    "alloc",
+] }
+rlp = { version = "0.5.2", default-features = false }
+ruzstd = "0.5.0"
+scale-info = { version = "2.10", default-features = false, features = [
+    "derive",
+] }
+
+serde = { version = "1.0", default-features = false, features = [
+    "alloc",
+    "derive",
+] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = { version = "2.0.11", default-features = false }
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+tokio = { version = "1.23.0", features = ["full"] }
+toml = "0.9"
+tower = { version = "0.5.2", features = ["timeout", "util"] }
+tree_hash = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0", default-features = false }
+tree_hash_derive = { git = "https://github.com/gear-tech/tree_hash.git", branch = "gear-v0.6.0" }
+uuid = { version = "1.17.0", features = ["v4", "v7", "serde"] }
+chrono = "0.4.41"
+zeroize = "1.8.1"
+async-trait = "0.1.88"
+url = "2.5.7"
+# Gear/Substrate deps
+gprimitives = { version = "1.10.0", default-features = false }
+gstd = { version = "1.10.0", features = ["nightly"] }
+gtest = "1.10.0"
+gear-wasm-builder = { version = "1.10.0", default-features = false }
+gsdk = "1.10.0"
+gclient = "1.10.0"
+gear-core = { version = "1.10.0", default-features = false }
+gbuiltin-bls381 = { version = "1.10.0", default-features = false }
+gbuiltin-eth-bridge = { version = "1.10.0", default-features = false }
+gear-core-errors = "1.10.0"
+pallet-gear-eth-bridge-primitives = { version = "1.10.0", default-features = false }
+# TODO: remove idl-gen and client-gen
+sails-idl-gen = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap" }
+sails-client-gen = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap" }
+sails-rs = { git = "https://github.com/gear-tech/sails.git", branch = "backport-gear-ap" }
+awesome-sails = { git = "https://github.com/gear-tech/awesome-sails", branch = "ap-backport-gear", default-features = false }
+awesome-sails-services = { git = "https://github.com/gear-tech/awesome-sails", branch = "ap-backport-gear", default-features = false, features = [
+    "vft",
+    "vft-admin",
+    "vft-extension",
+    "vft-metadata",
+    "vft-native-exchange",
+    "vft-native-exchange-admin",
+] }
+
+subxt-rpcs = "0.44.0"
+subxt = "0.44.0"
+sc-consensus-grandpa = { version = "0.30.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-runtime = { version = "39.0.1", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-consensus-beefy = { version = "22.1.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-consensus-grandpa = { version = "21.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+parity-scale-codec = { version = "3.7.5", default-features = false, features = [
+    "derive",
+] }
+trie-db = { version = "0.29.0", default-features = false }
+sp-trie = { version = "37.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-mmr-primitives = { version = "34.1.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+sp-core = { version = "34.0.0", git = "https://github.com/gear-tech/polkadot-sdk.git", branch = "gear-polkadot-stable2409-wasm32v1-none", default-features = false }
+binary-merkle-tree = "15.0.1"
+primitive-types = { version = "0.13.1", default-features = false }
+k256 = { version = "0.13.4", features = ["ecdsa"] }
+
+# Alloy deps
+alloy-consensus = { version = "1.1", default-features = false, features = [
+    "serde",
+] }
+alloy-eips = { version = "1.1", default-features = false }
+alloy-rlp = { version = "0.3.12", default-features = false }
+alloy-primitives = { version = "1.4", default-features = false }
+alloy-sol-types = { version = "1.4", default-features = false }
+alloy = { version = "1.1", package = "alloy", features = [
+    "sol-types",
+    "contract",
+    "pubsub",
+    "providers",
+    "provider-ws",
+    "signers",
+    "signer-local",
+    "transports",
+    "transport-ws",
+    "network",
+    "node-bindings",
+    "rpc",
+    "rpc-client",
+    "json-rpc",
+    "rpc-types",
+    "serde",
+] }

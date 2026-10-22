@@ -42,14 +42,16 @@ fn persist_root_intent(path: &Path, intent: &Value) -> Result<()> {
     let parent = state_directory(path);
     fs::create_dir_all(parent)?;
     let temporary = path.with_extension("json.tmp");
-    let mut file = fs::OpenOptions::new()
+    let file = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open(&temporary)?;
+    let mut file = std::io::BufWriter::new(file);
     serde_json::to_writer_pretty(&mut file, intent)?;
     file.write_all(b"\n")?;
-    file.sync_all()?;
+    file.flush()?;
+    file.get_ref().sync_all()?;
     drop(file);
     fs::rename(&temporary, path)?;
     File::open(parent)?.sync_all()?;
@@ -328,7 +330,7 @@ async fn reconcile_publication_owners(
             };
             ensure!(
                 authenticated_publication_matches(
-                    &proof,
+                    proof,
                     ethereum.queue_address,
                     intent["sourceBlock"]
                         .as_u64()
@@ -347,7 +349,7 @@ async fn reconcile_publication_owners(
                 kind,
                 Some((receipt.finalized_block_number, receipt.finalized_block_hash)),
             )?;
-            intent["publicationReceipt"]["receiptProof"] = serde_json::to_value(&proof)?;
+            intent["publicationReceipt"]["receiptProof"] = serde_json::to_value(proof)?;
             intent["publicationReceipt"]["checkpoint"] = serde_json::to_value(&receipt.checkpoint)?;
             persist_root_intent(path, intent)?;
         }
@@ -593,6 +595,7 @@ fn refresh_unsigned_intent(saved: &Value, expected: &Value) -> Result<Value> {
     );
     let mut refreshed = expected.clone();
     for field in [
+        "approvedManifestSha256",
         "nonce",
         "txHash",
         "rawTransaction",
@@ -637,7 +640,10 @@ async fn authenticate_root_anchor(
             .context("retained anchor source bytes missing; HOLD")?
             .trim_start_matches("0x"),
     )?;
-    ensure!(source_raw == anchor.raw, "retained anchor source bytes changed; HOLD");
+    ensure!(
+        source_raw == anchor.raw,
+        "retained anchor source bytes changed; HOLD"
+    );
     let raw = hex::decode(
         transaction["rawTransaction"]
             .as_str()
@@ -645,14 +651,27 @@ async fn authenticate_root_anchor(
             .trim_start_matches("0x"),
     )?;
     let included = (
-        entry["destinationBlock"].as_u64().context("anchor inclusion missing; HOLD")?,
-        B256::from(decode_hash(&entry["destinationHash"], "anchor inclusion hash")?),
+        entry["destinationBlock"]
+            .as_u64()
+            .context("anchor inclusion missing; HOLD")?,
+        B256::from(decode_hash(
+            &entry["destinationHash"],
+            "anchor inclusion hash",
+        )?),
     );
     let finalized = (
-        entry["finalizedBlock"].as_u64().context("anchor finality pin missing; HOLD")?,
-        B256::from(decode_hash(&entry["finalizedHash"], "anchor finality hash")?),
+        entry["finalizedBlock"]
+            .as_u64()
+            .context("anchor finality pin missing; HOLD")?,
+        B256::from(decode_hash(
+            &entry["finalizedHash"],
+            "anchor finality hash",
+        )?),
     );
-    ensure!(finalized.0 >= included.0, "anchor finality precedes inclusion; HOLD");
+    ensure!(
+        finalized.0 >= included.0,
+        "anchor finality precedes inclusion; HOLD"
+    );
     let directory = state_directory(publisher_state).join("finality-history");
     let mut view = ethereum
         .api
@@ -668,7 +687,8 @@ async fn authenticate_root_anchor(
             "anchor evidence conflicts at one finalized height; HOLD"
         );
     }
-    view.verify_blocks(ethereum.api.raw_provider(), &targets).await?;
+    view.verify_blocks(ethereum.api.raw_provider(), &targets)
+        .await?;
     let receipts = directory.join("receipts");
     let cached = if entry.get("receiptProof").is_none() {
         cached_receipt_proof(&receipts, hash)?
@@ -691,7 +711,12 @@ async fn authenticate_root_anchor(
     };
     ethereum
         .verify_accepted_commitment_evidence(
-            hash, &raw, &proof, &checkpoint, &mut view, anchor, snapshot,
+            hash,
+            &raw,
+            (&proof, &checkpoint),
+            &mut view,
+            anchor,
+            snapshot,
         )
         .await
 }
@@ -732,7 +757,7 @@ async fn authenticated_root_receipt(
     } else {
         None
     };
-    crate::ethereum::recover_receipt_proof(
+    let proof = crate::ethereum::recover_receipt_proof(
         ethereum.api.raw_provider(),
         &mut view,
         included,
@@ -741,7 +766,13 @@ async fn authenticated_root_receipt(
         evidence.and_then(|value| value.get("checkpoint")),
         &receipts,
     )
-    .await
+    .await?;
+    crate::ethereum::retain_proof_qualification(&directory,
+        &json!({"transactionHash":format!("{hash:#x}"),"included":included,
+            "finalized":finalized,"evidence":evidence}),
+        &json!({"checkpoint":view.checkpoint(),
+            "receiptProofDigest":format!("0x{}", hex::encode(crate::keccak256(&serde_json::to_vec(&proof)?)))}))?;
+    Ok(proof)
 }
 
 fn accepted_root_transaction(
@@ -1215,15 +1246,12 @@ async fn revalidate_terminal_roots(
                     ethereum.finality_genesis().await?,
                 )
                 .await?;
-            view.verify_blocks(
-                ethereum.api.raw_provider(),
-                &std::collections::BTreeMap::from([(number, hash)]),
-            )
-            .await?;
-            let nonce = ethereum.account_nonce_at(signed.from, hash).await?;
+            let raw = hex::decode(original["rawTransaction"].as_str()
+                .context("archived original bytes missing; HOLD")?.trim_start_matches("0x"))?;
+            let qualified = ethereum.account_nonce_at(&raw, &mut view, number, hash, Some(evidence), &directory).await?;
             revalidate_root_finalized_pin(ethereum, number, hash).await?;
             ensure!(
-                nonce > signed.nonce && evidence["accountNonce"].as_u64() == Some(nonce),
+                qualified["pinnedNonceConsumed"] == true,
                 "archived root nonce disposition changed; HOLD"
             );
             if let Some(receipt) = ethereum.api.get_finalized_receipt(signed.hash).await? {
@@ -1292,17 +1320,20 @@ pub(crate) async fn reconcile_root_original(
         return Ok(false);
     }
     let directory = state_directory(output).join("finality-history");
-    let view = ethereum
+    let mut view = ethereum
         .api
         .verified_finalized_view_with_archive(
             &directory.join("headers"),
             ethereum.finality_genesis().await?,
         )
         .await?;
-    let nonce = ethereum
-        .account_nonce_at(signed.from, view.block_hash())
+    let raw = hex::decode(intent["rawTransaction"].as_str()
+        .context("original root bytes missing; HOLD")?.trim_start_matches("0x"))?;
+    let (number, hash) = (view.block_number(), view.block_hash());
+    let mut evidence = ethereum
+        .account_nonce_at(&raw, &mut view, number, hash, None, &directory)
         .await?;
-    if nonce > signed.nonce {
+    if evidence["pinnedNonceConsumed"] == true {
         // Receipt availability may advance during the pinned nonce query. Keep
         // original ownership and reconcile that receipt before recording an unknown outcome.
         if ethereum
@@ -1314,13 +1345,8 @@ pub(crate) async fn reconcile_root_original(
             return Ok(false);
         }
         revalidate_root_finalized_pin(ethereum, view.block_number(), view.block_hash()).await?;
-        archive_root_original(
-            intent,
-            "nonceConsumed",
-            json!({"block":view.block_number(),
-            "blockHash":format!("{:#x}",view.block_hash()),"accountNonce":nonce,
-            "originalReceiptKnown":false}),
-        )?;
+        evidence["originalReceiptKnown"] = json!(false);
+        archive_root_original(intent, "nonceConsumed", evidence)?;
         persist_root_intent(output, intent)?;
         return Ok(true);
     }
@@ -1640,17 +1666,26 @@ pub(crate) async fn wait_for_root_receipt(
             && decode_hash(&intent["root"], "root")? == expected_root
             && intent["proof"]["anchorBlock"].as_u64() == Some(u64::from(anchor_block))
             && decode_hash(&intent["proof"]["anchorRoot"], "anchor root")? == anchor_root
-            && decode_hash(&intent["proof"]["anchorHash"], "anchor source hash")? == anchor.block_hash
-            && B256::from(decode_hash(&intent["acceptedAnchorTx"], "anchor transaction")?) == anchor_tx
+            && decode_hash(&intent["proof"]["anchorHash"], "anchor source hash")?
+                == anchor.block_hash
+            && B256::from(decode_hash(
+                &intent["acceptedAnchorTx"],
+                "anchor transaction"
+            )?) == anchor_tx
             && intent["acceptedAnchorClient"].as_str()
                 == Some(format!("{:#x}", ethereum.client_address).as_str())
             && intent["acceptedCheckpoint"]["block"].as_u64() == Some(anchor_inclusion.0)
-            && B256::from(decode_hash(&intent["acceptedCheckpoint"]["blockHash"], "anchor inclusion")?)
-                == anchor_inclusion.1
+            && B256::from(decode_hash(
+                &intent["acceptedCheckpoint"]["blockHash"],
+                "anchor inclusion"
+            )?) == anchor_inclusion.1
             && anchor.block == anchor_block
             && anchor.validated.mmr_root == anchor_root
             && anchor_block > source_block
-            && B256::from(decode_hash(&anchor_entry["txHash"], "retained anchor transaction")?) == anchor_tx,
+            && B256::from(decode_hash(
+                &anchor_entry["txHash"],
+                "retained anchor transaction"
+            )?) == anchor_tx,
         "root waiter arguments differ from retained original anchor; HOLD"
     );
     ensure!(
@@ -1769,7 +1804,7 @@ pub async fn publish_root(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
-    ethereum_witness_rpc: &str,
+    finality: &cli_utils::EthereumFinalityArgs,
     wallet: &Path,
     deployment_manifest: &Path,
     publisher_state: &Path,
@@ -1795,7 +1830,7 @@ pub async fn publish_root(
                 source_rpc,
                 witness_rpc,
                 ethereum_rpc,
-                ethereum_witness_rpc,
+                finality,
                 wallet,
                 deployment_manifest,
                 publisher_state,
@@ -1819,7 +1854,7 @@ pub(crate) async fn publish_root_locked(
     source_rpc: &str,
     witness_rpc: &str,
     ethereum_rpc: &str,
-    ethereum_witness_rpc: &str,
+    finality: &cli_utils::EthereumFinalityArgs,
     wallet: &Path,
     deployment_manifest: &Path,
     publisher_state: &Path,
@@ -1956,15 +1991,16 @@ pub(crate) async fn publish_root_locked(
             && active_ethereum["mmrStartBlock"] == manifest["ethereum"]["mmrStartBlock"],
         "actor active BEEFY identity differs from the immutable token deployment"
     );
-    let ethereum = Ethereum::connect(
+    let mut ethereum = Ethereum::connect(
         ethereum_rpc,
-        ethereum_witness_rpc,
+        finality,
         wallet,
         &active_ethereum,
         fixture,
         public_network,
     )
     .await?;
+    ethereum.load_execution_approval(deployment_manifest, finality).await?;
     ethereum
         .api
         .enable_finality_archive(
@@ -1996,6 +2032,8 @@ pub(crate) async fn publish_root_locked(
     )
     .await?;
     source.validate_attachment(&manifest["anchor"]).await?;
+    ethereum.qualify_execution_source(&source).await?;
+    ethereum.qualify_execution_source(&witness).await?;
     ensure_source_identity(
         &manifest["ethereum"],
         source.source_genesis,
@@ -2161,7 +2199,8 @@ pub(crate) async fn publish_root_locked(
         &anchor_proof.snapshot
     };
     let (destination_block, destination_hash) =
-        authenticate_root_anchor(&ethereum, publisher_state, last, &anchor, anchor_snapshot).await?;
+        authenticate_root_anchor(&ethereum, publisher_state, last, &anchor, anchor_snapshot)
+            .await?;
     let destination_hash_text = format!("{destination_hash:#x}");
     ensure!(
         last["destinationBlock"].as_u64() == Some(destination_block)
@@ -2270,6 +2309,12 @@ pub(crate) async fn publish_root_locked(
     };
     let provider = ethereum.api.raw_provider();
     let signed = if intent["txHash"].is_null() {
+        let approval = ethereum.require_execution().await?;
+        ensure!(intent["approvedManifestSha256"].is_null()
+            || intent["approvedManifestSha256"] == json!(approval),
+            "unsigned root belongs to a different approved manifest; HOLD");
+        intent["approvedManifestSha256"] = json!(approval);
+        persist_root_intent(output, &intent)?;
         ensure_pinned_latest_anchor(
             &ethereum.checkpoint().await?,
             anchor_block,
@@ -2425,8 +2470,14 @@ mod root_publication_tests {
             .await?
             .header
             .hash;
+        let head = ethereum_client::get_block(api.raw_provider(), 0).await?.header;
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            31_337, genesis, std::sync::Arc::new(move || head.clone()),
+        ).await?;
         let api = api
-            .with_finality_witness(&witness_url, 31_337, genesis)
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await?
+            .with_data_witness(&witness_url, 31_337, genesis)
             .await?;
         let provider = api.raw_provider();
         let publisher = anvil.addresses()[0];
@@ -2690,7 +2741,7 @@ mod root_publication_tests {
         let before = original.clone();
         let ethereum = crate::ethereum::Ethereum::connect_readonly(
             &rpc,
-            &std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?,
+            &crate::ethereum::test_finality_args(std::env::var("BEEFY_TEST_HOODI_WITNESS_RPC")?)?,
             &manifest["ethereum"],
             None,
             crate::ethereum::PublicEthereumNetwork::Hoodi,

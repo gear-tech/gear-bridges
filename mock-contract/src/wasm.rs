@@ -3,10 +3,10 @@ extern crate alloc;
 use checkpoint_light_client_client::{service_checkpoint_for, service_state};
 use gstd::{debug, msg, prelude::*};
 use hex_literal::hex;
-use primitive_types::H256;
 use sails_rs::{
     calls::ActionIo,
     prelude::{Decode, Encode},
+    H256,
 };
 
 /* associative list of slot -> (checkpoint, blockRoot) */
@@ -105,8 +105,29 @@ static CHECKPOINTS: &[(u64, (u64, H256))] = &[
 
 const GET_CHECKPOINT: &[u8] = <service_checkpoint_for::io::Get as ActionIo>::ROUTE;
 
+// Test-owned full-finalize scenarios bind their synthetic block through the same
+// checkpoint query ABI. Empty initialization preserves the historical fixtures.
+static mut OWNED_CHECKPOINTS: Vec<(u64, (u64, H256))> = Vec::new();
+
 #[unsafe(no_mangle)]
-extern "C" fn init() {}
+extern "C" fn init() {
+    let payload = msg::load_bytes().expect("unable to load fixture constructor");
+    if payload.is_empty() {
+        return;
+    }
+    let checkpoints = <Vec<(u64, (u64, H256))> as sails_rs::scale_codec::DecodeAll>::decode_all(
+        &mut payload.as_slice(),
+    ).expect("invalid owned checkpoint fixture");
+    assert!(!checkpoints.is_empty(), "owned checkpoint fixture is empty");
+    for (index, (slot, (checkpoint, root))) in checkpoints.iter().enumerate() {
+        assert!(*slot > 0 && checkpoint >= slot && *root != H256::zero(),
+            "invalid owned checkpoint coordinates");
+        assert!(checkpoints[..index].iter().all(|(previous, _)| previous != slot),
+            "duplicate owned checkpoint slot");
+    }
+    // Gear initializes a program once and runs these synchronous handlers serially.
+    unsafe { core::ptr::addr_of_mut!(OWNED_CHECKPOINTS).write(checkpoints) };
+}
 
 #[unsafe(no_mangle)]
 extern "C" fn handle() {
@@ -126,8 +147,8 @@ extern "C" fn handle() {
         .expect("unable to decode params");
     debug!("Received request for checkpoint for slot: {slot}");
 
-    let checkpoint = CHECKPOINTS
-        .iter()
+    let owned = unsafe { &*core::ptr::addr_of!(OWNED_CHECKPOINTS) };
+    let checkpoint = owned.iter().chain(CHECKPOINTS)
         .find(|(s, _)| *s == slot)
         .map(|(_, (checkpoint, block_root))| (*checkpoint, sails_rs::H256::from(block_root.0)))
         .expect("checkpoint not found");

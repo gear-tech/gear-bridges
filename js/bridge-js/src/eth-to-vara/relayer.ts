@@ -13,7 +13,7 @@ import { encodeEthToVaraEvent, getPrefix, GearClient, HistoricalProxyClient, Pro
 import { createBeaconClient, createEthereumClient } from '../ethereum/index.js';
 import { composeProof, InboundProofProfile, immutableInboundProfile } from './proof-composer.js';
 import { StatusCb, withOriginalDeadline } from '../util.js';
-import { VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, validateInboundTokenEffect, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
+import { VFT_MANAGER_IDL_SHA256, validateInboundTokenEffect, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
   type NativeReceiptDeposit, type NativeRedemption, type NativeReceiptIdentity, type InboundTokenEffect, type NativeTokenSettlement } from './token-effect.js';
 
 export interface RelayResult {
@@ -48,7 +48,8 @@ export interface ConsumerReplyContract {
 
 function nativeReceiptIdentity(profile: InboundProofProfile, proof: ProofResult, expectedEffect: InboundTokenEffect): NativeReceiptIdentity {
   return { managerId: profile.consumer.programId, proxyId: profile.historicalProxyId,
-    wrapperId: profile.nativeWrapper!.programId, slot: BigInt(proof.proofBlock.block.slot),
+    wrapperId: profile.nativeWrapper!.programId, wrapperMode: profile.nativeWrapper!.mode,
+    wrapperEthereumToken: profile.nativeWrapper!.ethereumToken, slot: BigInt(proof.proofBlock.block.slot),
     transactionIndex: BigInt(proof.transactionIndex), receiptRlp: proof.receiptRlp, expectedEffect };
 }
 
@@ -56,7 +57,7 @@ async function readNativeRedemptions(rows: readonly NativeReceiptDeposit[], pin:
   readRedemption: NonNullable<ConsumerReplyContract['nativeSettlement']>['readRedemption']) {
   const redemptions = new Map<HexString, NativeRedemption | null>();
   for (const row of rows.filter(row => row.native)) {
-    redemptions.set(row.operation_id, await readRedemption(row.operation_id, pin));
+    redemptions.set(row.operation_id.toLowerCase() as HexString, await readRedemption(row.operation_id, pin));
   }
   return redemptions;
 }
@@ -66,12 +67,17 @@ export function createVftManagerReplyContract(profile: InboundProofProfile,
   adapter: Pick<ConsumerReplyContract, 'registry' | 'idlSha256'> & NonNullable<ConsumerReplyContract['nativeSettlement']>): ConsumerReplyContract {
   profile = immutableInboundProfile(profile);
   if (profile.consumer.service !== 'VftManager' || profile.consumer.method !== 'SubmitReceipt' ||
-      adapter.idlSha256 !== VFT_MANAGER_IDL_SHA256) {
+      adapter.idlSha256.toLowerCase() !== VFT_MANAGER_IDL_SHA256) {
     throw new Error('HOLD: consumer decoder does not match approved deployed IDL');
+  }
+  if (profile.nativeWrapper &&
+      (adapter.expectedEffect.destinationToken.toLowerCase() === profile.nativeWrapper.programId) !==
+      (adapter.expectedEffect.sourceToken.toLowerCase() === profile.nativeWrapper.ethereumToken)) {
+    throw new Error('HOLD: native token mapping differs from approved wrapper binding');
   }
   const { registry, idlSha256, ...settlement } = adapter;
   return {
-    registry, idlSha256, resultType: 'Result<Null, Error>',
+    registry, idlSha256: idlSha256.toLowerCase(), resultType: 'Result<Null, Error>',
     nativeSettlement: profile.nativeWrapper ? settlement : undefined,
     verifyEffect: async (_value, result, proof) => {
       const pin = result.effectBlockHash ?? result.replyBlockHash;
@@ -87,7 +93,8 @@ export function createVftManagerReplyContract(profile: InboundProofProfile,
       const originals = new Map(result.nativeSettlements.map(entry => [entry.operationId, entry.redemption]));
       const settlements = validateNativeTokenEffect(identity, deposits, redemptions, originals);
       if (settlements.length !== result.nativeSettlements.length ||
-          settlements.some(entry => entry.child !== result.nativeSettlements!.find(original => original.operationId === entry.operationId)?.child)) {
+          settlements.some(entry => entry.child.toLowerCase() !== result.nativeSettlements!.find(original =>
+            original.operationId.toLowerCase() === entry.operationId.toLowerCase())?.child.toLowerCase())) {
         throw new Error('HOLD: original native settlement cohort changed');
       }
     },
@@ -95,8 +102,9 @@ export function createVftManagerReplyContract(profile: InboundProofProfile,
 }
 
 function consumerResult(payload: HexString, profile: InboundProofProfile, contract: Pick<ConsumerReplyContract, 'registry' | 'resultType' | 'idlSha256'>) {
+  profile = immutableInboundProfile(profile);
   if ((profile.consumer.service === 'VftManager' && profile.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256) ||
-      contract.idlSha256 !== profile.consumer.idlSha256 || !/^Result<.+>$/.test(contract.resultType)) {
+      contract.idlSha256.toLowerCase() !== profile.consumer.idlSha256 || !/^Result<.+>$/.test(contract.resultType)) {
     throw new Error('HOLD: consumer decoder does not match approved deployed IDL');
   }
   const decoded = contract.registry.createType<ITuple>(
@@ -121,11 +129,12 @@ async function authenticateEffectProfile(api: GearApi, profile: InboundProofProf
 
 /** This is a pending classifier, never an application-success decoder. */
 export function assertNativePendingReply(payload: HexString, profile: InboundProofProfile, contract: ConsumerReplyContract): void {
+  profile = immutableInboundProfile(profile);
   const result = consumerResult(payload, profile, contract);
   if (!result.isErr || result.isOk || result.asErr.type !== 'NativeSettlementPending' ||
       profile.consumer.service !== 'VftManager' || profile.consumer.method !== 'SubmitReceipt' ||
       profile.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256 || contract.resultType !== 'Result<Null, Error>' ||
-      !profile.nativeWrapper || profile.nativeWrapper.idlSha256 !== NATIVE_WRAPPER_IDL_SHA256 ||
+      !profile.nativeWrapper ||
       !contract.nativeSettlement || typeof contract.nativeSettlement.readDeposits !== 'function' || typeof contract.nativeSettlement.readRedemption !== 'function' ||
       typeof contract.nativeSettlement.readReceiptStatus !== 'function') {
     throw new Error('Finalized consumer error cannot reconcile: ' + (result.isErr ? result.asErr.toString() : 'not native pending'));
@@ -143,7 +152,8 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
   const redemptions = new Map<HexString, NativeRedemption>();
   for (const row of rows.filter(row => row.native)) {
     const value = await read(() => contract.readRedemption(row.operation_id, original.replyBlockHash));
-    validateNativeRedemption(row, identity.managerId, value); redemptions.set(row.operation_id, structuredClone(value!));
+    validateNativeRedemption(row, identity.managerId, identity.wrapperMode, value);
+    redemptions.set(row.operation_id.toLowerCase() as HexString, structuredClone(value!));
   }
   let previous = { number: original.replyBlockNumber, hash: original.replyBlockHash };
   let observedRows = rows;
@@ -154,9 +164,9 @@ async function reconcileOriginalNativeSettlement(params: RelayEthToVaraParams, p
     const currentRedemptions = new Map<HexString, NativeRedemption>();
     for (const row of current.filter(row => row.native)) {
       const value = await read(() => contract.readRedemption(row.operation_id, pin));
-      const status = validateNativeRedemption(row, identity.managerId, value, redemptions.get(row.operation_id));
+      const status = validateNativeRedemption(row, identity.managerId, identity.wrapperMode, value, redemptions.get(row.operation_id.toLowerCase() as HexString));
       if (status === 'Queued' && BigInt(value!.returned_value) === 0n) ready = false;
-      currentRedemptions.set(row.operation_id, structuredClone(value!));
+      currentRedemptions.set(row.operation_id.toLowerCase() as HexString, structuredClone(value!));
     }
     const wrapper = await read(() => api.programStorage.getProgram(identity.wrapperId, pin));
     const manager = await read(() => api.programStorage.getProgram(identity.managerId, pin));
@@ -571,7 +581,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
       if (native) {
         const rows = structuredClone(await withOriginalDeadline(deadline, () => native.readDeposits(result.replyBlockHash, proof)));
         if (rows.some(row => row.native || row.outcome === 'Refunded')) {
-          if (!params.inboundProfile.nativeWrapper || params.inboundProfile.nativeWrapper.idlSha256 !== NATIVE_WRAPPER_IDL_SHA256 ||
+          if (!params.inboundProfile.nativeWrapper ||
               params.inboundProfile.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256 ||
               params.inboundProfile.consumer.service !== 'VftManager' || params.inboundProfile.consumer.method !== 'SubmitReceipt') {
             throw new Error('HOLD: native completion requires the approved wrapper and manager');

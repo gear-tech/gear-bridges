@@ -7,14 +7,20 @@ import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {VaraMessage} from "src/interfaces/IMessageQueue.sol";
-import {Base} from "test/Base.sol";
+import {DeploymentBase} from "script/DeploymentBase.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 
 /// @dev Local-only fixture broadcaster. The Python entrypoint owns the Anvil and
 /// measures mined receipts, not the script's shared/warm execution context.
-contract BeefyFullTransactionBenchmark is BeefyFixtureTest, Base {
+contract BeefyFullTransactionBenchmark is BeefyFixtureTest, DeploymentBase {
     address internal constant SENDER = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
     bytes32 internal constant VFT_MANAGER = bytes32(uint256(0x909));
+
+    // Synthetic authorities measure transactions; they never approve a native source.
+    // The exemption exists only in this test-only 31337 script, not relay writers.
+    function _localDeploymentFixture() internal view override returns (bool) {
+        return block.chainid == 31337 && vm.envOr("BEEFY_BENCHMARK_OWNED_RUNNER", false);
+    }
 
     function runCase(uint256 index) public {
         require(block.chainid == 31337, "local benchmark chain only");
@@ -46,7 +52,7 @@ contract BeefyFullTransactionBenchmark is BeefyFixtureTest, Base {
         _nextUpdate(target, index, 103, 0, 1, index);
         _nextUpdate(target, index, 104, 1, 2, rotatedIndex);
         _nextUpdate(target, rotatedIndex, 105, 2, 3, index);
-        (uint128 current,,,) = target.currentValidatorSet();
+        (uint128 current,,) = target.currentValidatorSet();
         assertEq(current, 2);
     }
 

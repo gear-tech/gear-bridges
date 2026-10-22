@@ -161,6 +161,13 @@ def main():
         assert update_index == 13 and len(rows) == 15
         evidence = {
             "schemaVersion": 1, "chainId": 31337, "hardfork": "osaka",
+            "qualification": {
+                "kind": "owned-synthetic-transaction-gas",
+                "nativeSourceIdentityQualified": False,
+                "productionExecutionAuthorized": False,
+                "productionGovernanceQualified": False,
+                "boundary": "Owned loopback chain31337; synthetic 59/150/256 authorities and queue fixture, not native-runtime activation or live custody approval",
+            },
             "clientVersion": rpc("web3_clientVersion"),
             "forgeVersion": subprocess.check_output(["forge", "--version"], text=True).strip(),
             "fixtureSha256": hashlib.sha256((ROOT / "test/fixtures/beefy-interop.json").read_bytes()).hexdigest(),

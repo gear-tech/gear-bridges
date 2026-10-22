@@ -242,12 +242,7 @@ try {
       }),
     };
     const start = (deadline = Date.now() + timeout) =>
-      signAndSendFinalized(
-        extrinsic as unknown as Parameters<typeof signAndSendFinalized>[0],
-        'account',
-        {},
-        deadline,
-      );
+      signAndSendFinalized(extrinsic as unknown as Parameters<typeof signAndSendFinalized>[0], 'account', {}, deadline);
     const emit = (type: string) => {
       extrinsic.isSigned = true;
       const value = result(type);

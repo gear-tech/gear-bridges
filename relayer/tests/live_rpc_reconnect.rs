@@ -44,6 +44,23 @@ fn eth_message_queue_address() -> String {
         .expect("set ETH_MESSAGE_QUEUE_ADDRESS for this deployment")
 }
 
+fn beacon_approval() -> anyhow::Result<ethereum_client::beacon_finality::BeaconFinalityConfig> {
+    let config = ethereum_client::beacon_finality::BeaconFinalityConfig::load(
+        env::var("ETH_FINALITY_BOOTSTRAP")?,
+        env::var("ETH_FINALITY_BOOTSTRAP_SHA256")?.parse()?,
+        &env::var("ETH_FINALITY_BEACON_RPC")?,
+    )?;
+    anyhow::ensure!(
+        config.identity()
+            == (
+                env::var("ETH_CHAIN_ID")?.parse()?,
+                env::var("ETH_GENESIS_HASH")?.parse()?,
+            ),
+        "approved Ethereum identity differs from runtime test identity"
+    );
+    Ok(config)
+}
+
 async fn gear_latest_number(
     connection: &mut gear_common::api_provider::ApiProviderConnection,
 ) -> anyhow::Result<u32> {
@@ -244,11 +261,7 @@ async fn live_ethereum_polling_reconnect_keeps_finalized_queries() -> anyhow::Re
     let api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
             .await?
-            .with_finality_witness(
-                &env::var("ETH_WITNESS_RPC")?,
-                env::var("ETH_CHAIN_ID")?.parse()?,
-                env::var("ETH_GENESIS_HASH")?.parse()?,
-            )
+            .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
             .await?;
 
     let before = api.finalized_block().await?.header.number;
@@ -270,11 +283,7 @@ async fn live_ethereum_polling_survives_repeated_reconnects() -> anyhow::Result<
     let mut api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
             .await?
-            .with_finality_witness(
-                &env::var("ETH_WITNESS_RPC")?,
-                env::var("ETH_CHAIN_ID")?.parse()?,
-                env::var("ETH_GENESIS_HASH")?.parse()?,
-            )
+            .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
             .await?;
 
     let baseline = api.finalized_block().await?.header.number;
@@ -297,11 +306,7 @@ async fn live_ethereum_worker_queries_while_sibling_reconnects() -> anyhow::Resu
     let worker_api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
             .await?
-            .with_finality_witness(
-                &env::var("ETH_WITNESS_RPC")?,
-                env::var("ETH_CHAIN_ID")?.parse()?,
-                env::var("ETH_GENESIS_HASH")?.parse()?,
-            )
+            .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
             .await?;
     let mut reconnect_api = worker_api.clone();
 
@@ -356,11 +361,7 @@ async fn live_ethereum_contract_reconnect_keeps_queries_and_subscriptions() -> a
         None,
     )
     .await?
-    .with_finality_witness(
-        &env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?,
-        env::var("ETH_GENESIS_HASH")?.parse()?,
-    )
+    .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
     .await?;
 
     let max_block_number = api.max_block_number().await?;
@@ -429,11 +430,7 @@ async fn live_ethereum_contract_range_queries_survive_repeated_reconnects() -> a
         None,
     )
     .await?
-    .with_finality_witness(
-        &env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?,
-        env::var("ETH_GENESIS_HASH")?.parse()?,
-    )
+    .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
     .await?;
 
     let finalized = api.finalized_block_number().await?;

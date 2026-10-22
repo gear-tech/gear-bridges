@@ -1,22 +1,21 @@
-import { FetchRequest, JsonRpcProvider } from 'ethers';
+import { isDeepStrictEqual } from 'node:util';
+import { mkdirSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { keccak256, toUtf8Bytes } from 'ethers';
+import { NativeEvidenceClient, EthereumEvidenceError, exactObject } from './native-evidence.js';
 import type { Store } from '@subsquid/typeorm-store';
-import { getEthereumEvidenceConfig } from '../common/env.js';
+import { getEthereumEvidenceConfig, type EvidenceOwner } from '../common/env.js';
 import { EthereumFinalityCheckpoint } from '../model/entities/ethereumFinalityCheckpoint.model.js';
 import type { Receipt, ReceiptLog } from './completion.js';
 import type { Context } from './processor.js';
 
 export interface EthereumEvidenceClients {
-  primaryCall(method: string, params: unknown[]): Promise<unknown>;
-  witnessCall(method: string, params: unknown[]): Promise<unknown>;
+  native: NativeEvidenceClient;
   chainId: bigint;
   genesisHash: string;
 }
 
-export interface AgreedCheckpoint {
-  schemaVersion: 1;
-  policy: 'independent-two-el-v1';
-  chainId: string;
-  genesisHash: string;
+export interface HeaderEvidence {
   number: string;
   timestamp: string;
   hash: string;
@@ -25,33 +24,59 @@ export interface AgreedCheckpoint {
   transactionsRoot: string;
   receiptsRoot: string;
 }
+export interface LegacyCheckpoint extends HeaderEvidence {
+  schemaVersion: 1;
+  policy: 'independent-two-el-v1';
+  chainId: string;
+  genesisHash: string;
+}
+export interface NativeCheckpoint {
+  schema_version: 2;
+  policy: 'beacon-sync-committee-v1';
+  chain_id: number;
+  genesis_hash: string;
+  common_header: Record<string, unknown>;
+  beacon: { genesisValidatorsRoot: string; bootstrapApprovalHash: string; finalizedBeaconHeaderScale: string; proofDigest: string };
+}
+export interface RequalificationLink { originalDigest: string; proofDigest: string }
+export interface RetainedRequalificationLink extends RequalificationLink { checkpoint: NativeCheckpoint }
+export interface AgreedCheckpoint extends HeaderEvidence {
+  schemaVersion: 2;
+  policy: 'beacon-sync-committee-v1';
+  chainId: string;
+  genesisHash: string;
+  native: NativeCheckpoint;
+}
+export type HistoricalCheckpoint = LegacyCheckpoint | AgreedCheckpoint;
 
-export interface AuthenticatedReceipt {
+export interface ProofReference {
+  inclusionProofDigest: string;
+  checkpointProofDigest: string;
+  requalificationLinks: RequalificationLink[];
+}
+
+export interface AuthenticatedReceipt extends ProofReference {
   receipt: Receipt;
   blockTimestamp: string;
   checkpoint: AgreedCheckpoint;
 }
 
 export type ReceiptAuthenticator = (
-  hash: string, expected: { height: number; hash?: string },
+  hash: string, expected: { height: number; hash?: string; proofDigest?: string },
 ) => Promise<AuthenticatedReceipt | undefined>;
 
-export interface SourceReceiptAuth {
-  version: 1;
+export interface SourceReceiptAuth extends ProofReference {
+  version: 2;
   checkpointId: string;
   receipt: Receipt;
   blockTimestamp: string;
   localLogIndex: number;
 }
 
-type Header = Pick<AgreedCheckpoint,
-  'number' | 'timestamp' | 'hash' | 'parentHash' | 'stateRoot' | 'transactionsRoot' | 'receiptsRoot'>;
-type RpcCall = EthereumEvidenceClients['primaryCall'];
-const RPC_TIMEOUT = 10_000;
-const QUALIFICATION_TIMEOUT = 300_000;
+type Header = HeaderEvidence;
 const MAX_DATE_SECONDS = 8_640_000_000_000n;
 
-function hold(message: string): never { throw new Error(`HOLD: ${message}`); }
+function hold(message: string): never { throw new EthereumEvidenceError('conflict', message); }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) hold('missing or malformed Ethereum evidence');
   return value as Record<string, unknown>;
@@ -79,12 +104,12 @@ function timestamp(value: bigint): string {
   if (value < 0n || value > MAX_DATE_SECONDS) hold('Ethereum timestamp exceeds Date range');
   return value.toString();
 }
-function header(value: unknown): Header {
+function header(value: unknown): Omit<Header, 'hash'> {
   const raw = object(value);
   return {
     number: safe(BigInt(quantity(raw.number))).toString(),
     timestamp: timestamp(BigInt(quantity(raw.timestamp))),
-    hash: bytes(raw.hash, 32), parentHash: bytes(raw.parentHash, 32), stateRoot: bytes(raw.stateRoot, 32),
+    parentHash: bytes(raw.parentHash, 32), stateRoot: bytes(raw.stateRoot, 32),
     transactionsRoot: bytes(raw.transactionsRoot, 32), receiptsRoot: bytes(raw.receiptsRoot, 32),
   };
 }
@@ -96,151 +121,192 @@ function decimal(value: unknown): bigint {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) hold('noncanonical checkpoint decimal');
   return BigInt(value);
 }
-function normalizedCheckpoint(value: unknown): AgreedCheckpoint {
+export function normalizedCheckpoint(value: unknown): HistoricalCheckpoint {
   const raw = object(value);
-  if (raw.schemaVersion !== 1 || raw.policy !== 'independent-two-el-v1') hold('unsupported Ethereum checkpoint policy');
+  const legacy = raw.schemaVersion === 1 && raw.policy === 'independent-two-el-v1';
+  const beacon = raw.schemaVersion === 2 && raw.policy === 'beacon-sync-committee-v1';
+  if (!legacy && !beacon) hold('unsupported Ethereum checkpoint policy');
   const chainId = decimal(raw.chainId);
   if (chainId > 0xffffffffffffffffn) hold('checkpoint chain ID exceeds uint64');
-  const normalized: AgreedCheckpoint = {
-    schemaVersion: 1, policy: 'independent-two-el-v1', chainId: chainId.toString(),
-    genesisHash: bytes(raw.genesisHash, 32), number: safe(decimal(raw.number)).toString(),
-    timestamp: timestamp(decimal(raw.timestamp)), hash: bytes(raw.hash, 32), parentHash: bytes(raw.parentHash, 32),
-    stateRoot: bytes(raw.stateRoot, 32), transactionsRoot: bytes(raw.transactionsRoot, 32), receiptsRoot: bytes(raw.receiptsRoot, 32),
+  const common = {
+    chainId: chainId.toString(), genesisHash: bytes(raw.genesisHash, 32),
+    number: safe(decimal(raw.number)).toString(), timestamp: timestamp(decimal(raw.timestamp)),
+    hash: bytes(raw.hash, 32), parentHash: bytes(raw.parentHash, 32), stateRoot: bytes(raw.stateRoot, 32),
+    transactionsRoot: bytes(raw.transactionsRoot, 32), receiptsRoot: bytes(raw.receiptsRoot, 32),
   };
-  if (Object.keys(raw).length !== Object.keys(normalized).length ||
-      Object.entries(normalized).some(([key, val]) => raw[key] !== val)) hold('noncanonical Ethereum checkpoint record');
+  const normalized: HistoricalCheckpoint = legacy
+    ? { schemaVersion: 1, policy: 'independent-two-el-v1', ...common }
+    : { schemaVersion: 2, policy: 'beacon-sync-committee-v1', ...common, native: nativeCheckpoint(raw.native) };
+  if (!isDeepStrictEqual(raw, normalized)) hold('noncanonical Ethereum checkpoint record');
+  if (normalized.schemaVersion === 2) {
+    // Consensus-header JSON has no RPC hash. The native qualification below
+    // authenticates the separately retained hash, not this metadata projection.
+    if (Object.entries(header(normalized.native.common_header))
+        .some(([key, value]) => normalized[key as keyof Header] !== value) ||
+        String(normalized.native.chain_id) !== normalized.chainId || normalized.native.genesis_hash !== normalized.genesisHash) {
+      hold('native checkpoint projection mismatch');
+    }
+  }
   return normalized;
 }
-function approved(clients: EthereumEvidenceClients, checkpoint?: AgreedCheckpoint): void {
-  if (typeof clients.primaryCall !== 'function' || typeof clients.witnessCall !== 'function' ||
-      typeof clients.chainId !== 'bigint' || clients.chainId < 0n || clients.chainId > 0xffffffffffffffffn ||
-      bytes(clients.genesisHash, 32) !== clients.genesisHash) hold('independent Ethereum witness/identity is not configured');
+
+export function legacyCheckpointDigest(value: unknown): string {
+  const raw = object(value);
+  if (normalizedCheckpoint(raw).schemaVersion !== 1) hold('legacy metadata digest requires the original schema-one record');
+  // Metadata identity only, not finality authority. Matches the native canonical
+  // compact JSON: sorted ASCII keys, original string values, no whitespace.
+  return keccak256(toUtf8Bytes(JSON.stringify(Object.fromEntries(Object.keys(raw).sort().map((key) => [key, raw[key]])))));
+}
+
+function nativeCheckpoint(value: unknown): NativeCheckpoint {
+  const raw = exactObject(value, ['schema_version', 'policy', 'chain_id', 'genesis_hash', 'common_header', 'beacon']);
+  if (raw.schema_version !== 2 || raw.policy !== 'beacon-sync-committee-v1' ||
+      !Number.isSafeInteger(raw.chain_id) || Number(raw.chain_id) < 0 ||
+      bytes(raw.genesis_hash, 32) !== raw.genesis_hash) hold('invalid native checkpoint identity');
+  const beacon = exactObject(raw.beacon, ['genesisValidatorsRoot', 'bootstrapApprovalHash', 'finalizedBeaconHeaderScale', 'proofDigest']);
+  for (const key of ['genesisValidatorsRoot', 'bootstrapApprovalHash', 'proofDigest']) {
+    if (bytes(beacon[key], 32) !== beacon[key]) hold('invalid native checkpoint proof reference');
+  }
+  if (bytes(beacon.finalizedBeaconHeaderScale) !== beacon.finalizedBeaconHeaderScale ||
+      beacon.finalizedBeaconHeaderScale === '0x') hold('missing native Beacon header');
+  header(raw.common_header);
+  return raw as unknown as NativeCheckpoint;
+}
+
+function approved(clients: EthereumEvidenceClients, checkpoint?: HistoricalCheckpoint): void {
+  if (!(clients.native instanceof NativeEvidenceClient) || typeof clients.chainId !== 'bigint' ||
+      clients.chainId < 0n || clients.chainId > 0xffffffffffffffffn ||
+      bytes(clients.genesisHash, 32) !== clients.genesisHash) hold('native Ethereum authority is not configured');
   if (checkpoint && (checkpoint.chainId !== clients.chainId.toString() || checkpoint.genesisHash !== clients.genesisHash)) {
     hold('retained Ethereum checkpoint belongs to another approved network');
   }
 }
-function remaining(deadline: number): number {
-  const duration = deadline - Date.now();
-  if (duration <= 0) hold('Ethereum ancestry qualification timed out');
-  return Math.min(RPC_TIMEOUT, duration);
-}
-async function rpc(call: RpcCall, method: string, params: unknown[], deadline: number): Promise<unknown> {
-  const timeout = remaining(deadline);
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve().then(() => call(method, params)),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`HOLD: Ethereum RPC timed out (${method})`)), timeout);
-      }),
-    ]);
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('HOLD:')) throw error;
-    throw new Error(`HOLD: Ethereum RPC unavailable (${method})`, { cause: error });
-  } finally { clearTimeout(timer); }
-}
-async function block(call: RpcCall, tag: string, deadline: number): Promise<unknown> {
-  return rpc(call, 'eth_getBlockByNumber', [tag, false], deadline);
-}
-async function numbered(call: RpcCall, number: bigint, deadline: number): Promise<Header> {
-  const result = header(await block(call, `0x${number.toString(16)}`, deadline));
-  if (BigInt(result.number) !== number) hold('Ethereum header returned for the wrong height');
-  return result;
-}
-async function agreedHeader(clients: EthereumEvidenceClients, number: bigint, deadline: number): Promise<Header> {
-  const [primary, witness] = await Promise.all([
-    numbered(clients.primaryCall, number, deadline), numbered(clients.witnessCall, number, deadline),
-  ]);
-  if (!sameHeader(primary, witness)) hold(`independent Ethereum headers disagree at ${number}`);
-  return primary;
-}
-async function descend(call: RpcCall, tip: Header, ancestor: Header, deadline?: number): Promise<void> {
-  let current = tip;
-  if (BigInt(current.number) < BigInt(ancestor.number)) hold('finalized Ethereum head regressed');
-  while (BigInt(current.number) > BigInt(ancestor.number)) {
-    // Retained history is finite; bound each advancing request, not the checkpoint's age.
-    const parent = await numbered(call, BigInt(current.number) - 1n, deadline ?? Date.now() + RPC_TIMEOUT);
-    if (parent.hash !== current.parentHash) hold('broken finalized Ethereum ancestry');
-    current = parent;
-  }
-  if (!sameHeader(current, ancestor)) hold('finalized Ethereum ancestry excludes the accepted checkpoint');
-}
-async function historicalHeader(
-  clients: EthereumEvidenceClients, checkpoint: AgreedCheckpoint, target: bigint, deadline: number,
-): Promise<Header> {
-  if (target > BigInt(checkpoint.number)) hold('Ethereum target is not commonly finalized');
-  // Under the two-provider policy, both canonical numbered headers authenticate a
-  // historical target. Only retained finality fences require a complete ancestry walk.
-  return agreedHeader(clients, target, deadline);
-}
-async function recheck(clients: EthereumEvidenceClients, checkpoint: AgreedCheckpoint, deadline: number): Promise<void> {
-  if (!sameHeader(await agreedHeader(clients, BigInt(checkpoint.number), deadline), checkpoint)) {
-    hold('common finalized Ethereum anchor changed during authentication');
+
+const transports = new Map<EvidenceOwner, { key: string; clients: EthereumEvidenceClients }>();
+export function destroyEthereumEvidenceClients(owner?: EvidenceOwner): void {
+  for (const [name, transport] of transports) {
+    if (owner !== undefined && owner !== name) continue;
+    transport.clients.native.close();
+    transports.delete(name);
   }
 }
 
-let transports: { key: string; witness: JsonRpcProvider; primary?: JsonRpcProvider } | undefined;
-
-// CLI owners call this after their final transaction; live processors reuse transports.
-export function destroyEthereumEvidenceClients(): void {
-  transports?.primary?.destroy();
-  transports?.witness.destroy();
-  transports = undefined;
+export function createEthereumEvidenceClients(owner: EvidenceOwner = 'eth'): EthereumEvidenceClients {
+  const config = getEthereumEvidenceConfig(owner);
+  const key = JSON.stringify({ ...config, chainId: config.chainId.toString() });
+  let transport = transports.get(owner);
+  if (transport?.key !== key) {
+    destroyEthereumEvidenceClients(owner);
+    for (const directory of [...config.proofSources, join(config.store, 'beacon')]) mkdirSync(directory, { recursive: true });
+    const native = new NativeEvidenceClient(config.binary, ['ethereum-evidence',
+      '--ethereum-endpoint', config.rpcUrl, '--ethereum-finality-beacon-rpc', config.beaconRpc,
+      '--ethereum-finality-bootstrap', config.bootstrap, '--ethereum-finality-bootstrap-sha256', config.bootstrapSha256,
+      '--ethereum-finality-store', config.store,
+      ...config.proofSources.flatMap((path) => ['--ethereum-finality-proof-source', realpathSync(path)]),
+      ...config.evidenceProofSources.flatMap((path) => ['--ethereum-evidence-proof-source', realpathSync(path)])]);
+    transport = { key, clients: { native, chainId: config.chainId, genesisHash: config.genesisHash } };
+    transports.set(owner, transport);
+  }
+  return transport!.clients;
 }
 
-export function createEthereumEvidenceClients(primaryCall?: RpcCall): EthereumEvidenceClients {
-  const config = getEthereumEvidenceConfig();
-  const key = JSON.stringify([config.rpcUrl, config.witnessRpcUrl, config.chainId.toString(), config.genesisHash]);
-  if (transports?.key !== key) {
-    destroyEthereumEvidenceClients();
-    const request = new FetchRequest(config.witnessRpcUrl);
-    request.timeout = RPC_TIMEOUT;
-    transports = {
-      key, witness: new JsonRpcProvider(request, config.chainId, { staticNetwork: true, batchMaxCount: 1 }),
-    };
-  }
-  if (!primaryCall && !transports.primary) {
-    const request = new FetchRequest(config.rpcUrl);
-    request.timeout = RPC_TIMEOUT;
-    transports.primary = new JsonRpcProvider(request, config.chainId, { staticNetwork: true, batchMaxCount: 1 });
-  }
-  const { primary, witness } = transports;
-  return {
-    primaryCall: primaryCall ?? ((method, params) => primary!.send(method, params)),
-    witnessCall: (method, params) => witness.send(method, params),
-    chainId: config.chainId, genesisHash: config.genesisHash,
-  };
+function links(value: unknown): RequalificationLink[] {
+  if (!Array.isArray(value)) hold('missing native requalification links');
+  const seen = new Set<string>();
+  return value.map((item) => {
+    const raw = exactObject(item, ['originalDigest', 'proofDigest']);
+    const link = { originalDigest: bytes(raw.originalDigest, 32), proofDigest: bytes(raw.proofDigest, 32) };
+    if (!isDeepStrictEqual(link, raw) || seen.has(link.originalDigest)) hold('invalid duplicate requalification link');
+    seen.add(link.originalDigest);
+    return link;
+  });
 }
 
-export async function qualifyFinality(clients: EthereumEvidenceClients, previous?: AgreedCheckpoint): Promise<AgreedCheckpoint> {
-  const deadline = Date.now() + QUALIFICATION_TIMEOUT;
+export async function qualifyFinality(
+  clients: EthereumEvidenceClients, previous?: HistoricalCheckpoint,
+  targets: readonly { number: string; hash: string }[] = [],
+  retained: readonly HistoricalCheckpoint[] = [],
+  retainedLinks: readonly RetainedRequalificationLink[] = [],
+): Promise<AgreedCheckpoint> {
   approved(clients, previous && normalizedCheckpoint(previous));
-  const [primaryId, witnessId, primaryGenesis, witnessGenesis, primaryTip, witnessTip] = await Promise.all([
-    rpc(clients.primaryCall, 'eth_chainId', [], deadline), rpc(clients.witnessCall, 'eth_chainId', [], deadline),
-    numbered(clients.primaryCall, 0n, deadline), numbered(clients.witnessCall, 0n, deadline),
-    block(clients.primaryCall, 'finalized', deadline).then(header), block(clients.witnessCall, 'finalized', deadline).then(header),
-  ]);
-  if (BigInt(quantity(primaryId)) !== clients.chainId || BigInt(quantity(witnessId)) !== clients.chainId ||
-      primaryGenesis.hash !== clients.genesisHash || !sameHeader(primaryGenesis, witnessGenesis)) {
-    hold('Ethereum providers do not match the approved chain identity');
+  for (const link of retainedLinks) {
+    const native = nativeCheckpoint(link.checkpoint);
+    if (String(native.chain_id) !== clients.chainId.toString() || native.genesis_hash !== clients.genesisHash) {
+      hold('retained requalification belongs to another approved network');
+    }
   }
-  const number = BigInt(primaryTip.number) < BigInt(witnessTip.number) ? BigInt(primaryTip.number) : BigInt(witnessTip.number);
-  if (previous && number < BigInt(previous.number)) hold('common finalized Ethereum height regressed below retained checkpoint');
-  const common = await agreedHeader(clients, number, deadline);
-  await Promise.all([
-    descend(clients.primaryCall, primaryTip, common, deadline), descend(clients.witnessCall, witnessTip, common, deadline),
-  ]);
-  const checkpoint: AgreedCheckpoint = {
-    schemaVersion: 1, policy: 'independent-two-el-v1', chainId: clients.chainId.toString(), genesisHash: clients.genesisHash, ...common,
-  };
-  if (previous) {
-    await Promise.all([
-      descend(clients.primaryCall, checkpoint, previous),
-      descend(clients.witnessCall, checkpoint, previous),
-    ]);
+  const fences = new Map<string, string>();
+  for (const target of [...targets, ...retained, ...(previous ? [previous] : [])]) {
+    const number = safe(decimal(target.number)).toString(), hash = bytes(target.hash, 32);
+    if (fences.has(number) && fences.get(number) !== hash) hold('contradictory Ethereum checkpoint fences');
+    fences.set(number, hash);
   }
-  await recheck(clients, checkpoint, Date.now() + RPC_TIMEOUT);
+  for (const checkpoint of retained) approved(clients, normalizedCheckpoint(checkpoint));
+  const wire = (checkpoint: HistoricalCheckpoint) => checkpoint.schemaVersion === 2 ? checkpoint.native : checkpoint;
+  const response = await clients.native.request({ op: 'qualify',
+    ...(previous ? { previousCheckpoint: wire(previous) } : {}),
+    ...(retained.length ? { checkpointFences: retained.map(wire) } : {}),
+    ...(retainedLinks.length ? { retainedRequalificationLinks: retainedLinks } : {}),
+    targets: [...fences].map(([number, hash]) => ({ number, hash })) });
+  exactObject(response, ['id', 'ok', 'op', 'checkpoint', 'headers', 'requalificationLinks']);
+  if (response.op !== 'qualify' || !Array.isArray(response.headers)) hold('wrong native qualification response');
+  const native = nativeCheckpoint(response.checkpoint);
+  const common = header(native.common_header);
+  const headers = new Map<string, Header>();
+  for (const item of response.headers) {
+    const raw = exactObject(item, ['number', 'timestamp', 'hash', 'parentHash', 'stateRoot', 'transactionsRoot', 'receiptsRoot', 'proofDigest']);
+    const current: Header = { number: safe(decimal(raw.number)).toString(), timestamp: timestamp(decimal(raw.timestamp)),
+      hash: bytes(raw.hash, 32), parentHash: bytes(raw.parentHash, 32), stateRoot: bytes(raw.stateRoot, 32),
+      transactionsRoot: bytes(raw.transactionsRoot, 32), receiptsRoot: bytes(raw.receiptsRoot, 32) };
+    if (!isDeepStrictEqual({ ...current, proofDigest: bytes(raw.proofDigest, 32) }, raw) ||
+        headers.has(current.number)) hold('unexpected native authenticated header');
+    headers.set(current.number, current);
+  }
+  for (const link of retainedLinks) {
+    const retainedHeader = header(link.checkpoint.common_header);
+    const authenticated = headers.get(retainedHeader.number);
+    if (!authenticated || Object.entries(retainedHeader).some(([key, value]) => authenticated[key as keyof Header] !== value) ||
+        (fences.has(retainedHeader.number) && fences.get(retainedHeader.number) !== authenticated.hash)) {
+      hold('missing or inconsistent retained link checkpoint header');
+    }
+    // The native child hashes and authenticates the full consensus header. Its
+    // separately returned hash also belongs to the exact requested fence set.
+    fences.set(retainedHeader.number, authenticated.hash);
+  }
+  const head = headers.get(common.number);
+  if (!head || Object.entries(common).some(([key, value]) => head[key as keyof Header] !== value)) {
+    hold('missing or inconsistent native finalized header');
+  }
+  const checkpoint: AgreedCheckpoint = { schemaVersion: 2, policy: 'beacon-sync-committee-v1',
+    chainId: String(native.chain_id), genesisHash: native.genesis_hash, ...head, native };
+  approved(clients, checkpoint);
+  if (fences.has(checkpoint.number) && fences.get(checkpoint.number) !== checkpoint.hash) {
+    hold('native finalized header contradicts a requested fence');
+  }
+  fences.set(checkpoint.number, checkpoint.hash);
+  if (headers.size !== fences.size ||
+      [...fences].some(([number, hash]) => headers.get(number)?.hash !== hash)) {
+    hold('incomplete native fence qualification');
+  }
+  for (const retainedCheckpoint of [...retained, ...(previous ? [previous] : [])]) {
+    if (!sameHeader(headers.get(retainedCheckpoint.number)!, retainedCheckpoint)) hold('retained checkpoint fields changed');
+  }
+  const requalified = links(response.requalificationLinks);
+  const expectedLinks = [...retained, ...(previous ? [previous] : [])].filter((item) => item.schemaVersion === 1);
+  if (requalified.length !== new Set(expectedLinks.map((item) => checkpointId(item))).size) hold('missing legacy requalification link');
+  qualifications.set(checkpoint, requalified);
+  const verified = new Map<string, HistoricalCheckpoint>();
+  for (const item of [...retained, ...(previous ? [previous] : []), checkpoint]) verified.set(checkpointId(item), item);
+  qualifiedCheckpoints.set(clients, verified);
   return checkpoint;
+}
+
+const qualifications = new WeakMap<AgreedCheckpoint, RequalificationLink[]>();
+const qualifiedCheckpoints = new WeakMap<EthereumEvidenceClients, Map<string, HistoricalCheckpoint>>();
+const pendingRequalificationLinks = new WeakMap<EthereumEvidenceClients, Map<string, RetainedRequalificationLink>>();
+
+export function receiptDate(seconds: string): Date {
+  return new Date(Number(BigInt(timestamp(decimal(seconds))) * 1000n));
 }
 
 function normalizeReceipt(value: unknown): Receipt {
@@ -275,44 +341,36 @@ function normalizeReceipt(value: unknown): Receipt {
 }
 
 export async function authenticateReceipt(
-  clients: EthereumEvidenceClients, txHash: string, expected: { height: number; hash?: string }, checkpoint: AgreedCheckpoint,
+  clients: EthereumEvidenceClients, txHash: string, expected: { height: number; hash?: string; proofDigest?: string }, checkpoint: AgreedCheckpoint,
 ): Promise<AuthenticatedReceipt | undefined> {
-  const deadline = Date.now() + QUALIFICATION_TIMEOUT;
   approved(clients, normalizedCheckpoint(checkpoint));
+  if (checkpoint.schemaVersion !== 2) hold('legacy receipt authority requires requalification');
   const target = height(expected.height);
   const transactionHash = bytes(txHash, 32);
   const expectedHash = expected.hash === undefined ? undefined : bytes(expected.hash, 32);
+  const expectedProof = expected.proofDigest === undefined ? undefined : bytes(expected.proofDigest, 32);
   if (target > BigInt(checkpoint.number)) return undefined;
-  const [primary, witness] = await Promise.all([
-    rpc(clients.primaryCall, 'eth_getTransactionReceipt', [transactionHash], deadline),
-    rpc(clients.witnessCall, 'eth_getTransactionReceipt', [transactionHash], deadline),
-  ]);
-  if (primary === null && witness === null) return undefined;
-  if (primary === null || witness === null) hold('Ethereum providers disagree about original receipt presence');
-  const receipt = normalizeReceipt(primary);
-  if (JSON.stringify(receipt) !== JSON.stringify(normalizeReceipt(witness))) hold('independent Ethereum receipts disagree');
-  if (receipt.transactionHash !== transactionHash || BigInt(receipt.blockNumber) !== target ||
+  const response = await clients.native.request({ op: 'receipts', checkpoint: checkpoint.native,
+    originals: [{ hash: transactionHash, number: target.toString(), ...(expectedHash ? { blockHash: expectedHash } : {}),
+      ...(expectedProof ? { proofDigest: expectedProof } : {}) }] });
+  exactObject(response, ['id', 'ok', 'op', 'checkpoint', 'receipts']);
+  if (response.op !== 'receipts' || !isDeepStrictEqual(response.checkpoint, checkpoint.native) ||
+      !Array.isArray(response.receipts) || response.receipts.length !== 1) hold('native original checkpoint changed');
+  const item = exactObject(response.receipts[0], ['hash', 'number', 'blockHash', 'receipt', 'blockTimestamp', 'proofDigest']);
+  const receipt = normalizeReceipt(item.receipt);
+  if (item.hash !== transactionHash || item.number !== target.toString() || item.blockHash !== receipt.blockHash ||
+      receipt.transactionHash !== transactionHash || BigInt(receipt.blockNumber) !== target ||
       (expectedHash !== undefined && receipt.blockHash !== expectedHash)) hold('original Ethereum receipt identity changed');
-  const inclusion = await historicalHeader(clients, checkpoint, target, deadline);
-  if (inclusion.hash !== receipt.blockHash) hold('receipt is not in the canonical finalized Ethereum block');
-  const blocks = await Promise.all([
-    block(clients.primaryCall, `0x${target.toString(16)}`, deadline), block(clients.witnessCall, `0x${target.toString(16)}`, deadline),
-  ]);
-  for (const value of blocks) {
-    const raw = object(value);
-    if (!sameHeader(header(raw), inclusion) || !Array.isArray(raw.transactions) ||
-        bytes(raw.transactions[Number(BigInt(receipt.transactionIndex))], 32) !== transactionHash) {
-      hold('Ethereum receipt transaction index is not in the agreed block');
-    }
-  }
-  await recheck(clients, checkpoint, deadline);
-  return { receipt, blockTimestamp: inclusion.timestamp, checkpoint };
+  if (expectedProof !== undefined && item.proofDigest !== expectedProof) hold('native original inclusion proof identity changed');
+  return { receipt, blockTimestamp: timestamp(decimal(item.blockTimestamp)), checkpoint,
+    inclusionProofDigest: bytes(item.proofDigest, 32), checkpointProofDigest: checkpoint.native.beacon.proofDigest,
+    requalificationLinks: qualifications.get(checkpoint) ?? [] };
 }
 
 export function createReceiptAuthenticator(clients: EthereumEvidenceClients, checkpoint: AgreedCheckpoint): ReceiptAuthenticator {
   const receipts = new Map<string, Promise<AuthenticatedReceipt | undefined>>();
   return (hash, expected) => {
-    const key = `${bytes(hash, 32)}:${height(expected.height)}:${expected.hash === undefined ? '' : bytes(expected.hash, 32)}`;
+    const key = `${bytes(hash, 32)}:${height(expected.height)}:${expected.hash === undefined ? '' : bytes(expected.hash, 32)}:${expected.proofDigest === undefined ? '' : bytes(expected.proofDigest, 32)}`;
     let result = receipts.get(key);
     if (!result) {
       result = authenticateReceipt(clients, hash, expected, checkpoint);
@@ -322,23 +380,113 @@ export function createReceiptAuthenticator(clients: EthereumEvidenceClients, che
   };
 }
 
-export function checkpointId(checkpoint: AgreedCheckpoint): string {
+export function checkpointId(checkpoint: HistoricalCheckpoint): string {
   const value = normalizedCheckpoint(checkpoint);
-  return `${value.chainId}:${value.genesisHash}:${value.number}`;
+  const legacy = `${value.chainId}:${value.genesisHash}:${value.number}`;
+  return value.schemaVersion === 1 ? legacy : `${value.policy}:${legacy}:${value.native.beacon.proofDigest}`;
 }
 
-export async function loadCheckpoint(store: Store, clients: EthereumEvidenceClients): Promise<AgreedCheckpoint | undefined> {
+export async function loadCheckpoint(store: Store, clients: EthereumEvidenceClients): Promise<HistoricalCheckpoint | undefined> {
+  const checkpoints = await loadCheckpoints(store, clients);
+  return checkpoints.reduce<HistoricalCheckpoint | undefined>((highest, current) =>
+    !highest || BigInt(current.number) > BigInt(highest.number) ? current : highest, undefined);
+}
+
+async function loadCheckpoints(store: Store, clients: EthereumEvidenceClients): Promise<HistoricalCheckpoint[]> {
   approved(clients);
-  // The database is not chain-partitioned: even a lower foreign row is a conflict.
   const rows = await store.find(EthereumFinalityCheckpoint, {});
-  let highest: AgreedCheckpoint | undefined;
-  for (const row of rows) {
+  return rows.map((row) => {
     const checkpoint = normalizedCheckpoint(row.checkpoint);
     approved(clients, checkpoint);
     if (row.id !== checkpointId(checkpoint) || BigInt(row.blockNumber) !== BigInt(checkpoint.number)) hold('retained checkpoint row identity is inconsistent');
-    if (!highest || BigInt(checkpoint.number) > BigInt(highest.number)) highest = checkpoint;
+    return row.checkpoint;
+  });
+}
+
+export async function qualifyStoredFinality(
+  store: Store, clients: EthereumEvidenceClients, targets: readonly { number: string; hash: string }[] = [],
+): Promise<AgreedCheckpoint> {
+  pendingRequalificationLinks.set(clients, new Map());
+  return qualifyFinality(clients, undefined, targets, await loadCheckpoints(store, clients));
+}
+
+export async function recheckFinality(clients: EthereumEvidenceClients, checkpoint: AgreedCheckpoint): Promise<void> {
+  // A moving head must not replace the original page's receipt authorization references.
+  const pending = pendingRequalificationLinks.get(clients);
+  if (pending?.size) {
+    const legacy = [...(qualifiedCheckpoints.get(clients)?.values() ?? [])].filter((item) => item.schemaVersion === 1);
+    await qualifyFinality(clients, checkpoint, [], legacy, [...pending.values()]);
   }
-  return highest;
+  const response = await clients.native.request({ op: 'receipts', checkpoint: checkpoint.native, originals: [] });
+  exactObject(response, ['id', 'ok', 'op', 'checkpoint', 'receipts']);
+  if (response.op !== 'receipts' || !isDeepStrictEqual(response.checkpoint, checkpoint.native) ||
+      !Array.isArray(response.receipts) || response.receipts.length) hold('fixed native checkpoint changed');
+  pending?.clear();
+}
+
+export function proofReference(original: ProofReference): ProofReference {
+  const inclusionProofDigest = bytes(original.inclusionProofDigest, 32);
+  const checkpointProofDigest = bytes(original.checkpointProofDigest, 32);
+  if (inclusionProofDigest !== original.inclusionProofDigest || checkpointProofDigest !== original.checkpointProofDigest) {
+    hold('noncanonical receipt proof reference');
+  }
+  return { inclusionProofDigest, checkpointProofDigest, requalificationLinks: links(original.requalificationLinks) };
+}
+
+export function receiptAuthorization(
+  original: AuthenticatedReceipt, requalificationLinks: RequalificationLink[] = [],
+): Omit<SourceReceiptAuth, 'localLogIndex'> {
+  return { version: 2, checkpointId: checkpointId(original.checkpoint), receipt: original.receipt,
+    blockTimestamp: original.blockTimestamp, ...proofReference(original), requalificationLinks: links(requalificationLinks) };
+}
+
+export function requalificationLinksFor(
+  clients: EthereumEvidenceClients, original: AuthenticatedReceipt,
+  checkpointIds: readonly (string | undefined)[], retained?: readonly RequalificationLink[],
+): RequalificationLink[] {
+  const required = new Set<string>();
+  for (const id of checkpointIds) {
+    if (id === undefined) continue;
+    const checkpoint = qualifiedCheckpoints.get(clients)?.get(id);
+    if (!checkpoint) hold('missing archived authorization checkpoint');
+    required.add(legacyCheckpointDigest(checkpoint));
+  }
+  const candidates = retained === undefined ? original.requalificationLinks : links(retained);
+  const selected = candidates.filter((link) => required.has(link.originalDigest));
+  if (selected.length !== required.size || (retained !== undefined && selected.length !== retained.length)) {
+    hold('receipt authorization does not bind its exact archived checkpoints');
+  }
+  return selected;
+}
+
+export function assertAuthorizationCheckpoint(
+  clients: EthereumEvidenceClients, id: string, block: bigint, proofDigest?: string,
+): void {
+  const checkpoint = qualifiedCheckpoints.get(clients)?.get(id);
+  if (!checkpoint || BigInt(checkpoint.number) < block) hold('missing original authorization checkpoint fence');
+  if (proofDigest !== undefined && (checkpoint.schemaVersion !== 2 || checkpoint.native.beacon.proofDigest !== proofDigest)) {
+    hold('receipt authorization proof does not match its checkpoint');
+  }
+}
+
+export function assertReceiptAuthorization(
+  clients: EthereumEvidenceClients, retained: Omit<SourceReceiptAuth, 'localLogIndex'>, original: AuthenticatedReceipt,
+): void {
+  if (retained.version !== 2 || retained.blockTimestamp !== original.blockTimestamp ||
+      !isDeepStrictEqual(retained.receipt, original.receipt)) hold('retained receipt authorization changed');
+  proofReference(retained);
+  assertAuthorizationCheckpoint(clients, retained.checkpointId, BigInt(original.receipt.blockNumber), retained.checkpointProofDigest);
+  if (retained.inclusionProofDigest !== original.inclusionProofDigest) hold('retained original inclusion proof changed');
+  if (retained.requalificationLinks.length) {
+    const checkpoint = qualifiedCheckpoints.get(clients)?.get(retained.checkpointId);
+    if (!checkpoint || checkpoint.schemaVersion !== 2) hold('missing original native link checkpoint');
+    let pending = pendingRequalificationLinks.get(clients);
+    if (!pending) { pending = new Map(); pendingRequalificationLinks.set(clients, pending); }
+    for (const link of retained.requalificationLinks) {
+      pending.set(`${link.originalDigest}:${link.proofDigest}:${checkpoint.native.beacon.proofDigest}`,
+        { ...link, checkpoint: checkpoint.native });
+    }
+  }
 }
 
 export async function retainCheckpoint(store: Store, checkpoint: AgreedCheckpoint): Promise<void> {
@@ -347,7 +495,7 @@ export async function retainCheckpoint(store: Store, checkpoint: AgreedCheckpoin
   const existing = await store.findOneBy(EthereumFinalityCheckpoint, { id });
   if (existing) {
     if (existing.id !== id || BigInt(existing.blockNumber) !== BigInt(normalized.number) ||
-        JSON.stringify(normalizedCheckpoint(existing.checkpoint)) !== JSON.stringify(normalized)) hold('conflicting retained Ethereum checkpoint');
+        !isDeepStrictEqual(normalizedCheckpoint(existing.checkpoint), normalized)) hold('conflicting retained Ethereum checkpoint');
     return;
   }
   try {
@@ -366,25 +514,6 @@ export async function retainCheckpoint(store: Store, checkpoint: AgreedCheckpoin
 export async function requireFinalizedBatch(
   ctx: Context, headers: readonly { height: number; hash: string }[] = ctx.blocks.map(({ header }) => header),
 ): Promise<AgreedCheckpoint> {
-  const clients = createEthereumEvidenceClients((method, params) => ctx._chain.client.call(method, params));
-  const checkpoint = await qualifyFinality(clients, await loadCheckpoint(ctx.store, clients));
-  const deadline = Date.now() + QUALIFICATION_TIMEOUT;
-  const expected = new Map<bigint, string>();
-  for (const item of headers) {
-    const number = height(item.height);
-    const hash = bytes(item.hash, 32);
-    if (number > BigInt(checkpoint.number)) hold('Ethereum batch is ahead of common finality');
-    if (expected.has(number) && expected.get(number) !== hash) hold('contradictory Ethereum batch headers');
-    expected.set(number, hash);
-  }
-  let previous: Header | undefined;
-  for (const [number, hash] of [...expected].sort(([a], [b]) => a < b ? -1 : 1)) {
-    const current = await historicalHeader(clients, checkpoint, number, deadline);
-    if (current.hash !== hash || (previous && BigInt(previous.number) + 1n === number && current.parentHash !== previous.hash)) {
-      hold('noncanonical or unlinked Ethereum batch header');
-    }
-    previous = current;
-  }
-  await recheck(clients, checkpoint, deadline);
-  return checkpoint;
+  return qualifyStoredFinality(ctx.store, createEthereumEvidenceClients('eth'),
+    headers.map((item) => ({ number: height(item.height).toString(), hash: bytes(item.hash, 32) })));
 }

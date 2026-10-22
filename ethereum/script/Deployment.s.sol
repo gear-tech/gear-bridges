@@ -3,9 +3,9 @@
 pragma solidity ^0.8.37;
 
 import {Script} from "forge-std/Script.sol";
-import {Base} from "test/Base.sol";
+import {DeploymentBase} from "script/DeploymentBase.sol";
 
-contract DeploymentScript is Script, Base {
+contract DeploymentScript is Script, DeploymentBase {
     function run() public {
         deployBridgeFromEnvironment();
     }

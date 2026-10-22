@@ -41,6 +41,7 @@ pub async fn relay(
     storage_path: &Path,
     cutover_seal: Option<&Path>,
     approved_manager_code: Option<H256>,
+    native_wrapper_approval: Option<Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>,
 ) -> AnyResult<()> {
     super::cutover::reject_sealed(storage_path)?;
     let _journal_lock = lock_journal(storage_path)?;
@@ -132,6 +133,7 @@ pub async fn relay(
                 approved_manager_code,
                 &client,
                 &eth_api,
+                native_wrapper_approval.as_deref(),
             )
             .await?
         } else {
@@ -141,6 +143,7 @@ pub async fn relay(
                 approved_manager_code,
                 &client,
                 &eth_api,
+                native_wrapper_approval.as_deref(),
             )
             .await?
         }
@@ -174,6 +177,7 @@ pub async fn relay(
         gear_suri.clone(),
         None,
     )
+    .with_native_wrapper_approval(native_wrapper_approval)
     .with_signer_ownership(_signer_lock);
     let proof_composer = ProofComposer::new(
         provider_connection,

@@ -1,4 +1,4 @@
-use crate::services::{decode_complete_reply, Config, Error};
+use crate::services::{decode_complete_reply, Config, Error, NativeWrapperMode, VftManager};
 use core::cell::Cell;
 use gstd::{errors::Error as GStdError, msg};
 use sails_rs::{calls::ActionIo, prelude::*, rc::Rc};
@@ -65,7 +65,7 @@ pub(super) fn unlock_false(guard: &super::LogGuard<'_>) -> bool {
     })
 }
 
-fn retryable_native_child(guard: &super::LogGuard<'_>) -> bool {
+pub(super) fn retryable_native_child(guard: &super::LogGuard<'_>) -> bool {
     guard.deposit.native
         && matches!(
             super::deposit_status(guard.key, guard.deposit.log_index),
@@ -76,6 +76,35 @@ fn retryable_native_child(guard: &super::LogGuard<'_>) -> bool {
                 && details.terminal
                 && details.failure == Some(ChildFailure::ErrorReply)
         })
+}
+
+pub(super) fn native_mode(token: ActorId) -> Result<NativeWrapperMode, Error> {
+    VftManager::new().state().native_wrapper
+        .filter(|wrapper| wrapper.actor_id == token)
+        .map(|wrapper| wrapper.mode)
+        .ok_or(Error::InvalidReconciliation)
+}
+
+fn refund_backed(mode: NativeWrapperMode, amount: U256, returned_value: u128) -> bool {
+    match mode {
+        NativeWrapperMode::EscrowV1 => U256::from(returned_value) == amount,
+        NativeWrapperMode::HeldEscrowV2 => U256::from(returned_value) >= amount,
+    }
+}
+
+fn retry_backed_credit(mode: NativeWrapperMode, redemption: &Redemption) -> bool {
+    match mode {
+        NativeWrapperMode::EscrowV1 => {
+            redemption.status == PayoutStatus::Queued
+                && refund_backed(mode, redemption.amount, redemption.returned_value)
+        }
+        NativeWrapperMode::HeldEscrowV2 => {
+            matches!(
+                redemption.status,
+                PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+            ) && refund_backed(mode, redemption.amount, redemption.returned_value)
+        }
+    }
 }
 
 /// Only the immutable original manager child is made quiescent by evidence.
@@ -263,12 +292,20 @@ pub fn handle_persistent_reply() {
         }
         let bytes = msg::load_bytes().map_err(|e| Error::GasForReplyTooLow(format!("{e:?}")))?;
         match data.action {
-            ChildAction::Mint => decode_complete_reply::<Mint>(&bytes, |e| Error::Internal(format!("{e:?}"))).map(|_| false),
-            ChildAction::Unlock => decode_complete_reply::<TransferFrom>(&bytes, |e| Error::Internal(format!("{e:?}")))?
-                .then_some(false)
-                .ok_or(Error::TokenOperationRejected),
+            ChildAction::Mint => {
+                decode_complete_reply::<Mint>(&bytes, |e| Error::Internal(format!("{e:?}")))
+                    .map(|_| false)
+            }
+            ChildAction::Unlock => {
+                decode_complete_reply::<TransferFrom>(&bytes, |e| Error::Internal(format!("{e:?}")))?
+                    .then_some(false)
+                    .ok_or(Error::TokenOperationRejected)
+            }
             ChildAction::Native => {
-                let r = decode_complete_reply::<RedeemEscrow>(&bytes, |e| Error::Internal(format!("{e:?}")))?;
+                let mode = native_mode(data.token_id)?;
+                let r = decode_complete_reply::<RedeemEscrow>(&bytes, |e| {
+                    Error::Internal(format!("{e:?}"))
+                })?;
                 if (r.from, r.to, r.amount) != (Syscall::program_id(), data.receiver, data.amount)
                     || r.child.is_zero()
                     || r.child == child
@@ -277,12 +314,12 @@ pub fn handle_persistent_reply() {
                 }
                 match r.status {
                     PayoutStatus::Delivered if r.returned_value == 0 => Ok(false),
-                    PayoutStatus::Refunded if U256::from(r.returned_value) >= r.amount => {
+                    PayoutStatus::Refunded if refund_backed(mode, r.amount, r.returned_value) => {
                         refund = Some((r.child, r.returned_value));
                         Ok(true)
                     }
                     PayoutStatus::Queued
-                        if r.returned_value == 0 || U256::from(r.returned_value) >= r.amount =>
+                        if r.returned_value == 0 || refund_backed(mode, r.amount, r.returned_value) =>
                     {
                         Err(Error::NativeSettlementPending)
                     }
@@ -401,11 +438,12 @@ pub(super) async fn reconcile_native_log(
     if guard.child.is_none() {
         return Err(Error::InvalidReconciliation);
     }
+    let mode = native_mode(deposit.token_id)?;
     let original = query_native::<GetRedemption>(&guard, &deposit.operation_id, config).await?;
     guard.check()?;
     let mut redemption = original.ok_or(Error::InvalidReconciliation)?;
     validate_redemption(&guard, &redemption)?;
-    if matches!(
+    if mode == NativeWrapperMode::HeldEscrowV2 && matches!(
         redemption.status,
         PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
     ) {
@@ -425,11 +463,7 @@ pub(super) async fn reconcile_native_log(
             return Err(Error::NativeSettlementPending);
         }
     }
-    if matches!(
-        redemption.status,
-        PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
-    ) && U256::from(redemption.returned_value) >= deposit.amount
-    {
+    if retry_backed_credit(mode, &redemption) {
         let payout_child = redemption.child;
         // This existing-operation retry can only credit full returned backing.
         // It never starts a replacement native payout.
@@ -446,14 +480,17 @@ pub(super) async fn reconcile_native_log(
         .await?;
         guard.check()?;
         validate_redemption(&guard, &redemption)?;
-        if redemption.child != payout_child {
+        if redemption.child != payout_child
+            || redemption.status != PayoutStatus::Refunded
+            || !refund_backed(mode, deposit.amount, redemption.returned_value)
+        {
             return Err(Error::InvalidReconciliation);
         }
     }
     match redemption.status {
         PayoutStatus::Delivered | PayoutStatus::Refunded => {
             let refunded = redemption.status == PayoutStatus::Refunded;
-            if (refunded && U256::from(redemption.returned_value) < deposit.amount)
+            if (refunded && !refund_backed(mode, deposit.amount, redemption.returned_value))
                 || (!refunded && redemption.returned_value != 0)
             {
                 return Err(Error::InvalidReply);
@@ -542,26 +579,100 @@ mod tests {
     use vft_vara_client::Redemption;
 
     #[test]
+    fn immutable_v1_refund_and_retry_boundaries_are_not_v2_capabilities() {
+        let mut redemption = Redemption {
+            from: ActorId::from([1; 32]),
+            to: ActorId::from([2; 32]),
+            amount: U256::from(5u64),
+            child: MessageId::from([3; 32]),
+            status: PayoutStatus::Queued,
+            returned_value: 5,
+        };
+        for returned_value in [0, 4, 5, 6] {
+            redemption.returned_value = returned_value;
+            assert_eq!(
+                refund_backed(NativeWrapperMode::EscrowV1, redemption.amount, returned_value),
+                returned_value == 5
+            );
+            assert_eq!(
+                refund_backed(NativeWrapperMode::HeldEscrowV2, redemption.amount, returned_value),
+                returned_value >= 5
+            );
+            for status in [
+                PayoutStatus::Queued, PayoutStatus::Returned, PayoutStatus::Ambiguous,
+                PayoutStatus::Delivered, PayoutStatus::Refunded,
+            ] {
+                redemption.status = status;
+                assert_eq!(
+                    retry_backed_credit(NativeWrapperMode::EscrowV1, &redemption),
+                    redemption.status == PayoutStatus::Queued && returned_value == 5
+                );
+                assert_eq!(
+                    retry_backed_credit(NativeWrapperMode::HeldEscrowV2, &redemption),
+                    matches!(redemption.status,
+                        PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous)
+                        && returned_value >= 5
+                );
+            }
+        }
+    }
+
+    #[test]
     fn complete_reply_decoding_preserves_unit_wire_and_rejects_trailing_native_state() {
-        assert_eq!(decode_complete_reply::<Mint>(&[], |e| Error::Internal(format!("{e:?}"))), Ok(()));
+        let internal = |e| Error::Internal(format!("{e:?}"));
+        assert_eq!(decode_complete_reply::<Mint>(&[], internal), Ok(()));
         assert_eq!(
-            decode_complete_reply::<Mint>(Mint::ROUTE, |e| Error::Internal(format!("{e:?}"))),
+            decode_complete_reply::<Mint>(Mint::ROUTE, internal),
             Err(Error::InvalidReply)
         );
         let mut unlock_false = TransferFrom::ROUTE.to_vec();
         false.encode_to(&mut unlock_false);
-        assert_eq!(decode_complete_reply::<TransferFrom>(&unlock_false, |e| Error::Internal(format!("{e:?}"))), Ok(false));
+        assert_eq!(
+            decode_complete_reply::<TransferFrom>(&unlock_false, internal),
+            Ok(false)
+        );
         unlock_false.push(0);
         assert_eq!(
-            decode_complete_reply::<TransferFrom>(&unlock_false, |e| Error::Internal(format!("{e:?}"))),
+            decode_complete_reply::<TransferFrom>(&unlock_false, internal),
             Err(Error::InvalidReply),
         );
         let mut reply = GetRedemption::ROUTE.to_vec();
         None::<Redemption>.encode_to(&mut reply);
-        assert_eq!(decode_complete_reply::<GetRedemption>(&reply, |e| Error::Internal(format!("{e:?}"))), Ok(None));
+        assert_eq!(
+            decode_complete_reply::<GetRedemption>(&reply, internal),
+            Ok(None)
+        );
         reply.push(0);
         assert_eq!(
-            decode_complete_reply::<GetRedemption>(&reply, |e| Error::Internal(format!("{e:?}"))),
+            decode_complete_reply::<GetRedemption>(&reply, internal),
+            Err(Error::InvalidReply)
+        );
+
+        use vft_client::vft::io::{BalanceOf, Transfer};
+        let mut balance = BalanceOf::ROUTE.to_vec();
+        U256::from(7u64).encode_to(&mut balance);
+        assert_eq!(
+            decode_complete_reply::<BalanceOf>(&balance, internal),
+            Ok(U256::from(7u64))
+        );
+        balance.push(0);
+        assert_eq!(
+            decode_complete_reply::<BalanceOf>(&balance, internal),
+            Err(Error::InvalidReply)
+        );
+        let mut transfer = Transfer::ROUTE.to_vec();
+        true.encode_to(&mut transfer);
+        assert_eq!(
+            decode_complete_reply::<Transfer>(&transfer, internal),
+            Ok(true)
+        );
+        assert!(matches!(
+            decode_complete_reply::<TransferFrom>(&transfer, internal),
+            Err(Error::Internal(_))
+        ));
+        transfer.push(0);
+        assert_eq!(
+            decode_complete_reply::<Transfer>(&transfer, internal),
             Err(Error::InvalidReply)
         );
     }

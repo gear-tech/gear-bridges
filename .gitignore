@@ -16,6 +16,7 @@ deployment.toml
 
 .direnv/
 .worktrees/
+/.security-audit/
 
 # js
 node_modules/

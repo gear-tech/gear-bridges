@@ -2,12 +2,12 @@
 pragma solidity ^0.8.37;
 
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {DeploymentBase} from "script/DeploymentBase.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {VaraMessage} from "src/interfaces/IMessageQueue.sol";
-import {DeploymentBase} from "script/DeploymentBase.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 
 /// @dev Local-only fixture broadcaster. The Python entrypoint owns the Anvil and

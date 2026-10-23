@@ -11,7 +11,9 @@ use core::{fmt, future::Future};
 use ethereum_common::{
     base_types::{Bitvector, BytesFixed, FixedArray},
     beacon::{BLSPubKey, SyncAggregate, SyncCommittee},
-    merkle, tree_hash::TreeHash, utils as eth_utils, SYNC_COMMITTEE_SIZE,
+    merkle,
+    tree_hash::TreeHash,
+    utils as eth_utils, SYNC_COMMITTEE_SIZE,
 };
 use sails_rs::scale_codec::DecodeAll;
 
@@ -63,8 +65,7 @@ impl From<BackendError> for VerificationError {
 /// The only environment seam. Return the complete SCALE-encoded builtin response;
 /// the verifier checks its variant and consumes both outer and inner bytes exactly.
 pub trait BlsBackend: Sync {
-    fn call(&self, request: Request)
-        -> impl Future<Output = Result<Vec<u8>, BackendError>> + Send;
+    fn call(&self, request: Request) -> impl Future<Output = Result<Vec<u8>, BackendError>> + Send;
 }
 
 #[derive(Clone, Copy)]
@@ -190,7 +191,9 @@ async fn verify_decoded_update<B: BlsBackend>(
     } = update;
     let network = state.network;
     let update_slot_finalized = finalized_header.slot;
-    let current_slot = network.current_slot(now_ms).ok_or(Error::InvalidTimestamp)?;
+    let current_slot = network
+        .current_slot(now_ms)
+        .ok_or(Error::InvalidTimestamp)?;
     if !(current_slot >= signature_slot
         && signature_slot > attested_header.slot
         && attested_header.slot >= update_slot_finalized)
@@ -284,8 +287,8 @@ fn verify_next_committee(
     ) else {
         return Ok(None);
     };
-    let committee = construct_sync_committee(aggregate_pubkey, &keys)
-        .ok_or(Error::InvalidPublicKeys)?;
+    let committee =
+        construct_sync_committee(aggregate_pubkey, &keys).ok_or(Error::InvalidPublicKeys)?;
     if !merkle::is_next_committee_proof_valid(network, attested_header, &committee, &branch) {
         return Err(Error::InvalidNextSyncCommitteeProof);
     }

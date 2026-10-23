@@ -2,12 +2,10 @@ use crate::{backend, services::Event, State};
 use cell::RefCell;
 use checkpoint_light_client_io::{
     verification::{verify_update, VerificationState},
-    Error as SyncCommitteeUpdateError, ReplayBack,
-    Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP,
+    Error as SyncCommitteeUpdateError, ReplayBack, Update as SyncCommitteeUpdate, MAX_EPOCHS_GAP,
 };
 use ethereum_common::{tree_hash::TreeHash, utils as eth_utils};
 use sails_rs::{prelude::*, rc::Rc};
-
 
 pub struct SyncUpdate<'a> {
     state: &'a RefCell<State>,

@@ -1,6 +1,5 @@
 //! Independent transports and real signed transaction/receipt roots; no proof bypasses.
 use super::{tests::header_chain as chain, *};
-use beacon_finality::test_fixtures::{single_account_proof, LocalBeaconFixture};
 use alloy::{
     consensus::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
@@ -12,6 +11,7 @@ use alloy::{
     rpc::types::BlockTransactions,
     sol_types::SolCall,
 };
+use beacon_finality::test_fixtures::{single_account_proof, LocalBeaconFixture};
 use serde_json::json;
 use std::collections::BTreeSet;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,6 +25,7 @@ struct State {
     missing: BTreeSet<u64>,
     unavailable: bool,
     http_failure: Option<(&'static str, u16)>,
+    http_redirect: Option<(u16, String)>,
     rpc_failure: Option<&'static str>,
     receipt: Option<TransactionReceipt>,
     receipts: Vec<TransactionReceipt>,
@@ -52,7 +53,8 @@ impl Fixture {
         let url = format!("http://{}", listener.local_addr()?);
         let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(62))?;
         let (state_root, proof) = single_account_proof(signer.address(), 7);
-        let account_proofs = chain.iter()
+        let account_proofs = chain
+            .iter()
             .filter(|block| block.header.state_root == state_root)
             .map(|block| (block.header.hash, proof.clone()))
             .collect();
@@ -64,6 +66,7 @@ impl Fixture {
             missing: BTreeSet::new(),
             unavailable: false,
             http_failure: None,
+            http_redirect: None,
             rpc_failure: None,
             receipt: None,
             receipts: vec![],
@@ -110,8 +113,8 @@ impl Fixture {
                         }
                     };
                     // Inclusion faults target the full-body fetch, not Beacon's header binding.
-                    let inclusion_request = request["method"] != "eth_getBlockByHash"
-                        || request["params"][1] == true;
+                    let inclusion_request =
+                        request["method"] != "eth_getBlockByHash" || request["params"][1] == true;
                     let http_failure = {
                         let mut state = shared.lock().unwrap();
                         state.requests.push(request.clone());
@@ -119,6 +122,13 @@ impl Fixture {
                             .http_failure
                             .filter(|(method, _)| request["method"] == *method && inclusion_request)
                     };
+                    let redirect = shared.lock().unwrap().http_redirect.clone();
+                    if let Some((status, location)) = redirect {
+                        let _ = socket.write_all(format!(
+                            "HTTP/1.1 {status} Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        ).as_bytes()).await;
+                        return;
+                    }
                     if let Some((_, status)) = http_failure {
                         let _ = socket.write_all(format!(
                             "HTTP/1.1 {status} Fixture failure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -165,7 +175,12 @@ impl Fixture {
                 });
             }
         });
-        Ok(Self { url, state, server, beacon: tokio::sync::Mutex::new(None) })
+        Ok(Self {
+            url,
+            state,
+            server,
+            beacon: tokio::sync::Mutex::new(None),
+        })
     }
 
     async fn beacon_settings(&self) -> AnyResult<(BeaconFinalityConfig, std::path::PathBuf)> {
@@ -174,15 +189,23 @@ impl Fixture {
             let state = self.state.clone();
             let genesis = state.lock().unwrap().chain[0].header.hash;
             let bootstrap = std::sync::atomic::AtomicBool::new(true);
-            *owned = Some(LocalBeaconFixture::new(31337, genesis, Arc::new(move || {
-                let state = state.lock().unwrap();
-                let height = if bootstrap.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                    1
-                } else {
-                    state.signed_tip
-                };
-                state.chain[height].header.clone()
-            })).await?);
+            *owned = Some(
+                LocalBeaconFixture::new(
+                    31337,
+                    genesis,
+                    Arc::new(move || {
+                        let state = state.lock().unwrap();
+                        let height = if bootstrap.swap(false, std::sync::atomic::Ordering::Relaxed)
+                        {
+                            1
+                        } else {
+                            state.signed_tip
+                        };
+                        state.chain[height].header.clone()
+                    }),
+                )
+                .await?,
+            );
         }
         let beacon = owned.as_ref().unwrap();
         Ok((beacon.config.clone(), beacon.directory.clone()))
@@ -191,9 +214,12 @@ impl Fixture {
     async fn polling(&self, witness: &Self) -> AnyResult<PollingEthApi> {
         let genesis = self.state.lock().unwrap().chain[0].header.hash;
         let (config, directory) = self.beacon_settings().await?;
-        PollingEthApi::new(&self.url).await?
-            .with_beacon_finality(config, directory).await?
-            .with_data_witness(&witness.url, 31337, genesis).await
+        PollingEthApi::new(&self.url)
+            .await?
+            .with_beacon_finality(config, directory)
+            .await?
+            .with_data_witness(&witness.url, 31337, genesis)
+            .await
     }
 
     async fn api(&self, witness: &Self) -> AnyResult<EthApi> {
@@ -280,13 +306,7 @@ async fn wrong_network_outage_and_private_forks_never_qualify_or_replace_fences(
         .await?;
     let checkpoint = view.checkpoint().clone();
     let fence = std::fs::read(cleanup.directory.join("fence.json"))?;
-    for fault in [
-        "network",
-        "genesis",
-        "outage",
-        "private",
-        "malformed",
-    ] {
+    for fault in ["network", "genesis", "outage", "private", "malformed"] {
         {
             let mut state = witness.state.lock().unwrap();
             match fault {
@@ -342,7 +362,9 @@ async fn wrong_network_outage_and_private_forks_never_qualify_or_replace_fences(
     };
     let historical = FinalityCheckpoint::Legacy(legacy.clone());
     let original_bytes = serde_json::to_vec(&historical)?;
-    fresh.verify_checkpoint(api.raw_provider(), &historical).await?;
+    fresh
+        .verify_checkpoint(api.raw_provider(), &historical)
+        .await?;
     assert_eq!(serde_json::to_vec(&historical)?, original_bytes);
     let (_, directory) = primary.beacon_settings().await?;
     let original_file = std::fs::read_dir(&directory)?
@@ -352,24 +374,47 @@ async fn wrong_network_outage_and_private_forks_never_qualify_or_replace_fences(
         .path();
     let retained_original: Bytes = serde_json::from_slice(&std::fs::read(&original_file)?)?;
     assert_eq!(retained_original.as_ref(), original_bytes.as_slice());
-    let digest = original_file.file_stem().unwrap().to_str().unwrap().strip_prefix("legacy-").unwrap();
+    let digest = original_file
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .strip_prefix("legacy-")
+        .unwrap();
     let proof = &fresh.checkpoint().beacon().unwrap().beacon;
-    let link = directory.join(format!("requalified-{digest}-{:x}.json", proof.proof_digest));
+    let link = directory.join(format!(
+        "requalified-{digest}-{:x}.json",
+        proof.proof_digest
+    ));
     let (_, linked): (B256, BeaconCheckpointProof) = serde_json::from_slice(&std::fs::read(link)?)?;
     assert_eq!(&linked, proof);
     for primary_tip in [true, false] {
         let mut forged = legacy.clone();
-        let header = if primary_tip { &mut forged.primary_finalized_header } else { &mut forged.witness_finalized_header };
+        let header = if primary_tip {
+            &mut forged.primary_finalized_header
+        } else {
+            &mut forged.witness_finalized_header
+        };
         header.extra_data = vec![0xfa].into();
-        assert!(fresh.verify_checkpoint(api.raw_provider(), &FinalityCheckpoint::Legacy(forged)).await.is_err());
+        assert!(fresh
+            .verify_checkpoint(api.raw_provider(), &FinalityCheckpoint::Legacy(forged))
+            .await
+            .is_err());
     }
     // Freeze the exact retained schema-2 pin while the global cache remains at height 5.
-    fresh.pin_to_checkpoint(api.raw_provider(), &checkpoint).await?;
+    fresh
+        .pin_to_checkpoint(api.raw_provider(), &checkpoint)
+        .await?;
     assert_eq!(fresh.block_number(), 4);
     assert_eq!(fresh.block_hash(), chain[4].header.hash);
     assert_eq!(fresh.checkpoint(), &checkpoint);
     assert!(!fresh.contains(5, chain[5].header.hash));
-    fresh.verify_blocks(api.raw_provider(), &BTreeMap::from([(1, chain[1].header.hash)])).await?;
+    fresh
+        .verify_blocks(
+            api.raw_provider(),
+            &BTreeMap::from([(1, chain[1].header.hash)]),
+        )
+        .await?;
     assert!(fresh.contains(1, chain[1].header.hash));
     assert_eq!(fresh.checkpoint(), &checkpoint);
     assert_eq!(api.verified_finalized_view().await?.block_number(), 5);
@@ -380,7 +425,8 @@ async fn wrong_network_outage_and_private_forks_never_qualify_or_replace_fences(
 }
 
 #[tokio::test]
-async fn nonce_proofs_requalify_original_headers_and_roots_require_exact_hash_agreement() -> AnyResult<()> {
+async fn nonce_proofs_requalify_original_headers_and_roots_require_exact_hash_agreement(
+) -> AnyResult<()> {
     let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
     let (mut chain, _, raw) = receipt_chain(154, true).await?;
     let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(62))?;
@@ -393,50 +439,94 @@ async fn nonce_proofs_requalify_original_headers_and_roots_require_exact_hash_ag
     let _owned = super::tests::ClearOwnedChains([chain[0].header.hash]);
     let primary = Fixture::new(chain.clone(), 1).await?;
     let witness = Fixture::new(chain.clone(), 1).await?;
-    primary.state.lock().unwrap().account_proofs.insert(chain[2].header.hash, later_proof);
+    primary
+        .state
+        .lock()
+        .unwrap()
+        .account_proofs
+        .insert(chain[2].header.hash, later_proof);
     let api = primary.api(&witness).await?;
     let saved = api.get_finalized_submission_snapshot(&raw).await?.unwrap();
     assert!(!saved.pinned_nonce_consumed());
     assert_eq!(saved.beacon().unwrap().account_nonce, 7);
     assert_eq!(saved.beacon().unwrap().checkpoint.schema_version(), 2);
-    api.verify_finalized_submission_snapshot(&raw, &saved).await?;
+    api.verify_finalized_submission_snapshot(&raw, &saved)
+        .await?;
 
     // Unauthenticated count/processed answers cannot change the MPT-proven nonce.
     primary.state.lock().unwrap().nonce = 99;
     witness.state.lock().unwrap().nonce = 6;
     witness.state.lock().unwrap().processed = false;
-    assert!(!api.get_finalized_submission_snapshot(&raw).await?.unwrap().pinned_nonce_consumed());
-    let original_proof = primary.state.lock().unwrap().account_proofs[&chain[1].header.hash].clone();
+    assert!(!api
+        .get_finalized_submission_snapshot(&raw)
+        .await?
+        .unwrap()
+        .pinned_nonce_consumed());
+    let original_proof =
+        primary.state.lock().unwrap().account_proofs[&chain[1].header.hash].clone();
     let mut forged = original_proof.clone();
     forged.nonce = 99;
-    primary.state.lock().unwrap().account_proofs.insert(chain[1].header.hash, forged);
+    primary
+        .state
+        .lock()
+        .unwrap()
+        .account_proofs
+        .insert(chain[1].header.hash, forged);
     assert!(api.get_finalized_submission_snapshot(&raw).await.is_err());
-    primary.state.lock().unwrap().account_proofs.remove(&chain[1].header.hash);
+    primary
+        .state
+        .lock()
+        .unwrap()
+        .account_proofs
+        .remove(&chain[1].header.hash);
     assert!(api.get_finalized_submission_snapshot(&raw).await.is_err());
-    primary.state.lock().unwrap().account_proofs.insert(chain[1].header.hash, original_proof);
+    primary
+        .state
+        .lock()
+        .unwrap()
+        .account_proofs
+        .insert(chain[1].header.hash, original_proof);
     let mut forged = saved.beacon().unwrap().clone();
     forged.account_nonce = 99;
-    assert!(api.verify_finalized_submission_snapshot(&raw, &FinalizedSubmissionSnapshot::Beacon(forged)).await.is_err());
+    assert!(api
+        .verify_finalized_submission_snapshot(&raw, &FinalizedSubmissionSnapshot::Beacon(forged))
+        .await
+        .is_err());
     let mut forged = saved.beacon().unwrap().clone();
     forged.account_proof.account_proof.clear();
-    assert!(api.verify_finalized_submission_snapshot(&raw, &FinalizedSubmissionSnapshot::Beacon(forged)).await.is_err());
+    assert!(api
+        .verify_finalized_submission_snapshot(&raw, &FinalizedSubmissionSnapshot::Beacon(forged))
+        .await
+        .is_err());
 
     primary.state.lock().unwrap().signed_tip = 2;
-    assert!(api.get_finalized_submission_snapshot(&raw).await?.unwrap().pinned_nonce_consumed());
-    let restored: FinalizedSubmissionSnapshot = serde_json::from_slice(&serde_json::to_vec(&saved)?)?;
+    assert!(api
+        .get_finalized_submission_snapshot(&raw)
+        .await?
+        .unwrap()
+        .pinned_nonce_consumed());
+    let restored: FinalizedSubmissionSnapshot =
+        serde_json::from_slice(&serde_json::to_vec(&saved)?)?;
     drop(api);
     let reloaded = primary.api(&witness).await?;
     let api = reloaded.clone();
-    let retained = reloaded.verify_finalized_submission_snapshot(&raw, &restored).await?;
+    let retained = reloaded
+        .verify_finalized_submission_snapshot(&raw, &restored)
+        .await?;
     assert_eq!(retained.block_hash(), chain[1].header.hash);
     assert!(!retained.pinned_nonce_consumed());
-    assert_eq!(retained.beacon().unwrap().checkpoint, saved.beacon().unwrap().checkpoint);
+    assert_eq!(
+        retained.beacon().unwrap().checkpoint,
+        saved.beacon().unwrap().checkpoint
+    );
     for message_processed in [false, true] {
         let legacy: FinalizedSubmissionSnapshot = serde_json::from_value(json!({
             "block_number":1, "block_hash":chain[1].header.hash,
             "pinned_nonce_consumed":false, "message_processed":message_processed,
         }))?;
-        let upgraded = reloaded.verify_finalized_submission_snapshot(&raw, &legacy).await?;
+        let upgraded = reloaded
+            .verify_finalized_submission_snapshot(&raw, &legacy)
+            .await?;
         assert!(upgraded.beacon().is_some());
         assert_eq!(upgraded.block_number(), 1);
         assert_eq!(upgraded.block_hash(), chain[1].header.hash);
@@ -444,14 +534,22 @@ async fn nonce_proofs_requalify_original_headers_and_roots_require_exact_hash_ag
         assert_eq!(upgraded.beacon().unwrap().account_nonce, 7);
     }
     let legacy = FinalizedSubmissionSnapshot::Legacy(LegacySubmissionSnapshot {
-        block_number: 1, block_hash: chain[1].header.hash,
-        pinned_nonce_consumed: true, message_processed: true,
+        block_number: 1,
+        block_hash: chain[1].header.hash,
+        pinned_nonce_consumed: true,
+        message_processed: true,
     });
-    assert!(reloaded.verify_finalized_submission_snapshot(&raw, &legacy).await.is_err());
+    assert!(reloaded
+        .verify_finalized_submission_snapshot(&raw, &legacy)
+        .await
+        .is_err());
     assert_eq!(api.read_finalized_merkle_root(1).await?, Some([67; 32]));
     witness.state.lock().unwrap().root = B256::ZERO;
     assert!(api.read_finalized_merkle_root(1).await.is_err());
-    assert!(api.read_finalized_merkle_root_at(1, 2, chain[2].header.hash).await.is_err());
+    assert!(api
+        .read_finalized_merkle_root_at(1, 2, chain[2].header.hash)
+        .await
+        .is_err());
     assert!(api.max_block_number().await.is_err());
     assert!(api.max_block_distance().await.is_err());
     assert!(api.process_admin_message_delay().await.is_err());
@@ -461,13 +559,25 @@ async fn nonce_proofs_requalify_original_headers_and_roots_require_exact_hash_ag
         for request in &fixture.state.lock().unwrap().requests {
             assert_ne!(request["method"], "eth_getTransactionCount");
             if request["method"] == "eth_call" {
-                let input = request["params"][0].get("input").or_else(|| request["params"][0].get("data")).unwrap().as_str().unwrap();
-                assert!(!input.starts_with(&format!("0x{}", alloy::hex::encode(IMessageQueue::isProcessedCall::SELECTOR))));
-                assert_eq!(request["params"][1], json!({"blockHash":chain[2].header.hash, "requireCanonical":true}));
+                let input = request["params"][0]
+                    .get("input")
+                    .or_else(|| request["params"][0].get("data"))
+                    .unwrap()
+                    .as_str()
+                    .unwrap();
+                assert!(!input.starts_with(&format!(
+                    "0x{}",
+                    alloy::hex::encode(IMessageQueue::isProcessedCall::SELECTOR)
+                )));
+                assert_eq!(
+                    request["params"][1],
+                    json!({"blockHash":chain[2].header.hash, "requireCanonical":true})
+                );
             }
             if request["method"] == "eth_getProof" {
                 assert_eq!(request["params"][2]["requireCanonical"], true);
-                assert!([json!(chain[1].header.hash), json!(chain[2].header.hash)].contains(&request["params"][2]["blockHash"]));
+                assert!([json!(chain[1].header.hash), json!(chain[2].header.hash)]
+                    .contains(&request["params"][2]["blockHash"]));
             }
         }
     }
@@ -731,7 +841,9 @@ async fn legacy_archives_all_requalify_before_checkpoint_promotion_and_restart()
 
 #[tokio::test]
 async fn independent_beacon_owners_never_mutate_or_trust_peer_header_fences() -> AnyResult<()> {
-    fn retained_bytes(directory: &std::path::Path) -> AnyResult<BTreeMap<std::path::PathBuf, Vec<u8>>> {
+    fn retained_bytes(
+        directory: &std::path::Path,
+    ) -> AnyResult<BTreeMap<std::path::PathBuf, Vec<u8>>> {
         let mut files = BTreeMap::new();
         for entry in std::fs::read_dir(directory)? {
             let path = entry?.path();
@@ -751,27 +863,52 @@ async fn independent_beacon_owners_never_mutate_or_trust_peer_header_fences() ->
     let primary = Fixture::new(chain.clone(), 6).await?;
     let witness = Fixture::new(chain.clone(), 6).await?;
     let original = primary.polling(&witness).await?;
-    let checkpoint = original.verified_finalized_view().await?.checkpoint().clone();
+    let checkpoint = original
+        .verified_finalized_view()
+        .await?
+        .checkpoint()
+        .clone();
     let (config, original_directory) = primary.beacon_settings().await?;
     let before = retained_bytes(&original_directory)?;
     let peer_directory = cleanup.directory.join("peer");
     let peer_config = config.with_proof_sources(vec![original_directory.clone()])?;
-    let peer = PollingEthApi::new(&primary.url).await?
-        .with_beacon_finality(peer_config.clone(), &peer_directory).await?;
-    assert!(peer.enable_finality_archive(&original_directory.join("headers"), genesis).await.is_err());
+    let peer = PollingEthApi::new(&primary.url)
+        .await?
+        .with_beacon_finality(peer_config.clone(), &peer_directory)
+        .await?;
+    assert!(peer
+        .enable_finality_archive(&original_directory.join("headers"), genesis)
+        .await
+        .is_err());
     let mut peer_view = peer.verified_finalized_view().await?;
     peer_view.verify_checkpoint(&*peer, &checkpoint).await?;
-    peer_view.verify_blocks(&*peer, &BTreeMap::from([(2, chain[2].header.hash)])).await?;
+    peer_view
+        .verify_blocks(&*peer, &BTreeMap::from([(2, chain[2].header.hash)]))
+        .await?;
     assert_eq!(retained_bytes(&original_directory)?, before);
     drop(peer_view);
     drop(peer);
-    let peer = PollingEthApi::new(&primary.url).await?
-        .with_beacon_finality(peer_config, &peer_directory).await?;
-    peer.verified_finalized_view().await?.verify_checkpoint(&*peer, &checkpoint).await?;
+    let peer = PollingEthApi::new(&primary.url)
+        .await?
+        .with_beacon_finality(peer_config, &peer_directory)
+        .await?;
+    peer.verified_finalized_view()
+        .await?
+        .verify_checkpoint(&*peer, &checkpoint)
+        .await?;
     assert_eq!(retained_bytes(&original_directory)?, before);
-    std::fs::write(peer_directory.join("headers/fence.json"), b"corrupt peer fence")?;
-    assert_eq!(original.verified_finalized_view().await?.checkpoint(), &checkpoint);
-    assert_eq!(std::fs::read(peer_directory.join("headers/fence.json"))?, b"corrupt peer fence");
+    std::fs::write(
+        peer_directory.join("headers/fence.json"),
+        b"corrupt peer fence",
+    )?;
+    assert_eq!(
+        original.verified_finalized_view().await?.checkpoint(),
+        &checkpoint
+    );
+    assert_eq!(
+        std::fs::read(peer_directory.join("headers/fence.json"))?,
+        b"corrupt peer fence"
+    );
     Ok(())
 }
 
@@ -796,7 +933,8 @@ async fn durable_history_has_no_age_cutoff_and_preserves_corrupt_hints() -> AnyR
     let primary = Fixture::new(chain.clone(), height as usize).await?;
     let witness = Fixture::new(chain.clone(), height as usize).await?;
     let api = primary.api(&witness).await?;
-    api.enable_finality_archive(&cleanup.directory, genesis).await?;
+    api.enable_finality_archive(&cleanup.directory, genesis)
+        .await?;
     let mut view = api.verified_finalized_view().await?;
     let targets = (0..8_430)
         .map(|index| (index * 15, chain[(index * 15) as usize].header.hash))
@@ -869,7 +1007,8 @@ async fn all_unconfigured_finality_boundaries_preserve_the_typed_hold() -> AnyRe
                 message_processed: false,
             }),
         )
-        .await.map(|_| ()),
+        .await
+        .map(|_| ()),
     ] {
         assert!(matches!(
             result.unwrap_err().downcast_ref::<Error>(),
@@ -1072,18 +1211,29 @@ async fn signed_beacon_head_ignores_arbitrary_el_finalized_tag_skew() -> AnyResu
     let primary = Fixture::new(chain.clone(), 1).await?;
     let witness = Fixture::new(chain.clone(), 1).await?;
     let api = primary.api(&witness).await?;
-    let accepted = api.verified_finalized_view_with_archive(&cleanup.directory, chain[0].header.hash).await?;
+    let accepted = api
+        .verified_finalized_view_with_archive(&cleanup.directory, chain[0].header.hash)
+        .await?;
     let checkpoint = accepted.checkpoint().clone();
     for (primary_tip, witness_tip) in [(0, 100_006), (100_006, 0)] {
         primary.state.lock().unwrap().tip = primary_tip;
         witness.state.lock().unwrap().tip = witness_tip;
-        assert_eq!(api.verified_finalized_view().await?.checkpoint(), &checkpoint);
+        assert_eq!(
+            api.verified_finalized_view().await?.checkpoint(),
+            &checkpoint
+        );
     }
     primary.state.lock().unwrap().signed_tip = 2;
     assert_eq!(api.verified_finalized_view().await?.block_number(), 2);
     for fixture in [&primary, &witness] {
-        assert!(fixture.state.lock().unwrap().requests.iter().all(|request|
-            request["method"] != "eth_getBlockByNumber" || request["params"][0] != "finalized"));
+        assert!(fixture
+            .state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .all(|request| request["method"] != "eth_getBlockByNumber"
+                || request["params"][0] != "finalized"));
     }
     Ok(())
 }
@@ -1093,14 +1243,25 @@ async fn agreeing_execution_tags_cannot_replace_missing_beacon_authority() -> An
     let chain = chain(182, 1);
     let primary = Fixture::new(chain.clone(), 1).await?;
     let witness = Fixture::new(chain.clone(), 1).await?;
-    let api = PollingEthApi::new(&primary.url).await?
-        .with_data_witness(&witness.url, 31337, chain[0].header.hash).await?;
+    let api = PollingEthApi::new(&primary.url)
+        .await?
+        .with_data_witness(&witness.url, 31337, chain[0].header.hash)
+        .await?;
     assert!(api.raw_witness_provider().is_ok());
-    assert!(matches!(api.verified_finalized_view().await, Err(Error::BeaconFinalityNotConfigured)));
+    assert!(matches!(
+        api.verified_finalized_view().await,
+        Err(Error::BeaconFinalityNotConfigured)
+    ));
     assert!(api.finality_identity().is_err());
     for fixture in [&primary, &witness] {
-        assert!(fixture.state.lock().unwrap().requests.iter().all(|request|
-            request["method"] != "eth_getBlockByNumber" || request["params"][0] != "finalized"));
+        assert!(fixture
+            .state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .all(|request| request["method"] != "eth_getBlockByNumber"
+                || request["params"][0] != "finalized"));
     }
     Ok(())
 }
@@ -1277,7 +1438,14 @@ async fn data_witness_endpoint_policy_accepts_secure_and_distinct_loopback_confi
     let chain = chain(185, 1);
     let primary = Fixture::new(chain.clone(), 1).await?;
     let witness = Fixture::new(chain.clone(), 1).await?;
-    let api = EthApi::new(&primary.url, &format!("{:#x}", Address::repeat_byte(9)), None, None, None).await?;
+    let api = EthApi::new(
+        &primary.url,
+        &format!("{:#x}", Address::repeat_byte(9)),
+        None,
+        None,
+        None,
+    )
+    .await?;
     let polling = PollingEthApi::new(&primary.url).await?;
     for (primary_url, witness_url) in [
         ("https://primary.example/rpc", "https://witness.example/rpc"),
@@ -1294,8 +1462,12 @@ async fn data_witness_endpoint_policy_accepts_secure_and_distinct_loopback_confi
         signer.url = Url::parse(primary_url)?;
         let mut reader = polling.clone();
         reader.url = Url::parse(primary_url)?;
-        let signer = signer.with_data_witness(witness_url, 31337, chain[0].header.hash).await?;
-        let reader = reader.with_data_witness(witness_url, 31337, chain[0].header.hash).await?;
+        let signer = signer
+            .with_data_witness(witness_url, 31337, chain[0].header.hash)
+            .await?;
+        let reader = reader
+            .with_data_witness(witness_url, 31337, chain[0].header.hash)
+            .await?;
         assert!(signer.raw_witness_provider().is_ok());
         assert!(reader.raw_witness_provider().is_ok());
         assert!(signer.finality_identity().is_err());
@@ -1396,5 +1568,52 @@ async fn finality_endpoint_policy_rejects_insecure_primary_before_initial_rpc() 
             }
         }).await?;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn execution_rpc_redirects_never_contact_the_target() -> AnyResult<()> {
+    let fixture = Fixture::new(chain(187, 1), 1).await?;
+    let trap = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let target = format!("http://{}/redirected", trap.local_addr()?);
+    let queue = format!("{:#x}", Address::repeat_byte(9));
+    for status in [301, 302, 303, 307, 308] {
+        fixture.state.lock().unwrap().http_redirect = Some((status, target.clone()));
+        let requests = async {
+            // Read-only/proof providers and wallet providers share connect_rpc.
+            let polling = PollingEthApi::new(&fixture.url).await?;
+            let error = polling.provider.get_chain_id().await.unwrap_err();
+            assert!(matches!(
+                &error,
+                RpcError::Transport(TransportErrorKind::HttpError(error))
+                    if error.status == status
+            ));
+            let error = EthApi::new(&fixture.url, &queue, None, None, None)
+                .await
+                .err()
+                .expect("signer accepted a redirected execution RPC");
+            assert!(matches!(
+                &error,
+                Error::ErrorInHTTPTransport(
+                    RpcError::Transport(TransportErrorKind::HttpError(error))
+                ) if error.status == status
+            ));
+            Ok::<_, anyhow::Error>(())
+        };
+        tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                result = requests => result,
+                _ = trap.accept() => panic!("execution RPC followed an unchecked redirect"),
+            }
+        })
+        .await??;
+    }
+    assert_eq!(fixture.state.lock().unwrap().requests.len(), 10);
+    // Also reject a connection queued at the same time as the last response.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), trap.accept())
+            .await
+            .is_err()
+    );
     Ok(())
 }

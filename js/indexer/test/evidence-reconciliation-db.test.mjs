@@ -309,13 +309,17 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
   }
 
   await t.test('legacy backlog missing historical receipts does not wedge live SQL batches or certify operator skips', async () => {
-    const localEnv = { ...fixture.env, ETH_RPC_ONLY: 'true', ETH_BRIDGING_PAYMENT: `0x${'33'.repeat(20)}` };
+    const localEnv = { ...fixture.env, ETH_RPC_ONLY: 'true', ETH_BRIDGING_PAYMENT: `0x${'33'.repeat(20)}`,
+      GEAR_RPC_ONLY: 'true', GEAR_API_PATH: fileURLToPath(new URL('../../../api/gear', import.meta.url)),
+      GEAR_VFT_MANAGER: hash('11'), GEAR_HISTORICAL_PROXY: hash('22'), GEAR_BRIDGING_PAYMENT: hash('33'),
+      GEAR_CHECKPOINT_CLIENT: hash('44'), ETH_HTTP_RPC_URL: fixture.env.ETH_RPC_URL };
     const oldEnv = Object.fromEntries(Object.keys(localEnv).map((key) => [key, process.env[key]]));
     Object.assign(process.env, localEnv);
     await import('reflect-metadata');
     const { Store } = await import('@subsquid/typeorm-store');
     const { default: configured } = await import('../lib/model/dataSource.js');
     const { handleBatch } = await import('../lib/eth/handler.js');
+    const { BatchState: GearState } = await import('../lib/gear/batch-state.js');
     const { createEthereumEvidenceClients, destroyEthereumEvidenceClients } = await import('../lib/eth/finality.js');
     const database = new DataSource({ ...configured.options, url: url.href, synchronize: false,
       migrationsRun: false, dropSchema: false, logging: false });
@@ -341,6 +345,7 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
         blocks: [{ header: { height: 11, hash: fixture.headers[11].hash, timestamp: 1_700_000_011_000 },
           logs: [{ ...root, logIndex: 2, transactionIndex: 0 }] }] });
     });
+    let parkedSettlement;
     try {
       await database.initialize();
       fixture.state.fault = ({ method, result }) => method === 'eth_getBlockReceipts' ? null : result;
@@ -394,9 +399,66 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
       const visible = (await graphQL(port)).get('15-missing');
       assert.equal(visible.status.toLowerCase(), 'bridging'); assert.equal(visible.completedAt, null);
       assert.equal(visible.completedAtBlock, null); assert.equal(visible.completedAtTxHash, null);
+
+      // This scenario reuses a signed source receipt at a fresh settlement slot.
+      // Park the separate repair fixture so it cannot claim that same original.
+      parkedSettlement = (await db.query("DELETE FROM receipt_settlement WHERE id='200:2:0' RETURNING *")).rows[0];
+      const deposit = { slot: '9000', transaction_index: '2', log_index: '0', deposit_count: '1',
+        operation_id: hash('e1'), eth_token_id: identity.token, vara_token_id: identity.varaToken,
+        sender: identity.receiver, receiver: identity.sender, amount: '10', native: true };
+      await insert('transfer', { ...inbound, id: 'gear-missing', status: 'Bridging', tx_hash: absentHash,
+        source_transaction_index: '99', source_log_index: '0',
+        completed_at: null, completed_at_block: null, completed_at_tx_hash: null });
+      await insert('transfer', { ...inbound, id: 'gear-fresh', status: 'Bridging', tx_hash: fixture.txHashes[2],
+        source_transaction_index: '2', source_log_index: '0',
+        completed_at: null, completed_at_block: null, completed_at_tx_hash: null });
+      await db.query(`INSERT INTO receipt_relay (id, block_number)
+        SELECT (1000+n)::text || ':99', 11 FROM generate_series(1,1001) n`);
+      await db.query(`INSERT INTO receipt_settlement (id, deposit, timestamp, block_number, tx_hash, matched, legacy_matched)
+        SELECT (1000+n)::text || ':99:0',
+          jsonb_set(jsonb_set($1::jsonb, '{slot}', to_jsonb((1000+n)::text)), '{transaction_index}', '"99"'::jsonb),
+          $2, 300, $3, false, n % 2 = 0 FROM generate_series(1,1001) n`, [deposit, time, hash('d0')]);
+      const oldSettlements = (await db.query("SELECT * FROM receipt_settlement WHERE id LIKE '%:99:0' ORDER BY id")).rows;
+      assert.equal(oldSettlements.length, 1001);
+      const gear = new GearState();
+      let gearHeight = 300;
+      const liveGear = () => database.transaction('SERIALIZABLE', async (manager) => {
+        await gear.new({ store: new Store(() => manager), log: quiet,
+          blocks: [{ header: { height: gearHeight, hash: hash('db'), timestamp: 1_700_000_012_000 } }] });
+        gear.recordReceiptRelay({ slot: 9000, transaction_index: 2, block_number: 11 });
+        gear.recordReceiptSettlement(deposit, new Date(time), 300n, hash('d0'));
+        await gear.save();
+      });
+      fixture.state.requests.length = 0;
+      await liveGear();
+      const freshGear = await transfer('gear-fresh');
+      assert.equal(freshGear.status, 'Completed', 'Gear live page must reach fresh work beyond 1001 migrated settlements');
+      assert.equal(freshGear.source_receipt_auth.version, 2);
+      assert.deepEqual((await db.query("SELECT * FROM receipt_settlement WHERE id LIKE '%:99:0' ORDER BY id")).rows, oldSettlements);
+      assert.equal((await transfer('gear-missing')).status, 'Bridging');
+      assert.ok(!fixture.state.requests.some(({ method, params }) =>
+        method === 'eth_getTransactionReceipt' && params[0] === absentHash));
+      await db.query("UPDATE receipt_settlement SET matched=false, legacy_matched=true WHERE id='9000:2:0'");
+      const corruptAuth = structuredClone(freshGear.source_receipt_auth);
+      corruptAuth.receipt.logs[0].data = '0x';
+      await db.query("UPDATE transfer SET source_receipt_auth=$1 WHERE id='gear-fresh'", [corruptAuth]);
+      const beforeGearConflict = await snapshot();
+      gearHeight++;
+      await assert.rejects(liveGear(), /HOLD/);
+      assert.deepEqual(await snapshot(), beforeGearConflict, 'authenticated conflicts remain atomic HOLDs');
+      await db.query("UPDATE transfer SET source_receipt_auth=$1 WHERE id='gear-fresh'", [freshGear.source_receipt_auth]);
+      await liveGear();
+      assert.equal((await db.query("SELECT matched FROM receipt_settlement WHERE id='9000:2:0'")).rows[0].matched, true,
+        'a migrated row with real source authorization is eligible again');
+      assert.deepEqual((await transfer('gear-fresh')).source_receipt_auth, freshGear.source_receipt_auth);
     } finally {
       fixture.state.fault = undefined;
       destroyEthereumEvidenceClients('eth');
+      destroyEthereumEvidenceClients('gear');
+      await db.query("DELETE FROM receipt_settlement WHERE id LIKE '%:99:0' OR id='9000:2:0'");
+      if (parkedSettlement) await insert('receipt_settlement', parkedSettlement);
+      await db.query("DELETE FROM receipt_relay WHERE id LIKE '%:99' OR id='9000:2'");
+      await db.query("DELETE FROM transfer WHERE id IN ('gear-missing','gear-fresh')");
       await db.query('DELETE FROM completed_transfer WHERE id IN ($1,$2) OR id LIKE $3',
         [freshId, `outbound:${identity.queue}:1001`, 'legacy-backlog-%']);
       await db.query('DELETE FROM transfer WHERE id=$1', [fixtureId('15-missing')]);
@@ -408,6 +470,30 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
       for (const [key, value] of Object.entries(oldEnv)) {
         if (value === undefined) delete process.env[key]; else process.env[key] = value;
       }
+    }
+  });
+
+  await t.test('base nonce-keyed completion repairs a coordinate-free late transfer and retains the old row', async () => {
+    const pending = await transfer('00-pending');
+    await db.query('UPDATE transfer SET nonce=$2 WHERE id=$1', [pending.id, '8']);
+    await insert('completed_transfer', { id: '8', src_network: 'Vara', dest_network: 'Ethereum',
+      tx_hash: fixture.txHashes[0], block_number: '11', timestamp: time, matched: false, legacy_matched: false });
+    const old = (await db.query("SELECT * FROM completed_transfer WHERE id='8'")).rows[0];
+    try {
+      assert.equal((await run('vara-to-eth', ['--limit', '1'])).qualified, 1);
+      assert.equal((await transfer('00-pending')).completion_auth, null, 'dry-run cannot authorize the hint');
+      assert.equal((await run('vara-to-eth', ['--limit', '1', '--apply'])).qualified, 1);
+      const repaired = await transfer('00-pending');
+      assert.equal(repaired.status, 'Completed');
+      assert.equal(repaired.completed_at_tx_hash, old.tx_hash);
+      assert.equal(repaired.completion_auth.completionId, `outbound:${identity.queue}:8`);
+      assert.deepEqual((await db.query("SELECT * FROM completed_transfer WHERE id='8'")).rows[0], old);
+    } finally {
+      await db.query('DELETE FROM completed_transfer WHERE id IN ($1,$2)', ['8', `outbound:${identity.queue}:8`]);
+      await db.query(`UPDATE transfer SET nonce=$2, status=$3, completed_at=$4,
+        completed_at_block=$5, completed_at_tx_hash=$6, completion_auth=$7 WHERE id=$1`,
+      [pending.id, pending.nonce, pending.status, pending.completed_at,
+        pending.completed_at_block, pending.completed_at_tx_hash, pending.completion_auth]);
     }
   });
 

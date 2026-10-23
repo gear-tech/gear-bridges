@@ -181,10 +181,12 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         provider.connection(),
                         args.from_block,
-                        args.confirmations_merkle_root
-                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
-                        args.confirmations_status
-                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        (
+                            args.confirmations_merkle_root
+                                .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                            args.confirmations_status
+                                .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        ),
                         args.storage_path,
                         (governance_admin, governance_pauser),
                         lane_approvals,
@@ -612,10 +614,11 @@ fn load_beacon_finality(
         &finality.ethereum_finality_beacon_rpc,
     )?;
     anyhow::ensure!(
-        config.identity() == (
-            identity.ethereum_chain_id,
-            identity.ethereum_genesis_hash.parse()?,
-        ),
+        config.identity()
+            == (
+                identity.ethereum_chain_id,
+                identity.ethereum_genesis_hash.parse()?,
+            ),
         "HOLD: configured Ethereum identity differs from independently approved Beacon identity"
     );
     config.with_proof_sources(finality.ethereum_finality_proof_sources.clone())

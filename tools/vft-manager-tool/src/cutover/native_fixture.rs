@@ -726,6 +726,79 @@ async fn native_finalize_restarts(
     finalize(connection, api, args).await?;
     assert_eq!(native_fixture_nonce(api).await?, active_nonce);
     for (file, bytes) in artifacts.iter().zip(&exact) { assert_eq!(fs::read(file)?, *bytes); }
+    if exercise_crashes {
+        let activation_path = args.cutover_dir.join("cutover-activation.json");
+        let activation_bytes = fs::read(&activation_path)?;
+        let active_work = fs::read(&path)?;
+        let successor_paths = [
+            args.new_transactions.join("state.json"),
+            args.new_transactions.join("blocks.json"),
+            args.new_discovery.clone(),
+        ];
+        let successor_bytes = successor_paths.iter().map(fs::read)
+            .collect::<std::io::Result<Vec<_>>>()?;
+        fs::write(evidence.join("original-activation.json"), &activation_bytes)?;
+        for linked in [false, true] {
+            fs::remove_file(&activation_path)?;
+            fs::write(pending_path(&activation_path), &activation_bytes)?;
+            File::open(pending_path(&activation_path))?.sync_all()?;
+            if linked {
+                fs::hard_link(pending_path(&activation_path), &activation_path)?;
+            }
+            finalize(connection, api, args).await?;
+            assert_eq!(fs::read(&activation_path)?, activation_bytes,
+                "restart must retain the original unpause and status pin");
+            assert!(!pending_path(&activation_path).exists());
+            assert_eq!(fs::read(&path)?, active_work);
+            assert_eq!(native_fixture_nonce(api).await?, active_nonce,
+                "activation recovery must not sign again");
+            for (file, bytes) in successor_paths.iter().zip(&successor_bytes) {
+                assert_eq!(fs::read(file)?, *bytes, "activated journals changed");
+            }
+        }
+        for conflict in ["final-temp", "seal", "original", "pin", "status", "archived"] {
+            let mut changed: (H256, FinalizedCutoverCall, FinalizedCutoverStatus) =
+                serde_json::from_slice(&activation_bytes)?;
+            match conflict {
+                "final-temp" | "seal" => changed.0 = H256::repeat_byte(99),
+                "original" => changed.1.original.raw_extrinsic.push(0),
+                "pin" => changed.2.block_hash = H256::repeat_byte(99),
+                "status" => {
+                    let mut status = CutoverStatus::decode(&mut changed.2.status.as_slice())?;
+                    status.phase = CutoverPhase::Ready;
+                    changed.2.status = status.encode();
+                }
+                "archived" => changed.1.archived_no_effect = true,
+                _ => unreachable!(),
+            }
+            let changed_bytes = serde_json::to_vec(&changed)?;
+            if conflict != "final-temp" {
+                fs::remove_file(&activation_path)?;
+            }
+            fs::write(pending_path(&activation_path), &changed_bytes)?;
+            let error = finalize(connection, api, args).await
+                .expect_err("conflicting activation evidence must HOLD");
+            assert_eq!(fs::read(pending_path(&activation_path))?, changed_bytes);
+            if conflict == "final-temp" {
+                assert_eq!(fs::read(&activation_path)?, activation_bytes);
+            } else {
+                assert!(!activation_path.exists(), "unauthenticated evidence was published");
+            }
+            assert_eq!(fs::read(&path)?, active_work);
+            assert_eq!(native_fixture_nonce(api).await?, active_nonce);
+            for (file, bytes) in successor_paths.iter().zip(&successor_bytes) {
+                assert_eq!(fs::read(file)?, *bytes);
+            }
+            fs::write(evidence.join(format!("activation-{conflict}-hold.txt")), format!("{error:#}"))?;
+            fs::remove_file(pending_path(&activation_path))?;
+            if !activation_path.exists() {
+                fs::write(&activation_path, &activation_bytes)?;
+            }
+        }
+        finalize(connection, api, args).await?;
+        assert_eq!(fs::read(&activation_path)?, activation_bytes);
+        assert_eq!(native_fixture_nonce(api).await?, active_nonce);
+    }
     println!("Full native finalize: {} retained originals, Ready nonce {nonce}, Active nonce {active_nonce}; evidence {}; synthetic checkpoint/EL, NOT Beacon/mainnet qualification",
         active.calls.len(), evidence.display());
     Ok(())

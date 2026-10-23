@@ -478,13 +478,21 @@ async fn process_request(
     let leaf_index = u32::try_from(proof.leaf_index)?;
     let fresh = prepared.is_none();
     let Some(policy) = request.lane_policy.as_ref() else {
-        return Ok(report_hold(tx_uuid, "HOLD: outbound lane has no independently approved persisted effect policy".into(), responses));
+        return Ok(report_hold(
+            tx_uuid,
+            "HOLD: outbound lane has no independently approved persisted effect policy".into(),
+            responses,
+        ));
     };
     if let Err(error) = policy.validate_for_api(&this.eth_api, message) {
         return Ok(report_hold(tx_uuid, error.to_string(), responses));
     }
     if fresh && policy.original_hash.is_some() {
-        return Ok(report_hold(tx_uuid, "HOLD: historical original approval cannot authorize new signing".into(), responses));
+        return Ok(report_hold(
+            tx_uuid,
+            "HOLD: historical original approval cannot authorize new signing".into(),
+            responses,
+        ));
     }
     if fresh {
         let signed = match this
@@ -883,8 +891,8 @@ mod tests {
                                     "eth_getTransactionByHash" => Value::Null,
                                     "eth_getBlockByNumber" => {
                                         let number = params[0].as_str().unwrap();
-                                        let number = if number.starts_with("0x") {
-                                            usize::from_str_radix(&number[2..], 16).unwrap()
+                                        let number = if let Some(number) = number.strip_prefix("0x") {
+                                            usize::from_str_radix(number, 16).unwrap()
                                         } else {
                                             1 + usize::from(state.consumed.load(Ordering::SeqCst))
                                         };
@@ -947,10 +955,15 @@ mod tests {
         };
         let beacon_state = state.clone();
         let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
-            31337, state.chain[0].header.hash, Arc::new(move || {
-                beacon_state.chain[1 + usize::from(beacon_state.consumed.load(Ordering::SeqCst))].header.clone()
+            31337,
+            state.chain[0].header.hash,
+            Arc::new(move || {
+                beacon_state.chain[1 + usize::from(beacon_state.consumed.load(Ordering::SeqCst))]
+                    .header
+                    .clone()
             }),
-        ).await?;
+        )
+        .await?;
         let api = api
             .with_beacon_finality(beacon.config.clone(), &beacon.directory.join("store"))
             .await?

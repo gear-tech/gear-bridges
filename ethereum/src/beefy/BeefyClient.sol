@@ -773,11 +773,11 @@ contract BeefyClient {
      * @param bitfield claiming which validators have signed the commitment
      * @param vset the validator set state
      */
-    function fiatShamirFinalBitfield(
-        bytes32 commitmentHash,
-        uint256[] calldata bitfield,
-        ValidatorSet storage vset
-    ) internal view returns (uint256[] memory) {
+    function fiatShamirFinalBitfield(bytes32 commitmentHash, uint256[] calldata bitfield, ValidatorSet storage vset)
+        internal
+        view
+        returns (uint256[] memory)
+    {
         bytes32 bitFieldHash = keccak256(abi.encodePacked(bitfield));
         bytes32 fiatShamirHash = createFiatShamirHash(commitmentHash, bitFieldHash, vset);
         uint256 requiredSignatures = computeMaxRequiredSignatures(vset.length);

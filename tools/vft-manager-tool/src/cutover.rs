@@ -185,7 +185,10 @@ impl Intent {
             (Some(wrapper), Some(approved)) => {
                 let approval = &approved.approval;
                 approval.validate()?;
-                ensure!(!approved.approval_digest.is_zero(), "HOLD: missing capability approval digest");
+                ensure!(
+                    !approved.approval_digest.is_zero(),
+                    "HOLD: missing capability approval digest"
+                );
                 ensure!(
                     approval.gear_genesis_hash == self.old_identity.gear_genesis_hash
                         && approval.source_manager.actor_id
@@ -196,7 +199,8 @@ impl Intent {
                             != approval.replacement_manager.actor_id
                         && approval.replacement_manager.code_id == self.new_manager_code_id
                         && (self.native_wrapper_approval.is_none()
-                            || approval.replacement_manager.wrapper_abi == ManagerWrapperAbi::CapabilityBound)
+                            || approval.replacement_manager.wrapper_abi
+                                == ManagerWrapperAbi::CapabilityBound)
                         && approval.wrapper.actor_id == wrapper
                         && self
                             .mappings
@@ -412,10 +416,12 @@ struct EthereumQualification {
 
 fn qualification_digests(work: &Work) -> Result<(Option<H256>, Option<H256>)> {
     Ok((
-        work.ethereum_authentication.as_ref()
+        work.ethereum_authentication
+            .as_ref()
             .map(|checkpoint| serde_json::to_vec(checkpoint).map(|bytes| seal::digest(&bytes)))
             .transpose()?,
-        work.registration.as_ref()
+        work.registration
+            .as_ref()
             .map(|registration| serde_json::to_vec(registration).map(|bytes| seal::digest(&bytes)))
             .transpose()?,
     ))
@@ -435,8 +441,10 @@ fn validate_ethereum_qualification(work: &Work) -> Result<()> {
                     checkpoint.common_header().number >= registration.included_number
                         && checkpoint.common_header().number >= registration.finalized_number
                 })
-                && (qualified.original_checkpoint_digest, qualified.registration_digest)
-                    == qualification_digests(work)?,
+                && (
+                    qualified.original_checkpoint_digest,
+                    qualified.registration_digest
+                ) == qualification_digests(work)?,
             "HOLD: cutover Beacon qualification identity changed"
         );
     }
@@ -835,14 +843,15 @@ fn validate_work_version(work: &Work) -> Result<()> {
                     matches!(
                         (checkpoint.schema_version(), checkpoint.policy()),
                         (1, "independent-two-el-v1") | (2, "beacon-sync-committee-v1")
-                    )
-                        && checkpoint.chain_id() == work.intent.old_identity.ethereum_chain_id
+                    ) && checkpoint.chain_id() == work.intent.old_identity.ethereum_chain_id
                         && checkpoint.genesis_hash().0
                             == work.intent.old_identity.ethereum_genesis_hash.0
-                        && checkpoint.common_header().number >= work.intent.boundary.execution_number
+                        && checkpoint.common_header().number
+                            >= work.intent.boundary.execution_number
                         && work.registration.as_ref().is_none_or(|registration| {
                             checkpoint.common_header().number >= registration.included_number
-                                && checkpoint.common_header().number >= registration.finalized_number
+                                && checkpoint.common_header().number
+                                    >= registration.finalized_number
                         })
                 })
         } else {
@@ -851,19 +860,33 @@ fn validate_work_version(work: &Work) -> Result<()> {
         "HOLD: cutover finality evidence/schema mismatch"
     );
     if work.schema_version < 4 {
-        ensure!(work.intent.native_wrapper_approval.is_none(), "HOLD: legacy work contains schema4 capability");
+        ensure!(
+            work.intent.native_wrapper_approval.is_none(),
+            "HOLD: legacy work contains schema4 capability"
+        );
     }
     if work.schema_version >= 4 {
-        ensure!(work.intent.historical_native_wrapper_approval.is_none(), "HOLD: schema4 cannot override retained capability");
+        ensure!(
+            work.intent.historical_native_wrapper_approval.is_none(),
+            "HOLD: schema4 cannot override retained capability"
+        );
         work.intent.validate_wrapper_approval()?;
         for pin in work.intent.initial_role_pins.iter().chain(&work.role_pins) {
             match work.intent.wrapper_mode_for(pin.token) {
-                Some(NativeWrapperMode::EscrowV1) => ensure!(pin.outstanding_redemptions.is_some()
-                    && pin.blocking_redemptions.is_none(), "HOLD: v1 pin must record only actual OutstandingRedemptions"),
-                Some(NativeWrapperMode::HeldEscrowV2) => ensure!(pin.blocking_redemptions.zip(pin.outstanding_redemptions)
-                    .is_some_and(|(blocking, outstanding)| blocking <= outstanding), "HOLD: v2 pin must record both actual counters"),
-                None => ensure!(pin.outstanding_redemptions.is_none() && pin.blocking_redemptions.is_none(),
-                    "HOLD: non-wrapper pin contains native counters"),
+                Some(NativeWrapperMode::EscrowV1) => ensure!(
+                    pin.outstanding_redemptions.is_some() && pin.blocking_redemptions.is_none(),
+                    "HOLD: v1 pin must record only actual OutstandingRedemptions"
+                ),
+                Some(NativeWrapperMode::HeldEscrowV2) => ensure!(
+                    pin.blocking_redemptions
+                        .zip(pin.outstanding_redemptions)
+                        .is_some_and(|(blocking, outstanding)| blocking <= outstanding),
+                    "HOLD: v2 pin must record both actual counters"
+                ),
+                None => ensure!(
+                    pin.outstanding_redemptions.is_none() && pin.blocking_redemptions.is_none(),
+                    "HOLD: non-wrapper pin contains native counters"
+                ),
             }
         }
     }
@@ -951,7 +974,8 @@ async fn authenticate_work_ethereum(
     );
     validate_ethereum_qualification(work)?;
     if let Some(qualification) = &work.ethereum_qualification {
-        view.verify_checkpoint(&**eth, &qualification.checkpoint).await?;
+        view.verify_checkpoint(&**eth, &qualification.checkpoint)
+            .await?;
     }
     // Historical common/primary/witness fences remain immutable; the shared
     // authority appends their digest-to-Beacon qualification before progress.
@@ -978,11 +1002,8 @@ async fn authenticate_work_ethereum(
             "HOLD: saved coverage contradicts boundary"
         );
     }
-    view.verify_checkpoints_with_blocks(
-        &**eth,
-        work.ethereum_authentication.as_slice(),
-        &targets,
-    ).await?;
+    view.verify_checkpoints_with_blocks(&**eth, work.ethereum_authentication.as_slice(), &targets)
+        .await?;
     let mut parent = H256::zero();
     for (index, block) in work.blocks.iter().enumerate() {
         ensure!(
@@ -1128,7 +1149,10 @@ fn advance_ethereum_authentication(
 ) -> Result<()> {
     // Archive exact historical bytes before replacing unfrozen authority.
     if work.schema_version < 3
-        || work.ethereum_authentication.as_ref().is_some_and(|saved| saved.legacy().is_some())
+        || work
+            .ethereum_authentication
+            .as_ref()
+            .is_some_and(|saved| saved.legacy().is_some())
     {
         let bytes = fs::read(path)?;
         let digest = seal::digest(&bytes);
@@ -1152,17 +1176,28 @@ async fn ethereum_api(
         &args.ethereum_finality_bootstrap,
         args.ethereum_finality_bootstrap_sha256.parse()?,
         &args.ethereum_finality_beacon_rpc,
-    )?.with_proof_sources(args.ethereum_finality_proof_sources.clone())?;
+    )?
+    .with_proof_sources(args.ethereum_finality_proof_sources.clone())?;
     ensure!(
-        config.identity() == (identity.ethereum_chain_id, identity.ethereum_genesis_hash.0.into()),
+        config.identity()
+            == (
+                identity.ethereum_chain_id,
+                identity.ethereum_genesis_hash.0.into()
+            ),
         "HOLD: Beacon approval differs from cutover Ethereum identity"
     );
-    let mut eth = PollingEthApi::new(endpoint).await?
-        .with_beacon_finality(config, &args.ethereum_finality_store).await?;
+    let mut eth = PollingEthApi::new(endpoint)
+        .await?
+        .with_beacon_finality(config, &args.ethereum_finality_store)
+        .await?;
     if let Some(witness) = &args.ethereum_witness_rpc {
-        eth = eth.with_data_witness(
-            witness, identity.ethereum_chain_id, identity.ethereum_genesis_hash.0.into(),
-        ).await?;
+        eth = eth
+            .with_data_witness(
+                witness,
+                identity.ethereum_chain_id,
+                identity.ethereum_genesis_hash.0.into(),
+            )
+            .await?;
     }
     Ok(eth)
 }
@@ -1205,14 +1240,23 @@ fn read_versioned_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T>
         matches!(value["schema_version"].as_u64(), Some(1..=4)),
         "HOLD: unsupported cutover evidence schema"
     );
-    if value["schema_version"].as_u64().is_some_and(|version| version < 3) {
+    if value["schema_version"]
+        .as_u64()
+        .is_some_and(|version| version < 3)
+    {
         ensure!(
             value.get("ethereum_authentication").is_none(),
             "HOLD: legacy evidence contains an Ethereum authentication field"
         );
     }
-    if value["schema_version"].as_u64().is_some_and(|version| version < 4) {
-        ensure!(value["intent"].get("native_wrapper_approval").is_none(), "HOLD: legacy report contains schema4 capability");
+    if value["schema_version"]
+        .as_u64()
+        .is_some_and(|version| version < 4)
+    {
+        ensure!(
+            value["intent"].get("native_wrapper_approval").is_none(),
+            "HOLD: legacy report contains schema4 capability"
+        );
     }
     if value["schema_version"] == 1 {
         let admissions = value["admissions"].as_array().into_iter().flatten();
@@ -1235,21 +1279,33 @@ fn read_versioned_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T>
     Ok(serde_json::from_value(value)?)
 }
 
-async fn bind_invocation_approval(api: &GearApi, path: &Path, approved: Option<&ApprovedNativeWrapper>) -> Result<()> {
+async fn bind_invocation_approval(
+    api: &GearApi,
+    path: &Path,
+    approved: Option<&ApprovedNativeWrapper>,
+) -> Result<()> {
     let mut work = read_work(path)?;
     if work.schema_version >= 4 {
-        ensure!(work.intent.native_wrapper_approval.as_ref() == approved,
-            "HOLD: invocation approval differs from retained capability");
+        ensure!(
+            work.intent.native_wrapper_approval.as_ref() == approved,
+            "HOLD: invocation approval differs from retained capability"
+        );
     } else {
         if let Some(retained) = work.intent.wrapper_approval() {
-            ensure!(Some(retained) == approved, "HOLD: historical capability approval changed");
+            ensure!(
+                Some(retained) == approved,
+                "HOLD: historical capability approval changed"
+            );
         }
         work.intent.historical_native_wrapper_approval = approved.cloned();
     }
     authenticate_native_binding(api, &work.intent, None).await?;
     if work.schema_version < 4 {
         if let Some(approved) = approved {
-            gear_common::durable::immutable_json(&path.with_file_name("historical-native-wrapper-approval.json"), approved)?;
+            gear_common::durable::immutable_json(
+                &path.with_file_name("historical-native-wrapper-approval.json"),
+                approved,
+            )?;
         }
     }
     Ok(())
@@ -1257,12 +1313,14 @@ async fn bind_invocation_approval(api: &GearApi, path: &Path, approved: Option<&
 
 fn verify_legacy_work_archive(path: &Path, work: &Work) -> Result<()> {
     if let Some(digest) = work.legacy_ethereum_work_digest {
-        let bytes: alloy_primitives::Bytes = serde_json::from_slice(
-            &gear_common::durable::committed_bytes(
+        let bytes: alloy_primitives::Bytes =
+            serde_json::from_slice(&gear_common::durable::committed_bytes(
                 &path.with_file_name(format!("legacy-work-{digest:x}.json")),
-            )?,
-        )?;
-        ensure!(seal::digest(&bytes) == digest, "HOLD: historical Work archive changed");
+            )?)?;
+        ensure!(
+            seal::digest(&bytes) == digest,
+            "HOLD: historical Work archive changed"
+        );
     }
     Ok(())
 }
@@ -1276,7 +1334,8 @@ fn read_work(path: &Path) -> Result<Work> {
     if work.schema_version < 4 && work.intent.native_wrapper.is_some() {
         let approval_path = path.with_file_name("historical-native-wrapper-approval.json");
         if approval_path.exists() {
-            work.intent.historical_native_wrapper_approval = Some(serde_json::from_slice(&fs::read(approval_path)?)?);
+            work.intent.historical_native_wrapper_approval =
+                Some(serde_json::from_slice(&fs::read(approval_path)?)?);
         }
     }
     validate_work_version(&work)?;
@@ -1306,9 +1365,9 @@ fn save(path: &Path, work: &Work) -> Result<()> {
     if path.exists() {
         let mut previous = read_work(path)?;
         ensure!(
-            previous.legacy_ethereum_work_digest.is_none_or(|digest| {
-                work.legacy_ethereum_work_digest == Some(digest)
-            }),
+            previous
+                .legacy_ethereum_work_digest
+                .is_none_or(|digest| { work.legacy_ethereum_work_digest == Some(digest) }),
             "HOLD: historical Work archive reference changed"
         );
         let frozen = sealing_started(path, &previous)?;
@@ -1325,8 +1384,12 @@ fn save(path: &Path, work: &Work) -> Result<()> {
                 "HOLD: frozen cutover projection changed"
             );
         }
-        if !frozen && (previous.schema_version < 3
-            || previous.ethereum_authentication.as_ref().is_some_and(|saved| saved.legacy().is_some()))
+        if !frozen
+            && (previous.schema_version < 3
+                || previous
+                    .ethereum_authentication
+                    .as_ref()
+                    .is_some_and(|saved| saved.legacy().is_some()))
             && (previous.schema_version != work.schema_version
                 || previous.ethereum_authentication != work.ethereum_authentication)
         {
@@ -1541,8 +1604,7 @@ async fn finish_pending_seal(
     let mut view = eth.verified_finalized_view().await?;
     seal::verify_pending_originals(
         &sealed,
-        &coverage_bytes,
-        &lifecycle_bytes,
+        (&coverage_bytes, &lifecycle_bytes),
         provider.clone(),
         api,
         eth,
@@ -1644,7 +1706,8 @@ fn sender(
         provider,
         String::new(),
         manager,
-    ).with_native_wrapper_approval(approval.cloned().map(Arc::new))
+    )
+    .with_native_wrapper_approval(approval.cloned().map(Arc::new))
 }
 async fn status(api: &GearApi, id: H256) -> Result<(CutoverStatus, FinalizedCutoverStatus)> {
     let at = api.last_block_hash().await?;
@@ -1661,13 +1724,35 @@ async fn status(api: &GearApi, id: H256) -> Result<(CutoverStatus, FinalizedCuto
     };
     Ok((result, pin))
 }
-async fn authenticate_native_binding(api: &GearApi, intent: &Intent, at: Option<H256>) -> Result<()> {
+async fn authenticate_native_binding(
+    api: &GearApi,
+    intent: &Intent,
+    at: Option<H256>,
+) -> Result<()> {
     intent.validate_wrapper_approval()?;
-    let at = match at { Some(at) => at, None => H256::from_slice(api.last_block_hash().await?.as_ref()) };
-    let source = native_wrapper_at(api, intent.old_identity.vft_manager_address, at, intent.wrapper_approval()).await?;
-    let replacement = native_wrapper_at(api, intent.new_identity.vft_manager_address, at, intent.wrapper_approval()).await?;
-    ensure!(source == replacement && source.as_ref().map(|binding| binding.actor_id) == intent.native_wrapper,
-        "HOLD: source/replacement native capability differs");
+    let at = match at {
+        Some(at) => at,
+        None => H256::from_slice(api.last_block_hash().await?.as_ref()),
+    };
+    let source = native_wrapper_at(
+        api,
+        intent.old_identity.vft_manager_address,
+        at,
+        intent.wrapper_approval(),
+    )
+    .await?;
+    let replacement = native_wrapper_at(
+        api,
+        intent.new_identity.vft_manager_address,
+        at,
+        intent.wrapper_approval(),
+    )
+    .await?;
+    ensure!(
+        source == replacement
+            && source.as_ref().map(|binding| binding.actor_id) == intent.native_wrapper,
+        "HOLD: source/replacement native capability differs"
+    );
     Ok(())
 }
 
@@ -1885,19 +1970,16 @@ async fn verify_activation(
         .parent()
         .context("Seal parent missing")?
         .join("cutover-activation.json");
-    ensure!(
-        !PathBuf::from(format!("{}.new", path.display())).exists(),
-        "HOLD: interrupted activation evidence"
-    );
-    if !path.exists() {
+    let Some(retained) = retained_artifact(&path)? else {
         return Ok(false);
-    }
+    };
     let (digest, call, pin): (H256, FinalizedCutoverCall, FinalizedCutoverStatus) =
-        serde_json::from_slice(&fs::read(&path)?)?;
+        serde_json::from_slice(&retained)?;
     ensure!(
         digest == seal::load_seal(seal_path)?.1
             && call.step == CutoverStep::DestinationUnpause
-            && complete(&call.original),
+            && complete(&call.original)
+            && !call.archived_no_effect,
         "HOLD: activation seal/original mismatch"
     );
     verify_lifecycle_original(api, scanner, intent, &call).await?;
@@ -1935,9 +2017,13 @@ async fn verify_activation(
         "HOLD: authenticated activation state/order differs"
     );
     ensure!(
-        fs::read(&path)? == serde_json::to_vec(&(digest, call, pin))?,
+        retained == serde_json::to_vec(&(&digest, &call, &pin))?
+            && retained_artifact(&path)?.as_ref() == Some(&retained),
         "HOLD: activation bytes changed during verification"
     );
+    // Only authenticated immutable bytes may complete an interrupted publication.
+    // Keep the original unpause and historical status pin, never a fresh observation.
+    gear_common::durable::immutable_json(&path, &(digest, call, pin))?;
     Ok(true)
 }
 
@@ -2267,7 +2353,9 @@ async fn reconcile_original(
             return Ok((
                 MessageStatus::NeedsReconciliation {
                     receipt_key: signed.receipt_key,
-                    diagnostic: "HOLD: original absent and nonce consumed; no replacement proof authorized".into(),
+                    diagnostic:
+                        "HOLD: original absent and nonce consumed; no replacement proof authorized"
+                            .into(),
                     receipt_observation: Some(FinalizedReceiptObservation {
                         finalized_block_number: Some(signed.scanned_finalized_number),
                         finalized_block_hash: signed.scanned_finalized_hash.clone(),
@@ -2550,8 +2638,11 @@ async fn run_cutover_request(
         if let Some(wrapper) = work.intent.native_wrapper {
             let mode = work.intent.wrapper_mode_for(wrapper);
             let roles = read_role_pin(api, wrapper, mode, None).await?;
-            ensure!(roles.manager == Some(work.intent.old_identity.vft_manager_address)
-                && zero_blocking(&roles, mode)?, "HOLD: source native obligations/manager changed before BeginCutover");
+            ensure!(
+                roles.manager == Some(work.intent.old_identity.vft_manager_address)
+                    && zero_blocking(&roles, mode)?,
+                "HOLD: source native obligations/manager changed before BeginCutover"
+            );
         }
     }
     let frozen = sealing_started(work_path, &work)?;
@@ -2587,7 +2678,7 @@ async fn run_cutover_request(
             scanner.api_provider.clone(),
             &work.intent.old_identity,
             Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
+            work.intent.wrapper_approval(),
         ),
         &work,
     )
@@ -2741,7 +2832,11 @@ fn external_parent_result(
 fn accepted_external_parent(proof: &[u8], signed: &SignedSubmission) -> bool {
     matches!(
         external_parent_result(proof, signed),
-        Some(Ok(()) | Err(vft_manager_client::Error::NativeSettlementPending) | Err(vft_manager_client::Error::ReplyFailure(_)))
+        Some(
+            Ok(())
+                | Err(vft_manager_client::Error::NativeSettlementPending)
+                | Err(vft_manager_client::Error::ReplyFailure(_))
+        )
     )
 }
 fn refresh_pending_external_original(
@@ -2831,7 +2926,10 @@ fn attach_external_native_continuations(
 ) -> Result<()> {
     let pending_native = matches!(
         external_parent_result(proof, original),
-        Some(Err(vft_manager_client::Error::NativeSettlementPending) | Err(vft_manager_client::Error::ReplyFailure(_)))
+        Some(
+            Err(vft_manager_client::Error::NativeSettlementPending)
+                | Err(vft_manager_client::Error::ReplyFailure(_))
+        )
     );
     let mut native = continuations
         .iter()
@@ -4389,6 +4487,7 @@ pub async fn prepare(
     .await?;
     let mut view = eth.verified_finalized_view().await?;
     if let Some(predecessor) = seal::predecessor_seal_path(&old_transactions)? {
+        let (prior, _) = seal::verify_markers(&predecessor)?;
         let signer: gsdk::signer::Signer = api.clone().into();
         seal::verify_originals_read_only(
             &predecessor,
@@ -4396,7 +4495,7 @@ pub async fn prepare(
             api,
             &eth,
             &mut view,
-            approved.as_ref(),
+            prior.predecessor_wrapper_approval(approved.as_ref())?,
         )
         .await?;
     }
@@ -4472,9 +4571,24 @@ pub async fn prepare(
         .context("HOLD: source ERC20 manager missing")?;
     authenticate_source_emitter(&eth, &old_identity, H160(erc20_manager.0)).await?;
     let native_approval = args.native_capability.load()?;
-    let binding = native_wrapper_at(api, hash_actor(args.old_vft_manager), H256::from_slice(at.as_ref()), native_approval.as_ref()).await?;
-    let replacement_binding = native_wrapper_at(api, hash_actor(args.new_vft_manager), H256::from_slice(at.as_ref()), native_approval.as_ref()).await?;
-    ensure!(binding == replacement_binding, "HOLD: replacement full native configuration differs");
+    let binding = native_wrapper_at(
+        api,
+        hash_actor(args.old_vft_manager),
+        H256::from_slice(at.as_ref()),
+        native_approval.as_ref(),
+    )
+    .await?;
+    let replacement_binding = native_wrapper_at(
+        api,
+        hash_actor(args.new_vft_manager),
+        H256::from_slice(at.as_ref()),
+        native_approval.as_ref(),
+    )
+    .await?;
+    ensure!(
+        binding == replacement_binding,
+        "HOLD: replacement full native configuration differs"
+    );
     let native_wrapper = binding.as_ref().map(|binding| actor(binding.actor_id));
     let native_mode = binding.as_ref().map(|binding| binding.mode);
     let config = manager
@@ -4496,23 +4610,41 @@ pub async fn prepare(
         hash_actor(proxy) == old_identity.historical_proxy_address,
         "HOLD: original proxy differs from source"
     );
-    let fingerprint = if native_mode != Some(NativeWrapperMode::HeldEscrowV2) { seal::digest(
-        &(
-            *b"vft-manager/cutover-config/v1",
-            builtin,
-            proxy,
-            Some(erc20_manager),
-            native_wrapper,
-            config.clone(),
-            mappings.clone(),
+    let fingerprint = if native_mode != Some(NativeWrapperMode::HeldEscrowV2) {
+        seal::digest(
+            &(
+                *b"vft-manager/cutover-config/v1",
+                builtin,
+                proxy,
+                Some(erc20_manager),
+                native_wrapper,
+                config.clone(),
+                mappings.clone(),
+            )
+                .encode(),
         )
-            .encode(),
-    ) } else {
-        let config_binding = binding.as_ref().map(|binding| vft_manager_client::NativeWrapperConfig {
-            actor_id: actor(binding.actor_id), ethereum_token: binding.ethereum_token.0.into(),
-            code_id: binding.code_id.0.into(), mode: vft_manager_client::NativeWrapperMode::HeldEscrowV2,
-        });
-        seal::digest(&(*b"vft-manager/cutover-config/v2", builtin, proxy, Some(erc20_manager), config_binding, config, mappings.clone()).encode())
+    } else {
+        let config_binding =
+            binding
+                .as_ref()
+                .map(|binding| vft_manager_client::NativeWrapperConfig {
+                    actor_id: actor(binding.actor_id),
+                    ethereum_token: binding.ethereum_token.0.into(),
+                    code_id: binding.code_id.0.into(),
+                    mode: vft_manager_client::NativeWrapperMode::HeldEscrowV2,
+                });
+        seal::digest(
+            &(
+                *b"vft-manager/cutover-config/v2",
+                builtin,
+                proxy,
+                Some(erc20_manager),
+                config_binding,
+                config,
+                mappings.clone(),
+            )
+                .encode(),
+        )
     };
     let mut new_identity = old_identity.clone();
     new_identity.vft_manager_address = hash_actor(args.new_vft_manager);
@@ -4736,7 +4868,13 @@ async fn drain_source(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result
     }
     if let Some(wrapper) = work.intent.native_wrapper {
         let at = api.last_block_hash().await?;
-        let roles = read_role_pin(api, wrapper, work.intent.wrapper_mode_for(wrapper), Some(H256::from_slice(at.as_ref()))).await?;
+        let roles = read_role_pin(
+            api,
+            wrapper,
+            work.intent.wrapper_mode_for(wrapper),
+            Some(H256::from_slice(at.as_ref())),
+        )
+        .await?;
         let phase = manager
             .cutover_status()
             .at_block(sails_rs::H256::from_slice(at.as_ref()))
@@ -5172,7 +5310,13 @@ async fn handoff_roles_reconciled(api: &GearApi, eth: &PollingEthApi, path: &Pat
         );
         ensure!(
             zero_blocking(
-                &read_role_pin(api, wrapper, work.intent.wrapper_mode_for(wrapper), Some(H256::from_slice(at.as_ref()))).await?,
+                &read_role_pin(
+                    api,
+                    wrapper,
+                    work.intent.wrapper_mode_for(wrapper),
+                    Some(H256::from_slice(at.as_ref()))
+                )
+                .await?,
                 work.intent.wrapper_mode_for(wrapper)
             )?,
             "HOLD: blocking original native redemption"
@@ -5222,7 +5366,13 @@ async fn handoff_roles_reconciled(api: &GearApi, eth: &PollingEthApi, path: &Pat
             escrow.manager().at_block(pin).recv(actor(wrapper)).await? == Some(new)
                 && admin.burner().at_block(pin).recv(actor(wrapper)).await? == new
                 && zero_blocking(
-                    &read_role_pin(api, wrapper, work.intent.wrapper_mode_for(wrapper), Some(H256::from_slice(at.as_ref()))).await?,
+                    &read_role_pin(
+                        api,
+                        wrapper,
+                        work.intent.wrapper_mode_for(wrapper),
+                        Some(H256::from_slice(at.as_ref()))
+                    )
+                    .await?,
                     work.intent.wrapper_mode_for(wrapper)
                 )?,
             "HOLD: wrapper handoff readback differs"
@@ -5415,7 +5565,12 @@ pub async fn finalize(
         seal::lock_original_journals(&work.intent.old_transactions, &work.intent.old_discovery)?;
     let _signer = lock_signer(&path, api, work.intent.old_identity.gear_genesis_hash)?;
     let _other_signers = lock_other_signers(api, &work.intent, &work, &path)?;
-    let eth = ethereum_api(&args.ethereum_rpc, &args.ethereum_finality, &work.intent.old_identity).await?;
+    let eth = ethereum_api(
+        &args.ethereum_rpc,
+        &args.ethereum_finality,
+        &work.intent.old_identity,
+    )
+    .await?;
     eth.enable_finality_archive(
         &args.cutover_dir.join("ethereum-finality"),
         work.intent.old_identity.ethereum_genesis_hash.0.into(),
@@ -5428,8 +5583,16 @@ pub async fn finalize(
     let signer: gsdk::signer::Signer = api.clone().into();
     let provider = ApiProviderConnection::from_api(signer.api().clone());
     if let Some(predecessor) = seal::predecessor_seal_path(&work.intent.old_transactions)? {
-        seal::verify_originals_read_only(&predecessor, provider.clone(), api, &eth, &mut view, work.intent.wrapper_approval())
-            .await?;
+        let (prior, _) = seal::verify_markers(&predecessor)?;
+        seal::verify_originals_read_only(
+            &predecessor,
+            provider.clone(),
+            api,
+            &eth,
+            &mut view,
+            prior.predecessor_wrapper_approval(work.intent.wrapper_approval())?,
+        )
+        .await?;
     }
     let seal_path = args.cutover_dir.join("cutover.json");
     if sealing_started(&path, &work)? {
@@ -5544,7 +5707,15 @@ pub async fn finalize(
         finish_pending_seal(api, &eth, provider.clone(), &path).await?;
     }
     let mut view = eth.verified_finalized_view().await?;
-    seal::verify_originals_read_only(&seal_path, provider, api, &eth, &mut view, work.intent.wrapper_approval()).await?;
+    seal::verify_originals_read_only(
+        &seal_path,
+        provider,
+        api,
+        &eth,
+        &mut view,
+        work.intent.wrapper_approval(),
+    )
+    .await?;
     work = read_work(&path)?;
     let transactions = absolute_new_path(&args.new_transactions)?;
     let discovery = absolute_new_path(&args.new_discovery)?;
@@ -5669,7 +5840,12 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     let provider = provider(connection).await?;
     let mut readonly = provider.clone();
     let api = readonly.gclient();
-    let eth = ethereum_api(&args.ethereum_rpc, &args.ethereum_finality, &sealed.old_identity).await?;
+    let eth = ethereum_api(
+        &args.ethereum_rpc,
+        &args.ethereum_finality,
+        &sealed.old_identity,
+    )
+    .await?;
     // The dedicated Beacon store retains proof qualifications; sealed journals
     // and reports remain read-only and are never attached as a mutable archive.
     let mut view = eth.verified_finalized_view().await?;
@@ -5687,15 +5863,29 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
             && report.intent.new_manager_code_id == sealed.new_manager_code_id,
         "HOLD: sealed protocol evidence identities differ"
     );
-    ensure!(report.intent.native_wrapper_approval == sealed.native_wrapper_approval, "HOLD: seal capability differs");
+    ensure!(
+        report.intent.native_wrapper_approval == sealed.native_wrapper_approval,
+        "HOLD: seal capability differs"
+    );
     if sealed.schema_version >= 4 {
-        ensure!(report.intent.native_wrapper_approval == approved, "HOLD: invocation capability differs from seal");
+        ensure!(
+            report.intent.native_wrapper_approval == approved,
+            "HOLD: invocation capability differs from seal"
+        );
     } else {
         report.intent.historical_native_wrapper_approval = approved;
     }
     authenticate_environment(&api, &eth, &report.intent).await?;
     authenticate_boundary(&api, &beacon, &report.intent).await?;
-    seal::verify_originals_read_only(&args.seal, provider.clone(), &api, &eth, &mut view, report.intent.wrapper_approval()).await?;
+    seal::verify_originals_read_only(
+        &args.seal,
+        provider.clone(),
+        &api,
+        &eth,
+        &mut view,
+        report.intent.wrapper_approval(),
+    )
+    .await?;
     let work = Work {
         schema_version: sealed.schema_version,
         ethereum_authentication: report.ethereum_authentication,
@@ -5722,7 +5912,7 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
     );
     verify_activation(&api, &scanner, &work.intent, &args.seal).await?;
     seal::verify_markers(&args.seal)?;
-    println!("Verified original sealed journals, canonical coverage, lifecycle originals and historical economic settlement (strictly read-only).");
+    println!("Verified original sealed journals, canonical coverage, lifecycle originals and historical economic settlement; exact authenticated activation publication recovered if interrupted.");
     Ok(())
 }
 
@@ -5730,20 +5920,20 @@ async fn authenticate_completed_work(
     api: &GearApi,
     eth: &PollingEthApi,
     provider: ApiProviderConnection,
-    mut view: &mut ethereum_client::FinalizedView,
+    view: &mut ethereum_client::FinalizedView,
     mut work: Work,
 ) -> Result<Work> {
     if work.blocks.is_empty() && matches!(work.schema_version, 1 | 2) {
         work.blocks = seal::reconstruct_coverage(
-            &eth,
-            &mut view,
+            eth,
+            view,
             &work.intent.boundary,
             work.intent.old_identity.ethereum_genesis_hash,
         )
         .await?;
     }
-    authenticate_work_ethereum(&eth, &mut view, &mut work).await?;
-    qualify_work_ethereum(&mut work, &view)?;
+    authenticate_work_ethereum(eth, view, &mut work).await?;
+    qualify_work_ethereum(&mut work, view)?;
     completed_coverage(&work)?;
     validate_lifecycle_report(&work)?;
     let finalized = api.block_number_at(api.last_block_hash().await?).await?;
@@ -5772,7 +5962,7 @@ async fn authenticate_completed_work(
         work.intent.wrapper_approval(),
     );
     for original in &work.calls {
-        verify_lifecycle_original(&api, &scanner, &work.intent, original).await?;
+        verify_lifecycle_original(api, &scanner, &work.intent, original).await?;
     }
     for admission in &work.admissions {
         let block = work
@@ -5786,12 +5976,12 @@ async fn authenticate_completed_work(
             .find(|receipt| receipt.transaction_hash == admission.original_tx_hash)
             .context("HOLD: original admitted receipt missing")?;
         ensure!(
-            fee_emitter(&eth, &work.intent, receipt).await? == admission.fee_emitter
+            fee_emitter(eth, &work.intent, receipt).await? == admission.fee_emitter
                 && admission.fee_event_observed == admission.fee_emitter.is_some(),
             "HOLD: transaction-local fee evidence changed"
         );
         if admission.exclusion.is_some() {
-            authenticate_exclusion(&api, &scanner, &work, admission).await?;
+            authenticate_exclusion(api, &scanner, &work, admission).await?;
             continue;
         }
         if let Some(uuid) = admission.original_lane_uuid {
@@ -5825,7 +6015,7 @@ async fn authenticate_completed_work(
             );
             let mut external = external.clone();
             qualify_external_original(
-                &api,
+                api,
                 &scanner,
                 &proof,
                 &mut external,
@@ -5842,7 +6032,7 @@ async fn authenticate_completed_work(
             .context("HOLD: sponsored original missing")?;
         scanner
             .verify_saved_completion(
-                &api,
+                api,
                 &proof,
                 signed,
                 admission
@@ -5868,7 +6058,7 @@ async fn authenticate_completed_work(
                 .await?,
         "HOLD: sealed actual authorized EVM original unavailable"
     );
-    verify_current_registrations(&eth, &work.intent).await?;
+    verify_current_registrations(eth, &work.intent).await?;
     view.recheck(&**eth).await?;
     Ok(work)
 }
@@ -5883,12 +6073,17 @@ mod tests {
     ) -> Result<ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture> {
         let block = chain.last().context("empty execution fixture")?;
         let header = alloy::rpc::types::Header {
-            inner: block.header.clone(), hash: block.hash.0.into(),
-            total_difficulty: None, size: None,
+            inner: block.header.clone(),
+            hash: block.hash.0.into(),
+            total_difficulty: None,
+            size: None,
         };
         ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
-            31337, chain[0].hash.0.into(), Arc::new(move || header.clone()),
-        ).await
+            31337,
+            chain[0].hash.0.into(),
+            Arc::new(move || header.clone()),
+        )
+        .await
     }
 
     fn checkpoint_header_mut(
@@ -5915,38 +6110,60 @@ mod tests {
         };
         let approved_digest = args.ethereum_finality_bootstrap_sha256.clone();
         args.ethereum_finality_bootstrap_sha256 = format!("{:#x}", B256::repeat_byte(99));
-        assert!(ethereum_api(&rpc.url, &args, &work.intent.old_identity).await.is_err());
-        assert!(!args.ethereum_finality_store.exists(), "bad approval must not acquire authority");
+        assert!(ethereum_api(&rpc.url, &args, &work.intent.old_identity)
+            .await
+            .is_err());
+        assert!(
+            !args.ethereum_finality_store.exists(),
+            "bad approval must not acquire authority"
+        );
         args.ethereum_finality_bootstrap_sha256 = approved_digest;
         for change_chain in [true, false] {
             let mut wrong = work.intent.old_identity.clone();
-            if change_chain { wrong.ethereum_chain_id = 1; }
-            else { wrong.ethereum_genesis_hash = H256::repeat_byte(99); }
+            if change_chain {
+                wrong.ethereum_chain_id = 1;
+            } else {
+                wrong.ethereum_genesis_hash = H256::repeat_byte(99);
+            }
             assert!(ethereum_api(&rpc.url, &args, &wrong).await.is_err());
             assert!(!args.ethereum_finality_store.exists());
         }
         let eth = ethereum_api(&rpc.url, &args, &work.intent.old_identity).await?;
-        assert_eq!(eth.verified_finalized_view().await?.checkpoint().schema_version(), 2);
+        assert_eq!(
+            eth.verified_finalized_view()
+                .await?
+                .checkpoint()
+                .schema_version(),
+            2
+        );
         Ok(())
     }
 
     #[tokio::test]
-    async fn legacy_work_requalification_checks_every_fence_and_archives_exact_bytes() -> Result<()> {
+    async fn legacy_work_requalification_checks_every_fence_and_archives_exact_bytes() -> Result<()>
+    {
         let (mut work, chain) = interrupted_coverage_fixture().await;
         let rpc = WorkEvidenceRpc::new(chain.clone()).await;
         let witness = WorkEvidenceRpc::new(chain.clone()).await;
         let beacon = work_beacon_fixture(&chain).await?;
-        let eth = PollingEthApi::new(&rpc.url).await?
-            .with_beacon_finality(beacon.config.clone(), &beacon.directory).await?
-            .with_data_witness(&witness.url, 31337, chain[0].hash.0.into()).await?;
+        let eth = PollingEthApi::new(&rpc.url)
+            .await?
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await?
+            .with_data_witness(&witness.url, 31337, chain[0].hash.0.into())
+            .await?;
         let mut view = eth.verified_finalized_view().await?;
         let header = chain.last().unwrap().header.clone();
         work.schema_version = 3;
         work.ethereum_authentication = Some(ethereum_client::FinalityCheckpoint::Legacy(
             ethereum_client::beacon_finality::LegacyFinalityCheckpoint {
-                schema_version: 1, policy: "independent-two-el-v1".into(), chain_id: 31337,
-                genesis_hash: chain[0].hash.0.into(), common_header: header.clone(),
-                primary_finalized_header: header.clone(), witness_finalized_header: header,
+                schema_version: 1,
+                policy: "independent-two-el-v1".into(),
+                chain_id: 31337,
+                genesis_hash: chain[0].hash.0.into(),
+                common_header: header.clone(),
+                primary_finalized_header: header.clone(),
+                witness_finalized_header: header,
             },
         ));
         let path = work_path(&beacon.directory);
@@ -5955,21 +6172,29 @@ mod tests {
         for fence in 0..3 {
             let mut changed = work.clone();
             let ethereum_client::FinalityCheckpoint::Legacy(saved) =
-                changed.ethereum_authentication.as_mut().unwrap() else { unreachable!() };
+                changed.ethereum_authentication.as_mut().unwrap()
+            else {
+                unreachable!()
+            };
             match fence {
                 0 => saved.common_header.timestamp += 1,
                 1 => saved.primary_finalized_header.timestamp += 1,
                 _ => saved.witness_finalized_header.timestamp += 1,
             }
-            assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed).await.is_err());
+            assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed)
+                .await
+                .is_err());
             assert_eq!(fs::read(&path)?, original);
         }
         authenticate_work_ethereum(&eth, &mut view, &mut work).await?;
         assert_eq!(serde_json::to_vec(&work)?, original);
-        let history = path.with_file_name(format!("legacy-work-{:x}.json", seal::digest(&original)));
+        let history =
+            path.with_file_name(format!("legacy-work-{:x}.json", seal::digest(&original)));
         fs::write(&history, b"conflicting original")?;
-        assert!(advance_ethereum_authentication(&path, &mut work, &view).is_err(),
-            "archive collision must stop promotion");
+        assert!(
+            advance_ethereum_authentication(&path, &mut work, &view).is_err(),
+            "archive collision must stop promotion"
+        );
         assert_eq!(fs::read(&path)?, original);
         assert_eq!(fs::read(&history)?, b"conflicting original");
         fs::remove_file(&history)?;
@@ -5982,18 +6207,39 @@ mod tests {
         fs::write(&history, &retained_bytes)?;
         assert_eq!(retained.as_ref(), original.as_slice());
         let restarted = read_work(&path)?;
-        assert_eq!(restarted.ethereum_authentication.as_ref().unwrap().schema_version(), 2);
+        assert_eq!(
+            restarted
+                .ethereum_authentication
+                .as_ref()
+                .unwrap()
+                .schema_version(),
+            2
+        );
         let mut changed = restarted.clone();
-        changed.ethereum_qualification.as_mut().unwrap().original_checkpoint_digest = Some(H256::zero());
-        assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed).await.is_err());
+        changed
+            .ethereum_qualification
+            .as_mut()
+            .unwrap()
+            .original_checkpoint_digest = Some(H256::zero());
+        assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed)
+            .await
+            .is_err());
         for corrupt_header in [false, true] {
             let mut changed = restarted.clone();
             changed.ethereum_qualification = None;
             let ethereum_client::FinalityCheckpoint::Beacon(saved) =
-                changed.ethereum_authentication.as_mut().unwrap() else { unreachable!() };
-            if corrupt_header { saved.common_header.timestamp += 1; }
-            else { saved.beacon.proof_digest = B256::repeat_byte(99); }
-            assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed).await.is_err());
+                changed.ethereum_authentication.as_mut().unwrap()
+            else {
+                unreachable!()
+            };
+            if corrupt_header {
+                saved.common_header.timestamp += 1;
+            } else {
+                saved.beacon.proof_digest = B256::repeat_byte(99);
+            }
+            assert!(authenticate_work_ethereum(&eth, &mut view, &mut changed)
+                .await
+                .is_err());
         }
         let mut restarted = restarted;
         authenticate_work_ethereum(&eth, &mut view, &mut restarted).await?;
@@ -6001,14 +6247,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn frozen_reports_keep_checkpoint_identity_with_separate_beacon_qualification() -> Result<()> {
+    async fn frozen_reports_keep_checkpoint_identity_with_separate_beacon_qualification(
+    ) -> Result<()> {
         let (path, mut work) = pending_report_fixture().await;
         let beacon = work_beacon_fixture(&work.blocks).await?;
         let rpc = WorkEvidenceRpc::new(work.blocks.clone()).await;
-        let eth = PollingEthApi::new(&rpc.url).await?
-            .with_beacon_finality(beacon.config.clone(), &beacon.directory).await?;
+        let eth = PollingEthApi::new(&rpc.url)
+            .await?
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await?;
         let mut view = eth.verified_finalized_view().await?;
-        view.verify_checkpoint(&*eth, work.ethereum_authentication.as_ref().unwrap()).await?;
+        view.verify_checkpoint(&*eth, work.ethereum_authentication.as_ref().unwrap())
+            .await?;
         let (sealed, _, _) = pending_projection(&path, &mut work)?;
         let reports = report_bytes(&work)?;
         work.pending_seal = Some(sealed.clone());
@@ -6017,14 +6267,25 @@ mod tests {
         save(&path, &work)?;
         assert_eq!(report_bytes(&work)?, reports);
         assert_eq!(pending_projection(&path, &mut work)?.0, sealed);
-        assert!(work.ethereum_authentication.as_ref().unwrap().legacy().is_some());
+        assert!(work
+            .ethereum_authentication
+            .as_ref()
+            .unwrap()
+            .legacy()
+            .is_some());
         let mut changed = work.clone();
         changed.registration.as_mut().unwrap().finalized_hash = B256::repeat_byte(99);
-        assert!(validate_work_version(&changed).is_err(), "qualification must bind exact registration");
+        assert!(
+            validate_work_version(&changed).is_err(),
+            "qualification must bind exact registration"
+        );
         let mut changed = work.clone();
         changed.ethereum_qualification.as_mut().unwrap().checkpoint =
             work.ethereum_authentication.clone().unwrap();
-        assert!(validate_work_version(&changed).is_err(), "legacy evidence cannot authorize progress");
+        assert!(
+            validate_work_version(&changed).is_err(),
+            "legacy evidence cannot authorize progress"
+        );
         fs::remove_dir_all(path.parent().unwrap())?;
         Ok(())
     }
@@ -6413,7 +6674,12 @@ mod tests {
                 Err(vft_manager_client::Error::NativeSettlementPending),
                 true,
             ),
-            (Err(vft_manager_client::Error::ReplyFailure("native child error".into())), true),
+            (
+                Err(vft_manager_client::Error::ReplyFailure(
+                    "native child error".into(),
+                )),
+                true,
+            ),
             (Err(vft_manager_client::Error::Paused), false),
         ] {
             let mut manager_reply = io::SubmitReceipt::ROUTE.to_vec();
@@ -6984,12 +7250,14 @@ mod tests {
         (work, chain)
     }
 
+    type ManagerRegistrations = (H160, [H256; 2]);
+
     struct WorkEvidenceRpc {
         url: String,
         // Pruning bodies must not remove the canonical headers used by finality.
         bodies: Arc<std::sync::Mutex<BTreeSet<u64>>>,
         requests: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
-        registrations: Arc<std::sync::Mutex<Option<(H160, [H256; 2])>>>,
+        registrations: Arc<std::sync::Mutex<Option<ManagerRegistrations>>>,
         server: tokio::task::JoinHandle<()>,
     }
 
@@ -7013,7 +7281,7 @@ mod tests {
                 chain.iter().map(|b| b.number).collect::<BTreeSet<_>>(),
             ));
             let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
-            let registrations = Arc::new(std::sync::Mutex::new(None::<(H160, [H256; 2])>));
+            let registrations = Arc::new(std::sync::Mutex::new(None::<ManagerRegistrations>));
             let registered = registrations.clone();
             let available = bodies.clone();
             let observed = requests.clone();
@@ -7126,19 +7394,30 @@ mod tests {
                                     .filter(|b| available.lock().unwrap().contains(&b.number))
                                     .map_or(Value::Null, |b| json!(b.receipts))
                             }
-                            "eth_getTransactionReceipt" => chain.iter()
+                            "eth_getTransactionReceipt" => chain
+                                .iter()
                                 .flat_map(|block| &block.receipts)
                                 .find(|receipt| json!(receipt.transaction_hash) == params[0])
                                 .map_or(Value::Null, |receipt| json!(receipt)),
                             "eth_call" => {
                                 use alloy::sol_types::SolCall;
-                                let (manager, actors) = registered.lock().unwrap()
+                                let (manager, actors) = registered
+                                    .lock()
+                                    .unwrap()
                                     .expect("registration fixture not configured");
                                 assert_eq!(params[0]["to"], json!(manager));
-                                assert!(chain.iter().any(|block| params[1]["blockHash"] == json!(block.hash)));
-                                let input = params[0].get("input").or_else(|| params[0].get("data")).unwrap();
-                                let bytes = hex::decode(input.as_str().unwrap().trim_start_matches("0x")).unwrap();
-                                let call = IERC20Manager::isVftManagerCall::abi_decode(&bytes).unwrap();
+                                assert!(chain
+                                    .iter()
+                                    .any(|block| params[1]["blockHash"] == json!(block.hash)));
+                                let input = params[0]
+                                    .get("input")
+                                    .or_else(|| params[0].get("data"))
+                                    .unwrap();
+                                let bytes =
+                                    hex::decode(input.as_str().unwrap().trim_start_matches("0x"))
+                                        .unwrap();
+                                let call =
+                                    IERC20Manager::isVftManagerCall::abi_decode(&bytes).unwrap();
                                 assert!(actors.iter().any(|actor| actor.0 == call.vftManager.0));
                                 json!(format!("0x{:064x}", 1))
                             }
@@ -7502,7 +7781,7 @@ mod tests {
             connection,
             &work.intent.old_identity,
             Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
+            work.intent.wrapper_approval(),
         );
         let journal = seal::OriginalJournal {
             schema_version: 7,
@@ -8080,7 +8359,10 @@ mod tests {
         assert!(completed_coverage(&work).is_err());
         work.admissions[0].settlement = None;
         let ethereum_client::FinalityCheckpoint::Legacy(checkpoint) =
-            work.ethereum_authentication.as_mut().unwrap() else { unreachable!() };
+            work.ethereum_authentication.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
         checkpoint.policy = "single-provider".into();
         assert!(completed_coverage(&work).is_err());
     }
@@ -8124,14 +8406,20 @@ mod tests {
             let bytes = serde_json::to_vec(&saved).unwrap();
             authenticate_role_evidence(&saved, &drained, version, v1).unwrap();
             assert_eq!(serde_json::to_vec(&saved).unwrap(), bytes);
-            for mut changed in [historical_wrapper_pin(1, None), historical_wrapper_pin(0, Some(1))] {
+            for mut changed in [
+                historical_wrapper_pin(1, None),
+                historical_wrapper_pin(0, Some(1)),
+            ] {
                 assert!(authenticate_role_evidence(&saved, &changed, version, v1).is_err());
                 changed = drained.clone();
                 changed.block_hash = H256::repeat_byte(99);
                 assert!(authenticate_role_evidence(&saved, &changed, version, v1).is_err());
             }
         }
-        assert!(authenticate_role_evidence(&historical_wrapper_pin(0, Some(0)), &drained, 4, v1).is_err());
+        assert!(
+            authenticate_role_evidence(&historical_wrapper_pin(0, Some(0)), &drained, 4, v1)
+                .is_err()
+        );
     }
 
     #[test]
@@ -8419,7 +8707,10 @@ mod tests {
         let original_checkpoint = work.ethereum_authentication.clone();
         let mut newer = work.clone();
         let ethereum_client::FinalityCheckpoint::Legacy(checkpoint) =
-            newer.ethereum_authentication.as_mut().unwrap() else { unreachable!() };
+            newer.ethereum_authentication.as_mut().unwrap()
+        else {
+            unreachable!()
+        };
         checkpoint.common_header.number += 1;
         checkpoint.primary_finalized_header = checkpoint.common_header.clone();
         checkpoint.witness_finalized_header = checkpoint.common_header.clone();
@@ -8488,7 +8779,8 @@ mod tests {
                 "pin" => work.retirement.as_mut().unwrap().block_number += 1,
                 "identity" => work.intent.new_manager_code_id = H256::repeat_byte(77),
                 "checkpoint" => {
-                    checkpoint_header_mut(work.ethereum_authentication.as_mut().unwrap()).number += 1
+                    checkpoint_header_mut(work.ethereum_authentication.as_mut().unwrap()).number +=
+                        1
                 }
                 _ => unreachable!(),
             }
@@ -8529,19 +8821,32 @@ mod tests {
 
     #[tokio::test]
     async fn capability_bound_pending_seal_rejects_each_identity_change() {
-        use gear_common::native_wrapper::{ManagerProgramApproval, NativeWrapperApproval, NativeWrapperBinding};
+        use gear_common::native_wrapper::{
+            ManagerProgramApproval, NativeWrapperApproval, NativeWrapperBinding,
+        };
         let (path, mut work) = pending_report_fixture().await;
         work.intent.new_identity.vft_manager_address = H256::repeat_byte(75);
         let wrapper = H256::repeat_byte(71);
         let token = H160::repeat_byte(72);
         let approval = NativeWrapperApproval {
-            schema_version: 1, gear_genesis_hash: work.intent.old_identity.gear_genesis_hash,
-            source_manager: ManagerProgramApproval { actor_id: work.intent.old_identity.vft_manager_address,
-                code_id: H256::repeat_byte(73), wrapper_abi: ManagerWrapperAbi::ActorOnly },
-            replacement_manager: ManagerProgramApproval { actor_id: work.intent.new_identity.vft_manager_address,
-                code_id: work.intent.new_manager_code_id, wrapper_abi: ManagerWrapperAbi::CapabilityBound },
-            wrapper: NativeWrapperBinding { actor_id: wrapper, ethereum_token: token,
-                code_id: H256::repeat_byte(74), mode: NativeWrapperMode::EscrowV1 },
+            schema_version: 1,
+            gear_genesis_hash: work.intent.old_identity.gear_genesis_hash,
+            source_manager: ManagerProgramApproval {
+                actor_id: work.intent.old_identity.vft_manager_address,
+                code_id: H256::repeat_byte(73),
+                wrapper_abi: ManagerWrapperAbi::ActorOnly,
+            },
+            replacement_manager: ManagerProgramApproval {
+                actor_id: work.intent.new_identity.vft_manager_address,
+                code_id: work.intent.new_manager_code_id,
+                wrapper_abi: ManagerWrapperAbi::CapabilityBound,
+            },
+            wrapper: NativeWrapperBinding {
+                actor_id: wrapper,
+                ethereum_token: token,
+                code_id: H256::repeat_byte(74),
+                mode: NativeWrapperMode::EscrowV1,
+            },
         };
         let approval_path = path.with_file_name("approved-native.json");
         let bytes = serde_json::to_vec(&approval).unwrap();
@@ -8557,10 +8862,18 @@ mod tests {
         work.intent.validate_wrapper_approval().unwrap();
         let (sealed, coverage, lifecycle) = pending_projection(&path, &mut work).unwrap();
         assert_eq!(sealed.schema_version, 4);
-        assert_eq!(coverage.intent.native_wrapper_approval, lifecycle.intent.native_wrapper_approval);
-        assert_eq!(sealed.native_wrapper_approval, coverage.intent.native_wrapper_approval);
+        assert_eq!(
+            coverage.intent.native_wrapper_approval,
+            lifecycle.intent.native_wrapper_approval
+        );
+        assert_eq!(
+            sealed.native_wrapper_approval,
+            coverage.intent.native_wrapper_approval
+        );
         work.pending_seal = Some(sealed);
-        for field in ["actor", "token", "code", "mode", "digest", "missing", "manager"] {
+        for field in [
+            "actor", "token", "code", "mode", "digest", "missing", "manager",
+        ] {
             let mut changed = work.clone();
             let approved = changed.intent.native_wrapper_approval.as_mut().unwrap();
             match field {
@@ -8576,12 +8889,20 @@ mod tests {
             assert!(pending_projection(&path, &mut changed).is_err(), "{field}");
         }
         // Reject unsupported Hold before parsing/preparing any redemption payload.
-        assert!(crate::print_encoded_message(crate::HexEncodedMessage::HoldNativeRedemption {
-            operation_id: sails_rs::H256::zero(), expected_redemption_hex: "not-a-payload".into(),
-            acknowledge_irreversible_hold: true,
-            native_capability: NativeCapabilityArgs { native_wrapper_approval: Some(approval_path),
-                native_wrapper_approval_sha256: Some(hash) },
-        }).unwrap_err().to_string().contains("escrow-v1"));
+        assert!(
+            crate::print_encoded_message(crate::HexEncodedMessage::HoldNativeRedemption {
+                operation_id: sails_rs::H256::zero(),
+                expected_redemption_hex: "not-a-payload".into(),
+                acknowledge_irreversible_hold: true,
+                native_capability: NativeCapabilityArgs {
+                    native_wrapper_approval: Some(approval_path),
+                    native_wrapper_approval_sha256: Some(hash)
+                },
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("escrow-v1")
+        );
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 

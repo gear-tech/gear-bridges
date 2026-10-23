@@ -4,8 +4,8 @@ pragma solidity ^0.8.37;
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
+import {DeploymentArguments, DeploymentBase} from "script/DeploymentBase.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
-import {DeploymentBase, DeploymentArguments} from "script/DeploymentBase.sol";
 import {BaseConstants} from "test/BaseConstants.sol";
 
 interface ILocalRecoverySafe {
@@ -30,6 +30,7 @@ contract BeefyLocal is Script, DeploymentBase {
     function _localDeploymentFixture() internal view override returns (bool) {
         return block.chainid == 31337;
     }
+
     function run()
         public
         returns (address clientAddress, address verifierAddress, address queueAddress, address receiverAddress)
@@ -91,7 +92,8 @@ contract BeefyLocal is Script, DeploymentBase {
         vm.startBroadcast(recoveryKey);
         recoverySafeSingleton = _createFixture(singletonCreation);
         recoverySafe = _createFixture(bytes.concat(proxyCreation, abi.encode(recoverySafeSingleton)));
-        ILocalRecoverySafe(recoverySafe).setup(owners, 2, address(0), "", address(0), address(0), 0, payable(address(0)));
+        ILocalRecoverySafe(recoverySafe)
+            .setup(owners, 2, address(0), "", address(0), address(0), 0, payable(address(0)));
         address[] memory proposers = new address[](1);
         proposers[0] = recoverySafe;
         // OZ grants proposer+canceller to Safe, executor to Safe, and admin only to itself.

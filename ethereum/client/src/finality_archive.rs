@@ -52,11 +52,19 @@ impl HeaderArchive {
         &self.directory
     }
 
-    pub(crate) fn claim(&self, authority: &std::sync::Arc<crate::beacon_finality::BeaconAuthority>) -> Result<()> {
-        let mut owner = self.authority.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    pub(crate) fn claim(
+        &self,
+        authority: &std::sync::Arc<crate::beacon_finality::BeaconAuthority>,
+    ) -> Result<()> {
+        let mut owner = self
+            .authority
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(previous) = owner.upgrade() {
-            ensure!(std::sync::Arc::ptr_eq(&previous, authority),
-                "another Beacon authority owns this writable header archive; HOLD");
+            ensure!(
+                std::sync::Arc::ptr_eq(&previous, authority),
+                "another Beacon authority owns this writable header archive; HOLD"
+            );
         } else {
             *owner = std::sync::Arc::downgrade(authority);
         }
@@ -101,8 +109,13 @@ impl HeaderArchive {
 
     pub(crate) fn retained_checkpoint(&self) -> Result<Option<crate::FinalityCheckpoint>> {
         let path = self.directory.join("fence.json");
-        if !path.exists() { return Ok(None); }
-        ensure!(fs::metadata(&path)?.len() <= 64 * 1024 * 1024, "oversized finalized generation fence; HOLD");
+        if !path.exists() {
+            return Ok(None);
+        }
+        ensure!(
+            fs::metadata(&path)?.len() <= 64 * 1024 * 1024,
+            "oversized finalized generation fence; HOLD"
+        );
         Ok(serde_json::from_slice::<Fence>(&fs::read(path)?)?.quorum_checkpoint)
     }
 
@@ -139,12 +152,21 @@ impl HeaderArchive {
             ensure!(
                 checkpoint.genesis_hash() == genesis
                     && approved.is_some_and(|fresh| fresh.chain_id() == checkpoint.chain_id())
-                    && fence.tips.iter().any(|tip| tip == checkpoint.common_header()),
+                    && fence
+                        .tips
+                        .iter()
+                        .any(|tip| tip == checkpoint.common_header()),
                 "invalid retained finality checkpoint; HOLD"
             );
             for (number, expected) in checkpoint.fences()? {
-                ensure!(number <= head.number, "Beacon head has not reached every retained historical fence; HOLD");
-                ensure!(number != head.number || expected == hash, "retained checkpoint conflicts with Beacon head; HOLD");
+                ensure!(
+                    number <= head.number,
+                    "Beacon head has not reached every retained historical fence; HOLD"
+                );
+                ensure!(
+                    number != head.number || expected == hash,
+                    "retained checkpoint conflicts with Beacon head; HOLD"
+                );
             }
             if checkpoint.legacy().is_some() {
                 let bytes = fs::read(&path)?;
@@ -157,7 +179,12 @@ impl HeaderArchive {
         }
         let mut required = Vec::with_capacity(fence.tips.len());
         if let Some(checkpoint) = &fence.quorum_checkpoint {
-            required.extend(checkpoint.fences()?.into_iter().filter(|(_, expected)| *expected != hash));
+            required.extend(
+                checkpoint
+                    .fences()?
+                    .into_iter()
+                    .filter(|(_, expected)| *expected != hash),
+            );
         }
         for tip in &fence.tips {
             ensure!(
@@ -185,7 +212,10 @@ impl HeaderArchive {
     }
 
     pub(crate) fn complete(&self, checkpoint: &crate::FinalityCheckpoint) -> Result<()> {
-        ensure!(checkpoint.beacon().is_some(), "only Beacon checkpoints may complete an archive fence; HOLD");
+        ensure!(
+            checkpoint.beacon().is_some(),
+            "only Beacon checkpoints may complete an archive fence; HOLD"
+        );
         atomic_json(
             &self.directory.join("fence.json"),
             &Fence {

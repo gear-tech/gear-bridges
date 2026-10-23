@@ -21,7 +21,7 @@ export function exactObject(value: unknown, fields: readonly string[]): Record<s
 function parseFrame(text: string): Record<string, unknown> {
   const value: unknown = JSON.parse(text);
   const stack: Array<{ keys?: Set<string>; key: boolean }> = [];
-  const tokens = text.match(/"(?:[^"\\]|\\.)*"|[{}\[\]:,]|[^\s{}\[\]:,]+/g) ?? [];
+  const tokens = text.match(/"(?:[^"\\]|\\.)*"|[{}[\]:,]|[^\s{}[\]:,]+/g) ?? [];
   for (const token of tokens) {
     const current = stack.at(-1);
     if (token === '{') stack.push({ keys: new Set(), key: true });

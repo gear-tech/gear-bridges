@@ -228,6 +228,69 @@ export async function qualifyFinality(
   retained: readonly HistoricalCheckpoint[] = [],
   retainedLinks: readonly RetainedRequalificationLink[] = [],
 ): Promise<AgreedCheckpoint> {
+  // Bound both directions: at most 512 header/link-producing items and 1 MiB
+  // of input per frame, leaving room below the protocol's 8 MiB envelope.
+  // Every batch uses the first authenticated view; a moving head cannot rebind
+  // an original's authorization or produce different legacy proof links.
+  approved(clients, previous && normalizedCheckpoint(previous));
+  const verified = new Map<string, HistoricalCheckpoint>();
+  const legacy = new Map<string, HistoricalCheckpoint>();
+  const fences = new Map<string, string>();
+  for (const item of [...retained, ...(previous ? [previous] : [])]) {
+    approved(clients, normalizedCheckpoint(item));
+    verified.set(checkpointId(item), item);
+    if (item.schemaVersion === 1) legacy.set(legacyCheckpointDigest(item), item);
+  }
+  for (const item of [...targets, ...verified.values()]) {
+    const number = safe(decimal(item.number)).toString(), hash = bytes(item.hash, 32);
+    if (fences.has(number) && fences.get(number) !== hash) hold('contradictory Ethereum checkpoint fences');
+    fences.set(number, hash);
+  }
+  const checkpoint = await qualifyFinalityFrame(clients, previous);
+  const requalified = new Map((qualifications.get(checkpoint) ?? []).map((link) => [link.originalDigest, link]));
+  let batchTargets: { number: string; hash: string }[] = [];
+  let batchCheckpoints: HistoricalCheckpoint[] = [];
+  let batchLinks: RetainedRequalificationLink[] = [];
+  let size = 0, count = 0;
+  const flush = async () => {
+    if (!count) return;
+    const result = await qualifyFinalityFrame(clients, undefined, batchTargets, batchCheckpoints, batchLinks, checkpoint);
+    for (const link of qualifications.get(result) ?? []) {
+      const old = requalified.get(link.originalDigest);
+      if (old && !isDeepStrictEqual(old, link)) hold('fixed-view requalification link changed');
+      requalified.set(link.originalDigest, link);
+    }
+    batchTargets = []; batchCheckpoints = []; batchLinks = []; size = 0; count = 0;
+  };
+  for (const item of [
+    ...targets.map((target) => ({ target })),
+    ...retained.map((checkpoint) => ({ checkpoint })),
+    ...retainedLinks.map((link) => ({ link })),
+  ]) {
+    const old = 'link' in item ? legacy.get(item.link.originalDigest) : undefined;
+    if ('link' in item && !old) hold('retained link original was not supplied');
+    const bytes = Buffer.byteLength(JSON.stringify(item)) + (old ? Buffer.byteLength(JSON.stringify(old)) : 0);
+    if (bytes > 1024 * 1024) hold('individual qualification evidence exceeds batch limit');
+    if (count >= 512 || size + bytes > 1024 * 1024) await flush();
+    if ('target' in item) batchTargets.push(item.target);
+    if ('checkpoint' in item) batchCheckpoints.push(item.checkpoint);
+    if ('link' in item) { batchLinks.push(item.link); batchCheckpoints.push(old!); }
+    size += bytes; count++;
+  }
+  await flush();
+  qualifications.set(checkpoint, [...requalified.values()]);
+  verified.set(checkpointId(checkpoint), checkpoint);
+  qualifiedCheckpoints.set(clients, verified);
+  return checkpoint;
+}
+
+async function qualifyFinalityFrame(
+  clients: EthereumEvidenceClients, previous?: HistoricalCheckpoint,
+  targets: readonly { number: string; hash: string }[] = [],
+  retained: readonly HistoricalCheckpoint[] = [],
+  retainedLinks: readonly RetainedRequalificationLink[] = [],
+  fixed?: AgreedCheckpoint,
+): Promise<AgreedCheckpoint> {
   approved(clients, previous && normalizedCheckpoint(previous));
   for (const link of retainedLinks) {
     const native = nativeCheckpoint(link.checkpoint);
@@ -245,12 +308,14 @@ export async function qualifyFinality(
   const wire = (checkpoint: HistoricalCheckpoint) => checkpoint.schemaVersion === 2 ? checkpoint.native : checkpoint;
   const response = await clients.native.request({ op: 'qualify',
     ...(previous ? { previousCheckpoint: wire(previous) } : {}),
+    ...(fixed ? { fixedCheckpoint: fixed.native } : {}),
     ...(retained.length ? { checkpointFences: retained.map(wire) } : {}),
     ...(retainedLinks.length ? { retainedRequalificationLinks: retainedLinks } : {}),
     targets: [...fences].map(([number, hash]) => ({ number, hash })) });
   exactObject(response, ['id', 'ok', 'op', 'checkpoint', 'headers', 'requalificationLinks']);
   if (response.op !== 'qualify' || !Array.isArray(response.headers)) hold('wrong native qualification response');
   const native = nativeCheckpoint(response.checkpoint);
+  if (fixed && !isDeepStrictEqual(native, fixed.native)) hold('fixed native qualification checkpoint changed');
   const common = header(native.common_header);
   const headers = new Map<string, Header>();
   for (const item of response.headers) {
@@ -295,9 +360,6 @@ export async function qualifyFinality(
   const expectedLinks = [...retained, ...(previous ? [previous] : [])].filter((item) => item.schemaVersion === 1);
   if (requalified.length !== new Set(expectedLinks.map((item) => checkpointId(item))).size) hold('missing legacy requalification link');
   qualifications.set(checkpoint, requalified);
-  const verified = new Map<string, HistoricalCheckpoint>();
-  for (const item of [...retained, ...(previous ? [previous] : []), checkpoint]) verified.set(checkpointId(item), item);
-  qualifiedCheckpoints.set(clients, verified);
   return checkpoint;
 }
 

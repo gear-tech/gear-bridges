@@ -482,8 +482,10 @@ mod tests {
         let mut header: alloy::rpc::types::Header = Default::default();
         header.inner.extra_data = uuid::Uuid::new_v4().as_bytes().to_vec().into();
         header.hash = header.inner.hash_slow();
-        let mut genesis: alloy::rpc::types::Block = Default::default();
-        genesis.header = header.clone();
+        let genesis: alloy::rpc::types::Block = alloy::rpc::types::Block {
+            header: header.clone(),
+            ..Default::default()
+        };
         let app = axum::Router::new().route(
             "/",
             axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
@@ -500,7 +502,9 @@ mod tests {
         let (stop, stopped) = tokio::sync::oneshot::channel();
         let bootstrap = tokio::spawn(async move {
             axum::serve(bootstrap_listener, app)
-                .with_graceful_shutdown(async { let _ = stopped.await; })
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
                 .await
                 .unwrap();
         });

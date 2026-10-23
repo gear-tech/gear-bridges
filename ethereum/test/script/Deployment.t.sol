@@ -42,6 +42,7 @@ contract DeploymentMechanicsFixture is DeploymentScript {
         return block.chainid == 31337 || block.chainid == 560048;
     }
 }
+
 contract HoodiMechanicsFixture is BeefyHoodi {
     function _localDeploymentFixture() internal view override returns (bool) {
         return block.chainid == 560048;

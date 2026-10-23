@@ -10,8 +10,9 @@ use beefy_relay::{
     source::Source,
 };
 use bridging_payment_client::traits::{BridgingPayment, BridgingPaymentFactory};
-use checkpoint_light_client_client::traits::ServiceCheckpointFor;
+use checkpoint_light_client_client::traits::{ServiceCheckpointFor, ServiceState};
 use eth_events_electra_client::traits::{EthEventsElectraFactory, EthereumEventClient};
+use ethereum_common::network::Network;
 use gclient::GearApi;
 use gear_core::{
     ids::{prelude::*, ActorId, CodeId},
@@ -22,7 +23,7 @@ use gsdk::{
     gear::{self, runtime_types::gear_common::event::MessageEntry},
 };
 use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
-use parity_scale_codec::Decode;
+use parity_scale_codec::{Decode, Encode};
 use sails_rs::{
     calls::*,
     errors::{Result as SailsResult, RtlError},
@@ -280,14 +281,9 @@ pub async fn manifest(
         "chainId": chain_id, "client": client, "verifier": verifier,
         "queue": queue, "receiver": manager,
     });
-    let mut ethereum_manifest = Ethereum::token_manifest(
-        ethereum_rpc,
-        finality,
-        wallet,
-        &addresses,
-        fixture.as_ref(),
-    )
-    .await?;
+    let mut ethereum_manifest =
+        Ethereum::token_manifest(ethereum_rpc, finality, wallet, &addresses, fixture.as_ref())
+            .await?;
     ethereum_manifest["sourceGenesis"] = anchor["sourceGenesis"].clone();
     let ethereum = Ethereum::connect(
         ethereum_rpc,
@@ -491,6 +487,48 @@ async fn code(api: &GearApi, binary: &[u8]) -> Result<CodeId> {
     .map_err(|_| anyhow!("uploaded code is not finalized; HOLD"))?
 }
 
+// Both fresh preparation and configuration recovery must qualify the receipt
+// verifier's required routes before uploading code or replaying signed setup calls.
+async fn qualify_checkpoint<R: Remoting<Args = GClientArgs> + Clone>(
+    remoting: R,
+    checkpoint: ActorId,
+    at: H256,
+    slot: u64,
+    expected_hash: &[u8],
+    expected_network: Option<&Network>,
+) -> Result<()> {
+    let on_chain = checkpoint_light_client_client::ServiceCheckpointFor::new(remoting.clone())
+        .get(slot)
+        .at_block(at)
+        .recv(checkpoint)
+        .await
+        .map_err(|error| anyhow!("checkpoint query failed: {error:?}"))?
+        .map_err(|error| anyhow!("checkpoint trust anchor missing: {error:?}"))?;
+    ensure!(
+        on_chain.0 == slot && on_chain.1.as_ref() == expected_hash,
+        "checkpoint trust anchor does not match live Gear state"
+    );
+    let network = checkpoint_light_client_client::ServiceState::new(remoting)
+        .network()
+        .at_block(at)
+        .recv(checkpoint)
+        .await
+        .map_err(|error| {
+            anyhow!("checkpoint Network getter required by event verifier: {error:?}")
+        })?;
+    ensure!(
+        matches!(network, Network::Hoodi | Network::LocalFixture { .. }),
+        "checkpoint network is not supported by this Hoodi/owned-fixture token stack"
+    );
+    if let Some(expected) = expected_network {
+        ensure!(
+            network.encode() == expected.encode(),
+            "checkpoint network differs from approved Ethereum configuration"
+        );
+    }
+    Ok(())
+}
+
 pub async fn prepare(
     source_rpc: &str,
     expected_genesis: &str,
@@ -539,17 +577,15 @@ pub async fn prepare(
     );
     let remoting = GClientRemoting::new(api.clone());
     let mut finalized = api.last_block_hash().await?;
-    let on_chain = checkpoint_light_client_client::ServiceCheckpointFor::new(remoting.clone())
-        .get(slot)
-        .at_block(sails_block_hash(finalized))
-        .recv(checkpoint)
-        .await
-        .map_err(|e| anyhow!("checkpoint query failed: {e:?}"))?
-        .map_err(|e| anyhow!("checkpoint not available: {e:?}"))?;
-    ensure!(
-        on_chain.0 == slot && on_chain.1.as_ref() == expected_hash,
-        "checkpoint trust anchor does not match live Gear state"
-    );
+    qualify_checkpoint(
+        remoting.clone(),
+        checkpoint,
+        sails_block_hash(finalized),
+        slot,
+        &expected_hash,
+        None,
+    )
+    .await?;
     if path.exists() {
         let state: Value = serde_json::from_slice(&fs::read(&path)?)?;
         ensure!(
@@ -2366,7 +2402,9 @@ pub async fn configure(
         beefy_relay::ethereum::PublicEthereumNetwork::Hoodi,
     )
     .await?;
-    ethereum.load_execution_approval(deployment_manifest, finality).await?;
+    ethereum
+        .load_execution_approval(deployment_manifest, finality)
+        .await?;
     let stack_path = fs::canonicalize(token_stack)?;
     let mut stack = read_config_stack(&stack_path)?;
     if !stack["configuration"]["identity"].is_null() {
@@ -2501,7 +2539,11 @@ pub async fn configure(
     let native_config = vft_manager_client::NativeWrapperConfig {
         actor_id: native_id,
         ethereum_token: H160::from_slice(approved_wrapped_vara.as_slice()),
-        code_id: decode_hash(&stack["programs"]["nativeVft"]["codeId"], "native wrapper code")?.into(),
+        code_id: decode_hash(
+            &stack["programs"]["nativeVft"]["codeId"],
+            "native wrapper code",
+        )?
+        .into(),
         mode: vft_manager_client::NativeWrapperMode::HeldEscrowV2,
     };
     let native_identity = json!({
@@ -2518,6 +2560,25 @@ pub async fn configure(
         )?;
     }
     validate_native_configuration_intents(&stack, &native_identity)?;
+    let (finalized_hash, _, _) = finalized_evidence(&source).await?;
+    let remoting = GClientRemoting::new(api.clone());
+    let finalized_sails_hash = sails_block_hash(finalized_hash);
+    let checkpoint_network =
+        fixture
+            .as_ref()
+            .map_or(Network::Hoodi, |network| Network::LocalFixture {
+                genesis_time: network.beacon_genesis_time,
+                genesis_validators_root: network.beacon_genesis_validators_root.0.into(),
+            });
+    qualify_checkpoint(
+        remoting.clone(),
+        checkpoint_id,
+        finalized_sails_hash,
+        checkpoint_slot,
+        &checkpoint_hash,
+        Some(&checkpoint_network),
+    )
+    .await?;
     reconcile_saved_setup(&api, &stack_path).await?;
     let anchor_block = deployment["anchor"]["block"]
         .as_u64()
@@ -2529,6 +2590,7 @@ pub async fn configure(
     );
 
     let (finalized_hash, _, _) = finalized_evidence(&source).await?;
+    let finalized_sails_hash = sails_block_hash(finalized_hash);
     ensure_source_bridge_ready(&source, finalized_hash).await?;
     let programs = verify_stack_programs(
         &api,
@@ -2537,19 +2599,6 @@ pub async fn configure(
         &format!("0x{}", hex::encode(source.source_genesis)),
     )
     .await?;
-    let remoting = GClientRemoting::new(api.clone());
-    let finalized_sails_hash = sails_block_hash(finalized_hash);
-    let checkpoint = checkpoint_light_client_client::ServiceCheckpointFor::new(remoting.clone())
-        .get(checkpoint_slot)
-        .at_block(finalized_sails_hash)
-        .recv(checkpoint_id)
-        .await
-        .map_err(|error| anyhow!("checkpoint query failed: {error:?}"))?
-        .map_err(|error| anyhow!("checkpoint trust anchor missing: {error:?}"))?;
-    ensure!(
-        checkpoint.0 == checkpoint_slot && checkpoint.1.as_ref() == checkpoint_hash,
-        "Gear checkpoint trust anchor differs from token-stack manifest"
-    );
     let events_id = actor(
         stack["programs"]["ethEventsElectra"]["id"]
             .as_str()
@@ -2998,7 +3047,8 @@ pub async fn configure(
         manager_wrapper.is_none() || manager_wrapper.as_ref() == Some(&native_config),
         "manager names another native wrapper"
     );
-    let native_bound = wrapper_manager == Some(manager_id) && manager_wrapper.as_ref() == Some(&native_config);
+    let native_bound =
+        wrapper_manager == Some(manager_id) && manager_wrapper.as_ref() == Some(&native_config);
     ensure!(
         !was_ready || (native_bound && !native_paused),
         "ready native configuration changed or was safety-paused"
@@ -3046,8 +3096,17 @@ pub async fn configure(
                 .recv(native_id)
                 .await?
         } else {
-            let configured = manager.native_wrapper().at_block(sails_block_hash(at)).recv(manager_id).await?;
-            ensure!(configured.as_ref().is_none_or(|binding| binding == &native_config), "native capability changed during configuration");
+            let configured = manager
+                .native_wrapper()
+                .at_block(sails_block_hash(at))
+                .recv(manager_id)
+                .await?;
+            ensure!(
+                configured
+                    .as_ref()
+                    .is_none_or(|binding| binding == &native_config),
+                "native capability changed during configuration"
+            );
             configured.map(|binding| binding.actor_id)
         };
         ensure!(
@@ -3090,8 +3149,17 @@ pub async fn configure(
                 .recv(native_id)
                 .await?
         } else {
-            let configured = manager.native_wrapper().at_block(sails_block_hash(at)).recv(manager_id).await?;
-            ensure!(configured.as_ref().is_none_or(|binding| binding == &native_config), "native capability changed during configuration");
+            let configured = manager
+                .native_wrapper()
+                .at_block(sails_block_hash(at))
+                .recv(manager_id)
+                .await?;
+            ensure!(
+                configured
+                    .as_ref()
+                    .is_none_or(|binding| binding == &native_config),
+                "native capability changed during configuration"
+            );
             configured.map(|binding| binding.actor_id)
         };
         ensure!(
@@ -3278,6 +3346,123 @@ fn state_directory(path: &Path) -> &Path {
 #[cfg(test)]
 mod configuration_recovery_tests {
     use super::*;
+
+    #[derive(Clone)]
+    struct CheckpointRemoting {
+        network: Option<Network>,
+        slot: u64,
+        root: H256,
+    }
+
+    impl Remoting for CheckpointRemoting {
+        type Args = GClientArgs;
+
+        async fn activate(
+            self,
+            _code: CodeId,
+            _salt: impl AsRef<[u8]>,
+            _payload: impl AsRef<[u8]>,
+            _gas: Option<GasUnit>,
+            _value: ValueUnit,
+            _args: Self::Args,
+        ) -> SailsResult<impl Future<Output = SailsResult<(ActorId, Vec<u8>)>>> {
+            Ok(async { panic!("checkpoint preflight must not deploy a program") })
+        }
+
+        async fn message(
+            self,
+            _target: ActorId,
+            _payload: impl AsRef<[u8]>,
+            _gas: Option<GasUnit>,
+            _value: ValueUnit,
+            _args: Self::Args,
+        ) -> SailsResult<impl Future<Output = SailsResult<Vec<u8>>>> {
+            Ok(async { panic!("checkpoint preflight must not send a message") })
+        }
+
+        async fn query(
+            self,
+            target: ActorId,
+            payload: impl AsRef<[u8]>,
+            _gas: Option<GasUnit>,
+            value: ValueUnit,
+            _args: Self::Args,
+        ) -> SailsResult<Vec<u8>> {
+            use checkpoint_light_client_client::{
+                service_checkpoint_for::io::Get, service_state::io::Network as NetworkQuery,
+            };
+            assert_eq!(target, ActorId::from([7; 32]));
+            assert_eq!(value, 0);
+            let payload = payload.as_ref();
+            if payload == Get::encode_call(self.slot) {
+                let reply: <Get as ActionIo>::Reply = Ok((self.slot, self.root));
+                return Ok([Get::ROUTE, reply.encode().as_slice()].concat());
+            }
+            assert_eq!(payload, NetworkQuery::encode_call());
+            let network = self
+                .network
+                .ok_or_else(|| config_error("unknown ServiceState::Network route"))?;
+            Ok([NetworkQuery::ROUTE, network.encode().as_slice()].concat())
+        }
+    }
+
+    #[tokio::test]
+    async fn checkpoint_preflight_requires_network_getter_and_matching_configuration() -> Result<()>
+    {
+        let slot = Network::Hoodi.epoch_electra() * 32;
+        let root = H256::repeat_byte(8);
+        let remote = CheckpointRemoting {
+            network: Some(Network::Hoodi),
+            slot,
+            root,
+        };
+        let check = |remote: CheckpointRemoting, expected: Option<Network>| async move {
+            qualify_checkpoint(
+                remote.clone(),
+                ActorId::from([7; 32]),
+                H256::repeat_byte(9),
+                remote.slot,
+                root.as_bytes(),
+                expected.as_ref(),
+            )
+            .await
+        };
+        // Exercise the generated consumer queries, including the historical ABI
+        // that answers Get successfully but has no Network route.
+        let mut historical = remote.clone();
+        historical.network = None;
+        assert!(check(historical, None).await.is_err());
+        check(remote.clone(), None).await?;
+        check(remote.clone(), Some(Network::Hoodi)).await?;
+        let mut wrong_network = remote.clone();
+        wrong_network.network = Some(Network::Sepolia);
+        assert!(check(wrong_network, None).await.is_err());
+        let mut early = remote.clone();
+        early.slot -= 1;
+        // An older trust anchor may authenticate later Electra headers.
+        check(early, Some(Network::Hoodi)).await?;
+        let mut changed_root = remote.clone();
+        changed_root.root = H256::repeat_byte(1);
+        assert!(check(changed_root, Some(Network::Hoodi)).await.is_err());
+        let fixture = Network::LocalFixture {
+            genesis_time: 1_800_000_000,
+            genesis_validators_root: H256::repeat_byte(2),
+        };
+        let mut local = remote.clone();
+        local.network = Some(fixture.clone());
+        check(local.clone(), Some(fixture)).await?;
+        assert!(check(local.clone(), Some(Network::Hoodi)).await.is_err());
+        assert!(check(
+            local,
+            Some(Network::LocalFixture {
+                genesis_time: 1_800_000_001,
+                genesis_validators_root: H256::repeat_byte(2),
+            })
+        )
+        .await
+        .is_err());
+        Ok(())
+    }
 
     #[test]
     fn native_identity_requires_governance_provider_and_manifest_agreement() -> Result<()> {

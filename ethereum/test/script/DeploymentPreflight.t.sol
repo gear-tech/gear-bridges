@@ -5,12 +5,12 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 import {Test} from "forge-std/Test.sol";
 import {BeefyLocal} from "script/BeefyLocal.s.sol";
 import {BeefyTokens} from "script/BeefyTokens.s.sol";
+import {DeploymentArguments, DeploymentBase, Overrides} from "script/DeploymentBase.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
 import {WrappedBitcoin} from "src/erc20/WrappedBitcoin.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
-import {DeploymentBase, DeploymentArguments, Overrides} from "script/DeploymentBase.sol";
 import {Base} from "test/Base.sol";
 
 contract DeploymentPreflightHarness is Base {
@@ -28,7 +28,10 @@ contract DeploymentPreflightHarness is Base {
         return _loadBeefyBootstrap(queue);
     }
 
-    function deployClient(uint256 privateKey, address queue, BeefyBootstrap memory config) external returns (BeefyClient) {
+    function deployClient(uint256 privateKey, address queue, BeefyBootstrap memory config)
+        external
+        returns (BeefyClient)
+    {
         _deployBeefyClient(privateKey, queue, config);
         return beefyClient;
     }

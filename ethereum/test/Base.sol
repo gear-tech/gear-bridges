@@ -9,7 +9,7 @@ import {StdChains} from "forge-std/StdChains.sol";
 import {StdCheats} from "forge-std/StdCheats.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
-import {DeploymentBase, DeploymentArguments, Overrides} from "script/DeploymentBase.sol";
+import {DeploymentArguments, DeploymentBase, Overrides} from "script/DeploymentBase.sol";
 import {RetainedBridgeMigration} from "script/RetainedBridgeMigration.sol";
 import {BridgingPayment} from "src/BridgingPayment.sol";
 import {ERC20Manager} from "src/ERC20Manager.sol";
@@ -39,8 +39,15 @@ import {
 } from "src/libraries/packing/GovernancePacker.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 
-
-abstract contract Base is DeploymentBase, RetainedBridgeMigration, StdAssertions, StdChains, StdCheats, StdInvariant, StdUtils {
+abstract contract Base is
+    DeploymentBase,
+    RetainedBridgeMigration,
+    StdAssertions,
+    StdChains,
+    StdCheats,
+    StdInvariant,
+    StdUtils
+{
     using Hasher for VaraMessage;
 
     using GovernancePacker for UpgradeProxyMessage;
@@ -53,7 +60,6 @@ abstract contract Base is DeploymentBase, RetainedBridgeMigration, StdAssertions
     uint256 public currentBlockNumber = 1;
 
     ForkBeefyFixture internal forkBeefy;
-
 
     MessageHandlerMock public messageHandlerMock;
     NewImplementationMock public newImplementationMock;
@@ -407,7 +413,6 @@ abstract contract Base is DeploymentBase, RetainedBridgeMigration, StdAssertions
         p.retainedProxies = proxies;
     }
 
-
     function _deployVerifier(uint256 chainId, address messageQueueAddress) internal override returns (IVerifier) {
         if (deploymentArguments.privateKey != 0) return super._deployVerifier(chainId, messageQueueAddress);
         forkBeefy = new ForkBeefyFixture(MessageQueue(messageQueueAddress), 1, true);
@@ -419,7 +424,6 @@ abstract contract Base is DeploymentBase, RetainedBridgeMigration, StdAssertions
         require(sourceBlock <= type(uint32).max, "source block exceeds uint32");
         return forkBeefy.rootProof(uint32(sourceBlock), root);
     }
-
 
     function messageQueueAssertions(address messageQueueAddress) public view {
         assertEq(messageQueueAddress, address(messageQueue));
@@ -519,7 +523,6 @@ abstract contract Base is DeploymentBase, RetainedBridgeMigration, StdAssertions
         assertFalse(erc20Manager.isBridgingPayment(address(0)));
         assertTrue(erc20Manager.isBridgingPayment(address(bridgingPayment)));
     }
-
 }
 
 /// @dev Full-bridge fixture: checkpoint injection is restricted to explicit unit setup.

@@ -11,7 +11,7 @@ import {
   checkpointId, createEthereumEvidenceClients, createReceiptAuthenticator, destroyEthereumEvidenceClients,
   qualifyStoredFinality, recheckFinality, retainCheckpoint, receiptDate, receiptAuthorization,
   proofReference, assertReceiptAuthorization, assertAuthorizationCheckpoint, requalificationLinksFor,
-  type AgreedCheckpoint, type EthereumEvidenceClients, type ReceiptAuthenticator,
+  type EthereumEvidenceClients, type ReceiptAuthenticator,
 } from './finality.js';
 
 type Direction = 'vara-to-eth' | 'eth-to-vara';
@@ -115,7 +115,7 @@ export async function reconcilePage(
         throw new Error('HOLD: terminal projection lacks authentication; migrate before repair');
       }
       if (options.direction === 'vara-to-eth') {
-        const result = await reconcileOutbound(store, clients, transfer, queue, manager, checkpoint, authenticate, references);
+        const result = await reconcileOutbound(store, clients, transfer, queue, manager, authenticate, references);
         if (result) {
           changedTransfers.set(transfer.id, result.transfer);
           changedCompletions.set(result.completion.id, result.completion);
@@ -216,7 +216,7 @@ export async function reconcilePage(
 }
 
 async function reconcileOutbound(
-  store: Store, clients: EthereumEvidenceClients, transfer: Transfer, queue: string, manager: string, checkpoint: AgreedCheckpoint,
+  store: Store, clients: EthereumEvidenceClients, transfer: Transfer, queue: string, manager: string,
   authenticate: ReceiptAuthenticator, references: Map<string, bigint>,
 ): Promise<{ transfer: Transfer; completion: CompletedTransfer } | undefined> {
   if (transfer.completionAuth && transfer.completionAuth.kind !== 'ethereum-receipt') {
@@ -227,8 +227,14 @@ async function reconcileOutbound(
   if (legacyBinding && legacyBinding.completionId !== id) throw new Error('HOLD: archived completion ID changed');
   if (transfer.completionAuth && transfer.completionAuth.completionId !== id) throw new Error('HOLD: original completion ID changed');
   const saved = await store.findOneBy(CompletedTransfer, { id });
+  // Base-schema completions were keyed by nonce alone. They are acquisition
+  // hints, never authority, and remain untouched after the qualified row is saved.
+  const legacyRow = saved ? undefined : await store.findOneBy(CompletedTransfer, { id: transfer.nonce });
   if (transfer.completionAuth && (!saved || !saved.receiptAuth)) throw new Error('HOLD: missing original qualified completion');
   if (saved && !saved.outboundReceipt) throw new Error('HOLD: missing retained original completion receipt evidence');
+  if (legacyRow?.receiptAuth || legacyRow?.legacyReceiptAuth || legacyRow?.outboundReceipt) {
+    throw new Error('HOLD: nonce-keyed completion contains unexpected qualified identity');
+  }
   if (saved?.receiptAuth) referenceCheckpoint(references, saved.receiptAuth.checkpointId, saved.blockNumber);
   const archived = saved?.legacyReceiptAuth;
   if (archived) {
@@ -241,12 +247,13 @@ async function reconcileOutbound(
   const legacy = transfer.legacyEthereumAuth ?? transfer.legacyResolution;
   const originalHash = legacy?.completedAtTxHash ?? transfer.completedAtTxHash;
   const originalBlock = legacy?.completedAtBlock ?? transfer.completedAtBlock;
-  if (saved && (saved.srcNetwork !== Network.Vara || saved.destNetwork !== Network.Ethereum ||
-      (originalHash && saved.txHash.toLowerCase() !== originalHash.toLowerCase()) ||
-      (originalBlock != null && BigInt(saved.blockNumber) !== BigInt(originalBlock)))) {
+  const candidate = saved ?? legacyRow;
+  if (candidate && (candidate.srcNetwork !== Network.Vara || candidate.destNetwork !== Network.Ethereum ||
+      (originalHash && candidate.txHash.toLowerCase() !== originalHash.toLowerCase()) ||
+      (originalBlock != null && BigInt(candidate.blockNumber) !== BigInt(originalBlock)))) {
     throw new Error('HOLD: retained completion conflicts with original coordinates');
   }
-  const txHash = saved?.txHash ?? originalHash, blockNumber = saved?.blockNumber ?? originalBlock;
+  const txHash = candidate?.txHash ?? originalHash, blockNumber = candidate?.blockNumber ?? originalBlock;
   if (!txHash || blockNumber == null) return undefined;
   if (txHash.trim() !== txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error('HOLD: malformed original completion hash');
   const evidence = saved?.outboundReceipt;
@@ -257,7 +264,7 @@ async function reconcileOutbound(
   const original = await authenticate(txHash, { height: height(blockNumber), ...(expectedHash ? { hash: expectedHash } : {}),
     ...(saved?.receiptAuth ? { proofDigest: saved.receiptAuth.inclusionProofDigest } : {}) });
   if (!original) {
-    if (saved || transfer.completionAuth) throw new Error('HOLD: original retained completion receipt unavailable');
+    if (candidate || transfer.completionAuth) throw new Error('HOLD: original retained completion receipt unavailable');
     return undefined;
   }
   if (evidence) assertRetainedReceipt(evidence.receipt, original.receipt);

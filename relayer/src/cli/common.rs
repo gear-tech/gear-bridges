@@ -15,12 +15,21 @@ pub struct NativeWrapperApprovalArgs {
 }
 
 impl NativeWrapperApprovalArgs {
-    pub fn load(&self) -> anyhow::Result<Option<std::sync::Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>> {
-        match (&self.native_wrapper_approval, self.native_wrapper_approval_sha256) {
+    pub fn load(
+        &self,
+    ) -> anyhow::Result<Option<std::sync::Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>>
+    {
+        match (
+            &self.native_wrapper_approval,
+            self.native_wrapper_approval_sha256,
+        ) {
             (None, None) => Ok(None),
             (Some(path), Some(digest)) => Ok(Some(std::sync::Arc::new(
-                gear_common::native_wrapper::load_native_wrapper_approval(path, digest)?))),
-            _ => anyhow::bail!("HOLD: wrapper approval file and independent SHA-256 are required together"),
+                gear_common::native_wrapper::load_native_wrapper_approval(path, digest)?,
+            ))),
+            _ => anyhow::bail!(
+                "HOLD: wrapper approval file and independent SHA-256 are required together"
+            ),
         }
     }
 }

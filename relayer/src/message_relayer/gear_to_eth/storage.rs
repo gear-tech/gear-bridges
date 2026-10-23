@@ -170,10 +170,16 @@ fn decode_transaction_journal(contents: &str) -> anyhow::Result<Transaction> {
         object.insert("journal_version".into(), serde_json::json!(2));
         object.insert("legacy_evidence".into(), original);
     }
-    if object.get("journal_version").and_then(serde_json::Value::as_u64).is_some_and(|version| version < 6)
+    if object
+        .get("journal_version")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|version| version < 6)
         && !object.contains_key("historical_evidence")
     {
-        object.insert("historical_evidence".into(), serde_json::Value::Object(object.clone()));
+        object.insert(
+            "historical_evidence".into(),
+            serde_json::Value::Object(object.clone()),
+        );
     }
     let tx: Transaction = serde_json::from_value(value)?;
     anyhow::ensure!(
@@ -1677,7 +1683,13 @@ pub(crate) mod tests {
         let mut tx = Transaction::new(message, TxStatus::Completed);
         tx.ethereum_tx_attempts.push(signed.hash);
         tx.ethereum_tx_hash = Some(signed.hash);
-        tx.lane_policy = Some(crate::message_relayer::gear_to_eth::tx_manager::tests::policy(&tx.message.message, &signed, false));
+        tx.lane_policy = Some(
+            crate::message_relayer::gear_to_eth::tx_manager::tests::policy(
+                &tx.message.message,
+                &signed,
+                false,
+            ),
+        );
         tx.ethereum_submission = Some(signed);
         tx.completion = Some(completion);
         tx

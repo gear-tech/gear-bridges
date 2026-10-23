@@ -83,7 +83,11 @@ pub async fn connect_to_node(
     // Reuse the node without colliding with programs or balances from earlier runs.
     let origin = uuid::Uuid::now_v7();
     for (index, &balance) in balances.iter().enumerate() {
-        let salt = if index == 0 { origin } else { uuid::Uuid::now_v7() };
+        let salt = if index == 0 {
+            origin
+        } else {
+            uuid::Uuid::now_v7()
+        };
         let suri = format!("{DEV_PHRASE}//{program}-{salt}");
         let pair = Pair::from_string(&suri, None).expect("Failed to create keypair from SURI");
         let account = <MultiSignature as Verify>::Signer::from(pair.public()).into_account();

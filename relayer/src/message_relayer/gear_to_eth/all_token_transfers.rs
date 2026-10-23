@@ -57,9 +57,7 @@ impl Relayer {
 
         mut api_provider: ApiProviderConnection,
         from_block: Option<u32>,
-        confirmations_merkle_root: u64,
-
-        confirmations_status: u64,
+        (confirmations_merkle_root, confirmations_status): (u64, u64),
 
         storage_path: impl AsRef<Path>,
 

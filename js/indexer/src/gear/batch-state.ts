@@ -1,7 +1,7 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
 import { Store } from '@subsquid/typeorm-store';
 import { createPairHash } from 'gear-bridge-common';
-import { In, MoreThan } from 'typeorm';
+import { In, Raw } from 'typeorm';
 
 import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer, ReceiptRelay, ReceiptSettlement } from '../model/index.js';
 import { BaseBatchState, mapKeys, mapValues, setValues } from '../common/index.js';
@@ -237,9 +237,22 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       }
       if (added.length) await this._ctx.store.save(added);
     }
-    // ponytail: one bounded keyset page per batch; cycle pending rows so late arrivals still match.
+    // Repair owns migrated, unauthenticated settlements. Filter before LIMIT so
+    // unavailable historical receipts cannot starve unrelated live ingestion.
     const loadPending = () => this._ctx.store.find(ReceiptSettlement, {
-      where: { matched: false, ...(this._receiptSettlementCursor ? { id: MoreThan(this._receiptSettlementCursor) } : {}) },
+      where: { matched: false, id: Raw((alias) => {
+        const id = alias.split('.').map((part) => `"${part.replaceAll('"', '""')}"`).join('.');
+        return `
+        ${this._receiptSettlementCursor ? `${id} > :settlementCursor AND` : ''}
+        EXISTS (SELECT 1 FROM receipt_settlement s WHERE s.id = ${id}
+          AND (s.legacy_matched IS NULL OR EXISTS (
+            SELECT 1 FROM receipt_relay r JOIN transfer t
+              ON t.source_network = 'Ethereum' AND t.block_number = r.block_number
+              AND t.source_transaction_index = (s.deposit->>'transaction_index')::numeric
+              AND t.source_log_index = (s.deposit->>'log_index')::numeric
+            WHERE r.id = (s.deposit->>'slot') || ':' || (s.deposit->>'transaction_index')
+              AND t.source_receipt_auth IS NOT NULL)))`;
+      }, { settlementCursor: this._receiptSettlementCursor }) },
       order: { id: 'ASC' }, take: batchSize,
     });
     let pending = await loadPending();

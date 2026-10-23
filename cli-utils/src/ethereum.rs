@@ -27,7 +27,10 @@ pub struct EthereumFinalityArgs {
     #[arg(long = "ethereum-finality-bootstrap", env = "ETH_FINALITY_BOOTSTRAP")]
     pub ethereum_finality_bootstrap: std::path::PathBuf,
 
-    #[arg(long = "ethereum-finality-bootstrap-sha256", env = "ETH_FINALITY_BOOTSTRAP_SHA256")]
+    #[arg(
+        long = "ethereum-finality-bootstrap-sha256",
+        env = "ETH_FINALITY_BOOTSTRAP_SHA256"
+    )]
     pub ethereum_finality_bootstrap_sha256: String,
 
     /// Exclusive archive directory for this process; clones reuse its owner lock.

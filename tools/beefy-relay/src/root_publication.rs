@@ -767,11 +767,13 @@ async fn authenticated_root_receipt(
         &receipts,
     )
     .await?;
-    crate::ethereum::retain_proof_qualification(&directory,
+    crate::ethereum::retain_proof_qualification(
+        &directory,
         &json!({"transactionHash":format!("{hash:#x}"),"included":included,
             "finalized":finalized,"evidence":evidence}),
         &json!({"checkpoint":view.checkpoint(),
-            "receiptProofDigest":format!("0x{}", hex::encode(crate::keccak256(&serde_json::to_vec(&proof)?)))}))?;
+            "receiptProofDigest":format!("0x{}", hex::encode(crate::keccak256(&serde_json::to_vec(&proof)?)))}),
+    )?;
     Ok(proof)
 }
 
@@ -1246,9 +1248,15 @@ async fn revalidate_terminal_roots(
                     ethereum.finality_genesis().await?,
                 )
                 .await?;
-            let raw = hex::decode(original["rawTransaction"].as_str()
-                .context("archived original bytes missing; HOLD")?.trim_start_matches("0x"))?;
-            let qualified = ethereum.account_nonce_at(&raw, &mut view, number, hash, Some(evidence), &directory).await?;
+            let raw = hex::decode(
+                original["rawTransaction"]
+                    .as_str()
+                    .context("archived original bytes missing; HOLD")?
+                    .trim_start_matches("0x"),
+            )?;
+            let qualified = ethereum
+                .account_nonce_at(&raw, &mut view, number, hash, Some(evidence), &directory)
+                .await?;
             revalidate_root_finalized_pin(ethereum, number, hash).await?;
             ensure!(
                 qualified["pinnedNonceConsumed"] == true,
@@ -1327,8 +1335,12 @@ pub(crate) async fn reconcile_root_original(
             ethereum.finality_genesis().await?,
         )
         .await?;
-    let raw = hex::decode(intent["rawTransaction"].as_str()
-        .context("original root bytes missing; HOLD")?.trim_start_matches("0x"))?;
+    let raw = hex::decode(
+        intent["rawTransaction"]
+            .as_str()
+            .context("original root bytes missing; HOLD")?
+            .trim_start_matches("0x"),
+    )?;
     let (number, hash) = (view.block_number(), view.block_hash());
     let mut evidence = ethereum
         .account_nonce_at(&raw, &mut view, number, hash, None, &directory)
@@ -2000,7 +2012,9 @@ pub(crate) async fn publish_root_locked(
         public_network,
     )
     .await?;
-    ethereum.load_execution_approval(deployment_manifest, finality).await?;
+    ethereum
+        .load_execution_approval(deployment_manifest, finality)
+        .await?;
     ethereum
         .api
         .enable_finality_archive(
@@ -2310,9 +2324,11 @@ pub(crate) async fn publish_root_locked(
     let provider = ethereum.api.raw_provider();
     let signed = if intent["txHash"].is_null() {
         let approval = ethereum.require_execution().await?;
-        ensure!(intent["approvedManifestSha256"].is_null()
-            || intent["approvedManifestSha256"] == json!(approval),
-            "unsigned root belongs to a different approved manifest; HOLD");
+        ensure!(
+            intent["approvedManifestSha256"].is_null()
+                || intent["approvedManifestSha256"] == json!(approval),
+            "unsigned root belongs to a different approved manifest; HOLD"
+        );
         intent["approvedManifestSha256"] = json!(approval);
         persist_root_intent(output, &intent)?;
         ensure_pinned_latest_anchor(
@@ -2470,10 +2486,15 @@ mod root_publication_tests {
             .await?
             .header
             .hash;
-        let head = ethereum_client::get_block(api.raw_provider(), 0).await?.header;
+        let head = ethereum_client::get_block(api.raw_provider(), 0)
+            .await?
+            .header;
         let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
-            31_337, genesis, std::sync::Arc::new(move || head.clone()),
-        ).await?;
+            31_337,
+            genesis,
+            std::sync::Arc::new(move || head.clone()),
+        )
+        .await?;
         let api = api
             .with_beacon_finality(beacon.config.clone(), &beacon.directory)
             .await?

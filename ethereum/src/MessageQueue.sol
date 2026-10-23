@@ -10,13 +10,13 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeab
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
+import {SubstrateMerkleProof} from "src/beefy/utils/SubstrateMerkleProof.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
 import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
-import {SubstrateMerkleProof} from "src/beefy/utils/SubstrateMerkleProof.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 
 /**

@@ -115,10 +115,23 @@ enum Command {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::AuthorizeDeployment { source_rpc, witness_rpc, ethereum_rpc, finality, deployment_manifest, plan_hash } => {
+        Command::AuthorizeDeployment {
+            source_rpc,
+            witness_rpc,
+            ethereum_rpc,
+            finality,
+            deployment_manifest,
+            plan_hash,
+        } => {
             let digest = beefy_relay::authorize_deployment(
-                &source_rpc, &witness_rpc, &ethereum_rpc, &finality, &deployment_manifest, plan_hash,
-            ).await?;
+                &source_rpc,
+                &witness_rpc,
+                &ethereum_rpc,
+                &finality,
+                &deployment_manifest,
+                plan_hash,
+            )
+            .await?;
             println!("{digest:#x}");
             Ok(())
         }

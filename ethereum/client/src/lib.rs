@@ -33,15 +33,15 @@ pub use alloy::primitives::TxHash;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub mod beacon_finality;
+use beacon_finality::BeaconAuthority;
 pub use beacon_finality::{
     BeaconCheckpointProof, BeaconFinalityCheckpoint, BeaconFinalityConfig, FinalityCheckpoint,
     FinalizedSubmissionSnapshot, LegacyFinalityCheckpoint, LegacySubmissionSnapshot,
     ProvenSubmissionSnapshot,
 };
-use beacon_finality::BeaconAuthority;
-pub mod finality_archive;
 #[cfg(test)]
 mod beacon_fixture_tests;
+pub mod finality_archive;
 #[cfg(test)]
 mod finality_tests;
 pub mod inclusion;
@@ -70,7 +70,15 @@ async fn connect_rpc(
         ))
         .layer(tower::timeout::TimeoutLayer::new(RPC_REQUEST_TIMEOUT));
     match url.scheme() {
-        "http" | "https" => Ok(builder.http(url.clone())),
+        "http" | "https" => {
+            use alloy::transports::http::reqwest::{redirect::Policy, Client};
+            let client = Client::builder()
+                .redirect(Policy::none())
+                .timeout(RPC_REQUEST_TIMEOUT)
+                .build()
+                .map_err(Error::FailedToBuildClient)?;
+            Ok(builder.http_with_client(client, url.clone()))
+        }
         "ws" | "wss" => {
             let mut ws = WsConnect::new(url.clone());
             if let Some(retries) = ws_max_retry {
@@ -413,7 +421,9 @@ fn finality_endpoint_identity(url: &Url) -> AnyResult<(&str, &str, u16, &str, Op
         .strip_prefix('[')
         .and_then(|host| host.strip_suffix(']'))
         .unwrap_or(host);
-    let loopback = address.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
+    let loopback = address
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|address| address.is_loopback());
     let scheme = match url.scheme() {
         "https" | "wss" => "https",
         "http" | "ws" if loopback => "http",
@@ -454,7 +464,9 @@ impl DataWitness {
     }
 }
 
-fn require_authority(authority: &Option<Arc<BeaconAuthority>>) -> Result<&Arc<BeaconAuthority>, Error> {
+fn require_authority(
+    authority: &Option<Arc<BeaconAuthority>>,
+) -> Result<&Arc<BeaconAuthority>, Error> {
     authority.as_ref().ok_or(Error::BeaconFinalityNotConfigured)
 }
 
@@ -478,14 +490,19 @@ async fn open_beacon_authority(
     let mut owners = OWNERS.lock().await;
     owners.retain(|_, owner| owner.strong_count() != 0);
     let authority = if let Some(authority) = owners.get(&directory).and_then(Weak::upgrade) {
-        ensure!(authority.matches_config(&config), "HOLD: active Beacon store has a different approval/configuration");
+        ensure!(
+            authority.matches_config(&config),
+            "HOLD: active Beacon store has a different approval/configuration"
+        );
         authority
     } else {
         let authority = BeaconAuthority::open(config, &directory).await?;
         owners.insert(directory.clone(), Arc::downgrade(&authority));
         authority
     };
-    authority.attach_archive(enable_finality_archive(provider, &directory.join("headers"), genesis).await?)?;
+    authority.attach_archive(
+        enable_finality_archive(provider, &directory.join("headers"), genesis).await?,
+    )?;
     Ok(authority)
 }
 
@@ -537,9 +554,10 @@ impl PollingEthApi {
         config: BeaconFinalityConfig,
         store_directory: impl AsRef<std::path::Path>,
     ) -> AnyResult<Self> {
-        self.finality = Some(open_beacon_authority(
-            &self.provider, &self.url, config, store_directory.as_ref(),
-        ).await?);
+        self.finality = Some(
+            open_beacon_authority(&self.provider, &self.url, config, store_directory.as_ref())
+                .await?,
+        );
         Ok(self)
     }
 
@@ -572,7 +590,12 @@ impl PollingEthApi {
         Ok(&require_data_witness(&self.witness)?.provider)
     }
     pub async fn verified_finalized_view(&self) -> Result<FinalizedView, Error> {
-        verified_finalized_view(&self.provider, require_authority(&self.finality)?, self.witness.as_ref()).await
+        verified_finalized_view(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+        )
+        .await
     }
 
     pub async fn enable_finality_archive(
@@ -590,7 +613,13 @@ impl PollingEthApi {
     }
 
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
-        Ok(finalized_ancestor(&self.provider, require_authority(&self.finality)?, self.witness.as_ref(), number, B256::from(hash.0))
+        Ok(finalized_ancestor(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+            number,
+            B256::from(hash.0),
+        )
         .await?)
     }
 
@@ -618,10 +647,13 @@ impl PollingEthApi {
         &self,
         tx_hash: TxHash,
     ) -> AnyResult<Option<FinalizedTransactionReceipt>> {
-        Ok(
-            finalized_transaction_receipt(&self.provider, require_authority(&self.finality)?, self.witness.as_ref(), tx_hash)
-            .await?,
+        Ok(finalized_transaction_receipt(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+            tx_hash,
         )
+        .await?)
     }
     pub async fn get_transaction_block_number(&self, hash: TxHash) -> AnyResult<Option<u64>> {
         transaction_identity(&self.provider, hash)
@@ -791,7 +823,10 @@ fn finality_lock(genesis: B256) -> Arc<Mutex<()>> {
     lock
 }
 
-fn register_archive(directory: &std::path::Path, genesis: B256) -> AnyResult<Arc<finality_archive::HeaderArchive>> {
+fn register_archive(
+    directory: &std::path::Path,
+    genesis: B256,
+) -> AnyResult<Arc<finality_archive::HeaderArchive>> {
     std::fs::create_dir_all(directory)?;
     let directory = std::fs::canonicalize(directory)?;
     let mut archives = FINALITY_ARCHIVES
@@ -799,7 +834,10 @@ fn register_archive(directory: &std::path::Path, genesis: B256) -> AnyResult<Arc
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     for (chain, registered) in archives.iter() {
-        if let Some(archive) = registered.iter().find(|archive| archive.directory() == directory) {
+        if let Some(archive) = registered
+            .iter()
+            .find(|archive| archive.directory() == directory)
+        {
             ensure!(
                 *chain == genesis,
                 "finality archive belongs to another chain; HOLD"
@@ -856,7 +894,10 @@ async fn finality_pin(
     provider: &impl Provider,
     authority: &BeaconAuthority,
 ) -> Result<(Header, FinalityCheckpoint), Error> {
-    let (header, beacon) = authority.pin(provider).await.map_err(Error::BeaconFinality)?;
+    let (header, beacon) = authority
+        .pin(provider)
+        .await
+        .map_err(Error::BeaconFinality)?;
     let (chain_id, genesis_hash) = authority.identity();
     let checkpoint = FinalityCheckpoint::Beacon(BeaconFinalityCheckpoint {
         schema_version: 2,
@@ -1017,10 +1058,13 @@ impl FinalizedView {
 
     /// Recheck the exact pin, never replace staged evidence with a newer head.
     pub async fn recheck(&self, provider: &impl Provider) -> Result<(), Error> {
-        for endpoint in std::iter::once(provider.root()).chain(self.witness.as_ref().map(|witness| &witness.provider)) {
+        for endpoint in std::iter::once(provider.root())
+            .chain(self.witness.as_ref().map(|witness| &witness.provider))
+        {
             let header =
                 qualified_header(endpoint, BlockNumberOrTag::Number(self.block_number())).await?;
-            if header.inner != *self.checkpoint.common_header() || header.hash != self.block_hash() {
+            if header.inner != *self.checkpoint.common_header() || header.hash != self.block_hash()
+            {
                 return Err(Error::FinalizedAncestryConflict);
             }
         }
@@ -1032,7 +1076,12 @@ impl FinalizedView {
         provider: &impl Provider,
         checkpoint: &FinalityCheckpoint,
     ) -> Result<(), Error> {
-        self.verify_checkpoints_with_blocks(provider, std::slice::from_ref(checkpoint), &BTreeMap::new()).await
+        self.verify_checkpoints_with_blocks(
+            provider,
+            std::slice::from_ref(checkpoint),
+            &BTreeMap::new(),
+        )
+        .await
     }
 
     /// Authenticate all retained policies and fences in one grouped ancestry walk.
@@ -1045,11 +1094,16 @@ impl FinalizedView {
         let mut targets = targets.clone();
         for checkpoint in checkpoints {
             checkpoint.validate().map_err(Error::BeaconFinality)?;
-            if checkpoint.chain_id() != self.checkpoint.chain_id() || checkpoint.genesis_hash() != self.genesis {
+            if checkpoint.chain_id() != self.checkpoint.chain_id()
+                || checkpoint.genesis_hash() != self.genesis
+            {
                 return Err(Error::FinalizedAncestryConflict);
             }
             if let Some(beacon) = checkpoint.beacon() {
-                self.authority.verify_proof(&beacon.beacon, &beacon.common_header).await.map_err(Error::BeaconFinality)?;
+                self.authority
+                    .verify_proof(&beacon.beacon, &beacon.common_header)
+                    .await
+                    .map_err(Error::BeaconFinality)?;
             }
             for (number, hash) in checkpoint.fences().map_err(Error::BeaconFinality)? {
                 if targets.insert(number, hash).is_some_and(|old| old != hash) {
@@ -1058,9 +1112,18 @@ impl FinalizedView {
             }
         }
         self.verify_blocks(provider, &targets).await?;
-        let proof = &self.checkpoint.beacon().ok_or(Error::FinalizedAncestryConflict)?.beacon;
-        for checkpoint in checkpoints.iter().filter(|checkpoint| checkpoint.legacy().is_some()) {
-            self.authority.retain_requalification(checkpoint, proof).map_err(Error::BeaconFinality)?;
+        let proof = &self
+            .checkpoint
+            .beacon()
+            .ok_or(Error::FinalizedAncestryConflict)?
+            .beacon;
+        for checkpoint in checkpoints
+            .iter()
+            .filter(|checkpoint| checkpoint.legacy().is_some())
+        {
+            self.authority
+                .retain_requalification(checkpoint, proof)
+                .map_err(Error::BeaconFinality)?;
         }
         Ok(())
     }
@@ -1077,7 +1140,10 @@ impl FinalizedView {
         self.verify_checkpoint(provider, checkpoint).await?;
         let header = checkpoint.common_header();
         self.header = Header {
-            hash: header.hash_slow(), inner: header.clone(), total_difficulty: None, size: None,
+            hash: header.hash_slow(),
+            inner: header.clone(),
+            total_difficulty: None,
+            size: None,
         };
         self.checkpoint = checkpoint.clone();
         self.blocks.retain(|&number, _| number <= header.number);
@@ -1146,7 +1212,8 @@ impl FinalizedView {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(cache) = state.get_mut(&self.genesis).filter(|cache| {
-            cache.head == (self.block_number(), self.block_hash()) && cache.required_heads.is_empty()
+            cache.head == (self.block_number(), self.block_hash())
+                && cache.required_heads.is_empty()
         }) {
             cache.remember(proof);
             cache.lowest = (number, hash);
@@ -1167,8 +1234,14 @@ async fn verified_finalized_view(
     let genesis = checkpoint.genesis_hash();
     if let Some(witness) = witness {
         if (witness.chain_id, witness.genesis) != authority.identity()
-            || timeout(Duration::from_secs(10), witness.provider.get_chain_id()).await.map_err(|_| Error::FinalizedAncestryPending)?? != witness.chain_id
-            || qualified_header(&witness.provider, BlockNumberOrTag::Number(0)).await?.hash != genesis
+            || timeout(Duration::from_secs(10), witness.provider.get_chain_id())
+                .await
+                .map_err(|_| Error::FinalizedAncestryPending)??
+                != witness.chain_id
+            || qualified_header(&witness.provider, BlockNumberOrTag::Number(0))
+                .await?
+                .hash
+                != genesis
         {
             return Err(Error::FinalizedAncestryConflict);
         }
@@ -1176,9 +1249,15 @@ async fn verified_finalized_view(
     let mut retained = Vec::new();
     let archives = authority.archives();
     for archive in &archives {
-        if let Some(checkpoint) = archive.retained_checkpoint().map_err(Error::BeaconFinality)? {
+        if let Some(checkpoint) = archive
+            .retained_checkpoint()
+            .map_err(Error::BeaconFinality)?
+        {
             if let Some(beacon) = checkpoint.beacon() {
-                authority.verify_proof(&beacon.beacon, &beacon.common_header).await.map_err(Error::BeaconFinality)?;
+                authority
+                    .verify_proof(&beacon.beacon, &beacon.common_header)
+                    .await
+                    .map_err(Error::BeaconFinality)?;
             }
             retained.push(checkpoint);
         }
@@ -1186,8 +1265,7 @@ async fn verified_finalized_view(
     let head = (header.number, header.hash);
     if finalized_ancestor_at(
         provider,
-        head.0,
-        head.1,
+        head,
         &header,
         genesis,
         started,
@@ -1219,9 +1297,18 @@ async fn verified_finalized_view(
     {
         return Err(Error::FinalizedAncestryPending);
     }
-    let proof = &view.checkpoint.beacon().ok_or(Error::FinalizedAncestryConflict)?.beacon;
-    for checkpoint in retained.iter().filter(|checkpoint| checkpoint.legacy().is_some()) {
-        authority.retain_requalification(checkpoint, proof).map_err(Error::BeaconFinality)?;
+    let proof = &view
+        .checkpoint
+        .beacon()
+        .ok_or(Error::FinalizedAncestryConflict)?
+        .beacon;
+    for checkpoint in retained
+        .iter()
+        .filter(|checkpoint| checkpoint.legacy().is_some())
+    {
+        authority
+            .retain_requalification(checkpoint, proof)
+            .map_err(Error::BeaconFinality)?;
     }
     for archive in &archives {
         archive
@@ -1254,8 +1341,7 @@ async fn finalized_ancestor(
 
 async fn finalized_ancestor_at(
     provider: &impl Provider,
-    number: u64,
-    hash: B256,
+    (number, hash): (u64, B256),
     header: &Header,
     genesis: B256,
     started: Instant,
@@ -1298,7 +1384,7 @@ async fn finalized_ancestor_at(
         }
         if head != old_head {
             let (height, ancestor, extension) =
-                walk_ancestors(provider, head, old_head.0, started, &archives, None).await?;
+                walk_ancestors(provider, head, old_head.0, started, archives, None).await?;
             let mut cache = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1376,7 +1462,7 @@ async fn finalized_ancestor_at(
             start,
             required.0,
             started,
-            &archives,
+            archives,
             Some(&required_heads),
         )
         .await?;
@@ -1400,7 +1486,7 @@ async fn finalized_ancestor_at(
     if let Some((&oldest, _)) = durable_required.first_key_value() {
         let targets = durable_required;
         let (height, ancestor, links) =
-            walk_ancestors(provider, head, oldest, started, &archives, Some(&targets)).await?;
+            walk_ancestors(provider, head, oldest, started, archives, Some(&targets)).await?;
         if height != oldest {
             let mut cache = state
                 .lock()
@@ -1448,7 +1534,7 @@ async fn finalized_ancestor_at(
         })
     };
     let (height, ancestor, proof) =
-        walk_ancestors(provider, start, number, started, &archives, None).await?;
+        walk_ancestors(provider, start, number, started, archives, None).await?;
     let mut cache = state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1729,10 +1815,19 @@ impl EthApi {
         config: BeaconFinalityConfig,
         store_directory: impl AsRef<std::path::Path>,
     ) -> AnyResult<Self> {
-        ensure!(self.chain_id == config.identity().0, "HOLD: signer network differs from approved identity");
-        self.contracts.finality = Some(open_beacon_authority(
-            self.raw_provider(), &self.url, config, store_directory.as_ref(),
-        ).await?);
+        ensure!(
+            self.chain_id == config.identity().0,
+            "HOLD: signer network differs from approved identity"
+        );
+        self.contracts.finality = Some(
+            open_beacon_authority(
+                self.raw_provider(),
+                &self.url,
+                config,
+                store_directory.as_ref(),
+            )
+            .await?,
+        );
         Ok(self)
     }
 
@@ -1793,7 +1888,11 @@ impl EthApi {
 
     /// Uses bounded individual requests without a total historical traversal deadline.
     pub async fn verified_finalized_view(&self) -> Result<FinalizedView, Error> {
-        verified_finalized_view(self.raw_provider(), require_authority(&self.contracts.finality)?, self.contracts.witness.as_ref())
+        verified_finalized_view(
+            self.raw_provider(),
+            require_authority(&self.contracts.finality)?,
+            self.contracts.witness.as_ref(),
+        )
         .await
     }
 
@@ -2028,13 +2127,24 @@ impl EthApi {
         &self,
         tx_hash: TxHash,
     ) -> Result<Option<FinalizedTransactionReceipt>, Error> {
-        finalized_transaction_receipt(self.raw_provider(), require_authority(&self.contracts.finality)?, self.contracts.witness.as_ref(), tx_hash)
+        finalized_transaction_receipt(
+            self.raw_provider(),
+            require_authority(&self.contracts.finality)?,
+            self.contracts.witness.as_ref(),
+            tx_hash,
+        )
         .await
     }
     /// Revalidate a saved historical snapshot against the same finalized ancestry as receipts.
     /// An unfinished or unavailable proof is an error, not a conflicting block.
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
-        Ok(finalized_ancestor(self.raw_provider(), require_authority(&self.contracts.finality)?, self.contracts.witness.as_ref(), number, B256::from(hash.0))
+        Ok(finalized_ancestor(
+            self.raw_provider(),
+            require_authority(&self.contracts.finality)?,
+            self.contracts.witness.as_ref(),
+            number,
+            B256::from(hash.0),
+        )
         .await?)
     }
 
@@ -2138,14 +2248,21 @@ impl EthApi {
     }
 
     fn original_nonce(&self, raw: &[u8]) -> AnyResult<u64> {
-        use alloy::{consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope}, eips::{Decodable2718, Encodable2718}};
+        use alloy::{
+            consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope},
+            eips::{Decodable2718, Encodable2718},
+        };
         let mut remaining = raw;
         let transaction = TxEnvelope::decode_2718(&mut remaining)?;
-        ensure!(remaining.is_empty() && transaction.encoded_2718() == raw,
-            "HOLD: noncanonical signed original");
-        ensure!(transaction.chain_id() == Some(self.chain_id)
-            && transaction.recover_signer()? == self.public_key,
-            "HOLD: signed original signer/network mismatch");
+        ensure!(
+            remaining.is_empty() && transaction.encoded_2718() == raw,
+            "HOLD: noncanonical signed original"
+        );
+        ensure!(
+            transaction.chain_id() == Some(self.chain_id)
+                && transaction.recover_signer()? == self.public_key,
+            "HOLD: signed original signer/network mismatch"
+        );
         Ok(transaction.nonce())
     }
 
@@ -2155,18 +2272,34 @@ impl EthApi {
         &self,
         original_raw: &[u8],
     ) -> Result<Option<FinalizedSubmissionSnapshot>, Error> {
-        let nonce = self.original_nonce(original_raw).map_err(Error::BeaconFinality)?;
+        let nonce = self
+            .original_nonce(original_raw)
+            .map_err(Error::BeaconFinality)?;
         let view = self.verified_finalized_view().await?;
-        let proof = inclusion::prove_account(self.raw_provider(), &view, view.header.inner.clone(), self.public_key)
-            .await.map_err(Error::BeaconFinality)?;
-        let account_nonce = proof.verify(&view, self.public_key).map_err(Error::BeaconFinality)?
+        let proof = inclusion::prove_account(
+            self.raw_provider(),
+            &view,
+            view.header.inner.clone(),
+            self.public_key,
+        )
+        .await
+        .map_err(Error::BeaconFinality)?;
+        let account_nonce = proof
+            .verify(&view, self.public_key)
+            .map_err(Error::BeaconFinality)?
             .map_or(0, |account| account.nonce);
         view.recheck(self.raw_provider()).await?;
-        Ok(Some(FinalizedSubmissionSnapshot::Beacon(ProvenSubmissionSnapshot {
-            schema_version: 2, block_number: view.block_number(), block_hash: view.block_hash(),
-            account_nonce, pinned_nonce_consumed: account_nonce > nonce,
-            account_proof: proof, checkpoint: view.checkpoint,
-        })))
+        Ok(Some(FinalizedSubmissionSnapshot::Beacon(
+            ProvenSubmissionSnapshot {
+                schema_version: 2,
+                block_number: view.block_number(),
+                block_hash: view.block_hash(),
+                account_nonce,
+                pinned_nonce_consumed: account_nonce > nonce,
+                account_proof: proof,
+                checkpoint: view.checkpoint,
+            },
+        )))
     }
 
     /// Requalify at the original saved header, never at a newer account nonce.
@@ -2177,38 +2310,74 @@ impl EthApi {
         saved: &FinalizedSubmissionSnapshot,
     ) -> AnyResult<FinalizedSubmissionSnapshot> {
         let nonce = self.original_nonce(original_raw)?;
-        ensure!(saved.block_hash() != B256::ZERO, "HOLD: saved nonce disposition has no block hash");
+        ensure!(
+            saved.block_hash() != B256::ZERO,
+            "HOLD: saved nonce disposition has no block hash"
+        );
         let mut view = self.verified_finalized_view().await?;
         let targets = BTreeMap::from([(saved.block_number(), saved.block_hash())]);
         let proof = if let Some(proven) = saved.beacon() {
-            ensure!(proven.schema_version == 2 && proven.checkpoint.beacon().is_some(),
-                "HOLD: invalid nonce proof version/policy");
-            view.verify_checkpoints_with_blocks(self.raw_provider(), std::slice::from_ref(&proven.checkpoint), &targets).await?;
-            ensure!(proven.account_proof.header.number == saved.block_number()
-                && proven.account_proof.header.hash_slow() == saved.block_hash(),
-                "HOLD: account proof differs from original disposition pin");
+            ensure!(
+                proven.schema_version == 2 && proven.checkpoint.beacon().is_some(),
+                "HOLD: invalid nonce proof version/policy"
+            );
+            view.verify_checkpoints_with_blocks(
+                self.raw_provider(),
+                std::slice::from_ref(&proven.checkpoint),
+                &targets,
+            )
+            .await?;
+            ensure!(
+                proven.account_proof.header.number == saved.block_number()
+                    && proven.account_proof.header.hash_slow() == saved.block_hash(),
+                "HOLD: account proof differs from original disposition pin"
+            );
             proven.account_proof.clone()
         } else {
             view.verify_blocks(self.raw_provider(), &targets).await?;
-            let header = qualified_header(self.raw_provider(), BlockNumberOrTag::Number(saved.block_number())).await?;
-            ensure!(header.hash == saved.block_hash(), "HOLD: original disposition header changed");
-            inclusion::prove_account(self.raw_provider(), &view, header.inner, self.public_key).await?
+            let header = qualified_header(
+                self.raw_provider(),
+                BlockNumberOrTag::Number(saved.block_number()),
+            )
+            .await?;
+            ensure!(
+                header.hash == saved.block_hash(),
+                "HOLD: original disposition header changed"
+            );
+            inclusion::prove_account(self.raw_provider(), &view, header.inner, self.public_key)
+                .await?
         };
-        let account_nonce = proof.verify(&view, self.public_key)?.map_or(0, |account| account.nonce);
-        ensure!(saved.pinned_nonce_consumed() == (account_nonce > nonce)
-            && saved.beacon().is_none_or(|proven| proven.account_nonce == account_nonce),
-            "HOLD: saved nonce disposition differs from proven original account");
+        let account_nonce = proof
+            .verify(&view, self.public_key)?
+            .map_or(0, |account| account.nonce);
+        ensure!(
+            saved.pinned_nonce_consumed() == (account_nonce > nonce)
+                && saved
+                    .beacon()
+                    .is_none_or(|proven| proven.account_nonce == account_nonce),
+            "HOLD: saved nonce disposition differs from proven original account"
+        );
         view.recheck(self.raw_provider()).await?;
         if saved.beacon().is_some() {
             return Ok(saved.clone());
         }
-        let beacon = &view.checkpoint.beacon().context("Beacon checkpoint missing")?.beacon;
+        let beacon = &view
+            .checkpoint
+            .beacon()
+            .context("Beacon checkpoint missing")?
+            .beacon;
         view.authority.retain_requalification(saved, beacon)?;
-        Ok(FinalizedSubmissionSnapshot::Beacon(ProvenSubmissionSnapshot {
-            schema_version: 2, block_number: saved.block_number(), block_hash: saved.block_hash(),
-            account_nonce, pinned_nonce_consumed: saved.pinned_nonce_consumed(),
-            account_proof: proof, checkpoint: view.checkpoint,
-        }))
+        Ok(FinalizedSubmissionSnapshot::Beacon(
+            ProvenSubmissionSnapshot {
+                schema_version: 2,
+                block_number: saved.block_number(),
+                block_hash: saved.block_hash(),
+                account_nonce,
+                pinned_nonce_consumed: saved.pinned_nonce_consumed(),
+                account_proof: proof,
+                checkpoint: view.checkpoint,
+            },
+        ))
     }
 
     pub async fn subscribe_logs(
@@ -2249,8 +2418,12 @@ impl Contracts {
     }
 
     async fn scheduling_value<C: alloy::sol_types::SolCall>(&self, call: C) -> Result<U256, Error> {
-        let view =
-            verified_finalized_view(&self.provider, require_authority(&self.finality)?, self.witness.as_ref()).await?;
+        let view = verified_finalized_view(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+        )
+        .await?;
         let request = alloy::rpc::types::TransactionRequest::default()
             .to(*self.message_queue_instance.address())
             .input(Bytes::from(call.abi_encode()).into());
@@ -2510,8 +2683,12 @@ impl Contracts {
         block_tag: BlockNumberOrTag,
     ) -> Result<Option<[u8; 32]>, Error> {
         if block_tag == BlockNumberOrTag::Finalized {
-            let view =
-                verified_finalized_view(&self.provider, require_authority(&self.finality)?, self.witness.as_ref()).await?;
+            let view = verified_finalized_view(
+                &self.provider,
+                require_authority(&self.finality)?,
+                self.witness.as_ref(),
+            )
+            .await?;
             let root = self.read_merkle_root_at(block, view.block_id()).await?;
             view.recheck(&self.provider).await?;
             Ok(root)
@@ -2561,8 +2738,12 @@ impl Contracts {
         ethereum_block_number: u64,
         ethereum_block_hash: B256,
     ) -> Result<Option<[u8; 32]>, Error> {
-        let mut view =
-            verified_finalized_view(&self.provider, require_authority(&self.finality)?, self.witness.as_ref()).await?;
+        let mut view = verified_finalized_view(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+        )
+        .await?;
         if ethereum_block_number > view.block_number() {
             return Ok(None);
         }
@@ -2578,9 +2759,13 @@ impl Contracts {
         Ok(root)
     }
 
-
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
-        let Some(receipt) = finalized_transaction_receipt(&self.provider, require_authority(&self.finality)?, self.witness.as_ref(), tx_hash)
+        let Some(receipt) = finalized_transaction_receipt(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+            tx_hash,
+        )
         .await?
         else {
             return Ok(TxStatus::Pending);
@@ -2597,7 +2782,6 @@ impl Contracts {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[tokio::test]
     async fn root_scan_retains_both_sides_of_page_boundary() -> AnyResult<()> {
@@ -2735,7 +2919,8 @@ mod tests {
             message_processed: false,
         });
         let value = serde_json::to_value(&snapshot).unwrap();
-        let restored = serde_json::from_value::<FinalizedSubmissionSnapshot>(value.clone()).unwrap();
+        let restored =
+            serde_json::from_value::<FinalizedSubmissionSnapshot>(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(restored).unwrap(), value);
         for field in [
             "block_number",
@@ -2872,7 +3057,16 @@ mod tests {
         let started = Instant::now();
         let head = qualified_header(provider, BlockNumberOrTag::Finalized).await?;
         let genesis = qualified_header(provider, BlockNumberOrTag::Number(0)).await?;
-        finalized_ancestor_at(provider, number, hash, &head, genesis.hash, started, None, &archives_for(genesis.hash)).await
+        finalized_ancestor_at(
+            provider,
+            (number, hash),
+            &head,
+            genesis.hash,
+            started,
+            None,
+            &archives_for(genesis.hash),
+        )
+        .await
     }
 
     #[tokio::test]

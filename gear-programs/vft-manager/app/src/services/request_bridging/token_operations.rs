@@ -282,7 +282,8 @@ pub fn handle_persistent_reply() {
 
 /// Decode reply received from the Burn method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
-    decode_complete_reply::<Burn>(bytes, |e| Error::BurnTokensDecode(format!("{e:?}"))).map(|()| true)
+    decode_complete_reply::<Burn>(bytes, |e| Error::BurnTokensDecode(format!("{e:?}")))
+        .map(|()| true)
 }
 
 /// Decode reply received from the TransferFrom method.
@@ -292,7 +293,8 @@ fn decode_transfer_from_reply(bytes: &[u8]) -> Result<bool, Error> {
 
 /// Decode reply received from the Mint method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
-    decode_complete_reply::<Mint>(bytes, |e| Error::MintTokensDecode(format!("{e:?}"))).map(|()| true)
+    decode_complete_reply::<Mint>(bytes, |e| Error::MintTokensDecode(format!("{e:?}")))
+        .map(|()| true)
 }
 
 #[cfg(test)]

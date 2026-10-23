@@ -22,8 +22,9 @@ contract ProcessMessageScriptTest is Test, Base {
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("MESSAGE_QUEUE", vm.toString(address(messageQueue)));
         vm.setEnv("BLOCK_NUMBER", "1");
-        vm.setEnv("TOTAL_LEAVES", "1");
-        vm.setEnv("LEAF_INDEX", "0");
+        // The message is the right-hand leaf of [bytes32(0), messageHash].
+        vm.setEnv("TOTAL_LEAVES", "2");
+        vm.setEnv("LEAF_INDEX", "1");
         vm.setEnv("NONCE", "1");
         vm.setEnv("SOURCE", vm.toString(message.source));
         vm.setEnv("DESTINATION", vm.toString(message.destination));

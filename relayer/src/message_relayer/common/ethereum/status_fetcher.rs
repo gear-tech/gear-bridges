@@ -1,4 +1,6 @@
-use crate::{common::BASE_RETRY_DELAY, lane_policy::LanePolicy, message_relayer::common::message_hash};
+use crate::{
+    common::BASE_RETRY_DELAY, lane_policy::LanePolicy, message_relayer::common::message_hash,
+};
 use alloy::{
     primitives::{Address, B256, U256},
     sol_types::{SolCall, SolEvent},
@@ -23,7 +25,6 @@ use std::{
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
-
 
 pub struct StatusFetcher {
     eth_api: EthApi,
@@ -238,9 +239,10 @@ pub fn validate_receipt_authentication(
     use alloy::eips::Encodable2718;
     ethereum_client::prepared_content_message_transaction(signed)?;
     anyhow::ensure!(
-        matches!((checkpoint.schema_version(), checkpoint.policy()),
-            (1, "independent-two-el-v1") | (2, "beacon-sync-committee-v1"))
-            && checkpoint.chain_id() == signed.chain_id
+        matches!(
+            (checkpoint.schema_version(), checkpoint.policy()),
+            (1, "independent-two-el-v1") | (2, "beacon-sync-committee-v1")
+        ) && checkpoint.chain_id() == signed.chain_id
             && checkpoint.genesis_hash() != B256::ZERO
             && inclusion.genesis == checkpoint.genesis_hash()
             && inclusion.raw_transaction == signed.raw_transaction
@@ -259,10 +261,16 @@ pub fn validate_receipt_authentication(
         "HOLD: same-height checkpoint headers disagree"
     );
     if let Some(legacy) = checkpoint.legacy() {
-        for header in [&legacy.primary_finalized_header, &legacy.witness_finalized_header] {
-            anyhow::ensure!(header.number >= legacy.common_header.number
-                && (header.number != legacy.common_header.number || header == &legacy.common_header),
-                "HOLD: historical checkpoint fences conflict");
+        for header in [
+            &legacy.primary_finalized_header,
+            &legacy.witness_finalized_header,
+        ] {
+            anyhow::ensure!(
+                header.number >= legacy.common_header.number
+                    && (header.number != legacy.common_header.number
+                        || header == &legacy.common_header),
+                "HOLD: historical checkpoint fences conflict"
+            );
         }
     }
     anyhow::ensure!(
@@ -446,7 +454,10 @@ pub async fn failure_evidence(
     signed: &PreparedContentMessage,
     finalized: FinalizedTransactionReceipt,
 ) -> anyhow::Result<FinalizedFailureEvidence> {
-    anyhow::ensure!(finalized.checkpoint.beacon().is_some(), "HOLD: new failure evidence requires Beacon authority");
+    anyhow::ensure!(
+        finalized.checkpoint.beacon().is_some(),
+        "HOLD: new failure evidence requires Beacon authority"
+    );
     let evidence = FinalizedFailureEvidence {
         receipt: finalized.receipt,
         included_block_number: finalized.included_block_number,
@@ -481,7 +492,10 @@ pub async fn completion_evidence(
     finalized: FinalizedTransactionReceipt,
     policy: &LanePolicy,
 ) -> anyhow::Result<CompletionEvidence> {
-    anyhow::ensure!(finalized.checkpoint.beacon().is_some(), "HOLD: new completion evidence requires Beacon authority");
+    anyhow::ensure!(
+        finalized.checkpoint.beacon().is_some(),
+        "HOLD: new completion evidence requires Beacon authority"
+    );
     policy.validate_for_api(api, message)?;
     policy.validate(message, signed)?;
     validate_receipt_authentication(
@@ -533,9 +547,15 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
             );
         };
         let Some(policy) = request.lane_policy.as_ref() else {
-            return (request, hold("HOLD: original has no approved immutable lane policy".into()));
+            return (
+                request,
+                hold("HOLD: original has no approved immutable lane policy".into()),
+            );
         };
-        if let Err(error) = policy.validate_for_api(&api, &request.message).and_then(|_| policy.validate(&request.message, signed)) {
+        if let Err(error) = policy
+            .validate_for_api(&api, &request.message)
+            .and_then(|_| policy.validate(&request.message, signed))
+        {
             return (request, hold(error.to_string()));
         }
         let identity = original_call(&request.message, signed).and_then(|call| {
@@ -644,7 +664,10 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
 fn evidence_error_is_retryable(error: &anyhow::Error) -> bool {
     matches!(
         error.downcast_ref::<ethereum_client::Error>(),
-        Some(ethereum_client::Error::FinalizedAncestryPending | ethereum_client::Error::ErrorFetchingBlock)
+        Some(
+            ethereum_client::Error::FinalizedAncestryPending
+                | ethereum_client::Error::ErrorFetchingBlock
+        )
     ) || ethereum_client::is_transient_rpc_error(error)
 }
 
@@ -835,14 +858,21 @@ pub(crate) mod tests {
         let transaction = TxEnvelope::decode_2718(&mut signed.raw_transaction.as_slice()).unwrap();
         let envelope = receipt.clone().into_primitives_receipt().inner;
         let mut parent = B256::ZERO;
-        let (initial_nonce, transition, consumed_nonce) =
-            if signed.nonce >= 36 { (36, 2, 38) } else { (1, 101, 2) };
+        let (initial_nonce, transition, consumed_nonce) = if signed.nonce >= 36 {
+            (36, 2, 38)
+        } else {
+            (1, 101, 2)
+        };
         let initial_root = ethereum_client::beacon_finality::test_fixtures::single_account_proof(
-            signed.sender, initial_nonce,
-        ).0;
+            signed.sender,
+            initial_nonce,
+        )
+        .0;
         let consumed_root = ethereum_client::beacon_finality::test_fixtures::single_account_proof(
-            signed.sender, consumed_nonce,
-        ).0;
+            signed.sender,
+            consumed_nonce,
+        )
+        .0;
         let chain: Vec<Block> = (0..=head)
             .map(|number| {
                 let mut block: Block = Block::default();
@@ -850,7 +880,11 @@ pub(crate) mod tests {
                 block.header.inner.parent_hash = parent;
                 block.header.inner.timestamp = number * 12;
                 block.header.inner.extra_data = Bytes::copy_from_slice(tag);
-                block.header.inner.state_root = if number < transition { initial_root } else { consumed_root };
+                block.header.inner.state_root = if number < transition {
+                    initial_root
+                } else {
+                    consumed_root
+                };
                 if number == included {
                     block.header.inner.transactions_root =
                         calculate_transaction_root(std::slice::from_ref(&transaction));
@@ -1094,14 +1128,20 @@ pub(crate) mod tests {
                     let signed = self.request.submission.as_ref().unwrap();
                     assert_eq!(params[0], json!(signed.sender));
                     assert_eq!(params[2]["requireCanonical"], json!(true));
-                    let block = self.chain.iter().find(|block|
-                        json!(block.header.hash) == params[2]["blockHash"]
-                    ).unwrap();
+                    let block = self
+                        .chain
+                        .iter()
+                        .find(|block| json!(block.header.hash) == params[2]["blockHash"])
+                        .unwrap();
                     let nonce = if block.header.number < 101 { 1 } else { 2 };
-                    let (_, mut proof) = ethereum_client::beacon_finality::test_fixtures::single_account_proof(
-                        signed.sender, nonce,
-                    );
-                    if fault == RpcFault::Nonce { proof.nonce += 1; }
+                    let (_, mut proof) =
+                        ethereum_client::beacon_finality::test_fixtures::single_account_proof(
+                            signed.sender,
+                            nonce,
+                        );
+                    if fault == RpcFault::Nonce {
+                        proof.nonce += 1;
+                    }
                     Ok(json!(proof))
                 }
                 "eth_getTransactionCount" => {
@@ -1281,7 +1321,6 @@ pub(crate) mod tests {
         }
     }
 
-
     impl Drop for WatchRpc {
         fn drop(&mut self) {
             self.server.abort();
@@ -1363,10 +1402,16 @@ pub(crate) mod tests {
             log["blockHash"] = json!(chain[101].header.hash);
         }
         request.lane_policy = Some(lane_policy(
-            &request.message, request.submission.as_ref().unwrap(), chain[0].header.hash, true,
+            &request.message,
+            request.submission.as_ref().unwrap(),
+            chain[0].header.hash,
+            true,
         ));
         second.lane_policy = Some(lane_policy(
-            &second.message, second.submission.as_ref().unwrap(), chain[0].header.hash, true,
+            &second.message,
+            second.submission.as_ref().unwrap(),
+            chain[0].header.hash,
+            true,
         ));
         let mut fork = chain[100].clone();
         fork.header.inner.extra_data = Bytes::from(vec![4]);
@@ -1446,9 +1491,16 @@ pub(crate) mod tests {
             }
         };
         let beacon_state = state.clone();
-        let beacon = LocalBeaconFixture::new(31337, state.chain[0].header.hash, Arc::new(move || {
-            beacon_state.chain[beacon_state.finalized_height.load(Ordering::SeqCst) as usize].header.clone()
-        })).await?;
+        let beacon = LocalBeaconFixture::new(
+            31337,
+            state.chain[0].header.hash,
+            Arc::new(move || {
+                beacon_state.chain[beacon_state.finalized_height.load(Ordering::SeqCst) as usize]
+                    .header
+                    .clone()
+            }),
+        )
+        .await?;
         let api = api
             .with_beacon_finality(beacon.config.clone(), &beacon.directory.join("store"))
             .await?
@@ -1509,7 +1561,8 @@ pub(crate) mod tests {
             let rpc = watch_rpc(visible).await?;
             let request = rpc.state.request.clone();
             if fault == RpcFault::ConflictingFinality {
-                assert!(rpc.api
+                assert!(rpc
+                    .api
                     .get_finalized_submission_snapshot(
                         &request.submission.as_ref().unwrap().raw_transaction,
                     )
@@ -1582,14 +1635,29 @@ pub(crate) mod tests {
                 "index" => candidate.inclusion.as_mut().unwrap().index = 1,
                 "genesis" => candidate.inclusion.as_mut().unwrap().genesis = B256::ZERO,
                 "chain" => {
-                    let FinalityCheckpoint::Legacy(checkpoint) = candidate.checkpoint.as_mut().unwrap() else { unreachable!() };
+                    let FinalityCheckpoint::Legacy(checkpoint) =
+                        candidate.checkpoint.as_mut().unwrap()
+                    else {
+                        unreachable!()
+                    };
                     checkpoint.chain_id += 1;
                 }
                 "policy" | "version" => {
-                    let mut value = serde_json::to_value(candidate.checkpoint.as_ref().unwrap()).unwrap();
-                    value[if case == "policy" { "policy" } else { "schema_version" }] =
-                        if case == "policy" { json!("single-provider") } else { json!(9) };
-                    assert!(serde_json::from_value::<FinalityCheckpoint>(value).is_err(), "{case}");
+                    let mut value =
+                        serde_json::to_value(candidate.checkpoint.as_ref().unwrap()).unwrap();
+                    value[if case == "policy" {
+                        "policy"
+                    } else {
+                        "schema_version"
+                    }] = if case == "policy" {
+                        json!("single-provider")
+                    } else {
+                        json!(9)
+                    };
+                    assert!(
+                        serde_json::from_value::<FinalityCheckpoint>(value).is_err(),
+                        "{case}"
+                    );
                     continue;
                 }
                 "receipt" => candidate.receipt.transaction_index = Some(1),
@@ -1617,18 +1685,35 @@ pub(crate) mod tests {
         let request = &rpc.state.request;
         let signed = request.submission.as_ref().unwrap();
         let guard = rpc.api.reserve_submission().await;
-        for fault in [RpcFault::Governance, RpcFault::Manager, RpcFault::Token, RpcFault::Processed, RpcFault::Nonce] {
+        for fault in [
+            RpcFault::Governance,
+            RpcFault::Manager,
+            RpcFault::Token,
+            RpcFault::Processed,
+            RpcFault::Nonce,
+        ] {
             *rpc.state.fault.lock().unwrap() = fault;
             *rpc.state.witness_fault.lock().unwrap() = fault;
             let finalized = rpc.api.get_finalized_receipt(signed.hash).await?.unwrap();
             let completed = completion_evidence(
-                &rpc.api, &request.message, signed, finalized, request.lane_policy.as_ref().unwrap(),
-            ).await?;
+                &rpc.api,
+                &request.message,
+                signed,
+                finalized,
+                request.lane_policy.as_ref().unwrap(),
+            )
+            .await?;
             assert!(completed.token_delivery);
             validate_completion(&request.message, signed, &completed)?;
             assert!(futures::poll!(Box::pin(rpc.api.reserve_submission())).is_pending());
         }
-        assert!(!rpc.state.calls.lock().unwrap().iter().any(|call| call["method"] == "eth_call"));
+        assert!(!rpc
+            .state
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call["method"] == "eth_call"));
         *rpc.state.witness_fault.lock().unwrap() = RpcFault::WrongChain;
         assert!(rpc.api.get_finalized_receipt(signed.hash).await.is_err());
         *rpc.state.witness_fault.lock().unwrap() = RpcFault::None;
@@ -1645,10 +1730,18 @@ pub(crate) mod tests {
         rpc.state.finalized_height.store(107, Ordering::SeqCst);
         *rpc.state.witness_height.lock().unwrap() = Some(99);
         *rpc.state.receipt.lock().unwrap() = rpc.state.canonical_receipt.clone();
-        for fault in [RpcFault::MissingFinality, RpcFault::InvalidFinality, RpcFault::ConflictingFinality] {
+        for fault in [
+            RpcFault::MissingFinality,
+            RpcFault::InvalidFinality,
+            RpcFault::ConflictingFinality,
+        ] {
             *rpc.state.fault.lock().unwrap() = fault;
             *rpc.state.witness_fault.lock().unwrap() = fault;
-            let included = rpc.api.get_finalized_receipt(rpc.state.request.tx_hash).await?.unwrap();
+            let included = rpc
+                .api
+                .get_finalized_receipt(rpc.state.request.tx_hash)
+                .await?
+                .unwrap();
             assert_eq!(included.checkpoint.schema_version(), 2);
             assert_eq!(included.checkpoint.common_header().number, 107);
             assert!(included.checkpoint.beacon().is_some());
@@ -1659,7 +1752,15 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn missing_or_changed_policy_holds_before_receipt_lookup() -> anyhow::Result<()> {
         let rpc = watch_rpc(true).await?;
-        for case in ["missing", "chain", "genesis", "queue", "source", "destination", "downgrade"] {
+        for case in [
+            "missing",
+            "chain",
+            "genesis",
+            "queue",
+            "source",
+            "destination",
+            "downgrade",
+        ] {
             let mut request = rpc.state.request.clone();
             if case == "missing" {
                 request.lane_policy = None;
@@ -1677,8 +1778,23 @@ pub(crate) mod tests {
             }
             rpc.state.calls.lock().unwrap().clear();
             let (_, outcome) = watch_tx(rpc.api.clone(), request, 8).await;
-            assert!(matches!(outcome, SubmissionOutcome::NeedsReconciliation { nonce_disposition: None, .. }), "{case}");
-            assert!(!rpc.state.calls.lock().unwrap().iter().any(|call| call["method"] == "eth_getTransactionReceipt"));
+            assert!(
+                matches!(
+                    outcome,
+                    SubmissionOutcome::NeedsReconciliation {
+                        nonce_disposition: None,
+                        ..
+                    }
+                ),
+                "{case}"
+            );
+            assert!(!rpc
+                .state
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| call["method"] == "eth_getTransactionReceipt"));
         }
         Ok(())
     }
@@ -1697,7 +1813,13 @@ pub(crate) mod tests {
                 diagnostic, nonce_disposition: None,
             } if diagnostic.contains("lacks exactly one")));
         }
-        assert!(!rpc.state.calls.lock().unwrap().iter().any(|call| call["method"] == "eth_call"));
+        assert!(!rpc
+            .state
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|call| call["method"] == "eth_call"));
         Ok(())
     }
 
@@ -1782,7 +1904,10 @@ pub(crate) mod tests {
         rpc.state.finalized_height.store(107, Ordering::SeqCst);
         let mut request = rpc.state.request.clone();
         request.lane_policy = Some(lane_policy(
-            &request.message, request.submission.as_ref().unwrap(), rpc.state.chain[0].header.hash, false,
+            &request.message,
+            request.submission.as_ref().unwrap(),
+            rpc.state.chain[0].header.hash,
+            false,
         ));
         let signed = request.submission.as_ref().unwrap();
         // Token-shaped application payloads remain applications without a token lane.
@@ -2054,12 +2179,25 @@ pub(crate) mod tests {
     ) -> anyhow::Result<()> {
         let rpc = watch_rpc(false).await?;
         rpc.state.finalized_height.store(101, Ordering::SeqCst);
-        let raw = &rpc.state.request.submission.as_ref().unwrap().raw_transaction;
-        let saved = rpc.api.get_finalized_submission_snapshot(raw).await?.unwrap();
+        let raw = &rpc
+            .state
+            .request
+            .submission
+            .as_ref()
+            .unwrap()
+            .raw_transaction;
+        let saved = rpc
+            .api
+            .get_finalized_submission_snapshot(raw)
+            .await?
+            .unwrap();
         let saved: FinalizedSubmissionSnapshot =
             serde_json::from_slice(&serde_json::to_vec(&saved)?)?;
         rpc.state.finalized_height.store(107, Ordering::SeqCst);
-        let qualified = rpc.api.verify_finalized_submission_snapshot(raw, &saved).await?;
+        let qualified = rpc
+            .api
+            .verify_finalized_submission_snapshot(raw, &saved)
+            .await?;
         assert_eq!(qualified.block_hash(), saved.block_hash());
         assert!(qualified.pinned_nonce_consumed());
         assert_eq!(qualified.beacon().unwrap().checkpoint.schema_version(), 2);
@@ -2070,20 +2208,35 @@ pub(crate) mod tests {
                 "pinned_nonce_consumed": true,
                 "message_processed": processed,
             }))?;
-            let qualified = rpc.api.verify_finalized_submission_snapshot(raw, &historical).await?;
+            let qualified = rpc
+                .api
+                .verify_finalized_submission_snapshot(raw, &historical)
+                .await?;
             assert_eq!(qualified.block_hash(), saved.block_hash());
             assert!(qualified.beacon().is_some());
-            assert!(historical.legacy().is_some(), "qualification must not relabel historical evidence");
+            assert!(
+                historical.legacy().is_some(),
+                "qualification must not relabel historical evidence"
+            );
         }
         let mut damaged = saved.clone();
         let FinalizedSubmissionSnapshot::Beacon(proven) = &mut damaged else {
             panic!("live nonce evidence must use schema 2");
         };
         proven.account_proof.account_proof.clear();
-        assert!(rpc.api.verify_finalized_submission_snapshot(raw, &damaged).await.is_err());
+        assert!(rpc
+            .api
+            .verify_finalized_submission_snapshot(raw, &damaged)
+            .await
+            .is_err());
         *rpc.state.fault.lock().unwrap() = RpcFault::Nonce;
-        assert!(rpc.api.get_finalized_submission_snapshot(raw).await.is_err(),
-            "RPC nonce claim cannot override the account proof");
+        assert!(
+            rpc.api
+                .get_finalized_submission_snapshot(raw)
+                .await
+                .is_err(),
+            "RPC nonce claim cannot override the account proof"
+        );
         *rpc.state.fault.lock().unwrap() = RpcFault::None;
         for (field, value) in [
             ("pinned_nonce_consumed", json!(false)),
@@ -2093,11 +2246,21 @@ pub(crate) mod tests {
             let mut value_json = serde_json::to_value(&saved)?;
             value_json[field] = value;
             if let Ok(changed) = serde_json::from_value::<FinalizedSubmissionSnapshot>(value_json) {
-                assert!(rpc.api.verify_finalized_submission_snapshot(raw, &changed).await.is_err(), "{field}");
+                assert!(
+                    rpc.api
+                        .verify_finalized_submission_snapshot(raw, &changed)
+                        .await
+                        .is_err(),
+                    "{field}"
+                );
             }
         }
         *rpc.state.witness_fault.lock().unwrap() = RpcFault::WrongChain;
-        assert!(rpc.api.verify_finalized_submission_snapshot(raw, &saved).await.is_err());
+        assert!(rpc
+            .api
+            .verify_finalized_submission_snapshot(raw, &saved)
+            .await
+            .is_err());
         Ok(())
     }
 
@@ -2276,8 +2439,14 @@ pub(crate) mod tests {
         {
             let signed = request.submission.as_ref().unwrap();
             let finalized = rpc.api.get_finalized_receipt(signed.hash).await?.unwrap();
-            let mut completion =
-                completion_evidence(&rpc.api, &request.message, signed, finalized, request.lane_policy.as_ref().unwrap()).await?;
+            let mut completion = completion_evidence(
+                &rpc.api,
+                &request.message,
+                signed,
+                finalized,
+                request.lane_policy.as_ref().unwrap(),
+            )
+            .await?;
             completion.inclusion = None;
             completion.checkpoint = None;
             // Historical RPC classification may have downgraded an actual token delivery.
@@ -2299,19 +2468,23 @@ pub(crate) mod tests {
             manager.add_transaction(tx).await;
         }
         use sha2::Digest;
-        let lanes = [&rpc.state.request, &rpc.state.second].into_iter().map(|request| {
-            let mut lane = serde_json::to_value(request.lane_policy.as_ref().unwrap()).unwrap();
-            lane.as_object_mut().unwrap().remove("approvalSha256");
-            lane["originalHash"] = json!(request.tx_hash);
-            lane
-        }).collect::<Vec<_>>();
+        let lanes = [&rpc.state.request, &rpc.state.second]
+            .into_iter()
+            .map(|request| {
+                let mut lane = serde_json::to_value(request.lane_policy.as_ref().unwrap()).unwrap();
+                lane.as_object_mut().unwrap().remove("approvalSha256");
+                lane["originalHash"] = json!(request.tx_hash);
+                lane
+            })
+            .collect::<Vec<_>>();
         let approval_bytes = serde_json::to_vec(&json!({"schemaVersion": 1, "lanes": lanes}))?;
         let approvals_directory = directory.0.join("approvals");
         std::fs::create_dir_all(&approvals_directory)?;
         let approval_path = approvals_directory.join("historical-lanes.json");
         std::fs::write(&approval_path, &approval_bytes)?;
         let approvals = crate::lane_policy::LaneApprovals::load(
-            &approval_path, B256::from_slice(&sha2::Sha256::digest(&approval_bytes)),
+            &approval_path,
+            B256::from_slice(&sha2::Sha256::digest(&approval_bytes)),
         )?;
         let messages: Vec<_> = originals.iter().map(|tx| tx.message.clone()).collect();
         storage
@@ -2339,9 +2512,8 @@ pub(crate) mod tests {
         }
         assert_eq!(storage.queued_observations().await?.len(), 2);
         rpc.state.second_receipt.lock().unwrap()["cumulativeGasUsed"] = json!("0x9999");
-        let restored = TransactionManager::new(storage.clone()).with_lane_approvals(
-            rpc.api.clone(), approvals.clone(),
-        );
+        let restored = TransactionManager::new(storage.clone())
+            .with_lane_approvals(rpc.api.clone(), approvals.clone());
         restored.load_from_storage().await?;
         assert!(restored.verify_completed(&rpc.api).await.is_err());
         for (name, bytes) in &before {
@@ -2363,13 +2535,19 @@ pub(crate) mod tests {
             let completion = saved.completion.as_ref().unwrap();
             assert!(completion.inclusion.is_some() && completion.checkpoint.is_some());
             assert!(saved.ethereum_submission == original.ethereum_submission);
-            assert_eq!(saved.historical_evidence.as_ref(), Some(&serde_json::to_value(original)?));
+            assert_eq!(
+                saved.historical_evidence.as_ref(),
+                Some(&serde_json::to_value(original)?)
+            );
             assert_eq!(completion.checkpoint.as_ref().unwrap().schema_version(), 2);
             assert_eq!(
                 completion.receipt,
                 original.completion.as_ref().unwrap().receipt
             );
-            assert!(completion.token_delivery, "approved token policy must replace obsolete RPC classification");
+            assert!(
+                completion.token_delivery,
+                "approved token policy must replace obsolete RPC classification"
+            );
             assert_eq!(
                 saved.historical_evidence.as_ref().unwrap()["completion"]["token_delivery"],
                 json!(false),
@@ -2377,9 +2555,8 @@ pub(crate) mod tests {
             );
             upgraded.insert(original.uuid, bytes);
         }
-        let restarted = TransactionManager::new(storage.clone()).with_lane_approvals(
-            rpc.api.clone(), approvals,
-        );
+        let restarted = TransactionManager::new(storage.clone())
+            .with_lane_approvals(rpc.api.clone(), approvals);
         restarted.load_from_storage().await?;
         *rpc.state.witness_fault.lock().unwrap() = RpcFault::WrongChain;
         assert!(restarted
@@ -2577,8 +2754,10 @@ pub(crate) mod tests {
             .header
             .hash;
         let beacon = LocalBeaconFixture::from_provider(
-            provider.root().clone(), alloy::rpc::types::BlockNumberOrTag::Finalized,
-        ).await?;
+            provider.root().clone(),
+            alloy::rpc::types::BlockNumberOrTag::Finalized,
+        )
+        .await?;
         let api = EthApi::new(&primary.url, &format!("{queue:#x}"), Some(&key), None, None)
             .await?
             .with_beacon_finality(beacon.config.clone(), &beacon.directory.join("store"))
@@ -2721,10 +2900,7 @@ pub(crate) mod tests {
             &api,
             &request,
             &primary,
-            &[
-                RpcFault::Receipt,
-                RpcFault::ConflictingFinality,
-            ],
+            &[RpcFault::Receipt, RpcFault::ConflictingFinality],
         )
         .await?;
         let (_, outcome) = tokio::time::timeout(
@@ -2744,10 +2920,7 @@ pub(crate) mod tests {
             &restarted_api,
             &request,
             &primary,
-            &[
-                RpcFault::Receipt,
-                RpcFault::ConflictingFinality,
-            ],
+            &[RpcFault::Receipt, RpcFault::ConflictingFinality],
         )
         .await?;
         assert_eq!(std::fs::read(&saved_path)?, saved);

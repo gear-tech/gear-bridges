@@ -115,6 +115,46 @@ test('direct original completion restores only on apply and retained bindings su
   assert.deepEqual(structuredClone(store.rows.get(Transfer).get(f.transfer.id)), original);
 });
 
+test('nonce-keyed base completion authenticates a late counterpart without rewriting legacy evidence', async (t) => {
+  const f = await fixture(t);
+  delete f.transfer.legacyResolution;
+  const legacy = new CompletedTransfer({ id: f.transfer.nonce, srcNetwork: Network.Vara, destNetwork: Network.Ethereum,
+    txHash: f.receipt.transactionHash, blockNumber: 1n, timestamp: new Date(1), matched: false, legacyMatched: false });
+  const store = storeOf(f.transfer, legacy), retained = structuredClone(legacy);
+  assert.equal((await reconcilePage(store, f.clients, options, queueAddress, managerAddress)).qualified, 1);
+  assert.equal(store.writes.length, 0);
+  await reconcilePage(store, f.clients, { ...options, apply: true }, queueAddress, managerAddress);
+  assert.deepEqual(structuredClone(store.rows.get(CompletedTransfer).get(legacy.id)), retained);
+  const qualified = store.rows.get(CompletedTransfer).get(`outbound:${queueAddress}:8`);
+  assert.equal(qualified.receiptAuth.version, 2);
+  assert.equal(qualified.receiptAuth.receipt.transactionHash, legacy.txHash);
+  assert.equal(store.rows.get(Transfer).get(f.transfer.id).status, Status.Completed);
+  assert.ok(f.requests.some(({ method }) => method === 'eth_getBlockReceipts'));
+  f.state.finalizedHeight = 3;
+  const authorization = structuredClone(qualified.receiptAuth);
+  await reconcilePage(store, f.clients, { ...options, apply: true }, queueAddress, managerAddress);
+  assert.deepEqual(store.rows.get(CompletedTransfer).get(qualified.id).receiptAuth, authorization);
+});
+
+test('nonce-keyed hints cannot authorize missing receipts, wrong effects or conflicting original coordinates', async (t) => {
+  for (const fault of ['missing', 'effect', 'coordinates', 'network']) {
+    const f = await fixture(t);
+    if (fault !== 'coordinates') delete f.transfer.legacyResolution;
+    if (fault === 'effect') f.transfer.amount = '11';
+    const legacy = new CompletedTransfer({ id: '8', srcNetwork: fault === 'network' ? Network.Ethereum : Network.Vara,
+      destNetwork: Network.Ethereum, txHash: ['missing', 'coordinates'].includes(fault) ? hash('cc') : f.receipt.transactionHash,
+      blockNumber: 1n, timestamp: new Date(1), matched: false, legacyMatched: true });
+    const store = storeOf(f.transfer, legacy), before = store.snapshot();
+    if (fault === 'effect') {
+      assert.equal((await reconcilePage(store, f.clients, options, queueAddress, managerAddress)).pending, 1);
+    } else {
+      await assert.rejects(reconcilePage(store, f.clients, { ...options, apply: true }, queueAddress, managerAddress), /HOLD/);
+    }
+    assert.deepEqual(store.snapshot(), before);
+    assert.equal(store.writes.length, 0);
+  }
+});
+
 test('qualified original missing or changed effects fail the page with no writes', async (t) => {
   for (const fault of ['missing', 'corruptProof', 'effect', 'coordinates', 'binding', 'checkpoint', 'checkpointHeight', 'retainedReceipt']) {
     const f = await fixture(t, undefined, fault === 'checkpointHeight' ? 0 : 2), store = storeOf(f.transfer);

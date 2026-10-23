@@ -373,11 +373,14 @@ mod tests {
                 "ethereum-finality-bootstrap-sha256",
                 "ethereum-finality-store",
             ] {
-                assert!(outbound
-                    .get_arguments()
-                    .find(|arg| arg.get_long() == Some(flag))
-                    .unwrap()
-                    .is_required_set(), "{name}: {flag} must be required");
+                assert!(
+                    outbound
+                        .get_arguments()
+                        .find(|arg| arg.get_long() == Some(flag))
+                        .unwrap()
+                        .is_required_set(),
+                    "{name}: {flag} must be required"
+                );
             }
             assert!(!outbound
                 .get_arguments()
@@ -386,7 +389,10 @@ mod tests {
                 .is_required_set());
         }
         for name in ["eth-gear-tokens", "eth-gear-manual"] {
-            assert!(!command.find_subcommand(name).unwrap().get_arguments()
+            assert!(!command
+                .find_subcommand(name)
+                .unwrap()
+                .get_arguments()
                 .any(|arg| arg.get_long() == Some("lane-approval")));
         }
     }
@@ -395,17 +401,26 @@ mod tests {
     fn evidence_child_has_no_signer_or_gear_arguments() {
         let command = Cli::command();
         let evidence = command.find_subcommand("ethereum-evidence").unwrap();
-        let flags: Vec<_> = evidence.get_arguments().filter_map(|arg| arg.get_long()).collect();
-        assert_eq!(flags, [
-            "ethereum-endpoint",
-            "ethereum-finality-beacon-rpc",
-            "ethereum-finality-bootstrap",
-            "ethereum-finality-bootstrap-sha256",
-            "ethereum-finality-store",
+        let flags: Vec<_> = evidence
+            .get_arguments()
+            .filter_map(|arg| arg.get_long())
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                "ethereum-endpoint",
+                "ethereum-finality-beacon-rpc",
+                "ethereum-finality-bootstrap",
+                "ethereum-finality-bootstrap-sha256",
+                "ethereum-finality-store",
+                "ethereum-finality-proof-source",
+                "ethereum-evidence-proof-source",
+            ]
+        );
+        for flag in [
             "ethereum-finality-proof-source",
             "ethereum-evidence-proof-source",
-        ]);
-        for flag in ["ethereum-finality-proof-source", "ethereum-evidence-proof-source"] {
+        ] {
             assert!(!evidence
                 .get_arguments()
                 .find(|arg| arg.get_long() == Some(flag))

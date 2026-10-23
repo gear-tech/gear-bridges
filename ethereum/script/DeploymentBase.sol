@@ -309,7 +309,6 @@ abstract contract DeploymentBase is CommonBase {
         bridgingPayment = BridgingPayment(erc20Manager.createBridgingPayment(deploymentArguments.bridgingPaymentFee));
         console.log("    BridgingPayment:     ", address(bridgingPayment));
 
-
         //////////////////////////////////////////////////////////////////////////////
 
         _finishDeployment();
@@ -389,7 +388,9 @@ abstract contract DeploymentBase is CommonBase {
             initialBeefyBlock: _envUint64("BEEFY_INITIAL_BLOCK"),
             initialSourceTimestampMs: _envUint64("BEEFY_INITIAL_SOURCE_TIMESTAMP_MS"),
             currentSet: BeefyClient.ValidatorSet(
-                _envUint128("BEEFY_CURRENT_ID"), _envUint128("BEEFY_CURRENT_LENGTH"), vm.envBytes32("BEEFY_CURRENT_ROOT")
+                _envUint128("BEEFY_CURRENT_ID"),
+                _envUint128("BEEFY_CURRENT_LENGTH"),
+                vm.envBytes32("BEEFY_CURRENT_ROOT")
             ),
             nextSet: BeefyClient.ValidatorSet(
                 _envUint128("BEEFY_NEXT_ID"), _envUint128("BEEFY_NEXT_LENGTH"), vm.envBytes32("BEEFY_NEXT_ROOT")
@@ -401,9 +402,16 @@ abstract contract DeploymentBase is CommonBase {
     function _validateBeefyBootstrap(BeefyBootstrap memory bootstrap, address predictedQueue) internal view {
         require(bootstrap.sourceDomain != bytes32(0), "missing source domain");
         require(
-            predictedQueue != address(0) && bootstrap.bridgeDomain == keccak256(
-                abi.encodePacked("vara/gear-eth-bridge-domain/v2", bootstrap.sourceDomain, bytes32(block.chainid), predictedQueue)
-            ),
+            predictedQueue != address(0)
+                && bootstrap.bridgeDomain
+                    == keccak256(
+                        abi.encodePacked(
+                            "vara/gear-eth-bridge-domain/v2",
+                            bootstrap.sourceDomain,
+                            bytes32(block.chainid),
+                            predictedQueue
+                        )
+                    ),
             "configured bridge domain mismatch"
         );
         require(
@@ -422,9 +430,9 @@ abstract contract DeploymentBase is CommonBase {
             "invalid BEEFY validator ids"
         );
         require(
-            bootstrap.currentSet.length != 0 && bootstrap.currentSet.length <= 256
-                && bootstrap.nextSet.length != 0 && bootstrap.nextSet.length <= 256
-                && bootstrap.currentSet.root != bytes32(0) && bootstrap.nextSet.root != bytes32(0),
+            bootstrap.currentSet.length != 0 && bootstrap.currentSet.length <= 256 && bootstrap.nextSet.length != 0
+                && bootstrap.nextSet.length <= 256 && bootstrap.currentSet.root != bytes32(0)
+                && bootstrap.nextSet.root != bytes32(0),
             "invalid BEEFY validator sets"
         );
     }
@@ -460,11 +468,21 @@ abstract contract DeploymentBase is CommonBase {
 
     function _deploymentArgumentsHash() private view returns (bytes32) {
         DeploymentArguments memory a = deploymentArguments;
-        return keccak256(abi.encode(
-            a.deployerAddress, a.overrides, a.vftManager, a.governanceAdmin, a.governancePauser,
-            a.emergencyStopAdmin, a.emergencyStopObservers, a.bridgingPaymentFee,
-            messageOnlyBridge, includeOrdinaryGearToken, deployTestTokenProfile
-        ));
+        return keccak256(
+            abi.encode(
+                a.deployerAddress,
+                a.overrides,
+                a.vftManager,
+                a.governanceAdmin,
+                a.governancePauser,
+                a.emergencyStopAdmin,
+                a.emergencyStopObservers,
+                a.bridgingPaymentFee,
+                messageOnlyBridge,
+                includeOrdinaryGearToken,
+                deployTestTokenProfile
+            )
+        );
     }
 
     function _authorizeFreshDeployment(uint256 key, address queue, BeefyBootstrap memory bootstrap) internal {
@@ -473,31 +491,53 @@ abstract contract DeploymentBase is CommonBase {
         bytes32 approved = vm.envOr("BEEFY_APPROVED_MANIFEST_SHA256", bytes32(0));
         if (bytes(path).length == 0 || approved == bytes32(0)) revert DeploymentNotAuthorized();
         string memory manifest = vm.readFile(path);
-        if (sha256(bytes(manifest)) != approved || vm.parseJsonUint(manifest, ".schemaVersion") != 2
-            || !vm.parseJsonBool(manifest, ".executionAuthorized")) revert DeploymentNotAuthorized();
+        if (
+            sha256(bytes(manifest)) != approved || vm.parseJsonUint(manifest, ".schemaVersion") != 2
+                || !vm.parseJsonBool(manifest, ".executionAuthorized")
+        ) revert DeploymentNotAuthorized();
         address deployer = vm.addr(key);
         uint256 queueNonce = _beefyMessageQueueNonce(deployer, deploymentArguments.overrides);
-        if (vm.parseJsonUint(manifest, ".ethereum.chainId") != block.chainid
-            || vm.parseJsonAddress(manifest, ".ethereum.queue") != queue
-            || vm.parseJsonAddress(manifest, ".ethereum.client") != vm.computeCreateAddress(deployer, vm.getNonce(deployer))
-            || vm.parseJsonBytes32(manifest, ".ethereum.sourceGenesis") != bootstrap.sourceDomain
-            || vm.parseJsonBytes32(manifest, ".ethereum.sourceDomain") != bootstrap.sourceDomain
-            || vm.parseJsonBytes32(manifest, ".ethereum.bridgeDomain") != bootstrap.bridgeDomain
-            || vm.parseJsonUint(manifest, ".ethereum.mmrStartBlock") != bootstrap.mmrStartBlock) revert DeploymentNotAuthorized();
-        if (vm.parseJsonAddress(manifest, ".ethereum.verifier") != vm.computeCreateAddress(deployer, queueNonce - 2)
-            || vm.parseJsonAddress(manifest, ".ethereum.receiver") != vm.computeCreateAddress(deployer, queueNonce + (messageOnlyBridge ? 1 : 2))
-            || vm.parseJsonAddress(manifest, ".execution.authorities.governanceAdmin.address") != vm.computeCreateAddress(deployer, queueNonce - 4)
-            || vm.parseJsonAddress(manifest, ".execution.authorities.governancePauser.address") != vm.computeCreateAddress(deployer, queueNonce - 3)
-            || vm.parseJsonBytes32(manifest, ".gearManager") != deploymentArguments.vftManager
-            || vm.parseJsonBytes32(manifest, ".execution.authorities.governanceAdmin.storage.governance.value") != deploymentArguments.governanceAdmin
-            || vm.parseJsonBytes32(manifest, ".execution.authorities.governancePauser.storage.governance.value") != deploymentArguments.governancePauser) revert DeploymentNotAuthorized();
+        if (
+            vm.parseJsonUint(manifest, ".ethereum.chainId") != block.chainid
+                || vm.parseJsonAddress(manifest, ".ethereum.queue") != queue
+                || vm.parseJsonAddress(manifest, ".ethereum.client")
+                    != vm.computeCreateAddress(deployer, vm.getNonce(deployer))
+                || vm.parseJsonBytes32(manifest, ".ethereum.sourceGenesis") != bootstrap.sourceDomain
+                || vm.parseJsonBytes32(manifest, ".ethereum.sourceDomain") != bootstrap.sourceDomain
+                || vm.parseJsonBytes32(manifest, ".ethereum.bridgeDomain") != bootstrap.bridgeDomain
+                || vm.parseJsonUint(manifest, ".ethereum.mmrStartBlock") != bootstrap.mmrStartBlock
+        ) revert DeploymentNotAuthorized();
+        if (
+            vm.parseJsonAddress(manifest, ".ethereum.verifier") != vm.computeCreateAddress(deployer, queueNonce - 2)
+                || vm.parseJsonAddress(manifest, ".ethereum.receiver")
+                    != vm.computeCreateAddress(deployer, queueNonce + (messageOnlyBridge ? 1 : 2))
+                || vm.parseJsonAddress(manifest, ".execution.authorities.governanceAdmin.address")
+                    != vm.computeCreateAddress(deployer, queueNonce - 4)
+                || vm.parseJsonAddress(manifest, ".execution.authorities.governancePauser.address")
+                    != vm.computeCreateAddress(deployer, queueNonce - 3)
+                || vm.parseJsonBytes32(manifest, ".gearManager") != deploymentArguments.vftManager
+                || vm.parseJsonBytes32(manifest, ".execution.authorities.governanceAdmin.storage.governance.value")
+                    != deploymentArguments.governanceAdmin
+                || vm.parseJsonBytes32(manifest, ".execution.authorities.governancePauser.storage.governance.value")
+                    != deploymentArguments.governancePauser
+        ) revert DeploymentNotAuthorized();
         address recovery = vm.envAddress("BEEFY_RECOVERY_TIMELOCK");
         bytes32 arguments = _deploymentArgumentsHash();
-        bytes32 plan = keccak256(abi.encode(
-            block.chainid, vm.addr(key), vm.getNonce(vm.addr(key)), queue, bootstrap, arguments,
-            recovery, recovery.codehash, TimelockController(payable(recovery)).getMinDelay(),
-            keccak256(type(BeefyClient).creationCode), keccak256(type(VaraQueueRootVerifier).creationCode)
-        ));
+        bytes32 plan = keccak256(
+            abi.encode(
+                block.chainid,
+                vm.addr(key),
+                vm.getNonce(vm.addr(key)),
+                queue,
+                bootstrap,
+                arguments,
+                recovery,
+                recovery.codehash,
+                TimelockController(payable(recovery)).getMinDelay(),
+                keccak256(type(BeefyClient).creationCode),
+                keccak256(type(VaraQueueRootVerifier).creationCode)
+            )
+        );
         if (vm.parseJsonBytes32(manifest, ".execution.deploymentPlanHash") != plan) revert DeploymentNotAuthorized();
         // The existing native Beacon/MPT verifier authenticates source, governance,
         // complete roles/Safe state and planned-address absence before the first CREATE.
@@ -523,9 +563,12 @@ abstract contract DeploymentBase is CommonBase {
 
     function _startDeployment() internal virtual {
         if (!_localDeploymentFixture()) {
-            if (approvedDeploymentManifest == bytes32(0)
-                || approvedDeploymentManifest != sha256(bytes(vm.readFile(vm.envString("BEEFY_DEPLOYMENT_MANIFEST"))))
-                || approvedDeploymentArguments != _deploymentArgumentsHash()) revert DeploymentNotAuthorized();
+            if (
+                approvedDeploymentManifest == bytes32(0)
+                    || approvedDeploymentManifest
+                        != sha256(bytes(vm.readFile(vm.envString("BEEFY_DEPLOYMENT_MANIFEST"))))
+                    || approvedDeploymentArguments != _deploymentArgumentsHash()
+            ) revert DeploymentNotAuthorized();
         }
         require(deploymentArguments.privateKey != 0, "missing deployment key");
         require(address(beefyClient) != address(0), "missing BEEFY client");
@@ -534,9 +577,15 @@ abstract contract DeploymentBase is CommonBase {
 
     function _finishDeployment() internal virtual {
         if (!messageOnlyBridge) {
-            printContractInfo("WrappedVara", address(wrappedVara), Upgrades.getImplementationAddress(address(wrappedVara)));
-            printContractInfo("MessageQueue", address(messageQueue), Upgrades.getImplementationAddress(address(messageQueue)));
-            printContractInfo("ERC20Manager", address(erc20Manager), Upgrades.getImplementationAddress(address(erc20Manager)));
+            printContractInfo(
+                "WrappedVara", address(wrappedVara), Upgrades.getImplementationAddress(address(wrappedVara))
+            );
+            printContractInfo(
+                "MessageQueue", address(messageQueue), Upgrades.getImplementationAddress(address(messageQueue))
+            );
+            printContractInfo(
+                "ERC20Manager", address(erc20Manager), Upgrades.getImplementationAddress(address(erc20Manager))
+            );
         }
         vm.stopBroadcast();
     }

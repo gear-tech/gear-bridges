@@ -110,7 +110,10 @@ mod tests {
         let retained = fs::read(&path).unwrap();
         fs::remove_dir_all(directory).unwrap();
 
-        assert!(result.is_err(), "must not acknowledge without syncing the directory");
+        assert!(
+            result.is_err(),
+            "must not acknowledge without syncing the directory"
+        );
         recovered.unwrap();
         assert!(conflict.is_err(), "must not replace the original ownership");
         assert_eq!(retained, serde_json::to_vec("original").unwrap());

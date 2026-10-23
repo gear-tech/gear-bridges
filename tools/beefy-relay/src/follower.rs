@@ -991,18 +991,48 @@ async fn promote_finality(
                     )?;
                     let saved_transaction = commitment_transaction(entry)?;
                     let raw = decode(&saved_transaction["rawTransaction"])?;
-                    let (signed, _) = crate::ethereum::signed_transaction(&raw,hash.into(),number(&saved_transaction["nonce"])?,ethereum.client_address)?;
-                    ensure!(signed.chain_id() == Some(chain_id), "pending commitment chain changed; HOLD");
-                    let receipt = match ethereum.api.raw_provider().get_transaction_receipt(hash.into()).await? {
+                    let (signed, _) = crate::ethereum::signed_transaction(
+                        &raw,
+                        hash.into(),
+                        number(&saved_transaction["nonce"])?,
+                        ethereum.client_address,
+                    )?;
+                    ensure!(
+                        signed.chain_id() == Some(chain_id),
+                        "pending commitment chain changed; HOLD"
+                    );
+                    let receipt = match ethereum
+                        .api
+                        .raw_provider()
+                        .get_transaction_receipt(hash.into())
+                        .await?
+                    {
                         Some(receipt) => receipt,
                         None => {
-                            let mut view = ethereum.api.verified_finalized_view_with_archive(&output.join("finality-history/headers"),ethereum.finality_genesis().await?).await?;
+                            let mut view = ethereum
+                                .api
+                                .verified_finalized_view_with_archive(
+                                    &output.join("finality-history/headers"),
+                                    ethereum.finality_genesis().await?,
+                                )
+                                .await?;
                             let (number, pin_hash) = (view.block_number(), view.block_hash());
-                            let pin = ethereum.account_nonce_at(&raw, &mut view, number, pin_hash, None, &output.join("finality-history")).await?;
+                            let pin = ethereum
+                                .account_nonce_at(
+                                    &raw,
+                                    &mut view,
+                                    number,
+                                    pin_hash,
+                                    None,
+                                    &output.join("finality-history"),
+                                )
+                                .await?;
                             if pin["pinnedNonceConsumed"] == true {
-                                return Ok(Some((index,block,hash,anchor,None,false,pin)));
+                                return Ok(Some((index, block, hash, anchor, None, false, pin)));
                             }
-                            anyhow::bail!("previously mined commitment disappeared; hold original inclusion");
+                            anyhow::bail!(
+                                "previously mined commitment disappeared; hold original inclusion"
+                            );
                         }
                     };
                     let included = receipt
@@ -1048,7 +1078,15 @@ async fn promote_finality(
                             && finalized.receipt.block_hash == Some(finalized.included_block_hash),
                         "finalized BEEFY receipt differs from saved commitment"
                     );
-                    Ok(Some((index, block, hash, anchor, Some(finalized), reincluded, Value::Null)))
+                    Ok(Some((
+                        index,
+                        block,
+                        hash,
+                        anchor,
+                        Some(finalized),
+                        reincluded,
+                        Value::Null,
+                    )))
                 }),
         )
         .buffered(16)
@@ -1832,9 +1870,13 @@ async fn revalidate_terminal_submissions(
                 let pin = &entry["nonceDisposition"];
                 let block = number(&pin["block"])?;
                 let hash = B256::from(array::<32>(&pin["blockHash"])?);
-                let qualified = ethereum.account_nonce_at(&raw, &mut view, block, hash, Some(pin), directory).await?;
-                ensure!(qualified["pinnedNonceConsumed"] == true && pin["pinnedNonceConsumed"] == true,
-                    "terminal nonce disposition changed; HOLD");
+                let qualified = ethereum
+                    .account_nonce_at(&raw, &mut view, block, hash, Some(pin), directory)
+                    .await?;
+                ensure!(
+                    qualified["pinnedNonceConsumed"] == true && pin["pinnedNonceConsumed"] == true,
+                    "terminal nonce disposition changed; HOLD"
+                );
                 // A held original remains unresolved even if an RPC later recovers its receipt.
                 if let Some(receipt) = ethereum.api.get_finalized_receipt(identity.hash).await? {
                     ensure!(
@@ -1857,8 +1899,11 @@ async fn revalidate_terminal_submissions(
             _ => anyhow::bail!("invalid original terminal disposition; HOLD"),
         }
         view.recheck(ethereum.api.raw_provider()).await?;
-        crate::ethereum::retain_proof_qualification(directory, entry,
-            &json!({"transactionHash":bytes(identity.hash),"checkpoint":view.checkpoint()}))?;
+        crate::ethereum::retain_proof_qualification(
+            directory,
+            entry,
+            &json!({"transactionHash":bytes(identity.hash),"checkpoint":view.checkpoint()}),
+        )?;
     }
     Ok(())
 }
@@ -1874,6 +1919,10 @@ async fn advance(
     let maintenance_started = std::time::Instant::now();
     'progress: loop {
         reconcile_original_submission(ethereum, output, state).await?;
+        // This pin is saved only after authenticated destination finality.
+        if let Some(accepted) = state["follower"]["lastFinalizedUpdate"].as_u64() {
+            source.acknowledge_finalized(u32::try_from(accepted)?)?;
+        }
         let before = ethereum.checkpoint().await?;
         let reserved_block = if state["submission"].is_null()
             || number(&state["submission"]["block"])? <= before.block
@@ -3752,13 +3801,7 @@ mod tests {
             initial_proof.snapshot.initialized && initial_proof.snapshot.queue_root == [0; 32],
             "native heartbeat requires an authenticated initialized-empty bootstrap"
         );
-        let mut ethereum = Ethereum::prepare(
-            &directory,
-            &initial,
-            &initial_proof,
-            &source,
-        )
-        .await?;
+        let mut ethereum = Ethereum::prepare(&directory, &initial, &initial_proof, &source).await?;
         let before = ethereum.checkpoint().await?;
         let original_expiry_ms = before.source_timestamp_ms + 24 * 60 * 60 * 1_000;
         let due_seconds = before.source_timestamp_ms.div_ceil(1_000) + 12 * 60 * 60;
@@ -4222,19 +4265,29 @@ mod tests {
     }
 
     #[test]
-    fn queue_epoch_rollover_and_historical_backfill_keep_each_authenticated_identity() -> Result<()> {
+    fn queue_epoch_rollover_and_historical_backfill_keep_each_authenticated_identity() -> Result<()>
+    {
         let directory = tempfile::tempdir()?;
         let mut state = json!({"roots":{}, "rootScan":{"block":90,"blockHash":bytes([1;32])}});
-        retain_token_root(directory.path(), &mut state, 89, [2;32], 8, [3;32])?;
-        retain_token_root(directory.path(), &mut state, 90, [4;32], 9, [5;32])?;
+        retain_token_root(directory.path(), &mut state, 89, [2; 32], 8, [3; 32])?;
+        retain_token_root(directory.path(), &mut state, 90, [4; 32], 9, [5; 32])?;
         // An older epoch arriving through archive backfill is not today's lane identity.
-        retain_token_root(directory.path(), &mut state, 70, [6;32], 7, [7;32])?;
+        retain_token_root(directory.path(), &mut state, 70, [6; 32], 7, [7; 32])?;
         let restored = read_state_file(&directory.path().join("state.json"))?;
-        assert_eq!(restored["roots"][format!("89-{}", hex::encode([3;32]))]["queueId"], 8);
-        assert_eq!(restored["roots"][format!("90-{}", hex::encode([5;32]))]["queueId"], 9);
-        assert_eq!(restored["roots"][format!("70-{}", hex::encode([7;32]))]["queueId"], 7);
+        assert_eq!(
+            restored["roots"][format!("89-{}", hex::encode([3; 32]))]["queueId"],
+            8
+        );
+        assert_eq!(
+            restored["roots"][format!("90-{}", hex::encode([5; 32]))]["queueId"],
+            9
+        );
+        assert_eq!(
+            restored["roots"][format!("70-{}", hex::encode([7; 32]))]["queueId"],
+            7
+        );
         let before = fs::read(directory.path().join("state.json"))?;
-        assert!(retain_token_root(directory.path(), &mut state, 89, [2;32], 9, [3;32]).is_err());
+        assert!(retain_token_root(directory.path(), &mut state, 89, [2; 32], 9, [3; 32]).is_err());
         assert_eq!(fs::read(directory.path().join("state.json"))?, before);
         Ok(())
     }
@@ -4706,13 +4759,7 @@ mod tests {
             )
             .await?;
         let initial_proof = source.proof(initial.block - 1, &initial).await?;
-        let mut ethereum = Ethereum::prepare(
-            &directory,
-            &initial,
-            &initial_proof,
-            &source,
-        )
-        .await?;
+        let mut ethereum = Ethereum::prepare(&directory, &initial, &initial_proof, &source).await?;
         let provider = ethereum.api.raw_provider().clone();
         provider
             .client()
@@ -5006,8 +5053,9 @@ mod tests {
         let journal = std::env::var("BEEFY_TEST_SOURCE_JOURNAL")?;
         let token_stack_path = std::env::var("BEEFY_TEST_TOKEN_STACK")
             .context("full production-entrypoint native root smoke requires actual initialized native inventory")?;
-        let relay_binary = std::env::var("BEEFY_TEST_RELAY_BIN")
-            .context("full native root smoke requires the compiled owned-fixture beefy-relay binary")?;
+        let relay_binary = std::env::var("BEEFY_TEST_RELAY_BIN").context(
+            "full native root smoke requires the compiled owned-fixture beefy-relay binary",
+        )?;
         let recorded: Value = serde_json::from_slice(&fs::read(&journal)?)?;
         let bootstrap = &recorded["commitments"][0];
         let evidence = Path::new(&journal).with_extension("recovery");
@@ -5026,13 +5074,7 @@ mod tests {
             .await?;
         let initial_proof = source.proof(initial.block - 1, &initial).await?;
         let bootstrap = bootstrap_record(&initial, &initial_proof)?;
-        let mut ethereum = Ethereum::prepare(
-            directory,
-            &initial,
-            &initial_proof,
-            &source,
-        )
-        .await?;
+        let mut ethereum = Ethereum::prepare(directory, &initial, &initial_proof, &source).await?;
         source::local::initialize_bridge(&source.api).await?;
         let root_message = source::local::send_message(
             &source.api,
@@ -5632,7 +5674,10 @@ mod tests {
             let witness_rpc =
                 RecoveryRpc::new(ethereum.api.raw_witness_provider()?.clone(), false).await?;
             let source_witness_rpc = std::env::var("BEEFY_TEST_WITNESS_RPC")?;
-            let beacon = ethereum._beacon.as_ref().context("signed Beacon fixture missing")?;
+            let beacon = ethereum
+                ._beacon
+                .as_ref()
+                .context("signed Beacon fixture missing")?;
             let finality = cli_utils::EthereumFinalityArgs {
                 ethereum_witness_rpc: Some(witness_rpc.url.clone()),
                 ethereum_finality_beacon_rpc: beacon.beacon_rpc.clone(),
@@ -5650,7 +5695,10 @@ mod tests {
             )
             .await?
             .with_beacon_finality(
-                beacon.config.clone().with_proof_sources(vec![beacon.directory.clone()])?,
+                beacon
+                    .config
+                    .clone()
+                    .with_proof_sources(vec![beacon.directory.clone()])?,
                 &finality.ethereum_finality_store,
             )
             .await?
@@ -5783,43 +5831,85 @@ mod tests {
             fs::create_dir(&approved_dir)?;
             let native: crate::execution::fixture::NativeInventory =
                 serde_json::from_slice(&fs::read(&token_stack_path)?)?;
-            let manager = ApprovedFixtureGovernance::new(queue.governanceAdmin().call().await?, provider.clone())
-                .erc20Manager().call().await?;
+            let manager = ApprovedFixtureGovernance::new(
+                queue.governanceAdmin().call().await?,
+                provider.clone(),
+            )
+            .erc20Manager()
+            .call()
+            .await?;
             let mock_receiver = std::mem::replace(&mut ethereum.receiver_address, manager);
             let previous_approval = ethereum.execution.clone();
             let previous_transactions = ethereum.transactions.clone();
-            let (manifest, approved_digest) = ethereum.install_owned_native_approval(
-                &source, &initial, &initial_proof, &approved_dir, Some(native)).await?;
-            let owned_network = ethereum.owned_fixture_network.as_ref().context("owned network missing")?.clone();
+            let (manifest, approved_digest) = ethereum
+                .install_owned_native_approval(
+                    &source,
+                    &initial,
+                    &initial_proof,
+                    &approved_dir,
+                    Some(native),
+                )
+                .await?;
+            let owned_network = ethereum
+                .owned_fixture_network
+                .as_ref()
+                .context("owned network missing")?
+                .clone();
             let publisher_path = approved_dir.join("state.json");
             let mut publisher = state.clone();
             publisher["mode"] = json!("hoodi-token-follow");
             publisher["localRehearsal"] = json!(false);
             publisher["deployment"] = manifest.clone();
             publisher["activeEthereum"] = manifest["ethereum"].clone();
-            publisher["followerSigner"] = json!(format!("{:#x}", provider.default_signer_address()));
+            publisher["followerSigner"] =
+                json!(format!("{:#x}", provider.default_signer_address()));
             publisher["submission"] = Value::Null;
             publisher["roots"] = json!({});
-            let accepted = accepted_tx(&publisher, &ethereum, &advanced).await?
+            let accepted = accepted_tx(&publisher, &ethereum, &advanced)
+                .await?
                 .context("latest native interactive anchor missing")?;
             // The child must own its writable archive; seed through a separate parent journal.
             let seed_dir = approved_dir.join("parent-seed");
             fs::create_dir(&seed_dir)?;
-            record_external_commitment(&mut ethereum, &seed_dir, &mut publisher,
-                &advanced, &advanced_proof, accepted).await?;
+            record_external_commitment(
+                &mut ethereum,
+                &seed_dir,
+                &mut publisher,
+                &advanced,
+                &advanced_proof,
+                accepted,
+            )
+            .await?;
             let publication_block = advanced_proof.source;
-            ensure!(publication_block > root_block, "new root smoke must not reuse the accepted original's height");
+            ensure!(
+                publication_block > root_block,
+                "new root smoke must not reuse the accepted original's height"
+            );
             let published_root = advanced_proof.snapshot.queue_root;
-            let kind = if published_root == [0; 32] { "emptyProgress" } else { "merkleRoot" };
-            let signer = alloy::signers::local::PrivateKeySigner::from_bytes(&B256::from([18;32]))?;
+            let kind = if published_root == [0; 32] {
+                "emptyProgress"
+            } else {
+                "merkleRoot"
+            };
+            let signer =
+                alloy::signers::local::PrivateKeySigner::from_bytes(&B256::from([18; 32]))?;
             let sender = signer.address();
-            provider.client().request::<_, Value>("anvil_setBalance", (sender, "0xde0b6b3a7640000")).await?;
+            provider
+                .client()
+                .request::<_, Value>("anvil_setBalance", (sender, "0xde0b6b3a7640000"))
+                .await?;
             // Anvil's direct balance edit changes the current block's proof database.
             // Finalize a mined post-funding state before the child authenticates accounts.
-            provider.client().request::<_, Value>("anvil_mine", ("0x3",)).await?;
+            provider
+                .client()
+                .request::<_, Value>("anvil_mine", ("0x3",))
+                .await?;
             let wallet = approved_dir.join("wallet.json");
-            fs::write(&wallet, serde_json::to_vec(&json!({"address":format!("{sender:#x}"),
-                "private_key":format!("0x{}",hex::encode([18u8;32]))}))?)?;
+            fs::write(
+                &wallet,
+                serde_json::to_vec(&json!({"address":format!("{sender:#x}"),
+                "private_key":format!("0x{}",hex::encode([18u8;32]))}))?,
+            )?;
             fs::set_permissions(&wallet, fs::Permissions::from_mode(0o600))?;
             let publication = approved_dir.join("root-publications/approved.json");
             fs::create_dir_all(publication.parent().context("publication parent")?)?;
@@ -5834,46 +5924,99 @@ mod tests {
             let network_path = approved_dir.join("owned-network.json");
             fs::write(&network_path, serde_json::to_vec(&owned_network)?)?;
             let upstream = RecoveryRpc::new(provider.root().clone(), false).await?;
-            let upstream_witness = RecoveryRpc::new(ethereum.api.raw_witness_provider()?.clone(), false).await?;
-            let beacon = ethereum._beacon.as_ref().context("signed Beacon fixture missing")?;
-            provider.client().request::<_, Value>("anvil_setIntervalMining", (1u64,)).await?;
-            let result = tokio::time::timeout(Duration::from_secs(180),
+            let upstream_witness =
+                RecoveryRpc::new(ethereum.api.raw_witness_provider()?.clone(), false).await?;
+            let beacon = ethereum
+                ._beacon
+                .as_ref()
+                .context("signed Beacon fixture missing")?;
+            provider
+                .client()
+                .request::<_, Value>("anvil_setIntervalMining", (1u64,))
+                .await?;
+            let result = tokio::time::timeout(
+                Duration::from_secs(180),
                 tokio::process::Command::new(&relay_binary)
-                    .args(["tokens-publish-root","--source-rpc",&rpc,"--witness-rpc",&witness_rpc,
-                        "--ethereum-rpc",&upstream.url,"--ethereum-witness-rpc",&upstream_witness.url])
-                    .arg("--wallet").arg(&wallet)
-                    .arg("--deployment-manifest").arg(approved_dir.join("local-fixture-manifest.json"))
-                    .arg("--publisher-state").arg(&publisher_path)
-                    .arg("--registration").arg(&registration_path)
-                    .arg("--output").arg(&publication)
-                    .arg("--owned-fixture-network").arg(&network_path)
-                    .arg("--ethereum-finality-proof-source").arg(&beacon.directory)
-                    .env("BEEFY_APPROVED_MANIFEST_SHA256", format!("{approved_digest:#x}"))
-                    .env("ETH_FINALITY_BEACON_RPC",&beacon.beacon_rpc)
-                    .env("ETH_FINALITY_BOOTSTRAP",&beacon.approval_path)
-                    .env("ETH_FINALITY_BOOTSTRAP_SHA256",format!("{:#x}",beacon.approval_sha256))
-                    .env("ETH_FINALITY_STORE",approved_dir.join("child-beacon"))
-                    .kill_on_drop(true).output()).await
-                .context("production root entrypoint timed out")??;
-            provider.client().request::<_, Value>("anvil_setIntervalMining", (0u64,)).await?;
-            provider.client().request::<_, Value>("evm_setAutomine", (true,)).await?;
+                    .args([
+                        "tokens-publish-root",
+                        "--source-rpc",
+                        &rpc,
+                        "--witness-rpc",
+                        &witness_rpc,
+                        "--ethereum-rpc",
+                        &upstream.url,
+                        "--ethereum-witness-rpc",
+                        &upstream_witness.url,
+                    ])
+                    .arg("--wallet")
+                    .arg(&wallet)
+                    .arg("--deployment-manifest")
+                    .arg(approved_dir.join("local-fixture-manifest.json"))
+                    .arg("--publisher-state")
+                    .arg(&publisher_path)
+                    .arg("--registration")
+                    .arg(&registration_path)
+                    .arg("--output")
+                    .arg(&publication)
+                    .arg("--owned-fixture-network")
+                    .arg(&network_path)
+                    .arg("--ethereum-finality-proof-source")
+                    .arg(&beacon.directory)
+                    .env(
+                        "BEEFY_APPROVED_MANIFEST_SHA256",
+                        format!("{approved_digest:#x}"),
+                    )
+                    .env("ETH_FINALITY_BEACON_RPC", &beacon.beacon_rpc)
+                    .env("ETH_FINALITY_BOOTSTRAP", &beacon.approval_path)
+                    .env(
+                        "ETH_FINALITY_BOOTSTRAP_SHA256",
+                        format!("{:#x}", beacon.approval_sha256),
+                    )
+                    .env("ETH_FINALITY_STORE", approved_dir.join("child-beacon"))
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .context("production root entrypoint timed out")??;
+            provider
+                .client()
+                .request::<_, Value>("anvil_setIntervalMining", (0u64,))
+                .await?;
+            provider
+                .client()
+                .request::<_, Value>("evm_setAutomine", (true,))
+                .await?;
             fs::write(approved_dir.join("publisher.stdout"), &result.stdout)?;
             fs::write(approved_dir.join("publisher.stderr"), &result.stderr)?;
-            ensure!(result.status.success(), "production root entrypoint failed; inspect retained publisher.stderr");
+            ensure!(
+                result.status.success(),
+                "production root entrypoint failed; inspect retained publisher.stderr"
+            );
             let original: Value = serde_json::from_slice(&fs::read(&publication)?)?;
             ensure!(original["approvedManifestSha256"] == json!(approved_digest)
                 && original["rawTransaction"].as_str().is_some()
                 && original["publicationReceipt"]["finalized"] == true,
                 "production publisher did not preserve approved signed original and finalized inclusion");
             let raw = decode(&original["rawTransaction"])?;
-            let receipt = ethereum.api.get_finalized_receipt(B256::from(crate::keccak256(&raw))).await?
+            let receipt = ethereum
+                .api
+                .get_finalized_receipt(B256::from(crate::keccak256(&raw)))
+                .await?
                 .context("production root original receipt missing")?;
             let mut view = ethereum.api.verified_finalized_view().await?;
-            view.verify_blocks(provider.root(), &std::collections::BTreeMap::from([
-                (receipt.included_block_number, receipt.included_block_hash),
-                (receipt.finalized_block_number, receipt.finalized_block_hash),
-            ])).await?;
-            receipt.inclusion.verify_original_inclusion(&view, &raw, B256::from(crate::keccak256(&raw)))?;
+            view.verify_blocks(
+                provider.root(),
+                &std::collections::BTreeMap::from([
+                    (receipt.included_block_number, receipt.included_block_hash),
+                    (receipt.finalized_block_number, receipt.finalized_block_hash),
+                ]),
+            )
+            .await?;
+            receipt.inclusion.verify_original_inclusion(
+                &view,
+                &raw,
+                B256::from(crate::keccak256(&raw)),
+            )?;
             ethereum.receiver_address = mock_receiver;
             ethereum.execution = previous_approval;
             ethereum.transactions = previous_transactions;

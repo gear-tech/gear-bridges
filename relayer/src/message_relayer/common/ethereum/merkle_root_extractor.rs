@@ -756,6 +756,11 @@ fn insert_pin(pins: &mut BTreeMap<u64, B256>, number: u64, hash: B256) -> Result
 }
 
 fn qualification_holds(error: &anyhow::Error) -> bool {
+    // Beacon acquisition errors carry a HOLD display even when their typed
+    // network cause permits the startup/runtime reconnect loop to recover.
+    if ethereum_client::is_transient_rpc_error(error) {
+        return false;
+    }
     error.chain().any(|cause| {
         cause.to_string().contains("HOLD")
             || matches!(
@@ -877,6 +882,46 @@ mod tests {
         atomic::{AtomicU64, Ordering},
         Mutex,
     };
+
+    #[tokio::test]
+    async fn qualification_retries_typed_beacon_failures_but_holds_conflicts_and_storage() {
+        use ethereum_client::Error as ClientError;
+
+        let elapsed = tokio::time::timeout(Duration::ZERO, std::future::pending::<()>())
+            .await
+            .unwrap_err();
+        for cause in [
+            TransportErrorKind::custom(elapsed),
+            TransportErrorKind::http_error(503, "temporarily unavailable".into()),
+        ] {
+            let error = anyhow::Error::new(ClientError::BeaconFinality(cause.into()))
+                .context("acquire finalized root view");
+            assert!(format!("{error:#}").contains("HOLD"));
+            assert!(!qualification_holds(&error));
+        }
+        let unavailable = anyhow::Error::new(ClientError::FinalizedEvidenceUnavailable(
+            "finalized execution header",
+        ))
+        .context("acquire finalized root view");
+        assert!(!qualification_holds(&unavailable));
+
+        for error in [
+            anyhow::Error::new(ClientError::FinalizedAncestryConflict),
+            anyhow::Error::new(ClientError::InvalidFinalityEvidence("changed root".into())),
+            anyhow::Error::new(ClientError::BeaconFinality(anyhow::anyhow!(
+                "HOLD: invalid Beacon signature"
+            ))),
+            anyhow::Error::new(ClientError::BeaconFinality(
+                TransportErrorKind::http_error(401, "unauthorized".into()).into(),
+            )),
+            anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::TimedOut))
+                .context("HOLD: cannot load Ethereum root journal"),
+            anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+                .context("HOLD: cannot persist authenticated queue birth"),
+        ] {
+            assert!(qualification_holds(&error), "{error:#}");
+        }
+    }
 
     #[derive(Default)]
     struct MemoryRootStorage {
@@ -1196,7 +1241,9 @@ mod tests {
                 31337,
                 birth.genesis_hash,
                 Arc::new(move || {
-                    beacon_blocks[beacon_head.load(Ordering::SeqCst) as usize].header.clone()
+                    beacon_blocks[beacon_head.load(Ordering::SeqCst) as usize]
+                        .header
+                        .clone()
                 }),
             )
             .await?;

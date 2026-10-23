@@ -66,8 +66,8 @@ impl RecordedAccountProof {
             return Ok(None);
         };
         let mut remaining = value.as_slice();
-        let account = TrieAccount::decode(&mut remaining)
-            .context("malformed account proof RLP; HOLD")?;
+        let account =
+            TrieAccount::decode(&mut remaining).context("malformed account proof RLP; HOLD")?;
         ensure!(
             remaining.is_empty() && alloy::rlp::encode(account) == value,
             "noncanonical account proof RLP; HOLD"
@@ -261,18 +261,24 @@ pub async fn authenticated_receipt_block(
 )> {
     let (block, receipts) = tokio::try_join!(
         async {
-            tokio::time::timeout(std::time::Duration::from_secs(10),
-                provider.get_block_by_hash(block_hash).full())
-                .await.map_err(alloy::transports::TransportErrorKind::custom)??
-                .ok_or(crate::Error::FinalizedEvidenceUnavailable("full block"))
-                .context(errors.block)
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                provider.get_block_by_hash(block_hash).full(),
+            )
+            .await
+            .map_err(alloy::transports::TransportErrorKind::custom)??
+            .ok_or(crate::Error::FinalizedEvidenceUnavailable("full block"))
+            .context(errors.block)
         },
         async {
-            tokio::time::timeout(std::time::Duration::from_secs(10),
-                provider.get_block_receipts(BlockId::hash_canonical(block_hash)))
-                .await.map_err(alloy::transports::TransportErrorKind::custom)??
-                .ok_or(crate::Error::FinalizedEvidenceUnavailable("block receipts"))
-                .context(errors.receipts)
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                provider.get_block_receipts(BlockId::hash_canonical(block_hash)),
+            )
+            .await
+            .map_err(alloy::transports::TransportErrorKind::custom)??
+            .ok_or(crate::Error::FinalizedEvidenceUnavailable("block receipts"))
+            .context(errors.receipts)
         },
     )?;
     ensure!(
@@ -297,7 +303,10 @@ pub async fn authenticated_receipt_block(
         );
     }
     if receipts.len() < transactions.len() {
-        return Err(crate::Error::FinalizedEvidenceUnavailable("incomplete receipt set")).context(errors.count);
+        return Err(crate::Error::FinalizedEvidenceUnavailable(
+            "incomplete receipt set",
+        ))
+        .context(errors.count);
     }
     ensure!(receipts.len() == transactions.len(), errors.count);
     let mut envelopes = Vec::with_capacity(receipts.len());
@@ -478,7 +487,9 @@ mod tests {
         let trie = TrieDB::new(&database, &root).unwrap();
         let mut recorder = Recorder::new();
         assert_eq!(
-            trie.get_with(key.as_slice(), &mut recorder).unwrap().as_deref(),
+            trie.get_with(key.as_slice(), &mut recorder)
+                .unwrap()
+                .as_deref(),
             value
         );
         let header = Header {
@@ -489,28 +500,48 @@ mod tests {
         // These are genuine signed LocalFixture pins; the tests below exercise
         // account-trie failures independently of finality acquisition.
         let execution = alloy::rpc::types::Header {
-            hash: header.hash_slow(), inner: header.clone(), ..Default::default()
+            hash: header.hash_slow(),
+            inner: header.clone(),
+            ..Default::default()
         };
-        let view = std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(move || {
-            tokio::runtime::Runtime::new()?.block_on(async move {
-                let mut genesis: Block = Block::default();
-                genesis.header.inner.extra_data = execution.state_root.as_slice().to_vec().into();
-                genesis.header.hash = genesis.header.inner.hash_slow();
-                let head = execution.clone();
-                let fixture = crate::beacon_finality::test_fixtures::LocalBeaconFixture::new(
-                    31337, genesis.header.hash, std::sync::Arc::new(move || head.clone()),
-                ).await?;
-                let authority = crate::beacon_finality::BeaconAuthority::open(fixture.config.clone(), &fixture.directory).await?;
-                let asserter = Asserter::new();
-                let provider = alloy::providers::RootProvider::builder().connect_mocked_client(asserter.clone());
-                asserter.push_success(&alloy::primitives::U64::from(31337));
-                asserter.push_success(&genesis);
-                let head: Block = Block { header: execution, ..Default::default() };
-                asserter.push_success(&head);
-                asserter.push_success(&head);
-                crate::verified_finalized_view(&provider, &authority, None).await.map_err(anyhow::Error::from)
-            })
-        })?.join().map_err(|_| anyhow::anyhow!("signed account fixture thread panicked"))??;
+        let view = std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                tokio::runtime::Runtime::new()?.block_on(async move {
+                    let mut genesis: Block = Block::default();
+                    genesis.header.inner.extra_data =
+                        execution.state_root.as_slice().to_vec().into();
+                    genesis.header.hash = genesis.header.inner.hash_slow();
+                    let head = execution.clone();
+                    let fixture = crate::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+                        31337,
+                        genesis.header.hash,
+                        std::sync::Arc::new(move || head.clone()),
+                    )
+                    .await?;
+                    let authority = crate::beacon_finality::BeaconAuthority::open(
+                        fixture.config.clone(),
+                        &fixture.directory,
+                    )
+                    .await?;
+                    let asserter = Asserter::new();
+                    let provider = alloy::providers::RootProvider::builder()
+                        .connect_mocked_client(asserter.clone());
+                    asserter.push_success(&alloy::primitives::U64::from(31337));
+                    asserter.push_success(&genesis);
+                    let head: Block = Block {
+                        header: execution,
+                        ..Default::default()
+                    };
+                    asserter.push_success(&head);
+                    asserter.push_success(&head);
+                    crate::verified_finalized_view(&provider, &authority, None)
+                        .await
+                        .map_err(anyhow::Error::from)
+                })
+            })?
+            .join()
+            .map_err(|_| anyhow::anyhow!("signed account fixture thread panicked"))??;
         let genesis = view.genesis_hash();
         Ok((
             RecordedAccountProof {
@@ -598,7 +629,12 @@ mod tests {
             code_hash: account.code_hash,
             nonce: account.nonce,
             storage_hash: account.storage_root,
-            account_proof: proof.account_proof.iter().cloned().map(Into::into).collect(),
+            account_proof: proof
+                .account_proof
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
             storage_proof: Vec::new(),
         }
     }
@@ -644,7 +680,8 @@ mod tests {
                         true,
                     );
                 let provider = alloy::providers::RootProvider::builder().connect_client(client);
-                let result = prove_account(&provider, &view, proof.header.clone(), proof.address).await;
+                let result =
+                    prove_account(&provider, &view, proof.header.clone(), proof.address).await;
                 if mutation == 0 {
                     assert_eq!(
                         result?.verify(&view, proof.address)?,
@@ -657,8 +694,13 @@ mod tests {
                 asserter.push_success(&response);
                 let mut wrong_header = proof.header.clone();
                 wrong_header.number += 1;
-                assert!(prove_account(&provider, &view, wrong_header, proof.address).await.is_err());
-                assert!(asserter.pop_response().is_some(), "unauthenticated header reached RPC");
+                assert!(prove_account(&provider, &view, wrong_header, proof.address)
+                    .await
+                    .is_err());
+                assert!(
+                    asserter.pop_response().is_some(),
+                    "unauthenticated header reached RPC"
+                );
             }
         }
         Ok(())

@@ -14,8 +14,8 @@ use anyhow::{Context, Result};
 use gclient::GearApi;
 use gear_common::{
     api_provider::ApiProviderConnection,
-    native_wrapper::{ApprovedNativeWrapper, ManagerWrapperAbi, native_wrapper_at},
     durable::{committed_bytes, entry_exists, immutable_json},
+    native_wrapper::{native_wrapper_at, ApprovedNativeWrapper, ManagerWrapperAbi},
 };
 use parity_scale_codec::{Decode, Encode};
 use primitive_types::H256;
@@ -210,7 +210,12 @@ fn validate_report_versions(
             },
         "HOLD: seal/report schema disagreement or v2 evidence smuggled into v1"
     );
-    anyhow::ensure!(version >= 4 || (!has_field(coverage, "native_wrapper_approval") && !has_field(lifecycle, "native_wrapper_approval")), "HOLD: legacy report contains schema4 capability");
+    anyhow::ensure!(
+        version >= 4
+            || (!has_field(coverage, "native_wrapper_approval")
+                && !has_field(lifecycle, "native_wrapper_approval")),
+        "HOLD: legacy report contains schema4 capability"
+    );
     Ok(())
 }
 
@@ -231,8 +236,13 @@ fn parse_coverage(
     let lifecycle = serde_json::from_slice(lifecycle_bytes)?;
     validate_report_versions(version, &coverage, &lifecycle)?;
     if version >= 4 {
-        anyhow::ensure!(coverage.get("intent").is_some_and(|intent| !intent.is_null())
-            && coverage.get("intent") == lifecycle.get("intent"), "HOLD: capability-bound report intents differ");
+        anyhow::ensure!(
+            coverage
+                .get("intent")
+                .is_some_and(|intent| !intent.is_null())
+                && coverage.get("intent") == lifecycle.get("intent"),
+            "HOLD: capability-bound report intents differ"
+        );
     }
     Ok(serde_json::from_value(coverage)?)
 }
@@ -698,7 +708,10 @@ pub fn validate_exclusion_copy(
 ) -> Result<()> {
     anyhow::ensure!(
         original.same_request(copy)
-            && original.native_retry_qualification.as_ref().is_none_or(|pin| copy.native_retry_qualification.as_ref() == Some(pin))
+            && original
+                .native_retry_qualification
+                .as_ref()
+                .is_none_or(|pin| copy.native_retry_qualification.as_ref() == Some(pin))
             && original
                 .inclusion_block_number
                 .is_none_or(|value| copy.inclusion_block_number == Some(value))
@@ -796,9 +809,20 @@ async fn authenticate_retained_checkpoints(
                     ))
                 })
                 .transpose()?,
-        ).chain(original.native_retry_qualification.as_ref().map(|pin| {
-            Ok::<_, anyhow::Error>((pin.finalized_block_number.context("HOLD: retained retry height absent")?, pin.finalized_block_hash.as_str()))
-        }).transpose()?) {
+        )
+        .chain(
+            original
+                .native_retry_qualification
+                .as_ref()
+                .map(|pin| {
+                    Ok::<_, anyhow::Error>((
+                        pin.finalized_block_number
+                            .context("HOLD: retained retry height absent")?,
+                        pin.finalized_block_hash.as_str(),
+                    ))
+                })
+                .transpose()?,
+        ) {
             let hash: H256 = hash.parse()?;
             anyhow::ensure!(
                 number <= maximum
@@ -882,16 +906,28 @@ async fn verify_external_coverage(
     );
     validate_admission_inventory(coverage)?;
     if seal.schema_version >= 4 {
-        let intent = coverage.intent.as_ref().context("HOLD: capability intent missing")?;
-        anyhow::ensure!(intent.native_wrapper_approval == seal.native_wrapper_approval
-            && intent.old_identity.as_ref() == Some(&seal.old_identity)
-            && intent.new_identity.as_ref() == Some(&seal.new_identity)
-            && intent.new_manager_code_id == Some(seal.new_manager_code_id), "HOLD: capability report/seal identity changed");
+        let intent = coverage
+            .intent
+            .as_ref()
+            .context("HOLD: capability intent missing")?;
+        anyhow::ensure!(
+            intent.native_wrapper_approval == seal.native_wrapper_approval
+                && intent.old_identity.as_ref() == Some(&seal.old_identity)
+                && intent.new_identity.as_ref() == Some(&seal.new_identity)
+                && intent.new_manager_code_id == Some(seal.new_manager_code_id),
+            "HOLD: capability report/seal identity changed"
+        );
         match (intent.native_wrapper, &intent.native_wrapper_approval) {
             (None, None) => (),
-            (Some(actor), Some(approved)) => anyhow::ensure!(approved.approval.wrapper.actor_id == actor
-                && intent.mappings.contains(&(actor, approved.approval.wrapper.ethereum_token, 1)),
-                "HOLD: native actor/token/mapping changed"),
+            (Some(actor), Some(approved)) => anyhow::ensure!(
+                approved.approval.wrapper.actor_id == actor
+                    && intent.mappings.contains(&(
+                        actor,
+                        approved.approval.wrapper.ethereum_token,
+                        1
+                    )),
+                "HOLD: native actor/token/mapping changed"
+            ),
             _ => anyhow::bail!("HOLD: native capability approval missing or unexpected"),
         }
     }
@@ -1282,6 +1318,48 @@ fn decode_status(pin: &FinalizedCutoverStatus) -> Result<CutoverStatus> {
     Ok(status)
 }
 impl CutoverSeal {
+    /// A predecessor's schema4 capability belongs to that migration, not its successor.
+    pub fn predecessor_wrapper_approval<'a>(
+        &'a self,
+        historical: Option<&'a ApprovedNativeWrapper>,
+    ) -> Result<Option<&'a ApprovedNativeWrapper>> {
+        self.original_wrapper_approval(if self.schema_version >= 4 {
+            None
+        } else {
+            historical
+        })
+    }
+
+    fn original_wrapper_approval<'a>(
+        &'a self,
+        approval: Option<&'a ApprovedNativeWrapper>,
+    ) -> Result<Option<&'a ApprovedNativeWrapper>> {
+        let approved = if self.schema_version >= 4 {
+            anyhow::ensure!(
+                approval.is_none() || approval == self.native_wrapper_approval.as_ref(),
+                "HOLD: retained seal capability override"
+            );
+            self.native_wrapper_approval.as_ref()
+        } else {
+            approval
+        };
+        if let Some(approved) = approved {
+            anyhow::ensure!(
+                approved.approval.gear_genesis_hash == self.old_identity.gear_genesis_hash
+                    && approved.approval.source_manager.actor_id
+                        == self.old_identity.vft_manager_address
+                    && approved.approval.replacement_manager.actor_id
+                        == self.new_identity.vft_manager_address
+                    && approved.approval.replacement_manager.code_id == self.new_manager_code_id
+                    && (self.schema_version < 4
+                        || approved.approval.replacement_manager.wrapper_abi
+                            == ManagerWrapperAbi::CapabilityBound),
+                "HOLD: historical capability approval targets a different predecessor/replacement"
+            );
+        }
+        Ok(approved)
+    }
+
     pub fn predecessor(&self, manifest_digest: H256) -> PredecessorCutover {
         PredecessorCutover {
             manifest_digest,
@@ -1330,18 +1408,24 @@ impl CutoverSeal {
             "HOLD: invalid cutover identity/domain"
         );
         if self.schema_version < 4 {
-            anyhow::ensure!(self.native_wrapper_approval.is_none(), "HOLD: legacy seal cannot contain new capability evidence");
+            anyhow::ensure!(
+                self.native_wrapper_approval.is_none(),
+                "HOLD: legacy seal cannot contain new capability evidence"
+            );
         }
         if let Some(approved) = &self.native_wrapper_approval {
             approved.approval.validate()?;
             let approval = &approved.approval;
-            anyhow::ensure!(!approved.approval_digest.is_zero()
-                && approval.gear_genesis_hash == old.gear_genesis_hash
-                && approval.source_manager.actor_id == old.vft_manager_address
-                && approval.replacement_manager.actor_id == new.vft_manager_address
-                && approval.replacement_manager.code_id == self.new_manager_code_id
-                && approval.replacement_manager.wrapper_abi == ManagerWrapperAbi::CapabilityBound,
-                "HOLD: capability approval does not bind sealed managers");
+            anyhow::ensure!(
+                !approved.approval_digest.is_zero()
+                    && approval.gear_genesis_hash == old.gear_genesis_hash
+                    && approval.source_manager.actor_id == old.vft_manager_address
+                    && approval.replacement_manager.actor_id == new.vft_manager_address
+                    && approval.replacement_manager.code_id == self.new_manager_code_id
+                    && approval.replacement_manager.wrapper_abi
+                        == ManagerWrapperAbi::CapabilityBound,
+                "HOLD: capability approval does not bind sealed managers"
+            );
         }
         let retirement = decode_status(&self.retirement)?;
         let readiness = decode_status(&self.readiness)?;
@@ -1646,27 +1730,28 @@ async fn verify_original_lane(
     approval: Option<&ApprovedNativeWrapper>,
 ) -> Result<()> {
     authenticate_status_pins(seal, api).await?;
-    let approved = if seal.schema_version >= 4 {
-        anyhow::ensure!(approval.is_none() || approval == seal.native_wrapper_approval.as_ref(), "HOLD: retained seal capability override");
-        seal.native_wrapper_approval.as_ref()
-    } else { approval };
-    if let Some(approved) = approved {
-        anyhow::ensure!(approved.approval.source_manager.actor_id == seal.old_identity.vft_manager_address
-            && approved.approval.replacement_manager.actor_id == seal.new_identity.vft_manager_address
-            && approved.approval.replacement_manager.code_id == seal.new_manager_code_id
-            && (seal.schema_version < 4 || approved.approval.replacement_manager.wrapper_abi == ManagerWrapperAbi::CapabilityBound),
-            "HOLD: historical capability approval targets a different predecessor/replacement");
-    }
+    let approved = seal.original_wrapper_approval(approval)?;
     let at = H256::from_slice(api.last_block_hash().await?.as_ref());
-    let source = native_wrapper_at(api, seal.old_identity.vft_manager_address, at, approved).await?;
-    let replacement = native_wrapper_at(api, seal.new_identity.vft_manager_address, at, approved).await?;
-    anyhow::ensure!(source == replacement, "HOLD: sealed native configuration differs");
+    let source =
+        native_wrapper_at(api, seal.old_identity.vft_manager_address, at, approved).await?;
+    let replacement =
+        native_wrapper_at(api, seal.new_identity.vft_manager_address, at, approved).await?;
+    anyhow::ensure!(
+        source == replacement,
+        "HOLD: sealed native configuration differs"
+    );
     if let Some(intent) = &coverage.intent {
-        anyhow::ensure!(intent.native_wrapper == source.as_ref().map(|binding| binding.actor_id),
-            "HOLD: coverage native actor differs from independently approved original");
+        anyhow::ensure!(
+            intent.native_wrapper == source.as_ref().map(|binding| binding.actor_id),
+            "HOLD: coverage native actor differs from independently approved original"
+        );
         if let Some(binding) = &source {
-            anyhow::ensure!(intent.mappings.contains(&(binding.actor_id, binding.ethereum_token, 1)),
-                "HOLD: coverage native token differs from independently approved original");
+            anyhow::ensure!(
+                intent
+                    .mappings
+                    .contains(&(binding.actor_id, binding.ethereum_token, 1)),
+                "HOLD: coverage native token differs from independently approved original"
+            );
         }
     }
     let journal = read_original_journal(
@@ -1703,7 +1788,8 @@ async fn verify_original_lane(
         provider.clone(),
         String::new(),
         seal.old_identity.erc20_manager_address,
-    ).with_native_wrapper_approval(approved.cloned().map(std::sync::Arc::new));
+    )
+    .with_native_wrapper_approval(approved.cloned().map(std::sync::Arc::new));
     authenticate_coverage(seal, &mut coverage, eth, view).await?;
     let authenticated = verify_external_coverage(seal, &journal, &coverage, &sender, api).await?;
     anyhow::ensure!(
@@ -1861,8 +1947,7 @@ fn validate_predecessor(seal: &CutoverSeal, prior: &CutoverSeal) -> Result<()> {
 /// The caller retains original writer ownership through publication of the final seal.
 pub async fn verify_pending_originals(
     seal: &CutoverSeal,
-    coverage_bytes: &[u8],
-    lifecycle_bytes: &[u8],
+    (coverage_bytes, lifecycle_bytes): (&[u8], &[u8]),
     provider: ApiProviderConnection,
     api: &GearApi,
     eth: &ethereum_client::PollingEthApi,
@@ -1879,7 +1964,15 @@ pub async fn verify_pending_originals(
     )? {
         let (prior, _) = verify_markers(&previous)?;
         validate_predecessor(seal, &prior)?;
-        verify_originals_read_only(&previous, provider, api, eth, view, if prior.schema_version >= 4 { None } else { approval }).await?;
+        verify_originals_read_only(
+            &previous,
+            provider,
+            api,
+            eth,
+            view,
+            prior.predecessor_wrapper_approval(approval)?,
+        )
+        .await?;
     }
     view.recheck(&**eth).await?;
     verify_old_journal_digests(seal)
@@ -1904,8 +1997,21 @@ pub async fn verify_originals_read_only(
         );
         let coverage = read_coverage(&seal)?;
         // A prior schema4 seal owns its own capability; never redirect predecessor queries.
-        let original_approval = if retained.is_empty() || seal.schema_version < 4 { approval } else { None };
-        verify_original_lane(&seal, coverage, provider.clone(), api, eth, view, original_approval).await?;
+        let original_approval = if retained.is_empty() {
+            approval
+        } else {
+            seal.predecessor_wrapper_approval(approval)?
+        };
+        verify_original_lane(
+            &seal,
+            coverage,
+            provider.clone(),
+            api,
+            eth,
+            view,
+            original_approval,
+        )
+        .await?;
         retained.push((path.clone(), hash));
         let predecessor = predecessor_seal_path(
             seal.old_state
@@ -2157,7 +2263,12 @@ fn validate_disposition_bound(
                     .finalized_block_number
                     .is_some_and(|number| number <= maximum)
             })
-            && original.native_retry_qualification.as_ref().is_none_or(|pin| pin.finalized_block_number.is_some_and(|number| number <= maximum))
+            && original
+                .native_retry_qualification
+                .as_ref()
+                .is_none_or(|pin| pin
+                    .finalized_block_number
+                    .is_some_and(|number| number <= maximum))
             && original.has_terminal_reconciliation(),
         "HOLD: original has no terminal nonce/reply disposition at or before exclusion"
     );
@@ -2260,28 +2371,71 @@ pub async fn authenticate_archived_native_retry(
     use super::message_sender::decode_complete_reply;
     use historical_proxy_client::historical_proxy::io::Redirect;
     use vft_manager_client::vft_manager::io::SubmitReceipt;
-    let pin = original.native_retry_qualification.as_ref().context("HOLD: archived native retry qualification missing")?;
-    anyhow::ensure!(original.native_wrapper_approval.as_ref().is_none_or(|saved|
-        sender.native_wrapper_approval.as_deref() == Some(saved)), "HOLD: archived original capability approval changed");
-    anyhow::ensure!(original.manager == format!("{:#x}", sender.receiver_address)
-        && original.historical_proxy == format!("{:#x}", sender.historical_proxy_address)
-        && original.receipt_key == (payload.proof_block.block.slot, payload.transaction_index)
-        && original.payload_hash == format!("{:#x}", alloy_primitives::keccak256(payload.encode())),
-        "HOLD: archived retry original identity differs");
-    let call = Redirect::encode_call(payload.proof_block.block.slot, payload.encode(), sender.receiver_address.0.into(), SubmitReceipt::ROUTE.to_vec());
-    authenticate_original_call(sender, &sender.api_provider, original, sender.historical_proxy_address, &call).await?;
-    let reply = original.finalized_reply.as_ref().context("HOLD: retry original reply absent")?;
-    anyhow::ensure!(pin.finalized_block_number.zip(reply.observation.finalized_block_number)
-        .is_some_and(|(qualified, replied)| qualified >= replied), "HOLD: retry qualification predates original error reply");
+    let pin = original
+        .native_retry_qualification
+        .as_ref()
+        .context("HOLD: archived native retry qualification missing")?;
+    anyhow::ensure!(
+        original
+            .native_wrapper_approval
+            .as_ref()
+            .is_none_or(|saved| sender.native_wrapper_approval.as_deref() == Some(saved)),
+        "HOLD: archived original capability approval changed"
+    );
+    anyhow::ensure!(
+        original.manager == format!("{:#x}", sender.receiver_address)
+            && original.historical_proxy == format!("{:#x}", sender.historical_proxy_address)
+            && original.receipt_key == (payload.proof_block.block.slot, payload.transaction_index)
+            && original.payload_hash
+                == format!("{:#x}", alloy_primitives::keccak256(payload.encode())),
+        "HOLD: archived retry original identity differs"
+    );
+    let call = Redirect::encode_call(
+        payload.proof_block.block.slot,
+        payload.encode(),
+        sender.receiver_address.0.into(),
+        SubmitReceipt::ROUTE.to_vec(),
+    );
+    authenticate_original_call(
+        sender,
+        &sender.api_provider,
+        original,
+        sender.historical_proxy_address,
+        &call,
+    )
+    .await?;
+    let reply = original
+        .finalized_reply
+        .as_ref()
+        .context("HOLD: retry original reply absent")?;
+    anyhow::ensure!(
+        pin.finalized_block_number
+            .zip(reply.observation.finalized_block_number)
+            .is_some_and(|(qualified, replied)| qualified >= replied),
+        "HOLD: retry qualification predates original error reply"
+    );
     let (receipt, inner) = decode_complete_reply::<Redirect>(&reply.payload)?
         .map_err(|_| anyhow::anyhow!("HOLD: retry proxy failed before manager"))?;
-    anyhow::ensure!(receipt == payload.receipt_rlp && matches!(decode_complete_reply::<SubmitReceipt>(&inner)?,
-        Ok(()) | Err(vft_manager_client::Error::NativeSettlementPending) | Err(vft_manager_client::Error::ReplyFailure(_))),
-        "HOLD: archived retry has no original native settlement reply");
+    anyhow::ensure!(
+        receipt == payload.receipt_rlp
+            && matches!(
+                decode_complete_reply::<SubmitReceipt>(&inner)?,
+                Ok(())
+                    | Err(vft_manager_client::Error::NativeSettlementPending)
+                    | Err(vft_manager_client::Error::ReplyFailure(_))
+            ),
+        "HOLD: archived retry has no original native settlement reply"
+    );
     let mut connection = sender.api_provider.clone();
     let api = connection.gclient();
-    anyhow::ensure!(sender.receipt_retry_qualification(&api, payload, Some(pin)).await?.as_ref() == Some(pin),
-        "HOLD: exact original native retry cohort no longer authenticates at retained pin");
+    anyhow::ensure!(
+        sender
+            .receipt_retry_qualification(&api, payload, Some(pin))
+            .await?
+            .as_ref()
+            == Some(pin),
+        "HOLD: exact original native retry cohort no longer authenticates at retained pin"
+    );
     Ok(())
 }
 
@@ -2594,7 +2748,8 @@ mod tests {
             state.blocks[0].header.hash,
             Arc::new(move || {
                 beacon_state.blocks[beacon_state.witness_height.load(Ordering::SeqCst)]
-                    .header.clone()
+                    .header
+                    .clone()
             }),
         )
         .await
@@ -2746,10 +2901,19 @@ mod tests {
         seal.boundary = old_boundary;
         rpc.witness_height.store(1, Ordering::SeqCst);
         let mut retained_view = eth.verified_finalized_view().await.unwrap();
-        assert_eq!(retained_view.block_number(), retained.common_header().number,
-            "a stale signed Beacon update must not regress the authenticated execution fence");
-        assert_eq!(retained_view.block_hash(), retained.common_header().hash_slow());
-        retained_view.verify_checkpoint(&*eth, &retained).await.unwrap();
+        assert_eq!(
+            retained_view.block_number(),
+            retained.common_header().number,
+            "a stale signed Beacon update must not regress the authenticated execution fence"
+        );
+        assert_eq!(
+            retained_view.block_hash(),
+            retained.common_header().hash_slow()
+        );
+        retained_view
+            .verify_checkpoint(&*eth, &retained)
+            .await
+            .unwrap();
         rpc.witness_height.store(2, Ordering::SeqCst);
         rpc.fork.store(true, Ordering::SeqCst);
         assert!(
@@ -3260,6 +3424,108 @@ mod tests {
                 status: readiness.encode(),
             },
         }
+    }
+
+    #[test]
+    fn chained_seals_keep_original_capability_approval() {
+        use gear_common::native_wrapper::{
+            ManagerProgramApproval, NativeWrapperApproval, NativeWrapperBinding, NativeWrapperMode,
+        };
+        let base = std::env::temp_dir().join(format!("cutover-approvals-{}", Uuid::now_v7()));
+        fs::create_dir_all(base.join("old")).unwrap();
+        for name in [
+            "old/state.json",
+            "old/blocks.json",
+            "old-discovery.json",
+            "cutover-coverage.json",
+            "cutover-calls.json",
+        ] {
+            fs::write(base.join(name), b"{}").unwrap();
+        }
+        let mut prior = fixture_seal(&base, identity());
+        prior.schema_version = 4;
+        let approved = ApprovedNativeWrapper {
+            approval_digest: H256::repeat_byte(20),
+            approval: NativeWrapperApproval {
+                schema_version: 1,
+                gear_genesis_hash: prior.old_identity.gear_genesis_hash,
+                source_manager: ManagerProgramApproval {
+                    actor_id: prior.old_identity.vft_manager_address,
+                    code_id: H256::repeat_byte(21),
+                    wrapper_abi: ManagerWrapperAbi::ActorOnly,
+                },
+                replacement_manager: ManagerProgramApproval {
+                    actor_id: prior.new_identity.vft_manager_address,
+                    code_id: prior.new_manager_code_id,
+                    wrapper_abi: ManagerWrapperAbi::CapabilityBound,
+                },
+                wrapper: NativeWrapperBinding {
+                    actor_id: H256::repeat_byte(22),
+                    ethereum_token: primitive_types::H160::repeat_byte(23),
+                    code_id: H256::repeat_byte(24),
+                    mode: NativeWrapperMode::EscrowV1,
+                },
+            },
+        };
+        approved.approval.validate().unwrap();
+        prior.native_wrapper_approval = Some(approved.clone());
+        let original = serde_json::to_vec(&prior).unwrap();
+        let mut next = prior.clone();
+        next.old_identity = prior.new_identity.clone();
+        next.new_identity.vft_manager_address = H256::repeat_byte(25);
+        next.new_manager_code_id = H256::repeat_byte(26);
+        let mut next_approval = approved.clone();
+        next_approval.approval_digest = H256::repeat_byte(27);
+        next_approval.approval.source_manager = approved.approval.replacement_manager.clone();
+        next_approval.approval.replacement_manager.actor_id = next.new_identity.vft_manager_address;
+        next_approval.approval.replacement_manager.code_id = next.new_manager_code_id;
+        next.native_wrapper_approval = Some(next_approval.clone());
+        assert_eq!(
+            next.original_wrapper_approval(Some(&next_approval))
+                .unwrap(),
+            Some(&next_approval)
+        );
+        let selected = prior
+            .predecessor_wrapper_approval(Some(&next_approval))
+            .unwrap();
+        assert_eq!(selected, Some(&approved));
+        assert_eq!(
+            prior.original_wrapper_approval(selected).unwrap(),
+            Some(&approved)
+        );
+        assert!(prior
+            .original_wrapper_approval(Some(&next_approval))
+            .is_err());
+        assert!(next.original_wrapper_approval(Some(&approved)).is_err());
+        assert_eq!(serde_json::to_vec(&prior).unwrap(), original);
+
+        // A legacy predecessor needs an approval for A→B, never the new B→C policy.
+        prior.schema_version = 3;
+        prior.native_wrapper_approval = None;
+        assert_eq!(
+            prior.predecessor_wrapper_approval(Some(&approved)).unwrap(),
+            Some(&approved)
+        );
+        assert!(prior
+            .predecessor_wrapper_approval(Some(&next_approval))
+            .is_err());
+        for field in ["genesis", "source", "replacement", "code"] {
+            let mut changed = approved.clone();
+            match field {
+                "genesis" => changed.approval.gear_genesis_hash = H256::repeat_byte(99),
+                "source" => changed.approval.source_manager.actor_id = H256::repeat_byte(99),
+                "replacement" => {
+                    changed.approval.replacement_manager.actor_id = H256::repeat_byte(99)
+                }
+                "code" => changed.approval.replacement_manager.code_id = H256::repeat_byte(99),
+                _ => unreachable!(),
+            }
+            assert!(
+                prior.predecessor_wrapper_approval(Some(&changed)).is_err(),
+                "{field}"
+            );
+        }
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[tokio::test]

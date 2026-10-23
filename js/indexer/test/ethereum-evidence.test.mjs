@@ -210,6 +210,53 @@ test('legacy checkpoints requalify at the original pin and retain separate proof
   await assert.rejects(evidence.qualifyFinality(f.client, { ...legacy, receiptsRoot: hash(999) }), /HOLD:/);
 });
 
+test('lifetime qualification crosses the native frame cap without dropping fences or rebinding links', async (t) => {
+  const f = await fixture(t);
+  const prior = await evidence.qualifyFinality(f.client);
+  const header = f.headers[10];
+  const legacy = { schemaVersion: 1, policy: 'independent-two-el-v1', chainId: '31337',
+    genesisHash: f.headers[0].hash, number: '10', timestamp: BigInt(header.timestamp).toString(),
+    hash: header.hash, parentHash: header.parentHash, stateRoot: header.stateRoot,
+    transactionsRoot: header.transactionsRoot, receiptsRoot: header.receiptsRoot };
+  const oldQualification = await evidence.qualifyFinality(f.client, legacy);
+  const oldOriginal = await auth(f, oldQualification);
+  const retainedLinks = oldOriginal.requalificationLinks.map((link) => ({ ...link, checkpoint: oldQualification.native }));
+  // Repeat valid native records to cross the wire limit without thousands of
+  // unrelated fixture signatures. Each supplied record must still be checked.
+  const copies = Math.ceil(9 * 1024 * 1024 / Buffer.byteLength(JSON.stringify(prior.native)));
+  const retained = [...Array.from({ length: copies }, () => prior), legacy];
+  assert.ok(Buffer.byteLength(JSON.stringify({ checkpointFences: retained.map((item) => item.native ?? item) })) > 8 * 1024 * 1024);
+  const request = f.client.native.request.bind(f.client.native), frames = [];
+  let pinned;
+  t.mock.method(f.client.native, 'request', async (input) => {
+    frames.push(structuredClone(input));
+    assert.ok(Buffer.byteLength(JSON.stringify(input)) < 2 * 1024 * 1024);
+    const response = await request(input);
+    assert.ok(Buffer.byteLength(JSON.stringify(response)) < 2 * 1024 * 1024);
+    if (input.op === 'qualify') {
+      pinned ??= structuredClone(response.checkpoint);
+      assert.deepEqual(response.checkpoint, pinned, 'all chunks retain the initial view even when Beacon advances');
+      f.state.finalizedHeight = 13;
+    }
+    return response;
+  });
+  const saved = structuredClone(retainedLinks);
+  const checkpoint = await evidence.qualifyFinality(f.client, undefined, [], retained, retainedLinks);
+  assert.equal(checkpoint.number, '11');
+  const batches = frames.filter((frame) => frame.op === 'qualify' && frame.fixedCheckpoint);
+  assert.ok(batches.length > 1);
+  assert.equal(batches.flatMap((frame) => frame.checkpointFences ?? []).filter((item) => item.schema_version === 2).length, copies);
+  assert.deepEqual(retainedLinks, saved);
+  const original = await auth(f, checkpoint);
+  assert.deepEqual(original.requalificationLinks, oldOriginal.requalificationLinks);
+  assert.equal(original.checkpointProofDigest, prior.native.beacon.proofDigest);
+  // A conflict in the last frame must not be hidden by successful earlier chunks.
+  const corrupt = structuredClone(prior);
+  corrupt.native.beacon.proofDigest = hash(999);
+  pinned = undefined;
+  await assert.rejects(evidence.qualifyFinality(f.client, undefined, [], [...retained, corrupt], retainedLinks), /HOLD/);
+});
+
 test('retained continuity verifies an intervening header, not only endpoint identity', async (t) => {
   const f = await fixture(t), previous = await evidence.qualifyFinality(f.client);
   f.state.finalizedHeight = 13;

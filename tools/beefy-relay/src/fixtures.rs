@@ -9,9 +9,9 @@ use std::{collections::BTreeMap, path::Path};
 
 use crate::{
     protocol::{
-        authority_addresses, authority_root, encode_outer_leaf,
-        encode_queue_proof, keccak256, verify_native_mmr_proof, Hash32,
-        KeccakHasher, QueueSnapshot, RuntimeLeafProof, MAX_MMR_PROOF_ITEMS, MAX_VALIDATORS,
+        authority_addresses, authority_root, encode_outer_leaf, encode_queue_proof, keccak256,
+        verify_native_mmr_proof, Hash32, KeccakHasher, QueueSnapshot, RuntimeLeafProof,
+        MAX_MMR_PROOF_ITEMS, MAX_VALIDATORS,
     },
     validate_signed_commitment,
 };

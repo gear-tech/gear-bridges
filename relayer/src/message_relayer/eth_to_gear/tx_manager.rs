@@ -339,9 +339,17 @@ impl TransactionManager {
                     self.preparing_submissions.write().await.insert(tx_uuid);
                     *self.last_submission.write().await = Some(tx_uuid);
                     self.storage.save(self).await?;
-                    let retry_original = tx.receipt.as_ref().and_then(|receipt|
-                        receipt.submission_attempts.last()).map(|attempt| attempt.signed_submission.clone());
-                    if !message_sender.prepare_message(tx_uuid, tx.tx.tx_hash, event, retry_original) {
+                    let retry_original = tx
+                        .receipt
+                        .as_ref()
+                        .and_then(|receipt| receipt.submission_attempts.last())
+                        .map(|attempt| attempt.signed_submission.clone());
+                    if !message_sender.prepare_message(
+                        tx_uuid,
+                        tx.tx.tx_hash,
+                        event,
+                        retry_original,
+                    ) {
                         log::info!("Message sender connection closed, exiting...");
                         return Ok(false);
                     }
@@ -600,9 +608,13 @@ impl TransactionManager {
                         .is_none_or(|reply| signed.finalized_reply.as_ref() == Some(reply)),
                     "Original finalized proof reply identity changed for {tx_uuid}"
                 );
-                anyhow::ensure!(previous.native_retry_qualification.as_ref().is_none_or(|pin|
-                    signed.native_retry_qualification.as_ref() == Some(pin)),
-                    "Original native retry qualification pin changed for {tx_uuid}");
+                anyhow::ensure!(
+                    previous
+                        .native_retry_qualification
+                        .as_ref()
+                        .is_none_or(|pin| signed.native_retry_qualification.as_ref() == Some(pin)),
+                    "Original native retry qualification pin changed for {tx_uuid}"
+                );
                 anyhow::ensure!(
                     signed.preserves_reconciliation(previous),
                     "Original reconciliation history/bytes/reply changed for {tx_uuid}"
@@ -641,17 +653,25 @@ impl TransactionManager {
                     "HOLD: saved completion was queried at a different settlement pin");
             }
         }
-        if let MessageStatus::RetryableNoop { receipt_observation, .. } = &status {
+        if let MessageStatus::RetryableNoop {
+            receipt_observation,
+            ..
+        } = &status
+        {
             let qualified = receipt.signed_submission.as_ref().is_some_and(|signed| {
                 (signed.inclusion_block_number.is_some()
                     && signed.inclusion_block_hash.is_some()
                     && signed.message_id.is_none()
                     && signed.finalized_dispatch_error.is_some())
-                || (signed.has_finalized_dispatch_reply()
-                    && signed.native_retry_qualification.as_ref().is_some_and(|pin|
-                        pin.finalized_block_number.is_some()
-                            && receipt_observation.as_ref() == Some(pin)
-                            && signed.validate_settlement_order(pin).is_ok()))
+                    || (signed.has_finalized_dispatch_reply()
+                        && signed
+                            .native_retry_qualification
+                            .as_ref()
+                            .is_some_and(|pin| {
+                                pin.finalized_block_number.is_some()
+                                    && receipt_observation.as_ref() == Some(pin)
+                                    && signed.validate_settlement_order(pin).is_ok()
+                            }))
             });
             if !qualified {
                 status = MessageStatus::NeedsReconciliation {
@@ -1415,7 +1435,10 @@ pub(super) mod tests {
 
         let transactions = manager.transactions.read().await;
         let stored = &transactions[&uuid];
-        assert!(matches!(stored.status, TxStatus::NeedsReconciliation { .. }));
+        assert!(matches!(
+            stored.status,
+            TxStatus::NeedsReconciliation { .. }
+        ));
         let receipt = stored.receipt.as_ref().unwrap();
         assert_eq!(receipt.signed_submission.as_ref(), Some(&signed));
         assert!(receipt.submission_attempts.is_empty());
@@ -2184,7 +2207,8 @@ pub(super) mod tests {
             finalized_block_hash: format!("{:#x}", primitive_types::H256::repeat_byte(55)),
         };
         signed.inclusion_block_number = Some(51);
-        signed.inclusion_block_hash = Some(format!("{:#x}", primitive_types::H256::repeat_byte(51)));
+        signed.inclusion_block_hash =
+            Some(format!("{:#x}", primitive_types::H256::repeat_byte(51)));
         signed.message_id = Some(format!("{:#x}", primitive_types::H256::repeat_byte(52)));
         signed.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
             payload: vec![1],
@@ -2266,20 +2290,29 @@ pub(super) mod tests {
         retry.nonce = signed.nonce + 1;
         retry.raw_extrinsic = vec![5, 6, 7, 8];
         retry.extrinsic_hash = "retry-original".into();
-        restored.finalize_transaction(message_sender::Response {
-            tx_uuid: uuid, status: MessageStatus::Prepared, submission: None,
-            signed_submission: Some(retry.clone()),
-        }).await.unwrap();
+        restored
+            .finalize_transaction(message_sender::Response {
+                tx_uuid: uuid,
+                status: MessageStatus::Prepared,
+                submission: None,
+                signed_submission: Some(retry.clone()),
+            })
+            .await
+            .unwrap();
         restored.resume(&mut sender, &mut composer).await.unwrap();
-        assert!(matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared { prepared, .. })
-            if prepared.1 == retry && prepared.0.encode() == event.encode()));
+        assert!(
+            matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared { prepared, .. })
+            if prepared.1 == retry && prepared.0.encode() == event.encode())
+        );
         // Lost response/timeout: restart replays exactly these bytes, not another nonce.
         drop(restored);
         let restored = TransactionManager::new(storage.clone());
         storage.load(&restored).await.unwrap();
         restored.resume(&mut sender, &mut composer).await.unwrap();
-        assert!(matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared { prepared, .. })
-            if prepared.1 == retry));
+        assert!(
+            matches!(sent.try_recv(), Ok(message_sender::Request::SubmitPrepared { prepared, .. })
+            if prepared.1 == retry)
+        );
         retry.inclusion_block_number = Some(60);
         retry.inclusion_block_hash = Some(format!("{:#x}", primitive_types::H256::repeat_byte(60)));
         retry.message_id = Some(format!("{:#x}", primitive_types::H256::repeat_byte(61)));
@@ -2288,18 +2321,27 @@ pub(super) mod tests {
             finalized_block_hash: format!("{:#x}", primitive_types::H256::repeat_byte(62)),
         };
         retry.finalized_reply = Some(message_sender::FinalizedReplyEvidence {
-            payload: vec![0], observation: settled.clone(),
+            payload: vec![0],
+            observation: settled.clone(),
         });
-        restored.finalize_transaction(message_sender::Response {
-            tx_uuid: uuid,
-            status: MessageStatus::Success { receipt_observation: Some(settled) },
-            submission: Some(message_sender::SubmissionEvidence {
-                observed_at_ms: 80, manager: primitive_types::H256::repeat_byte(4),
-                historical_proxy: primitive_types::H256::repeat_byte(6), sender: "source-signer".into(),
-                manager_reply: Some(vec![0]), error: None,
-            }),
-            signed_submission: Some(retry.clone()),
-        }).await.unwrap();
+        restored
+            .finalize_transaction(message_sender::Response {
+                tx_uuid: uuid,
+                status: MessageStatus::Success {
+                    receipt_observation: Some(settled),
+                },
+                submission: Some(message_sender::SubmissionEvidence {
+                    observed_at_ms: 80,
+                    manager: primitive_types::H256::repeat_byte(4),
+                    historical_proxy: primitive_types::H256::repeat_byte(6),
+                    sender: "source-signer".into(),
+                    manager_reply: Some(vec![0]),
+                    error: None,
+                }),
+                signed_submission: Some(retry.clone()),
+            })
+            .await
+            .unwrap();
         let completed = restored.completed.read().await;
         let receipt = completed[&uuid].receipt.as_ref().unwrap();
         assert_eq!(receipt.signed_submission.as_ref(), Some(&retry));

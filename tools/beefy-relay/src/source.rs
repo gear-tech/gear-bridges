@@ -19,12 +19,12 @@ use tokio::time::Instant;
 use tokio::time::{timeout, Duration};
 
 use crate::{
-    authority_addresses, authority_root, decode_authority_list,
-    decode_beefy_digest, decode_mmr_leaves, decode_mmr_proof, decode_outer_leaf,
-    decode_validator_set, decode_versioned_finality_proof, keccak256, outer_leaf_hash,
-    validate_mmr_coordinates, validate_signed_commitment, verify_native_mmr_proof, Hash32,
-    QueueSnapshot, RuntimeLeaf, RuntimeLeafProof, SimplifiedMmrProof, ValidatedCommitment,
-    MAX_BEEFY_PROOF_BYTES, MAX_MMR_LEAVES_BYTES, MAX_MMR_PROOF_BYTES, MAX_VALIDATORS,
+    authority_addresses, authority_root, decode_authority_list, decode_beefy_digest,
+    decode_mmr_leaves, decode_mmr_proof, decode_outer_leaf, decode_validator_set,
+    decode_versioned_finality_proof, keccak256, outer_leaf_hash, validate_mmr_coordinates,
+    validate_signed_commitment, verify_native_mmr_proof, Hash32, QueueSnapshot, RuntimeLeaf,
+    RuntimeLeafProof, SimplifiedMmrProof, ValidatedCommitment, MAX_BEEFY_PROOF_BYTES,
+    MAX_MMR_LEAVES_BYTES, MAX_MMR_PROOF_BYTES, MAX_VALIDATORS,
 };
 
 const MAX_WAIT: Duration = Duration::from_secs(45);
@@ -51,6 +51,8 @@ struct ScanJournal {
     scanned_hash: Hash32,
     pending: std::collections::BTreeMap<u32, Vec<u8>>,
     delivered: Option<(u32, Vec<u8>)>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    retained_deliveries: std::collections::BTreeMap<u32, Vec<u8>>,
 }
 
 impl ScanJournal {
@@ -121,7 +123,14 @@ pub struct Source {
     scanned_through: u32,
     scanned_hash: Hash32,
     scan_path: Option<PathBuf>,
-    delivered: Option<(u32, Vec<u8>)>,
+    // Separate from the subscription cap: grows only with unacknowledged
+    // deliveries and is pruned against the authenticated resume checkpoint.
+    retained_deliveries: std::collections::BTreeMap<u32, Vec<u8>>,
+    #[cfg(test)]
+    capture_gate: Option<(
+        std::sync::Arc<tokio::sync::Notify>,
+        std::sync::Arc<tokio::sync::Notify>,
+    )>,
 }
 
 impl Source {
@@ -185,16 +194,28 @@ impl Source {
             ensure_runtime_binding(&legacy, &self.identity.runtime)?;
         } else {
             let pinned = &anchor["sourceIdentity"];
-            let height: u32 = pinned["finalizedHeight"].as_u64()
-                .context("source identity finalized height missing; HOLD")?.try_into()?;
-            ensure!(height <= self.identity.finalized_height, "source identity is not finalized; HOLD");
+            let height: u32 = pinned["finalizedHeight"]
+                .as_u64()
+                .context("source identity finalized height missing; HOLD")?
+                .try_into()?;
+            ensure!(
+                height <= self.identity.finalized_height,
+                "source identity is not finalized; HOLD"
+            );
             let at = self.api.block_number_to_hash(height).await?;
-            let mut historical = serde_json::to_value(discover_source_identity(&self.api, at).await?)?;
+            let mut historical =
+                serde_json::to_value(discover_source_identity(&self.api, at).await?)?;
             // Old immutable reports predate this explicit timestamp field.
             if pinned.get("sourceTimestampMs").is_none() {
-                historical.as_object_mut().expect("identity object").remove("sourceTimestampMs");
+                historical
+                    .as_object_mut()
+                    .expect("identity object")
+                    .remove("sourceTimestampMs");
             }
-            ensure!(*pinned == historical, "native source identity report differs at its original finalized pin; HOLD");
+            ensure!(
+                *pinned == historical,
+                "native source identity report differs at its original finalized pin; HOLD"
+            );
             ensure_runtime_binding(&pinned["runtime"], &self.identity.runtime)?;
             ensure!(pinned["beefyActivationBlock"] == self.beefy_activation_block
                 && pinned["mmrStartBlock"] == self.mmr_start_block
@@ -236,7 +257,9 @@ impl Source {
             scanned_through: 0,
             scanned_hash: [0; 32],
             scan_path: None,
-            delivered: None,
+            retained_deliveries: Default::default(),
+            #[cfg(test)]
+            capture_gate: None,
         }
     }
 
@@ -316,7 +339,7 @@ impl Source {
             );
             self.scanned_through = saved.scanned_through;
             self.scanned_hash = saved.scanned_hash;
-            for (block, raw) in saved.pending.into_iter().chain(saved.delivered.into_iter()) {
+            for (block, raw) in saved.pending {
                 ensure!(
                     decode_versioned_finality_proof(&raw)?
                         .commitment
@@ -328,6 +351,34 @@ impl Source {
                     self.queue_justification(raw).await?;
                 }
             }
+            for (block, raw) in saved.retained_deliveries.into_iter().chain(saved.delivered) {
+                ensure!(
+                    decode_versioned_finality_proof(&raw)?
+                        .commitment
+                        .block_number
+                        == block,
+                    "retained source delivery identity changed; HOLD"
+                );
+                if block > resume_from {
+                    if let Some(existing) = self
+                        .retained_deliveries
+                        .get(&block)
+                        .or_else(|| self.pending.get(&block))
+                    {
+                        ensure!(
+                            commitment_identity(existing)? == commitment_identity(&raw)?,
+                            "conflicting retained source delivery at block {block}; HOLD"
+                        );
+                        if existing != &raw {
+                            self.recapture(block, raw.clone()).await?;
+                        }
+                    }
+                    // A retained delivery wins over a subscription duplicate,
+                    // without consuming a 1025th pending slot.
+                    self.pending.remove(&block);
+                    self.retained_deliveries.entry(block).or_insert(raw);
+                }
+            }
             let (current, _) = self.checkpoint_at(resume_from).await?;
             self.last_block = Some(resume_from);
             self.last_set_id = Some(current.id);
@@ -336,47 +387,22 @@ impl Source {
             self.scanned_hash = self.api.block_number_to_hash(self.scanned_through).await?.0;
         }
         self.scan_path = Some(path.to_owned());
-        self.persist_scan_journal(None)
+        self.persist_scan_journal()
     }
 
-    fn persist_scan_journal(&self, delivery: Option<(u32, &[u8])>) -> Result<()> {
+    fn persist_scan_journal(&self) -> Result<()> {
         let Some(path) = &self.scan_path else {
             return Ok(());
         };
-        // Pending raw proofs are bounded; accepted raw proofs live only in the
-        // caller's immutable submission journal, never an expanding RAM archive.
-        struct Undispatched<'a> {
-            pending: &'a std::collections::BTreeMap<u32, Vec<u8>>,
-            exclude: Option<u32>,
-        }
-        impl Serialize for Undispatched<'_> {
-            fn serialize<S: serde::Serializer>(
-                &self,
-                serializer: S,
-            ) -> std::result::Result<S::Ok, S::Error> {
-                use serde::ser::SerializeMap;
-                let count = self.pending.len()
-                    - usize::from(
-                        self.exclude
-                            .is_some_and(|block| self.pending.contains_key(&block)),
-                    );
-                let mut map = serializer.serialize_map(Some(count))?;
-                for (block, raw) in self.pending {
-                    if self.exclude != Some(*block) {
-                        map.serialize_entry(block, raw)?;
-                    }
-                }
-                map.end()
-            }
-        }
         #[derive(Serialize)]
         struct Saved<'a> {
             genesis: Hash32,
             bridge_domain: Hash32,
             scanned_through: u32,
             scanned_hash: Hash32,
-            pending: Undispatched<'a>,
+            pending: &'a std::collections::BTreeMap<u32, Vec<u8>>,
             delivered: Option<(u32, &'a [u8])>,
+            retained_deliveries: &'a std::collections::BTreeMap<u32, Vec<u8>>,
         }
         ethereum_client::finality_archive::atomic_json(
             path,
@@ -385,17 +411,26 @@ impl Source {
                 bridge_domain: self.bridge_domain,
                 scanned_through: self.scanned_through,
                 scanned_hash: self.scanned_hash,
-                pending: Undispatched {
-                    pending: &self.pending,
-                    exclude: delivery.map(|(block, _)| block),
-                },
-                delivered: delivery.or_else(|| {
-                    self.delivered
-                        .as_ref()
-                        .map(|(block, raw)| (*block, raw.as_slice()))
-                }),
+                pending: &self.pending,
+                // Read legacy delivered originals, but write each original once.
+                delivered: None,
+                retained_deliveries: &self.retained_deliveries,
             },
         )
+    }
+
+    /// Release originals only after the follower durably records authenticated
+    /// destination finality, never merely capture or mining.
+    pub(crate) fn acknowledge_finalized(&mut self, block: u32) -> Result<()> {
+        if self
+            .retained_deliveries
+            .first_key_value()
+            .is_some_and(|(&first, _)| first <= block)
+        {
+            self.retained_deliveries.retain(|&height, _| height > block);
+            self.persist_scan_journal()?;
+        }
+        Ok(())
     }
 
     /// Replay archived history before draining later durable originals, so late
@@ -411,16 +446,24 @@ impl Source {
             let finalized_hash = self.api.latest_finalized_block().await?;
             let finalized = self.api.block_hash_to_number(finalized_hash).await?;
 
+            let through = finalized.min(self.scanned_through);
             let next = self
-                .pending
-                .range(..=finalized.min(self.scanned_through))
+                .retained_deliveries
+                .range((
+                    std::ops::Bound::Excluded(self.last_block.unwrap_or(0)),
+                    std::ops::Bound::Unbounded,
+                ))
                 .next()
+                .filter(|(block, _)| **block <= through)
+                .into_iter()
+                .chain(self.pending.range(..=through).next())
+                .min_by_key(|(block, _)| **block)
                 .map(|(&block, raw)| (block, raw.clone()));
             let next = if next.is_some() {
                 next
             } else if self.scanned_through < finalized {
-                // New archive proofs go directly to durable delivery, not into a
-                // possibly saturated retained backlog of original justifications.
+                // Archive deliveries have their own durable storage rather than
+                // evicting a saturated subscription backlog.
                 let Some(next) = self.scan_range(finalized).await? else {
                     continue;
                 };
@@ -429,17 +472,21 @@ impl Source {
                 None
             };
             if let Some((block, raw)) = next {
-                let captured = self.capture(block, raw.clone(), finalized, true).await?;
-                // Commit the original delivered proof before advancing memory.
-                // An I/O failure leaves it pending and cannot lose a handover.
-                self.persist_scan_journal(Some((block, &raw)))?;
+                self.retained_deliveries
+                    .entry(block)
+                    .or_insert_with(|| raw.clone());
                 self.pending.remove(&block);
+                // Retain the exact original before the first cancellable capture
+                // await. A timeout retries it; a restart rescans before replaying it.
+                self.persist_scan_journal()?;
+                let captured = self.capture(block, raw, finalized, true).await?;
+                // Capture cannot advance the delivery cursor until authentication
+                // succeeds; retained originals remain until accepted on restart.
                 self.accepted
                     .insert(block, captured.validated.commitment_hash);
                 while self.accepted.len() > MAX_ACCEPTED_IDENTITIES {
                     self.accepted.pop_first();
                 }
-                self.delivered = Some((block, raw));
                 self.last_block = Some(block);
                 self.last_set_id = Some(captured.validated.signed.commitment.validator_set_id);
                 return Ok(captured);
@@ -481,8 +528,7 @@ impl Source {
                 .await
                 .with_context(|| format!("read block {block} for BEEFY catch-up"))?;
             let bytes = justification_bytes(&raw)?;
-            self.scanned_through = block;
-            self.scanned_hash = hash.0;
+            // Do not advance past a proof until it is retained or authenticated.
             if let Some(bytes) = bytes {
                 let proof_block = decode_versioned_finality_proof(&bytes)?
                     .commitment
@@ -490,21 +536,36 @@ impl Source {
                 ensure!(proof_block > 0, "genesis BEEFY commitment is not usable");
                 if self.last_block.is_none_or(|last| proof_block > last)
                     && !self.pending.contains_key(&proof_block)
+                    && !self.retained_deliveries.contains_key(&proof_block)
                     && proof_block <= block
                 {
+                    self.retained_deliveries.insert(proof_block, bytes.clone());
+                    self.scanned_through = block;
+                    self.scanned_hash = hash.0;
                     return Ok(Some((proof_block, bytes)));
                 }
                 self.queue_justification(bytes).await?;
             }
-            if self.pending.range(..=block).next().is_some() {
-                self.persist_scan_journal(None)?;
+            self.scanned_through = block;
+            self.scanned_hash = hash.0;
+            if self.pending.range(..=block).next().is_some()
+                || self
+                    .retained_deliveries
+                    .range((
+                        std::ops::Bound::Excluded(self.last_block.unwrap_or(0)),
+                        std::ops::Bound::Unbounded,
+                    ))
+                    .next()
+                    .is_some_and(|(height, _)| *height <= block)
+            {
+                self.persist_scan_journal()?;
                 return Ok(None);
             }
             if block % 32 == 0 {
-                self.persist_scan_journal(None)?;
+                self.persist_scan_journal()?;
             }
         }
-        self.persist_scan_journal(None)?;
+        self.persist_scan_journal()?;
         Ok(None)
     }
     async fn queue_justification(&mut self, bytes: Vec<u8>) -> Result<()> {
@@ -542,7 +603,11 @@ impl Source {
                 return Ok(());
             }
         }
-        if let Some(existing) = self.pending.get(&block) {
+        if let Some(existing) = self
+            .retained_deliveries
+            .get(&block)
+            .or_else(|| self.pending.get(&block))
+        {
             ensure!(
                 commitment_identity(existing)? == identity,
                 "conflicting BEEFY commitment for block {block}"
@@ -598,6 +663,11 @@ impl Source {
                     "BEEFY commitment history is not increasing"
                 );
             }
+        }
+        #[cfg(test)]
+        if let Some((entered, release)) = &self.capture_gate {
+            entered.notify_one();
+            release.notified().await;
         }
         let (current, next) = self.checkpoint_at(block).await?;
         let current_keys = key_arrays(&current.keys)?;
@@ -859,7 +929,10 @@ fn active_mmr_start(activation: Option<u32>, block: u32, count: u64) -> Result<(
         .filter(|s| *s > 0)
         .context("MMR count exceeds finalized source range")?;
     // MMR begins when this runtime is installed, possibly before BEEFY activation.
-    ensure!(u64::from(activation) >= start, "first BEEFY block precedes MMR start; HOLD");
+    ensure!(
+        u64::from(activation) >= start,
+        "first BEEFY block precedes MMR start; HOLD"
+    );
     ensure!(
         count == expected_leaf_count(start, block)?,
         "noncontiguous MMR range"
@@ -1529,7 +1602,7 @@ mod tests {
     #[test]
     fn restart_rewinds_proofless_scan_without_losing_pending_or_delivered_originals() -> Result<()>
     {
-        let pending = (101..100 + MAX_PENDING_JUSTIFICATIONS as u32)
+        let pending = (101..=100 + MAX_PENDING_JUSTIFICATIONS as u32)
             .map(|block| (block, block.to_le_bytes().to_vec()))
             .collect();
         let saved = ScanJournal {
@@ -1539,6 +1612,7 @@ mod tests {
             scanned_hash: [3; 32],
             pending,
             delivered: Some((100, vec![4; 32])),
+            retained_deliveries: Default::default(),
         };
         let mut restored: ScanJournal = serde_json::from_slice(&serde_json::to_vec(&saved)?)?;
         restored.rewind_to(50, [5; 32]);
@@ -1894,7 +1968,15 @@ mod tests {
         );
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("source-scan.json");
-        let original_cursor =
+        let (mut source, witness) = Source::connect_pair(
+            GearApi::new(rpc.as_str(), 3).await?,
+            GearApi::new(witness_rpc.as_str(), 3).await?,
+        )
+        .await?;
+        assert_eq!(source.source_genesis, genesis);
+        assert_eq!(witness.source_genesis, genesis);
+        assert_eq!(source.bridge_domain, witness.bridge_domain);
+        let saturated_pending =
             if let Some(original) = std::env::var_os("SOURCE_CATCHUP_SCAN_JOURNAL") {
                 let bytes = fs::read(original)?;
                 let saved: ScanJournal = serde_json::from_slice(&bytes)?;
@@ -1903,23 +1985,37 @@ mod tests {
                     "fixture must reproduce a saturated original backlog"
                 );
                 fs::write(&path, bytes)?;
-                Some(saved.scanned_through)
+                saved.pending
             } else {
-                None
-            };
-        let started = std::time::Instant::now();
-        timeout(Duration::from_secs(45), async {
-            let (mut source, witness) = Source::connect_pair(
-                GearApi::new(rpc.as_str(), 3).await?,
-                GearApi::new(witness_rpc.as_str(), 3).await?,
-            )
-            .await?;
-            assert_eq!(source.source_genesis, genesis);
-            assert_eq!(witness.source_genesis, genesis);
-            assert_eq!(source.bridge_domain, witness.bridge_domain);
-            if original_cursor.is_none() {
-                // Reproduce a cursor persisted while GRANDPA-finalized history
-                // still had no BEEFY proofs. The archive now contains them.
+                // Acquire genuine later originals from the owned archive before
+                // timing recovery. No invented heights, signatures or duplicate keys.
+                let mut pending = std::collections::BTreeMap::new();
+                for block in (expected_first + 1..=source.identity.finalized_height).rev() {
+                    let hash = source.api.block_number_to_hash(block).await?;
+                    let archived: JsonValue = source
+                        .api
+                        .api
+                        .rpc()
+                        .request("chain_getBlock", rpc_params![hash])
+                        .await?;
+                    if let Some(raw) = justification_bytes(&archived)? {
+                        let height = decode_versioned_finality_proof(&raw)?
+                            .commitment
+                            .block_number;
+                        if height > expected_first {
+                            pending.entry(height).or_insert(raw);
+                        }
+                    }
+                    if pending.len() == MAX_PENDING_JUSTIFICATIONS {
+                        break;
+                    }
+                }
+                ensure!(
+                    pending.len() == MAX_PENDING_JUSTIFICATIONS,
+                    "owned archive lacks 1024 distinct later original proofs"
+                );
+                // Also exercise ordinary proofless-cursor recovery, before the
+                // saturated legacy snapshot is installed below.
                 let saved = ScanJournal {
                     genesis: source.source_genesis,
                     bridge_domain: source.bridge_domain,
@@ -1927,13 +2023,53 @@ mod tests {
                     scanned_hash: source.identity.finalized_hash,
                     pending: Default::default(),
                     delivered: None,
+                    retained_deliveries: Default::default(),
                 };
                 fs::write(&path, serde_json::to_vec(&saved)?)?;
-            }
+                pending
+            };
+        let started = std::time::Instant::now();
+        timeout(Duration::from_secs(45), async {
             source.seek_from(resume.checked_add(1).context("resume height overflow")?)?;
             source.enable_scan_journal(&path, resume, &witness).await?;
             assert_eq!(source.scanned_through, resume);
+            let entered = std::sync::Arc::new(tokio::sync::Notify::new());
+            source.capture_gate = Some((
+                entered.clone(),
+                std::sync::Arc::new(tokio::sync::Notify::new()),
+            ));
+            {
+                let attempt = source.next_commitment();
+                tokio::pin!(attempt);
+                tokio::select! {
+                    _ = entered.notified() => {}
+                    result = &mut attempt => panic!("capture did not suspend: {result:?}"),
+                }
+                assert!(timeout(Duration::ZERO, attempt).await.is_err());
+            }
+            let interrupted: ScanJournal = serde_json::from_slice(&fs::read(&path)?)?;
+            let original = interrupted
+                .retained_deliveries
+                .get(&expected_first)
+                .context("cancelled direct scan must persist the original before capture")?
+                .clone();
+            assert_eq!(source.last_block, Some(resume));
+            assert_eq!(source.scanned_through, expected_first);
+            let cancelled_path = directory.path().join("cancelled-source-scan.json");
+            fs::copy(&path, &cancelled_path)?;
+            source.capture_gate = None;
             let first = source.next_commitment().await?;
+            assert_eq!(
+                first.raw, original,
+                "timeout retry must use identical raw bytes"
+            );
+            let mut cancelled = Source::connect(GearApi::new(rpc.as_str(), 3).await?).await?;
+            cancelled.seek_from(resume + 1)?;
+            cancelled
+                .enable_scan_journal(&cancelled_path, resume, &witness)
+                .await?;
+            assert_eq!(cancelled.next_commitment().await?.raw, original);
+            drop(cancelled);
             assert_eq!(
                 first.block, expected_first,
                 "catch-up must return the original earliest commitment"
@@ -1945,8 +2081,8 @@ mod tests {
             let saved: ScanJournal = serde_json::from_slice(&fs::read(&path)?)?;
             assert_eq!(saved.scanned_through, expected_first);
             assert_eq!(
-                saved.delivered.as_ref().map(|(block, _)| *block),
-                Some(expected_first)
+                saved.retained_deliveries.get(&expected_first),
+                Some(&first.raw)
             );
             assert!(
                 first.block < first.finalized_height,
@@ -1968,18 +2104,69 @@ mod tests {
                 "source-catchup original_scan={}",
                 fs::read_to_string(&path)?
             );
+            // Reproduce the old writer exactly: 1024 pending originals plus
+            // a distinct later delivered proof. Rewind must discover the
+            // earlier handover without overwriting that reserved original.
+            let reserved = source.next_commitment().await?;
+            ensure!(
+                saturated_pending
+                    .keys()
+                    .all(|block| *block > reserved.block),
+                "saturated fixture must leave the first two originals for direct scanning"
+            );
+            let legacy = ScanJournal {
+                genesis: source.source_genesis,
+                bridge_domain: source.bridge_domain,
+                scanned_through: source.scanned_through,
+                scanned_hash: source.scanned_hash,
+                pending: saturated_pending,
+                delivered: Some((reserved.block, reserved.raw.clone())),
+                retained_deliveries: Default::default(),
+            };
+            fs::write(&path, serde_json::to_vec(&legacy)?)?;
 
             // Lose the caller before it journals acceptance; only the scan file survives.
             drop(source);
             let mut source = Source::connect(GearApi::new(rpc.as_str(), 3).await?).await?;
             source.seek_from(resume + 1)?;
             source.enable_scan_journal(&path, resume, &witness).await?;
+            assert_eq!(source.pending.len(), MAX_PENDING_JUSTIFICATIONS);
+            assert_eq!(
+                source.retained_deliveries.get(&reserved.block),
+                Some(&reserved.raw)
+            );
             let replayed = source.next_commitment().await?;
             assert_eq!(replayed.block, first.block);
             assert_eq!(replayed.block_hash, first.block_hash);
             assert_eq!(
                 replayed.raw, first.raw,
                 "restart must retain the original signed proof bytes"
+            );
+            let saved: ScanJournal = serde_json::from_slice(&fs::read(&path)?)?;
+            assert_eq!(saved.pending.len(), MAX_PENDING_JUSTIFICATIONS);
+            assert_eq!(
+                saved.retained_deliveries.get(&first.block),
+                Some(&first.raw)
+            );
+            assert_eq!(
+                saved.retained_deliveries.get(&reserved.block),
+                Some(&reserved.raw)
+            );
+            // A second crash before acceptance preserves both originals.
+            drop(source);
+            source = Source::connect(GearApi::new(rpc.as_str(), 3).await?).await?;
+            source.seek_from(resume + 1)?;
+            source.enable_scan_journal(&path, resume, &witness).await?;
+            assert_eq!(source.next_commitment().await?.raw, first.raw);
+            let recovered = source.next_commitment().await?;
+            assert_eq!(recovered.block, reserved.block);
+            assert_eq!(recovered.raw, reserved.raw);
+            source.acknowledge_finalized(first.block)?;
+            let acknowledged: ScanJournal = serde_json::from_slice(&fs::read(&path)?)?;
+            assert!(!acknowledged.retained_deliveries.contains_key(&first.block));
+            assert_eq!(
+                acknowledged.retained_deliveries.get(&reserved.block),
+                Some(&reserved.raw)
             );
             drop(source);
 
@@ -1994,6 +2181,7 @@ mod tests {
             source
                 .enable_scan_journal(&path, first.block, &witness)
                 .await?;
+            assert!(!source.retained_deliveries.contains_key(&first.block));
             let mut previous_block = first.block;
             let mut previous_set = first.validated.signed.commitment.validator_set_id;
             let mut handovers = 0;

@@ -42,7 +42,13 @@ pub(crate) async fn verify_sync_committee_signature<B: BlsBackend>(
     let signing_root = signing_root::compute(attested_header.tree_hash_root(), domain);
 
     let points: ArkScale<Vec<G1>> = pub_keys.into();
-    let response = call(backend, Request::AggregateG1 { points: points.encode() }).await?;
+    let response = call(
+        backend,
+        Request::AggregateG1 {
+            points: points.encode(),
+        },
+    )
+    .await?;
     let Response::AggregateG1(bytes) = response else {
         return Err(BackendError::MalformedResponse);
     };
@@ -56,9 +62,13 @@ pub(crate) async fn verify_sync_committee_signature<B: BlsBackend>(
         return Err(BackendError::MalformedResponse);
     }
 
-    let response = call(backend, Request::MapToG2Affine {
-        message: signing_root.as_ref().to_vec(),
-    }).await?;
+    let response = call(
+        backend,
+        Request::MapToG2Affine {
+            message: signing_root.as_ref().to_vec(),
+        },
+    )
+    .await?;
     let Response::MapToG2Affine(bytes) = response else {
         return Err(BackendError::MalformedResponse);
     };
@@ -70,7 +80,14 @@ pub(crate) async fn verify_sync_committee_signature<B: BlsBackend>(
     let generator_g1_negative = G1Affine::generator().neg();
     let a: ArkScale<Vec<G1Affine>> = vec![generator_g1_negative, pub_key].into();
     let b: ArkScale<Vec<G2Affine>> = vec![signature, message.0].into();
-    let response = call(backend, Request::MultiMillerLoop { a: a.encode(), b: b.encode() }).await?;
+    let response = call(
+        backend,
+        Request::MultiMillerLoop {
+            a: a.encode(),
+            b: b.encode(),
+        },
+    )
+    .await?;
     let Response::MultiMillerLoop(miller_loop) = response else {
         return Err(BackendError::MalformedResponse);
     };
@@ -93,13 +110,25 @@ mod tests {
         let point: ArkScale<G1> = G1Affine::generator().into_group().into();
         let payload = point.encode();
         let mut response = Response::AggregateG1(payload.clone()).encode();
-        assert!(matches!(decode_exact::<Response>(&response), Ok(Response::AggregateG1(_))));
+        assert!(matches!(
+            decode_exact::<Response>(&response),
+            Ok(Response::AggregateG1(_))
+        ));
         response.push(0);
-        assert_eq!(decode_exact::<Response>(&response), Err(BackendError::MalformedResponse));
+        assert_eq!(
+            decode_exact::<Response>(&response),
+            Err(BackendError::MalformedResponse)
+        );
         assert!(decode_exact::<ArkScale<G1>>(&payload).is_ok());
         let mut trailing_payload = payload;
         trailing_payload.push(0);
-        assert!(matches!(decode_exact::<ArkScale<G1>>(&trailing_payload), Err(BackendError::MalformedResponse)));
-        assert!(matches!(decode_exact::<ArkScale<G1>>(&[]), Err(BackendError::MalformedResponse)));
+        assert!(matches!(
+            decode_exact::<ArkScale<G1>>(&trailing_payload),
+            Err(BackendError::MalformedResponse)
+        ));
+        assert!(matches!(
+            decode_exact::<ArkScale<G1>>(&[]),
+            Err(BackendError::MalformedResponse)
+        ));
     }
 }

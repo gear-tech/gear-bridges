@@ -57,7 +57,9 @@ impl<'a> ReplayBack<'a> {
         .await
         .map_err(backend::protocol_error)?;
 
-        let finalized_header = verified.finalized_header.ok_or(ReplayBackError::NoFinalityUpdate)?;
+        let finalized_header = verified
+            .finalized_header
+            .ok_or(ReplayBackError::NoFinalityUpdate)?;
         let mut state = self.state.borrow_mut();
         if state.replay_back.is_some() {
             return Err(ReplayBackError::AlreadyStarted);

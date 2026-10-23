@@ -117,13 +117,20 @@ extern "C" fn init() {
     }
     let checkpoints = <Vec<(u64, (u64, H256))> as sails_rs::scale_codec::DecodeAll>::decode_all(
         &mut payload.as_slice(),
-    ).expect("invalid owned checkpoint fixture");
+    )
+    .expect("invalid owned checkpoint fixture");
     assert!(!checkpoints.is_empty(), "owned checkpoint fixture is empty");
     for (index, (slot, (checkpoint, root))) in checkpoints.iter().enumerate() {
-        assert!(*slot > 0 && checkpoint >= slot && *root != H256::zero(),
-            "invalid owned checkpoint coordinates");
-        assert!(checkpoints[..index].iter().all(|(previous, _)| previous != slot),
-            "duplicate owned checkpoint slot");
+        assert!(
+            *slot > 0 && checkpoint >= slot && *root != H256::zero(),
+            "invalid owned checkpoint coordinates"
+        );
+        assert!(
+            checkpoints[..index]
+                .iter()
+                .all(|(previous, _)| previous != slot),
+            "duplicate owned checkpoint slot"
+        );
     }
     // Gear initializes a program once and runs these synchronous handlers serially.
     unsafe { core::ptr::addr_of_mut!(OWNED_CHECKPOINTS).write(checkpoints) };
@@ -148,7 +155,9 @@ extern "C" fn handle() {
     debug!("Received request for checkpoint for slot: {slot}");
 
     let owned = unsafe { &*core::ptr::addr_of!(OWNED_CHECKPOINTS) };
-    let checkpoint = owned.iter().chain(CHECKPOINTS)
+    let checkpoint = owned
+        .iter()
+        .chain(CHECKPOINTS)
         .find(|(s, _)| *s == slot)
         .map(|(_, (checkpoint, block_root))| (*checkpoint, sails_rs::H256::from(block_root.0)))
         .expect("checkpoint not found");

@@ -3,8 +3,7 @@ use sails_rs::{calls::*, futures::FutureExt, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
     traits::*, Config, Error, InitConfig, MessageStatus, NativeWrapperConfig, NativeWrapperMode,
-    Order, TokenSupply,
-    VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
+    Order, TokenSupply, VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
 };
 use vft_vara_client::{
     traits::{VftAdmin as _, VftNativeExchange as _, VftVaraFactory},
@@ -34,7 +33,12 @@ fn held_wrapper_config(
     NativeWrapperConfig {
         actor_id,
         ethereum_token,
-        code_id: H256::from(remoting.system().submit_code(vft_vara::WASM_BINARY).into_bytes()),
+        code_id: H256::from(
+            remoting
+                .system()
+                .submit_code(vft_vara::WASM_BINARY)
+                .into_bytes(),
+        ),
         mode: NativeWrapperMode::HeldEscrowV2,
     }
 }
@@ -352,13 +356,19 @@ async fn setup_with_wrapper(
         use vft_vara_v1_client::traits::VftVaraFactory as _;
         vft_vara_v1_client::VftVaraFactory::new(remoting.clone())
             .new(vft_vara_v1_client::Mainnet::No)
-            .send_recv(remoting.system().submit_code(vft_vara_v1::WASM_BINARY), b"salt")
+            .send_recv(
+                remoting.system().submit_code(vft_vara_v1::WASM_BINARY),
+                b"salt",
+            )
             .await
             .unwrap()
     } else {
         vft_vara_client::VftVaraFactory::new(remoting.clone())
             .new(Mainnet::No)
-            .send_recv(remoting.system().submit_code(vft_vara::WASM_BINARY), b"salt")
+            .send_recv(
+                remoting.system().submit_code(vft_vara::WASM_BINARY),
+                b"salt",
+            )
             .await
             .unwrap()
     };
@@ -3767,7 +3777,11 @@ async fn test_native_configuration_is_paused_and_gear_supply_only() {
         .unwrap();
     assert_eq!(
         service.native_wrapper().recv(manager).await.unwrap(),
-        Some(held_wrapper_config(&remoting, native, ERC20_TOKEN_GEAR_SUPPLY))
+        Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY
+        ))
     );
     assert!(service
         .remove_vara_to_eth_address(native)
@@ -4828,11 +4842,7 @@ async fn configure_cutover_destination(
             .await
             .unwrap();
     }
-    let wrapper = admin
-        .native_wrapper()
-        .recv(source)
-        .await
-        .unwrap();
+    let wrapper = admin.native_wrapper().recv(source).await.unwrap();
     admin
         .configure_native_wrapper(wrapper)
         .send_recv(destination)

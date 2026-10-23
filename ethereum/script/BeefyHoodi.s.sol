@@ -2,7 +2,7 @@
 pragma solidity ^0.8.37;
 
 import {Script} from "forge-std/Script.sol";
-import {DeploymentBase, DeploymentArguments} from "script/DeploymentBase.sol";
+import {DeploymentArguments, DeploymentBase} from "script/DeploymentBase.sol";
 import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 
 /**

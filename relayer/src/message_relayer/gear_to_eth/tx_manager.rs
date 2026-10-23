@@ -108,9 +108,14 @@ impl Transaction {
                 "HOLD: completion version/hash changed"
             );
             if self.journal_version >= 6 {
-                let policy = self.lane_policy.as_ref().ok_or_else(|| anyhow::anyhow!("HOLD: completion lacks approved lane policy"))?;
+                let policy = self.lane_policy.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("HOLD: completion lacks approved lane policy")
+                })?;
                 policy.validate(&self.message.message, signed)?;
-                anyhow::ensure!(evidence.token_delivery == policy.token_delivery_required, "HOLD: completion token effect disagrees with approved lane policy");
+                anyhow::ensure!(
+                    evidence.token_delivery == policy.token_delivery_required,
+                    "HOLD: completion token effect disagrees with approved lane policy"
+                );
             }
         }
         if let Some(evidence) = &self.failure_evidence {
@@ -176,7 +181,12 @@ impl Transaction {
         if let Some(signed) = &self.ethereum_submission {
             status_fetcher::validate_original_submission(&self.message.message, signed)?;
             if self.journal_version >= 6 {
-                self.lane_policy.as_ref().ok_or_else(|| anyhow::anyhow!("HOLD: signed original lacks approved lane policy"))?.validate(&self.message.message, signed)?;
+                self.lane_policy
+                    .as_ref()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("HOLD: signed original lacks approved lane policy")
+                    })?
+                    .validate(&self.message.message, signed)?;
             }
             anyhow::ensure!(
                 !unsigned,
@@ -271,7 +281,11 @@ impl TransactionManager {
         }
     }
 
-    pub fn with_lane_approvals(mut self, api: ethereum_client::EthApi, approvals: LaneApprovals) -> Self {
+    pub fn with_lane_approvals(
+        mut self,
+        api: ethereum_client::EthApi,
+        approvals: LaneApprovals,
+    ) -> Self {
         self.policy_api = Some(api);
         self.lane_approvals = approvals;
         self
@@ -338,9 +352,15 @@ impl TransactionManager {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("HOLD: completion has no original signed bytes"))?;
         status_fetcher::validate_completion(&current.message.message, signed, &evidence)?;
-        let policy = current.lane_policy.as_ref().ok_or_else(|| anyhow::anyhow!("HOLD: completion lacks approved lane policy"))?;
+        let policy = current
+            .lane_policy
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("HOLD: completion lacks approved lane policy"))?;
         policy.validate(&current.message.message, signed)?;
-        anyhow::ensure!(evidence.token_delivery == policy.token_delivery_required, "HOLD: completion token effect disagrees with approved lane policy");
+        anyhow::ensure!(
+            evidence.token_delivery == policy.token_delivery_required,
+            "HOLD: completion token effect disagrees with approved lane policy"
+        );
         anyhow::ensure!(
             evidence.inclusion.is_some() && evidence.checkpoint.is_some(),
             "HOLD: completion lacks authenticated original receipt"
@@ -479,7 +499,10 @@ impl TransactionManager {
             );
             return Ok(None);
         }
-        let api = self.policy_api.as_ref().ok_or_else(|| anyhow::anyhow!("HOLD: no approved outbound lane configuration"))?;
+        let api = self
+            .policy_api
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("HOLD: no approved outbound lane configuration"))?;
         let policy = self.lane_approvals.qualify(api, &message.message, None)?;
         self.storage
             .block_storage()
@@ -517,14 +540,27 @@ impl TransactionManager {
             let policy = match &tx.lane_policy {
                 Some(policy) => {
                     if let Some(signed) = &tx.ethereum_submission {
-                        self.lane_approvals.validate_saved(policy, api, &tx.message.message, signed)?;
+                        self.lane_approvals.validate_saved(
+                            policy,
+                            api,
+                            &tx.message.message,
+                            signed,
+                        )?;
                     } else {
-                        anyhow::ensure!(self.lane_approvals.qualify(api, &tx.message.message, None)? == *policy,
-                            "HOLD: saved unsigned lane policy differs from independent approval");
+                        anyhow::ensure!(
+                            self.lane_approvals
+                                .qualify(api, &tx.message.message, None)?
+                                == *policy,
+                            "HOLD: saved unsigned lane policy differs from independent approval"
+                        );
                     }
                     policy.clone()
                 }
-                None => self.lane_approvals.qualify(api, &tx.message.message, tx.ethereum_submission.as_ref())?,
+                None => self.lane_approvals.qualify(
+                    api,
+                    &tx.message.message,
+                    tx.ethereum_submission.as_ref(),
+                )?,
             };
             tx.lane_policy = Some(policy.clone());
             if let Some(signed) = &tx.ethereum_submission {
@@ -559,11 +595,17 @@ impl TransactionManager {
                     .await?;
                     anyhow::ensure!(
                         Self::same_original_receipt(&observed.receipt, &saved.receipt)
-                            && (!had_approved_policy || observed.token_delivery == saved.token_delivery),
+                            && (!had_approved_policy
+                                || observed.token_delivery == saved.token_delivery),
                         "HOLD: saved completion receipt/effect policy changed"
                     );
                     saved.token_delivery = observed.token_delivery;
-                    if saved.inclusion.is_none() || saved.checkpoint.as_ref().is_none_or(|checkpoint| checkpoint.beacon().is_none()) {
+                    if saved.inclusion.is_none()
+                        || saved
+                            .checkpoint
+                            .as_ref()
+                            .is_none_or(|checkpoint| checkpoint.beacon().is_none())
+                    {
                         saved.finalized_block_number = observed.finalized_block_number;
                         saved.finalized_block_hash = observed.finalized_block_hash;
                         saved.inclusion = observed.inclusion;
@@ -602,7 +644,12 @@ impl TransactionManager {
                                 && observed.included_block_hash == saved.included_block_hash,
                             "HOLD: failed original receipt changed"
                         );
-                        if saved.inclusion.is_none() || saved.checkpoint.as_ref().is_none_or(|checkpoint| checkpoint.beacon().is_none()) {
+                        if saved.inclusion.is_none()
+                            || saved
+                                .checkpoint
+                                .as_ref()
+                                .is_none_or(|checkpoint| checkpoint.beacon().is_none())
+                        {
                             saved.finalized_block_number = observed.finalized_block_number;
                             saved.finalized_block_hash = observed.finalized_block_hash;
                             saved.inclusion = observed.inclusion;
@@ -613,12 +660,12 @@ impl TransactionManager {
                     }
                 }
                 if let Some(saved) = &tx.nonce_disposition {
-                    let qualified = api.verify_finalized_submission_snapshot(
-                        &signed.raw_transaction,
-                        saved,
-                    ).await?;
+                    let qualified = api
+                        .verify_finalized_submission_snapshot(&signed.raw_transaction, saved)
+                        .await?;
                     if tx.historical_evidence.is_none() && saved.legacy().is_some() {
-                        tx.historical_evidence = Some(serde_json::json!({"nonce_disposition": saved}));
+                        tx.historical_evidence =
+                            Some(serde_json::json!({"nonce_disposition": saved}));
                     }
                     tx.nonce_disposition = Some(qualified);
                 }
@@ -776,7 +823,12 @@ impl TransactionManager {
             let Some(tx) = transactions.get_mut(&tx_uuid) else {
                 return Ok(false);
             };
-            tx.lane_policy.as_ref().ok_or_else(|| anyhow::anyhow!("HOLD: signing has no durable approved lane policy"))?.validate(&tx.message.message, &signed)?;
+            tx.lane_policy
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("HOLD: signing has no durable approved lane policy")
+                })?
+                .validate(&tx.message.message, &signed)?;
             if let Some(original) = &tx.ethereum_submission {
                 anyhow::ensure!(
                     original == &signed,
@@ -849,12 +901,19 @@ impl TransactionManager {
             }
             if let Some(saved) = &tx.nonce_disposition {
                 if saved.legacy().is_some() {
-                    let api = self.policy_api.as_ref().ok_or_else(|| anyhow::anyhow!("HOLD: legacy nonce fence requires Beacon authority"))?;
-                    let signed = tx.ethereum_submission.as_ref().ok_or_else(|| anyhow::anyhow!("HOLD: legacy nonce fence lacks original signed bytes"))?;
+                    let api = self.policy_api.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("HOLD: legacy nonce fence requires Beacon authority")
+                    })?;
+                    let signed = tx.ethereum_submission.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("HOLD: legacy nonce fence lacks original signed bytes")
+                    })?;
                     // Requalify this exact retained fence, never substitute the watcher's newer pin.
-                    let qualified = api.verify_finalized_submission_snapshot(&signed.raw_transaction, saved).await?;
+                    let qualified = api
+                        .verify_finalized_submission_snapshot(&signed.raw_transaction, saved)
+                        .await?;
                     if tx.historical_evidence.is_none() {
-                        tx.historical_evidence = Some(serde_json::json!({"nonce_disposition": saved}));
+                        tx.historical_evidence =
+                            Some(serde_json::json!({"nonce_disposition": saved}));
                     }
                     tx.nonce_disposition = Some(qualified);
                 }
@@ -868,7 +927,9 @@ impl TransactionManager {
             tx.status = TxStatus::NeedsReconciliation {
                 diagnostic: diagnostic.clone(),
             };
-            tx.nonce_disposition.as_ref().is_some_and(|snapshot| snapshot.beacon().is_some() && snapshot.pinned_nonce_consumed())
+            tx.nonce_disposition.as_ref().is_some_and(|snapshot| {
+                snapshot.beacon().is_some() && snapshot.pinned_nonce_consumed()
+            })
         };
         self.storage.save(self).await?;
         log::warn!("HOLD: outbound transaction {tx_uuid}: {diagnostic}");
@@ -1312,27 +1373,50 @@ pub(crate) mod tests {
         PrivateKeySigner::from_bytes(&B256::from([7; 32])).unwrap()
     }
 
-    pub(crate) fn policy(message: &Message, signed: &PreparedContentMessage, token_delivery: bool) -> LanePolicy {
+    pub(crate) fn policy(
+        message: &Message,
+        signed: &PreparedContentMessage,
+        token_delivery: bool,
+    ) -> LanePolicy {
         status_fetcher::tests::lane_policy(message, signed, B256::repeat_byte(1), token_delivery)
     }
 
-    async fn approved_manager(storage: Arc<dyn Storage>, message: &Message) -> (status_fetcher::tests::WatchRpc, TransactionManager) {
-        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false).await.unwrap();
+    async fn approved_manager(
+        storage: Arc<dyn Storage>,
+        message: &Message,
+    ) -> (status_fetcher::tests::WatchRpc, TransactionManager) {
+        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false)
+            .await
+            .unwrap();
         let signed = status_fetcher::tests::signed_message(message).await;
-        let policy = status_fetcher::tests::lane_policy(message, &signed, rpc.api.finality_identity().unwrap().1, false);
-        let manager = TransactionManager::new(storage).with_lane_approvals(rpc.api.clone(), LaneApprovals::from_policy(policy));
+        let policy = status_fetcher::tests::lane_policy(
+            message,
+            &signed,
+            rpc.api.finality_identity().unwrap().1,
+            false,
+        );
+        let manager = TransactionManager::new(storage)
+            .with_lane_approvals(rpc.api.clone(), LaneApprovals::from_policy(policy));
         (rpc, manager)
     }
 
     #[tokio::test]
     async fn legacy_nonce_fence_is_qualified_and_saved_before_lane_release() {
-        let path = std::env::temp_dir().join(format!("gear-nonce-qualification-{}", Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("gear-nonce-qualification-{}", Uuid::new_v4()));
         let storage = bound_storage(&path).await;
-        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false).await.unwrap();
+        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false)
+            .await
+            .unwrap();
         rpc.advance_finalized_to(101);
         let mut tx = transaction();
         let signed = status_fetcher::tests::signed_message(&tx.message.message).await;
-        let qualified = rpc.api.get_finalized_submission_snapshot(&signed.raw_transaction).await.unwrap().unwrap();
+        let qualified = rpc
+            .api
+            .get_finalized_submission_snapshot(&signed.raw_transaction)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(qualified.pinned_nonce_consumed());
         let legacy = serde_json::json!({
             "block_number": qualified.block_number(),
@@ -1342,27 +1426,44 @@ pub(crate) mod tests {
         });
         let saved: FinalizedSubmissionSnapshot = serde_json::from_value(legacy.clone()).unwrap();
         tx.journal_version = 5;
-        tx.status = TxStatus::NeedsReconciliation { diagnostic: "retained legacy fence".into() };
+        tx.status = TxStatus::NeedsReconciliation {
+            diagnostic: "retained legacy fence".into(),
+        };
         tx.remember_attempt(signed.hash);
         tx.nonce_disposition = Some(saved);
-        tx.lane_policy = Some(status_fetcher::tests::lane_policy(&tx.message.message, &signed, rpc.api.finality_identity().unwrap().1, false));
+        tx.lane_policy = Some(status_fetcher::tests::lane_policy(
+            &tx.message.message,
+            &signed,
+            rpc.api.finality_identity().unwrap().1,
+            false,
+        ));
         tx.ethereum_submission = Some(signed);
         let uuid = tx.uuid;
-        let manager = TransactionManager::new(storage)
-            .with_lane_approvals(rpc.api.clone(), LaneApprovals::from_policy(tx.lane_policy.clone().unwrap()));
+        let manager = TransactionManager::new(storage).with_lane_approvals(
+            rpc.api.clone(),
+            LaneApprovals::from_policy(tx.lane_policy.clone().unwrap()),
+        );
         manager.add_transaction(tx).await;
         manager.update_storage().await.unwrap();
         // The incoming pin is deliberately invalid: only the exact saved fence may authorize release.
         let mut newer = serde_json::to_value(&qualified).unwrap();
         newer["block_number"] = serde_json::json!(qualified.block_number() + 1);
         let newer = serde_json::from_value(newer).unwrap();
-        assert!(manager.hold_active_transaction(uuid, "watcher advanced".into(), Some(newer)).await.unwrap());
-        let persisted: Transaction = serde_json::from_slice(&tokio::fs::read(path.join(uuid.to_string())).await.unwrap()).unwrap();
+        assert!(manager
+            .hold_active_transaction(uuid, "watcher advanced".into(), Some(newer))
+            .await
+            .unwrap());
+        let persisted: Transaction =
+            serde_json::from_slice(&tokio::fs::read(path.join(uuid.to_string())).await.unwrap())
+                .unwrap();
         let snapshot = persisted.nonce_disposition.as_ref().unwrap();
         assert!(snapshot.beacon().is_some());
         assert_eq!(snapshot.block_number(), qualified.block_number());
         assert_eq!(snapshot.block_hash(), qualified.block_hash());
-        assert_eq!(persisted.historical_evidence.unwrap()["nonce_disposition"], legacy);
+        assert_eq!(
+            persisted.historical_evidence.unwrap()["nonce_disposition"],
+            legacy
+        );
         tokio::fs::remove_dir_all(path).await.unwrap();
     }
 
@@ -1370,14 +1471,19 @@ pub(crate) mod tests {
     async fn unknown_lane_holds_without_creating_a_journal_or_signature() {
         let path = std::env::temp_dir().join(format!("gear-unknown-lane-{}", Uuid::new_v4()));
         let storage = bound_storage(&path).await;
-        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false).await.unwrap();
+        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false)
+            .await
+            .unwrap();
         let manager = TransactionManager::new(storage.clone())
             .with_lane_approvals(rpc.api.clone(), LaneApprovals::default());
         let message = transaction().message;
         let error = manager.accept_message(message.clone()).await.err().unwrap();
         assert!(error.to_string().contains("no independently approved"));
         assert!(manager.transactions.read().await.is_empty());
-        assert!(!storage.outbound_nonce_owned(message.message.nonce_be).await.unwrap());
+        assert!(!storage
+            .outbound_nonce_owned(message.message.nonce_be)
+            .await
+            .unwrap());
         tokio::fs::remove_dir_all(path).await.unwrap();
     }
 
@@ -1385,7 +1491,9 @@ pub(crate) mod tests {
     async fn historical_original_requires_exact_approval_and_retains_immutable_evidence() {
         let path = std::env::temp_dir().join(format!("gear-historical-policy-{}", Uuid::new_v4()));
         let storage = bound_storage(&path).await;
-        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false).await.unwrap();
+        let rpc = status_fetcher::tests::watch_rpc_with_policy(false, false)
+            .await
+            .unwrap();
         let mut tx = transaction();
         let signed = signed_content(&tx, 36).await;
         tx.journal_version = 5;
@@ -1399,7 +1507,12 @@ pub(crate) mod tests {
         manager.update_storage().await.unwrap();
         let journal = path.join(uuid.to_string());
         let bytes = tokio::fs::read(&journal).await.unwrap();
-        let mut policy = status_fetcher::tests::lane_policy(&tx.message.message, &signed, rpc.api.finality_identity().unwrap().1, false);
+        let mut policy = status_fetcher::tests::lane_policy(
+            &tx.message.message,
+            &signed,
+            rpc.api.finality_identity().unwrap().1,
+            false,
+        );
         for original_hash in [None, Some(B256::repeat_byte(99))] {
             policy.original_hash = original_hash;
             let rejected = TransactionManager::new(storage.clone())
@@ -1413,7 +1526,8 @@ pub(crate) mod tests {
             .with_lane_approvals(rpc.api.clone(), LaneApprovals::from_policy(policy.clone()));
         approved.load_from_storage().await.unwrap();
         approved.verify_completed(&rpc.api).await.unwrap();
-        let saved: Transaction = serde_json::from_slice(&tokio::fs::read(&journal).await.unwrap()).unwrap();
+        let saved: Transaction =
+            serde_json::from_slice(&tokio::fs::read(&journal).await.unwrap()).unwrap();
         assert_eq!(saved.journal_version, 6);
         assert_eq!(saved.lane_policy, Some(policy.clone()));
         assert!(saved.ethereum_submission == Some(signed));
@@ -1437,10 +1551,18 @@ pub(crate) mod tests {
         tx.status = TxStatus::Completed;
         tx.remember_attempt(signed.hash);
         tx.ethereum_tx_hash = Some(signed.hash);
-        tx.completion = Some(status_fetcher::tests::evidence(&tx.message.message, &signed, false));
+        tx.completion = Some(status_fetcher::tests::evidence(
+            &tx.message.message,
+            &signed,
+            false,
+        ));
         tx.lane_policy = Some(policy(&tx.message.message, &signed, true));
         tx.ethereum_submission = Some(signed);
-        assert!(tx.validate_journal().unwrap_err().to_string().contains("token effect"));
+        assert!(tx
+            .validate_journal()
+            .unwrap_err()
+            .to_string()
+            .contains("token effect"));
     }
 
     fn inclusion(tx: &Transaction) -> (RelayedMerkleRoot, MerkleProof) {
@@ -1609,7 +1731,8 @@ pub(crate) mod tests {
             "block_hash": alloy::primitives::B256::from([4; 32]),
             "pinned_nonce_consumed": true,
             "message_processed": true
-        })).unwrap();
+        }))
+        .unwrap();
         manager
             .hold_active_transaction(
                 uuid,
@@ -1644,7 +1767,10 @@ pub(crate) mod tests {
                 .transaction_hash,
             signed.hash
         );
-        assert_eq!(serde_json::to_value(&tx.nonce_disposition).unwrap(), serde_json::to_value(Some(snapshot)).unwrap());
+        assert_eq!(
+            serde_json::to_value(&tx.nonce_disposition).unwrap(),
+            serde_json::to_value(Some(snapshot)).unwrap()
+        );
         assert!(tx.ethereum_tx_hash.is_none() && tx.completion.is_none());
         drop(active);
         assert!(restored.completed.read().await.is_empty());

@@ -79,7 +79,9 @@ pub(super) fn retryable_native_child(guard: &super::LogGuard<'_>) -> bool {
 }
 
 pub(super) fn native_mode(token: ActorId) -> Result<NativeWrapperMode, Error> {
-    VftManager::new().state().native_wrapper
+    VftManager::new()
+        .state()
+        .native_wrapper
         .filter(|wrapper| wrapper.actor_id == token)
         .map(|wrapper| wrapper.mode)
         .ok_or(Error::InvalidReconciliation)
@@ -296,11 +298,11 @@ pub fn handle_persistent_reply() {
                 decode_complete_reply::<Mint>(&bytes, |e| Error::Internal(format!("{e:?}")))
                     .map(|_| false)
             }
-            ChildAction::Unlock => {
-                decode_complete_reply::<TransferFrom>(&bytes, |e| Error::Internal(format!("{e:?}")))?
-                    .then_some(false)
-                    .ok_or(Error::TokenOperationRejected)
-            }
+            ChildAction::Unlock => decode_complete_reply::<TransferFrom>(&bytes, |e| {
+                Error::Internal(format!("{e:?}"))
+            })?
+            .then_some(false)
+            .ok_or(Error::TokenOperationRejected),
             ChildAction::Native => {
                 let mode = native_mode(data.token_id)?;
                 let r = decode_complete_reply::<RedeemEscrow>(&bytes, |e| {
@@ -319,7 +321,8 @@ pub fn handle_persistent_reply() {
                         Ok(true)
                     }
                     PayoutStatus::Queued
-                        if r.returned_value == 0 || refund_backed(mode, r.amount, r.returned_value) =>
+                        if r.returned_value == 0
+                            || refund_backed(mode, r.amount, r.returned_value) =>
                     {
                         Err(Error::NativeSettlementPending)
                     }
@@ -443,10 +446,12 @@ pub(super) async fn reconcile_native_log(
     guard.check()?;
     let mut redemption = original.ok_or(Error::InvalidReconciliation)?;
     validate_redemption(&guard, &redemption)?;
-    if mode == NativeWrapperMode::HeldEscrowV2 && matches!(
-        redemption.status,
-        PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
-    ) {
+    if mode == NativeWrapperMode::HeldEscrowV2
+        && matches!(
+            redemption.status,
+            PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+        )
+    {
         let held = query_native::<HeldRedemption>(&guard, &deposit.operation_id, config).await?;
         guard.check()?;
         if let Some(held) = held {
@@ -591,16 +596,27 @@ mod tests {
         for returned_value in [0, 4, 5, 6] {
             redemption.returned_value = returned_value;
             assert_eq!(
-                refund_backed(NativeWrapperMode::EscrowV1, redemption.amount, returned_value),
+                refund_backed(
+                    NativeWrapperMode::EscrowV1,
+                    redemption.amount,
+                    returned_value
+                ),
                 returned_value == 5
             );
             assert_eq!(
-                refund_backed(NativeWrapperMode::HeldEscrowV2, redemption.amount, returned_value),
+                refund_backed(
+                    NativeWrapperMode::HeldEscrowV2,
+                    redemption.amount,
+                    returned_value
+                ),
                 returned_value >= 5
             );
             for status in [
-                PayoutStatus::Queued, PayoutStatus::Returned, PayoutStatus::Ambiguous,
-                PayoutStatus::Delivered, PayoutStatus::Refunded,
+                PayoutStatus::Queued,
+                PayoutStatus::Returned,
+                PayoutStatus::Ambiguous,
+                PayoutStatus::Delivered,
+                PayoutStatus::Refunded,
             ] {
                 redemption.status = status;
                 assert_eq!(
@@ -609,9 +625,10 @@ mod tests {
                 );
                 assert_eq!(
                     retry_backed_credit(NativeWrapperMode::HeldEscrowV2, &redemption),
-                    matches!(redemption.status,
-                        PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous)
-                        && returned_value >= 5
+                    matches!(
+                        redemption.status,
+                        PayoutStatus::Queued | PayoutStatus::Returned | PayoutStatus::Ambiguous
+                    ) && returned_value >= 5
                 );
             }
         }

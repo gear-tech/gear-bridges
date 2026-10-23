@@ -72,7 +72,8 @@ impl EthApi {
     ) -> Result<QueueDeployment> {
         let (approved_chain, approved_genesis) = self.finality_identity()?;
         ensure!(
-            view.checkpoint().chain_id() == approved_chain && view.genesis_hash() == approved_genesis,
+            view.checkpoint().chain_id() == approved_chain
+                && view.genesis_hash() == approved_genesis,
             "HOLD: queue deployment view differs from configured identity"
         );
         let provider = self.raw_provider();
@@ -206,11 +207,13 @@ mod tests {
         .with_beacon_finality(config, std::env::var("ETH_BEACON_STORE")?)
         .await?;
         if let Ok(witness) = std::env::var("ETH_WITNESS_RPC") {
-            api = api.with_data_witness(
-                &witness,
-                std::env::var("ETH_CHAIN_ID")?.parse()?,
-                std::env::var("ETH_GENESIS_HASH")?.parse()?,
-            ).await?;
+            api = api
+                .with_data_witness(
+                    &witness,
+                    std::env::var("ETH_CHAIN_ID")?.parse()?,
+                    std::env::var("ETH_GENESIS_HASH")?.parse()?,
+                )
+                .await?;
         }
         let hash = std::env::var("QUEUE_TEST_CREATION")?.parse()?;
         let mut view = api.verified_finalized_view().await?;

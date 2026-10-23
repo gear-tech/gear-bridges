@@ -222,8 +222,10 @@ mod tests {
         let mut header: alloy::rpc::types::Header = Default::default();
         header.inner.extra_data = uuid::Uuid::new_v4().as_bytes().to_vec().into();
         header.hash = header.inner.hash_slow();
-        let mut genesis: alloy::rpc::types::Block = Default::default();
-        genesis.header = header.clone();
+        let genesis: alloy::rpc::types::Block = alloy::rpc::types::Block {
+            header: header.clone(),
+            ..Default::default()
+        };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let server = HttpServer::new(move || {
@@ -265,11 +267,7 @@ mod tests {
         .unwrap();
         let path =
             std::env::temp_dir().join(format!("deposit-discovery-{}.json", uuid::Uuid::now_v7()));
-        let discovery = Arc::new(
-            JSONBlockStorage::new(path.clone(), identity)
-                .await
-                .unwrap(),
-        );
+        let discovery = Arc::new(JSONBlockStorage::new(path.clone(), identity).await.unwrap());
         let extractor = DepositEventExtractor::new(
             PollingEthApi::new(&endpoint)
                 .await

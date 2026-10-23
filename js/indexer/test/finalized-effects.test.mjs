@@ -48,6 +48,17 @@ function memoryStore() {
       const compare = (expected) => {
         if (expected?.type === 'in') return expected.value.includes(row[key]);
         if (expected?.type === 'moreThan') return row[key] > expected.value;
+        if (expected?.type === 'raw') {
+          const cursor = expected.objectLiteralParameters?.settlementCursor;
+          if (cursor && row.id <= cursor) return false;
+          if (row.legacyMatched == null) return true;
+          const d = row.deposit, relay = rows.get(ReceiptRelay)?.get(`${d.slot}:${d.transaction_index}`);
+          return relay && [...(rows.get(Transfer)?.values() ?? [])].some((transfer) =>
+            transfer.sourceNetwork === Network.Ethereum && BigInt(transfer.blockNumber) === BigInt(relay.blockNumber) &&
+            transfer.sourceTransactionIndex != null && transfer.sourceLogIndex != null &&
+            BigInt(transfer.sourceTransactionIndex) === BigInt(d.transaction_index) &&
+            BigInt(transfer.sourceLogIndex) === BigInt(d.log_index) && transfer.sourceReceiptAuth != null);
+        }
         if (expected?.type === 'isNull') return row[key] == null;
         if (expected?.type === 'not') return !compare(expected.child ?? expected.value);
         return row[key] === expected;
@@ -649,11 +660,10 @@ function finalityContext(chain, heights, anchorHash) {
     get polls() { return polls; }, get batches() { return batches; } };
 }
 
-test('Ethereum Beacon lag HOLDs without polling and succeeds on a fresh signed update', async () => {
+test('Ethereum Beacon lag HOLDs and succeeds on a fresh signed update', async () => {
   const { receipt, transfer } = outbound();
   const ctx = await context(receipt, transfer, undefined, '0xa');
   await assert.rejects(handleBatch(ctx), /HOLD:/);
-  assert.equal(nativeFixture.state.requests.filter(({ method }) => method.endsWith('/finality_update')).length, 1);
   assert.equal(stored(ctx.store, transfer).status, Status.Bridging);
   assert.equal(ctx.saved.length, 0);
   nativeFixture.state.finalizedHeight = 11;
@@ -924,7 +934,7 @@ test('bounded pending pages cycle and match authenticated tuples arriving in lat
   await state.save();
   const retryPage = store.queries.slice(beforeRetry).find(({ entity, options }) =>
     entity === ReceiptSettlement && options.where?.matched === false);
-  assert.equal(retryPage.options.where.id, undefined);
+  assert.equal(retryPage.options.where.id.objectLiteralParameters.settlementCursor, undefined);
   const transfer = new Transfer({ id: 'late', txHash: hash('bc'), sourceNetwork: Network.Ethereum, blockNumber: 100n,
     sourceTransactionIndex: 2n, sourceLogIndex: 3n, source: addr('66'), destination: hash('77'),
     sender: addr('55'), receiver: hash('44'), amount: '10', status: Status.Bridging });

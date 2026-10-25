@@ -8,7 +8,7 @@ const address = `0x${'11'.repeat(20)}`;
 const txHash = hash(500);
 const hex = (n) => `0x${n.toString(16)}`;
 function fixture(primaryTip = 4, witnessTip = 3) {
-  const chain = Array.from({ length: 6 }, (_, n) => ({ number: hex(n), hash: hash(n + 1),
+  const chain = Array.from({ length: Math.max(6, primaryTip + 1, witnessTip + 1) }, (_, n) => ({ number: hex(n), hash: hash(n + 1),
     parentHash: hash(n), stateRoot: hash(100 + n), transactionsRoot: hash(200 + n),
     receiptsRoot: hash(300 + n), timestamp: hex(1_700_000_000 + n), transactions: [txHash] }));
   const receipt = { transactionHash: txHash, blockHash: chain[2].hash, blockNumber: '0x2',
@@ -71,12 +71,74 @@ test('retained checkpoint cannot regress, change fields, or fall off ancestry', 
   await assert.rejects(evidence.qualifyFinality(f.clients, previous));
 });
 
-test('retained continuity walks every intervening parent, not only its endpoint', async () => {
-  const f = fixture(3, 3);
+test('retained continuity checks all 3600 parents on both providers beyond the fresh-tip deadline', async (t) => {
+  const f = fixture(3603, 3603);
+  f.primary.tip = f.witness.tip = 3;
   const previous = await evidence.qualifyFinality(f.clients);
-  f.primary.tip = f.witness.tip = 5;
-  f.primary.chain[4].parentHash = f.witness.chain[4].parentHash = hash(999);
-  await assert.rejects(evidence.qualifyFinality(f.clients, previous));
+  const retained = structuredClone(previous);
+  f.primary.tip = f.witness.tip = 3603;
+  f.calls.length = 0;
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  for (const side of ['primary', 'witness']) {
+    const original = f.clients[`${side}Call`];
+    f.clients[`${side}Call`] = async (method, params) => {
+      if (method === 'eth_getBlockByNumber' && params[0] !== 'finalized') now += 100;
+      return original(method, params);
+    };
+  }
+  const checkpoint = await evidence.qualifyFinality(f.clients, previous);
+  assert.equal(checkpoint.number, '3603');
+  assert.ok(now > 300_000);
+  assert.deepEqual(previous, retained);
+  const parents = Array.from({ length: 3600 }, (_, i) => hex(3602 - i));
+  for (const side of [f.primary, f.witness]) {
+    const reads = f.calls.filter((call) => call.side === side && call.method === 'eth_getBlockByNumber');
+    assert.deepEqual(reads.map(({ params }) => params[0]), [
+      '0x0', 'finalized', hex(3603), ...parents, hex(3603),
+    ]);
+  }
+});
+
+test('retained continuity walks every intervening parent on either provider, not only its endpoint', async () => {
+  for (const side of ['primary', 'witness']) {
+    const f = fixture(3, 3);
+    const previous = await evidence.qualifyFinality(f.clients);
+    const retained = structuredClone(previous);
+    f.primary.tip = f.witness.tip = 5;
+    f[side].chain[4].parentHash = hash(999);
+    await assert.rejects(evidence.qualifyFinality(f.clients, previous), /HOLD: broken finalized Ethereum ancestry/);
+    assert.deepEqual(previous, retained);
+  }
+});
+
+test('retained continuity still HOLDs on a 10-second parent RPC timeout from either provider', async (t) => {
+  for (const side of ['primary', 'witness']) {
+    const f = fixture(3, 3);
+    const previous = await evidence.qualifyFinality(f.clients);
+    const retained = structuredClone(previous);
+    f.primary.tip = f.witness.tip = 5;
+    const original = f.clients[`${side}Call`];
+    let stalled = false;
+    f.clients[`${side}Call`] = async (method, params) => {
+      if (method === 'eth_getBlockByNumber' && params[0] === '0x4') {
+        stalled = true;
+        return new Promise(() => {});
+      }
+      return original(method, params);
+    };
+    // Healthy RPCs settle in microtasks; only the stalled parent reaches its timer.
+    t.mock.method(Date, 'now', () => 0);
+    t.mock.method(globalThis, 'setTimeout', (fn, duration) => {
+      assert.equal(duration, 10_000);
+      return setImmediate(fn);
+    });
+    t.mock.method(globalThis, 'clearTimeout', clearImmediate);
+    await assert.rejects(evidence.qualifyFinality(f.clients, previous), /HOLD: Ethereum RPC timed out \(eth_getBlockByNumber\)/);
+    assert.equal(stalled, true);
+    assert.deepEqual(previous, retained);
+    t.mock.restoreAll();
+  }
 });
 
 test('fresh finality pin must survive post-acquisition explicit-height recheck', async () => {

@@ -1,5 +1,7 @@
 import type { GearApi, HexString, MessageQueuedData, GearCoreMessageUserUserMessage } from '@gear-js/api';
 import { GearClient } from '@gear-js/bridge';
+import type { AddressOrPair, SignerOptions, SubmittableExtrinsic } from '@polkadot/api/types';
+import type { ISubmittableResult } from '@polkadot/types/types';
 
 export type BridgeReply = { nonce: bigint; ethTokenId: `0x${string}` };
 
@@ -58,6 +60,73 @@ export async function submitVaraBridgeRequest<T extends BridgeReply & { txHash: 
     );
   }
   return original;
+}
+
+export function signAndSendFinalized(
+  extrinsic: SubmittableExtrinsic<'promise', ISubmittableResult>,
+  address: AddressOrPair,
+  options: Partial<SignerOptions>,
+  deadline: number,
+): Promise<ISubmittableResult> {
+  return new Promise((resolve, reject) => {
+    let unsubscribe: (() => void) | undefined;
+    let terminal = false;
+    let txHash: string | undefined;
+    const finish = () => {
+      terminal = true;
+      clearTimeout(timer);
+      unsubscribe?.();
+      unsubscribe = undefined;
+    };
+    const fail = (error: unknown) => {
+      if (terminal) return;
+      finish();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const expire = () => {
+      // Before wallet signing completes, extrinsic.hash identifies unsigned bytes.
+      const original = txHash ?? (extrinsic.isSigned ? extrinsic.hash.toHex() : undefined);
+      fail(
+        new Error(
+          `HOLD: Vara finalized inclusion deadline expired; transaction outcome is unknown. ${
+            original
+              ? `Original transaction ${original}.`
+              : 'Signed transaction hash unavailable; the pending wallet request may still complete.'
+          } Do not submit another transaction; reconcile the original submission first.`,
+        ),
+      );
+    };
+    const timer = setTimeout(expire, Math.max(0, deadline - Date.now()));
+    if (Date.now() >= deadline) {
+      expire();
+      return;
+    }
+    try {
+      extrinsic
+        .signAndSend(address, options, (result) => {
+          if (terminal) return;
+          txHash = result.txHash.toHex();
+          if (Date.now() >= deadline) {
+            expire();
+            return;
+          }
+          const { status } = result;
+          if (status.isDropped || status.isInvalid || status.isUsurped || status.isFinalityTimeout) {
+            fail(new Error(`Vara transaction ${txHash}: ${status.type}. Reconcile before retrying.`));
+          } else if (status.isFinalized) {
+            finish();
+            resolve(result);
+          }
+        })
+        .then((unsub) => {
+          if (terminal) unsub();
+          else unsubscribe = unsub;
+        })
+        .catch(fail);
+    } catch (error) {
+      fail(error);
+    }
+  });
 }
 
 export async function waitForFinalizedReplies(

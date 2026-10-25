@@ -8,6 +8,7 @@ This page describes the current runtime composition of the bridge. The implement
 - `ethereum-client::signed_transaction` checks signed-envelope hashes, complete decoding, nonce/destination, chain and signer constraints. Each lane still validates its typed calldata and owns signing, persistence and broadcast recovery.
 - `gear-rpc-client::observation` shares finalized-range extrinsic discovery and reply-to scanning. Callers qualify the range and retained pins, authenticate dispatch/reply identities, and persist their own cursors and outcomes. Deployment keeps its full-range inclusion uniqueness check.
 - `gear-common::{durable, signer_ownership}` owns durable immutable writes and per-genesis/account signer exclusion, including cutover ownership. Deployment tooling no longer depends on the relayer actor for those mechanisms.
+  Recovery of an identical immutable record syncs its parent directory even when `.new` is absent: a prior attempt may have stopped after unlinking `.new` but before that sync. Failure to sync remains an error, not acknowledged durable ownership.
 - The SDK owns the standard VFT-manager settlement adapter and shared Gear reply traversal; the frontend supplies generated pinned readers. Subscription handling, original-request authentication and arbitrary consumer effect policies remain explicit.
 
 These are shared evidence mechanisms, not a shared recovery state machine. Journal schemas, save-before-broadcast boundaries, native refund-versus-delivery semantics, and independent lane ownership remain unchanged.
@@ -228,6 +229,8 @@ The refund down-migration refuses while either `transfer.status` or retained
 evidence whose transfer counterpart has not arrived yet.
 
 Both indexers hold the entire database callback while an otherwise valid finalized head lags the batch. They poll every 30 seconds without a five-attempt ceiling, reauthenticate the previous height/hash before replacing it, and reject regression, malformed responses, missing history or canonical conflicts. Gear also disables hot-block ingestion. Bounded RPC timeouts remain; process shutdown cancels waiting. Neither projection effects nor the processor cursor commit before the full batch and final anchor validate.
+
+Retained Ethereum indexer checkpoint catch-up checks every intervening parent on both providers. The finite historical walk uses a fresh 10-second timeout for each RPC rather than the 300-second fresh-tip qualification deadline, so checkpoint age alone cannot prevent recovery. Broken links, missing history and stalled requests still HOLD; the candidate anchor is rechecked before it replaces the retained checkpoint.
 
 Outbound queue receipts that arrive before their Vara counterpart are retained in `CompletedTransfer.outboundReceipt`, not discarded or marked complete. Migration `1791936000000-outbound_completion.js` adds this authenticated-receipt evidence and the bounded pending-match index. Each later batch rechecks the original canonical finalized inclusion, exact message identity and same-receipt token effect before completing the late counterpart. Replayed receipts compare structurally across PostgreSQL JSONB key ordering. Legacy rows without this evidence cannot authorize completion.
 

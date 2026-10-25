@@ -52,8 +52,9 @@ pub fn immutable_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
                 "HOLD: interrupted cutover evidence has a different intent"
             );
             fs::remove_file(&temp)?;
-            File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()?;
         }
+        // The original write may have stopped after unlinking .new but before syncing.
+        File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()?;
         return Ok(());
     }
     if temp.try_exists()? {
@@ -76,4 +77,45 @@ pub fn immutable_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     fs::remove_file(&temp)?;
     File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn existing_record_does_not_acknowledge_an_unsyncable_directory() {
+        // Root bypasses directory read permissions; run this regression unprivileged.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let directory = std::env::temp_dir().join(format!(
+            "immutable-recovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("owner.json");
+        // Model the state after the link and unlink, before the parent was synced.
+        fs::write(&path, serde_json::to_vec("original").unwrap()).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o300)).unwrap();
+        let result = immutable_json(&path, &"original");
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let recovered = immutable_json(&path, &"original");
+        let conflict = immutable_json(&path, &"different");
+        let retained = fs::read(&path).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+
+        assert!(
+            result.is_err(),
+            "must not acknowledge without syncing the directory"
+        );
+        recovered.unwrap();
+        assert!(conflict.is_err(), "must not replace the original ownership");
+        assert_eq!(retained, serde_json::to_vec("original").unwrap());
+    }
 }

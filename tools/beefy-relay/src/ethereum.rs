@@ -625,6 +625,14 @@ pub struct DestinationCheckpoint {
     pub next_root: Hash32,
 }
 
+fn validate_queue_root_minimum(floor: u64, mmr_start_block: u64) -> Result<u64> {
+    ensure!(
+        floor > 0 && floor <= u64::from(u32::MAX) && floor >= mmr_start_block,
+        "queue immutable root minimum invalid; HOLD"
+    );
+    Ok(floor)
+}
+
 // Owned loopback routes exercise two transports, not production provider independence.
 #[cfg(test)]
 struct AnvilWitness {
@@ -1239,7 +1247,7 @@ impl Ethereum {
         Ok(self.api.finality_identity()?.1)
     }
 
-    pub(crate) async fn queue_root_minimum(&self) -> Result<u64> {
+    pub(crate) async fn queue_root_minimum(&self, mmr_start_block: u64) -> Result<u64> {
         let view = self.api.verified_finalized_view().await?;
         let primary = TokenQueueBinding::new(self.queue_address, self.api.raw_provider().clone());
         let witness =
@@ -1259,7 +1267,12 @@ impl Ethereum {
             "HOLD: Ethereum providers disagree on queue root minimum"
         );
         view.recheck(self.api.raw_provider()).await?;
-        Ok(value.try_into()?)
+        validate_queue_root_minimum(
+            value
+                .try_into()
+                .context("queue immutable root minimum invalid; HOLD")?,
+            mmr_start_block,
+        )
     }
 
     /// Recover immutable constructor evidence, not the advancing latest checkpoint.
@@ -2960,6 +2973,28 @@ mod tests {
         primitives::TxKind,
     };
     use sp_core::crypto::UncheckedFrom;
+
+    #[test]
+    fn queue_root_minimum_validates_authenticated_mmr_start() {
+        for (floor, start, valid) in [
+            (100, 100, true),
+            (101, 100, true),
+            (u64::from(u32::MAX), 100, true),
+            (99, 100, false),
+            (0, 0, false),
+            (u64::from(u32::MAX) + 1, 100, false),
+        ] {
+            let result = validate_queue_root_minimum(floor, start);
+            if valid {
+                assert_eq!(result.unwrap(), floor);
+            } else {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "queue immutable root minimum invalid; HOLD"
+                );
+            }
+        }
+    }
 
     async fn commitment_signing_fixture() -> Result<(
         Ethereum,

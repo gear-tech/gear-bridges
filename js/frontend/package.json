@@ -6,6 +6,7 @@
   "scripts": {
     "start": "vite",
     "build": "vite build",
+    "test": "node --experimental-strip-types test/submission.test.ts && node --experimental-strip-types test/native-profile.test.ts",
     "preview": "vite preview",
     "codegen": "graphql-codegen --require dotenv/config"
   },

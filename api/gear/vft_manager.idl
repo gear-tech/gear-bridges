@@ -121,6 +121,7 @@ type Error = enum {
   TokenOperationRejected,
   /// The approved immutable native wrapper cannot retain held liabilities.
   NativeHoldUnsupported,
+  InvalidRecipient,
 };
 
 /// Code identity is a governance assertion, independently authenticated offchain.

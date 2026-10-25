@@ -434,6 +434,58 @@ contract VaraQueueRootVerifierTest is BeefyFixtureTest {
         assertFalse(verifyAsQueue(verifier, p.leaf.parentNumber, root, encodeProof(p)));
     }
 
+    function testAuthenticatedQueueEpochTransitionsRemainAccepted() public {
+        uint64 historicalTimestamp = uint64(fixtureUint(0, "sourceTimestampMs"));
+        bytes32 firstRoot = bytes32(uint256(0x7007));
+        QueueProof memory first = customQueueProofForEpoch(
+            client, 100, 103, firstRoot, historicalTimestamp, uint64(block.timestamp * 1000), 7
+        );
+        assertEq(client.latestBeefyBlock(), 103);
+        assertEq(client.latestMMRRoot(), first.anchorRoot);
+        bytes32 checkpoint = stateHash(client);
+
+        // QueueId is authenticated metadata, not a fixed generation admission policy.
+        QueueProof memory unsignedMutation = abi.decode(abi.encode(first), (QueueProof));
+        unsignedMutation.queueId = 8;
+        bytes memory mutatedProof = encodeProof(unsignedMutation);
+        assertFalse(verifyAsQueue(verifier, 100, firstRoot, mutatedProof));
+        vm.expectRevert(IMessageQueue.InvalidQueueRootProof.selector);
+        queue.submitMerkleRoot(100, firstRoot, mutatedProof);
+        assertEq(stateHash(client), checkpoint);
+        assertEq(queue.getMerkleRoot(100), bytes32(0));
+        assertEq(queue.getMerkleRootTimestampForBlock(100), 0);
+        assertEq(queue.genesisBlock(), 0);
+        assertEq(queue.maxBlockNumber(), 0);
+        assertFalse(queue.isProcessed(7));
+        assertFalse(queue.isProcessed(8));
+
+        bytes memory firstProof = encodeProof(first);
+        assertTrue(verifyAsQueue(verifier, 100, firstRoot, firstProof));
+        queue.submitMerkleRoot(100, firstRoot, firstProof);
+        assertEq(queue.getMerkleRoot(100), firstRoot);
+        assertEq(queue.genesisBlock(), 100);
+        assertEq(queue.maxBlockNumber(), 100);
+        uint256 firstRegisteredAt = queue.getMerkleRootTimestampForBlock(100);
+
+        vm.warp(block.timestamp + 3);
+        bytes32 secondRoot = bytes32(uint256(0x8008));
+        QueueProof memory second = customQueueProofForEpoch(
+            client, 101, 104, secondRoot, historicalTimestamp + 3_000, uint64(block.timestamp * 1000), 8
+        );
+        assertEq(client.latestBeefyBlock(), 104);
+        assertEq(client.latestMMRRoot(), second.anchorRoot);
+        bytes memory secondProof = encodeProof(second);
+        assertTrue(verifyAsQueue(verifier, 101, secondRoot, secondProof));
+        queue.submitMerkleRoot(101, secondRoot, secondProof);
+        assertEq(queue.getMerkleRoot(101), secondRoot);
+        assertEq(queue.getMerkleRoot(100), firstRoot);
+        assertEq(queue.getMerkleRootTimestampForBlock(100), firstRegisteredAt);
+        assertEq(queue.genesisBlock(), 100);
+        assertEq(queue.maxBlockNumber(), 101);
+        assertFalse(queue.isProcessed(7));
+        assertFalse(queue.isProcessed(8));
+    }
+
     function testUnchangedQueueMaturityReceiverAndReplay() public {
         VaraMessage memory message =
             VaraMessage(7, bytes32(uint256(77)), address(receiver), bytes("real receiver payload"));

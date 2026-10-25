@@ -114,6 +114,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Filter files
         id: filter
         uses: dorny/paths-filter@v4
@@ -135,6 +137,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
 
       - name: "Install: Linux packages"
         run: |
@@ -244,6 +253,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
 
       - name: "Install: Linux packages"
         run: |
@@ -303,6 +319,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
 
       - name: "Install: Linux packages"
         run: |
@@ -352,6 +375,16 @@ jobs:
           docker pull ghcr.io/gear-tech/node:v2.1.1
           docker run --name "$NODE_CONTAINER_NAME" --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v2.1.1 gear --dev --tmp --rpc-external
 
+      - name: Run retained-manager regressions
+        run: |
+          cargo test --locked --release -p tests vft_manager::gtest::test_zero_receiver_rejected_without_economic_effects -- --exact --nocapture --test-threads=1
+          cargo test --locked --release -p tests vft_manager::init -- --exact --nocapture --test-threads=1
+          cargo test --locked --release -p tests vft_manager::gtest:: -- --test-threads=1
+          cargo test --locked --release -p vft-manager-tool mode_bound_counts_and_historical_inference -- --test-threads=1
+
+      - name: Run affected native libraries
+        run: cargo test --locked --release -p vft-manager-app -p vft-vara-app -p ethereum-client -p relayer -p beefy-relay --lib
+
       - name: Run tests
         run: |
           cargo test --locked --release --workspace --features beefy-relay/deployment || {
@@ -361,8 +394,13 @@ jobs:
           }
 
       - name: Run solidity tests
+        env:
+          FOUNDRY_FORCE: "true"
         run: |
           cd ethereum
+          forge test --match-contract VaraQueueRootVerifierTest --match-test testAuthenticatedQueueEpochTransitionsRemainAccepted -vvv
+          forge test --match-contract VaraQueueRootVerifierTest --match-test testUnchangedQueueMaturityReceiverAndReplay -vvv
+          forge test --match-contract ERC20ManagerTest
           forge test --force --threads 1
 
       - name: Stop Gear node container (if any)

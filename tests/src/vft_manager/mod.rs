@@ -234,7 +234,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
     let mut service =
         vft_manager_client::VftManager::new(remoting.clone().with_suri(suri_unauthorized));
     let reply = service
-        .request_bridging(vft_id, amount, Default::default())
+        .request_bridging(vft_id, amount, H160::from([1u8; 20]))
         .send(vft_manager_id)
         .await;
 
@@ -1123,6 +1123,21 @@ async fn init() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
+    let result = service
+        .request_bridging(Default::default(), 0.into(), H160::zero())
+        .with_gas_limit(gas_limit)
+        .send_recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert_eq!(result, Err(vft_manager_client::Error::InvalidRecipient));
+    assert!(service
+        .request_briding_msg_tracker_state(0, 10)
+        .with_gas_limit(gas_limit)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?
+        .is_empty());
+
     // teleport requests should fail since the ERC20Manager address is not set
     let result = service
         .submit_receipt(0, 0, vec![])
@@ -1132,7 +1147,7 @@ async fn init() -> Result<()> {
         .map_err(|e| anyhow!("{e:?}"));
     assert!(result.is_err(), "result = {result:?}");
     let result = service
-        .request_bridging(Default::default(), 0.into(), Default::default())
+        .request_bridging(Default::default(), 0.into(), H160::from([1u8; 20]))
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await

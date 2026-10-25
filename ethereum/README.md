@@ -324,6 +324,19 @@ This narrow recovery capability grants no UUPS upgrade or general pause role.
 ### Mainnet custody-preserving migration candidate
 
 Keep the existing queue proxy, ERC20 manager, token contracts and Vara programs.
+This branch finalization retains VFT/VFT-VARA and Ethereum token identities and
+uses `EscrowV1` only for production compatibility. It authorizes no production
+execution, new token, wrapper migration or held/v2 production path. The Ethereum
+verifier migration does not require manager replacement. If separately required,
+replace a manager only with a newly constructed program, never an in-place
+code/state upgrade, retaining the original manager's queryable evidence.
+Require complete admission/reservation inventory and actual v1
+`OutstandingRedemptions == 0` before `BeginCutover` and again paused/drained
+before custody transfer; `BeginCutover` alone and v2 blocking-zero do not prove
+that gate. Immutable-v1 A2 partial/excess recovery, A6 hold consent and
+held-liability release limitations remain production blockers. See the
+[manager-replacement inventory gate](../docs/running-the-bridge.md#mandatory-manager-replacement-inventory-gate--accepted-p0-a3-availability-risk).
+
 The queue at `0x8E01Fbf136cA97627ca241dB9EFf1DFE3f2195F6` used implementation
 `0xadf9f599277f41907cf86109833d1601b433dc5b` (initializer version 6) at Ethereum
 block 26,183,239. Its authenticated runtime bytecode and real claim inputs are in
@@ -347,6 +360,15 @@ after migration. Previously registered roots remain redeemable below the floor;
 new registrations use block-specific maturity. Reconcile and publish all needed
 legacy root coverage before selecting the floor; catch up with genuine ZK roots
 if the MMR start is beyond the distance bound. Never invent empty progress.
+
+`VaraBridgeMetadata::hash` authenticates `QueueId`, but the verifier does not
+enforce a queue-generation admission policy: properly authenticated epoch
+transitions remain accepted, whereas an unsigned QueueId mutation cannot reuse
+the original proof. This is a policy deferral, not a demonstrated nonce-reset
+exploit or an accepted production risk. Explicit reviewer acknowledgment and an
+independent runtime reset/global nonce-uniqueness review remain required before
+production activation. Do not invent an `expectedQueueId` manifest field or
+treat authenticated metadata as that missing admission policy.
 
 Run the bytecode transition regressions and the opt-in archival fork rehearsal:
 
@@ -395,6 +417,11 @@ are rejected. Mock-based unit suites always deploy fresh fixtures; the removed
 migration tests. The dedicated CI job sets `REQUIRE_MAINNET_MIGRATION=true`, making
 a missing archive RPC fail the integrated scenario rather than silently skip it.
 An archive rejection is a failed qualification, not permission to change the pin.
+The protected archive qualification must actually run both
+`test_DeploymentMainnetBeefyMigration()` and
+`testMainnetForkMigrationPreservesCustodyAndRedeemsLegacyClaim()` successfully;
+an optional skip or ordinary PR CI success is not archive qualification. Even
+successful archive results remain rehearsal only, not production approval.
 
 #### Retained migration operator inputs
 
@@ -442,6 +469,11 @@ must come from the complete independently approved liability/permission audit;
 the tool cannot infer missing historical obligations from an incomplete list.
 The RPC must support canonical finalized blocks, archival state and recovery
 timelock grant/revoke history.
+The retained production profile must keep the approved v1 wrapper identity and
+actual IDL digest; newer source/codec support cannot patch immutable deployed
+code. Keep incompatible profiles fail-closed rather than rewriting their pins
+to match the candidate. V2 capability support is for separately qualified v2
+deployments, not this migration route.
 The recovery-role inventory must include every live role, including the
 timelock's implicit `CANCELLER_ROLE` grants to proposers.
 
@@ -521,6 +553,9 @@ Release pipeline, in order:
    the whole architectural WIP as a release shortcut.
 2. Approve the production source runtime, weights/full-state migration rehearsal,
    validator BEEFY keys, destination-bound domain and activation/MMR insertion pins.
+   Independently authenticate the real current/next BEEFY validator rosters and
+   MMR/bootstrap history; fixture signatures and a successful fork are not that
+   approval.
    At the 2026-10-13 read-only refresh, both public Vara endpoints reported spec
    11000 at block 36,889,688, without BEEFY/MMR runtime APIs or BEEFY fields in
    queued session keys. These are matching provider observations, not authenticated
@@ -547,6 +582,10 @@ Release pipeline, in order:
    both indexers, source governance authorization and interruption/restart against
    the exact retained-state release profile. A fresh-token deployment is not this
    acceptance test. Retain legacy claim services and historical proofs.
+   For any separately authorized manager replacement, enforce the
+   [predecessor bundle/preset-switch gate](../docs/running-the-bridge.md#frontend-predecessor-bundle-and-preset-switch-gate);
+   seamless frontend predecessor routing remains deferred, not implemented by
+   indexer authentication.
 6. Review implementation/verifier/client hashes, existing governance authority,
    recovery timelock code/roles/delay and multisig policy, expected legacy
    verifier/maximum, floor, calldata and pause/unpause sequencing. Only separately
@@ -556,6 +595,11 @@ Release pipeline, in order:
 Source activation, mainnet follower qualification, full accounting, end-to-end
 acceptance and governance approval remain release gates. Local fork success
 neither authorizes a public transaction nor qualifies mainnet activation.
+Queue-generation policy, seamless predecessor UI routing and external alarm
+delivery/escalation remain explicit deferrals requiring reviewer acknowledgment;
+none is presumed accepted here. Before activation, complete the independent
+runtime reset/global nonce-uniqueness review and
+[operational alarm qualification](../docs/running-the-bridge.md#shutdown-restart-and-recovery).
 
 
 ### Copied BEEFY sources and licenses

@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Check changed files
         id: changed
@@ -68,6 +70,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
 
 
       - name: 'Install: NodeJS 20.x'
@@ -88,7 +97,7 @@ jobs:
       - name: Read-only CI gateway boundaries
         run: node js/bridge-js/test/test_readonly_rpc_gateway.mjs
       - name: Offline SDK protocol checks (not live qualification)
-        run: yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts --mode unit
+        run: yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts test/examples.test.ts --mode unit
 
 
       - name: 'Lint'
@@ -186,6 +195,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
 
       - name: Install rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -232,17 +248,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Set up Node.js 20.x
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
+
+      - name: Set up Node.js 24.x
         uses: actions/setup-node@v7
         with:
-          node-version: 20.x
+          node-version: 24.x
 
       - name: Install dependencies
         run: yarn workspaces focus frontend gear-bridges gear-bridge-common @gear-js/bridge
 
       - name: Build
         run: yarn build:frontend
+
+      - name: Run submission and native profile regressions
+        run: yarn workspace frontend test
 
       - name: Typecheck frontend against shared SDK
         run: PATH="$PWD/node_modules/.bin:$PATH" yarn workspace frontend exec tsc -p tsconfig.app.json --noEmit

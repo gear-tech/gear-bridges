@@ -71,4 +71,5 @@ pub enum Error {
     TokenOperationRejected,
     /// The approved immutable native wrapper cannot retain held liabilities.
     NativeHoldUnsupported,
+    InvalidRecipient,
 }

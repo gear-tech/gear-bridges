@@ -94,6 +94,14 @@ Every existing VFT/wrapper ActorId, CodeId, ledger, supply, allowance and backin
 remains unchanged. Original manager evidence stays queryable under its own ABI.
 An older wrapper without even the approved v1 escrow APIs blocks deployment.
 
+For this branch's retained production route, use `EscrowV1` only and retain the
+existing Ethereum token contracts as well as all VFT/VFT-VARA identities. Manager
+replacement is optional for the separate Ethereum verifier migration; when
+required, it uses the newly constructed program above, never existing manager
+state in place. No wrapper migration, new token, held/v2 production path or
+production execution is authorized by branch finalization. The `HeldEscrowV2`
+behavior below describes separately qualified v2 deployments only.
+
 A queued mailbox payout is not settled until its original reply is authenticated.
 `EscrowV1` never calls `HeldRedemption`, `HoldRedemption` or `BlockingRedemptions`.
 Only an exact-full-backed `Queued` original (`returned_value == amount`) may
@@ -141,6 +149,10 @@ Before `BeginCutover` and again before the first paused/drained custody `Upgrade
 perform the [mandatory complete-inventory scan](../../docs/running-the-bridge.md#mandatory-manager-replacement-inventory-gate--accepted-p0-a3-availability-risk).
 Successful transaction history or journals alone cannot enumerate reservations.
 Missing complete inventory or unresolved rows means **HOLD**, never force-clear.
+For retained v1, authenticate actual `OutstandingRedemptions == 0` before
+`BeginCutover` and again at that paused/drained boundary. `BeginCutover` does not
+prove this operational inventory gate. A v2 `BlockingRedemptions == 0` observation
+cannot replace the v1 requirement or authorize resetting reservations.
 
 The admin lifecycle is:
 
@@ -164,7 +176,8 @@ The admin lifecycle is:
 3. `Upgrade(destination)` checks the prepared destination, the paused source's
    local obligations, and the same wrapper's manager and mode-selected zero count:
    actual `OutstandingRedemptions` for v1, actual `BlockingRedemptions` for v2.
-   Only qualified v2 held liabilities may remain financially outstanding. It enters
+   Only separately qualified v2 deployments may retain held financial liabilities;
+   that path is excluded from this retained-v1 production route. It enters
    irreversible `Transferring` and transfers the frozen,
    sorted token inventory. Each enqueue and original child record is atomic.
    Concurrent continuation calls cannot claim a token twice. Continue this same

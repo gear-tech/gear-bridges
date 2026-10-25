@@ -3011,13 +3011,9 @@ pub async fn follow_tokens(
             && checkpoint.next_root == anchor.next.root,
         "token client bootstrap does not equal authenticated source checkpoint"
     );
+    let floor = ethereum.queue_root_minimum(source.mmr_start_block).await?;
     if state["bootstrap"].is_null() {
         state["bootstrap"] = bootstrap;
-        let floor = ethereum.queue_root_minimum().await?;
-        ensure!(
-            floor > 0 && floor <= u64::from(u32::MAX),
-            "queue immutable root minimum invalid; HOLD"
-        );
         let cursor = u32::try_from(floor)?.saturating_sub(1);
         state["rootMinimum"] = json!(floor);
         let cursor_hash = source.api.block_number_to_hash(cursor).await?;
@@ -3029,12 +3025,10 @@ pub async fn follow_tokens(
         save(output, &mut state, Some(&ethereum))?;
     }
     ensure!(
-        state["rootMinimum"].is_null()
-            || number(&state["rootMinimum"])? == ethereum.queue_root_minimum().await?,
+        state["rootMinimum"].is_null() || state["rootMinimum"].as_u64() == Some(floor),
         "immutable queue floor changed; HOLD"
     );
     if state["rootMinimum"].is_null() {
-        let floor = ethereum.queue_root_minimum().await?;
         let cursor = u32::try_from(floor)?
             .checked_sub(1)
             .context("invalid immutable root floor")?;
@@ -3332,6 +3326,8 @@ mod tests {
         for error in [
             anyhow::anyhow!("source identity changed; HOLD"),
             anyhow::anyhow!("finalized hash changed; HOLD"),
+            anyhow::anyhow!("queue immutable root minimum invalid; HOLD"),
+            anyhow::anyhow!("immutable queue floor changed; HOLD"),
             ethereum_client::Error::FinalizedAncestryConflict.into(),
             alloy::transports::TransportErrorKind::http_error(401, "timeout".into()).into(),
             subxt_rpcs::Error::User(subxt_rpcs::UserError::method_not_found()).into(),
@@ -5632,6 +5628,8 @@ mod tests {
                 json!(format!("{:#x}", provider.default_signer_address()));
             publisher["rootPublisherSigner"] = json!(format!("{root_sender:#x}"));
             publisher["roots"] = json!({"original":registration});
+            publisher["rootMinimum"] =
+                json!(ethereum.queue_root_minimum(source.mmr_start_block).await?);
             fs::write(&publisher_state, serde_json::to_vec(&publisher)?)?;
             let anchor_entry = &publisher["commitments"][2];
             let anchor_tx = B256::from(array::<32>(&anchor_entry["txHash"])?);
@@ -5705,6 +5703,35 @@ mod tests {
             .with_data_witness(&witness_rpc.url, chain_id, genesis)
             .await?;
             let original_api = std::mem::replace(&mut ethereum.api, restarted_api);
+            for saved_floor in [Value::Null, json!("invalid"), json!(0)] {
+                let mut held = publisher.clone();
+                held["rootMinimum"] = saved_floor;
+                let held_bytes = serde_json::to_vec(&held)?;
+                fs::write(&publisher_state, &held_bytes)?;
+                let error = crate::root_publication::publish_root_locked(
+                    &rpc,
+                    &source_witness_rpc,
+                    &primary_rpc.url,
+                    &finality,
+                    &wallet_path,
+                    &manifest_path,
+                    &publisher_state,
+                    &registration,
+                    &restart_path,
+                    Some(&fixture),
+                    crate::ethereum::PublicEthereumNetwork::Hoodi,
+                )
+                .await
+                .unwrap_err();
+                ensure!(
+                    error.to_string() == "immutable queue floor changed; HOLD"
+                        && fs::read(&publisher_state)? == held_bytes
+                        && fs::read(&restart_path)? == saved_bytes
+                        && primary_rpc.blocked_receipts.load(Ordering::SeqCst) == 0,
+                    "floor HOLD changed a reconciled original or fetched receipt bodies: {error:#}"
+                );
+            }
+            fs::write(&publisher_state, serde_json::to_vec(&publisher)?)?;
             for _ in 0..2 {
                 ensure!(
                     !crate::root_publication::reconcile_root_original(
@@ -5918,6 +5945,9 @@ mod tests {
                 "queueId":advanced_proof.snapshot.queue_id,"kind":kind,"queueRoot":bytes(published_root)});
             publisher["rootPublisherSigner"] = json!(format!("{sender:#x}"));
             publisher["roots"] = json!({"approved":registration});
+            let floor = ethereum.queue_root_minimum(source.mmr_start_block).await?;
+            publisher["rootMinimum"] = json!(floor);
+            publisher["bootstrapDeployment"] = pin.clone();
             fs::write(&publisher_path, serde_json::to_vec(&publisher)?)?;
             let registration_path = approved_dir.join("registration.json");
             fs::write(&registration_path, serde_json::to_vec(&registration)?)?;
@@ -5934,11 +5964,56 @@ mod tests {
                 .client()
                 .request::<_, Value>("anvil_setIntervalMining", (1u64,))
                 .await?;
-            let result = tokio::time::timeout(
-                Duration::from_secs(180),
-                tokio::process::Command::new(&relay_binary)
+            let follower_wallet = approved_dir.join("floor-follower-wallet.json");
+            let follower_signer =
+                alloy::signers::local::PrivateKeySigner::from_bytes(&B256::from([17; 32]))?;
+            fs::write(
+                &follower_wallet,
+                serde_json::to_vec(
+                    &json!({"address":format!("{:#x}",follower_signer.address()),
+                    "private_key":format!("0x{}",hex::encode([17u8;32]))}),
+                )?,
+            )?;
+            fs::set_permissions(&follower_wallet, fs::Permissions::from_mode(0o600))?;
+            let original_journal = fs::read(directory.join("state.json"))?;
+            let original_root = fs::read(&root_path)?;
+            let mut successful = None;
+            for (follower, saved_floor) in [
+                (false, None),
+                (false, Some(Value::Null)),
+                (false, Some(json!(floor.to_string()))),
+                (false, Some(json!(floor + 1))),
+                (true, Some(json!(floor + 1))),
+                (true, Some(json!(floor.to_string()))),
+                (false, Some(json!(floor))),
+            ] {
+                let should_succeed = !follower && saved_floor == Some(json!(floor));
+                let mut candidate = publisher.clone();
+                match saved_floor {
+                    Some(saved) => candidate["rootMinimum"] = saved,
+                    None => {
+                        candidate.as_object_mut().unwrap().remove("rootMinimum");
+                    }
+                }
+                if follower {
+                    candidate["followerSigner"] =
+                        json!(format!("{:#x}", follower_signer.address()));
+                }
+                let candidate_bytes = serde_json::to_vec(&candidate)?;
+                fs::write(&publisher_path, &candidate_bytes)?;
+                let nonce_before = provider.get_transaction_count(sender).pending().await?;
+                let follower_nonce = provider
+                    .get_transaction_count(follower_signer.address())
+                    .pending()
+                    .await?;
+                let mut command = tokio::process::Command::new(&relay_binary);
+                command
                     .args([
-                        "tokens-publish-root",
+                        if follower {
+                            "tokens-follow"
+                        } else {
+                            "tokens-publish-root"
+                        },
                         "--source-rpc",
                         &rpc,
                         "--witness-rpc",
@@ -5949,15 +6024,9 @@ mod tests {
                         &upstream_witness.url,
                     ])
                     .arg("--wallet")
-                    .arg(&wallet)
+                    .arg(if follower { &follower_wallet } else { &wallet })
                     .arg("--deployment-manifest")
                     .arg(approved_dir.join("local-fixture-manifest.json"))
-                    .arg("--publisher-state")
-                    .arg(&publisher_path)
-                    .arg("--registration")
-                    .arg(&registration_path)
-                    .arg("--output")
-                    .arg(&publication)
                     .arg("--owned-fixture-network")
                     .arg(&network_path)
                     .arg("--ethereum-finality-proof-source")
@@ -5973,11 +6042,73 @@ mod tests {
                         format!("{:#x}", beacon.approval_sha256),
                     )
                     .env("ETH_FINALITY_STORE", approved_dir.join("child-beacon"))
-                    .kill_on_drop(true)
-                    .output(),
-            )
-            .await
-            .context("production root entrypoint timed out")??;
+                    .kill_on_drop(true);
+                if follower {
+                    command
+                        .arg("--root-wallet")
+                        .arg(&wallet)
+                        .arg("--output-dir")
+                        .arg(&approved_dir)
+                        .arg("--reconcile-once");
+                } else {
+                    command
+                        .arg("--publisher-state")
+                        .arg(&publisher_path)
+                        .arg("--registration")
+                        .arg(&registration_path)
+                        .arg("--output")
+                        .arg(&publication);
+                }
+                let result = tokio::time::timeout(Duration::from_secs(180), command.output())
+                    .await
+                    .context("production floor entrypoint timed out")??;
+                if should_succeed {
+                    successful = Some(result);
+                    break;
+                }
+                ensure!(
+                    !result.status.success()
+                        && String::from_utf8_lossy(&result.stderr)
+                            .contains("immutable queue floor changed; HOLD"),
+                    "floor mismatch did not reach its HOLD: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                ensure!(
+                    !publication.exists()
+                        && provider.get_transaction_count(sender).pending().await? == nonce_before
+                        && provider
+                            .get_transaction_count(follower_signer.address())
+                            .pending()
+                            .await?
+                            == follower_nonce
+                        && fs::read(directory.join("state.json"))? == original_journal
+                        && fs::read(&root_path)? == original_root,
+                    "floor HOLD signed a transaction or changed original journals"
+                );
+                if follower {
+                    let held = read_state_file(&publisher_path)?;
+                    for field in [
+                        "rootMinimum",
+                        "rootScan",
+                        "commitments",
+                        "transactions",
+                        "submission",
+                        "terminalSubmissions",
+                        "roots",
+                    ] {
+                        ensure!(
+                            held[field] == candidate[field],
+                            "floor HOLD changed {field}"
+                        );
+                    }
+                } else {
+                    ensure!(
+                        fs::read(&publisher_path)? == candidate_bytes,
+                        "publisher floor HOLD changed follower journal"
+                    );
+                }
+            }
+            let result = successful.context("valid publisher floor was not exercised")?;
             provider
                 .client()
                 .request::<_, Value>("anvil_setIntervalMining", (0u64,))

@@ -13,6 +13,12 @@ Outbound delivery uses BEEFY-authenticated MMR roots, with timing that depends o
 
 The existing header selector chooses Mainnet or Testnet; URL/storage selection is retained and the default remains Mainnet. Explicitly select Testnet for Hoodi/local-Vara qualification and supply only its independently approved profile; never reuse Hoodi pins as mainnet approval.
 
+Manager cutover is a gated bundle/preset switch, not automatic historical-claim routing. `useRelayEthTx` selects the one manager in the configured preset and approved inbound profile; history does not supply authenticated per-transfer manager routing. Indexer manager authentication does not make the frontend route predecessor claims.
+
+During an authorized drain, retain the approved predecessor bundle and profile and respect the source manager's pause state. Disable ordinary UI service whenever one preset cannot safely serve the transition. Resolve or classify every predecessor obligation using its original authenticated evidence and approved tooling; do not switch while the source is `Draining` or any cutover prerequisite is HOLD. Switch only after authenticated source `Retired`, complete custody/role handoff, successor `Ready`, and separately authorized activation. Rebuild Vite with the successor manager and its matching independently approved profile together; runtime environment changes cannot update the bundle. Preserve prior approved bundles/profiles as evidence.
+
+Seamless predecessor claiming remains deferred behind this production gate; reviewer acknowledgment is still required, not presumed. This branch finalization does not execute cutover or authorize production activation.
+
 For a loopback preview with a separate GraphQL API, use the preview origin for the testnet indexer URL and set the Node-side `BRIDGE_INDEXER_PROXY=http://127.0.0.1:5450`. Vite development and preview both proxy `/graphql` (including WebSockets); absent means no proxy, and malformed/non-HTTP(S) targets fail startup. This avoids broadening backend CORS or exposing the API. Open `http://127.0.0.1:5273/?network=testnet`, verify the actual live token pairs and indexed transfer states, and connect real approved wallets. Wallet metadata uses the browser origin. Hoodi USDC is selectable; the mainnet USDC business restriction remains.
 
 Vara queue block/message identifiers apply only to Vara-origin transfers. Ethereum-origin transfers show their native destination settlement under Timings rather than permanent loading placeholders for those source-only fields.
@@ -24,6 +30,8 @@ Native payout rejection is a distinct terminal `Refunded` / GraphQL `REFUNDED` h
 Before serving the refund-aware API/UI, apply `js/indexer/db/migrations/1792022400000-native_refund.js`, restart the PostGraphile API to expose the appended status enum, then regenerate GraphQL artifacts with the command below and rebuild. Existing legacy rows are not reclassified by this migration; recover historical refunds only from authenticated finalized events and original receipt identities, never from old completion flags or balances. Rollback refuses to discard an already recorded refund.
 
 Native inbound profiles bind the unchanged wrapper ActorId, actual CodeId, Ethereum token, explicit `escrow-v1`/`held-escrow-v2` capability and its actual IDL digest. Missing mode or a modern IDL paired with v1 code HOLDs before signing. The claim adapter exposes only the `Redemption` read shared by the two exact IDLs, qualified against both artifacts; it never probes unavailable hold/blocking routes. V1 reconciliation requires exact-full returned backing and authenticates the same original's terminal Refunded evidence afterward; partial/excess/ambiguous v1 liabilities remain blocked.
+
+The retained production route uses `EscrowV1` / `escrow-v1` only, with unchanged VFT/VFT-VARA and Ethereum token identities; `held-escrow-v2` support is for separately qualified deployments, not a wrapper migration. If replacing the manager, construct a new program rather than reusing old state in place. Require the complete admission/reservation inventory and actual v1 `OutstandingRedemptions == 0` before `BeginCutover` and again paused/drained before custody transfer; v2 blocking-zero is not a substitute. Immutable-v1 A2 partial/excess recovery, A6 hold consent and held-liability release limitations remain production blockers.
 
 The Docker frontend build uses a 4 GiB Node heap; the default 2 GiB heap is insufficient for the current bundle.
 
@@ -38,10 +46,9 @@ For GraphQL regeneration, set the singular Node-side `VITE_INDEXER_ADDRESS` to t
 Focused regression checks (repository root):
 
 ```sh
-node --experimental-strip-types js/frontend/test/submission.test.ts
-node --experimental-strip-types js/frontend/test/native-profile.test.ts
+yarn workspace frontend test
 yarn workspace @gear-js/bridge typecheck
-yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts --mode unit
+yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts test/examples.test.ts --mode unit
 ```
 
 The SDK root-availability helper scans bounded recent-first history and closes the watcher handoff gap; it is advisory, not proof membership or claim authorization. Builds and unit checks do not qualify browser transfers: record genuine wallet-originated source transactions, exact destination balance effects and finalized settlement metadata.

@@ -1,5 +1,20 @@
 ## The **vft-vara** program
 
+This branch's retained production compatibility route uses the existing immutable
+`EscrowV1` wrapper only. Keep every VFT/VFT-VARA ActorId, CodeId, ledger, supply,
+allowance and backing, and the existing Ethereum token contracts. No wrapper
+migration, new token, held/v2 production path or production activation is
+authorized here. If a manager is replaced, construct a new manager and retain the
+old manager's evidence; an in-place code/state upgrade is not supported.
+
+Source-level v2 fixes below describe only separately qualified v2 deployments;
+they cannot patch retained immutable v1 code. A2 partial/excess recovery, A6 hold
+consent and P0-R1 held-liability release remain production blockers under the
+retained-v1 constraint. Require a complete admission/reservation inventory and
+the actual v1 `OutstandingRedemptions == 0` before `BeginCutover` and again
+paused/drained before custody transfer. `BeginCutover` alone is not that proof;
+v2 blocking-zero or reservation resets cannot substitute for it.
+
 The program workspace includes the following packages:
 - `vft-vara` is the package allowing to build WASM binary for the program and IDL file for it. 
 - `vft-vara-app` is the package containing business logic for the program represented by the `VftVaraService` structure.  
@@ -62,8 +77,9 @@ escrow split into 1 and 0.5 VARA claims). Configure/deployment rejects preexisti
 nonzero-minimum wrappers rather than lowering the minimum or minting a dust
 repair. These fixes require a newly deployed immutable program **before bridge
 exposure**; they cannot patch an old deployed wrapper or reconstruct already
-reaped dust. An existing exposed wrapper needs an independently qualified,
-liability-preserving migration; manager cutover alone cannot replace it.
+reaped dust. An affected existing exposed wrapper remains a production blocker;
+any liability-preserving wrapper migration requires separate qualification and
+authorization outside this retained-v1 route. Manager cutover cannot replace it.
 
 Manager ReconcileReceipt first validates the wrapper's existing Redemption.
 An unheld `Queued`, `Returned` or `Ambiguous` record with backing at least the

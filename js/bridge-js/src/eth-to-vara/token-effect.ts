@@ -21,7 +21,7 @@ export interface SettledReceiptDeposit {
   outcome: string;
 }
 
-export const VFT_MANAGER_IDL_SHA256 = 'e3cd830b1e0b7ffde48663d8c666e052c4e84e71fcd62a24ea864ca4394f94aa';
+export const VFT_MANAGER_IDL_SHA256 = '154430a8ae96db936ca025e1fde23299ede2bd608399555b862a7ef1cb4dc66b';
 export const NATIVE_WRAPPER_IDL_SHA256 = '8ef5f27c84e720d05b7ffb3496153a0049e1e642e2c5c8a72cadff662c9ff2f1';
 export const NATIVE_WRAPPER_V1_IDL_SHA256 = 'afd6509bb15544b1302dcd4c5659bd77ef07c7dfb98a292f0c4a99b59c73fca9';
 export type NativeWrapperMode = 'escrow-v1' | 'held-escrow-v2';

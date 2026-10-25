@@ -13,7 +13,7 @@ export class SailsProgram {
       InitConfig: {"gear_bridge_builtin":"[u8;32]","historical_proxy_address":"[u8;32]","config":"Config"},
       Config: {"gas_for_token_ops":"u64","gas_for_reply_deposit":"u64","gas_to_send_request_to_builtin":"u64","gas_for_swap_token_maps":"u64","reply_timeout":"u32","fee_bridge":"u128","fee_incoming":"u128"},
       TokenSupply: {"_enum":["Ethereum","Gear"]},
-      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null","ReceiptResolved":"Null","TokenOperationRejected":"Null","NativeHoldUnsupported":"Null"}},
+      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null","ReceiptResolved":"Null","TokenOperationRejected":"Null","NativeHoldUnsupported":"Null","InvalidRecipient":"Null"}},
       NativeWrapperConfig: {"actor_id":"[u8;32]","ethereum_token":"H160","code_id":"H256","mode":"NativeWrapperMode"},
       NativeWrapperMode: {"_enum":["EscrowV1","HeldEscrowV2"]},
       ReceiptStatus: {"_enum":["Unknown","Reserved","Processed","Resolved"]},
@@ -1362,7 +1362,8 @@ export type Error =
   /**
    * The approved immutable native wrapper cannot retain held liabilities.
   */
-  | { NativeHoldUnsupported: null };
+  | { NativeHoldUnsupported: null }
+  | { InvalidRecipient: null };
 
 /**
  * Code identity is a governance assertion, independently authenticated offchain.
@@ -1521,4 +1522,4 @@ export interface SourceRequestEvidence {
 
 export type Order = "Direct" | "Reverse";
 
-export const IDL_SHA256 = 'e3cd830b1e0b7ffde48663d8c666e052c4e84e71fcd62a24ea864ca4394f94aa';
+export const IDL_SHA256 = '154430a8ae96db936ca025e1fde23299ede2bd608399555b862a7ef1cb4dc66b';

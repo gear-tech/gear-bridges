@@ -2061,6 +2061,11 @@ pub(crate) async fn publish_root_locked(
                 == format!("0x{}", hex::encode(source.bridge_domain)),
         "token deployment anchor differs from current source identity"
     );
+    let floor = ethereum.queue_root_minimum(source.mmr_start_block).await?;
+    ensure!(
+        existing_journal["rootMinimum"].as_u64() == Some(floor),
+        "immutable queue floor changed; HOLD"
+    );
 
     let active_client = active_ethereum["client"]
         .as_str()

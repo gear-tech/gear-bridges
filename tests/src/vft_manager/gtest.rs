@@ -630,6 +630,185 @@ async fn test_reply_benchmark_preserves_ambiguous_progress_and_original_child() 
 }
 
 #[tokio::test]
+async fn test_zero_receiver_rejected_without_economic_effects() {
+    use sails_rs::events::EventIo;
+    use vft_client::{vft::events::VftEvents, vft_2::events::Vft2Events};
+    use vft_manager_client::vft_manager::{events::VftManagerEvents, io::RequestBridging};
+
+    for burn in [true, false] {
+        let Fixture {
+            remoting,
+            vft_manager_program_id: manager,
+            gear_supply_vft,
+            eth_supply_vft,
+        } = setup_with_wrapper(Some(ReplyBehavior::Queued), 100, true).await;
+        let (token, eth_token) = if burn {
+            (eth_supply_vft, ERC20_TOKEN_ETH_SUPPLY)
+        } else {
+            (gear_supply_vft, ERC20_TOKEN_GEAR_SUPPLY)
+        };
+        let sender: ActorId = 100_000.into();
+        let amount = U256::from(10_000_000_000_u64);
+        remoting.system().mint_to(sender, 100_000_000_000_000_000);
+        if burn {
+            mint_eth_supply_tokens(&remoting, manager, token, sender, amount, 0).await;
+        } else {
+            VftAdminC::new(remoting.clone())
+                .mint(sender, amount)
+                .send_recv(token)
+                .await
+                .unwrap();
+        }
+        let mut vft = VftC::new(remoting.clone().with_actor_id(sender));
+        assert!(vft.approve(manager, amount).send_recv(token).await.unwrap());
+        let admin = VftManagerC::new(remoting.clone());
+        let sender_before = balance_of(&remoting, token, sender).await;
+        let manager_before = balance_of(&remoting, token, manager).await;
+        let supply_before = vft.total_supply().recv(token).await.unwrap();
+        let allowance_before = vft.allowance(sender, manager).recv(token).await.unwrap();
+        assert_eq!(sender_before, amount);
+        assert_eq!(allowance_before, amount);
+        assert!(admin
+            .request_briding_msg_tracker_state(0, 100)
+            .recv(manager)
+            .await
+            .unwrap()
+            .is_empty());
+
+        for receiver in [H160::zero(), ETH_TOKEN_RECEIVER] {
+            let request = remoting
+                .system()
+                .get_program(manager)
+                .unwrap()
+                .send_bytes_with_gas(
+                    sender,
+                    RequestBridging::encode_call(token, amount, receiver),
+                    gtest::constants::MAX_USER_GAS_LIMIT,
+                    0,
+                );
+            let mut reply = None;
+            let mut logs = Vec::new();
+            let mut processed = 0;
+            for _ in 0..20 {
+                let block = remoting.system().run_next_block();
+                processed += block.total_processed;
+                for entry in block.log() {
+                    if entry.reply_to() == Some(request) {
+                        assert!(reply.is_none(), "one reply per original request");
+                        reply = Some(RequestBridging::decode_reply(entry.payload()).unwrap());
+                    }
+                }
+                logs.extend(block.log);
+            }
+            let reply = reply.expect("bridging request must reply within 20 blocks");
+            let events: Vec<_> = logs
+                .iter()
+                .filter(|entry| entry.source() == manager && entry.destination().is_zero())
+                .map(|entry| VftManagerEvents::decode_event(entry.payload()).unwrap())
+                .collect();
+            let evidence = admin
+                .source_request_evidence(request)
+                .recv(manager)
+                .await
+                .unwrap();
+            assert!(admin
+                .request_briding_msg_tracker_state(0, 100)
+                .recv(manager)
+                .await
+                .unwrap()
+                .is_empty());
+
+            if receiver.is_zero() {
+                assert_eq!(reply, Err(Error::InvalidRecipient));
+                assert_eq!(
+                    processed, 1,
+                    "rejection must execute only the request, with no token or builtin child"
+                );
+                assert!(events.is_empty(), "no BridgingRequested on rejection");
+                assert!(logs.iter().all(|entry| entry.source() == manager));
+                assert!(evidence.is_none());
+                assert_eq!(balance_of(&remoting, token, sender).await, sender_before);
+                assert_eq!(balance_of(&remoting, token, manager).await, manager_before);
+                assert_eq!(vft.total_supply().recv(token).await.unwrap(), supply_before);
+                assert_eq!(
+                    vft.allowance(sender, manager).recv(token).await.unwrap(),
+                    allowance_before
+                );
+            } else {
+                assert_eq!(reply, Ok((U256::one(), eth_token)));
+                assert_eq!(
+                    balance_of(&remoting, token, sender).await,
+                    sender_before - amount
+                );
+                assert_eq!(
+                    balance_of(&remoting, token, manager).await,
+                    manager_before + if burn { U256::zero() } else { amount }
+                );
+                assert_eq!(
+                    vft.total_supply().recv(token).await.unwrap(),
+                    supply_before - if burn { amount } else { U256::zero() }
+                );
+                assert_eq!(
+                    vft.allowance(sender, manager).recv(token).await.unwrap(),
+                    allowance_before - if burn { U256::zero() } else { amount }
+                );
+                let transfers: Vec<_> = logs
+                    .iter()
+                    .filter(|entry| entry.source() == token && entry.destination().is_zero())
+                    .filter_map(|entry| {
+                        if burn {
+                            match Vft2Events::decode_event(entry.payload()) {
+                                Ok(Vft2Events::Transfer { from, to, value }) => {
+                                    Some((from, to, value))
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            match VftEvents::decode_event(entry.payload()) {
+                                Ok(VftEvents::Transfer { from, to, value }) => {
+                                    Some((from, to, value))
+                                }
+                                _ => None,
+                            }
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    transfers,
+                    vec![(sender, if burn { ActorId::zero() } else { manager }, amount)]
+                );
+                assert_eq!(events.len(), 1);
+                assert!(matches!(
+                    &events[0],
+                    VftManagerEvents::BridgingRequested {
+                        nonce,
+                        queue_id: 1,
+                        hash,
+                        vara_token_id,
+                        amount: bridged,
+                        sender: from,
+                        receiver: to,
+                    } if *nonce == U256::one() && *hash == H256::from([1; 32])
+                        && *vara_token_id == token && *bridged == amount
+                        && *from == sender && *to == ETH_TOKEN_RECEIVER
+                ));
+                let evidence = evidence.expect("valid request must reach the queue");
+                assert_eq!(evidence.request, request);
+                assert_eq!(evidence.builtin, ActorId::from(BRIDGE_BUILTIN_ID));
+                assert_eq!(
+                    evidence.outcome,
+                    vft_manager_client::SourceRequestOutcome::Queued {
+                        nonce: U256::one(),
+                        hash: H256::from([1; 32]),
+                        queue_id: 1,
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn test_gear_supply_token() {
     let Fixture {
         remoting,

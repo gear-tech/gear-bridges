@@ -51,6 +51,10 @@ pub async fn request_bridging(
     amount: U256,
     receiver: H160,
 ) -> Result<(U256, H160), Error> {
+    if receiver.is_zero() {
+        return Err(Error::InvalidRecipient);
+    }
+
     let gear_bridge_builtin = service.state().gear_bridge_builtin;
 
     let Some(erc20_manager_address) = service.state().erc20_manager_address else {

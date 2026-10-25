@@ -1,7 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { Transfer } from '../model/index.js';
 import {
-  checkpointId, createReceiptAuthenticator,
+  createReceiptAuthenticator, receiptAuthorization, assertReceiptAuthorization, assertAuthorizationCheckpoint,
+  requalificationLinksFor,
   type AgreedCheckpoint, type AuthenticatedReceipt, type EthereumEvidenceClients, type SourceReceiptAuth,
 } from './finality.js';
 import * as manager from './abi/erc20-manager.js';
@@ -141,33 +142,65 @@ export async function authenticateSourceReceipt(
   authenticate = createReceiptAuthenticator(clients, checkpoint),
 ): Promise<SourceReceiptAuth | undefined> {
   const retained = transfer.sourceReceiptAuth;
+  const legacy = transfer.legacyEthereumAuth?.sourceReceiptAuth;
+  if (legacy) {
+    assertAuthorizationCheckpoint(clients, legacy.checkpointId, BigInt(transfer.blockNumber));
+    if (legacy.version !== 1) throw new Error('HOLD: malformed archived source authorization');
+  }
+  const archivedCompletion = transfer.legacyEthereumAuth?.completionAuth;
+  if (archivedCompletion) {
+    if (archivedCompletion.kind !== 'gear-settlement' || !archivedCompletion.sourceCheckpointId) {
+      throw new Error('HOLD: archived source completion identity changed');
+    }
+    assertAuthorizationCheckpoint(clients, archivedCompletion.sourceCheckpointId, BigInt(transfer.blockNumber));
+  }
   const pending = () => {
     if (retained || transfer.completionAuth) throw new Error('HOLD: previously authenticated source receipt unavailable or changed');
     return undefined;
   };
-  if (transfer.sourceTransactionIndex == null || transfer.sourceLogIndex == null || !transfer.txHash) return pending();
+  const missingCoordinates = transfer.sourceTransactionIndex == null || transfer.sourceLogIndex == null;
+  if (!transfer.txHash || (missingCoordinates && (retained || transfer.completionAuth))) return pending();
   const height = Number(transfer.blockNumber);
-  const localLogIndex = Number(transfer.sourceLogIndex);
-  if (!Number.isSafeInteger(height) || height < 0 || !Number.isSafeInteger(localLogIndex) || localLogIndex < 0) {
+  if (!Number.isSafeInteger(height) || height < 0 ||
+      (transfer.sourceTransactionIndex != null && BigInt(transfer.sourceTransactionIndex) < 0n) ||
+      (transfer.sourceLogIndex != null && (BigInt(transfer.sourceLogIndex) < 0n ||
+        BigInt(transfer.sourceLogIndex) > BigInt(Number.MAX_SAFE_INTEGER)))) {
     throw new Error('HOLD: source receipt coordinates exceed safe integer range');
   }
-  const original = await authenticate(transfer.txHash, { height, ...(retained ? { hash: retained.receipt.blockHash } : {}) });
+  const savedReceipt = retained?.receipt ?? legacy?.receipt;
+  const original = await authenticate(transfer.txHash, { height, ...(savedReceipt ? { hash: savedReceipt.blockHash } : {}),
+    ...(retained ? { proofDigest: retained.inclusionProofDigest } : {}) });
   if (!original) return pending();
   const receipt = original.receipt;
-  if (receipt.status !== '0x1' || BigInt(receipt.transactionIndex) !== BigInt(transfer.sourceTransactionIndex)) return pending();
-  const log = receipt.logs[localLogIndex];
-  if (!log || log.address !== managerAddress.toLowerCase() ||
-      log.topics[0] !== manager.events.BridgingRequested.topic.toLowerCase()) return pending();
-  const [sender, receiver, token, amount] = manager.events.BridgingRequested.decode(log);
-  if (sender.toLowerCase() !== transfer.sender.toLowerCase() || receiver.toLowerCase() !== transfer.receiver.toLowerCase() ||
-      token.toLowerCase() !== transfer.source.toLowerCase() || amount !== BigInt(transfer.amount)) return pending();
-  if (retained) {
-    if (retained.version !== 1 || retained.localLogIndex !== localLogIndex ||
-        retained.blockTimestamp !== original.blockTimestamp || !retained.checkpointId) {
-      throw new Error('HOLD: retained source authorization changed');
+  if (legacy) {
+    assertRetainedReceipt(legacy.receipt, receipt);
+    if (legacy.blockTimestamp !== original.blockTimestamp || !original.requalificationLinks.length) {
+      throw new Error('HOLD: archived source authorization lacks exact Beacon requalification');
     }
-    if (!isDeepStrictEqual(retained.receipt, receipt)) throw new Error('HOLD: retained authenticated source receipt changed');
+  }
+  if (receipt.status !== '0x1' || (transfer.sourceTransactionIndex != null &&
+      BigInt(receipt.transactionIndex) !== BigInt(transfer.sourceTransactionIndex))) return pending();
+  const candidates: number[] = [];
+  for (const [index, log] of receipt.logs.entries()) {
+    if (transfer.sourceLogIndex != null && BigInt(index) !== BigInt(transfer.sourceLogIndex)) continue;
+    if (log.address !== managerAddress.toLowerCase() ||
+        log.topics[0] !== manager.events.BridgingRequested.topic.toLowerCase()) continue;
+    const [sender, receiver, token, amount] = manager.events.BridgingRequested.decode(log);
+    if (sender.toLowerCase() === transfer.sender.toLowerCase() && receiver.toLowerCase() === transfer.receiver.toLowerCase() &&
+        token.toLowerCase() === transfer.source.toLowerCase() && amount === BigInt(transfer.amount)) candidates.push(index);
+  }
+  if (candidates.length > 1) throw new Error('HOLD: ambiguous original source deposit');
+  if (!candidates.length) return pending();
+  const localLogIndex = candidates[0];
+  const requalified = requalificationLinksFor(clients, original,
+    [legacy?.checkpointId, archivedCompletion?.sourceCheckpointId], retained?.requalificationLinks);
+  if (retained) {
+    assertReceiptAuthorization(clients, retained, original);
+    if (retained.localLogIndex !== localLogIndex) throw new Error('HOLD: retained source authorization changed');
     return retained;
   }
-  return { version: 1, checkpointId: checkpointId(checkpoint), receipt, blockTimestamp: original.blockTimestamp, localLogIndex };
+  if (legacy?.localLogIndex !== undefined && legacy.localLogIndex !== localLogIndex) {
+    throw new Error('HOLD: archived source deposit position changed');
+  }
+  return { ...receiptAuthorization(original, requalified), localLogIndex };
 }

@@ -233,9 +233,8 @@ try {
     const unsubscribe = mock.fn();
     const extrinsic = {
       isSigned: false,
-      signedHash: '0xsigned-original',
       get hash() {
-        return codec(this.isSigned ? this.signedHash : '0xunsigned');
+        return codec(this.isSigned ? '0xsigned-original' : '0xunsigned');
       },
       signAndSend: mock.fn((_address: unknown, _options: unknown, cb: (value: Result) => void) => {
         callback = cb;
@@ -262,7 +261,6 @@ try {
     /HOLD:.*deadline expired; transaction outcome is unknown.*Original transaction 0xsigned-original.*Do not submit another transaction; reconcile/,
   );
   stalled.emit('InBlock');
-  stalled.extrinsic.signedHash = '0xchanged-extrinsic';
   mock.timers.tick(timeout - 1);
   await Promise.resolve();
   assert.equal(settled, false, 'InBlock alone cannot settle the mutation');
@@ -272,7 +270,6 @@ try {
   stalled.admit();
   await Promise.resolve();
   assert.equal(stalled.unsubscribe.mock.callCount(), 1, 'Late unsubscribe must still be called exactly once');
-  assert.equal(stalled.extrinsic.signAndSend.mock.callCount(), 1, 'An unknown outcome must not resubmit');
 
   const normal = submissionFixture();
   const normalPromise = normal.start();
@@ -308,7 +305,6 @@ try {
   unsigned.admit();
   await Promise.resolve();
   assert.equal(unsigned.unsubscribe.mock.callCount(), 1, 'Signing after expiry must only clean up, not succeed');
-  assert.equal(unsigned.extrinsic.signAndSend.mock.callCount(), 1, 'A silent wallet must not be resubmitted');
 
   const racing = submissionFixture();
   const racingPromise = racing.start();

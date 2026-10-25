@@ -219,37 +219,62 @@ mod tests {
 
     #[tokio::test]
     async fn transport_failure_retains_replayed_and_live_blocks() {
+        let mut header: alloy::rpc::types::Header = Default::default();
+        header.inner.extra_data = uuid::Uuid::new_v4().as_bytes().to_vec().into();
+        header.hash = header.inner.hash_slow();
+        let genesis: alloy::rpc::types::Block = alloy::rpc::types::Block {
+            header: header.clone(),
+            ..Default::default()
+        };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let witness = TcpListener::bind("127.0.0.1:0").unwrap();
-        let witness_endpoint = format!("http://{}", witness.local_addr().unwrap());
-        let server = HttpServer::new(|| {
+        let server = HttpServer::new(move || {
+            let genesis = genesis.clone();
             App::new().route(
                 "/",
-                web::post().to(|| async { HttpResponse::ServiceUnavailable().finish() }),
+                web::post().to(move |request: web::Json<serde_json::Value>| {
+                    let genesis = genesis.clone();
+                    async move {
+                        if request["method"] == "eth_getBlockByNumber"
+                            && request["params"][0] == "0x0"
+                        {
+                            HttpResponse::Ok().json(serde_json::json!({
+                                "jsonrpc": "2.0", "id": request["id"], "result": genesis
+                            }))
+                        } else {
+                            HttpResponse::ServiceUnavailable().finish()
+                        }
+                    }
+                }),
             )
         })
         .workers(1)
         .listen(listener)
         .unwrap()
-        .listen(witness)
-        .unwrap()
         .disable_signals()
         .run();
         let handle = server.handle();
         tokio::spawn(server);
+        let mut identity = super::super::block_storage::tests::identity();
+        identity.ethereum_chain_id = 31337;
+        identity.ethereum_genesis_hash = header.hash.0.into();
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            31337,
+            header.hash,
+            Arc::new(move || header.clone()),
+        )
+        .await
+        .unwrap();
         let path =
             std::env::temp_dir().join(format!("deposit-discovery-{}.json", uuid::Uuid::now_v7()));
-        let discovery = Arc::new(
-            JSONBlockStorage::new(path.clone(), super::super::block_storage::tests::identity())
+        let discovery = Arc::new(JSONBlockStorage::new(path.clone(), identity).await.unwrap());
+        let extractor = DepositEventExtractor::new(
+            PollingEthApi::new(&endpoint)
+                .await
+                .unwrap()
+                .with_beacon_finality(beacon.config.clone(), &beacon.directory)
                 .await
                 .unwrap(),
-        );
-        let extractor = DepositEventExtractor::new(
-            PollingEthApi::new(&endpoint).await.unwrap()
-                .with_finality_witness(&witness_endpoint, 560048,
-                    super::super::block_storage::tests::identity().ethereum_genesis_hash.0.into())
-                .await.unwrap(),
             H160::zero(),
             Arc::new(NoStorage::new()),
             0,

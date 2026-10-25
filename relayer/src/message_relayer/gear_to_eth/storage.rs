@@ -170,6 +170,17 @@ fn decode_transaction_journal(contents: &str) -> anyhow::Result<Transaction> {
         object.insert("journal_version".into(), serde_json::json!(2));
         object.insert("legacy_evidence".into(), original);
     }
+    if object
+        .get("journal_version")
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|version| version < 6)
+        && !object.contains_key("historical_evidence")
+    {
+        object.insert(
+            "historical_evidence".into(),
+            serde_json::Value::Object(object.clone()),
+        );
+    }
     let tx: Transaction = serde_json::from_value(value)?;
     anyhow::ensure!(
         !legacy || !matches!(&tx.status, super::tx_manager::TxStatus::PrepareMessage(..)),
@@ -1647,7 +1658,7 @@ pub(crate) mod tests {
 
     pub(crate) fn lane_identity() -> OutboundLaneIdentity {
         OutboundLaneIdentity {
-            destination_chain_id: 560048,
+            destination_chain_id: 31337,
             destination_genesis_hash: H256::repeat_byte(1),
             message_queue_address: H160::repeat_byte(2),
             bridging_payment_address: Some(H256::repeat_byte(3)),
@@ -1672,6 +1683,13 @@ pub(crate) mod tests {
         let mut tx = Transaction::new(message, TxStatus::Completed);
         tx.ethereum_tx_attempts.push(signed.hash);
         tx.ethereum_tx_hash = Some(signed.hash);
+        tx.lane_policy = Some(
+            crate::message_relayer::gear_to_eth::tx_manager::tests::policy(
+                &tx.message.message,
+                &signed,
+                false,
+            ),
+        );
         tx.ethereum_submission = Some(signed);
         tx.completion = Some(completion);
         tx
@@ -2513,7 +2531,7 @@ pub(crate) mod tests {
         assert_eq!(upgraded["journal_version"], 2);
         assert_eq!(upgraded["legacy_evidence"], original);
         for corrupt in [
-            serde_json::json!({"journal_version": 6}),
+            serde_json::json!({"journal_version": 7}),
             serde_json::json!({"unexpected_field": 1}),
         ] {
             let mut invalid = upgraded.clone();

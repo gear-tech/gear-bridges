@@ -15,11 +15,31 @@ pub struct EthereumConnectionArgs {
     pub retry_interval_ms: Option<u64>,
 }
 
-/// Execution endpoints must be operated independently; different URLs alone do not prove this.
+/// Beacon approval is finality authority; an optional EL witness only corroborates data.
 #[derive(Args, Clone, Debug)]
 pub struct EthereumFinalityArgs {
     #[arg(long = "ethereum-witness-rpc", env = "ETH_WITNESS_RPC")]
-    pub ethereum_witness_rpc: String,
+    pub ethereum_witness_rpc: Option<String>,
+
+    #[arg(long = "ethereum-finality-beacon-rpc", env = "ETH_FINALITY_BEACON_RPC")]
+    pub ethereum_finality_beacon_rpc: String,
+
+    #[arg(long = "ethereum-finality-bootstrap", env = "ETH_FINALITY_BOOTSTRAP")]
+    pub ethereum_finality_bootstrap: std::path::PathBuf,
+
+    #[arg(
+        long = "ethereum-finality-bootstrap-sha256",
+        env = "ETH_FINALITY_BOOTSTRAP_SHA256"
+    )]
+    pub ethereum_finality_bootstrap_sha256: String,
+
+    /// Exclusive archive directory for this process; clones reuse its owner lock.
+    #[arg(long = "ethereum-finality-store", env = "ETH_FINALITY_STORE")]
+    pub ethereum_finality_store: std::path::PathBuf,
+
+    /// Read-only peer archives supplying retained immutable Beacon proof records.
+    #[arg(long = "ethereum-finality-proof-source")]
+    pub ethereum_finality_proof_sources: Vec<std::path::PathBuf>,
 }
 
 #[derive(Args, Clone, Debug)]

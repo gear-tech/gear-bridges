@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {BeefyFixtureTest} from "./BeefyInterop.t.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";

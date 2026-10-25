@@ -161,13 +161,20 @@ def main():
         assert update_index == 13 and len(rows) == 15
         evidence = {
             "schemaVersion": 1, "chainId": 31337, "hardfork": "osaka",
+            "qualification": {
+                "kind": "owned-synthetic-transaction-gas",
+                "nativeSourceIdentityQualified": False,
+                "productionExecutionAuthorized": False,
+                "productionGovernanceQualified": False,
+                "boundary": "Owned loopback chain31337; synthetic 59/150/256 authorities and queue fixture, not native-runtime activation or live custody approval",
+            },
             "clientVersion": rpc("web3_clientVersion"),
             "forgeVersion": subprocess.check_output(["forge", "--version"], text=True).strip(),
             "fixtureSha256": hashlib.sha256((ROOT / "test/fixtures/beefy-interop.json").read_bytes()).hexdigest(),
             "sourceSha256": {str(path): hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in (
                 Path("src/beefy/BeefyClient.sol"), Path("src/MessageQueue.sol"), Path("src/ERC20Manager.sol"),
                 Path("script/BeefyFullTransactionBenchmark.s.sol"), Path("script/benchmark-full-transactions.py"))},
-            "compilerSettings": {"solc": "0.8.38", "viaIR": True, "optimizer": True, "evmVersion": "osaka"},
+            "compilerSettings": {"solc": "0.8.37", "viaIR": True, "optimizer": True, "evmVersion": "osaka"},
             "postState": {"queue": queue, "manager": manager, "token": token,
                           "message702Processed": True, "managerBalance": 20, "recipientBalance": 10},
             "measurements": rows, "allReceipts": all_receipts,

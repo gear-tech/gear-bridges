@@ -78,6 +78,7 @@ impl Relayer {
         http_receiver: Option<UnboundedReceiver<EthTransaction>>,
         cutover_seal: Option<std::path::PathBuf>,
         approved_manager_code: Option<H256>,
+        native_wrapper_approval: Option<Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>,
     ) -> anyhow::Result<Self> {
         cutover::reject_sealed(std::path::Path::new(&storage_path))?;
         cutover::reject_sealed(std::path::Path::new(&eth_unprocessed_block_storage_path))?;
@@ -138,6 +139,7 @@ impl Relayer {
                 &client,
                 cutover_seal.as_deref(),
                 approved_manager_code,
+                native_wrapper_approval.as_deref(),
             )
             .await?;
         let ethereum_block_listener =
@@ -165,6 +167,7 @@ impl Relayer {
             suri.clone(),
             None,
         )
+        .with_native_wrapper_approval(native_wrapper_approval)
         .with_signer_ownership(signer_ownership);
 
         let proof_composer = proof_composer::ProofComposer::new(

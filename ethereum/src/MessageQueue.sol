@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -10,13 +10,13 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeab
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
+import {SubstrateMerkleProof} from "src/beefy/utils/SubstrateMerkleProof.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
 import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
 import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
-import {BinaryMerkleTree} from "src/libraries/BinaryMerkleTree.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 
 /**
@@ -598,7 +598,7 @@ contract MessageQueue is
         }
 
         bytes32 messageHash = message.hashCalldata();
-        if (!BinaryMerkleTree.verifyProofCalldata(merkleRoot, proof, totalLeaves, leafIndex, messageHash)) {
+        if (!SubstrateMerkleProof.verify(merkleRoot, messageHash, leafIndex, totalLeaves, proof)) {
             revert InvalidMerkleProof();
         }
 

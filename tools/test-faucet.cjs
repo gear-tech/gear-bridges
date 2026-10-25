@@ -230,7 +230,8 @@ class Faucet {
       const claim = this.journal.load().find(c => c.asset === asset && c.status === 'pending');
       if (!claim || this.stopping) return;
       this.chain.validate(claim);
-      const update = await bounded(this.chain.observe(claim), 45000);
+      // Individual RPCs are bounded; a progressing 32-block scan may take longer.
+      const update = await this.chain.observe(claim);
       if (update) this.journal.append({ ...update, txHash: claim.txHash });
     });
   }

@@ -48,9 +48,12 @@ async fn bind_runtime(
     client: &GearApi,
     cutover_seal: Option<&Path>,
     approved_manager_code: Option<H256>,
+    native_wrapper_approval: Option<&gear_common::native_wrapper::ApprovedNativeWrapper>,
 ) -> anyhow::Result<(Arc<JSONBlockStorage>, std::fs::File, u64, Option<u64>)> {
-    let signer_ownership =
-        gear_common::signer_ownership::lock_signer(identity.gear_genesis_hash, identity.gear_sender)?;
+    let signer_ownership = gear_common::signer_ownership::lock_signer(
+        identity.gear_genesis_hash,
+        identity.gear_sender,
+    )?;
     eth_api
         .enable_finality_archive(
             &Path::new(storage_path).join("ethereum-finality"),
@@ -63,6 +66,7 @@ async fn bind_runtime(
         approved_manager_code,
         client,
         eth_api,
+        native_wrapper_approval,
     )
     .await?;
     log::info!(
@@ -74,16 +78,14 @@ async fn bind_runtime(
         cutover::receipt_domain(client, identity.vft_manager_address).await?;
     log::info!("Authenticated inbound receipt domain: minimum={minimum_receipt_slot}; last={last_receipt_slot:?}; independently approved successor CodeId={approved_manager_code:?}");
     let block_storage = Arc::new(
-        JSONBlockStorage::new_bound(
-            discovery_path.into(),
-            identity.clone(),
-            predecessor.clone(),
-        )
-        .await?
-        .with_journal_ownership(journal_ownership.clone()),
+        JSONBlockStorage::new_bound(discovery_path.into(), identity.clone(), predecessor.clone())
+            .await?
+            .with_journal_ownership(journal_ownership.clone()),
     );
     if let Some(predecessor) = predecessor {
-        storage.bind_successor_identity(identity, predecessor).await?;
+        storage
+            .bind_successor_identity(identity, predecessor)
+            .await?;
     } else {
         storage.bind_runtime_identity(identity).await?;
     }

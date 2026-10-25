@@ -103,3 +103,48 @@ test('aliases, daily limits, concurrent originals, restart HOLD and journal tamp
     assert.equal(fs.readFileSync(path.join(state, '000000003.json.new'), 'utf8'), 'interrupted original');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('observation keeps signer ownership and durable progress beyond an aggregate deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'faucet-progress-'));
+  try {
+    const state = path.join(directory, 'journal');
+    const secret = Buffer.alloc(32, 7), identity = { test: 'slow-observation' };
+    const original = { asset: 'TVARA', address: '0x' + '11'.repeat(32),
+      amount: AMOUNTS.TVARA, status: 'pending', raw: '0x0102', txHash: '0x' + '22'.repeat(32),
+      nonce: '0', pin: { height: 100, hash: '0x' + '33'.repeat(32) },
+      scanNext: 100, createdAt: 1800000000000, nextClaimAt: 1800000000000 + COOLDOWN };
+    const journal = new Journal(state, secret, identity);
+    journal.append({ kind: 'original', claim: original });
+    const starts = [];
+    const chain = {
+      validate(claim) { assert.equal(claim.raw, original.raw); },
+      async observe(claim) {
+        starts.push(claim.scanNext);
+        await new Promise(resolve => setTimeout(resolve, 60000));
+        return { kind: 'progress', next: claim.scanNext + 32 };
+      },
+    };
+    let faucet = new Faucet(journal, chain);
+    const first = faucet.observe('TVARA');
+    await Promise.resolve();
+    t.mock.timers.tick(45001);
+    assert(faucet.jobs.has('TVARA'), 'the in-flight observation still owns the signer');
+    t.mock.timers.tick(14999);
+    await first;
+    const restored = new Journal(state, secret, identity);
+    assert.equal(restored.claims[0].scanNext, 132);
+    assert.equal(restored.claims[0].txHash, original.txHash);
+    assert.equal(restored.claims[0].status, 'pending');
+    faucet = new Faucet(restored, chain);
+    const second = faucet.observe('TVARA');
+    await Promise.resolve();
+    t.mock.timers.tick(60000);
+    await second;
+    assert.deepEqual(starts, [100, 132]);
+    assert.equal(new Journal(state, secret, identity).claims[0].scanNext, 164);
+  } finally {
+    t.mock.timers.reset();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

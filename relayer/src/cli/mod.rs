@@ -21,6 +21,9 @@ pub struct Cli {
 #[allow(clippy::enum_variant_names)]
 #[derive(Subcommand)]
 pub enum CliCommands {
+    /// Serve read-only, Beacon-authenticated Ethereum evidence over JSON-lines.
+    EthereumEvidence(crate::ethereum_evidence::Args),
+
     /// Start core protocol ethereum to gear relayer
     EthGearCore(EthGearCoreArgs),
 
@@ -76,6 +79,8 @@ pub struct GearEthTokensArgs {
     pub gear_args: GearArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
+    #[clap(flatten)]
+    pub lane: common::LaneApprovalArgs,
     #[clap(flatten)]
     pub prometheus_args: PrometheusArgs,
 
@@ -170,6 +175,8 @@ pub struct EthGearTokensArgs {
     /// Independently approved replacement CodeId (never inferred from the live receiver).
     #[arg(long, requires = "cutover_seal")]
     pub successor_manager_code_id: Option<String>,
+    #[clap(flatten)]
+    pub native_wrapper: common::NativeWrapperApprovalArgs,
 }
 
 #[derive(Subcommand)]
@@ -218,6 +225,8 @@ pub struct GearEthManualArgs {
     pub gear_args: GearArgs,
     #[clap(flatten)]
     pub ethereum_args: EthereumSignerArgs,
+    #[clap(flatten)]
+    pub lane: common::LaneApprovalArgs,
 
     #[arg(long, help = format!("How many confirmations wait for message transaction on Ethereum. Default: {DEFAULT_COUNT_CONFIRMATIONS}"))]
     pub confirmations_status: Option<u64>,
@@ -242,6 +251,8 @@ pub struct EthGearManualArgs {
     pub cutover_seal: Option<PathBuf>,
     #[arg(long, requires = "cutover_seal")]
     pub successor_manager_code_id: Option<String>,
+    #[clap(flatten)]
+    pub native_wrapper: common::NativeWrapperApprovalArgs,
 
     /// ProgramId of the checkpoint-light-client program
     #[arg(long = "checkpoint-light-client")]
@@ -341,5 +352,80 @@ fn parse_fee_payers(s: &str) -> anyhow::Result<FeePayers> {
         Err(anyhow::anyhow!("Fee payers cannot be empty"))
     } else {
         Ok(FeePayers::ExcludedIds(ids))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    #[test]
+    fn outbound_requires_approved_lane_and_beacon_authority() {
+        let command = Cli::command();
+        for name in ["gear-eth-tokens", "gear-eth-manual"] {
+            let outbound = command.find_subcommand(name).unwrap();
+            for flag in [
+                "lane-approval",
+                "lane-approval-sha256",
+                "ethereum-finality-beacon-rpc",
+                "ethereum-finality-bootstrap",
+                "ethereum-finality-bootstrap-sha256",
+                "ethereum-finality-store",
+            ] {
+                assert!(
+                    outbound
+                        .get_arguments()
+                        .find(|arg| arg.get_long() == Some(flag))
+                        .unwrap()
+                        .is_required_set(),
+                    "{name}: {flag} must be required"
+                );
+            }
+            assert!(!outbound
+                .get_arguments()
+                .find(|arg| arg.get_long() == Some("ethereum-witness-rpc"))
+                .unwrap()
+                .is_required_set());
+        }
+        for name in ["eth-gear-tokens", "eth-gear-manual"] {
+            assert!(!command
+                .find_subcommand(name)
+                .unwrap()
+                .get_arguments()
+                .any(|arg| arg.get_long() == Some("lane-approval")));
+        }
+    }
+
+    #[test]
+    fn evidence_child_has_no_signer_or_gear_arguments() {
+        let command = Cli::command();
+        let evidence = command.find_subcommand("ethereum-evidence").unwrap();
+        let flags: Vec<_> = evidence
+            .get_arguments()
+            .filter_map(|arg| arg.get_long())
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                "ethereum-endpoint",
+                "ethereum-finality-beacon-rpc",
+                "ethereum-finality-bootstrap",
+                "ethereum-finality-bootstrap-sha256",
+                "ethereum-finality-store",
+                "ethereum-finality-proof-source",
+                "ethereum-evidence-proof-source",
+            ]
+        );
+        for flag in [
+            "ethereum-finality-proof-source",
+            "ethereum-evidence-proof-source",
+        ] {
+            assert!(!evidence
+                .get_arguments()
+                .find(|arg| arg.get_long() == Some(flag))
+                .unwrap()
+                .is_required_set());
+        }
     }
 }

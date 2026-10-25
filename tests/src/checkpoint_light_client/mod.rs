@@ -193,8 +193,13 @@ async fn init_hoodi_with_distinct_epoch_checkpoint_and_signed_update() -> Result
 async fn init_holesky() -> Result<()> {
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let (_api, program_id, gas_limit) =
-        initialize(Network::Holesky, update, bootstrap, "checkpoint-light-client").await?;
+    let (_api, program_id, gas_limit) = initialize(
+        Network::Holesky,
+        update,
+        bootstrap,
+        "checkpoint-light-client",
+    )
+    .await?;
 
     println!(
         "program_id = {:?}, gas_limit = {gas_limit}",
@@ -226,8 +231,13 @@ async fn sync_update_requires_replaying_back() -> Result<()> {
         _ => unreachable!("Requested single update"),
     };
 
-    let (api, program_id, gas_limit) =
-        initialize(Network::Sepolia, update, bootstrap, "checkpoint-light-client").await?;
+    let (api, program_id, gas_limit) = initialize(
+        Network::Sepolia,
+        update,
+        bootstrap,
+        "checkpoint-light-client",
+    )
+    .await?;
 
     println!(
         "program_id = {:?}, gas_limit = {gas_limit}",
@@ -284,8 +294,13 @@ async fn replay_back_and_updating() -> Result<()> {
 
     let (bootstrap, update) = get_bootstrap_and_update();
 
-    let (api, program_id, gas_limit) =
-        initialize(Network::Holesky, update, bootstrap, "checkpoint-light-client").await?;
+    let (api, program_id, gas_limit) = initialize(
+        Network::Holesky,
+        update,
+        bootstrap,
+        "checkpoint-light-client",
+    )
+    .await?;
 
     println!(
         "program_id = {:?}, gas_limit = {gas_limit}",

@@ -1,5 +1,6 @@
 use crate::{
     common::{is_transport_error_recoverable, BASE_RETRY_DELAY},
+    lane_policy::LanePolicy,
     message_relayer::common::RelayedMerkleRoot,
 };
 use ethereum_client::{
@@ -26,6 +27,7 @@ pub struct Request {
     pub proof: MerkleProof,
     pub tx_uuid: Uuid,
     pub prepared: Option<PreparedContentMessage>,
+    pub lane_policy: Option<LanePolicy>,
 }
 
 pub enum Response {
@@ -125,6 +127,7 @@ impl MessageSenderIo {
         proof: MerkleProof,
         tx_uuid: Uuid,
         prepared: Option<PreparedContentMessage>,
+        lane_policy: Option<LanePolicy>,
     ) -> bool {
         self.requests
             .send(Request {
@@ -133,6 +136,7 @@ impl MessageSenderIo {
                 proof,
                 tx_uuid,
                 prepared,
+                lane_policy,
             })
             .is_ok()
     }
@@ -414,7 +418,10 @@ async fn retry_original(
     // Receipt finality takes precedence over a consumed nonce or a competitor's processed bit.
     if let Some(included) = api.get_finalized_receipt(signed.hash).await? {
         super::status_fetcher::validate_receipt_authentication(
-            signed, &included.receipt, &included.inclusion, &included.checkpoint,
+            signed,
+            &included.receipt,
+            &included.inclusion,
+            &included.checkpoint,
         )?;
         anyhow::ensure!(
             included.receipt.block_number == Some(included.included_block_number)
@@ -425,7 +432,7 @@ async fn retry_original(
         return Ok(());
     }
     let snapshot = api
-        .get_finalized_submission_snapshot(signed.nonce, original.message.nonce_be)
+        .get_finalized_submission_snapshot(&signed.raw_transaction)
         .await?
         .ok_or_else(|| anyhow::anyhow!("canonical finalized submission snapshot is pending"))?;
     if let Some(observed) = transaction_identity(api.raw_provider(), signed.hash).await? {
@@ -436,7 +443,7 @@ async fn retry_original(
                 && observed.to == Some(signed.contract),
             "RPC outbound transaction differs from saved signed identity"
         );
-    } else if !snapshot.pinned_nonce_consumed {
+    } else if !snapshot.pinned_nonce_consumed() {
         // Even a processed message must consume its original nonce; a competitor cannot release it.
         let hash = api
             .broadcast_prepared_content_message(guard, signed)
@@ -470,6 +477,23 @@ async fn process_request(
     let total_leaves = u32::try_from(proof.num_leaves)?;
     let leaf_index = u32::try_from(proof.leaf_index)?;
     let fresh = prepared.is_none();
+    let Some(policy) = request.lane_policy.as_ref() else {
+        return Ok(report_hold(
+            tx_uuid,
+            "HOLD: outbound lane has no independently approved persisted effect policy".into(),
+            responses,
+        ));
+    };
+    if let Err(error) = policy.validate_for_api(&this.eth_api, message) {
+        return Ok(report_hold(tx_uuid, error.to_string(), responses));
+    }
+    if fresh && policy.original_hash.is_some() {
+        return Ok(report_hold(
+            tx_uuid,
+            "HOLD: historical original approval cannot authorize new signing".into(),
+            responses,
+        ));
+    }
     if fresh {
         let signed = match this
             .eth_api
@@ -522,6 +546,9 @@ async fn process_request(
     let signed = prepared
         .as_ref()
         .expect("submission was prepared or restored");
+    if let Err(error) = policy.validate(message, signed) {
+        return Ok(report_hold(tx_uuid, error.to_string(), responses));
+    }
     if let Err(error) = this.eth_api.validate_prepared_content_message(
         signed,
         root.block.0,
@@ -717,7 +744,7 @@ mod tests {
         }
         .abi_encode();
         let mut transaction = TxEip1559 {
-            chain_id: 560048,
+            chain_id: 31337,
             nonce,
             gas_limit: 100_000,
             max_fee_per_gas: 10,
@@ -730,7 +757,7 @@ mod tests {
         let raw_transaction =
             TxEnvelope::Eip1559(transaction.into_signed(signature)).encoded_2718();
         let signed = PreparedContentMessage {
-            chain_id: 560048,
+            chain_id: 31337,
             contract,
             sender: signer.address(),
             nonce,
@@ -792,6 +819,7 @@ mod tests {
         state: std::sync::Arc<RetryState>,
         broadcasts: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
         server: tokio::task::JoinHandle<()>,
+        _beacon: ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture,
     }
     impl Drop for RetryRpc {
         fn drop(&mut self) {
@@ -814,10 +842,15 @@ mod tests {
         let tag = uuid::Uuid::new_v4();
         let original = original(36).await;
         let failure = super::super::status_fetcher::tests::reverted_evidence(
-            &original.message, &original.submission,
+            &original.message,
+            &original.submission,
         );
         let (chain, receipt, _, _) = super::super::status_fetcher::tests::authenticated_fixture(
-            &original.submission, failure.receipt, tag.as_bytes(), 1, 1,
+            &original.submission,
+            failure.receipt,
+            tag.as_bytes(),
+            1,
+            2,
         );
         let (broadcasts, received) = tokio::sync::mpsc::unbounded_channel();
         let state = Arc::new(RetryState {
@@ -851,25 +884,33 @@ mod tests {
                                 state.calls.lock().unwrap().push(method.to_owned());
                                 let params = &request["params"];
                                 let result = match method {
-                                    "eth_chainId" => json!("0x88bb0"),
+                                    "eth_chainId" => json!("0x7a69"),
                                     "eth_getBalance" => json!("0x1000000000000000000"),
                                     "eth_getTransactionReceipt" => state.receipt.lock().unwrap().clone(),
                                     "eth_getBlockReceipts" => json!([state.canonical_receipt]),
                                     "eth_getTransactionByHash" => Value::Null,
                                     "eth_getBlockByNumber" => {
-                                        let number = if params[0] == "0x0" { 0 } else { 1 };
+                                        let number = params[0].as_str().unwrap();
+                                        let number = if let Some(number) = number.strip_prefix("0x") {
+                                            usize::from_str_radix(number, 16).unwrap()
+                                        } else {
+                                            1 + usize::from(state.consumed.load(Ordering::SeqCst))
+                                        };
                                         json!(state.chain[number])
                                     },
                                     "eth_getBlockByHash" => state.chain.iter()
                                         .find(|block| json!(block.header.hash) == params[0])
                                         .map(|block| json!(block)).unwrap_or(Value::Null),
-                                    "eth_getTransactionCount" => {
-                                        assert_eq!(params[1], json!({"blockHash":state.chain[1].header.hash, "requireCanonical":true}));
-                                        json!(if state.consumed.load(Ordering::SeqCst) { "0x26" } else { "0x24" })
-                                    },
-                                    "eth_call" => {
-                                        assert_eq!(params[1], json!({"blockHash":state.chain[1].header.hash, "requireCanonical":true}));
-                                        json!(format!("0x{:064x}", u8::from(state.processed.load(Ordering::SeqCst))))
+                                    "eth_getProof" => {
+                                        assert_eq!(params[2]["requireCanonical"], json!(true));
+                                        let block = state.chain.iter().find(|block|
+                                            json!(block.header.hash) == params[2]["blockHash"]
+                                        ).unwrap();
+                                        let address = serde_json::from_value(params[0].clone()).unwrap();
+                                        let (_, proof) = ethereum_client::beacon_finality::test_fixtures::single_account_proof(
+                                            address, if block.header.number < 2 { 36 } else { 38 },
+                                        );
+                                        json!(proof)
                                     },
                                     "eth_sendRawTransaction" => {
                                         let raw = hex::decode(params[0].as_str().unwrap().trim_start_matches("0x")).unwrap();
@@ -912,13 +953,29 @@ mod tests {
                 return Err(error.into());
             }
         };
-        let api = api.with_finality_witness(&witness_url, 560048, state.chain[0].header.hash).await?;
+        let beacon_state = state.clone();
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            31337,
+            state.chain[0].header.hash,
+            Arc::new(move || {
+                beacon_state.chain[1 + usize::from(beacon_state.consumed.load(Ordering::SeqCst))]
+                    .header
+                    .clone()
+            }),
+        )
+        .await?;
+        let api = api
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory.join("store"))
+            .await?
+            .with_data_witness(&witness_url, 31337, state.chain[0].header.hash)
+            .await?;
         state.calls.lock().unwrap().clear();
         Ok(RetryRpc {
             api,
             state,
             broadcasts: received,
             server,
+            _beacon: beacon,
         })
     }
 
@@ -939,14 +996,20 @@ mod tests {
         );
         let calls = rpc.state.calls.lock().unwrap().clone();
         assert!(
-            calls.iter().position(|method| method == "eth_getTransactionReceipt").unwrap()
-                < calls.iter().position(|method| method == "eth_getTransactionCount").unwrap(),
-            "receipt must precede nonce/processed observations"
+            calls
+                .iter()
+                .position(|method| method == "eth_getTransactionReceipt")
+                .unwrap()
+                < calls
+                    .iter()
+                    .position(|method| method == "eth_getProof")
+                    .unwrap(),
+            "receipt must precede authenticated account proof"
         );
         assert!(
             calls
                 .iter()
-                .position(|method| method == "eth_getTransactionCount")
+                .position(|method| method == "eth_getProof")
                 .unwrap()
                 < calls
                     .iter()
@@ -1080,7 +1143,9 @@ mod tests {
         let guard = rpc.api.reserve_submission().await;
         retry_original(&rpc.api, &guard, &original).await?;
         let calls = rpc.state.calls.lock().unwrap().clone();
-        assert!(calls.iter().any(|method| method == "eth_getTransactionReceipt"));
+        assert!(calls
+            .iter()
+            .any(|method| method == "eth_getTransactionReceipt"));
         assert!(!calls
             .iter()
             .any(|method| method == "eth_getTransactionCount" || method == "eth_call"));
@@ -1098,7 +1163,10 @@ mod tests {
                 _ => json!(alloy::primitives::Address::ZERO),
             };
             *rpc.state.receipt.lock().unwrap() = forged;
-            assert!(retry_original(&rpc.api, &guard, &original).await.is_err(), "{field}");
+            assert!(
+                retry_original(&rpc.api, &guard, &original).await.is_err(),
+                "{field}"
+            );
             assert!(futures::poll!(Box::pin(rpc.api.reserve_submission())).is_pending());
             assert!(rpc.broadcasts.try_recv().is_err());
             *rpc.state.receipt.lock().unwrap() = valid;

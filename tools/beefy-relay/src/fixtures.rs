@@ -1,4 +1,4 @@
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 use k256::ecdsa::SigningKey;
 use parity_scale_codec::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -9,9 +9,9 @@ use std::{collections::BTreeMap, path::Path};
 
 use crate::{
     protocol::{
-        authority_addresses, authority_root, convert_mmr_proof, encode_outer_leaf,
-        encode_queue_proof, keccak256, verify_native_mmr_proof, verify_simplified_mmr, Hash32,
-        KeccakHasher, QueueSnapshot, RuntimeLeafProof, MAX_MMR_PROOF_ITEMS, MAX_VALIDATORS,
+        authority_addresses, authority_root, encode_outer_leaf, encode_queue_proof, keccak256,
+        verify_native_mmr_proof, Hash32, KeccakHasher, QueueSnapshot, RuntimeLeafProof,
+        MAX_MMR_PROOF_ITEMS, MAX_VALIDATORS,
     },
     validate_signed_commitment,
 };
@@ -399,25 +399,15 @@ fn make_case(
         leaf_count,
         items: native_items(newest_index, leaf_count, &nodes),
     };
-    ensure!(
-        verify_native_mmr_proof(mmr_root, &historical_proof, historical_leaf_hash)?,
-        "native historical fixture MMR proof failed for {name} (index {historical_index}, count {leaf_count}, items {})",
-        historical_proof.items.len()
-    );
-    ensure!(
-        verify_native_mmr_proof(mmr_root, &freshness_proof, freshness_leaf_hash)?,
-        "native freshness fixture MMR proof failed"
-    );
-    let historical_simplified = convert_mmr_proof(&historical_proof)?;
-    let freshness_simplified = convert_mmr_proof(&freshness_proof)?;
-    ensure!(
-        verify_simplified_mmr(mmr_root, historical_leaf_hash, &historical_simplified)?,
-        "simplified historical fixture MMR proof failed for {name}"
-    );
-    ensure!(
-        verify_simplified_mmr(mmr_root, freshness_leaf_hash, &freshness_simplified)?,
-        "simplified freshness fixture MMR proof failed for {name}"
-    );
+    let historical_simplified =
+        verify_native_mmr_proof(mmr_root, &historical_proof, historical_leaf_hash)
+            .with_context(|| format!(
+                "native historical fixture MMR proof failed for {name} (index {historical_index}, count {leaf_count}, items {})",
+                historical_proof.items.len()
+            ))?;
+    let freshness_simplified =
+        verify_native_mmr_proof(mmr_root, &freshness_proof, freshness_leaf_hash)
+            .context("native freshness fixture MMR proof failed")?;
     ensure!(
         historical_simplified.items.len() <= MAX_MMR_PROOF_ITEMS
             && freshness_simplified.items.len() <= MAX_MMR_PROOF_ITEMS,

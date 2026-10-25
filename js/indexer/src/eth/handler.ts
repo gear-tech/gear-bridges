@@ -9,21 +9,19 @@ import { ethNonce, gearNonce } from '../common/index.js';
 import type { Context } from './processor.js';
 import { BatchState } from './batch-state.js';
 import { config } from './config.js';
-import { checkpointId, createEthereumEvidenceClients, createReceiptAuthenticator, qualifyFinality,
-  requireFinalizedBatch, retainCheckpoint, type AuthenticatedReceipt } from './finality.js';
+import { createEthereumEvidenceClients, createReceiptAuthenticator, recheckFinality, receiptDate,
+  receiptAuthorization, proofReference, assertReceiptAuthorization, assertAuthorizationCheckpoint, requalificationLinksFor,
+  requireFinalizedBatch, retainCheckpoint, type EthereumEvidenceClients, type AuthenticatedReceipt } from './finality.js';
 import { assertRetainedReceipt, qualifyOutboundCompletion } from './completion.js';
 
 let pendingCompletionCursor: string | undefined;
 let pendingCompletionBatch: string | undefined;
 let pendingCompletionStart: string | undefined;
 
-function receiptDate(seconds: string): Date {
-  const millis = BigInt(seconds) * 1000n;
-  if (millis < 0n || millis > 8_640_000_000_000_000n) throw new Error('HOLD: receipt timestamp out of range');
-  return new Date(Number(millis));
-}
 
-function bindObservation(row: CompletedTransfer, original: AuthenticatedReceipt): void {
+function bindObservation(
+  clients: EthereumEvidenceClients, row: CompletedTransfer, original: AuthenticatedReceipt,
+): void {
   if (!row.outboundReceipt) throw new Error('HOLD: missing retained outbound receipt');
   if (row.srcNetwork !== Network.Vara || row.destNetwork !== Network.Ethereum ||
       !Number.isSafeInteger(row.outboundReceipt.logIndex) || row.outboundReceipt.logIndex < 0) {
@@ -34,26 +32,52 @@ function bindObservation(row: CompletedTransfer, original: AuthenticatedReceipt)
     throw new Error('HOLD: retained outbound completion identity changed');
   }
   assertRetainedReceipt(row.outboundReceipt.receipt, original.receipt);
-  if (row.receiptAuth) {
-    if (row.receiptAuth.version !== 1 || row.receiptAuth.blockTimestamp !== original.blockTimestamp ||
-        !isDeepStrictEqual(row.receiptAuth.receipt, original.receipt) || !row.receiptAuth.checkpointId) {
-      throw new Error('HOLD: authenticated outbound receipt changed');
+  const archived = row.legacyReceiptAuth;
+  if (archived) {
+    assertAuthorizationCheckpoint(clients, archived.receiptAuth.checkpointId, BigInt(row.blockNumber));
+    assertRetainedReceipt(archived.receiptAuth.receipt, original.receipt);
+    if (archived.receiptAuth.version !== 1 || archived.txHash.toLowerCase() !== row.txHash.toLowerCase() ||
+        BigInt(archived.blockNumber) !== BigInt(row.blockNumber) ||
+        archived.receiptAuth.blockTimestamp !== original.blockTimestamp || !original.requalificationLinks.length) {
+      throw new Error('HOLD: archived completion lacks exact Beacon requalification');
     }
-  } else row.receiptAuth = { version: 1, checkpointId: checkpointId(original.checkpoint),
-    receipt: original.receipt, blockTimestamp: original.blockTimestamp };
+  }
+  const requalified = requalificationLinksFor(clients, original,
+    [archived?.receiptAuth.checkpointId], row.receiptAuth?.requalificationLinks);
+  if (row.receiptAuth) {
+    assertReceiptAuthorization(clients, row.receiptAuth, original);
+  } else row.receiptAuth = receiptAuthorization(original, requalified);
 }
 
-function settle(transfer: Transfer, row: CompletedTransfer, original: AuthenticatedReceipt): Transfer | undefined {
+function settle(clients: EthereumEvidenceClients, transfer: Transfer, row: CompletedTransfer, original: AuthenticatedReceipt): Transfer | undefined {
   const match = qualifyOutboundCompletion(transfer, original, config.msgQ, config.erc20Manager);
   if (!match || match.processedLogIndex !== row.outboundReceipt!.logIndex) {
     if (transfer.completionAuth || row.matched) throw new Error('HOLD: previously qualified outbound effect changed');
     return;
   }
-  const timestamp = receiptDate(original.blockTimestamp);
+  const legacy = transfer.legacyEthereumAuth ?? transfer.legacyResolution;
+  if ((legacy?.completedAtTxHash && legacy.completedAtTxHash.toLowerCase() !== row.txHash.toLowerCase()) ||
+      (legacy?.completedAtBlock != null && BigInt(legacy.completedAtBlock) !== BigInt(row.blockNumber))) {
+    throw new Error('HOLD: archived terminal original cannot be replaced');
+  }
+  const archived = transfer.legacyEthereumAuth?.completionAuth;
+  if (archived) {
+    if (archived.kind !== 'ethereum-receipt' || !archived.checkpointId || archived.completionId !== row.id ||
+        archived.processedLogIndex !== match.processedLogIndex) {
+      throw new Error('HOLD: archived completion binding changed');
+    }
+    assertAuthorizationCheckpoint(clients, archived.checkpointId, BigInt(row.blockNumber));
+  }
   const auth = transfer.completionAuth;
+  if (auth && auth.kind !== 'ethereum-receipt') throw new Error('HOLD: original outbound completion has another evidence kind');
+  const requalified = requalificationLinksFor(clients, original, [archived?.checkpointId], auth?.requalificationLinks);
+  // The observation can predate its counterpart; preserve its authorization separately.
+  const authorization = auth ?? receiptAuthorization(original, requalified);
+  assertReceiptAuthorization(clients, { ...row.receiptAuth!, ...authorization }, original);
+  const timestamp = receiptDate(original.blockTimestamp);
   if (auth) {
-    if (auth.version !== 1 || auth.kind !== 'ethereum-receipt' || auth.completionId !== row.id ||
-        auth.processedLogIndex !== match.processedLogIndex || auth.checkpointId !== row.receiptAuth!.checkpointId ||
+    if (auth.version !== 2 || auth.completionId !== row.id ||
+        auth.processedLogIndex !== match.processedLogIndex ||
         transfer.status !== Status.Completed || transfer.completedAt?.getTime() !== timestamp.getTime() ||
         transfer.completedAtBlock == null || BigInt(transfer.completedAtBlock) !== BigInt(row.blockNumber) ||
         transfer.completedAtTxHash?.toLowerCase() !== row.txHash.toLowerCase()) {
@@ -65,8 +89,8 @@ function settle(transfer: Transfer, row: CompletedTransfer, original: Authentica
   row.matched = true;
   return auth ? undefined : new Transfer({ ...transfer, status: Status.Completed, completedAt: timestamp,
     completedAtBlock: BigInt(row.blockNumber), completedAtTxHash: row.txHash,
-    completionAuth: { version: 1, kind: 'ethereum-receipt', checkpointId: row.receiptAuth!.checkpointId,
-      completionId: row.id, processedLogIndex: match.processedLogIndex } });
+    completionAuth: { version: 2, kind: 'ethereum-receipt', checkpointId: authorization.checkpointId,
+      completionId: row.id, processedLogIndex: match.processedLogIndex, ...proofReference(authorization) } });
 }
 
 export async function handleBatch(ctx: Context): Promise<void> {
@@ -78,7 +102,7 @@ export async function handleBatch(ctx: Context): Promise<void> {
     pendingCompletionStart = pendingCompletionCursor;
   }
   const checkpoint = await requireFinalizedBatch(ctx);
-  const clients = createEthereumEvidenceClients((method, params) => ctx._chain.client.call(method, params));
+  const clients = createEthereumEvidenceClients('eth');
   const authenticate = createReceiptAuthenticator(clients, checkpoint);
   const state = new BatchState();
   await state.new(ctx);
@@ -114,8 +138,7 @@ export async function handleBatch(ctx: Context): Promise<void> {
           id: randomUUID(), txHash, blockNumber, timestamp,
           nonce: ethNonce(firstDeposit ? `${blockNumber}${transactionIndex}` : `${blockNumber}:${transactionIndex}:${localIndex}`),
           sourceTransactionIndex: transactionIndex, sourceLogIndex: BigInt(localIndex),
-          sourceReceiptAuth: { version: 1, checkpointId: checkpointId(checkpoint), receipt,
-            blockTimestamp: original.blockTimestamp, localLogIndex: localIndex },
+          sourceReceiptAuth: { ...receiptAuthorization(original), localLogIndex: localIndex },
           sourceNetwork: Network.Ethereum, source: token, destNetwork: Network.Vara,
           status: Status.AwaitingPayment, sender: from, receiver: to, amount: amount.toString(),
         }));
@@ -188,18 +211,20 @@ export async function handleBatch(ctx: Context): Promise<void> {
   for (const row of observations.values()) {
     const height = Number(row.blockNumber);
     if (!Number.isSafeInteger(height) || height < 0) throw new Error('HOLD: completion block out of range');
-    const original = originals.get(row.id) ?? await authenticate(row.txHash, { height, hash: row.outboundReceipt!.receipt.blockHash });
+    const original = row.receiptAuth
+      ? await authenticate(row.txHash, { height, hash: row.outboundReceipt!.receipt.blockHash, proofDigest: row.receiptAuth.inclusionProofDigest })
+      : originals.get(row.id) ?? await authenticate(row.txHash, { height, hash: row.outboundReceipt!.receipt.blockHash });
     if (!original) throw new Error('HOLD: retained completion receipt unavailable');
-    bindObservation(row, original);
     const transfer = byNonce.get(row.outboundReceipt!.nonce);
+    bindObservation(clients, row, original);
     if (!transfer) {
       if (row.matched) throw new Error('HOLD: matched completion lost its original transfer');
       continue;
     }
-    const update = settle(transfer, row, original);
+    const update = settle(clients, transfer, row, original);
     if (update) updates.push(update);
   }
-  await qualifyFinality(clients, checkpoint);
+  await recheckFinality(clients, checkpoint);
   await retainCheckpoint(ctx.store, checkpoint);
   await state.save();
   if (updates.length) await ctx.store.save(updates);

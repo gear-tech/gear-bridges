@@ -119,6 +119,22 @@ type Error = enum {
   ReceiptResolved,
   /// The original authenticated token operation explicitly rejected without effect.
   TokenOperationRejected,
+  /// The approved immutable native wrapper cannot retain held liabilities.
+  NativeHoldUnsupported,
+};
+
+/// Code identity is a governance assertion, independently authenticated offchain.
+type NativeWrapperConfig = struct {
+  actor_id: actor_id,
+  ethereum_token: h160,
+  code_id: h256,
+  mode: NativeWrapperMode,
+};
+
+/// Capabilities of the unchanged native wrapper approved by governance.
+type NativeWrapperMode = enum {
+  EscrowV1,
+  HeldEscrowV2,
 };
 
 /// The on-chain outcome of an Ethereum receipt key.
@@ -295,8 +311,8 @@ service VftManager {
   /// 
   /// Swaps internal hash maps of the TokenMap instance.
   CalculateGasForTokenMapSwap : () -> null;
-  /// Settlement policy is explicit, and only changes at a paused boundary.
-  ConfigureNativeWrapper : (wrapper: opt struct { actor_id, h160 }) -> null;
+  /// Settlement policy is explicit and cannot change after economic activity.
+  ConfigureNativeWrapper : (wrapper: opt NativeWrapperConfig) -> null;
   /// End an emergency stop before its deadline.
   /// 
   /// Can be called only by a [State::admin] or [State::pause_admin].
@@ -395,12 +411,14 @@ service VftManager {
   query IsEmergencyStopped : () -> bool;
   /// Check if `vft-manager` is manually paused.
   query IsPaused : () -> bool;
-  query NativeWrapper : () -> opt actor_id;
+  query NativeWrapper : () -> opt NativeWrapperConfig;
   /// Get current [State::pause_admin] address.
   query PauseAdmin : () -> actor_id;
   query ReceiptDeposits : (slot: u64, transaction_index: u64) -> vec ReceiptDepositState;
   /// Read retained no-effect evidence for a terminally rejected deposit.
   query ReceiptRejection : (slot: u64, transaction_index: u64, log_index: u64) -> opt ReceiptRejectionEvidence;
+  /// Exact retained native error-child retry permission, not a status-only hint.
+  query ReceiptRetryableNative : (slot: u64, transaction_index: u64, log_index: u64, operation_id: h256, child: message_id) -> bool;
   /// Read the current status for one Ethereum receipt key.
   query ReceiptStatus : (slot: u64, transaction_index: u64) -> ReceiptStatus;
   /// Get state of a `request_bridging` message tracker.

@@ -71,6 +71,8 @@ enum HexEncodedMessage {
         expected_redemption_hex: String,
         #[arg(long)]
         acknowledge_irreversible_hold: bool,
+        #[command(flatten)]
+        native_capability: cutover::NativeCapabilityArgs,
     },
 }
 
@@ -154,7 +156,16 @@ fn print_encoded_message(message: HexEncodedMessage) -> AnyResult<()> {
             operation_id,
             expected_redemption_hex,
             acknowledge_irreversible_hold,
+            native_capability,
         } => {
+            let approved = native_capability
+                .load()?
+                .context("HOLD: explicit native capability approval required")?;
+            anyhow::ensure!(
+                approved.approval.wrapper.mode
+                    == gear_common::native_wrapper::NativeWrapperMode::HeldEscrowV2,
+                "HOLD: escrow-v1 has no HoldRedemption capability"
+            );
             let bytes = hex::decode(
                 expected_redemption_hex
                     .strip_prefix("0x")

@@ -10,7 +10,7 @@ import { composeProof, generateMerkleProof, immutableInboundProfile, parseInboun
 import { relayEthToVara, createVftManagerReplyContract, validateFinalizedEthToVaraReply, decodeConsumerReply, assertNativePendingReply, validateFinalizedNativeReconciliationReply } from '../src/eth-to-vara/relayer.js';
 import type { ConsumerReplyContract, RelayResult } from '../src/eth-to-vara/relayer.js';
 import { validateInboundTokenEffect, BridgingRequestedAbi, nativeOperationId, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
-  VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, type NativeReceiptDeposit, type NativeRedemption } from '../src/eth-to-vara/token-effect.js';
+  VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, NATIVE_WRAPPER_V1_IDL_SHA256, type NativeWrapperMode, type NativeReceiptDeposit, type NativeRedemption } from '../src/eth-to-vara/token-effect.js';
 import { encode as rlpEncode } from '@ethereumjs/rlp';
 import { HistoricalProxy } from '../src/vara/historical-proxy.js';
 import * as beaconMethods from '../src/ethereum/beacon-client.js';
@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto';
 import { readApprovedFixtureProfile } from './setup/setup.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import './beacon-fixtures.js';
 
 dotenv.config();
 
@@ -35,6 +36,7 @@ async function managerRegistry() {
   const idl = fs.readFileSync(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8');
   expect(createHash('sha256').update(idl).digest('hex')).toBe(VFT_MANAGER_IDL_SHA256);
   expect(createHash('sha256').update(fs.readFileSync(new URL('../../../api/gear/vft_vara.idl', import.meta.url))).digest('hex')).toBe(NATIVE_WRAPPER_IDL_SHA256);
+  expect(createHash('sha256').update(fs.readFileSync(new URL('../../../api/gear/vft_vara_v1.idl', import.meta.url))).digest('hex')).toBe(NATIVE_WRAPPER_V1_IDL_SHA256);
   return new Sails(await SailsIdlParser.new()).parseIdl(idl).registry;
 }
 
@@ -139,7 +141,7 @@ test.each(['deadline', 'funded', 'insufficient', 'case-profile'] as const)('SDK 
   const inboundProfile = scenario === 'case-profile' ? parseInboundProofProfile(JSON.stringify({
     ...profile, sourceRuntimeCodeHash: '0x' + profile.sourceRuntimeCodeHash.slice(2).toUpperCase(),
   }, (_, value) => typeof value === 'bigint' ? value.toString() : value)) : profile;
-  if (scenario === 'case-profile') expect(inboundProfile.sourceRuntimeCodeHash).not.toBe(profile.sourceRuntimeCodeHash);
+  if (scenario === 'case-profile') expect(inboundProfile.sourceRuntimeCodeHash).toBe(profile.sourceRuntimeCodeHash);
   const inner = getPrefix('Ping', 'SubmitReceipt') + '00';
   fixture.state.payload = fixture.registry.createType('(String,String,Result<(Vec<u8>,Vec<u8>),ProxyError>)',
     ['HistoricalProxy', 'Redirect', { ok: [bytesToHex(fixture.receiptRlp), inner] }]).toHex();
@@ -325,6 +327,112 @@ describe('SDK finalized consumer and token effects', () => {
     expect(() => immutableInboundProfile(undefined as unknown as InboundProofProfile)).toThrow('HOLD');
   });
 
+  test.each(['escrow-v1', 'held-escrow-v2'] as const)('normalizes all profile byte identities and binds %s to its actual IDL', async (mode) => {
+    const original = nativeProfile(mode), actorId = hash(0xabcdef), token = `0x${'abcdefabcd'.repeat(4)}` as HexString;
+    const profile: InboundProofProfile = { ...original, ethereumGenesisHash: actorId, beaconGenesisValidatorsRoot: actorId,
+      sourceGenesisHash: actorId, sourceBlockHash: actorId, sourceRuntimeCodeHash: actorId,
+      historicalProxyId: actorId, historicalProxyCodeId: actorId,
+      endpoint: { ...original.endpoint, programId: actorId, codeId: actorId },
+      checkpoint: { ...original.checkpoint, programId: actorId, codeId: actorId },
+      consumer: { ...original.consumer, programId: actorId, codeId: actorId },
+      nativeWrapper: { ...original.nativeWrapper!, programId: actorId, codeId: actorId, ethereumToken: token },
+      forks: original.forks.map(fork => ({ ...fork, version: '0xabcdefab' })) };
+    const upper = JSON.parse(JSON.stringify(profile, (_, value) => typeof value === 'bigint' ? value.toString() :
+      typeof value === 'string' && /^(?:0x)?[0-9a-fA-F]{8,}$/.test(value) ?
+        (value.startsWith('0x') ? '0x' + value.slice(2).toUpperCase() : value.toUpperCase()) : value));
+    const canonical = parseInboundProofProfile(JSON.stringify(upper));
+    expect(canonical).toEqual(profile);
+    expect(Object.isFrozen(canonical.nativeWrapper)).toBe(true);
+    expect(Object.isFrozen(canonical.forks[0])).toBe(true);
+    const registry = await managerRegistry();
+    const contract: ConsumerReplyContract = { registry, idlSha256: VFT_MANAGER_IDL_SHA256.toUpperCase(),
+      resultType: 'Result<Null, Error>', verifyEffect: async () => {},
+      nativeSettlement: { expectedEffect: { managerAddress: token, sourceToken: token, destinationToken: actorId,
+        sender: token, receiver: actorId, amount: 10n },
+        readDeposits: async () => [], readRedemption: async () => null, readReceiptStatus: async () => 'Reserved' } };
+    const pending = registry.createType('(String,String,Result<Null,Error>)',
+      ['VftManager', 'SubmitReceipt', { err: { NativeSettlementPending: null } }]).toHex();
+    expect(() => assertNativePendingReply(pending, canonical, contract)).not.toThrow();
+    const ok = registry.createType('(String,String,Result<Null,Error>)', ['VftManager', 'SubmitReceipt', { ok: null }]).toHex();
+    expect(decodeConsumerReply(ok, canonical, contract)).toBeNull();
+    for (const binding of [
+      { ...profile.nativeWrapper!, mode: mode === 'escrow-v1' ? 'held-escrow-v2' as const : 'escrow-v1' as const },
+      { ...profile.nativeWrapper!, mode: undefined },
+      { ...profile.nativeWrapper!, ethereumToken: '0x00' },
+      { ...profile.nativeWrapper!, codeId: hash(0) },
+      { ...profile.nativeWrapper!, idlSha256: 'b'.repeat(64) },
+    ]) expect(() => immutableInboundProfile({ ...profile, nativeWrapper: binding } as InboundProofProfile)).toThrow('HOLD');
+    const adapter = { registry, idlSha256: contract.idlSha256, ...contract.nativeSettlement! };
+    expect(() => createVftManagerReplyContract(canonical, adapter)).not.toThrow();
+    expect(() => createVftManagerReplyContract(canonical, { ...adapter,
+      expectedEffect: { ...adapter.expectedEffect, sourceToken: `0x${'ff'.repeat(20)}` } })).toThrow('mapping');
+    expect(() => createVftManagerReplyContract(canonical, { ...adapter,
+      expectedEffect: { ...adapter.expectedEffect, destinationToken: hash(0xff) } })).toThrow('mapping');
+  });
+
+  test.each(['escrow-v1', 'held-escrow-v2'] as const)('compares mixed-case native cohorts by bytes without weakening %s refund rules', async (mode) => {
+    const upper = (value: HexString) => ('0x' + value.slice(2).toUpperCase()) as HexString;
+    const expected = { managerAddress: `0x${'ab'.repeat(20)}` as HexString, sourceToken: `0x${'cd'.repeat(20)}` as HexString,
+      sender: `0x${'ef'.repeat(20)}` as HexString, destinationToken: hash(0xab), receiver: hash(0xcd), amount: 10n };
+    const log = { address: expected.managerAddress, topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
+      args: { from: expected.sender, to: expected.receiver, token: expected.sourceToken } }), data: encodeAbiParameters(parseAbiParameters('uint256'), [10n]) };
+    const { receiptRlp } = await generateMerkleProof(0, [{ type: 'eip1559', transactionIndex: 0, status: 'success',
+      cumulativeGasUsed: 21000n, logsBloom: '0x' + '00'.repeat(256), logs: [log] } as unknown as TransactionReceipt]);
+    const identity = { managerId: hash(0xef), proxyId: hash(0xfa), wrapperId: expected.destinationToken, wrapperMode: mode,
+      wrapperEthereumToken: expected.sourceToken, slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
+    const row: NativeReceiptDeposit = { log_index: 0, sender: expected.sender, receiver: expected.receiver, eth_token_id: expected.sourceToken,
+      token_id: expected.destinationToken, amount: 10n, outcome: 'NativeQueued', native: true, supply: 'Gear',
+      operation_id: nativeOperationId(identity, 0n), child: hash(0xabcd) };
+    const changedCase = { ...row, sender: upper(row.sender), receiver: upper(row.receiver), eth_token_id: upper(row.eth_token_id),
+      token_id: upper(row.token_id), operation_id: upper(row.operation_id), child: upper(row.child!) };
+    const upperIdentity = { ...identity, managerId: upper(identity.managerId), proxyId: upper(identity.proxyId),
+      wrapperId: upper(identity.wrapperId), wrapperEthereumToken: upper(identity.wrapperEthereumToken) };
+    expect(() => validateNativePendingCohort(upperIdentity, [changedCase])).not.toThrow();
+    expect(() => validateNativeCohortContinuity([row], [changedCase], false)).not.toThrow();
+    const queued: NativeRedemption = { from: identity.managerId, to: row.receiver, amount: 10n, child: hash(0xbcde),
+      status: 'Queued', returned_value: 10n };
+    const upperQueued = { ...queued, from: upper(queued.from), to: upper(queued.to), child: upper(queued.child) };
+    expect(validateNativeRedemption(changedCase, upper(identity.managerId), mode, upperQueued, queued)).toBe('Queued');
+    expect(() => validateNativeTokenEffect(identity, [changedCase], new Map([[row.operation_id, upperQueued]]))).toThrow('not terminal');
+    const refunded = { ...changedCase, outcome: 'Refunded' };
+    const refund = { ...upperQueued, status: 'Refunded' as const };
+    const original = new Map([[upper(row.operation_id), upperQueued]]);
+    expect(validateNativeTokenEffect(upperIdentity, [refunded], new Map([[row.operation_id, refund]]), original)[0])
+      .toEqual({ operationId: row.operation_id, logIndex: 0n, child: row.child, redemption: { ...queued, status: 'Refunded' } });
+    expect(() => validateNativeCohortContinuity([row], [refunded], true)).not.toThrow();
+    const delivered = { ...changedCase, outcome: 'Settled' };
+    expect(() => validateInboundTokenEffect(receiptRlp, [delivered], {
+      ...expected, managerAddress: upper(expected.managerAddress), sourceToken: upper(expected.sourceToken),
+      destinationToken: upper(expected.destinationToken), sender: upper(expected.sender), receiver: upper(expected.receiver),
+    })).not.toThrow();
+    expect(validateNativeTokenEffect(identity, [delivered], new Map([[upper(row.operation_id),
+      { ...upperQueued, status: 'Delivered', returned_value: 0n }]]))[0].redemption.status).toBe('Delivered');
+    for (const change of [{ operation_id: hash(0xff) }, { child: hash(0xff) }, { token_id: hash(0xff) },
+      { receiver: hash(0xff) }, { eth_token_id: `0x${'ff'.repeat(20)}` as HexString }]) {
+      expect(() => validateNativeCohortContinuity([row], [{ ...refunded, ...change }], true)).toThrow('HOLD');
+    }
+    for (const change of [{ child: hash(0xff) }, { from: hash(0xff) }, { to: hash(0xff) }]) {
+      expect(() => validateNativeTokenEffect(identity, [refunded], new Map([[row.operation_id, { ...refund, ...change }]]), original)).toThrow('HOLD');
+    }
+    expect(() => validateNativePendingCohort({ ...identity, wrapperEthereumToken: `0x${'ff'.repeat(20)}` }, [row])).toThrow('HOLD');
+    expect(() => validateNativePendingCohort(identity, [{ ...row, operation_id: hash(0xff) }])).toThrow('HOLD');
+    expect(() => validateNativeTokenEffect(identity, [refunded], new Map([[hash(0xff), refund]]), original)).toThrow('HOLD');
+    expect(() => validateNativeTokenEffect(identity, [refunded], new Map([[row.operation_id, refund], [upper(row.operation_id), refund]]), original)).toThrow('duplicate');
+    for (const status of ['Returned', 'Ambiguous'] as const) {
+      expect(() => validateNativeRedemption(row, identity.managerId, mode, { ...queued, status })).toThrow('HOLD');
+    }
+    for (const returned_value of [1n, 9n, 11n]) {
+      const excess = { ...queued, returned_value };
+      if (mode === 'held-escrow-v2' && returned_value === 11n) {
+        expect(validateNativeRedemption(row, identity.managerId, mode, excess)).toBe('Queued');
+        expect(validateNativeRedemption(refunded, identity.managerId, mode, { ...excess, status: 'Refunded' }, excess)).toBe('Refunded');
+      } else {
+        expect(() => validateNativeRedemption(row, identity.managerId, mode, excess)).toThrow('HOLD');
+        expect(() => validateNativeRedemption(refunded, identity.managerId, mode, { ...excess, status: 'Refunded' })).toThrow('HOLD');
+      }
+    }
+  });
+
   test('qualifies actual Electra and historical proxy IDL bytes and rejects either mutation', () => {
     const original = checkpointProofFixture().profile;
     const [proxyHash, endpointHash] = ['historical_proxy', 'eth_events_electra'].map(name => createHash('sha256').update(
@@ -416,7 +524,8 @@ describe('SDK finalized consumer and token effects', () => {
       args: { from: expected.sender, to: expected.receiver, token: expected.sourceToken } }), data: encodeAbiParameters(parseAbiParameters('uint256'), [amount]) }));
     const { receiptRlp } = await generateMerkleProof(0, [{ type: 'eip1559', transactionIndex: 0, status: 'success', cumulativeGasUsed: 21000n,
       logsBloom: '0x' + '00'.repeat(256), logs } as unknown as TransactionReceipt]);
-    const identity = { managerId: hash(1), proxyId: hash(2), wrapperId: hash(8), slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
+    const identity = { managerId: hash(1), proxyId: hash(2), wrapperId: hash(8), wrapperMode: 'held-escrow-v2' as const,
+      wrapperEthereumToken: expected.sourceToken, slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
     const rows: NativeReceiptDeposit[] = [10n, 20n].map((amount, log_index) => ({ log_index, sender: expected.sender, receiver: expected.receiver,
       eth_token_id: expected.sourceToken, token_id: expected.destinationToken, amount, outcome: 'NativeQueued', native: true, supply: 'Gear',
       operation_id: nativeOperationId(identity, BigInt(log_index)), child: hash(40 + log_index) }));
@@ -439,47 +548,47 @@ describe('SDK finalized consumer and token effects', () => {
     }
     expect(() => validateNativeCohortContinuity(rows, delivered.slice(0, 1), true)).toThrow();
     const queued = { from: identity.managerId, to: expected.receiver, amount: 10n, child: hash(50), status: 'Queued' as const, returned_value: 0n };
-    expect(validateNativeRedemption(rows[0], identity.managerId, queued)).toBe('Queued');
+    expect(validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, queued)).toBe('Queued');
     const returned = { ...queued, returned_value: 10n };
-    expect(validateNativeRedemption(rows[0], identity.managerId, returned, queued)).toBe('Queued');
+    expect(validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, returned, queued)).toBe('Queued');
     expect(() => validateNativeTokenEffect(identity, rows, new Map([[rows[0].operation_id, returned]]))).toThrow('HOLD');
     for (const change of [{ returned_value: 1n }, { child: hash(99) }, { child: rows[0].child! },
       { to: hash(99) }, { from: hash(99) }, { amount: 11n }, { status: 'Ambiguous' as const }, { status: 'Returned' as const }]) {
-      expect(() => validateNativeRedemption(rows[0], identity.managerId, { ...returned, ...change }, queued)).toThrow('HOLD');
+      expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, { ...returned, ...change }, queued)).toThrow('HOLD');
     }
-    expect(() => validateNativeRedemption(rows[0], identity.managerId, queued, returned)).toThrow('HOLD');
-    expect(() => validateNativeRedemption(rows[0], identity.managerId, { ...queued, status: 'Delivered' }, returned)).toThrow('HOLD');
-    expect(() => validateNativeRedemption({ ...rows[0], amount: 0n }, identity.managerId, { ...queued, amount: 0n })).toThrow('HOLD');
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, queued, returned)).toThrow('HOLD');
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, { ...queued, status: 'Delivered' }, returned)).toThrow('HOLD');
+    expect(() => validateNativeRedemption({ ...rows[0], amount: 0n }, identity.managerId, identity.wrapperMode, { ...queued, amount: 0n })).toThrow('HOLD');
     const settled = { ...queued, status: 'Delivered' as const };
-    expect(validateNativeRedemption(delivered[0], identity.managerId, settled, queued)).toBe('Delivered');
+    expect(validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, settled, queued)).toBe('Delivered');
     for (const change of [{ child: hash(99) }, { child: rows[0].child! }, { returned_value: 1n }, { status: 'Returned' as const }, { status: 'Ambiguous' as const },
-      { to: hash(99) }, { from: hash(99) }, { amount: 11n }]) expect(() => validateNativeRedemption(delivered[0], identity.managerId, { ...settled, ...change }, queued)).toThrow();
-    expect(() => validateNativeRedemption(rows[0], identity.managerId, null)).toThrow();
+      { to: hash(99) }, { from: hash(99) }, { amount: 11n }]) expect(() => validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, { ...settled, ...change }, queued)).toThrow();
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, null)).toThrow();
     expect(() => validateInboundTokenEffect(receiptRlp, rows, expected)).toThrow();
     expect(() => validateInboundTokenEffect(receiptRlp, delivered, expected)).not.toThrow();
     const refunded = rows.map(row => ({ ...row, outcome: 'Refunded' }));
     const refunds = new Map(rows.map(row => [row.operation_id, { ...queued, amount: row.amount, child: hash(50 + Number(row.log_index)),
       status: 'Refunded' as const, returned_value: row.amount }]));
     const originals = new Map([...refunds].map(([operation, value]) => [operation, { ...value, status: 'Queued' as const, returned_value: 0n }]));
-    expect(validateNativeRedemption(refunded[0], identity.managerId, refunds.get(rows[0].operation_id)!, queued)).toBe('Refunded');
-    expect(validateNativeRedemption(refunded[0], identity.managerId, refunds.get(rows[0].operation_id)!, returned)).toBe('Refunded');
+    expect(validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, refunds.get(rows[0].operation_id)!, queued)).toBe('Refunded');
+    expect(validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, refunds.get(rows[0].operation_id)!, returned)).toBe('Refunded');
     const excess = { ...returned, returned_value: 11n };
     const excessRefunds = new Map([...refunds].map(([operation, value]) => [operation,
       { ...value, returned_value: BigInt(value.amount) + 1n }]));
     const excessOriginals = new Map([...excessRefunds].map(([operation, value]) => [operation, { ...value, status: 'Queued' as const }]));
-    expect(validateNativeRedemption(rows[0], identity.managerId, excess, queued)).toBe('Queued');
-    expect(validateNativeRedemption(refunded[0], identity.managerId, excessRefunds.get(rows[0].operation_id)!, excess)).toBe('Refunded');
+    expect(validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, excess, queued)).toBe('Queued');
+    expect(validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, excessRefunds.get(rows[0].operation_id)!, excess)).toBe('Refunded');
     const excessSettlements = validateNativeTokenEffect(identity, refunded, excessRefunds, excessOriginals);
     expect(validateNativeTokenEffect(identity, refunded, excessRefunds, originals).map(entry => entry.redemption.returned_value)).toEqual([11n, 21n]);
     expect(excessSettlements.map(entry => entry.redemption.returned_value)).toEqual([11n, 21n]);
     expect(excessSettlements.map(entry => entry.redemption.amount)).toEqual([10n, 20n]);
     for (const backing of [0n, 10n, 12n]) {
-      expect(() => validateNativeRedemption(rows[0], identity.managerId, { ...excess, returned_value: backing }, excess)).toThrow('HOLD');
-      expect(() => validateNativeRedemption(refunded[0], identity.managerId,
+      expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, { ...excess, returned_value: backing }, excess)).toThrow('HOLD');
+      expect(() => validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode,
         { ...excess, status: 'Refunded', returned_value: backing }, excess)).toThrow('HOLD');
     }
-    expect(() => validateNativeRedemption(delivered[0], identity.managerId, { ...excess, status: 'Delivered' }, queued)).toThrow('HOLD');
-    expect(() => validateNativeRedemption(refunded[0], identity.managerId,
+    expect(() => validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, { ...excess, status: 'Delivered' }, queued)).toThrow('HOLD');
+    expect(() => validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode,
       { ...excess, status: 'Refunded', returned_value: 12n }, excessRefunds.get(rows[0].operation_id)!)).toThrow('HOLD');
     expect(() => validateNativeCohortContinuity(rows, refunded, true)).not.toThrow();
     const authenticated = validateNativeTokenEffect(identity, refunded, refunds, originals);
@@ -498,8 +607,8 @@ describe('SDK finalized consumer and token effects', () => {
     }
     expect(() => validateNativeCohortContinuity(refunded, delivered, true)).toThrow();
     expect(() => validateNativeCohortContinuity(delivered, refunded, true)).toThrow();
-    expect(() => validateNativeRedemption(refunded[0], identity.managerId, refunds.get(rows[0].operation_id)!, settled)).toThrow();
-    expect(() => validateNativeRedemption(delivered[0], identity.managerId, settled, refunds.get(rows[0].operation_id)!)).toThrow();
+    expect(() => validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, refunds.get(rows[0].operation_id)!, settled)).toThrow();
+    expect(() => validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, settled, refunds.get(rows[0].operation_id)!)).toThrow();
     expect(() => validateNativeTokenEffect(identity, [{ ...refunded[0], receiver: hash(99) }, refunded[1]], refunds, originals)).toThrow();
     expect(() => validateNativeCohortContinuity(rows, [{ ...refunded[0], child: hash(99) }, refunded[1]], true)).toThrow();
     const mixed = [refunded[0], delivered[1]];
@@ -508,11 +617,12 @@ describe('SDK finalized consumer and token effects', () => {
     expect(validateNativeTokenEffect(identity, mixed, mixedRedemptions, originals).map(entry => entry.redemption.status)).toEqual(['Refunded', 'Delivered']);
   });
 
-  test.each(['refund', 'delivered', 'direct-refund', 'partial', 'amount', 'child', 'manager-child', 'recipient', 'source', 'terminal', 'ambiguous', 'pin',
-    'reconcile-refund', 'reconcile-uncredited', 'queued-wait', 'queued-partial', 'queued-child', 'queued-recipient', 'queued-source', 'queued-amount', 'queued-ambiguous'] as const)(
-    'qualifies original native settlement at its saved finalized pin: %s', async (scenario) => {
+  test.each((['refund', 'delivered', 'direct-refund', 'partial', 'amount', 'child', 'manager-child', 'recipient', 'source', 'terminal', 'ambiguous', 'pin',
+    'reconcile-refund', 'reconcile-uncredited', 'queued-wait', 'queued-partial', 'queued-child', 'queued-recipient', 'queued-source', 'queued-amount', 'queued-ambiguous'] as const)
+    .flatMap(scenario => (['escrow-v1', 'held-escrow-v2'] as const).map(mode => [mode, scenario] as const)))(
+    'qualifies original native settlement at its saved finalized pin: %s/%s', async (mode, scenario) => {
       const fixture = originalReplyFixture(), api = fixture.params.gearApi, registry = await managerRegistry();
-      const profile = nativeProfile(), direct = scenario === 'direct-refund', delivered = scenario === 'delivered';
+      const profile = nativeProfile(mode), direct = scenario === 'direct-refund', delivered = scenario === 'delivered';
       const reconcile = scenario.startsWith('reconcile-') || scenario.startsWith('queued-');
       const expected = { managerAddress: ('0x' + '12'.repeat(20)) as HexString, sourceToken: ('0x' + '13'.repeat(20)) as HexString,
         destinationToken: profile.nativeWrapper!.programId, sender: ('0x' + '14'.repeat(20)) as HexString, receiver: hash(9), amount: 10n };
@@ -521,6 +631,7 @@ describe('SDK finalized consumer and token effects', () => {
       const { receiptRlp } = await generateMerkleProof(0, [{ type: 'eip1559', transactionIndex: 0, status: 'success', cumulativeGasUsed: 21000n,
         logsBloom: '0x' + '00'.repeat(256), logs: [log] } as unknown as TransactionReceipt]);
       const identity = { managerId: profile.consumer.programId, proxyId: profile.historicalProxyId, wrapperId: expected.destinationToken,
+        wrapperMode: profile.nativeWrapper!.mode, wrapperEthereumToken: profile.nativeWrapper!.ethereumToken,
         slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
       const row: NativeReceiptDeposit = { log_index: 0, sender: expected.sender, receiver: expected.receiver, eth_token_id: expected.sourceToken,
         token_id: expected.destinationToken, amount: 10n, outcome: 'NativeQueued', native: true, supply: 'Gear',
@@ -706,10 +817,11 @@ describe('SDK finalized consumer and token effects', () => {
 });
 
 
-function nativeProfile(): InboundProofProfile {
+function nativeProfile(mode: NativeWrapperMode = 'held-escrow-v2'): InboundProofProfile {
   const original = checkpointProofFixture().profile;
   return immutableInboundProfile({ ...original, consumer: { ...original.consumer, idlSha256: VFT_MANAGER_IDL_SHA256, service: 'VftManager' },
-    nativeWrapper: { programId: hash(8), codeId: hash(18), idlSha256: NATIVE_WRAPPER_IDL_SHA256 } });
+    nativeWrapper: { programId: hash(8), ethereumToken: `0x${'13'.repeat(20)}`, codeId: hash(18), mode,
+      idlSha256: mode === 'escrow-v1' ? NATIVE_WRAPPER_V1_IDL_SHA256 : NATIVE_WRAPPER_IDL_SHA256 } });
 }
 
 
@@ -834,6 +946,21 @@ describe('SDK owned LocalFixture approvals', () => {
     expect(checkpointNetworkMatches(approved.checkpoint.network, 'Hoodi')).toBe(false);
     expect(checkpointNetworkMatches({ hoodi: null }, 'Hoodi')).toBe(true);
     expect(checkpointNetworkMatches({ mainnet: null }, 'Hoodi')).toBe(false);
+  });
+
+  test('normalizes nested local-fixture genesis bytes and independent descriptors before freezing', () => {
+    const profile = localProfile(), root = hash(0xabcdef);
+    if (typeof profile.checkpoint.network === 'string') throw new Error('fixture required');
+    const upper = ('0x' + root.slice(2).toUpperCase()) as HexString;
+    const approved = immutableInboundProfile({ ...profile, beaconGenesisValidatorsRoot: upper,
+      checkpoint: { ...profile.checkpoint, network: { localFixture: { ...profile.checkpoint.network.localFixture,
+        genesis_validators_root: upper } } } });
+    if (typeof approved.checkpoint.network === 'string') throw new Error('fixture required');
+    expect(approved.beaconGenesisValidatorsRoot).toBe(root);
+    expect(approved.checkpoint.network.localFixture.genesis_validators_root).toBe(root);
+    const network = immutableOwnedFixtureNetwork({ ...descriptor(profile), ethereumGenesisHash: upper, beaconGenesisValidatorsRoot: upper }, transports);
+    expect(network.ethereumGenesisHash).toBe(root);
+    expect(network.beaconGenesisValidatorsRoot).toBe(root);
   });
 
   test('rejects changed fixture root, time, fork and execution domain before I/O', () => {

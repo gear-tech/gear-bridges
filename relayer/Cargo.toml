@@ -48,6 +48,7 @@ reqwest.workspace = true
 sails-rs = { workspace = true, features = ["gclient"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror = { workspace = true, features = ["std"] }
 tokio.workspace = true
 utils-prometheus.workspace = true
@@ -62,7 +63,9 @@ async-trait.workspace = true
 sp-consensus-grandpa = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+ethereum-client = { workspace = true, features = ["test-fixtures"] }
 tokio = { workspace = true, features = ["test-util"] }
+vft-client.workspace = true
 hex-literal.workspace = true
 ruzstd.workspace = true
 sp-core = { workspace = true, features = ["std"] }

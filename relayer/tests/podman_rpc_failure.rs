@@ -42,6 +42,23 @@ fn eth_message_queue_address() -> String {
         .unwrap_or_else(|_| DEFAULT_ETH_MESSAGE_QUEUE_ADDRESS.to_string())
 }
 
+fn beacon_approval() -> anyhow::Result<ethereum_client::beacon_finality::BeaconFinalityConfig> {
+    let config = ethereum_client::beacon_finality::BeaconFinalityConfig::load(
+        env::var("ETH_FINALITY_BOOTSTRAP")?,
+        env::var("ETH_FINALITY_BOOTSTRAP_SHA256")?.parse()?,
+        &env::var("ETH_FINALITY_BEACON_RPC")?,
+    )?;
+    anyhow::ensure!(
+        config.identity()
+            == (
+                env::var("ETH_CHAIN_ID")?.parse()?,
+                env::var("ETH_GENESIS_HASH")?.parse()?,
+            ),
+        "approved Ethereum identity differs from runtime test identity"
+    );
+    Ok(config)
+}
+
 async fn gear_latest_number(
     connection: &mut gear_common::api_provider::ApiProviderConnection,
 ) -> anyhow::Result<u32> {
@@ -168,8 +185,8 @@ async fn podman_ethereum_contract_read_recovers_after_real_proxy_outage() -> any
         None,
     )
     .await?
-    .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+    .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
+    .await?;
 
     let baseline = api.max_block_number().await?;
     proxy.stop_container().await?;
@@ -226,8 +243,8 @@ async fn podman_ethereum_polling_recovers_after_real_proxy_outage() -> anyhow::R
         Some(Duration::from_millis(250)),
     )
     .await?
-    .with_finality_witness(&env::var("ETH_WITNESS_RPC")?,
-        env::var("ETH_CHAIN_ID")?.parse()?, env::var("ETH_GENESIS_HASH")?.parse()?).await?;
+    .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
+    .await?;
     let mut worker_api = api.clone();
     let mut sibling_api = api;
 

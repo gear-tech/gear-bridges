@@ -1,6 +1,9 @@
-use super::{Config, TokenSupply, VftManager};
+use super::{
+    decode_complete_reply, Config, Error, NativeWrapperConfig, NativeWrapperMode, TokenSupply,
+    VftManager,
+};
 use ethereum_common::{hash_db::Hasher, keccak_hasher::KeccakHasher};
-use sails_rs::{calls::ActionIo, gstd::msg, prelude::*};
+use sails_rs::{gstd::msg, prelude::*};
 use vft_client::vft::io::{BalanceOf, Transfer};
 
 #[derive(Clone, Copy, Debug, Default, Encode, Decode, TypeInfo, PartialEq, Eq)]
@@ -77,9 +80,9 @@ fn fingerprint(service: &VftManager) -> (H256, Vec<(ActorId, H160, TokenSupply)>
         assert!(eth.insert(address), "Duplicate Ethereum identity");
         previous = Some(token);
     }
-    let hash = KeccakHasher::hash(
-        &(
-            *b"vft-manager/cutover-config/v1",
+    let encoded = match state.native_wrapper {
+        Some(wrapper) if wrapper.mode == NativeWrapperMode::HeldEscrowV2 => (
+            *b"vft-manager/cutover-config/v2",
             state.gear_bridge_builtin,
             state.historical_proxy_address,
             state.erc20_manager_address,
@@ -88,7 +91,18 @@ fn fingerprint(service: &VftManager) -> (H256, Vec<(ActorId, H160, TokenSupply)>
             &mappings,
         )
             .encode(),
-    );
+        _ => (
+            *b"vft-manager/cutover-config/v1",
+            state.gear_bridge_builtin,
+            state.historical_proxy_address,
+            state.erc20_manager_address,
+            state.native_wrapper.map(|wrapper| wrapper.actor_id),
+            service.config(),
+            &mappings,
+        )
+            .encode(),
+    };
+    let hash = KeccakHasher::hash(&encoded);
     (hash, mappings)
 }
 
@@ -302,13 +316,16 @@ async fn balance(token: ActorId, config: &Config) -> U256 {
     .expect("Balance query timeout installation failed")
     .await
     .expect("Balance query failed");
-    let amount = BalanceOf::decode_reply(&bytes).expect("Invalid balance reply");
-    assert_eq!(
-        bytes.len(),
-        BalanceOf::ROUTE.len() + amount.encoded_size(),
-        "Trailing balance bytes"
-    );
-    amount
+    decode_complete_reply::<BalanceOf>(&bytes, |error| panic!("Invalid balance reply: {error:?}"))
+        .expect("Trailing balance bytes")
+}
+
+async fn blocking_native_redemptions(wrapper: NativeWrapperConfig, config: &Config) -> u64 {
+    let method = match wrapper.mode {
+        NativeWrapperMode::EscrowV1 => "OutstandingRedemptions",
+        NativeWrapperMode::HeldEscrowV2 => "BlockingRedemptions",
+    };
+    query(wrapper.actor_id, "NativeEscrow", method, config).await
 }
 
 pub(super) async fn upgrade(service: &mut VftManager, destination: ActorId) {
@@ -329,9 +346,9 @@ pub(super) async fn upgrade(service: &mut VftManager, destination: ActorId) {
     validate_prepared(service, &prepared);
     if service.state().cutover.phase == CutoverPhase::Draining {
         if let Some(wrapper) = service.state().native_wrapper {
-            let manager: Option<ActorId> = query(wrapper, "NativeEscrow", "Manager", &config).await;
-            let blocking: u64 =
-                query(wrapper, "NativeEscrow", "BlockingRedemptions", &config).await;
+            let manager: Option<ActorId> =
+                query(wrapper.actor_id, "NativeEscrow", "Manager", &config).await;
+            let blocking = blocking_native_redemptions(wrapper, &config).await;
             assert_eq!(
                 manager,
                 Some(Syscall::program_id()),
@@ -357,17 +374,6 @@ pub(super) async fn upgrade(service: &mut VftManager, destination: ActorId) {
         if amount.is_zero() {
             service.state_mut().custody_completed.insert(token);
             continue;
-        }
-        if service
-            .state()
-            .custody_latest
-            .get(&token)
-            .is_some_and(|&index| {
-                service.state().custody_transfers[index].outcome
-                    == CustodyTransferOutcome::Completed
-            })
-        {
-            panic!("Completed token has nonzero remaining custody");
         }
         let reply = msg::send_bytes_with_gas_for_reply(
             token,
@@ -450,9 +456,7 @@ pub fn handle_upgrade_reply() {
     let outcome = match msg::reply_code() {
         Ok(ReplyCode::Error(_)) => CustodyTransferOutcome::Rejected,
         Ok(ReplyCode::Success(_)) => match msg::load_bytes().ok().and_then(|bytes| {
-            Transfer::decode_reply(&bytes)
-                .ok()
-                .filter(|reply| bytes.len() == Transfer::ROUTE.len() + reply.encoded_size())
+            decode_complete_reply::<Transfer>(&bytes, |_| Error::InvalidReply).ok()
         }) {
             Some(true) => CustodyTransferOutcome::Completed,
             Some(false) => CustodyTransferOutcome::Rejected,
@@ -512,9 +516,10 @@ pub(super) async fn finalize(service: &mut VftManager) {
         "Unresolved custody transfers"
     );
     if let Some(wrapper) = service.state().native_wrapper {
-        let manager: Option<ActorId> = query(wrapper, "NativeEscrow", "Manager", &config).await;
-        let burner: ActorId = query(wrapper, "VftAdmin", "Burner", &config).await;
-        let blocking: u64 = query(wrapper, "NativeEscrow", "BlockingRedemptions", &config).await;
+        let manager: Option<ActorId> =
+            query(wrapper.actor_id, "NativeEscrow", "Manager", &config).await;
+        let burner: ActorId = query(wrapper.actor_id, "VftAdmin", "Burner", &config).await;
+        let blocking = blocking_native_redemptions(wrapper, &config).await;
         assert_eq!(
             manager,
             Some(Syscall::program_id()),

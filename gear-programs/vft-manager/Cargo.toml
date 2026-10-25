@@ -7,6 +7,7 @@ edition.workspace = true
 vft-manager-app = { path = "app" }
 
 [build-dependencies]
+gear-wasm-builder.workspace = true
 vft-manager-app = { path = "app" }
 sails-rs = { workspace = true, features = ["wasm-builder"] }
 sails-idl-gen.workspace = true

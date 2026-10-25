@@ -1,12 +1,27 @@
 import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
 import { Network } from './_network.js';
 import { Status } from './_status.js';
-import type { SourceReceiptAuth } from '../../eth/finality.js';
+import type { SourceReceiptAuth, ProofReference } from '../../eth/finality.js';
 
-export type CompletionAuth =
-  | { version: 1; kind: 'ethereum-receipt'; checkpointId: string; completionId: string; processedLogIndex: number }
-  | { version: 1; kind: 'gear-settlement'; sourceCheckpointId: string; receiptRelayId: string;
-      receiptSettlementId: string; outcome: 'Completed' | 'Refunded' };
+export type CompletionAuth = ProofReference & (
+  | { version: 2; kind: 'ethereum-receipt'; checkpointId: string; completionId: string; processedLogIndex: number }
+  | { version: 2; kind: 'gear-settlement'; sourceCheckpointId: string; receiptRelayId: string;
+      receiptSettlementId: string; outcome: 'Completed' | 'Refunded' });
+
+export interface LegacyReceiptAuth {
+  version: 1;
+  checkpointId: string;
+  receipt: SourceReceiptAuth['receipt'];
+  blockTimestamp: string;
+  localLogIndex?: number;
+}
+
+export interface LegacyEthereumAuth extends LegacyResolution {
+  sourceReceiptAuth: LegacyReceiptAuth | null;
+  completionAuth: { version: 1; kind: 'ethereum-receipt' | 'gear-settlement'; checkpointId?: string;
+    sourceCheckpointId?: string; completionId?: string; processedLogIndex?: number;
+    receiptRelayId?: string; receiptSettlementId?: string; outcome?: 'Completed' | 'Refunded' } | null;
+}
 
 export interface LegacyResolution {
   status: Status;
@@ -49,6 +64,9 @@ export class Transfer {
   /** Original projection, preserved once before fail-closed invalidation. */
   @Column('jsonb', { nullable: true, name: 'legacy_resolution' })
   legacyResolution?: LegacyResolution | null;
+
+  @Column('jsonb', { nullable: true, name: 'legacy_ethereum_auth' })
+  legacyEthereumAuth?: LegacyEthereumAuth | null;
 
   @Index()
   @Column('timestamp with time zone', { nullable: false })

@@ -1,7 +1,8 @@
 use super::Event;
-use crate::{state::ReplayBackState, State};
+use crate::{backend, state::ReplayBackState, State};
 use cell::RefCell;
 use checkpoint_light_client_io::{
+    verification::{verify_update, VerificationState},
     BeaconBlockHeader, Error, ReplayBackError, ReplayBackStatus, Update,
 };
 use ethereum_common::{tree_hash::TreeHash, EPOCHS_PER_SYNC_COMMITTEE, SLOTS_PER_EPOCH};
@@ -41,19 +42,24 @@ impl<'a> ReplayBack<'a> {
             )
         };
 
-        let sync_aggregate = <ethereum_common::beacon::SyncAggregate as sails_rs::scale_codec::DecodeAll>::decode_all(&mut &sync_aggregate_encoded[..])
-            .map_err(|_| Error::InvalidSyncAggregate)?;
-        let (finalized_header_update, committee_update) = super::sync_update::verify(
-            &network,
-            slot,
-            &sync_committee_current,
-            &sync_committee_next,
+        let verified = verify_update(
+            VerificationState {
+                network: &network,
+                finalized_slot: slot,
+                current_committee: &sync_committee_current,
+                next_committee: &sync_committee_next,
+            },
+            Syscall::block_timestamp(),
             sync_update,
-            sync_aggregate,
+            &sync_aggregate_encoded,
+            &backend::GearBls,
         )
-        .await?;
+        .await
+        .map_err(backend::protocol_error)?;
 
-        let finalized_header = finalized_header_update.ok_or(ReplayBackError::NoFinalityUpdate)?;
+        let finalized_header = verified
+            .finalized_header
+            .ok_or(ReplayBackError::NoFinalityUpdate)?;
         let mut state = self.state.borrow_mut();
         if state.replay_back.is_some() {
             return Err(ReplayBackError::AlreadyStarted);
@@ -67,7 +73,7 @@ impl<'a> ReplayBack<'a> {
         state.replay_back = Some(ReplayBackState {
             base_checkpoint,
             finalized_header: finalized_header.clone(),
-            sync_committee_next: committee_update,
+            sync_committee_next: verified.next_committee.map(Into::into),
             checkpoints: {
                 let mut checkpoints = Vec::with_capacity(EPOCHS_PER_SYNC_COMMITTEE as usize);
                 checkpoints.push((finalized_header.slot, tree_hash_root));

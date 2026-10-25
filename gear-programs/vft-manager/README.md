@@ -10,7 +10,11 @@ The program workspace includes the following packages:
 The manager WASM build uses release-equivalent LTO, codegen, debug-assertion and
 overflow-check settings even when the host CLI is built in development mode.
 These settings apply only to the manager's child Cargo build, preserving other
-program artifacts. Qualify the complete artifact against the target runtime:
+program artifacts. The build uses `wasm-opt -Oz`, with Gear's canonical export,
+section and memory preparation, rather than its default `-O4`. Each invocation
+starts from compiler output, so incremental builds do not repeatedly optimize an
+already optimized artifact and change its CodeId. Missing or failed `wasm-opt`
+is a build failure. Qualify the complete artifact against the target runtime:
 raw WASM size alone does not establish that its instrumented code fits.
 
 The `mocks` feature enables gas benchmarks and can be forwarded into the embedded
@@ -52,6 +56,12 @@ cannot inherit its retry permission. Wrapper deduplication preserves the origina
 payout child. Historical `NativeErrorAbsent` (SCALE discriminant 4) remains
 decodable but cannot authorize new resolution or exclusion. Input-invalid
 rejections require no dispatched child.
+`ReceiptRetryableNative(slot, transaction_index, log_index, operation_id, child)`
+exports that exact predicate (all three coordinates are `u64`). It returns false
+for a different child/operation, non-native log, nonterminal child or any status
+other than the current `Retryable` row. Relayers must additionally authenticate
+the original error and wrapper redemption absence at the retained finalized pin;
+the getter is not financial settlement or permission to skip unresolved siblings.
 
 While the manager is paused in `Active` or `Draining`, its admin may call
 `ResolveReceiptDeposit(slot, transaction_index, log_index, operation_id, child)`.
@@ -62,20 +72,38 @@ transfer. Evidence queries fence changes to administrator, pause, deployment
 domain, configuration revision, receipt generation and original child.
 Matching repeated resolution is idempotent; `Held` mints nothing and preserves
 the original liability even when a late payout reply subsequently arrives.
+For `EscrowV1`, native held resolution returns `NativeHoldUnsupported` before any
+wrapper query. Permanent-input no-effect rejection and exact non-native
+`UnlockFalse` resolution remain available in either mode.
 
-Native redemption requires `ConfigureNativeWrapper(Some((wrapper, approved_wrapped_vara)))`
-and the wrapper's escrow manager while both are paused. The approved nonzero
-Ethereum address must equal the wrapper's mapped Gear-supply token; minimum
-balance must be zero. `None` clears the binding. This is an explicit admin approval,
-not an Ethereum-state oracle or protection against a malicious admin. The shipped
-configuration tool independently qualifies finalized primary/witness governance
-`wrappedVara()` and the registered native pair before configuring.
+Native redemption requires `ConfigureNativeWrapper(Some(NativeWrapperConfig {
+actor_id, ethereum_token, code_id, mode }))`. `NativeWrapperMode` is explicitly
+`EscrowV1` or `HeldEscrowV2`; `NativeWrapper` returns the full approved binding.
+The admin must configure while paused and `Active`, with nonzero actor, Ethereum
+token and CodeId, the exact bidirectional Gear-supply mapping and zero existing
+`MinimumBalance`. Authority, pause, phase, mapping, economic activity and revision
+are rechecked after querying. Identical configuration is idempotent. Binding
+changes or clearing via `None` are prohibited after any economic activity, and
+mapping mutation cannot replace the configured native identity. Legacy `Config`
+SCALE bytes are unchanged. The CodeId is a governance assertion, not an onchain
+cross-program code lookup: tools must authenticate actual deployed CodeIds at a
+finalized pin against independent approval.
+
+Deploy a newly constructed manager; no in-place code swap/initializer is provided.
+Every existing VFT/wrapper ActorId, CodeId, ledger, supply, allowance and backing
+remains unchanged. Original manager evidence stays queryable under its own ABI.
+An older wrapper without even the approved v1 escrow APIs blocks deployment.
+
 A queued mailbox payout is not settled until its original reply is authenticated.
-An original success or error returning at least the payout amount records durable
-backing. Reconciliation retries wrapped credit for unheld `Queued`, `Returned` or
-`Ambiguous` originals with full/excess backing; it credits only the original amount,
-retains actual returned evidence, and leaves excess native backing at the wrapper.
-Capacity failure retains backing and the obligation without another native payout.
+`EscrowV1` never calls `HeldRedemption`, `HoldRedemption` or `BlockingRedemptions`.
+Only an exact-full-backed `Queued` original (`returned_value == amount`) may
+retry the same `RedeemEscrow`; it must return terminal `Refunded` with the same
+payout child and exact amount. Queued retry permission is not completion.
+Partial/excess `Ambiguous` and all unresolved originals remain blocking.
+`HeldEscrowV2` retains the unheld `Queued`/`Returned`/`Ambiguous` full-or-excess-backed
+credit path: only the original amount is credited and excess backing remains at
+the wrapper. Both modes require zero returned value for `Delivered`. Capacity
+failure retains backing and the obligation without another native payout.
 Only successful credit records
 `ReceiptDepositOutcome::Refunded`, not native `Settled`/`Delivered`, and
 releases the completed receipt reservation. Refunds emit the distinct
@@ -88,6 +116,10 @@ replay cannot mint again or enqueue another native payout. Partial or unknown
 backing stays unresolved. Live `Delivered`/`Refunded` state is checked before a
 saved hold; historical holds are retained but cannot mask economic completion.
 Fully resolved wrapped refunds no longer veto manager/wrapper-manager cutover.
+Under the unchanged-v1-wrapper constraint, A2 partial/excess recovery, A6 hold
+consent and P0-R1 held-liability release cannot be closed by manager replacement.
+No unavailable hold/release API, pooled-backing compensation or reservation
+force-clear is authorized; unresolved obligations remain deployment blockers.
 
 ### Retained-program cutover
 
@@ -130,8 +162,9 @@ The admin lifecycle is:
    Preparation rechecks pause, permanent economic-activity state, quiescence and
    configuration revision after the source query. `Unpause` cannot activate it.
 3. `Upgrade(destination)` checks the prepared destination, the paused source's
-   local obligations, and the same wrapper's manager and zero blocking
-   redemptions. Held liabilities remain financially outstanding. It enters
+   local obligations, and the same wrapper's manager and mode-selected zero count:
+   actual `OutstandingRedemptions` for v1, actual `BlockingRedemptions` for v2.
+   Only qualified v2 held liabilities may remain financially outstanding. It enters
    irreversible `Transferring` and transfers the frozen,
    sorted token inventory. Each enqueue and original child record is atomic.
    Concurrent continuation calls cannot claim a token twice. Continue this same
@@ -140,8 +173,8 @@ The admin lifecycle is:
 4. Handoff existing token roles and the wrapper manager/burner through their
    authorized lifecycle. Wrapper backing and original payout records stay at
    that wrapper. `FinalizeCutover` authenticates matching retired source status,
-   completed custody, destination wrapper manager/burner and zero blocking
-   redemptions, then enters `Ready` while remaining paused. Only `Unpause`
+   completed custody, destination wrapper manager/burner and the same mode-selected
+   zero count, then enters `Ready` while remaining paused. Only `Unpause`
    changes `Ready` to `Active`. A later cutover retains the predecessor and
    the existing receipt floor.
 
@@ -171,17 +204,26 @@ terminal attempts cannot be rewritten. Queries and transfers use the frozen
 configured token-operation gas, reply deposit and block deadline. A timeout
 ends only the wait, not original custody ownership. Lifecycle commands return
 unit; operators must read status to distinguish pending custody from retirement.
+A residual balance observed after a completed transfer can be swept by a later
+`Upgrade` to the same frozen successor. It appends a distinct child/amount/outcome
+without rewriting the completed original. In-flight or ambiguous children still
+fence another sweep, and retirement still requires every final balance to be zero.
 No new lifecycle events are invented: original settlement/request events remain
 unchanged, and lifecycle progress is read through these retained queries.
 
-The fingerprint is Keccak256 of SCALE
+For `EscrowV1` (and no wrapper), the fingerprint is byte-compatible with the
+immutable predecessor: Keccak256 of SCALE
 `(*b"vft-manager/cutover-config/v1", builtin, proxy, erc20_manager,
-native_wrapper, config, sorted_mappings)`. Mappings are sorted by raw ActorId
-bytes and reject duplicate Gear/Ethereum identities. Config declaration order
-remains token-op gas, reply-deposit gas, builtin gas, map-swap gas, reply timeout,
-bridge fee and incoming fee. Admin/observers, pause, domains and progress are not
-part of this economic fingerprint. It is frozen once rather than recomputed
-for each custody transfer.
+native_wrapper.map(|binding| binding.actor_id), config, sorted_mappings)`.
+The actor projection remains `Option<ActorId>`; CodeId/mode are separately bound
+by the replacement approval and immutable cutover reports. `HeldEscrowV2` uses
+`vft-manager/cutover-config/v2` and full `Option<NativeWrapperConfig>` in that
+tuple; both managers must support that fingerprint. Never relabel a frozen v1 hash.
+Mappings are sorted by raw ActorId bytes and reject duplicate Gear/Ethereum
+identities. Config declaration order remains token-op gas, reply-deposit gas,
+builtin gas, map-swap gas, reply timeout, bridge fee and incoming fee.
+Admin/observers, pause, domains and progress are not part of this economic
+fingerprint. It is frozen once rather than recomputed for each custody transfer.
 
 Quiescence checks receipt reservations/nonterminal receipt children, the
 incremental pending-original-builtin count, source deposit/refund children and
@@ -200,6 +242,24 @@ fresh deployment as proof of migration. Old journals are sealed and verified
 read-only; successor journals bind the exact seal and begin discovery at the
 boundary execution block + 1. No rollback to an active source is supported
 after custody transfer starts.
+
+Finalization freezes the authenticated coverage checkpoint, lifecycle originals,
+retirement/readiness pins and original-journal digests in `pending_seal` before
+publishing either report. Restart reauthenticates those exact projections without
+advancing their checkpoint; matching immutable `.new` files or final links are
+completed before the seal is published last. Conflicting artifacts or changed
+originals HOLD without overwrite, signing or activation. A mutable work `.new`
+file remains a HOLD, not a recoverable immutable report.
+
+An intentionally paused native wrapper is permitted during role-handoff recovery
+only when the source is already `Retired` at the same finalized Gear hash used
+to read wrapper obligations. Zero blocking obligations remain mandatory in every
+phase. Retained role originals are reconciled and persisted before role guards.
+
+Legacy missing coverage reconstructs every block from genesis through the frozen
+boundary without an aggregate recovery deadline. Individual full-block and receipt
+requests retain their ten-second limits. Recovering a missing admitted block does
+not advance the scanned prefix or certify unrecorded sibling deposits.
 
 
 Local regression command (actual gtest WASM, no node required):

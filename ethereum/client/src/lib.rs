@@ -32,7 +32,16 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 pub use alloy::primitives::TxHash;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-mod finality_archive;
+pub mod beacon_finality;
+use beacon_finality::BeaconAuthority;
+pub use beacon_finality::{
+    BeaconCheckpointProof, BeaconFinalityCheckpoint, BeaconFinalityConfig, FinalityCheckpoint,
+    FinalizedSubmissionSnapshot, LegacyFinalityCheckpoint, LegacySubmissionSnapshot,
+    ProvenSubmissionSnapshot,
+};
+#[cfg(test)]
+mod beacon_fixture_tests;
+pub mod finality_archive;
 #[cfg(test)]
 mod finality_tests;
 pub mod inclusion;
@@ -61,7 +70,15 @@ async fn connect_rpc(
         ))
         .layer(tower::timeout::TimeoutLayer::new(RPC_REQUEST_TIMEOUT));
     match url.scheme() {
-        "http" | "https" => Ok(builder.http(url.clone())),
+        "http" | "https" => {
+            use alloy::transports::http::reqwest::{redirect::Policy, Client};
+            let client = Client::builder()
+                .redirect(Policy::none())
+                .timeout(RPC_REQUEST_TIMEOUT)
+                .build()
+                .map_err(Error::FailedToBuildClient)?;
+            Ok(builder.http_with_client(client, url.clone()))
+        }
         "ws" | "wss" => {
             let mut ws = WsConnect::new(url.clone());
             if let Some(retries) = ws_max_retry {
@@ -262,7 +279,8 @@ type ProviderType =
 #[derive(Clone)]
 pub struct Contracts {
     provider: ProviderType,
-    finality: Option<FinalityWitness>,
+    finality: Option<Arc<BeaconAuthority>>,
+    witness: Option<DataWitness>,
     message_queue_instance: IMessageQueueInstance<ProviderType, Ethereum>,
     max_fee_per_gas: u128,
     max_priority_fee_per_gas: u128,
@@ -385,30 +403,9 @@ pub struct FinalizedTransactionReceipt {
     pub inclusion: inclusion::RecordedReceiptProof,
     pub checkpoint: FinalityCheckpoint,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FinalizedSubmissionSnapshot {
-    pub block_number: u64,
-    pub block_hash: B256,
-    pub pinned_nonce_consumed: bool,
-    pub message_processed: bool,
-}
-
-/// Execution finality is independently corroborated, not Beacon consensus verification.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FinalityCheckpoint {
-    pub schema_version: u32,
-    pub policy: String,
-    pub chain_id: u64,
-    pub genesis_hash: B256,
-    pub common_header: alloy::consensus::Header,
-    pub primary_finalized_header: alloy::consensus::Header,
-    pub witness_finalized_header: alloy::consensus::Header,
-}
 
 #[derive(Clone, Debug)]
-struct FinalityWitness {
+struct DataWitness {
     provider: RootProvider,
     chain_id: u64,
     genesis: B256,
@@ -416,26 +413,35 @@ struct FinalityWitness {
 
 // URL spelling cannot establish operator independence; reject obvious aliases.
 fn finality_endpoint_identity(url: &Url) -> AnyResult<(&str, &str, u16, &str, Option<&str>)> {
-    let host = url.host_str().context("HOLD: Ethereum endpoint has no host")?
+    let host = url
+        .host_str()
+        .context("HOLD: Ethereum endpoint has no host")?
         .trim_end_matches('.');
-    let address = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')).unwrap_or(host);
-    let loopback = host == "localhost"
-        || address.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
+    let address = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    let loopback = address
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|address| address.is_loopback());
     let scheme = match url.scheme() {
         "https" | "wss" => "https",
         "http" | "ws" if loopback => "http",
-        _ => bail!("HOLD: Ethereum endpoints require HTTPS/WSS except literal loopback or localhost"),
+        _ => {
+            bail!("HOLD: Ethereum endpoints require HTTPS/WSS except literal loopback")
+        }
     };
     Ok((
         scheme,
         if loopback { "localhost" } else { host },
-        url.port_or_known_default().context("HOLD: Ethereum endpoint has no port")?,
+        url.port_or_known_default()
+            .context("HOLD: Ethereum endpoint has no port")?,
         url.path().trim_end_matches('/'),
         url.query(),
     ))
 }
 
-impl FinalityWitness {
+impl DataWitness {
     async fn connect(
         primary: &Url,
         witness: &str,
@@ -458,14 +464,53 @@ impl FinalityWitness {
     }
 }
 
-fn require_witness(witness: &Option<FinalityWitness>) -> Result<&FinalityWitness, Error> {
-    witness.as_ref().ok_or(Error::FinalityWitnessNotConfigured)
+fn require_authority(
+    authority: &Option<Arc<BeaconAuthority>>,
+) -> Result<&Arc<BeaconAuthority>, Error> {
+    authority.as_ref().ok_or(Error::BeaconFinalityNotConfigured)
+}
+
+fn require_data_witness(witness: &Option<DataWitness>) -> Result<&DataWitness, Error> {
+    witness.as_ref().ok_or(Error::DataWitnessNotConfigured)
+}
+
+async fn open_beacon_authority(
+    provider: &impl Provider,
+    endpoint: &Url,
+    config: BeaconFinalityConfig,
+    directory: &std::path::Path,
+) -> AnyResult<Arc<BeaconAuthority>> {
+    finality_endpoint_identity(endpoint)?;
+    config.validate_execution_endpoint(endpoint)?;
+    let genesis = config.identity().1;
+    std::fs::create_dir_all(directory)?;
+    let directory = std::fs::canonicalize(directory)?;
+    static OWNERS: std::sync::LazyLock<Mutex<HashMap<std::path::PathBuf, Weak<BeaconAuthority>>>> =
+        std::sync::LazyLock::new(Default::default);
+    let mut owners = OWNERS.lock().await;
+    owners.retain(|_, owner| owner.strong_count() != 0);
+    let authority = if let Some(authority) = owners.get(&directory).and_then(Weak::upgrade) {
+        ensure!(
+            authority.matches_config(&config),
+            "HOLD: active Beacon store has a different approval/configuration"
+        );
+        authority
+    } else {
+        let authority = BeaconAuthority::open(config, &directory).await?;
+        owners.insert(directory.clone(), Arc::downgrade(&authority));
+        authority
+    };
+    authority.attach_archive(
+        enable_finality_archive(provider, &directory.join("headers"), genesis).await?,
+    )?;
+    Ok(authority)
 }
 
 #[derive(Clone)]
 pub struct PollingEthApi {
     provider: RootProvider,
-    finality: Option<FinalityWitness>,
+    finality: Option<Arc<BeaconAuthority>>,
+    witness: Option<DataWitness>,
     url: Url,
     ws_max_retry: Option<u32>,
     ws_retry_interval: Option<Duration>,
@@ -488,6 +533,7 @@ impl PollingEthApi {
         Ok(Self {
             provider,
             finality: None,
+            witness: None,
             url,
             ws_max_retry,
             ws_retry_interval,
@@ -496,35 +542,60 @@ impl PollingEthApi {
 
     pub async fn reconnect(&self) -> AnyResult<Self> {
         let mut connected =
-            Self::new_with_retries(self.url.as_str(), self.ws_max_retry, self.ws_retry_interval).await?;
+            Self::new_with_retries(self.url.as_str(), self.ws_max_retry, self.ws_retry_interval)
+                .await?;
         connected.finality = self.finality.clone();
+        connected.witness = self.witness.clone();
         Ok(connected)
     }
 
-    pub async fn with_finality_witness(
+    pub async fn with_beacon_finality(
+        mut self,
+        config: BeaconFinalityConfig,
+        store_directory: impl AsRef<std::path::Path>,
+    ) -> AnyResult<Self> {
+        self.finality = Some(
+            open_beacon_authority(&self.provider, &self.url, config, store_directory.as_ref())
+                .await?,
+        );
+        Ok(self)
+    }
+
+    pub async fn with_data_witness(
         mut self,
         witness_url: &str,
         expected_chain_id: u64,
         expected_genesis: B256,
     ) -> AnyResult<Self> {
-        self.finality = Some(FinalityWitness::connect(
-            &self.url, witness_url, expected_chain_id, expected_genesis,
-            self.ws_max_retry, self.ws_retry_interval,
-        ).await?);
+        self.witness = Some(
+            DataWitness::connect(
+                &self.url,
+                witness_url,
+                expected_chain_id,
+                expected_genesis,
+                self.ws_max_retry,
+                self.ws_retry_interval,
+            )
+            .await?,
+        );
         Ok(self)
     }
 
     pub fn finality_identity(&self) -> AnyResult<(u64, B256)> {
-        let witness = require_witness(&self.finality)?;
-        Ok((witness.chain_id, witness.genesis))
+        Ok(require_authority(&self.finality)?.identity())
     }
 
     /// Raw read-only transport. Pair historical answers at a qualified hash.
     pub fn raw_witness_provider(&self) -> AnyResult<&RootProvider> {
-        Ok(&require_witness(&self.finality)?.provider)
+        Ok(&require_data_witness(&self.witness)?.provider)
     }
     pub async fn verified_finalized_view(&self) -> Result<FinalizedView, Error> {
-        verified_finalized_view(&self.provider, require_witness(&self.finality)?).await
+        verified_finalized_view(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+        )
+        .await
     }
 
     pub async fn enable_finality_archive(
@@ -532,15 +603,24 @@ impl PollingEthApi {
         directory: &std::path::Path,
         expected_genesis: B256,
     ) -> AnyResult<()> {
-        ensure!(self.finality_identity()?.1 == expected_genesis, "archive approval mismatch");
-        enable_finality_archive(&self.provider, directory, expected_genesis).await
+        ensure!(
+            self.finality_identity()?.1 == expected_genesis,
+            "archive approval mismatch"
+        );
+        require_authority(&self.finality)?.attach_archive(
+            enable_finality_archive(&self.provider, directory, expected_genesis).await?,
+        )
     }
 
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
-        Ok(
-            finalized_ancestor(&self.provider, require_witness(&self.finality)?, number, B256::from(hash.0))
-                .await?,
+        Ok(finalized_ancestor(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+            number,
+            B256::from(hash.0),
         )
+        .await?)
     }
 
     pub async fn chain_id(&self) -> AnyResult<u64> {
@@ -549,9 +629,15 @@ impl PollingEthApi {
 
     pub async fn finalized_block(&self) -> AnyResult<Block> {
         let view = self.verified_finalized_view().await?;
-        let block = self.provider.get_block_by_hash(view.block_hash()).await?
+        let block = self
+            .provider
+            .get_block_by_hash(view.block_hash())
+            .await?
             .context("qualified block unavailable")?;
-        ensure!(valid_header(&block, view.block_number(), view.block_hash()), "qualified block changed");
+        ensure!(
+            valid_header(&block, view.block_number(), view.block_hash()),
+            "qualified block changed"
+        );
         view.recheck(&self.provider).await?;
         Ok(block)
     }
@@ -561,7 +647,13 @@ impl PollingEthApi {
         &self,
         tx_hash: TxHash,
     ) -> AnyResult<Option<FinalizedTransactionReceipt>> {
-        Ok(finalized_transaction_receipt(&self.provider, require_witness(&self.finality)?, tx_hash).await?)
+        Ok(finalized_transaction_receipt(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+            tx_hash,
+        )
+        .await?)
     }
     pub async fn get_transaction_block_number(&self, hash: TxHash) -> AnyResult<Option<u64>> {
         transaction_identity(&self.provider, hash)
@@ -656,7 +748,6 @@ impl Deref for PollingEthApi {
     }
 }
 
-
 pub async fn latest_block(provider: impl Provider) -> AnyResult<Block> {
     provider
         .get_block_by_number(BlockNumberOrTag::Latest)
@@ -697,9 +788,6 @@ static FINALITY_ARCHIVES: OnceLock<
 static FINALITY_LOCKS: OnceLock<std::sync::Mutex<HashMap<B256, Weak<Mutex<()>>>>> = OnceLock::new();
 const MAX_CHAINS: usize = 8;
 const MAX_KNOWN_ANCESTORS: usize = 32_768;
-const MAX_PROOF_DURATION: Duration = Duration::from_secs(300);
-// Eight mainnet epochs of advertised lag; not a historical ancestry/proof limit.
-const MAX_FINALIZED_TIP_DISTANCE: u64 = 256;
 
 impl VerifiedAncestry {
     fn remember(&mut self, proof: impl IntoIterator<Item = (u64, B256)>) {
@@ -710,6 +798,7 @@ impl VerifiedAncestry {
     }
 }
 
+#[cfg(test)]
 fn archives_for(genesis: B256) -> Vec<Arc<finality_archive::HeaderArchive>> {
     FINALITY_ARCHIVES
         .get_or_init(Default::default)
@@ -734,7 +823,10 @@ fn finality_lock(genesis: B256) -> Arc<Mutex<()>> {
     lock
 }
 
-fn register_archive(directory: &std::path::Path, genesis: B256) -> AnyResult<()> {
+fn register_archive(
+    directory: &std::path::Path,
+    genesis: B256,
+) -> AnyResult<Arc<finality_archive::HeaderArchive>> {
     std::fs::create_dir_all(directory)?;
     let directory = std::fs::canonicalize(directory)?;
     let mut archives = FINALITY_ARCHIVES
@@ -742,27 +834,27 @@ fn register_archive(directory: &std::path::Path, genesis: B256) -> AnyResult<()>
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     for (chain, registered) in archives.iter() {
-        if registered
+        if let Some(archive) = registered
             .iter()
-            .any(|archive| archive.directory() == directory)
+            .find(|archive| archive.directory() == directory)
         {
             ensure!(
                 *chain == genesis,
                 "finality archive belongs to another chain; HOLD"
             );
-            return Ok(());
+            return Ok(archive.clone());
         }
     }
     let archive = Arc::new(finality_archive::HeaderArchive::open(&directory)?);
-    archives.entry(genesis).or_default().push(archive);
-    Ok(())
+    archives.entry(genesis).or_default().push(archive.clone());
+    Ok(archive)
 }
 
 async fn enable_finality_archive(
     provider: &impl Provider,
     directory: &std::path::Path,
     expected_genesis: B256,
-) -> AnyResult<()> {
+) -> AnyResult<Arc<finality_archive::HeaderArchive>> {
     let genesis = provider
         .get_block_by_number(BlockNumberOrTag::Number(0))
         .await?
@@ -785,7 +877,8 @@ async fn qualified_header(
     tag: BlockNumberOrTag,
 ) -> Result<Header, Error> {
     let block = timeout(Duration::from_secs(10), provider.get_block_by_number(tag))
-        .await.map_err(|_| Error::FinalizedAncestryPending)??
+        .await
+        .map_err(|_| Error::FinalizedAncestryPending)??
         .ok_or(Error::FinalizedAncestryPending)?;
     let number = match tag {
         BlockNumberOrTag::Number(number) => number,
@@ -799,60 +892,29 @@ async fn qualified_header(
 
 async fn finality_pin(
     provider: &impl Provider,
-    witness: &FinalityWitness,
-    started: Instant,
+    authority: &BeaconAuthority,
 ) -> Result<(Header, FinalityCheckpoint), Error> {
-    let mut tips = Vec::with_capacity(2);
-    for endpoint in [provider.root(), &witness.provider] {
-        let chain_id = timeout(Duration::from_secs(10), endpoint.get_chain_id())
-            .await.map_err(|_| Error::FinalizedAncestryPending)??;
-        let genesis = qualified_header(endpoint, BlockNumberOrTag::Number(0)).await?;
-        if chain_id != witness.chain_id || genesis.hash != witness.genesis {
-            return Err(Error::FinalizedAncestryConflict);
-        }
-        let tip = qualified_header(endpoint, BlockNumberOrTag::Finalized).await?;
-        if tip.number == 0 && tip.hash != genesis.hash {
-            return Err(Error::FinalizedAncestryConflict);
-        }
-        tips.push(tip);
-    }
-    if tips[0].number.abs_diff(tips[1].number) > MAX_FINALIZED_TIP_DISTANCE {
-        return Err(Error::FinalizedAncestryPending);
-    }
-    let height = tips[0].number.min(tips[1].number);
-    let common = qualified_header(provider, BlockNumberOrTag::Number(height)).await?;
-    let other = qualified_header(&witness.provider, BlockNumberOrTag::Number(height)).await?;
-    if common.inner != other.inner || common.hash != other.hash {
-        return Err(Error::FinalizedAncestryConflict);
-    }
-    for (endpoint, tip) in [provider.root(), &witness.provider].into_iter().zip(&tips) {
-        let (number, hash, _) = walk_ancestors(
-            endpoint, (tip.number, tip.hash), height, started, &[], None,
-        ).await?;
-        if number != height || started.elapsed() >= MAX_PROOF_DURATION {
-            return Err(Error::FinalizedAncestryPending);
-        }
-        if hash != common.hash {
-            return Err(Error::FinalizedAncestryConflict);
-        }
-    }
-    let checkpoint = FinalityCheckpoint {
-        schema_version: 1,
-        policy: "independent-two-el-v1".into(),
-        chain_id: witness.chain_id,
-        genesis_hash: witness.genesis,
-        common_header: common.inner.clone(),
-        primary_finalized_header: tips[0].inner.clone(),
-        witness_finalized_header: tips[1].inner.clone(),
-    };
-    Ok((common, checkpoint))
+    let (header, beacon) = authority
+        .pin(provider)
+        .await
+        .map_err(Error::BeaconFinality)?;
+    let (chain_id, genesis_hash) = authority.identity();
+    let checkpoint = FinalityCheckpoint::Beacon(BeaconFinalityCheckpoint {
+        schema_version: 2,
+        policy: beacon_finality::POLICY.into(),
+        chain_id,
+        genesis_hash,
+        common_header: header.inner.clone(),
+        beacon,
+    });
+    Ok((header, checkpoint))
 }
 
 async fn walk_ancestors(
     provider: &impl Provider,
     start: (u64, B256),
     target: u64,
-    started: Instant,
+    _started: Instant,
     archives: &[Arc<finality_archive::HeaderArchive>],
     targets: Option<&BTreeMap<u64, B256>>,
 ) -> Result<(u64, B256, Vec<(u64, B256)>), Error> {
@@ -865,7 +927,7 @@ async fn walk_ancestors(
     let mut local = VecDeque::new();
     let archive = archives.first();
     let mut chunk = Vec::with_capacity(archive.map_or(0, |_| 512));
-    while number > target && started.elapsed() < MAX_PROOF_DURATION {
+    while number > target {
         if local.is_empty() {
             for candidate in archives {
                 let stored = candidate.read(number, hash).unwrap_or_default();
@@ -977,16 +1039,16 @@ async fn walk_ancestors(
     Ok((number, hash, verified.into()))
 }
 
-/// Immutable, continuity-checked state pin. State-only completion legitimately
-/// permits another transaction to process a message; it never attributes that
-/// success to an unproved original receipt.
+/// Immutable Beacon-authenticated execution pin. Arbitrary RPC state remains
+/// unauthenticated; economic events and account nonces require their own MPT proofs.
 #[derive(Clone, Debug)]
 pub struct FinalizedView {
     header: Header,
     genesis: B256,
     blocks: BTreeMap<u64, B256>,
     checkpoint: FinalityCheckpoint,
-    witness: FinalityWitness,
+    authority: Arc<BeaconAuthority>,
+    witness: Option<DataWitness>,
 }
 
 impl FinalizedView {
@@ -996,9 +1058,13 @@ impl FinalizedView {
 
     /// Recheck the exact pin, never replace staged evidence with a newer head.
     pub async fn recheck(&self, provider: &impl Provider) -> Result<(), Error> {
-        for endpoint in [provider.root(), &self.witness.provider] {
-            let header = qualified_header(endpoint, BlockNumberOrTag::Number(self.block_number())).await?;
-            if header.inner != self.checkpoint.common_header || header.hash != self.block_hash() {
+        for endpoint in std::iter::once(provider.root())
+            .chain(self.witness.as_ref().map(|witness| &witness.provider))
+        {
+            let header =
+                qualified_header(endpoint, BlockNumberOrTag::Number(self.block_number())).await?;
+            if header.inner != *self.checkpoint.common_header() || header.hash != self.block_hash()
+            {
                 return Err(Error::FinalizedAncestryConflict);
             }
         }
@@ -1010,17 +1076,78 @@ impl FinalizedView {
         provider: &impl Provider,
         checkpoint: &FinalityCheckpoint,
     ) -> Result<(), Error> {
-        if checkpoint.schema_version != 1 || checkpoint.policy != "independent-two-el-v1"
-            || checkpoint.chain_id != self.checkpoint.chain_id
-            || checkpoint.genesis_hash != self.genesis
-            || checkpoint.common_header.number > checkpoint.primary_finalized_header.number
-            || checkpoint.common_header.number > checkpoint.witness_finalized_header.number
+        self.verify_checkpoints_with_blocks(
+            provider,
+            std::slice::from_ref(checkpoint),
+            &BTreeMap::new(),
+        )
+        .await
+    }
+
+    /// Authenticate all retained policies and fences in one grouped ancestry walk.
+    pub async fn verify_checkpoints_with_blocks(
+        &mut self,
+        provider: &impl Provider,
+        checkpoints: &[FinalityCheckpoint],
+        targets: &BTreeMap<u64, B256>,
+    ) -> Result<(), Error> {
+        let mut targets = targets.clone();
+        for checkpoint in checkpoints {
+            checkpoint.validate().map_err(Error::BeaconFinality)?;
+            if checkpoint.chain_id() != self.checkpoint.chain_id()
+                || checkpoint.genesis_hash() != self.genesis
+            {
+                return Err(Error::FinalizedAncestryConflict);
+            }
+            if let Some(beacon) = checkpoint.beacon() {
+                self.authority
+                    .verify_proof(&beacon.beacon, &beacon.common_header)
+                    .await
+                    .map_err(Error::BeaconFinality)?;
+            }
+            for (number, hash) in checkpoint.fences().map_err(Error::BeaconFinality)? {
+                if targets.insert(number, hash).is_some_and(|old| old != hash) {
+                    return Err(Error::FinalizedAncestryConflict);
+                }
+            }
+        }
+        self.verify_blocks(provider, &targets).await?;
+        let proof = &self
+            .checkpoint
+            .beacon()
+            .ok_or(Error::FinalizedAncestryConflict)?
+            .beacon;
+        for checkpoint in checkpoints
+            .iter()
+            .filter(|checkpoint| checkpoint.legacy().is_some())
         {
+            self.authority
+                .retain_requalification(checkpoint, proof)
+                .map_err(Error::BeaconFinality)?;
+        }
+        Ok(())
+    }
+
+    /// Freeze a previously authenticated Beacon checkpoint without substituting a newer pin.
+    pub async fn pin_to_checkpoint(
+        &mut self,
+        provider: &impl Provider,
+        checkpoint: &FinalityCheckpoint,
+    ) -> Result<(), Error> {
+        if checkpoint.beacon().is_none() {
             return Err(Error::FinalizedAncestryConflict);
         }
-        self.verify_blocks(provider, &BTreeMap::from([(
-            checkpoint.common_header.number, checkpoint.common_header.hash_slow(),
-        )])).await
+        self.verify_checkpoint(provider, checkpoint).await?;
+        let header = checkpoint.common_header();
+        self.header = Header {
+            hash: header.hash_slow(),
+            inner: header.clone(),
+            total_difficulty: None,
+            size: None,
+        };
+        self.checkpoint = checkpoint.clone();
+        self.blocks.retain(|&number, _| number <= header.number);
+        self.recheck(provider).await
     }
 
     pub fn block_number(&self) -> u64 {
@@ -1058,7 +1185,7 @@ impl FinalizedView {
         {
             return Err(Error::FinalizedAncestryPending);
         }
-        let archives = archives_for(self.genesis);
+        let archives = self.authority.archives();
         if let Some(expected) = targets.get(&self.block_number()) {
             if *expected != self.block_hash() {
                 return Err(Error::FinalizedAncestryConflict);
@@ -1084,15 +1211,13 @@ impl FinalizedView {
         let mut state = state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let cache = state
-            .get_mut(&self.genesis)
-            .filter(|cache| {
-                cache.head == (self.block_number(), self.block_hash())
-                    && cache.required_heads.is_empty()
-            })
-            .ok_or(Error::FinalizedAncestryPending)?;
-        cache.remember(proof);
-        cache.lowest = (number, hash);
+        if let Some(cache) = state.get_mut(&self.genesis).filter(|cache| {
+            cache.head == (self.block_number(), self.block_hash())
+                && cache.required_heads.is_empty()
+        }) {
+            cache.remember(proof);
+            cache.lowest = (number, hash);
+        }
         self.blocks
             .extend(targets.iter().map(|(&number, &hash)| (number, hash)));
         Ok(())
@@ -1101,44 +1226,113 @@ impl FinalizedView {
 
 async fn verified_finalized_view(
     provider: &impl Provider,
-    witness: &FinalityWitness,
+    authority: &Arc<BeaconAuthority>,
+    witness: Option<&DataWitness>,
 ) -> Result<FinalizedView, Error> {
     let started = Instant::now();
-    let (header, checkpoint) = finality_pin(provider, witness, started).await?;
-    let genesis = checkpoint.genesis_hash;
+    let (header, checkpoint) = finality_pin(provider, authority).await?;
+    let genesis = checkpoint.genesis_hash();
+    if let Some(witness) = witness {
+        if (witness.chain_id, witness.genesis) != authority.identity()
+            || timeout(Duration::from_secs(10), witness.provider.get_chain_id())
+                .await
+                .map_err(|_| Error::FinalizedAncestryPending)??
+                != witness.chain_id
+            || qualified_header(&witness.provider, BlockNumberOrTag::Number(0))
+                .await?
+                .hash
+                != genesis
+        {
+            return Err(Error::FinalizedAncestryConflict);
+        }
+    }
+    let mut retained = Vec::new();
+    let archives = authority.archives();
+    for archive in &archives {
+        if let Some(checkpoint) = archive
+            .retained_checkpoint()
+            .map_err(Error::BeaconFinality)?
+        {
+            if let Some(beacon) = checkpoint.beacon() {
+                authority
+                    .verify_proof(&beacon.beacon, &beacon.common_header)
+                    .await
+                    .map_err(Error::BeaconFinality)?;
+            }
+            retained.push(checkpoint);
+        }
+    }
     let head = (header.number, header.hash);
-    if finalized_ancestor_at(provider, head.0, head.1, &header, genesis, started, Some(&checkpoint)).await?.is_none() {
+    if finalized_ancestor_at(
+        provider,
+        head,
+        &header,
+        genesis,
+        started,
+        Some(&checkpoint),
+        &archives,
+    )
+    .await?
+    .is_none()
+    {
         return Err(Error::FinalizedAncestryConflict);
     }
     let view = FinalizedView {
-        header, genesis, checkpoint, witness: witness.clone(),
+        header,
+        genesis,
+        checkpoint,
+        authority: authority.clone(),
+        witness: witness.cloned(),
         blocks: BTreeMap::from([head]),
     };
     view.recheck(provider).await?;
     let _verification = finality_lock(genesis).lock_owned().await;
-    let current = FINALIZED_ANCESTRY.get_or_init(Default::default)
-        .lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if !current.get(&genesis).is_some_and(|cache| cache.head == head && cache.required_heads.is_empty()) {
+    let current = FINALIZED_ANCESTRY
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !current
+        .get(&genesis)
+        .is_some_and(|cache| cache.head == head && cache.required_heads.is_empty())
+    {
         return Err(Error::FinalizedAncestryPending);
     }
-    for archive in archives_for(genesis) {
-        archive.complete(&view.checkpoint)
-            .map_err(|_| Error::FinalizedAncestryPending)?;
+    let proof = &view
+        .checkpoint
+        .beacon()
+        .ok_or(Error::FinalizedAncestryConflict)?
+        .beacon;
+    for checkpoint in retained
+        .iter()
+        .filter(|checkpoint| checkpoint.legacy().is_some())
+    {
+        authority
+            .retain_requalification(checkpoint, proof)
+            .map_err(Error::BeaconFinality)?;
+    }
+    for archive in &archives {
+        archive
+            .complete(&view.checkpoint)
+            .map_err(Error::BeaconFinality)?;
     }
     Ok(view)
 }
 
 async fn finalized_ancestor(
     provider: &impl Provider,
-    witness: &FinalityWitness,
+    authority: &Arc<BeaconAuthority>,
+    witness: Option<&DataWitness>,
     number: u64,
     hash: B256,
 ) -> Result<bool, Error> {
-    let mut view = verified_finalized_view(provider, witness).await?;
+    let mut view = verified_finalized_view(provider, authority, witness).await?;
     if number > view.block_number() {
         return Err(Error::FinalizedAncestryPending);
     }
-    match view.verify_blocks(provider, &BTreeMap::from([(number, hash)])).await {
+    match view
+        .verify_blocks(provider, &BTreeMap::from([(number, hash)]))
+        .await
+    {
         Ok(()) => Ok(true),
         Err(Error::FinalizedAncestryConflict) => Ok(false),
         Err(error) => Err(error),
@@ -1147,26 +1341,25 @@ async fn finalized_ancestor(
 
 async fn finalized_ancestor_at(
     provider: &impl Provider,
-    number: u64,
-    hash: B256,
+    (number, hash): (u64, B256),
     header: &Header,
     genesis: B256,
     started: Instant,
     checkpoint: Option<&FinalityCheckpoint>,
+    archives: &[Arc<finality_archive::HeaderArchive>],
 ) -> Result<Option<(u64, B256)>, Error> {
     let _verification = finality_lock(genesis).lock_owned().await;
     let head = (header.number, header.hash);
     if number > head.0 {
         return Err(Error::FinalizedAncestryPending);
     }
-    // Every directory retains its own durable fence. Registering another proof
-    // owner must not replace or bypass any previously witnessed generation.
-    let archives = archives_for(genesis);
+    // Every explicitly owned directory retains its own durable fence. Other
+    // authorities' mutable fences and chunk writers are never consulted.
     let mut durable_required = BTreeMap::new();
-    for archive in &archives {
+    for archive in archives {
         for (number, hash) in archive
             .witness(genesis, &header.inner, checkpoint)
-            .map_err(|_| Error::FinalizedAncestryPending)?
+            .map_err(Error::BeaconFinality)?
         {
             if durable_required
                 .insert(number, hash)
@@ -1191,7 +1384,7 @@ async fn finalized_ancestor_at(
         }
         if head != old_head {
             let (height, ancestor, extension) =
-                walk_ancestors(provider, head, old_head.0, started, &archives, None).await?;
+                walk_ancestors(provider, head, old_head.0, started, archives, None).await?;
             let mut cache = state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1269,7 +1462,7 @@ async fn finalized_ancestor_at(
             start,
             required.0,
             started,
-            &archives,
+            archives,
             Some(&required_heads),
         )
         .await?;
@@ -1293,7 +1486,7 @@ async fn finalized_ancestor_at(
     if let Some((&oldest, _)) = durable_required.first_key_value() {
         let targets = durable_required;
         let (height, ancestor, links) =
-            walk_ancestors(provider, head, oldest, started, &archives, Some(&targets)).await?;
+            walk_ancestors(provider, head, oldest, started, archives, Some(&targets)).await?;
         if height != oldest {
             let mut cache = state
                 .lock()
@@ -1341,7 +1534,7 @@ async fn finalized_ancestor_at(
         })
     };
     let (height, ancestor, proof) =
-        walk_ancestors(provider, start, number, started, &archives, None).await?;
+        walk_ancestors(provider, start, number, started, archives, None).await?;
     let mut cache = state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1368,25 +1561,40 @@ async fn finalized_ancestor_at(
 }
 async fn finalized_transaction_receipt(
     provider: impl Provider,
-    witness: &FinalityWitness,
+    authority: &Arc<BeaconAuthority>,
+    witness: Option<&DataWitness>,
     tx_hash: TxHash,
 ) -> Result<Option<FinalizedTransactionReceipt>, Error> {
-    let mut view = verified_finalized_view(&provider, witness).await?;
+    let mut view = verified_finalized_view(&provider, authority, witness).await?;
     let Some(receipt) = provider.get_transaction_receipt(tx_hash).await? else {
         view.recheck(&provider).await?;
         return Ok(None);
     };
     let invalid = |error: anyhow::Error| Error::InvalidFinalityEvidence(error.to_string());
-    let (included_block_number, included_block_hash) = receipt.block_number.zip(receipt.block_hash)
-        .ok_or_else(|| Error::InvalidFinalityEvidence("receipt inclusion coordinates missing".into()))?;
+    let (included_block_number, included_block_hash) = receipt
+        .block_number
+        .zip(receipt.block_hash)
+        .ok_or_else(|| {
+            Error::InvalidFinalityEvidence("receipt inclusion coordinates missing".into())
+        })?;
     if included_block_number > view.block_number() {
         view.recheck(&provider).await?;
         return Ok(None);
     }
-    view.verify_blocks(&provider, &BTreeMap::from([(included_block_number, included_block_hash)])).await?;
+    view.verify_blocks(
+        &provider,
+        &BTreeMap::from([(included_block_number, included_block_hash)]),
+    )
+    .await?;
     let (inclusion, first_log_index) = inclusion::prove_transaction_receipt_with_log_index(
-        &provider, &view, included_block_number, included_block_hash, tx_hash,
-    ).await.map_err(|error| match error.downcast::<Error>() {
+        &provider,
+        &view,
+        included_block_number,
+        included_block_hash,
+        tx_hash,
+    )
+    .await
+    .map_err(|error| match error.downcast::<Error>() {
         Ok(error) => error,
         Err(error) => match error.downcast::<TransportError>() {
             Ok(error) => Error::from(error),
@@ -1394,8 +1602,15 @@ async fn finalized_transaction_receipt(
         },
     })?;
     validate_receipt_locator(&receipt, &inclusion, tx_hash).map_err(invalid)?;
-    if receipt.inner.logs().first().is_some_and(|log| log.log_index != Some(first_log_index)) {
-        return Err(Error::InvalidFinalityEvidence("receipt global log index differs from included predecessors".into()));
+    if receipt
+        .inner
+        .logs()
+        .first()
+        .is_some_and(|log| log.log_index != Some(first_log_index))
+    {
+        return Err(Error::InvalidFinalityEvidence(
+            "receipt global log index differs from included predecessors".into(),
+        ));
     }
     view.recheck(&provider).await?;
     Ok(Some(FinalizedTransactionReceipt {
@@ -1428,23 +1643,36 @@ fn validate_receipt_locator(
     );
     let mut bytes = proof.raw_transaction.as_slice();
     let transaction = TxEnvelope::decode_2718(&mut bytes)?;
-    ensure!(bytes.is_empty() && alloy::primitives::keccak256(&proof.raw_transaction) == hash,
-        "invalid exact signed envelope");
+    ensure!(
+        bytes.is_empty() && alloy::primitives::keccak256(&proof.raw_transaction) == hash,
+        "invalid exact signed envelope"
+    );
     let signer = transaction.recover_signer()?;
-    ensure!(signer == receipt.from && transaction.to() == receipt.to,
-        "receipt sender/destination differs from signed original");
+    ensure!(
+        signer == receipt.from && transaction.to() == receipt.to,
+        "receipt sender/destination differs from signed original"
+    );
     let created = (transaction.to().is_none() && proof.receipt.status())
         .then(|| signer.create(transaction.nonce()));
-    ensure!(receipt.contract_address == created, "receipt creation address differs from signed original");
+    ensure!(
+        receipt.contract_address == created,
+        "receipt creation address differs from signed original"
+    );
     let mut previous = None;
     for log in receipt.inner.logs() {
-        ensure!(!log.removed && log.block_hash == receipt.block_hash
-            && log.block_number == receipt.block_number
-            && log.transaction_hash == Some(hash)
-            && log.transaction_index == Some(proof.index), "misbound or removed receipt log");
+        ensure!(
+            !log.removed
+                && log.block_hash == receipt.block_hash
+                && log.block_number == receipt.block_number
+                && log.transaction_hash == Some(hash)
+                && log.transaction_index == Some(proof.index),
+            "misbound or removed receipt log"
+        );
         let index = log.log_index.context("missing global log index")?;
-        ensure!(previous.is_none_or(|previous: u64| previous.checked_add(1) == Some(index)),
-            "noncontiguous receipt log indices");
+        ensure!(
+            previous.is_none_or(|previous: u64| previous.checked_add(1) == Some(index)),
+            "noncontiguous receipt log indices"
+        );
         previous = Some(index);
     }
     Ok(())
@@ -1562,6 +1790,7 @@ impl EthApi {
             Some(self.contracts.max_priority_fee_per_gas),
         )?;
         contracts.finality = self.contracts.finality.clone();
+        contracts.witness = self.contracts.witness.clone();
 
         Ok(EthApi {
             contracts,
@@ -1581,28 +1810,58 @@ impl EthApi {
         &self.contracts.provider
     }
 
-    pub async fn with_finality_witness(
+    pub async fn with_beacon_finality(
+        mut self,
+        config: BeaconFinalityConfig,
+        store_directory: impl AsRef<std::path::Path>,
+    ) -> AnyResult<Self> {
+        ensure!(
+            self.chain_id == config.identity().0,
+            "HOLD: signer network differs from approved identity"
+        );
+        self.contracts.finality = Some(
+            open_beacon_authority(
+                self.raw_provider(),
+                &self.url,
+                config,
+                store_directory.as_ref(),
+            )
+            .await?,
+        );
+        Ok(self)
+    }
+
+    pub async fn with_data_witness(
         mut self,
         witness_url: &str,
         expected_chain_id: u64,
         expected_genesis: B256,
     ) -> AnyResult<Self> {
-        ensure!(self.chain_id == expected_chain_id, "HOLD: signer network differs from approved identity");
-        self.contracts.finality = Some(FinalityWitness::connect(
-            &self.url, witness_url, expected_chain_id, expected_genesis,
-            self.ws_max_retry, self.ws_retry_interval,
-        ).await?);
+        ensure!(
+            self.chain_id == expected_chain_id,
+            "HOLD: signer network differs from approved identity"
+        );
+        self.contracts.witness = Some(
+            DataWitness::connect(
+                &self.url,
+                witness_url,
+                expected_chain_id,
+                expected_genesis,
+                self.ws_max_retry,
+                self.ws_retry_interval,
+            )
+            .await?,
+        );
         Ok(self)
     }
 
     pub fn finality_identity(&self) -> AnyResult<(u64, B256)> {
-        let witness = require_witness(&self.contracts.finality)?;
-        Ok((witness.chain_id, witness.genesis))
+        Ok(require_authority(&self.contracts.finality)?.identity())
     }
 
     /// Raw read-only transport. Pair historical answers at a qualified hash.
     pub fn raw_witness_provider(&self) -> AnyResult<&RootProvider> {
-        Ok(&require_witness(&self.contracts.finality)?.provider)
+        Ok(&require_data_witness(&self.contracts.witness)?.provider)
     }
     pub fn with_queue_deployment_transaction(mut self, hash: Option<B256>) -> Self {
         self.queue_deployment_transaction = hash;
@@ -1627,11 +1886,14 @@ impl EthApi {
         }
     }
 
-    /// Uses per-header deadlines and a cooperative traversal bound that retains
-    /// authenticated progress. Do not wrap the complete proof in an RPC timeout:
-    /// cancelling it can discard a partially verified ancestry frontier.
+    /// Uses bounded individual requests without a total historical traversal deadline.
     pub async fn verified_finalized_view(&self) -> Result<FinalizedView, Error> {
-        verified_finalized_view(self.raw_provider(), require_witness(&self.contracts.finality)?).await
+        verified_finalized_view(
+            self.raw_provider(),
+            require_authority(&self.contracts.finality)?,
+            self.contracts.witness.as_ref(),
+        )
+        .await
     }
 
     /// Attach an independently owned archive without replacing same-chain owners.
@@ -1642,7 +1904,8 @@ impl EthApi {
         directory: &std::path::Path,
         expected_genesis: B256,
     ) -> AnyResult<FinalizedView> {
-        self.enable_finality_archive(directory, expected_genesis).await?;
+        self.enable_finality_archive(directory, expected_genesis)
+            .await?;
         Ok(self.verified_finalized_view().await?)
     }
 
@@ -1651,8 +1914,13 @@ impl EthApi {
         directory: &std::path::Path,
         expected_genesis: B256,
     ) -> AnyResult<()> {
-        ensure!(self.finality_identity()?.1 == expected_genesis, "archive approval mismatch");
-        enable_finality_archive(self.raw_provider(), directory, expected_genesis).await
+        ensure!(
+            self.finality_identity()?.1 == expected_genesis,
+            "archive approval mismatch"
+        );
+        require_authority(&self.contracts.finality)?.attach_archive(
+            enable_finality_archive(self.raw_provider(), directory, expected_genesis).await?,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1859,15 +2127,25 @@ impl EthApi {
         &self,
         tx_hash: TxHash,
     ) -> Result<Option<FinalizedTransactionReceipt>, Error> {
-        finalized_transaction_receipt(self.raw_provider(), require_witness(&self.contracts.finality)?, tx_hash).await
+        finalized_transaction_receipt(
+            self.raw_provider(),
+            require_authority(&self.contracts.finality)?,
+            self.contracts.witness.as_ref(),
+            tx_hash,
+        )
+        .await
     }
     /// Revalidate a saved historical snapshot against the same finalized ancestry as receipts.
     /// An unfinished or unavailable proof is an error, not a conflicting block.
     pub async fn is_finalized_block(&self, number: u64, hash: H256) -> AnyResult<bool> {
-        Ok(
-            finalized_ancestor(self.raw_provider(), require_witness(&self.contracts.finality)?, number, B256::from(hash.0))
-                .await?,
+        Ok(finalized_ancestor(
+            self.raw_provider(),
+            require_authority(&self.contracts.finality)?,
+            self.contracts.witness.as_ref(),
+            number,
+            B256::from(hash.0),
         )
+        .await?)
     }
 
     pub async fn read_finalized_merkle_root(
@@ -1901,11 +2179,14 @@ impl EthApi {
         gear_block: u32,
         view: &FinalizedView,
     ) -> Result<Option<[u8; 32]>, Error> {
-        let witness = require_witness(&self.contracts.finality)?;
-        if witness.chain_id != view.checkpoint.chain_id || witness.genesis != view.genesis {
+        let authority = require_authority(&self.contracts.finality)?;
+        if authority.identity() != (view.checkpoint.chain_id(), view.genesis) {
             return Err(Error::FinalizedAncestryConflict);
         }
-        let root = self.contracts.read_merkle_root_at(U256::from(gear_block), view.block_id()).await?;
+        let root = self
+            .contracts
+            .read_merkle_root_at(U256::from(gear_block), view.block_id())
+            .await?;
         view.recheck(self.raw_provider()).await?;
         Ok(root)
     }
@@ -1966,55 +2247,137 @@ impl EthApi {
         Ok(self::safe_block(self.raw_provider()).await?.header.number)
     }
 
-    /// Reads the relayer nonce and bridge processed bit from one canonical finalized block.
-    /// None means the finalized block could not be confirmed canonical; callers must hold.
+    fn original_nonce(&self, raw: &[u8]) -> AnyResult<u64> {
+        use alloy::{
+            consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope},
+            eips::{Decodable2718, Encodable2718},
+        };
+        let mut remaining = raw;
+        let transaction = TxEnvelope::decode_2718(&mut remaining)?;
+        ensure!(
+            remaining.is_empty() && transaction.encoded_2718() == raw,
+            "HOLD: noncanonical signed original"
+        );
+        ensure!(
+            transaction.chain_id() == Some(self.chain_id)
+                && transaction.recover_signer()? == self.public_key,
+            "HOLD: signed original signer/network mismatch"
+        );
+        Ok(transaction.nonce())
+    }
+
+    /// Prove the immutable original signer's nonce against the Beacon-anchored state root.
+    /// A consumed nonce releases no ownership until the caller durably saves this proof.
     pub async fn get_finalized_submission_snapshot(
         &self,
-        pinned_nonce: u64,
-        message_nonce: [u8; 32],
+        original_raw: &[u8],
     ) -> Result<Option<FinalizedSubmissionSnapshot>, Error> {
-        self.contracts
-            .finalized_submission_snapshot(
-                self.public_key,
-                pinned_nonce,
-                U256::from_be_bytes(message_nonce),
-            )
-            .await
+        let nonce = self
+            .original_nonce(original_raw)
+            .map_err(Error::BeaconFinality)?;
+        let view = self.verified_finalized_view().await?;
+        let proof = inclusion::prove_account(
+            self.raw_provider(),
+            &view,
+            view.header.inner.clone(),
+            self.public_key,
+        )
+        .await
+        .map_err(Error::BeaconFinality)?;
+        let account_nonce = proof
+            .verify(&view, self.public_key)
+            .map_err(Error::BeaconFinality)?
+            .map_or(0, |account| account.nonce);
+        view.recheck(self.raw_provider()).await?;
+        Ok(Some(FinalizedSubmissionSnapshot::Beacon(
+            ProvenSubmissionSnapshot {
+                schema_version: 2,
+                block_number: view.block_number(),
+                block_hash: view.block_hash(),
+                account_nonce,
+                pinned_nonce_consumed: account_nonce > nonce,
+                account_proof: proof,
+                checkpoint: view.checkpoint,
+            },
+        )))
     }
-    /// Reauthenticate every saved bit at its original canonical finalized state pin.
-    /// Latest state cannot substitute for a historical nonce disposition.
+
+    /// Requalify at the original saved header, never at a newer account nonce.
+    /// Legacy processed observations remain historical and cannot authorize completion.
     pub async fn verify_finalized_submission_snapshot(
         &self,
-        pinned_nonce: u64,
-        message_nonce: [u8; 32],
+        original_raw: &[u8],
         saved: &FinalizedSubmissionSnapshot,
-    ) -> AnyResult<()> {
-        require_witness(&self.contracts.finality)?;
+    ) -> AnyResult<FinalizedSubmissionSnapshot> {
+        let nonce = self.original_nonce(original_raw)?;
         ensure!(
-            saved.block_hash != B256::ZERO,
+            saved.block_hash() != B256::ZERO,
             "HOLD: saved nonce disposition has no block hash"
         );
         let mut view = self.verified_finalized_view().await?;
-        view.verify_blocks(self.raw_provider(), &BTreeMap::from([(saved.block_number, saved.block_hash)])).await?;
-        let block_id = BlockId::hash_canonical(saved.block_hash);
-        let account_nonce = self.contracts.agreed_account_nonce(self.public_key, block_id).await?;
-        let processed = self
-            .contracts
-            .is_message_processed_at(U256::from_be_bytes(message_nonce), block_id)
+        let targets = BTreeMap::from([(saved.block_number(), saved.block_hash())]);
+        let proof = if let Some(proven) = saved.beacon() {
+            ensure!(
+                proven.schema_version == 2 && proven.checkpoint.beacon().is_some(),
+                "HOLD: invalid nonce proof version/policy"
+            );
+            view.verify_checkpoints_with_blocks(
+                self.raw_provider(),
+                std::slice::from_ref(&proven.checkpoint),
+                &targets,
+            )
             .await?;
+            ensure!(
+                proven.account_proof.header.number == saved.block_number()
+                    && proven.account_proof.header.hash_slow() == saved.block_hash(),
+                "HOLD: account proof differs from original disposition pin"
+            );
+            proven.account_proof.clone()
+        } else {
+            view.verify_blocks(self.raw_provider(), &targets).await?;
+            let header = qualified_header(
+                self.raw_provider(),
+                BlockNumberOrTag::Number(saved.block_number()),
+            )
+            .await?;
+            ensure!(
+                header.hash == saved.block_hash(),
+                "HOLD: original disposition header changed"
+            );
+            inclusion::prove_account(self.raw_provider(), &view, header.inner, self.public_key)
+                .await?
+        };
+        let account_nonce = proof
+            .verify(&view, self.public_key)?
+            .map_or(0, |account| account.nonce);
         ensure!(
-            saved.pinned_nonce_consumed == (account_nonce > pinned_nonce)
-                && saved.message_processed == processed,
-            "HOLD: saved nonce disposition differs from original finalized state"
+            saved.pinned_nonce_consumed() == (account_nonce > nonce)
+                && saved
+                    .beacon()
+                    .is_none_or(|proven| proven.account_nonce == account_nonce),
+            "HOLD: saved nonce disposition differs from proven original account"
         );
         view.recheck(self.raw_provider()).await?;
-        Ok(())
-    }
-
-    pub async fn is_message_processed(&self, nonce: [u8; 32]) -> Result<bool, Error> {
-        self.contracts
-            .is_message_processed(U256::from_be_bytes(nonce))
-            .await
+        if saved.beacon().is_some() {
+            return Ok(saved.clone());
+        }
+        let beacon = &view
+            .checkpoint
+            .beacon()
+            .context("Beacon checkpoint missing")?
+            .beacon;
+        view.authority.retain_requalification(saved, beacon)?;
+        Ok(FinalizedSubmissionSnapshot::Beacon(
+            ProvenSubmissionSnapshot {
+                schema_version: 2,
+                block_number: saved.block_number(),
+                block_hash: saved.block_hash(),
+                account_nonce,
+                pinned_nonce_consumed: saved.pinned_nonce_consumed(),
+                account_proof: proof,
+                checkpoint: view.checkpoint,
+            },
+        ))
     }
 
     pub async fn subscribe_logs(
@@ -2047,6 +2410,7 @@ impl Contracts {
         Ok(Contracts {
             provider,
             finality: None,
+            witness: None,
             message_queue_instance,
             max_fee_per_gas: max_fee_per_gas.unwrap_or(MAX_FEE_PER_GAS),
             max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(MAX_PRIORITY_FEE_PER_GAS),
@@ -2054,13 +2418,25 @@ impl Contracts {
     }
 
     async fn scheduling_value<C: alloy::sol_types::SolCall>(&self, call: C) -> Result<U256, Error> {
-        let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
+        let view = verified_finalized_view(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+        )
+        .await?;
         let request = alloy::rpc::types::TransactionRequest::default()
             .to(*self.message_queue_instance.address())
             .input(Bytes::from(call.abi_encode()).into());
-        let primary = self.provider.call(request.clone()).block(view.block_id()).await?;
-        let witness = require_witness(&self.finality)?.provider
-            .call(request).block(view.block_id()).await?;
+        let primary = self
+            .provider
+            .call(request.clone())
+            .block(view.block_id())
+            .await?;
+        let witness = require_data_witness(&self.witness)?
+            .provider
+            .call(request)
+            .block(view.block_id())
+            .await?;
         if primary != witness || primary.len() != 32 {
             return Err(Error::FinalizedAncestryConflict);
         }
@@ -2069,28 +2445,38 @@ impl Contracts {
     }
 
     pub async fn max_block_number(&self) -> Result<u32, Error> {
-        self.scheduling_value(IMessageQueue::maxBlockNumberCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("max block exceeds u32".into()))
+        self.scheduling_value(IMessageQueue::maxBlockNumberCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("max block exceeds u32".into()))
     }
 
     pub async fn max_block_distance(&self) -> Result<u32, Error> {
-        self.scheduling_value(IMessageQueue::MAX_BLOCK_DISTANCECall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("max distance exceeds u32".into()))
+        self.scheduling_value(IMessageQueue::MAX_BLOCK_DISTANCECall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("max distance exceeds u32".into()))
     }
 
     pub async fn process_admin_message_delay(&self) -> Result<u64, Error> {
-        self.scheduling_value(IMessageQueue::PROCESS_ADMIN_MESSAGE_DELAYCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("admin delay exceeds u64".into()))
+        self.scheduling_value(IMessageQueue::PROCESS_ADMIN_MESSAGE_DELAYCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("admin delay exceeds u64".into()))
     }
 
     pub async fn process_pauser_message_delay(&self) -> Result<u64, Error> {
-        self.scheduling_value(IMessageQueue::PROCESS_PAUSER_MESSAGE_DELAYCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("pauser delay exceeds u64".into()))
+        self.scheduling_value(IMessageQueue::PROCESS_PAUSER_MESSAGE_DELAYCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("pauser delay exceeds u64".into()))
     }
 
     pub async fn process_user_message_delay(&self) -> Result<u64, Error> {
-        self.scheduling_value(IMessageQueue::PROCESS_USER_MESSAGE_DELAYCall {}).await?
-            .try_into().map_err(|_| Error::InvalidFinalityEvidence("user delay exceeds u64".into()))
+        self.scheduling_value(IMessageQueue::PROCESS_USER_MESSAGE_DELAYCall {})
+            .await?
+            .try_into()
+            .map_err(|_| Error::InvalidFinalityEvidence("user delay exceeds u64".into()))
     }
 
     pub async fn get_approx_balance(&self, address: Address) -> Result<f64, Error> {
@@ -2297,14 +2683,24 @@ impl Contracts {
         block_tag: BlockNumberOrTag,
     ) -> Result<Option<[u8; 32]>, Error> {
         if block_tag == BlockNumberOrTag::Finalized {
-            let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
+            let view = verified_finalized_view(
+                &self.provider,
+                require_authority(&self.finality)?,
+                self.witness.as_ref(),
+            )
+            .await?;
             let root = self.read_merkle_root_at(block, view.block_id()).await?;
             view.recheck(&self.provider).await?;
             Ok(root)
         } else {
-            let root = self.message_queue_instance.getMerkleRoot(block)
-                .block(BlockId::Number(block_tag)).call().await
-                .map_err(Error::ErrorDuringContractExecution)?.0;
+            let root = self
+                .message_queue_instance
+                .getMerkleRoot(block)
+                .block(BlockId::Number(block_tag))
+                .call()
+                .await
+                .map_err(Error::ErrorDuringContractExecution)?
+                .0;
             Ok((root != [0; 32]).then_some(root))
         }
     }
@@ -2314,7 +2710,7 @@ impl Contracts {
         block: U256,
         block_id: BlockId,
     ) -> Result<Option<[u8; 32]>, Error> {
-        let witness = require_witness(&self.finality)?;
+        let witness = require_data_witness(&self.witness)?;
         let root = self
             .message_queue_instance
             .getMerkleRoot(block)
@@ -2324,9 +2720,15 @@ impl Contracts {
             .map_err(Error::ErrorDuringContractExecution)?
             .0;
         let other = IMessageQueue::new(*self.message_queue_instance.address(), &witness.provider)
-            .getMerkleRoot(block).block(block_id).call().await
-            .map_err(Error::ErrorDuringContractExecution)?.0;
-        if root != other { return Err(Error::FinalizedAncestryConflict); }
+            .getMerkleRoot(block)
+            .block(block_id)
+            .call()
+            .await
+            .map_err(Error::ErrorDuringContractExecution)?
+            .0;
+        if root != other {
+            return Err(Error::FinalizedAncestryConflict);
+        }
 
         Ok((root != [0; 32]).then_some(root))
     }
@@ -2336,73 +2738,36 @@ impl Contracts {
         ethereum_block_number: u64,
         ethereum_block_hash: B256,
     ) -> Result<Option<[u8; 32]>, Error> {
-        let mut view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
-        if ethereum_block_number > view.block_number() { return Ok(None); }
-        view.verify_blocks(&self.provider, &BTreeMap::from([(ethereum_block_number, ethereum_block_hash)])).await?;
-        let root = self.read_merkle_root_at(block, BlockId::hash_canonical(ethereum_block_hash)).await?;
+        let mut view = verified_finalized_view(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+        )
+        .await?;
+        if ethereum_block_number > view.block_number() {
+            return Ok(None);
+        }
+        view.verify_blocks(
+            &self.provider,
+            &BTreeMap::from([(ethereum_block_number, ethereum_block_hash)]),
+        )
+        .await?;
+        let root = self
+            .read_merkle_root_at(block, BlockId::hash_canonical(ethereum_block_hash))
+            .await?;
         view.recheck(&self.provider).await?;
         Ok(root)
     }
 
-    async fn finalized_submission_snapshot(
-        &self,
-        account: Address,
-        pinned_nonce: u64,
-        message_nonce: U256,
-    ) -> Result<Option<FinalizedSubmissionSnapshot>, Error> {
-        let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
-        let block_number = view.block_number();
-        let block_hash = view.block_hash();
-        let block_id = view.block_id();
-
-        let account_nonce = self.agreed_account_nonce(account, block_id).await?;
-        let message_processed = self
-            .is_message_processed_at(message_nonce, block_id)
-            .await?;
-        view.recheck(&self.provider).await?;
-
-        Ok(Some(FinalizedSubmissionSnapshot {
-            block_number,
-            block_hash,
-            pinned_nonce_consumed: account_nonce > pinned_nonce,
-            message_processed,
-        }))
-    }
-
-    pub async fn is_message_processed(&self, nonce: U256) -> Result<bool, Error> {
-        let view = verified_finalized_view(&self.provider, require_witness(&self.finality)?).await?;
-        let processed = self.is_message_processed_at(nonce, view.block_id()).await?;
-        view.recheck(&self.provider).await?;
-        Ok(processed)
-    }
-
-    async fn is_message_processed_at(&self, nonce: U256, block_id: BlockId) -> Result<bool, Error> {
-        let witness = require_witness(&self.finality)?;
-        let processed = self
-            .message_queue_instance
-            .isProcessed(nonce)
-            .block(block_id)
-            .call()
-            .await
-            .map_err(Error::ErrorDuringContractExecution)?;
-        let other = IMessageQueue::new(*self.message_queue_instance.address(), &witness.provider)
-            .isProcessed(nonce).block(block_id).call().await
-            .map_err(Error::ErrorDuringContractExecution)?;
-        if processed != other { return Err(Error::FinalizedAncestryConflict); }
-
-        Ok(processed)
-    }
-
-    async fn agreed_account_nonce(&self, account: Address, block: BlockId) -> Result<u64, Error> {
-        let witness = require_witness(&self.finality)?;
-        let nonce = self.provider.get_transaction_count(account).block_id(block).await?;
-        let other = witness.provider.get_transaction_count(account).block_id(block).await?;
-        if nonce != other { return Err(Error::FinalizedAncestryConflict); }
-        Ok(nonce)
-    }
-
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
-        let Some(receipt) = finalized_transaction_receipt(&self.provider, require_witness(&self.finality)?, tx_hash).await? else {
+        let Some(receipt) = finalized_transaction_receipt(
+            &self.provider,
+            require_authority(&self.finality)?,
+            self.witness.as_ref(),
+            tx_hash,
+        )
+        .await?
+        else {
             return Ok(TxStatus::Pending);
         };
 
@@ -2417,22 +2782,6 @@ impl Contracts {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn unconfigured_finality_never_reports_an_absent_original_pending() -> AnyResult<()> {
-        let api = mocked_ancestry_api(alloy::transports::mock::Asserter::new())?;
-        for error in [
-            api.get_finalized_receipt(B256::ZERO).await.unwrap_err(),
-            api.get_tx_status(B256::ZERO).await.unwrap_err(),
-            api.verified_finalized_view().await.unwrap_err(),
-        ] {
-            assert_eq!(
-                error.to_string(),
-                "HOLD: independent Ethereum finality witness is not configured"
-            );
-        }
-        Ok(())
-    }
 
     #[tokio::test]
     async fn root_scan_retains_both_sides_of_page_boundary() -> AnyResult<()> {
@@ -2563,17 +2912,16 @@ mod tests {
 
     #[test]
     fn finalized_submission_snapshot_serde_requires_exact_evidence_fields() {
-        let snapshot = FinalizedSubmissionSnapshot {
+        let snapshot = FinalizedSubmissionSnapshot::Legacy(LegacySubmissionSnapshot {
             block_number: 100,
             block_hash: B256::from([7; 32]),
             pinned_nonce_consumed: true,
             message_processed: false,
-        };
-        let value = serde_json::to_value(snapshot).unwrap();
-        assert_eq!(
-            serde_json::from_value::<FinalizedSubmissionSnapshot>(value.clone()).unwrap(),
-            snapshot
-        );
+        });
+        let value = serde_json::to_value(&snapshot).unwrap();
+        let restored =
+            serde_json::from_value::<FinalizedSubmissionSnapshot>(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), value);
         for field in [
             "block_number",
             "block_hash",
@@ -2702,14 +3050,24 @@ mod tests {
     // Exercise the ancestry/cache algorithm independently of finality qualification.
     // Production acceptance and receipt proof regressions use two transports in finality_tests.
     async fn ancestry_only(
-        provider: &impl Provider, number: u64, hash: B256,
+        provider: &impl Provider,
+        number: u64,
+        hash: B256,
     ) -> Result<Option<(u64, B256)>, Error> {
         let started = Instant::now();
         let head = qualified_header(provider, BlockNumberOrTag::Finalized).await?;
         let genesis = qualified_header(provider, BlockNumberOrTag::Number(0)).await?;
-        finalized_ancestor_at(provider, number, hash, &head, genesis.hash, started, None).await
+        finalized_ancestor_at(
+            provider,
+            (number, hash),
+            &head,
+            genesis.hash,
+            started,
+            None,
+            &archives_for(genesis.hash),
+        )
+        .await
     }
-
 
     #[tokio::test]
     async fn finalized_ancestry_rejects_a_numbered_block_from_another_backend() -> AnyResult<()> {
@@ -2883,8 +3241,6 @@ mod tests {
         assert!(asserter.read_q().is_empty());
         Ok(())
     }
-
-
 
     #[tokio::test]
     async fn interrupted_interior_frontier_survives_the_recent_ancestor_bound() -> AnyResult<()> {

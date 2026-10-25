@@ -1,12 +1,12 @@
 use gstd::{msg, MessageId};
-use sails_rs::{calls::ActionIo, prelude::*};
+use sails_rs::prelude::*;
 
 use vft_client::{
     vft::io::TransferFrom,
     vft_admin::io::{Burn, Mint},
 };
 
-use crate::services::TokenSupply;
+use crate::services::{decode_complete_reply, TokenSupply};
 
 use super::{
     super::{Config, Error},
@@ -282,25 +282,44 @@ pub fn handle_persistent_reply() {
 
 /// Decode reply received from the Burn method.
 fn decode_burn_reply(bytes: &[u8]) -> Result<bool, Error> {
-    Burn::decode_reply(bytes).map_err(|e| Error::BurnTokensDecode(format!("{e:?}")))?;
-    bytes.is_empty().then_some(true).ok_or(Error::InvalidReply)
+    decode_complete_reply::<Burn>(bytes, |e| Error::BurnTokensDecode(format!("{e:?}")))
+        .map(|()| true)
 }
 
 /// Decode reply received from the TransferFrom method.
 fn decode_transfer_from_reply(bytes: &[u8]) -> Result<bool, Error> {
-    TransferFrom::decode_reply(bytes)
-        .map_err(|e| Error::TransferFromDecode(format!("{e:?}")))
-        .and_then(|reply| {
-            if bytes.len() == TransferFrom::ROUTE.len() + reply.encoded_size() {
-                Ok(reply)
-            } else {
-                Err(Error::InvalidReply)
-            }
-        })
+    decode_complete_reply::<TransferFrom>(bytes, |e| Error::TransferFromDecode(format!("{e:?}")))
 }
 
 /// Decode reply received from the Mint method.
 fn decode_mint_reply(bytes: &[u8]) -> Result<bool, Error> {
-    Mint::decode_reply(bytes).map_err(|e| Error::MintTokensDecode(format!("{e:?}")))?;
-    bytes.is_empty().then_some(true).ok_or(Error::InvalidReply)
+    decode_complete_reply::<Mint>(bytes, |e| Error::MintTokensDecode(format!("{e:?}")))
+        .map(|()| true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sails_rs::calls::ActionIo;
+
+    #[test]
+    fn complete_outbound_replies_preserve_unit_and_decode_error_classification() {
+        assert_eq!(decode_burn_reply(&[]), Ok(true));
+        assert_eq!(decode_mint_reply(&[]), Ok(true));
+        assert_eq!(decode_burn_reply(Burn::ROUTE), Err(Error::InvalidReply));
+        assert_eq!(decode_mint_reply(Mint::ROUTE), Err(Error::InvalidReply));
+        assert!(matches!(
+            decode_transfer_from_reply(&[]),
+            Err(Error::TransferFromDecode(_))
+        ));
+        let mut reply = TransferFrom::ROUTE.to_vec();
+        assert!(matches!(
+            decode_transfer_from_reply(&reply),
+            Err(Error::TransferFromDecode(_))
+        ));
+        false.encode_to(&mut reply);
+        assert_eq!(decode_transfer_from_reply(&reply), Ok(false));
+        reply.push(0);
+        assert_eq!(decode_transfer_from_reply(&reply), Err(Error::InvalidReply));
+    }
 }

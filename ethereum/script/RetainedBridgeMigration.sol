@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
@@ -407,8 +407,8 @@ abstract contract RetainedBridgeMigration is CommonBase {
                 "bootstrap not genuinely accepted/live"
             );
         } else if (client.latestMMRRoot() == 0) {
-            (uint128 id, uint128 length, bytes32 root,) = client.currentValidatorSet();
-            (uint128 nextId, uint128 nextLength, bytes32 nextRoot,) = client.nextValidatorSet();
+            (uint128 id, uint128 length, bytes32 root) = client.currentValidatorSet();
+            (uint128 nextId, uint128 nextLength, bytes32 nextRoot) = client.nextValidatorSet();
             _retainedRequire(
                 id == p.bootstrap.currentSet.id && length == p.bootstrap.currentSet.length
                     && root == p.bootstrap.currentSet.root && nextId == p.bootstrap.nextSet.id

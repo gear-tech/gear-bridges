@@ -59,17 +59,23 @@ Rust preflights bound SCALE lengths before decoding: at most 256 authorities, 64
 
 The [EVM relay](../tools/beefy-relay/src/ethereum.rs) calls `createFiatShamirFinalBitfield` and `submitFiatShamir`. The client also retains interactive verification. Bootstrap trusts the configured current/next authority sets. Each update authenticates the newest leaf's parent timestamp; a next-set commitment hands over authority using that leaf's next-set proof. [`VaraQueueRootVerifier`](../ethereum/src/VaraQueueRootVerifier.sol) binds queue proofs to the client's latest accepted MMR anchor and the destination-bound snapshot.
 
+External adoption and retained-original validation accept both `submitFiatShamir` and interactive `submitFinal`, selected by their exact ABI selector. Both require canonical calldata and the original source commitment, newest-leaf snapshot and next-authority binding. Adoption preserves the accepted signed bytes; it never converts an interactive transaction into a new submission.
+
 `MessageQueue.submitMerkleRoot(uint256,bytes32,bytes)` passes the original height, root and canonical v2 envelope to `IVerifier.safeVerifyProof(uint256 sourceBlock, bytes32 merkleRoot, bytes proof)`. The verifier rejects heights above `uint32`, wrong queue/chain/domain, uninitialized snapshots, noncanonical encodings and stale or mismatched anchors; malformed ABI decoding returns false. Invalid root proofs revert with `InvalidQueueRootProof`. There is no field-element packing or selectable proof-system fallback. See [proof authentication](circuits-and-proofs.md).
 
 A canonically mined commitment is capacity/progress evidence, not finalized acceptance. The [follower](../tools/beefy-relay/src/follower.rs) and [root publisher](../tools/beefy-relay/src/root_publication.rs) retain original source, client, anchor, nonce, raw bytes, transaction hash and inclusion. A signed root publication cannot be reanchored; finality promotion may add evidence but cannot replace that identity. [`MessageQueue`](../ethereum/src/MessageQueue.sol) retains maturity, message inclusion, global nonce replay protection, custody dispatch and historical-root redemption. Empty initialized queue progress creates no root and does not restart maturity. Completion requires canonical finalized commitment, root and release receipt evidence.
 
 A never-mined signed commitment may resume by broadcasting its original bytes. Once an inclusion is recorded, disappearance with an unconsumed nonce is HOLD, not a broadcast trigger; retain the original inclusion until authenticated recovery qualifies it. A finalized consumed-nonce disposition can archive ownership without claiming successful delivery.
 
+Retained finalized root recovery uses the original signed transaction, receipt/transaction inclusion proofs and finality archive through both the full publisher and its waiter. The exact client-bound commitment entry supplies the original anchor evidence, even after the client advances. Once source/witness, manifest, queue and signer bindings revalidate, recovery returns the original's accepted outcome without rediscovering receipt or transaction bodies. Corrupt retained evidence fails closed; external progress and consumed-nonce reconciliation cannot complete that original.
+
 The corrected common queue preserves legacy slots 0–13: block→root at 11, root→timestamp at 12 and nonce→processed at 13. Appended slot 14 holds the BEEFY root floor and slot 15 holds block→timestamp; there is no controller storage slot. `getMerkleRootTimestamp(bytes32)` remains the historical API; `getMerkleRootTimestampForBlock(uint256)` and redemption share the effective timestamp reader. Per-block time takes precedence; legacy fallback is permitted only before activation or below the floor. Missing applicable timestamps fail closed. Repeated hashes mature independently; authenticated conflicts clear only the affected block. The 300/3600-second delays and historical redemption remain intact.
 
 The immutable `beefyRootMinimum` is the admission floor, not the first publication. `genesisBlock()` records the first nonzero publication and never moves; `maxBlockNumber()` records monotonic progress. Authenticated nonzero roots may backfill any missing height at or above the floor, including below genesis or behind empty progress. A zero BEEFY floor rejects new publication; it does not disable historical redemption. Forward publications remain bounded by max plus MAX_BLOCK_DISTANCE. Empty progress requires initialization and a strictly greater height, creates no root and grants no maturity. Each backfilled block starts its own destination registration delay, even if the same root hash is already mature elsewhere.
 
 Follower/root schema 4 records own versus external accepted transaction provenance. An external finalized checkpoint or root can satisfy unsigned progress, but never changes the identity or outcome of a signed original. Historical root inventory begins at the immutable floor and retains unpublished epochs behind the frontier. Distance catch-up publishes the actual initialized source/witness snapshot, including nonzero intermediate roots. Outbound discovery separately persists qualified inclusion hashes and transaction/log coordinates with one atomic cursor/root state; legacy numeric caches require a complete finalized replay before unsigned work resumes.
+
+At every scanned height, both source endpoints must agree on the presence **or absence** of `QueueMerkleRootChanged` before snapshot retention or cursor advancement. A disagreement or query failure leaves that height unconsumed, including at the floor; matching block hashes alone do not authenticate an event response.
 
 An authenticated competing root can release independent BEEFY following while the root publisher retains its unresolved signed original. The follower revalidates that observed progress before leaving `held-root`; it does not replace the original bytes, nonce or anchor, and later reconciles the original receipt separately. An unsigned standalone publication finishes on either its own accepted publication or authenticated external observation.
 
@@ -116,6 +122,8 @@ Retrieve site access only over SSH with `cat /home/bridge/.config/bridge-hoodi/s
 `VITE_ISOLATED_FAUCET=true` enables the retained lane's same-origin faucet in Testnet mode. It grants **100 TVARA** or **1,000 Test USDC** per normalized address per 24 hours. USDC is the existing six-decimal ERC20 `0xd4d65b1100b522cbde9664b9ba78c8add04e5b53`, paired with six-decimal hUSDC VFT `0x4e1512f4e996cf4784d052661f38c31b39606a1716f0f735e6aec64df5249baf`. These are test-only assets with no monetary value, not real Circle USDC. The faucet transfers canonical ERC20 inventory; it never independently mints VFT.
 
 The [faucet service](../tools/test-faucet.cjs) uses two dedicated signers, with initial pools capped at 10,000 TVARA and 100,000 Test USDC plus 0.005 Hoodi ETH for gas. There are no automatic refills. Allocation ceilings are lifetime bounds; fees can exhaust funding earlier. Address limits are not person-level Sybil protection. One unresolved original holds further claims for that asset until canonical finality, including Hoodi's finality delay. The other asset remains independent.
+
+Original observation scans retain exclusive signer ownership until the bounded 32-block scan finishes and its progress is journaled. Each RPC keeps its own deadline; there is no additional 45-second aggregate deadline that discards a progressing scan. An interruption resumes from the durable scan boundary with the same signed original, never a replacement claim.
 
 The task-owned launcher `/srv/vara-bridge/config/run-faucet` mounts only read-only application code/configuration, dedicated keys under `config/faucet-keys`, and the faucet state directory. Configuration `config/faucet.json` and key files require mode 0600; directories require 0700. Its `stateDir` maps to `run/hoodi-v210/faucet/journal`, which must not exist before first initialization. Preserve this authenticated journal and both keys together. Never restore an older journal, delete an unresolved original, rotate signers in place, or run another host against these signers. A nonce/history mismatch or interrupted journal fails closed.
 
@@ -170,6 +178,28 @@ The relayer follows finalized beacon-chain data and submits sync-committee/final
 Bootstrap requires an independently trusted recent checkpoint root, not the deployment provider's choice of finality. `checkpoints-tool` requires that root and the trusted genesis validators root; the actor checks bootstrap proofs against the supplied root and rejects period-zero bootstrap. The selected `Network` fixes genesis validators identity, genesis time and the Deneb/Electra/Fulu schedule for the lifetime of the actor.
 
 Regular updates and replay enforce `current_slot >= signature_slot > attested_slot >= finalized_slot`, sequential authenticated committee transitions and the fork at the preceding signature slot. Replay headers must already be strictly ordered and chain to the authenticated interval; neither the relayer nor the actor sorts malformed input into validity. Revision compare-and-set, bounded checkpoint history and native BLS verification remain enforced.
+
+The actor and host Ethereum client share the consensus rules in
+`gear-programs/checkpoint-light-client/io/src/verification.rs`, with separate
+actor/native cryptographic backends. Host authority requires an independently
+hash-approved Beacon bootstrap and an owned durable proof store. Signed Beacon
+finality binds the complete execution header; execution RPC supplies data, not
+an alternative finality vote. Receipt and signer-account proofs use that
+authenticated header's trie roots. Legacy checkpoints and nonce snapshots must
+requalify their original pins before resuming; a consumed nonce alone never
+proves bridge completion. The indexer invokes the same native verifier rather
+than reimplementing consensus or MPT verification in JavaScript.
+
+Electra adds body-level `execution_requests`; its SSZ execution payload still has
+17 fields. Fulu retains that block layout. The execution header separately commits
+to EIP-7685 `requestsHash` through its complete RLP hash. Shared provenance-pinned
+mainnet captures at Electra slot 11649029 and Fulu slot 13164563 each contain a
+consolidation request. Rust and Lodestar checks cover full/light SSZ roots, request
+hashes, execution-header binding, transaction/receipt tries, retained-proof reload
+and independent mutations. Capture sources and SHA-256 digests are in
+`tests/src/checkpoint_light_client/chain-data/execution-requests-provenance.json`.
+These public captures qualify proof composition, not an independently approved
+sync-committee bootstrap or production finality authority.
 
 Checkpoint deployment, updates and native integration tests submit with 95% of the block gas limit. Deployment and native-test gas estimates must fit that ceiling; the exact RPC minimum is not an execution budget. It can exhaust gas during queued BLS execution even when the update is valid.
 
@@ -236,14 +266,14 @@ Outbound queue receipts that arrive before their Vara counterpart are retained i
 
 The GraphQL `Transfer.amount` resolver emits an exact base-10 integer string, including for preserved database rows stored as hexadecimal strings. It does not rewrite historical rows or convert token amounts through JavaScript floating-point numbers.
 
-For an existing indexer database, applying the schema migration is not a data cutover:
-legacy pending rows have NULL receipt transaction/log coordinates and cannot match
-new settlement evidence, while legacy Completed rows are not automatically requalified.
-Use an isolated fresh database and reindex the approved original chain history, or
-perform an independently verified backfill of the original receipt slot, transaction
-index and receipt-local log index before switching readers. Preserve original transfer
-identities and requalify completion from authenticated settlement; never derive these
-coordinates from concatenated nonces or manufacture Settled rows.
+For an existing indexer database, applying the schema migration is not a data cutover.
+Inbound reconciliation can backfill NULL transaction/receipt-local log coordinates
+from the independently authenticated original receipt, requiring a unique matching
+manager deposit and preserving every known coordinate. `--apply` retains this source
+evidence even while settlement is pending; a dry run writes nothing. Completion still
+requires the original receipt relay and authenticated settlement, which also establish
+the receipt slot. Missing indexed history requires an approved reindex/backfill;
+never derive coordinates from concatenated nonces or manufacture Settled rows.
 
 Retained Gear manager routing requires migration `1792454400000-retained_manager_handoff.js`
 before starting the updated indexer (`yarn workspace indexer migration:run` against

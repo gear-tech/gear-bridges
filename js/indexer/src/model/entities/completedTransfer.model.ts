@@ -2,6 +2,7 @@ import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
 import type { Receipt } from '../../eth/completion.js';
 import { Network } from './_network.js';
 import type { SourceReceiptAuth } from '../../eth/finality.js';
+import type { LegacyReceiptAuth } from './transfer.model.js';
 
 export type ReceiptAuth = Omit<SourceReceiptAuth, 'localLogIndex'>;
 
@@ -38,6 +39,10 @@ export class CompletedTransfer {
 
   @Column('boolean', { nullable: true, name: 'legacy_matched' })
   legacyMatched?: boolean | null;
+
+  @Column('jsonb', { nullable: true, name: 'legacy_receipt_auth' })
+  legacyReceiptAuth?: { receiptAuth: LegacyReceiptAuth; matched: boolean; timestamp: string | null;
+    blockNumber: string; txHash: string } | null;
 
   @Index('IDX_completed_transfer_matched')
   @Column({ default: false })

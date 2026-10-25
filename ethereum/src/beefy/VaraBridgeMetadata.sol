@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {ScaleCodec} from "./utils/ScaleCodec.sol";
 
@@ -17,6 +17,27 @@ library VaraBridgeMetadata {
 
     uint8 internal constant VERSION = 2;
     bytes4 internal constant MAGIC = bytes4("vara");
+
+    // SCALE: u8 + u32 + H256 + u64 + u32 + H256 + H256 = 113 bytes.
+    function encodeMMRLeaf(
+        uint8 version,
+        uint32 parentNumber,
+        bytes32 parentHash,
+        uint64 nextAuthoritySetID,
+        uint32 nextAuthoritySetLen,
+        bytes32 nextAuthoritySetRoot,
+        bytes32 extraRoot
+    ) internal pure returns (bytes memory) {
+        return bytes.concat(
+            ScaleCodec.encodeU8(version),
+            ScaleCodec.encodeU32(parentNumber),
+            parentHash,
+            ScaleCodec.encodeU64(nextAuthoritySetID),
+            ScaleCodec.encodeU32(nextAuthoritySetLen),
+            nextAuthoritySetRoot,
+            extraRoot
+        );
+    }
 
     function hash(Snapshot memory snapshot) internal pure returns (bytes32) {
         if (

@@ -78,6 +78,7 @@ impl Relayer {
         storage_path: impl AsRef<Path>,
         governance_admin: ActorId,
         governance_pauser: ActorId,
+        lane_approvals: crate::lane_policy::LaneApprovals,
     ) -> AnyResult<Self> {
         let storage_path = storage_path.as_ref();
         let (destination_chain_id, destination_genesis) = eth_api.finality_identity()?;
@@ -97,7 +98,8 @@ impl Relayer {
         let replay_start_block = storage
             .replay_from_block(event_start_block, GearEventStream::Queued)
             .await?;
-        let tx_manager = TransactionManager::new(storage.clone());
+        let tx_manager = TransactionManager::new(storage.clone())
+            .with_lane_approvals(eth_api.clone(), lane_approvals);
         tx_manager.load_from_storage().await?;
         eth_api
             .enable_finality_archive(&storage_path.join("ethereum-finality"), destination_genesis)

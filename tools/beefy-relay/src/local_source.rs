@@ -4,7 +4,10 @@ use gsdk::{
     ext::sp_core::{sr25519, Pair as _},
     PairSigner,
 };
-use std::fs::OpenOptions;
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct RotationEvidence {

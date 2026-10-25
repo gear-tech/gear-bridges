@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {Script} from "forge-std/Script.sol";
-import {Base, DeploymentArguments} from "test/Base.sol";
+import {DeploymentArguments, DeploymentBase} from "script/DeploymentBase.sol";
 
 /**
  * @dev Fresh, queue-bound token test bridge. Never points at the message-only deployment.
  */
-contract BeefyTokens is Script, Base {
+contract BeefyTokens is Script, DeploymentBase {
     function run()
         public
         returns (address clientAddress, address verifierAddress, address queueAddress, address managerAddress)
@@ -38,8 +38,9 @@ contract BeefyTokens is Script, Base {
         includeOrdinaryGearToken = true;
         deployTestTokenProfile = true; // Explicit test-token profile on the two allowed test chains.
         _validateDeploymentArguments(args);
+        deploymentArguments = args;
         address predictedQueue = _predictBeefyMessageQueue(deployer, args.overrides);
-        _deployBeefyClient(privateKey, predictedQueue);
+        _deployBeefyClient(privateKey, predictedQueue, _loadBeefyBootstrap(predictedQueue));
         deployBridge(args);
         require(address(messageQueue) == predictedQueue, "deployed queue differs from prediction");
         return (address(beefyClient), address(verifier), address(messageQueue), address(erc20Manager));

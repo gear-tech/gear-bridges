@@ -1,7 +1,8 @@
 import type { Store } from '@subsquid/typeorm-store';
 import { In } from 'typeorm';
 import { EthereumFinalityCheckpoint, Network, ReceiptRelay, ReceiptSettlement, Status, Transfer } from '../model/index.js';
-import type { SourceReceiptAuth } from '../eth/finality.js';
+import { proofReference, type SourceReceiptAuth } from '../eth/finality.js';
+import { isDeepStrictEqual } from 'node:util';
 import type { ReceiptDepositEffect } from './types/index.js';
 
 export function validateReceiptSettlement(deposit: ReceiptDepositEffect): void {
@@ -17,6 +18,7 @@ export function validateReceiptSettlement(deposit: ReceiptDepositEffect): void {
 export async function reconcileReceiptSettlements(
   store: Store, pending: readonly ReceiptSettlement[],
   authenticateSource: (transfer: Transfer) => Promise<SourceReceiptAuth | undefined>,
+  recovered?: Transfer,
 ): Promise<{ transfers: Transfer[]; settlements: ReceiptSettlement[] }> {
   if (!pending.length) return { transfers: [], settlements: [] };
   const receiptIds = [...new Set(pending.map(({ deposit: d }) => `${d.slot}:${d.transaction_index}`))];
@@ -27,6 +29,9 @@ export async function reconcileReceiptSettlements(
       sourceTransactionIndex: BigInt(d.transaction_index), sourceLogIndex: BigInt(d.log_index) }] : [];
   });
   const originals = tuples.length ? await store.find(Transfer, { where: tuples }) : [];
+  // The repair page has authenticated these coordinates but must not write them
+  // before the entire page passes. Still include DB matches to detect ambiguity.
+  if (recovered && !originals.some((row) => row.id === recovered.id)) originals.push(recovered);
   const transfersByTuple = new Map<string, Transfer>();
   for (const transfer of originals) {
     const key = `${transfer.blockNumber}:${transfer.sourceTransactionIndex}:${transfer.sourceLogIndex}`;
@@ -77,9 +82,15 @@ export async function reconcileReceiptSettlements(
     const source = await authenticateSource(transfer);
     if (!source) { conflict(); continue; }
     const outcome = 'outcome' in d && d.outcome === 'Refunded' ? Status.Refunded : Status.Completed;
+    const archived = transfer.legacyEthereumAuth?.completionAuth;
+    if (archived && (archived.kind !== 'gear-settlement' || archived.receiptRelayId !== relayId ||
+        archived.receiptSettlementId !== settlement.id || archived.outcome !== outcome)) {
+      throw new Error('HOLD: archived receipt terminal identity cannot be replaced');
+    }
     const auth = transfer.completionAuth;
     if (auth) {
-      if (auth.version !== 1 || auth.kind !== 'gear-settlement' || auth.sourceCheckpointId !== source.checkpointId ||
+      if (auth.version !== 2 || auth.kind !== 'gear-settlement' || auth.sourceCheckpointId !== source.checkpointId ||
+          !isDeepStrictEqual(proofReference(auth), proofReference(source)) ||
           auth.receiptRelayId !== relayId || auth.receiptSettlementId !== settlement.id || auth.outcome !== outcome ||
           transfer.status !== outcome || transfer.completedAt?.getTime() !== settlement.timestamp.getTime() ||
           transfer.completedAtBlock == null || BigInt(transfer.completedAtBlock) !== BigInt(settlement.blockNumber) ||
@@ -94,8 +105,8 @@ export async function reconcileReceiptSettlements(
       transfer.completedAt = settlement.timestamp;
       transfer.completedAtBlock = settlement.blockNumber;
       transfer.completedAtTxHash = settlement.txHash;
-      transfer.completionAuth = { version: 1, kind: 'gear-settlement', sourceCheckpointId: source.checkpointId,
-        receiptRelayId: relayId, receiptSettlementId: settlement.id, outcome };
+      transfer.completionAuth = { version: 2, kind: 'gear-settlement', sourceCheckpointId: source.checkpointId,
+        receiptRelayId: relayId, receiptSettlementId: settlement.id, outcome, ...proofReference(source) };
     }
     transfer.sourceReceiptAuth = source;
     transfer.receiptSlot = BigInt(d.slot);

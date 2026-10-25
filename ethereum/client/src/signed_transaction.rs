@@ -40,11 +40,16 @@ pub fn decode_signed_transaction(
         encoded.is_empty()
             && transaction.nonce() == expected.nonce
             && transaction.to() == Some(expected.destination)
-            && expected.chain_id.is_none_or(|chain| transaction.chain_id() == Some(chain)),
+            && expected
+                .chain_id
+                .is_none_or(|chain| transaction.chain_id() == Some(chain)),
         errors.identity
     );
     let from = transaction.recover_signer().context(errors.signature)?;
-    ensure!(expected.signer.is_none_or(|signer| from == signer), errors.signer);
+    ensure!(
+        expected.signer.is_none_or(|signer| from == signer),
+        errors.signer
+    );
     let identity = TransactionIdentity {
         hash: expected.hash,
         from,

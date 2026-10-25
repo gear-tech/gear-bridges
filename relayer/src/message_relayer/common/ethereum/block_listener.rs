@@ -242,8 +242,6 @@ mod tests {
         let server_unavailable_reads = unavailable_reads.clone();
         let socket = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", socket.local_addr().unwrap());
-        let witness_socket = TcpListener::bind("127.0.0.1:0").unwrap();
-        let witness_endpoint = format!("http://{}", witness_socket.local_addr().unwrap());
         let server_blocks = blocks.clone();
         let server_queries = queries.clone();
         let server = HttpServer::new(move || {
@@ -265,7 +263,7 @@ mod tests {
                             return HttpResponse::ServiceUnavailable().finish();
                         }
                         let result = match request["method"].as_str().unwrap() {
-                            "eth_chainId" => json!("0x88bb0"),
+                            "eth_chainId" => json!("0x7a69"),
                             "eth_getBlockByNumber" => {
                                 let tag = request["params"][0].as_str().unwrap();
                                 let number = if tag == "finalized" || tag == "latest" {
@@ -297,18 +295,28 @@ mod tests {
         .workers(1)
         .listen(socket)
         .unwrap()
-        .listen(witness_socket)
-        .unwrap()
         .disable_signals()
         .run();
         let server_handle = server.handle();
         tokio::spawn(server);
-        let api = PollingEthApi::new(&endpoint).await.unwrap()
-            .with_finality_witness(&witness_endpoint, 560048, blocks[0].header.hash)
-            .await.unwrap();
+        let beacon_blocks = blocks.clone();
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            31337,
+            blocks[0].header.hash,
+            Arc::new(move || beacon_blocks[272].header.clone()),
+        )
+        .await
+        .unwrap();
+        let api = PollingEthApi::new(&endpoint)
+            .await
+            .unwrap()
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await
+            .unwrap();
         let path =
             std::env::temp_dir().join(format!("listener-aged-{}.json", uuid::Uuid::now_v7()));
         let mut bound = identity();
+        bound.ethereum_chain_id = 31337;
         bound.ethereum_genesis_hash = blocks[0].header.hash.0.into();
         let storage = Arc::new(
             JSONBlockStorage::new(path.clone(), bound.clone())

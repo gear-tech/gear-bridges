@@ -69,4 +69,6 @@ pub enum Error {
     ReceiptResolved,
     /// The original authenticated token operation explicitly rejected without effect.
     TokenOperationRejected,
+    /// The approved immutable native wrapper cannot retain held liabilities.
+    NativeHoldUnsupported,
 }

@@ -195,6 +195,28 @@ pub fn receipt_rejection(key: (u64, u64), log_index: u64) -> Option<ReceiptRejec
     }
 }
 
+pub fn receipt_retryable_native(
+    key: (u64, u64),
+    log_index: u64,
+    operation_id: H256,
+    child: MessageId,
+) -> bool {
+    let Some(log) = receipt_progress_mut().get(&key).and_then(|progress| {
+        progress
+            .deposits
+            .iter()
+            .find(|log| log.deposit.log_index == log_index)
+    }) else {
+        return false;
+    };
+    if child.is_zero() || log.child != Some(child) || log.deposit.operation_id != operation_id {
+        return false;
+    }
+    let deposit = log.deposit.clone();
+    LogGuard::capture(key, &deposit, false)
+        .is_ok_and(|guard| token_operations::retryable_native_child(&guard))
+}
+
 #[allow(unused_variables)]
 pub(super) fn emit_settled(key: (u64, u64), log: u64) {
     let Some(p) = receipt_progress_mut().get(&key) else {
@@ -586,6 +608,9 @@ async fn resolve_log(guard: &LogGuard<'_>, config: &Config) -> Result<DepositSta
     if !deposit.native {
         return Err(Error::InvalidReconciliation);
     }
+    if token_operations::native_mode(deposit.token_id)? == super::NativeWrapperMode::EscrowV1 {
+        return Err(Error::NativeHoldUnsupported);
+    }
     let original =
         token_operations::query_native::<GetRedemption>(guard, &deposit.operation_id, config)
             .await?;
@@ -862,7 +887,10 @@ pub async fn submit_receipt(
                 eth_token_id,
                 amount: U256::from_little_endian(event.amount.as_le_slice()),
                 supply,
-                native: service.state().native_wrapper == Some(token_id),
+                native: service
+                    .state()
+                    .native_wrapper
+                    .is_some_and(|wrapper| wrapper.actor_id == token_id),
                 operation_id: KeccakHasher::hash(&operation),
             });
         }
@@ -974,8 +1002,8 @@ pub async fn submit_receipt(
             DepositStatus::Pending | DepositStatus::Retryable(_) | DepositStatus::NativeQueued => {}
         }
 
-        if !matches!(&status, DepositStatus::NativeQueued)
-            && !(deposit.native && original_child(key, deposit.log_index).is_some())
+        if !(matches!(&status, DepositStatus::NativeQueued)
+            || deposit.native && original_child(key, deposit.log_index).is_some())
         {
             set_deposit_status(key, deposit.log_index, DepositStatus::InFlight);
         }

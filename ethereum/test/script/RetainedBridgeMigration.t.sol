@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
@@ -591,8 +591,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         migrationClient.submitFinal(
             c, signers, selectedProofs(migrationClient, c, 0, selection[0], ""), leaf, s, new bytes32[](0), 0
         );
-        (uint128 current,,,) = migrationClient.currentValidatorSet();
-        (uint128 next,, bytes32 nextRoot,) = migrationClient.nextValidatorSet();
+        (uint128 current,,) = migrationClient.currentValidatorSet();
+        (uint128 next,, bytes32 nextRoot) = migrationClient.nextValidatorSet();
         assertEq(current, 1);
         assertEq(next, 2);
         assertEq(nextRoot, leaf.nextAuthoritySetRoot);

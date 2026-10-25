@@ -11,7 +11,7 @@ remappings = [
     "openzeppelin-foundry-upgrades/=dependencies/openzeppelin-foundry-upgrades-0.4.2/src/",
 ]
 evm_version = "osaka"
-solc = "0.8.38"
+solc = "0.8.37"
 optimizer = true
 extra_output_files = ["irOptimized"]
 via_ir = true

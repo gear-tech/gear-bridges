@@ -2,6 +2,8 @@ pub mod protocol;
 pub use protocol::*;
 pub mod ethereum;
 mod evidence;
+mod execution;
+pub use execution::authorize_deployment;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixtures;
 pub mod follower;

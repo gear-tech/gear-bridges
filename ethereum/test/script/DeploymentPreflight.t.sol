@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {Test} from "forge-std/Test.sol";
 import {BeefyLocal} from "script/BeefyLocal.s.sol";
 import {BeefyTokens} from "script/BeefyTokens.s.sol";
+import {DeploymentArguments, DeploymentBase, Overrides} from "script/DeploymentBase.sol";
+import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {CircleToken} from "src/erc20/CircleToken.sol";
 import {TetherToken} from "src/erc20/TetherToken.sol";
 import {WrappedBitcoin} from "src/erc20/WrappedBitcoin.sol";
 import {WrappedEther} from "src/erc20/WrappedEther.sol";
-import {Base, DeploymentArguments, Overrides} from "test/Base.sol";
+import {Base} from "test/Base.sol";
 
 contract DeploymentPreflightHarness is Base {
     function preflight(DeploymentArguments memory args, bool messageOnly, bool generateTokens) external {
@@ -20,6 +22,18 @@ contract DeploymentPreflightHarness is Base {
 
     function predict(address deployer, Overrides memory tokens) external view returns (address) {
         return _predictBeefyMessageQueue(deployer, tokens);
+    }
+
+    function bootstrap(address queue) external view returns (BeefyBootstrap memory) {
+        return _loadBeefyBootstrap(queue);
+    }
+
+    function deployClient(uint256 privateKey, address queue, BeefyBootstrap memory config)
+        external
+        returns (BeefyClient)
+    {
+        _deployBeefyClient(privateKey, queue, config);
+        return beefyClient;
     }
 }
 
@@ -86,11 +100,12 @@ contract DeploymentPreflightTest is Test {
     function test_BeefyPreflightRejectsEveryDuplicatePairAndCodeLessToken() public {
         for (uint256 i; i < 4; ++i) {
             for (uint256 j; j < i; ++j) {
-                address[4] memory tokens = _addresses();
-                tokens[i] = tokens[j];
-                DeploymentArguments memory args = _arguments();
-                args.overrides = Overrides(tokens[0], tokens[1], tokens[2], tokens[3]);
-                _rejectBeforeCreate(args);
+                address[4] memory duplicateTokens = _addresses();
+                duplicateTokens[i] = duplicateTokens[j];
+                DeploymentArguments memory duplicateArgs = _arguments();
+                duplicateArgs.overrides =
+                    Overrides(duplicateTokens[0], duplicateTokens[1], duplicateTokens[2], duplicateTokens[3]);
+                _rejectBeforeCreate(duplicateArgs);
             }
             address[4] memory tokens = _addresses();
             tokens[i] = address(0xBEEF);
@@ -100,30 +115,84 @@ contract DeploymentPreflightTest is Test {
         }
     }
 
-    function test_BeefyPreflightMainnetForbidsMissingAndNoncanonicalOverrides() public {
+    function test_BeefyPreflightMainnetForbidsEvenCanonicalOverrides() public {
         vm.chainId(1);
         _rejectBeforeCreate(_arguments());
         DeploymentArguments memory args = _arguments();
-        args.overrides = _tokens(15);
-        _rejectBeforeCreate(args);
         args.overrides = _canonicalTokens();
-        address[4] memory tokens = [
-            args.overrides.circleToken,
-            args.overrides.tetherToken,
-            args.overrides.wrappedEther,
-            args.overrides.wrappedBitcoin
-        ];
-        for (uint256 i; i < tokens.length; ++i) {
-            vm.etch(tokens[i], hex"00");
-        }
-        deployment.preflight(args, false, false);
-        for (uint256 i; i < tokens.length; ++i) {
-            address original = tokens[i];
-            tokens[i] = address(0x1001);
-            args.overrides = Overrides(tokens[0], tokens[1], tokens[2], tokens[3]);
-            _rejectBeforeCreate(args);
-            tokens[i] = original;
-        }
+        vm.etch(args.overrides.circleToken, hex"00");
+        vm.etch(args.overrides.tetherToken, hex"00");
+        vm.etch(args.overrides.wrappedEther, hex"00");
+        vm.etch(args.overrides.wrappedBitcoin, hex"00");
+        _rejectBeforeCreate(args);
+        vm.expectRevert(DeploymentBase.FreshMainnetDeploymentForbidden.selector);
+        deployment.preflight(args, true, false);
+    }
+
+    function test_BeefyPreflightMainnetEnvironmentAndSharedClientRejectBeforeCreate() public {
+        _configureFreshEnvironment();
+        vm.chainId(1);
+        uint64 nonce = vm.getNonce(vm.addr(DEPLOYER_KEY));
+        uint64 harnessNonce = vm.getNonce(address(deployment));
+        vm.expectRevert(DeploymentBase.FreshMainnetDeploymentForbidden.selector);
+        deployment.deployBridgeFromEnvironment();
+        assertEq(vm.getNonce(vm.addr(DEPLOYER_KEY)), nonce);
+        assertEq(vm.getNonce(address(deployment)), harnessNonce);
+        DeploymentBase.BeefyBootstrap memory bootstrap;
+        vm.expectRevert(DeploymentBase.FreshMainnetDeploymentForbidden.selector);
+        deployment.deployClient(DEPLOYER_KEY, address(0x1234), bootstrap);
+        assertEq(vm.getNonce(vm.addr(DEPLOYER_KEY)), nonce);
+        assertEq(vm.getNonce(address(deployment)), harnessNonce);
+    }
+
+    function test_BeefyPreflightMissingApprovalRejectsBeforeAnyCreate() public {
+        _configureFreshEnvironment();
+        vm.setEnv("BEEFY_LOCAL_FIXTURE", "false");
+        vm.setEnv("BEEFY_DEPLOYMENT_MANIFEST", "");
+        vm.setEnv("BEEFY_APPROVED_MANIFEST_SHA256", vm.toString(bytes32(0)));
+        uint64 nonce = vm.getNonce(vm.addr(DEPLOYER_KEY));
+        uint64 harnessNonce = vm.getNonce(address(deployment));
+        vm.expectRevert(DeploymentBase.DeploymentNotAuthorized.selector);
+        deployment.deployBridgeFromEnvironment();
+        assertEq(vm.getNonce(vm.addr(DEPLOYER_KEY)), nonce);
+        assertEq(vm.getNonce(address(deployment)), harnessNonce);
+    }
+
+    function test_BeefyPreflightFalseAndConflictingApprovalRejectBeforeCreate() public {
+        _configureFreshEnvironment();
+        vm.setEnv("BEEFY_LOCAL_FIXTURE", "false");
+        vm.createDir("broadcast", true);
+        string memory path = "broadcast/deployment-preflight-approval.json";
+        string memory manifest = '{"schemaVersion":2,"executionAuthorized":false}';
+        vm.writeFile(path, manifest);
+        vm.setEnv("BEEFY_DEPLOYMENT_MANIFEST", path);
+        uint64 nonce = vm.getNonce(vm.addr(DEPLOYER_KEY));
+        uint64 harnessNonce = vm.getNonce(address(deployment));
+        vm.setEnv("BEEFY_APPROVED_MANIFEST_SHA256", vm.toString(bytes32(uint256(1))));
+        vm.expectRevert(DeploymentBase.DeploymentNotAuthorized.selector);
+        deployment.deployBridgeFromEnvironment();
+        vm.setEnv("BEEFY_APPROVED_MANIFEST_SHA256", vm.toString(sha256(bytes(manifest))));
+        vm.expectRevert(DeploymentBase.DeploymentNotAuthorized.selector);
+        deployment.deployBridgeFromEnvironment();
+        assertEq(vm.getNonce(vm.addr(DEPLOYER_KEY)), nonce);
+        assertEq(vm.getNonce(address(deployment)), harnessNonce);
+        vm.removeFile(path);
+    }
+
+    function test_BeefyPreflightDeploysTheValidatedBootstrapWithoutReloadingEnvironment() public {
+        _configureFreshEnvironment();
+        address queue = deployment.predict(vm.addr(DEPLOYER_KEY), _tokens(0));
+        DeploymentBase.BeefyBootstrap memory config = deployment.bootstrap(queue);
+        vm.setEnv("BEEFY_CURRENT_ROOT", vm.toString(bytes32(0)));
+        vm.setEnv("BEEFY_SOURCE_DOMAIN", vm.toString(bytes32(0)));
+        BeefyClient client = deployment.deployClient(DEPLOYER_KEY, queue, config);
+        assertEq(client.sourceDomain(), config.sourceDomain);
+        assertEq(client.bridgeDomain(), config.bridgeDomain);
+        assertEq(client.destinationQueue(), queue);
+        (uint128 id, uint128 length, bytes32 root) = client.currentValidatorSet();
+        assertEq(id, config.currentSet.id);
+        assertEq(length, config.currentSet.length);
+        assertEq(root, config.currentSet.root);
     }
 
     function test_BeefyPreflightExplicitGenerationIsTestChainOnly() public {
@@ -285,10 +354,10 @@ contract DeploymentPreflightTest is Test {
                 vm.setEnv(
                     keys[missing], empty == 0 ? "" : (missing < 3 ? vm.toString(bytes32(0)) : vm.toString(address(0)))
                 );
-                uint64 nonce = vm.getNonce(vm.addr(DEPLOYER_KEY));
+                uint64 identityNonce = vm.getNonce(vm.addr(DEPLOYER_KEY));
                 vm.expectRevert();
                 deployment.deployBridgeFromEnvironment();
-                assertEq(vm.getNonce(vm.addr(DEPLOYER_KEY)), nonce);
+                assertEq(vm.getNonce(vm.addr(DEPLOYER_KEY)), identityNonce);
             }
         }
         // An empty observer list is allowed; a selected zero-address observer is not.
@@ -449,6 +518,7 @@ contract DeploymentPreflightTest is Test {
     }
 
     function _configureFreshEnvironment() private {
+        vm.setEnv("BEEFY_LOCAL_FIXTURE", "true");
         _clearTokens();
         vm.setEnv("DEPLOYMENT_MODE", "fresh-beefy");
         vm.setEnv("DEPLOY_TEST_TOKENS", "true");

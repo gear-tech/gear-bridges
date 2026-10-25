@@ -576,7 +576,7 @@ mod tests {
             let storage = JSONStorage::new(&path);
             storage
                 .bind_outbound_lane(OutboundLaneIdentity {
-                    destination_chain_id: 560048,
+                    destination_chain_id: 31337,
                     destination_genesis_hash: H256::repeat_byte(1),
                     message_queue_address: H160::repeat_byte(2),
                     bridging_payment_address: Some(H256::repeat_byte(3)),

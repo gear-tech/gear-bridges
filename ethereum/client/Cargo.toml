@@ -3,14 +3,22 @@ name = "ethereum-client"
 version.workspace = true
 edition.workspace = true
 
+[features]
+test-fixtures = []
+
 [dependencies]
 ahash.workspace = true
 alloy = { workspace = true, features = ["k256"] }
 anyhow.workspace = true
+builtins-common.workspace = true
+checkpoint-light-client-io = { workspace = true, features = ["std"] }
 ethereum-common = { workspace = true, features = ["std"] }
+ethereum_beacon_client.workspace = true
+gear-common.workspace = true
 keccak-hash.workspace = true
 log.workspace = true
 primitive-types = { workspace = true, features = ["serde"] }
+parity-scale-codec = { workspace = true, features = ["std"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,3 +29,8 @@ tower.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+
+[[example]]
+name = "export_beacon_fixture"
+path = "examples/export_beacon_fixture.rs"
+required-features = ["test-fixtures"]

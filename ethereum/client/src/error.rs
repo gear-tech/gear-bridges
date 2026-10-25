@@ -18,6 +18,8 @@ pub fn is_transient_rpc_cause(error: &(dyn StdError + 'static)) -> bool {
                     Error::ErrorDuringContractExecution(error)
                     | Error::ErrorQueryingEvent(error)
                     | Error::ChallengeRootPreBroadcast(error) => transient_contract(error),
+                    Error::BeaconFinality(error) => is_transient_rpc_error(error),
+                    Error::FinalizedEvidenceUnavailable(_) => true,
                     _ => false,
                 });
             }
@@ -26,6 +28,9 @@ pub fn is_transient_rpc_cause(error: &(dyn StdError + 'static)) -> bool {
             }
             if let Some(error) = error.downcast_ref::<alloy::contract::Error>() {
                 return Some(transient_contract(error));
+            }
+            if error.is::<ethereum_beacon_client::ErrorNotFound>() {
+                return Some(true);
             }
             error
                 .downcast_ref::<reqwest::Error>()
@@ -147,8 +152,14 @@ pub enum Error {
     ErrorFetchingTransactionReceipt,
     #[error("Error fetching block")]
     ErrorFetchingBlock,
-    #[error("HOLD: independent Ethereum finality witness is not configured")]
-    FinalityWitnessNotConfigured,
+    #[error("HOLD: approved Beacon finality is not configured")]
+    BeaconFinalityNotConfigured,
+    #[error("HOLD: independent Ethereum data witness is not configured")]
+    DataWitnessNotConfigured,
+    #[error("HOLD: Beacon or authenticated execution evidence failed: {0}")]
+    BeaconFinality(#[source] anyhow::Error),
+    #[error("HOLD: finalized proof acquisition unavailable: {0}")]
+    FinalizedEvidenceUnavailable(&'static str),
     #[error("HOLD: invalid authenticated Ethereum evidence: {0}")]
     InvalidFinalityEvidence(String),
     #[error("Finalized ancestry is not yet verified")]

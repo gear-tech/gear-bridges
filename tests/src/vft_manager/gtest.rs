@@ -2,13 +2,16 @@ use gtest::{Log, Program, System, WasmProgram};
 use sails_rs::{calls::*, futures::FutureExt, gtest::calls::*, prelude::*};
 use vft_client::{traits::*, Vft as VftC, VftAdmin as VftAdminC, VftFactory as VftFactoryC};
 use vft_manager_client::{
-    traits::*, Config, Error, InitConfig, MessageStatus, Order, TokenSupply,
-    VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
+    traits::*, Config, Error, InitConfig, MessageStatus, NativeWrapperConfig, NativeWrapperMode,
+    Order, TokenSupply, VftManager as VftManagerC, VftManagerFactory as VftManagerFactoryC,
 };
 use vft_vara_client::{
     traits::{VftAdmin as _, VftNativeExchange as _, VftVaraFactory},
     Mainnet,
 };
+
+#[path = "v1.rs"]
+mod v1;
 
 const REMOTING_ACTOR_ID: u64 = 1_000;
 const HISTORICAL_PROXY_ID: u64 = 500;
@@ -21,6 +24,24 @@ const ETH_TOKEN_RECEIVER: H160 = H160([6; 20]);
 
 const ERC20_TOKEN_GEAR_SUPPLY: H160 = H160([10; 20]);
 const ERC20_TOKEN_ETH_SUPPLY: H160 = H160([15; 20]);
+
+fn held_wrapper_config(
+    remoting: &GTestRemoting,
+    actor_id: ActorId,
+    ethereum_token: H160,
+) -> NativeWrapperConfig {
+    NativeWrapperConfig {
+        actor_id,
+        ethereum_token,
+        code_id: H256::from(
+            remoting
+                .system()
+                .submit_code(vft_vara::WASM_BINARY)
+                .into_bytes(),
+        ),
+        mode: NativeWrapperMode::HeldEscrowV2,
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum ReplyBehavior {
@@ -271,6 +292,14 @@ async fn setup_for_test_with_builtin(
     builtin_behavior: Option<ReplyBehavior>,
     reply_timeout: u32,
 ) -> Fixture {
+    setup_with_wrapper(builtin_behavior, reply_timeout, false).await
+}
+
+async fn setup_with_wrapper(
+    builtin_behavior: Option<ReplyBehavior>,
+    reply_timeout: u32,
+    escrow_v1: bool,
+) -> Fixture {
     let system = System::new();
     system.init_logger();
     system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000_000);
@@ -323,12 +352,26 @@ async fn setup_for_test_with_builtin(
         .unwrap();
 
     // VFT
-    let vft_code_id = remoting.system().submit_code(vft_vara::WASM_BINARY);
-    let gear_supply_vft = vft_vara_client::VftVaraFactory::new(remoting.clone())
-        .new(Mainnet::No)
-        .send_recv(vft_code_id, b"salt")
-        .await
-        .unwrap();
+    let gear_supply_vft = if escrow_v1 {
+        use vft_vara_v1_client::traits::VftVaraFactory as _;
+        vft_vara_v1_client::VftVaraFactory::new(remoting.clone())
+            .new(vft_vara_v1_client::Mainnet::No)
+            .send_recv(
+                remoting.system().submit_code(vft_vara_v1::WASM_BINARY),
+                b"salt",
+            )
+            .await
+            .unwrap()
+    } else {
+        vft_vara_client::VftVaraFactory::new(remoting.clone())
+            .new(Mainnet::No)
+            .send_recv(
+                remoting.system().submit_code(vft_vara::WASM_BINARY),
+                b"salt",
+            )
+            .await
+            .unwrap()
+    };
 
     vft_client::allocate_shards(
         remoting.clone(),
@@ -1056,7 +1099,11 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
         .await
         .unwrap();
     admin
-        .configure_native_wrapper(Some((gear_supply_vft, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            gear_supply_vft,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
@@ -1211,11 +1258,11 @@ async fn test_gear_supply_multilog_unlock_retry_and_replay_preserve_exact_balanc
                 .send_recv(vft_manager_program_id)
                 .await
                 .unwrap();
-            admin
+            assert!(admin
                 .configure_native_wrapper(None)
                 .send_recv(vft_manager_program_id)
                 .await
-                .unwrap();
+                .is_err());
             admin
                 .unpause()
                 .send_recv(vft_manager_program_id)
@@ -2521,8 +2568,8 @@ fn submit_receipt_events(
                 events.push(VftManagerEvents::decode_event(entry.payload()).unwrap());
             }
         }
-        if reply.is_some() {
-            return (reply.unwrap(), events);
+        if let Some(reply) = reply {
+            return (reply, events);
         }
     }
     std::panic!("receipt submission did not reply");
@@ -2630,7 +2677,11 @@ async fn test_native_wrapper_error_retries_after_resume() {
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     admin
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
@@ -2832,7 +2883,11 @@ async fn test_native_over_return_refunds_once() {
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     admin
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
@@ -3140,7 +3195,11 @@ async fn test_receipt_resolution_reconciles_native_despite_ambiguous_sibling() {
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     admin
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
@@ -3273,7 +3332,11 @@ async fn test_invalid_receipt_inputs_are_terminal_without_economic_children() {
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     admin
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
@@ -3643,14 +3706,24 @@ async fn test_native_configuration_is_paused_and_gear_supply_only() {
         ..
     } = setup_for_test().await;
     let mut service = VftManagerC::new(remoting.clone());
+    let eth_config = NativeWrapperConfig {
+        actor_id: eth_supply_vft,
+        ethereum_token: ERC20_TOKEN_ETH_SUPPLY,
+        code_id: H256::from(remoting.system().submit_code(vft::WASM_BINARY).into_bytes()),
+        mode: NativeWrapperMode::HeldEscrowV2,
+    };
     assert!(service
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY
+        )))
         .send_recv(manager)
         .await
         .is_err());
     service.pause().send_recv(manager).await.unwrap();
     assert!(service
-        .configure_native_wrapper(Some((eth_supply_vft, ERC20_TOKEN_ETH_SUPPLY)))
+        .configure_native_wrapper(Some(eth_config.clone()))
         .send_recv(manager)
         .await
         .is_err());
@@ -3672,31 +3745,43 @@ async fn test_native_configuration_is_paused_and_gear_supply_only() {
         .await
         .unwrap();
     assert!(service
-        .configure_native_wrapper(Some((eth_supply_vft, ERC20_TOKEN_ETH_SUPPLY)))
+        .configure_native_wrapper(Some(eth_config))
         .send_recv(manager)
         .await
         .is_err());
     for approval in [H160::zero(), ERC20_TOKEN_ETH_SUPPLY] {
         assert!(service
-            .configure_native_wrapper(Some((native, approval)))
+            .configure_native_wrapper(Some(held_wrapper_config(&remoting, native, approval)))
             .send_recv(manager)
             .await
             .is_err());
         assert_eq!(service.native_wrapper().recv(manager).await.unwrap(), None);
     }
     assert!(service
-        .configure_native_wrapper(Some((ActorId::zero(), ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            ActorId::zero(),
+            ERC20_TOKEN_GEAR_SUPPLY
+        )))
         .send_recv(manager)
         .await
         .is_err());
     service
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
     assert_eq!(
         service.native_wrapper().recv(manager).await.unwrap(),
-        Some(native)
+        Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY
+        ))
     );
     assert!(service
         .remove_vara_to_eth_address(native)
@@ -3756,7 +3841,11 @@ async fn test_native_fractional_split_preserves_aggregate_escrow() {
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     admin
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
@@ -4267,7 +4356,11 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     admin
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
@@ -4749,18 +4842,7 @@ async fn configure_cutover_destination(
             .await
             .unwrap();
     }
-    let wrapper = admin
-        .native_wrapper()
-        .recv(source)
-        .await
-        .unwrap()
-        .map(|wrapper| {
-            let (_, approved, _) = mappings
-                .iter()
-                .find(|(token, _, _)| *token == wrapper)
-                .unwrap();
-            (wrapper, *approved)
-        });
+    let wrapper = admin.native_wrapper().recv(source).await.unwrap();
     admin
         .configure_native_wrapper(wrapper)
         .send_recv(destination)
@@ -5413,7 +5495,11 @@ async fn test_prepare_cutover_rejects_mismatched_fingerprint_and_used_destinatio
             }
             3 => {
                 admin
-                    .configure_native_wrapper(Some((gear_supply_vft, ERC20_TOKEN_GEAR_SUPPLY)))
+                    .configure_native_wrapper(Some(held_wrapper_config(
+                        &remoting,
+                        gear_supply_vft,
+                        ERC20_TOKEN_GEAR_SUPPLY,
+                    )))
                     .send_recv(destination)
                     .await
                     .unwrap();
@@ -5783,6 +5869,75 @@ async fn test_custody_timeout_late_reply_and_concurrent_upgrade_keep_one_origina
 }
 
 #[tokio::test]
+async fn test_custody_donation_appends_residual_attempt_and_preserves_original() {
+    use vft_manager_client::{CustodyTransferOutcome, CutoverPhase};
+    let (remoting, source, destination, token) = custody_mailbox_fixture().await;
+    let amount = U256::from(17u32);
+    let donation = U256::from(3u32);
+    let mailbox = remoting.system().get_mailbox(token);
+    let mut success = vft_client::vft::io::Transfer::ROUTE.to_vec();
+    true.encode_to(&mut success);
+    start_custody_upgrade(&remoting, source, destination);
+    reply_custody_balance(&remoting, source, token, amount);
+    mailbox
+        .reply_bytes(
+            custody_transfer_log(source, destination, token, amount),
+            success.clone(),
+            0,
+        )
+        .unwrap();
+    // The completed original has moved its custody, but an unsolicited balance
+    // arrives before the final zero check. Retirement must remain blocked.
+    reply_custody_balance(&remoting, source, token, donation);
+    let admin = VftManagerC::new(remoting.clone());
+    let original = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
+    assert_eq!(original.len(), 1);
+    assert_eq!(original[0].outcome, CustodyTransferOutcome::Completed);
+    assert_eq!(
+        admin.cutover_status().recv(source).await.unwrap().phase,
+        CutoverPhase::Transferring
+    );
+
+    start_custody_upgrade(&remoting, source, destination);
+    reply_custody_balance(&remoting, source, token, donation);
+    let residual = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
+    assert_eq!(
+        residual.len(),
+        2,
+        "completed custody must not permanently fence residual sweeps"
+    );
+    assert_eq!(residual[0], original[0]);
+    assert_eq!(residual[1].token, token);
+    assert_eq!(residual[1].amount, donation);
+    assert_ne!(residual[1].child, original[0].child);
+    assert_eq!(residual[1].outcome, CustodyTransferOutcome::InFlight);
+    start_custody_upgrade(&remoting, source, destination);
+    for _ in 0..3 {
+        remoting.run_next_block();
+    }
+    assert_eq!(
+        admin.cutover_transfers(0, 10).recv(source).await.unwrap(),
+        residual
+    );
+    mailbox
+        .reply_bytes(
+            custody_transfer_log(source, destination, token, donation),
+            success,
+            0,
+        )
+        .unwrap();
+    reply_custody_balance(&remoting, source, token, U256::zero());
+    let completed = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
+    assert_eq!(completed[0], original[0]);
+    assert_eq!(completed[1].child, residual[1].child);
+    assert_eq!(completed[1].outcome, CustodyTransferOutcome::Completed);
+    assert_eq!(
+        admin.cutover_status().recv(source).await.unwrap().phase,
+        CutoverPhase::Retired
+    );
+}
+
+#[tokio::test]
 async fn test_custody_exact_false_archives_before_retry_and_malformed_true_stays_held() {
     for malformed in [false, true] {
         use vft_manager_client::CustodyTransferOutcome;
@@ -6018,7 +6173,11 @@ async fn test_native_held_and_delivered_first_observed_in_same_block() {
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     admin
-        .configure_native_wrapper(Some((native, ERC20_TOKEN_GEAR_SUPPLY)))
+        .configure_native_wrapper(Some(held_wrapper_config(
+            &remoting,
+            native,
+            ERC20_TOKEN_GEAR_SUPPLY,
+        )))
         .send_recv(manager)
         .await
         .unwrap();
@@ -6328,7 +6487,11 @@ async fn test_native_cutover_requires_same_wrapper_handoff_before_ready() {
         let mut admin = VftManagerC::new(remoting.clone());
         admin.pause().send_recv(source).await.unwrap();
         admin
-            .configure_native_wrapper(Some((wrapper, ERC20_TOKEN_GEAR_SUPPLY)))
+            .configure_native_wrapper(Some(held_wrapper_config(
+                &remoting,
+                wrapper,
+                ERC20_TOKEN_GEAR_SUPPLY,
+            )))
             .send_recv(source)
             .await
             .unwrap();

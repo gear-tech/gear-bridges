@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
@@ -1471,6 +1471,60 @@ contract MessageQueueTest is Test, Base {
         vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidMerkleProof.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
+    }
+
+    function test_ProcessMessageCanonicalOddTreeAndMalformedProofs() public {
+        VaraMessage memory message = _userMessage(messageNonce++);
+        bytes32 a = keccak256("A");
+        bytes32 b = keccak256("B");
+        bytes32 c = keccak256("C");
+        bytes32 d = keccak256("D");
+        bytes32 ab = keccak256(abi.encodePacked(a, b));
+        bytes32 abcd = keccak256(abi.encodePacked(ab, keccak256(abi.encodePacked(c, d))));
+        bytes32 root = keccak256(abi.encodePacked(abcd, message.hash()));
+        uint256 blockNumber = currentBlockNumber++;
+        messageQueue.submitMerkleRoot(blockNumber, root, _rootProof(blockNumber, root));
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = abcd;
+
+        // Two odd levels promote the fifth leaf without consuming siblings.
+        for (uint256 index; index <= 5; index++) {
+            if (index == 4) continue;
+            vm.expectRevert(IMessageQueue.InvalidMerkleProof.selector);
+            messageQueue.processMessage(blockNumber, 5, index, message, proof);
+            assertFalse(messageQueue.isProcessed(message.nonce));
+        }
+        vm.expectRevert(IMessageQueue.InvalidMerkleProof.selector);
+        messageQueue.processMessage(blockNumber, 0, 0, message, proof);
+        vm.expectRevert(IMessageQueue.InvalidMerkleProof.selector);
+        messageQueue.processMessage(blockNumber, 5, 4, message, new bytes32[](0));
+
+        bytes32[] memory trailing = new bytes32[](2);
+        trailing[0] = abcd;
+        trailing[1] = root;
+        vm.expectRevert(IMessageQueue.InvalidMerkleProof.selector);
+        messageQueue.processMessage(blockNumber, 5, 4, message, trailing);
+        assertFalse(messageQueue.isProcessed(message.nonce));
+        messageQueue.processMessage(blockNumber, 5, 4, message, proof);
+        assertTrue(messageQueue.isProcessed(message.nonce));
+    }
+
+    function test_ProcessMessageRejectsSingleLeafWidthAliasAndTrailingProof() public {
+        VaraMessage memory message = _userMessage(messageNonce++);
+        bytes32 leaf = message.hash();
+        bytes32 sibling = keccak256("sibling");
+        bytes32 root = keccak256(abi.encodePacked(leaf, sibling));
+        uint256 blockNumber = currentBlockNumber++;
+        messageQueue.submitMerkleRoot(blockNumber, root, _rootProof(blockNumber, root));
+        vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_USER_MESSAGE_DELAY());
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = sibling;
+        vm.expectRevert(IMessageQueue.InvalidMerkleProof.selector);
+        messageQueue.processMessage(blockNumber, 1, 0, message, proof);
+        assertFalse(messageQueue.isProcessed(message.nonce));
+        messageQueue.processMessage(blockNumber, 2, 0, message, proof);
+        assertTrue(messageQueue.isProcessed(message.nonce));
     }
 
     function test_AddEmergencyStopObserver() public {

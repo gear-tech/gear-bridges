@@ -50,6 +50,11 @@ jobs:
             js/common/**
             api/gear/**
             api/ethereum/**
+            **/*.rs
+            **/Cargo.toml
+            Cargo.lock
+            rust-toolchain.toml
+            .cargo/**
             package.json
             yarn.lock
             lerna.json

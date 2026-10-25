@@ -1,9 +1,9 @@
 import { BlockHeader, DataHandlerContext } from '@subsquid/substrate-processor';
 import { Store } from '@subsquid/typeorm-store';
 import { createPairHash } from 'gear-bridge-common';
-import { In, MoreThan } from 'typeorm';
+import { In, Raw } from 'typeorm';
 
-import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer, ReceiptRelay, ReceiptSettlement, Status } from '../model/index.js';
+import { GearEthBridgeMessage, InitiatedTransfer, Network, Pair, Transfer, ReceiptRelay, ReceiptSettlement } from '../model/index.js';
 import { BaseBatchState, mapKeys, mapValues, setValues } from '../common/index.js';
 import {
   getEthTokenDecimals,
@@ -15,7 +15,7 @@ import {
   getVaraTokenSymbol,
 } from './rpc-queries.js';
 import type { Relayed, ReceiptDepositEffect, ReceiptDepositRefunded, ReceiptDepositSettled } from './types/index.js';
-import { createEthereumEvidenceClients, createReceiptAuthenticator, loadCheckpoint, qualifyFinality, retainCheckpoint,
+import { createEthereumEvidenceClients, createReceiptAuthenticator, qualifyStoredFinality, recheckFinality, retainCheckpoint,
   type SourceReceiptAuth } from '../eth/finality.js';
 import { authenticateSourceReceipt } from '../eth/completion.js';
 import { reconcileReceiptSettlements, validateReceiptSettlement } from './receipt-reconciliation.js';
@@ -237,9 +237,22 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       }
       if (added.length) await this._ctx.store.save(added);
     }
-    // ponytail: one bounded keyset page per batch; cycle pending rows so late arrivals still match.
+    // Repair owns migrated, unauthenticated settlements. Filter before LIMIT so
+    // unavailable historical receipts cannot starve unrelated live ingestion.
     const loadPending = () => this._ctx.store.find(ReceiptSettlement, {
-      where: { matched: false, ...(this._receiptSettlementCursor ? { id: MoreThan(this._receiptSettlementCursor) } : {}) },
+      where: { matched: false, id: Raw((alias) => {
+        const id = alias.split('.').map((part) => `"${part.replaceAll('"', '""')}"`).join('.');
+        return `
+        ${this._receiptSettlementCursor ? `${id} > :settlementCursor AND` : ''}
+        EXISTS (SELECT 1 FROM receipt_settlement s WHERE s.id = ${id}
+          AND (s.legacy_matched IS NULL OR EXISTS (
+            SELECT 1 FROM receipt_relay r JOIN transfer t
+              ON t.source_network = 'Ethereum' AND t.block_number = r.block_number
+              AND t.source_transaction_index = (s.deposit->>'transaction_index')::numeric
+              AND t.source_log_index = (s.deposit->>'log_index')::numeric
+            WHERE r.id = (s.deposit->>'slot') || ':' || (s.deposit->>'transaction_index')
+              AND t.source_receipt_auth IS NOT NULL)))`;
+      }, { settlementCursor: this._receiptSettlementCursor }) },
       order: { id: 'ASC' }, take: batchSize,
     });
     let pending = await loadPending();
@@ -255,9 +268,10 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
   }
 
   public async save() {
-    const clients = createEthereumEvidenceClients();
-    const checkpoint = await qualifyFinality(clients, await loadCheckpoint(this._ctx.store, clients));
+    const clients = createEthereumEvidenceClients('gear');
+    const checkpoint = await qualifyStoredFinality(this._ctx.store, clients);
     const authenticate = createReceiptAuthenticator(clients, checkpoint);
+    await recheckFinality(clients, checkpoint);
     if (this._transfersToRemove.size > 0) {
       await this._ctx.store.remove(setValues(this._transfersToRemove));
     }
@@ -269,7 +283,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     await this._processPriorityRequests();
     await this._saveTransfers();
     await this._saveInitiatedTransfers();
-    await qualifyFinality(clients, checkpoint);
+    await recheckFinality(clients, checkpoint);
     await retainCheckpoint(this._ctx.store, checkpoint);
   }
 

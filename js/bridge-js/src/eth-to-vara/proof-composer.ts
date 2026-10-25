@@ -20,7 +20,7 @@ import {
   ProofResult,
 } from '../vara/index.js';
 import { StatusCb, withOriginalDeadline } from '../util.js';
-import { NATIVE_WRAPPER_IDL_SHA256, VFT_MANAGER_IDL_SHA256 } from './token-effect.js';
+import { nativeWrapperIdlSha256, VFT_MANAGER_IDL_SHA256, type NativeWrapperMode } from './token-effect.js';
 
 export type CheckpointNetwork = 'Mainnet' | 'Sepolia' | 'Holesky' | 'Hoodi' | Readonly<{
   localFixture: Readonly<{ genesis_time: bigint; genesis_validators_root: HexString }>;
@@ -50,14 +50,14 @@ export interface InboundProofProfile {
   readonly endpoint: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string; framing: 'electra' }>;
   readonly checkpoint: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string; network: CheckpointNetwork }>;
   readonly consumer: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string; service: string; method: string }>;
-  readonly nativeWrapper?: Readonly<{ programId: HexString; codeId: HexString; idlSha256: string }>;
+  readonly nativeWrapper?: Readonly<{ programId: HexString; ethereumToken: HexString; codeId: HexString; mode: NativeWrapperMode; idlSha256: string }>;
   readonly forks: readonly Readonly<{ name: string; epoch: bigint; version: HexString }>[];
 }
 
 /** Snapshot independently approved pins before I/O; never learn deployment identity from RPC. */
 export function immutableInboundProfile(profile: InboundProofProfile): InboundProofProfile {
   if (!profile) throw new Error('HOLD: an authenticated inbound proof profile is required');
-  const copy = structuredClone(profile);
+  let copy = structuredClone(profile);
   const hashes = [copy.ethereumGenesisHash, copy.beaconGenesisValidatorsRoot, copy.sourceGenesisHash, copy.sourceBlockHash,
     copy.sourceRuntimeCodeHash, copy.historicalProxyId, copy.historicalProxyCodeId, copy.endpoint?.programId, copy.endpoint?.codeId,
     copy.checkpoint?.programId, copy.checkpoint?.codeId, copy.consumer?.programId, copy.consumer?.codeId,
@@ -65,7 +65,10 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
   if (hashes.some(hash => typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) ||
       typeof copy.ethereumChainId !== 'bigint' || copy.ethereumChainId <= 0n ||
       typeof copy.beaconGenesisTime !== 'bigint' || copy.beaconGenesisTime < 0n ||
-      [copy.historicalProxyIdlSha256, copy.endpoint?.idlSha256, copy.checkpoint?.idlSha256, copy.consumer?.idlSha256].some(hash => !/^[0-9a-f]{64}$/.test(hash ?? '')) ||
+      [copy.historicalProxyIdlSha256, copy.endpoint?.idlSha256, copy.checkpoint?.idlSha256, copy.consumer?.idlSha256,
+        ...(copy.nativeWrapper ? [copy.nativeWrapper.idlSha256] : [])].some(hash => typeof hash !== 'string' || !/^[0-9a-fA-F]{64}$/.test(hash)) ||
+      (copy.nativeWrapper && (typeof copy.nativeWrapper.ethereumToken !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(copy.nativeWrapper.ethereumToken) ||
+        [copy.nativeWrapper.programId, copy.nativeWrapper.codeId, copy.nativeWrapper.ethereumToken].some(id => BigInt(id) === 0n))) ||
       typeof copy.consumer?.service !== 'string' || !copy.consumer.service || typeof copy.consumer?.method !== 'string' || !copy.consumer.method ||
       !Array.isArray(copy.forks) || !copy.forks.length || copy.forks.some(fork => typeof fork.name !== 'string' ||
         typeof fork.epoch !== 'bigint' || fork.epoch < 0n || !/^0x[0-9a-fA-F]{8}$/.test(fork.version)) ||
@@ -73,12 +76,23 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
         !copy.checkpoint.network || Object.keys(copy.checkpoint.network).length !== 1 || !('localFixture' in copy.checkpoint.network))) {
     throw new Error('HOLD: incomplete or unknown inbound deployment profile');
   }
+  const lowerHex = (value: HexString) => value.toLowerCase() as HexString;
+  const actor = <T extends { programId: HexString; codeId: HexString; idlSha256: string }>(value: T): T =>
+    ({ ...value, programId: lowerHex(value.programId), codeId: lowerHex(value.codeId), idlSha256: value.idlSha256.toLowerCase() });
+  copy = { ...copy, ethereumGenesisHash: lowerHex(copy.ethereumGenesisHash),
+    beaconGenesisValidatorsRoot: lowerHex(copy.beaconGenesisValidatorsRoot), sourceGenesisHash: lowerHex(copy.sourceGenesisHash),
+    sourceBlockHash: lowerHex(copy.sourceBlockHash), sourceRuntimeCodeHash: lowerHex(copy.sourceRuntimeCodeHash),
+    historicalProxyId: lowerHex(copy.historicalProxyId), historicalProxyCodeId: lowerHex(copy.historicalProxyCodeId),
+    historicalProxyIdlSha256: copy.historicalProxyIdlSha256.toLowerCase(),
+    endpoint: actor(copy.endpoint), checkpoint: actor(copy.checkpoint), consumer: actor(copy.consumer),
+    nativeWrapper: copy.nativeWrapper ? { ...actor(copy.nativeWrapper), ethereumToken: lowerHex(copy.nativeWrapper.ethereumToken) } : undefined,
+    forks: copy.forks.map(fork => ({ ...fork, version: lowerHex(fork.version) })) };
   if (copy.endpoint.framing !== 'electra' || copy.endpoint.idlSha256 !== ELECTRA_IDL_SHA256 ||
       (copy.checkpoint.idlSha256 !== CHECKPOINT_IDL_SHA256 &&
         !(typeof copy.checkpoint.network === 'string' && copy.checkpoint.idlSha256 === LEGACY_PUBLIC_CHECKPOINT_IDL_SHA256)) ||
       copy.historicalProxyIdlSha256 !== PROXY_IDL_SHA256 ||
       (copy.consumer.service === 'VftManager' && copy.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256) ||
-      (copy.nativeWrapper && copy.nativeWrapper.idlSha256 !== NATIVE_WRAPPER_IDL_SHA256)) {
+      (copy.nativeWrapper && copy.nativeWrapper.idlSha256 !== nativeWrapperIdlSha256(copy.nativeWrapper.mode))) {
     throw new Error('HOLD: unqualified deployed inbound IDL or proof framing');
   }
   if (typeof copy.checkpoint.network !== 'string') {
@@ -92,7 +106,10 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
         copy.forks[5].version.toLowerCase() !== '0x60003137') {
       throw new Error('HOLD: LocalFixture identity or fixed Electra fork schedule differs from approval');
     }
-    Object.freeze(fixture); Object.freeze(copy.checkpoint.network);
+    copy = { ...copy, checkpoint: { ...copy.checkpoint,
+      network: { localFixture: { ...fixture, genesis_validators_root: lowerHex(fixture.genesis_validators_root) } } } };
+    if (typeof copy.checkpoint.network !== 'string') Object.freeze(copy.checkpoint.network.localFixture);
+    Object.freeze(copy.checkpoint.network);
   }
   Object.freeze(copy.endpoint); Object.freeze(copy.checkpoint); Object.freeze(copy.consumer);
   if (copy.nativeWrapper) Object.freeze(copy.nativeWrapper);
@@ -145,7 +162,9 @@ export function immutableOwnedFixtureNetwork(descriptor: OwnedFixtureNetwork, tr
       throw new Error('HOLD: LocalFixture transports must use numeric loopback addresses');
     }
   }
-  return Object.freeze(structuredClone(descriptor));
+  return Object.freeze({ ...structuredClone(descriptor),
+    ethereumGenesisHash: descriptor.ethereumGenesisHash.toLowerCase() as HexString,
+    beaconGenesisValidatorsRoot: descriptor.beaconGenesisValidatorsRoot.toLowerCase() as HexString });
 }
 
 /** Offline profile and chain approval must match; live RPC is never approval. */

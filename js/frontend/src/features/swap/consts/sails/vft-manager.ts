@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { GearApi, BaseGearProgram, HexString } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
-import { TransactionBuilder, ActorId, H160, MessageId, H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
+import { TransactionBuilder, ActorId, MessageId, H160, H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 
 export class SailsProgram {
   public readonly registry: TypeRegistry;
@@ -13,7 +13,9 @@ export class SailsProgram {
       InitConfig: {"gear_bridge_builtin":"[u8;32]","historical_proxy_address":"[u8;32]","config":"Config"},
       Config: {"gas_for_token_ops":"u64","gas_for_reply_deposit":"u64","gas_to_send_request_to_builtin":"u64","gas_for_swap_token_maps":"u64","reply_timeout":"u32","fee_bridge":"u128","fee_incoming":"u128"},
       TokenSupply: {"_enum":["Ethereum","Gear"]},
-      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null","ReceiptResolved":"Null","TokenOperationRejected":"Null"}},
+      Error: {"_enum":{"SendFailure":"String","ReplyFailure":"String","ReplyTimeout":"String","ReplyHook":"String","NoReplyCode":"String","MessageNotFound":"Null","InvalidMessageStatus":"Null","MessageFailed":"Null","BurnTokensDecode":"String","TransferFromDecode":"String","MintTokensDecode":"String","BuiltinDecode":"String","GasForReplyTooLow":"String","NoCorrespondingEthAddress":"Null","NoCorrespondingVaraAddress":"Null","NotHistoricalProxy":"Null","UnsupportedEthEvent":"Null","TransactionTooOld":"Null","AlreadyProcessed":"Null","Paused":"Null","BurnFromFailed":"String","Internal":"String","InvalidReply":"Null","NativeSettlementPending":"Null","NativeSettlementReturned":"Null","ReceiptLeaseActive":"Null","InvalidReconciliation":"Null","ReceiptOutsideDeployment":"Null","Retired":"Null","CutoverNotReady":"Null","ReceiptResolved":"Null","TokenOperationRejected":"Null","NativeHoldUnsupported":"Null"}},
+      NativeWrapperConfig: {"actor_id":"[u8;32]","ethereum_token":"H160","code_id":"H256","mode":"NativeWrapperMode"},
+      NativeWrapperMode: {"_enum":["EscrowV1","HeldEscrowV2"]},
       ReceiptStatus: {"_enum":["Unknown","Reserved","Processed","Resolved"]},
       SourceRequestOutcome: {"_enum":{"Pending":"Null","Queued":{"nonce":"U256","hash":"H256","queue_id":"u64"},"NotQueued":"Null"}},
       ReceiptDepositOutcome: {"_enum":["Pending","InFlight","Settled","Rejected","Unknown","NativeQueued","Refunded","Retryable","Held"]},
@@ -205,9 +207,9 @@ export class VftManager {
   }
 
   /**
-   * Settlement policy is explicit, and only changes at a paused boundary.
+   * Settlement policy is explicit and cannot change after economic activity.
   */
-  public configureNativeWrapper(wrapper: [ActorId, H160] | null): TransactionBuilder<null> {
+  public configureNativeWrapper(wrapper: NativeWrapperConfig | null): TransactionBuilder<null> {
     if (!this._program.programId) throw new Error('Program ID is not set');
     return new TransactionBuilder<null>(
       this._program.api,
@@ -216,7 +218,7 @@ export class VftManager {
       'VftManager',
       'ConfigureNativeWrapper',
       wrapper,
-      'Option<([u8;32], [u8;20])>',
+      'Option<NativeWrapperConfig>',
       'Null',
       this._program.programId,
     );
@@ -830,8 +832,8 @@ export class VftManager {
     );
   }
 
-  public nativeWrapper(): QueryBuilder<ActorId | null> {
-    return new QueryBuilder<ActorId | null>(
+  public nativeWrapper(): QueryBuilder<NativeWrapperConfig | null> {
+    return new QueryBuilder<NativeWrapperConfig | null>(
       this._program.api,
       this._program.registry,
       this._program.programId,
@@ -839,7 +841,7 @@ export class VftManager {
       'NativeWrapper',
       null,
       null,
-      'Option<[u8;32]>',
+      'Option<NativeWrapperConfig>',
     );
   }
 
@@ -885,6 +887,22 @@ export class VftManager {
       [slot, transaction_index, log_index],
       '(u64, u64, u64)',
       'Option<ReceiptRejectionEvidence>',
+    );
+  }
+
+  /**
+   * Exact retained native error-child retry permission, not a status-only hint.
+  */
+  public receiptRetryableNative(slot: number | string | bigint, transaction_index: number | string | bigint, log_index: number | string | bigint, operation_id: H256, child: MessageId): QueryBuilder<boolean> {
+    return new QueryBuilder<boolean>(
+      this._program.api,
+      this._program.registry,
+      this._program.programId,
+      'VftManager',
+      'ReceiptRetryableNative',
+      [slot, transaction_index, log_index, operation_id, child],
+      '(u64, u64, u64, H256, [u8;32])',
+      'bool',
     );
   }
 
@@ -1340,7 +1358,26 @@ export type Error =
   /**
    * The original authenticated token operation explicitly rejected without effect.
   */
-  | { TokenOperationRejected: null };
+  | { TokenOperationRejected: null }
+  /**
+   * The approved immutable native wrapper cannot retain held liabilities.
+  */
+  | { NativeHoldUnsupported: null };
+
+/**
+ * Code identity is a governance assertion, independently authenticated offchain.
+*/
+export interface NativeWrapperConfig {
+  actor_id: ActorId;
+  ethereum_token: H160;
+  code_id: H256;
+  mode: NativeWrapperMode;
+}
+
+/**
+ * Capabilities of the unchanged native wrapper approved by governance.
+*/
+export type NativeWrapperMode = "EscrowV1" | "HeldEscrowV2";
 
 /**
  * The on-chain outcome of an Ethereum receipt key.
@@ -1484,4 +1521,4 @@ export interface SourceRequestEvidence {
 
 export type Order = "Direct" | "Reverse";
 
-export const IDL_SHA256 = '24af190a703abed2b5a7e17c550739a9d4b7520c1b5a9d7e178c3a91c182bdb3';
+export const IDL_SHA256 = 'e3cd830b1e0b7ffde48663d8c666e052c4e84e71fcd62a24ea864ca4394f94aa';

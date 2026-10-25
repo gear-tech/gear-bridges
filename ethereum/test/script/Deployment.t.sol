@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
@@ -34,6 +34,20 @@ import {MessageHandlerMock} from "src/mocks/MessageHandlerMock.sol";
 import {Base} from "test/Base.sol";
 import {BaseConstants} from "test/BaseConstants.sol";
 import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
+
+// Deployment mechanics fixtures only. Production authorization has its own
+// proof-backed gate and pre-CREATE negative tests; these never qualify a live deployment.
+contract DeploymentMechanicsFixture is DeploymentScript {
+    function _localDeploymentFixture() internal view override returns (bool) {
+        return block.chainid == 31337 || block.chainid == 560048;
+    }
+}
+
+contract HoodiMechanicsFixture is BeefyHoodi {
+    function _localDeploymentFixture() internal view override returns (bool) {
+        return block.chainid == 560048;
+    }
+}
 
 contract DeploymentScriptTest is BeefyFixtureTest {
     function setUp() public {
@@ -124,8 +138,8 @@ contract DeploymentScriptTest is BeefyFixtureTest {
         assertEq(deployedClient.MAX_VALIDATORS(), 256);
         assertEq(deployedClient.MAX_SOURCE_AGE_MS(), 86_400_000);
         assertEq(deployedClient.MAX_FUTURE_SOURCE_SKEW_MS(), 120_000);
-        (uint128 currentId, uint128 currentLength, bytes32 currentSetRoot,) = deployedClient.currentValidatorSet();
-        (uint128 nextId, uint128 nextLength, bytes32 nextSetRoot,) = deployedClient.nextValidatorSet();
+        (uint128 currentId, uint128 currentLength, bytes32 currentSetRoot) = deployedClient.currentValidatorSet();
+        (uint128 nextId, uint128 nextLength, bytes32 nextSetRoot) = deployedClient.nextValidatorSet();
         assertEq(currentId, 5);
         assertEq(currentLength, 2);
         assertEq(currentSetRoot, currentRoot);
@@ -136,6 +150,7 @@ contract DeploymentScriptTest is BeefyFixtureTest {
 
     function test_DeploymentBeefyTokensQueueDomainDryRun() public {
         vm.chainId(31337);
+        vm.setEnv("BEEFY_LOCAL_FIXTURE", "true");
         vm.warp(vm.unixTime() / 1000);
         uint256 privateKey = 1;
         address deployerAddress = vm.addr(privateKey);
@@ -258,7 +273,7 @@ contract DeploymentScriptTest is BeefyFixtureTest {
         vm.setEnv("BRIDGING_PAYMENT_FEE", vm.toString(BaseConstants.BRIDGING_PAYMENT_FEE));
         // forge-lint: disable-end(unsafe-cheatcode)
         _genericBootstrap(false);
-        DeploymentScript deploymentScript = new DeploymentScript();
+        DeploymentScript deploymentScript = new DeploymentMechanicsFixture();
         deploymentScript.run();
         _assertGenericDeployment(deploymentScript);
     }
@@ -268,7 +283,7 @@ contract DeploymentScriptTest is BeefyFixtureTest {
         test_DeploymentHoodi();
     }
 
-    function test_DeploymentMainnetWithCanonicalTokens() public {
+    function test_DeploymentMainnetWithCanonicalTokensRejectsBeforeCreate() public {
         vm.chainId(1);
         vm.warp(vm.unixTime() / 1000);
         _genericEnvironment(false);
@@ -286,18 +301,15 @@ contract DeploymentScriptTest is BeefyFixtureTest {
         }
         _genericBootstrap(true);
         DeploymentScript deployment = new DeploymentScript();
+        uint64 nonce = vm.getNonce(vm.addr(1));
+        vm.expectRevert(bytes4(keccak256("FreshMainnetDeploymentForbidden()")));
         deployment.run();
-        _assertGenericDeployment(deployment);
-        assertTrue(deployment.shouldUseOverrides());
-        assertEq(address(deployment.circleToken()), canonical[0]);
-        assertEq(address(deployment.tetherToken()), canonical[1]);
-        assertEq(address(deployment.wrappedEther()), canonical[2]);
-        assertEq(address(deployment.wrappedBitcoin()), canonical[3]);
+        assertEq(vm.getNonce(vm.addr(1)), nonce);
     }
 
-    function test_DeploymentMainnetAtNonzeroNonce() public {
+    function test_DeploymentMainnetAtNonzeroNonceRejectsBeforeCreate() public {
         vm.setNonce(vm.addr(1), 41);
-        test_DeploymentMainnetWithCanonicalTokens();
+        test_DeploymentMainnetWithCanonicalTokensRejectsBeforeCreate();
     }
 
     function test_DeploymentHoodiWithCompleteOverrides() public {
@@ -310,13 +322,14 @@ contract DeploymentScriptTest is BeefyFixtureTest {
             vm.setEnv(keys[i], vm.toString(token));
         }
         _genericBootstrap(true);
-        DeploymentScript deployment = new DeploymentScript();
+        DeploymentScript deployment = new DeploymentMechanicsFixture();
         deployment.run();
         _assertGenericDeployment(deployment);
         assertTrue(deployment.shouldUseOverrides());
     }
 
     function _genericEnvironment(bool generateTokens) private {
+        vm.setEnv("BEEFY_LOCAL_FIXTURE", "true");
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("DEPLOYMENT_MODE", "fresh-beefy");
         vm.setEnv("DEPLOY_TEST_TOKENS", generateTokens ? "true" : "false");
@@ -599,7 +612,7 @@ contract BeefyHoodiDeploymentTest is BeefyFixtureTest {
         vm.chainId(560048);
         _setBootstrapEnv();
         vm.warp(uint256(bootstrapTimestamp(0)) / 1000);
-        BeefyHoodi deployment = new BeefyHoodi();
+        BeefyHoodi deployment = new HoodiMechanicsFixture();
         (address clientAddress, address verifierAddress, address queueAddress, address receiverAddress) =
             deployment.run();
         client = BeefyClient(clientAddress);

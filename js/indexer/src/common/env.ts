@@ -1,4 +1,5 @@
 import * as dotenv from 'dotenv';
+import { resolve, join } from 'node:path';
 
 dotenv.config();
 
@@ -12,38 +13,38 @@ export const getEnv = (key: string, _default?: string): string => {
   return env;
 };
 
-// These endpoints must be operated independently; distinct URLs alone cannot prove that.
-export function getEthereumEvidenceConfig(): {
-  rpcUrl: string; witnessRpcUrl: string; chainId: bigint; genesisHash: string;
+export type EvidenceOwner = 'eth' | 'gear' | 'repair';
+
+export function getEthereumEvidenceConfig(owner: EvidenceOwner = 'eth'): {
+  rpcUrl: string; chainId: bigint; genesisHash: string; binary: string; beaconRpc: string;
+  bootstrap: string; bootstrapSha256: string; store: string; proofSources: string[]; evidenceProofSources: string[];
 } {
-  const endpoint = (key: string): { url: string; identity: string } => {
+  const endpoint = (key: string): string => {
     const value = getEnv(key);
     let url: URL;
     try { url = new URL(value); } catch { throw new Error(`Invalid ${key}: expected an HTTP(S) endpoint`); }
     if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.hash) {
       throw new Error(`Invalid ${key}: expected an HTTP(S) endpoint without a fragment`);
     }
-    const host = url.hostname.toLowerCase().replace(/\.+$/, '');
-    const loopback = host === 'localhost' || host === '[::1]' || /^127(?:\.\d{1,3}){3}$/.test(host);
-    if (url.protocol === 'http:' && !loopback) {
-      throw new Error(`Invalid ${key}: HTTPS is required except for loopback fixtures`);
-    }
-    return { url: url.toString(), identity: JSON.stringify([
-      url.protocol, loopback ? 'localhost' : host, url.port, url.pathname.replace(/\/+$/, ''), url.search,
-    ]) };
+    const loopback = url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+    if (url.protocol === 'http:' && !loopback) throw new Error(`Invalid ${key}: HTTPS required except literal loopback`);
+    return url.toString();
   };
-  const primary = endpoint('ETH_RPC_URL');
-  const witness = endpoint('ETH_WITNESS_RPC');
-  if (primary.identity === witness.identity) {
-    throw new Error('ETH_WITNESS_RPC must be independent of ETH_RPC_URL');
-  }
   const chainId = getEnv('ETH_CHAIN_ID');
   if (!/^(0|[1-9][0-9]*)$/.test(chainId) || BigInt(chainId) > 0xffffffffffffffffn) {
     throw new Error('Invalid ETH_CHAIN_ID: expected a decimal uint64');
   }
   const genesisHash = getEnv('ETH_GENESIS_HASH');
-  if (!/^0x[0-9a-f]{64}$/i.test(genesisHash)) {
-    throw new Error('Invalid ETH_GENESIS_HASH: expected a 32-byte hash');
+  const bootstrapSha256 = getEnv('ETH_FINALITY_BOOTSTRAP_SHA256');
+  if (!/^0x[0-9a-f]{64}$/.test(genesisHash) || !/^0x[0-9a-f]{64}$/.test(bootstrapSha256)) {
+    throw new Error('Invalid Ethereum genesis or bootstrap approval digest');
   }
-  return { rpcUrl: primary.url, witnessRpcUrl: witness.url, chainId: BigInt(chainId), genesisHash: genesisHash.toLowerCase() };
+  const root = resolve(getEnv('ETH_FINALITY_ARCHIVE_ROOT'));
+  const store = join(root, owner);
+  const evidenceProofSources = (['eth', 'gear', 'repair'] as const).filter((peer) => peer !== owner)
+    .map((peer) => join(root, peer));
+  const proofSources = evidenceProofSources.map((peer) => join(peer, 'beacon'));
+  return { rpcUrl: endpoint('ETH_RPC_URL'), chainId: BigInt(chainId), genesisHash,
+    binary: getEnv('ETH_EVIDENCE_BINARY', 'relayer'), beaconRpc: endpoint('ETH_FINALITY_BEACON_RPC'),
+    bootstrap: getEnv('ETH_FINALITY_BOOTSTRAP'), bootstrapSha256, store, proofSources, evidenceProofSources };
 }

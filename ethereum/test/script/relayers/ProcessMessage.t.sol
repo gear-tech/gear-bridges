@@ -1,6 +1,6 @@
 // Copyright (C) Gear Technologies Inc.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
-pragma solidity ^0.8.38;
+pragma solidity ^0.8.37;
 
 import {Test} from "forge-std/Test.sol";
 import {ProcessMessageScript} from "script/relayers/ProcessMessage.s.sol";
@@ -22,8 +22,9 @@ contract ProcessMessageScriptTest is Test, Base {
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("MESSAGE_QUEUE", vm.toString(address(messageQueue)));
         vm.setEnv("BLOCK_NUMBER", "1");
-        vm.setEnv("TOTAL_LEAVES", "1");
-        vm.setEnv("LEAF_INDEX", "0");
+        // The message is the right-hand leaf of [bytes32(0), messageHash].
+        vm.setEnv("TOTAL_LEAVES", "2");
+        vm.setEnv("LEAF_INDEX", "1");
         vm.setEnv("NONCE", "1");
         vm.setEnv("SOURCE", vm.toString(message.source));
         vm.setEnv("DESTINATION", vm.toString(message.destination));

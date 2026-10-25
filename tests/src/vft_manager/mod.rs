@@ -556,7 +556,7 @@ async fn upgrade() -> Result<()> {
     let vft_id_1 = factory
         .new("TEST_TOKEN1".into(), "TT1".into(), 20)
         .with_gas_limit(gas_limit)
-        .send_recv(code_id_vft, [])
+        .send_recv(code_id_vft, [salt, salt].concat())
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
@@ -1219,7 +1219,7 @@ async fn vft_burn_from() -> Result<()> {
     let vft_id = factory
         .new(Mainnet::No)
         .with_gas_limit(gas_limit)
-        .send_recv(code_id_vft, [])
+        .send_recv(code_id_vft, salt)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
@@ -1290,7 +1290,12 @@ async fn vft_burn_from() -> Result<()> {
         .await
         .unwrap();
     service
-        .configure_native_wrapper(Some((vft_id, address_token.into())))
+        .configure_native_wrapper(Some(vft_manager_client::NativeWrapperConfig {
+            actor_id: vft_id,
+            ethereum_token: address_token.into(),
+            code_id: H256::from(code_id_vft.into_bytes()),
+            mode: vft_manager_client::NativeWrapperMode::HeldEscrowV2,
+        }))
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
@@ -1585,7 +1590,12 @@ async fn vft_burn_from() -> Result<()> {
         .await
         .unwrap();
     service
-        .configure_native_wrapper(Some((vft_id, address_token.into())))
+        .configure_native_wrapper(Some(vft_manager_client::NativeWrapperConfig {
+            actor_id: vft_id,
+            ethereum_token: address_token.into(),
+            code_id: H256::from(code_id_vft.into_bytes()),
+            mode: vft_manager_client::NativeWrapperMode::HeldEscrowV2,
+        }))
         .with_gas_limit(gas_limit)
         .send_recv(destination)
         .await
@@ -1979,11 +1989,19 @@ async fn deploy_programs(
         user_id
     } else {
         let factory = vft_client::VftFactory::new(remoting.clone());
-        factory
+        let token = factory
             .new("TEST_TOKEN".into(), "TT".into(), 20)
             .send_recv(vft_code_id, salt)
             .await
-            .map_err(|e| anyhow!("{e:?}"))?
+            .map_err(|e| anyhow!("{e:?}"))?;
+        let mut extension = vft_client::VftExtension::new(remoting.clone());
+        while extension
+            .allocate_next_balances_shard()
+            .send_recv(token)
+            .await
+            .unwrap()
+        {}
+        token
     };
     println!(
         "program_id = {:?} (extended_vft)",
@@ -2049,13 +2067,9 @@ async fn submit_receipt_works() -> Result<()> {
 
     let erc20_manager_address = H160([1_u8; 20]);
     let sender = H160([99_u8; 20]);
-    let receipt_rlp = crate::create_receipt_rlp(
-        erc20_manager_address,
-        sender,
-        42.into(),
-        erc20_addr,
-        U256::zero(),
-    );
+    let amount = U256::from(17_u64);
+    let receipt_rlp =
+        crate::create_receipt_rlp(erc20_manager_address, sender, user_id, erc20_addr, amount);
 
     let gas_limit = api.block_gas_limit().unwrap();
 
@@ -2078,6 +2092,7 @@ async fn submit_receipt_works() -> Result<()> {
         .send_recv(vft_manager_id)
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
+    assert!(result.is_ok(), "Result: {result:?}");
 
     // Checking two things:
     // - a reply to the `submit_receipt` request has been sent to the user
@@ -2097,12 +2112,15 @@ async fn submit_receipt_works() -> Result<()> {
                 && message.source().into_bytes() == vft_manager_id.into_bytes() =>
         {
             if let VftManagerEvents::BridgingAccepted {
-                to, amount, token, ..
+                to,
+                amount: received_amount,
+                token,
+                ..
             } = VftManagerEvents::decode_event(message.payload_bytes()).unwrap()
             {
-                assert_eq!(to, 42.into());
+                assert_eq!(to, user_id);
                 assert_eq!(token, vft_token_id);
-                assert_eq!(amount, U256::zero());
+                assert_eq!(received_amount, amount);
 
                 Some(())
             } else {
@@ -2112,16 +2130,16 @@ async fn submit_receipt_works() -> Result<()> {
         _ => None,
     };
 
-    listener
-        .proc_many(predicate, |tuples| {
+    tokio::time::timeout(
+        Duration::from_secs(60),
+        listener.proc_many(predicate, |tuples| {
             let total = tuples.len();
-
             (tuples, total > 1)
-        })
-        .await
-        .unwrap();
-
-    assert!(result.is_ok(), "Result: {result:?}");
+        }),
+    )
+    .await
+    .expect("receipt reply and BridgingAccepted event were not observed")
+    .unwrap();
 
     let txs = service
         .transactions(Order::Direct, 0, 1)
@@ -2129,8 +2147,16 @@ async fn submit_receipt_works() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    assert_eq!(txs.len(), 1, "Transactions list must contain one pair");
-    assert!(txs.iter().any(|(slot, tx_idx)| *slot == 0 && *tx_idx == 1));
+    assert_eq!(txs, vec![(0, 1)]);
+    let token = vft_client::Vft::new(remoting.clone());
+    assert_eq!(
+        token.balance_of(user_id).recv(vft_token_id).await.unwrap(),
+        amount
+    );
+    assert_eq!(
+        token.total_supply().recv(vft_token_id).await.unwrap(),
+        amount
+    );
 
     Ok(())
 }
@@ -2140,13 +2166,6 @@ async fn submit_receipt_works() -> Result<()> {
 async fn error_in_vft_propagated_correctly() -> Result<()> {
     let (remoting, api, manager, user, token, erc20) =
         deploy_programs(true, false, TokenSupply::Ethereum, None).await?;
-    let mut extension = vft_client::VftExtension::new(remoting.clone());
-    while extension
-        .allocate_next_balances_shard()
-        .send_recv(token)
-        .await
-        .unwrap()
-    {}
     let gas = api.block_gas_limit().unwrap();
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
     assert_eq!(
@@ -2202,7 +2221,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
     );
     let rejected = service.receipt_deposits(0, 1).recv(manager).await.unwrap();
     assert_eq!(rejected.len(), 1);
-    assert_eq!(rejected[0].outcome, ReceiptDepositOutcome::Rejected);
+    assert_eq!(rejected[0].outcome, ReceiptDepositOutcome::Retryable);
     assert!(rejected[0].child.is_some());
     let vft = vft_client::Vft::new(remoting.clone());
     assert_eq!(
@@ -2257,7 +2276,7 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
 // - on behalf of the historical proxy, sending `submit_receipt` message to the VFT manager,
 //   with the rlp receipt indicating a transfer of an ERC20 token with Gear supply
 // - waiting (as a VFT contract) for a message from the vft-manager to do `transfer_from` action
-// - replying with `false` to the vft-manager meaning that the transfer was not successful
+// - replying with a boolean followed by trailing bytes, which is not a valid VFT reply
 // Expecting:
 // - the receipt is reserved with an ambiguous deposit, preventing economic replay
 // - no `BridgingAccepted` event is emitted
@@ -2273,7 +2292,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
         sender,
         42.into(),
         erc20_addr,
-        U256::zero(),
+        U256::from(17_u64),
     );
 
     let gas_limit = api.block_gas_limit().unwrap();
@@ -2340,11 +2359,12 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
         }
     }
 
-    // Sending `false` as a reply to the vft-manager
+    // A valid `false` is a definite rejection; trailing bytes make this reply malformed.
     let reply: <vft_client::vft::io::TransferFrom as ActionIo>::Reply = false;
     let reply_payload = {
         let mut buffer = vft_client::vft::io::TransferFrom::ROUTE.to_vec();
         reply.encode_to(&mut buffer);
+        buffer.push(0);
 
         buffer
     };
@@ -2417,7 +2437,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
         .await
         .unwrap();
 
-    // Successful-looking false is ambiguous: do not replay the economic child.
+    // A malformed reply is ambiguous: do not replay the economic child.
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
     assert!(service
         .transactions(Order::Direct, 0, 1)
@@ -2479,7 +2499,7 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
     const REPLY_TIMEOUT: u32 = 10;
 
     let (remoting, api, vft_manager_id, user_id, _, erc20_addr) =
-        deploy_programs(false, false, TokenSupply::Gear, Some(10)).await?;
+        deploy_programs(false, false, TokenSupply::Gear, Some(REPLY_TIMEOUT)).await?;
 
     let erc20_manager_address = H160([1_u8; 20]);
     let sender = H160([99_u8; 20]);
@@ -2488,7 +2508,7 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
         sender,
         42.into(),
         erc20_addr,
-        U256::zero(),
+        U256::from(17_u64),
     );
 
     let gas_limit = api.block_gas_limit().unwrap();

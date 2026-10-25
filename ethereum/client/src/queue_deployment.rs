@@ -3,10 +3,7 @@ use crate::{
     EthApi, FinalizedView,
 };
 use alloy::{
-    consensus::{
-        transaction::SignerRecoverable,
-        Transaction, TxEnvelope,
-    },
+    consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope},
     eips::{Decodable2718, Encodable2718},
     primitives::{keccak256, Address, Bytes, B256},
     providers::Provider,
@@ -74,8 +71,11 @@ impl EthApi {
         view: &mut FinalizedView,
     ) -> Result<QueueDeployment> {
         let (approved_chain, approved_genesis) = self.finality_identity()?;
-        ensure!(view.checkpoint().chain_id == approved_chain && view.genesis_hash() == approved_genesis,
-            "HOLD: queue deployment view differs from configured identity");
+        ensure!(
+            view.checkpoint().chain_id() == approved_chain
+                && view.genesis_hash() == approved_genesis,
+            "HOLD: queue deployment view differs from configured identity"
+        );
         let provider = self.raw_provider();
         let receipt = provider
             .get_transaction_receipt(hash)
@@ -189,9 +189,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires explicit read-only Ethereum endpoint, queue and creation locator"]
+    #[ignore = "requires explicit read-only Ethereum and Beacon endpoints, approved bootstrap/store, queue and creation locator"]
     async fn qualify_live_queue_creation_read_only() -> Result<()> {
-        let api = EthApi::new(
+        let config = crate::BeaconFinalityConfig::load(
+            std::env::var("ETH_BEACON_BOOTSTRAP")?,
+            std::env::var("ETH_BEACON_BOOTSTRAP_SHA256")?.parse()?,
+            &std::env::var("ETH_BEACON_RPC")?,
+        )?;
+        let mut api = EthApi::new(
             &std::env::var("QUEUE_TEST_RPC")?,
             &std::env::var("QUEUE_TEST_ADDRESS")?,
             None,
@@ -199,11 +204,17 @@ mod tests {
             None,
         )
         .await?
-        .with_finality_witness(
-            &std::env::var("ETH_WITNESS_RPC")?,
-            std::env::var("ETH_CHAIN_ID")?.parse()?,
-            std::env::var("ETH_GENESIS_HASH")?.parse()?,
-        ).await?;
+        .with_beacon_finality(config, std::env::var("ETH_BEACON_STORE")?)
+        .await?;
+        if let Ok(witness) = std::env::var("ETH_WITNESS_RPC") {
+            api = api
+                .with_data_witness(
+                    &witness,
+                    std::env::var("ETH_CHAIN_ID")?.parse()?,
+                    std::env::var("ETH_GENESIS_HASH")?.parse()?,
+                )
+                .await?;
+        }
         let hash = std::env::var("QUEUE_TEST_CREATION")?.parse()?;
         let mut view = api.verified_finalized_view().await?;
         let deployment = api.authenticate_queue_deployment(hash, &mut view).await?;

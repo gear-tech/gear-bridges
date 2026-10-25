@@ -12,7 +12,17 @@ fn main() {
     env::set_var("CARGO_PROFILE_DEV_CODEGEN_UNITS", "1");
     env::set_var("CARGO_PROFILE_DEV_DEBUG_ASSERTIONS", "false");
     env::set_var("CARGO_PROFILE_DEV_OVERFLOW_CHECKS", "false");
-    sails_rs::build_wasm();
+    if let Some((original, optimized)) = sails_rs::build_wasm() {
+        // Start from the compiler output on every build: optimizing the previous optimized
+        // artifact again would make clean and incremental builds produce different CodeIds.
+        let mut optimizer = gear_wasm_builder::optimize::Optimizer::new(&original).unwrap();
+        optimizer.insert_stack_end_export().unwrap();
+        optimizer.strip_custom_sections();
+        optimizer.strip_exports();
+        optimizer.flush_to_file(&optimized);
+        // Gear's default -O4 exceeds the runtime's instrumented-code limit for this program.
+        gear_wasm_builder::optimize::optimize_wasm(&optimized, &optimized, "z", true).unwrap();
+    }
 
     if env::var("__GEAR_WASM_BUILDER_NO_BUILD").is_ok() {
         return;

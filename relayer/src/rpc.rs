@@ -474,20 +474,62 @@ mod tests {
     #[tokio::test]
     async fn retries_nested_socket_resets_from_actual_http_readers() {
         use tokio::io::AsyncReadExt;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let bootstrap_listener =
+            tokio::net::TcpListener::from_std(listener.try_clone().unwrap()).unwrap();
+        let mut header: alloy::rpc::types::Header = Default::default();
+        header.inner.extra_data = uuid::Uuid::new_v4().as_bytes().to_vec().into();
+        header.hash = header.inner.hash_slow();
+        let genesis: alloy::rpc::types::Block = alloy::rpc::types::Block {
+            header: header.clone(),
+            ..Default::default()
+        };
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
+                let genesis = genesis.clone();
+                async move {
+                    assert_eq!(request["method"], "eth_getBlockByNumber");
+                    assert_eq!(request["params"][0], "0x0");
+                    axum::Json(serde_json::json!({
+                        "jsonrpc": "2.0", "id": request["id"], "result": genesis
+                    }))
+                }
+            }),
+        );
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let bootstrap = tokio::spawn(async move {
+            axum::serve(bootstrap_listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
+                .await
+                .unwrap();
+        });
+        let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            31337,
+            header.hash,
+            std::sync::Arc::new(move || header.clone()),
+        )
+        .await
+        .unwrap();
+        let api = ethereum_client::PollingEthApi::new(&endpoint)
+            .await
+            .unwrap()
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await
+            .unwrap();
+        stop.send(()).unwrap();
+        bootstrap.await.unwrap();
+        let listener = tokio::net::TcpListener::from_std(listener).unwrap();
         let server = tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 // Leave the rest of the HTTP request unread so closing resets the connection.
                 let _ = socket.read_exact(&mut [0; 1]).await;
             }
         });
-        let api = ethereum_client::PollingEthApi::new(&endpoint)
-            .await
-            .unwrap()
-            .with_finality_witness(&format!("{endpoint}/witness"), 560048,
-                alloy::primitives::B256::repeat_byte(1))
-            .await.unwrap();
         let block = api.finalized_block().await.unwrap_err();
         let deposit = api
             .fetch_deposit_events_at(Default::default(), 1, Default::default())

@@ -6,7 +6,7 @@ Contents of this folder are guaranteed to be up to date as there's a workflow in
 > Update CI workflow when adding new files to this folder
 
 Regenerate the Ethereum snapshots from the repository root with the CI-pinned
-Foundry v1.8.6 and the compiler/settings in `ethereum/foundry.toml` (Solc 0.8.38):
+Foundry v1.8.5 and the compiler/settings in `ethereum/foundry.toml` (Solc 0.8.37):
 
 ```sh
 forge build --force --no-cache --root ethereum

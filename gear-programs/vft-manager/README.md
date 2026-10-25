@@ -277,3 +277,8 @@ not advance the scanned prefix or certify unrecorded sibling deposits.
 
 Local regression command (actual gtest WASM, no node required):
 `cargo test --release -p tests vft_manager::gtest:: -- --test-threads=1`.
+
+The zero-Ethereum-recipient regression checks the original request's first
+outgoing child in execution results and logs, not the system-wide message count.
+It also verifies unchanged balances, supply and allowance, and a valid subsequent
+request in both burn and lock modes.

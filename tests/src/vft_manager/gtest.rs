@@ -631,6 +631,7 @@ async fn test_reply_benchmark_preserves_ambiguous_progress_and_original_child() 
 
 #[tokio::test]
 async fn test_zero_receiver_rejected_without_economic_effects() {
+    use gear_core::ids::prelude::MessageIdExt;
     use sails_rs::events::EventIo;
     use vft_client::{vft::events::VftEvents, vft_2::events::Vft2Events};
     use vft_manager_client::vft_manager::{events::VftManagerEvents, io::RequestBridging};
@@ -686,12 +687,19 @@ async fn test_zero_receiver_rejected_without_economic_effects() {
                     gtest::constants::MAX_USER_GAS_LIMIT,
                     0,
                 );
+            let first_child = MessageId::generate_outgoing(request, 0);
             let mut reply = None;
             let mut logs = Vec::new();
-            let mut processed = 0;
+            let mut child_observed = false;
             for _ in 0..20 {
                 let block = remoting.system().run_next_block();
-                processed += block.total_processed;
+                child_observed |= block.succeed.contains(&first_child)
+                    || block.failed.contains(&first_child)
+                    || block.not_executed.contains(&first_child)
+                    || block.gas_burned.contains_key(&first_child)
+                    || block.log().iter().any(|entry| {
+                        entry.id() == first_child || entry.reply_to() == Some(first_child)
+                    });
                 for entry in block.log() {
                     if entry.reply_to() == Some(request) {
                         assert!(reply.is_none(), "one reply per original request");
@@ -720,12 +728,11 @@ async fn test_zero_receiver_rejected_without_economic_effects() {
 
             if receiver.is_zero() {
                 assert_eq!(reply, Err(Error::InvalidRecipient));
-                assert_eq!(
-                    processed, 1,
-                    "rejection must execute only the request, with no token or builtin child"
+                assert!(
+                    !child_observed,
+                    "rejection must not dispatch the original request's first token or builtin child"
                 );
                 assert!(events.is_empty(), "no BridgingRequested on rejection");
-                assert!(logs.iter().all(|entry| entry.source() == manager));
                 assert!(evidence.is_none());
                 assert_eq!(balance_of(&remoting, token, sender).await, sender_before);
                 assert_eq!(balance_of(&remoting, token, manager).await, manager_before);
@@ -735,6 +742,7 @@ async fn test_zero_receiver_rejected_without_economic_effects() {
                     allowance_before
                 );
             } else {
+                assert!(child_observed, "valid request must dispatch its token child");
                 assert_eq!(reply, Ok((U256::one(), eth_token)));
                 assert_eq!(
                     balance_of(&remoting, token, sender).await,

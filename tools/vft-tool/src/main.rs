@@ -1,13 +1,13 @@
-use clap::{Args, Parser, Subcommand};
+use bridging_payment_client::traits::BridgingPayment;
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use cli_utils::GearConnectionArgs;
 use gclient::GearApi;
-use gear_common::api_provider::{ApiProvider, ApiProviderConnection};
+use gear_common::api_provider::ApiProvider;
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
 use vft_client::{traits::*, vft_admin::io};
+use vft_manager_client::{traits::*, TokenSupply};
 use vft_vara_client::{traits::*, Mainnet};
-
-const SIZE_MIGRATE_BATCH: u32 = 200;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -16,11 +16,8 @@ struct Cli {
     #[clap(flatten)]
     gear_connection: GearConnectionArgs,
 
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char
-    #[arg(long, default_value = "//Alice", env = "GEAR_SURI")]
+    /// Explicit signer URI; omitted only for read-only encoding commands.
+    #[arg(long, env = "GEAR_SURI", default_value = "")]
     gear_suri: String,
 
     #[arg(long)]
@@ -49,8 +46,97 @@ enum CliCommands {
         /// Program ID of the VFT contract
         program_id: String,
     },
-    MigrateBalances(MigrateBalances),
     HexEncodedMessage(HexEncodedMessageArgs),
+    Manager {
+        program_id: String,
+        #[command(subcommand)]
+        action: ManagerAction,
+    },
+    Token {
+        program_id: String,
+        #[command(subcommand)]
+        action: TokenAction,
+    },
+    Payment {
+        program_id: String,
+        #[command(subcommand)]
+        action: PaymentAction,
+    },
+    Roles {
+        program_id: String,
+        #[command(subcommand)]
+        action: RolesAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ManagerAction {
+    Status,
+    SetErc20Manager {
+        address: String,
+    },
+    Map {
+        vft: String,
+        erc20: String,
+        supply: Supply,
+    },
+    RequestBridging {
+        vft: String,
+        amount: String,
+        receiver: String,
+    },
+    RecoverInterruptedTransfer {
+        message_id: String,
+    },
+    Unmap {
+        vft: String,
+    },
+    Pause,
+    Unpause,
+}
+
+#[derive(Clone, ValueEnum)]
+enum Supply {
+    Ethereum,
+    Gear,
+}
+#[derive(Subcommand)]
+enum TokenAction {
+    Status {
+        owner: String,
+        spender: Option<String>,
+    },
+    Mint {
+        to: String,
+        amount: String,
+    },
+    Approve {
+        spender: String,
+        amount: String,
+    },
+    Wrap {
+        amount: u128,
+    },
+    Unwrap {
+        amount: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PaymentAction {
+    Status,
+    PayFees {
+        nonce: String,
+        #[arg(long)]
+        value: Option<u128>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RolesAction {
+    Status,
+    SetMinter { actor: String },
+    SetBurner { actor: String },
 }
 
 #[derive(Args)]
@@ -94,24 +180,16 @@ struct RolesArgs {
     burner: Option<String>,
 }
 
-#[derive(Args)]
-struct MigrateBalances {
-    #[arg(long, help = format!("Size of migration batch. Default: {SIZE_MIGRATE_BATCH}"))]
-    size_batch: Option<u32>,
-    /// ActorId of the source VFT contract (old)
-    #[arg(long)]
-    vft: String,
-    /// ActorId of the destination VFT contract (new). Provided `remoting` should have account
-    /// with mint-permission
-    #[arg(long)]
-    vft_new: String,
-}
-
 fn str_to_actorid(s: String) -> ActorId {
     let s = if &s[..2] == "0x" { &s[2..] } else { &s };
     let data = hex::decode(s).expect("Failed to decode ActorId");
 
     ActorId::new(data.try_into().expect("Got input of wrong length"))
+}
+
+fn str_to_h160(s: String) -> H160 {
+    let data = hex::decode(s.strip_prefix("0x").unwrap_or(&s)).expect("Invalid EVM address");
+    H160::from_slice(&data)
 }
 
 fn print_encoded_message(message: HexEncodedMessage) {
@@ -247,8 +325,353 @@ async fn main() {
             uploader.allocate_shards(program_id).await;
         }
 
-        CliCommands::MigrateBalances(args) => {
-            migrate_balances(connection, cli.gear_suri, args).await
+        CliCommands::Manager { program_id, action } => {
+            let program_id = str_to_actorid(program_id);
+            let gas_limit = gear_api
+                .block_gas_limit()
+                .expect("Unable to get block gas limit");
+            let mut manager = vft_manager_client::VftManager::new(GClientRemoting::new(gear_api));
+            match action {
+                ManagerAction::Status => {
+                    println!(
+                        "admin: {:?}",
+                        manager
+                            .admin()
+                            .recv(program_id)
+                            .await
+                            .expect("Admin query failed")
+                    );
+                    println!(
+                        "paused: {}",
+                        manager
+                            .is_paused()
+                            .recv(program_id)
+                            .await
+                            .expect("Pause query failed")
+                    );
+                    println!(
+                        "erc20_manager: {:?}",
+                        manager
+                            .erc_20_manager_address()
+                            .recv(program_id)
+                            .await
+                            .expect("Manager address query failed")
+                    );
+                    println!(
+                        "config: {:?}",
+                        manager
+                            .get_config()
+                            .recv(program_id)
+                            .await
+                            .expect("Config query failed")
+                    );
+                    println!(
+                        "mappings: {:?}",
+                        manager
+                            .vara_to_eth_addresses()
+                            .recv(program_id)
+                            .await
+                            .expect("Mappings query failed")
+                    );
+                }
+                ManagerAction::SetErc20Manager { address } => {
+                    manager
+                        .update_erc_20_manager_address(str_to_h160(address))
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Manager binding failed");
+                    println!(
+                        "erc20_manager: {:?}",
+                        manager
+                            .erc_20_manager_address()
+                            .recv(program_id)
+                            .await
+                            .expect("Manager address query failed")
+                    );
+                }
+                ManagerAction::Map { vft, erc20, supply } => {
+                    let supply = match supply {
+                        Supply::Ethereum => TokenSupply::Ethereum,
+                        Supply::Gear => TokenSupply::Gear,
+                    };
+                    manager
+                        .map_vara_to_eth_address(str_to_actorid(vft), str_to_h160(erc20), supply)
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Mapping failed");
+                    println!(
+                        "mappings: {:?}",
+                        manager
+                            .vara_to_eth_addresses()
+                            .recv(program_id)
+                            .await
+                            .expect("Mappings query failed")
+                    );
+                }
+                ManagerAction::RequestBridging {
+                    vft,
+                    amount,
+                    receiver,
+                } => {
+                    let fee = manager
+                        .get_config()
+                        .recv(program_id)
+                        .await
+                        .expect("Config query failed")
+                        .fee_incoming;
+                    let result = manager
+                        .request_bridging(
+                            str_to_actorid(vft),
+                            U256::from_dec_str(&amount).expect("Invalid amount"),
+                            str_to_h160(receiver),
+                        )
+                        .with_value(fee)
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Bridge request failed");
+                    println!("bridge: {:?}", result.expect("Bridge request rejected"));
+                }
+                ManagerAction::RecoverInterruptedTransfer { message_id } => {
+                    let bytes: [u8; 32] = hex::decode(message_id.trim_start_matches("0x"))
+                        .expect("Invalid message ID hex")
+                        .try_into()
+                        .expect("Message ID must be 32 bytes");
+                    let result = manager
+                        .handle_request_bridging_interrupted_transfer(MessageId::from(bytes))
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Interrupted-transfer recovery transport failed");
+                    println!(
+                        "recovery: {:?}",
+                        result.expect("Interrupted-transfer recovery rejected")
+                    );
+                }
+                ManagerAction::Unmap { vft } => {
+                    manager
+                        .remove_vara_to_eth_address(str_to_actorid(vft))
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Unmapping failed");
+                    println!(
+                        "mappings: {:?}",
+                        manager
+                            .vara_to_eth_addresses()
+                            .recv(program_id)
+                            .await
+                            .expect("Mappings query failed")
+                    );
+                }
+                ManagerAction::Pause => {
+                    manager
+                        .pause()
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Pause failed");
+                    println!(
+                        "paused: {}",
+                        manager
+                            .is_paused()
+                            .recv(program_id)
+                            .await
+                            .expect("Pause query failed")
+                    );
+                }
+                ManagerAction::Unpause => {
+                    manager
+                        .unpause()
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Unpause failed");
+                    println!(
+                        "paused: {}",
+                        manager
+                            .is_paused()
+                            .recv(program_id)
+                            .await
+                            .expect("Pause query failed")
+                    );
+                }
+            }
+        }
+        CliCommands::Token { program_id, action } => {
+            let program_id = str_to_actorid(program_id);
+            let gas_limit = gear_api
+                .block_gas_limit()
+                .expect("Unable to get block gas limit");
+            let remoting = GClientRemoting::new(gear_api);
+            match action {
+                TokenAction::Status { owner, spender } => {
+                    let token = vft_client::Vft::new(remoting);
+                    let owner = str_to_actorid(owner);
+                    println!(
+                        "balance: {:?}",
+                        token
+                            .balance_of(owner)
+                            .recv(program_id)
+                            .await
+                            .expect("Balance query failed")
+                    );
+                    println!(
+                        "total_supply: {:?}",
+                        token
+                            .total_supply()
+                            .recv(program_id)
+                            .await
+                            .expect("Supply query failed")
+                    );
+                    if let Some(spender) = spender {
+                        println!(
+                            "allowance: {:?}",
+                            token
+                                .allowance(owner, str_to_actorid(spender))
+                                .recv(program_id)
+                                .await
+                                .expect("Allowance query failed")
+                        );
+                    }
+                }
+                TokenAction::Mint { to, amount } => {
+                    let mut admin = vft_client::VftAdmin::new(remoting);
+                    admin
+                        .mint(
+                            str_to_actorid(to),
+                            U256::from_dec_str(&amount).expect("Invalid amount"),
+                        )
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Mint failed");
+                    println!("minted");
+                }
+                TokenAction::Approve { spender, amount } => {
+                    let mut token = vft_client::Vft::new(remoting);
+                    let approved = token
+                        .approve(
+                            str_to_actorid(spender),
+                            U256::from_dec_str(&amount).expect("Invalid amount"),
+                        )
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Approve failed");
+                    assert!(approved, "Approval rejected");
+                    println!("approved");
+                }
+                TokenAction::Wrap { amount } => {
+                    let mut native = vft_vara_client::VftNativeExchange::new(remoting);
+                    native
+                        .mint()
+                        .with_value(amount)
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Native wrap failed");
+                    println!("wrapped");
+                }
+                TokenAction::Unwrap { amount } => {
+                    let mut native = vft_vara_client::VftNativeExchange::new(remoting);
+                    let burned = native
+                        .burn(U256::from_dec_str(&amount).expect("Invalid amount"))
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Native unwrap failed");
+                    assert!(burned, "Native unwrap rejected");
+                    println!("unwrapped");
+                }
+            }
+        }
+        CliCommands::Payment { program_id, action } => {
+            let program_id = str_to_actorid(program_id);
+            let gas_limit = gear_api
+                .block_gas_limit()
+                .expect("Unable to get block gas limit");
+            let mut payment =
+                bridging_payment_client::BridgingPayment::new(GClientRemoting::new(gear_api));
+            let state = payment
+                .get_state()
+                .recv(program_id)
+                .await
+                .expect("Payment state query failed");
+            match action {
+                PaymentAction::Status => println!("payment: {state:?}"),
+                PaymentAction::PayFees { nonce, value } => {
+                    payment
+                        .pay_fees(U256::from_dec_str(&nonce).expect("Invalid nonce"))
+                        .with_value(value.unwrap_or(state.fee))
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Payment failed");
+                    println!("paid");
+                }
+            }
+        }
+        CliCommands::Roles { program_id, action } => {
+            let program_id = str_to_actorid(program_id);
+            let gas_limit = gear_api
+                .block_gas_limit()
+                .expect("Unable to get block gas limit");
+            let mut admin = vft_client::VftAdmin::new(GClientRemoting::new(gear_api));
+            match action {
+                RolesAction::Status => {
+                    println!(
+                        "minter: {:?}",
+                        admin
+                            .minter()
+                            .recv(program_id)
+                            .await
+                            .expect("Minter query failed")
+                    );
+                    println!(
+                        "burner: {:?}",
+                        admin
+                            .burner()
+                            .recv(program_id)
+                            .await
+                            .expect("Burner query failed")
+                    );
+                }
+                RolesAction::SetMinter { actor } => {
+                    admin
+                        .set_minter(str_to_actorid(actor))
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Set minter failed");
+                    println!(
+                        "minter: {:?}",
+                        admin
+                            .minter()
+                            .recv(program_id)
+                            .await
+                            .expect("Minter query failed")
+                    );
+                }
+                RolesAction::SetBurner { actor } => {
+                    admin
+                        .set_burner(str_to_actorid(actor))
+                        .with_gas_limit(gas_limit)
+                        .send_recv(program_id)
+                        .await
+                        .expect("Set burner failed");
+                    println!(
+                        "burner: {:?}",
+                        admin
+                            .burner()
+                            .recv(program_id)
+                            .await
+                            .expect("Burner query failed")
+                    );
+                }
+            }
         }
 
         CliCommands::HexEncodedMessage(..) => {}
@@ -287,22 +710,9 @@ impl Uploader {
     }
 
     async fn allocate_shards_impl(remoting: GClientRemoting, program_id: ActorId, gas_limit: u64) {
-        let mut vft_extension = vft_client::VftExtension::new(remoting);
-        while vft_extension
-            .allocate_next_balances_shard()
-            .with_gas_limit(gas_limit)
-            .send_recv(program_id)
+        vft_client::allocate_shards(remoting, program_id, gas_limit)
             .await
-            .expect("Failed to allocate next balances shard")
-        {}
-
-        while vft_extension
-            .allocate_next_allowances_shard()
-            .with_gas_limit(gas_limit)
-            .send_recv(program_id)
-            .await
-            .expect("Failed to allocate next allowances shard")
-        {}
+            .expect("Failed to initialize VFT storage");
     }
 
     async fn upload_code(&self, wasm_binary: &[u8]) -> CodeId {
@@ -421,25 +831,5 @@ impl Uploader {
             .expect("Failed to upload program");
 
         self.upload_common(program_id).await
-    }
-}
-
-async fn migrate_balances(
-    connection: ApiProviderConnection,
-    gear_suri: String,
-    args: MigrateBalances,
-) {
-    let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
-
-    if let Err(e) = gear_common::migrate_balances(
-        connection,
-        gear_suri,
-        size_batch,
-        str_to_actorid(args.vft),
-        str_to_actorid(args.vft_new),
-    )
-    .await
-    {
-        println!("Failed to migrate balances: {e:?}");
     }
 }

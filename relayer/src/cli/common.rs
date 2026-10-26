@@ -1,15 +1,98 @@
 use clap::Args;
 pub use cli_utils::{
-    BeaconConnectionArgs, BlockStorageArgs, EthereumConnectionArgs, EthereumTxArgs,
-    GearConnectionArgs, GearSignerArgs, GenesisConfigArgs, PrometheusArgs,
+    BeaconConnectionArgs, EthereumChainIdentityArgs, EthereumConnectionArgs, EthereumFinalityArgs,
+    EthereumTxArgs, GearConnectionArgs, GearSignerArgs, PrometheusArgs,
 };
 use std::path::PathBuf;
 
+#[derive(Args, Clone)]
+pub struct NativeWrapperApprovalArgs {
+    /// Exact independently approved capability file; required for any native wrapper.
+    #[arg(long, requires = "native_wrapper_approval_sha256")]
+    pub native_wrapper_approval: Option<PathBuf>,
+    #[arg(long, requires = "native_wrapper_approval")]
+    pub native_wrapper_approval_sha256: Option<primitive_types::H256>,
+}
+
+impl NativeWrapperApprovalArgs {
+    pub fn load(
+        &self,
+    ) -> anyhow::Result<Option<std::sync::Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>>
+    {
+        match (
+            &self.native_wrapper_approval,
+            self.native_wrapper_approval_sha256,
+        ) {
+            (None, None) => Ok(None),
+            (Some(path), Some(digest)) => Ok(Some(std::sync::Arc::new(
+                gear_common::native_wrapper::load_native_wrapper_approval(path, digest)?,
+            ))),
+            _ => anyhow::bail!(
+                "HOLD: wrapper approval file and independent SHA-256 are required together"
+            ),
+        }
+    }
+}
+
+#[derive(Args, Clone)]
+pub struct HistoricalReceiptApprovalArgs {
+    /// Existing approved coverage policy; only historicalReceipts authorize retained framing.
+    #[arg(long, requires = "historical_receipt_policy_keccak256")]
+    pub historical_receipt_policy: Option<PathBuf>,
+    #[arg(long, requires = "historical_receipt_policy")]
+    pub historical_receipt_policy_keccak256: Option<alloy::primitives::B256>,
+}
+
+impl HistoricalReceiptApprovalArgs {
+    pub fn load(
+        &self,
+        eth: &ethereum_client::PollingEthApi,
+    ) -> anyhow::Result<Vec<gear_common::receipt_framing::HistoricalReceiptApproval>> {
+        match (
+            &self.historical_receipt_policy,
+            self.historical_receipt_policy_keccak256,
+        ) {
+            (None, None) => Ok(Vec::new()),
+            (Some(path), Some(digest)) => {
+                let raw = gear_common::durable::committed_bytes(path)?;
+                anyhow::ensure!(
+                    alloy::primitives::keccak256(&raw) == digest,
+                    "HOLD: historical receipt policy differs from independent approval"
+                );
+                let policy: crate::message_relayer::eth_to_gear::cutover::preflight::CoveragePolicy =
+                    serde_json::from_slice(&raw)?;
+                policy.validate()?;
+                anyhow::ensure!(
+                    eth.finality_identity()?
+                        == (
+                            policy.ethereum_chain_id,
+                            policy.ethereum_genesis_hash.0.into()
+                        ),
+                    "HOLD: historical receipt policy belongs to another Ethereum chain"
+                );
+                Ok(policy.historical_receipts)
+            }
+            _ => anyhow::bail!(
+                "HOLD: historical receipt policy and independent Keccak-256 are required together"
+            ),
+        }
+    }
+}
+
 #[derive(Args)]
-pub struct ProofStorageArgs {
-    /// Gear fee payer. If not set, proofs are saved to file system
-    #[arg(long = "gear-fee-payer", env = "GEAR_FEE_PAYER")]
-    pub gear_fee_payer: Option<String>,
+pub struct LaneApprovalArgs {
+    /// Independently approved outbound lane identities and immutable delivery policies.
+    #[arg(long, env = "GEAR_ETH_LANE_APPROVAL")]
+    pub lane_approval: PathBuf,
+    /// Independently pinned SHA-256 of the exact lane approval file.
+    #[arg(long, env = "GEAR_ETH_LANE_APPROVAL_SHA256")]
+    pub lane_approval_sha256: alloy::primitives::B256,
+}
+
+impl LaneApprovalArgs {
+    pub fn load(&self) -> anyhow::Result<crate::lane_policy::LaneApprovals> {
+        crate::lane_policy::LaneApprovals::load(&self.lane_approval, self.lane_approval_sha256)
+    }
 }
 
 #[derive(Args)]
@@ -30,10 +113,6 @@ pub struct EthereumKillSwitchArgs {
     /// Private key for observer role
     #[arg(long = "eth-observer-pk-path", env = "ETH_OBSERVER_PK_PATH")]
     pub eth_observer_pk_path: PathBuf,
-
-    /// Private key for admin role
-    #[arg(long = "eth-admin-pk-path", env = "ETH_ADMIN_PK_PATH")]
-    pub eth_admin_pk_path: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
@@ -42,30 +121,20 @@ pub struct EthereumArgs {
     pub connection: EthereumConnectionArgs,
 
     #[clap(flatten)]
+    pub finality: EthereumFinalityArgs,
+    #[clap(flatten)]
+    pub identity: EthereumChainIdentityArgs,
+
+    #[clap(flatten)]
     pub tx: EthereumTxArgs,
 
     /// Ethereum address of message queue contract
     #[arg(long = "mq-address", env = "ETH_MESSAGE_QUEUE_ADDRESS")]
     pub mq_address: String,
-}
 
-#[derive(Args)]
-pub struct RelayerHttpArgs {
-    /// URL of the relayer HTTP endpoint
-    #[arg(long = "relayer-http-url", env = "RELAYER_HTTP_URL")]
-    pub url: String,
-
-    /// Access token for the relayer HTTP endpoint
-    #[arg(long = "relayer-http-access-token", env = "RELAYER_HTTP_ACCESS_TOKEN")]
-    pub access_token: String,
-
-    /// Timeout in seconds for requests to the relayer HTTP endpoint, default is 1800 seconds (30 minutes)
-    #[arg(
-        long = "relayer-http-timeout-secs",
-        default_value = "1800",
-        env = "RELAYER_HTTP_TIMEOUT_SECS"
-    )]
-    pub timeout_secs: u64,
+    /// Direct CREATE locator; finalized transaction/receipt tries and signature authenticate queue birth
+    #[arg(long, env = "QUEUE_DEPLOYMENT_TRANSACTION")]
+    pub queue_deployment_transaction: Option<alloy::primitives::B256>,
 }
 
 // Type aliases for backward compatibility or clarity if needed, though we use the structs directly above.

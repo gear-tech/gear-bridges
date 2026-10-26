@@ -1,0 +1,9 @@
+:root { color-scheme: dark; font: 16px system-ui, sans-serif; background: #13191e; color: #fff; }
+main { max-width: 52rem; margin: 3rem auto; padding: 1rem; }
+label { display: block; margin: 1rem 0; }
+input, select { display: block; box-sizing: border-box; width: 100%; padding: .8rem; margin-top: .5rem; }
+button { padding: .8rem; margin: 1rem 1rem 1rem 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+a { color: #00ffc4; }
+p { overflow-wrap: anywhere; line-height: 1.5; }
+:focus-visible { outline: 2px solid #00ffc4; outline-offset: 3px; }

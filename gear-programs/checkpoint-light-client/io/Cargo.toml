@@ -5,16 +5,22 @@ edition.workspace = true
 
 [dependencies]
 ark-bls12-381 = { workspace = true, features = ["curve"] }
+ark-ec.workspace = true
+ark-ff.workspace = true
 ark-scale.workspace = true
 ark-serialize.workspace = true
 ethereum-common.workspace = true
+gbuiltin-bls381.workspace = true
 sails-rs.workspace = true
 
 [features]
 default = ["std"]
 std = [
     "ark-bls12-381/std",
+    "ark-ec/std",
+    "ark-ff/std",
     "ark-scale/std",
     "ark-serialize/std",
     "ethereum-common/std",
+    "gbuiltin-bls381/std",
 ]

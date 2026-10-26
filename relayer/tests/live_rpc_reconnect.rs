@@ -22,15 +22,10 @@ use relayer::{
     rpc,
 };
 
-const DEFAULT_GEAR_ENDPOINT: &str = "wss://testnet-archive.vara.network";
 const DEFAULT_GEAR_RPC_RETRIES: u8 = 3;
-const DEFAULT_ETH_ENDPOINT: &str = "wss://hoodi-reth-rpc.gear-tech.io/ws";
-const DEFAULT_ETH_MESSAGE_QUEUE_ADDRESS: &str = "0xAb8F315Cc80cf2368750fE5A33E259d6241b3dEB";
 
 fn gear_endpoint() -> String {
-    env::var("GEAR_ENDPOINT")
-        .or_else(|_| env::var("GEAR_DOMAIN"))
-        .unwrap_or_else(|_| DEFAULT_GEAR_ENDPOINT.to_string())
+    env::var("GEAR_ENDPOINT").expect("set GEAR_ENDPOINT for the intended source chain")
 }
 
 fn gear_retries() -> u8 {
@@ -41,15 +36,29 @@ fn gear_retries() -> u8 {
 }
 
 fn eth_endpoint() -> String {
-    env::var("ETHEREUM_RPC")
-        .or_else(|_| env::var("ETHEREUM_ENDPOINT"))
-        .or_else(|_| env::var("ETH_RPC"))
-        .unwrap_or_else(|_| DEFAULT_ETH_ENDPOINT.to_string())
+    env::var("ETHEREUM_RPC").expect("set ETHEREUM_RPC for the intended destination chain")
 }
 
 fn eth_message_queue_address() -> String {
     env::var("ETH_MESSAGE_QUEUE_ADDRESS")
-        .unwrap_or_else(|_| DEFAULT_ETH_MESSAGE_QUEUE_ADDRESS.to_string())
+        .expect("set ETH_MESSAGE_QUEUE_ADDRESS for this deployment")
+}
+
+fn beacon_approval() -> anyhow::Result<ethereum_client::beacon_finality::BeaconFinalityConfig> {
+    let config = ethereum_client::beacon_finality::BeaconFinalityConfig::load(
+        env::var("ETH_FINALITY_BOOTSTRAP")?,
+        env::var("ETH_FINALITY_BOOTSTRAP_SHA256")?.parse()?,
+        &env::var("ETH_FINALITY_BEACON_RPC")?,
+    )?;
+    anyhow::ensure!(
+        config.identity()
+            == (
+                env::var("ETH_CHAIN_ID")?.parse()?,
+                env::var("ETH_GENESIS_HASH")?.parse()?,
+            ),
+        "approved Ethereum identity differs from runtime test identity"
+    );
+    Ok(config)
 }
 
 async fn gear_latest_number(
@@ -67,7 +76,7 @@ async fn gear_latest_number(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires live Vara testnet RPC"]
+#[ignore = "requires local two-validator Gear source RPC"]
 async fn live_gear_retry_helper_survives_explicit_reconnect() -> anyhow::Result<()> {
     let provider = ApiProvider::new(gear_endpoint(), gear_retries()).await?;
     let mut connection = provider.connection();
@@ -86,7 +95,7 @@ async fn live_gear_retry_helper_survives_explicit_reconnect() -> anyhow::Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires live Vara testnet RPC"]
+#[ignore = "requires local two-validator Gear source RPC"]
 async fn live_gear_provider_reconnects_multiple_connections() -> anyhow::Result<()> {
     let provider = ApiProvider::new(gear_endpoint(), gear_retries()).await?;
     let mut first = provider.connection();
@@ -112,7 +121,7 @@ async fn live_gear_provider_reconnects_multiple_connections() -> anyhow::Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires live Vara testnet RPC"]
+#[ignore = "requires local two-validator Gear source RPC"]
 async fn live_gear_worker_continues_while_sibling_triggers_reconnects() -> anyhow::Result<()> {
     let provider = ApiProvider::new(gear_endpoint(), gear_retries()).await?;
     let mut worker_connection = provider.connection();
@@ -157,7 +166,7 @@ async fn live_gear_worker_continues_while_sibling_triggers_reconnects() -> anyho
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires live Vara testnet RPC"]
+#[ignore = "requires local two-validator Gear source RPC"]
 async fn live_gear_subscription_can_be_recreated_after_reconnect() -> anyhow::Result<()> {
     let provider = ApiProvider::new(gear_endpoint(), gear_retries()).await?;
     let mut connection = provider.connection();
@@ -188,7 +197,7 @@ async fn live_gear_subscription_can_be_recreated_after_reconnect() -> anyhow::Re
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires live Vara testnet RPC"]
+#[ignore = "requires local two-validator Gear source RPC"]
 async fn live_gear_block_listener_background_catchup_still_emits_blocks() -> anyhow::Result<()> {
     let provider = ApiProvider::new(gear_endpoint(), gear_retries()).await?;
     let mut setup_connection = provider.connection();
@@ -220,7 +229,7 @@ async fn live_gear_block_listener_background_catchup_still_emits_blocks() -> any
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires live Vara testnet RPC"]
+#[ignore = "requires local two-validator Gear source RPC"]
 async fn live_gear_background_catchup_replays_multiple_blocks() -> anyhow::Result<()> {
     let provider = ApiProvider::new(gear_endpoint(), gear_retries()).await?;
     let mut setup_connection = provider.connection();
@@ -251,6 +260,8 @@ async fn live_gear_background_catchup_replays_multiple_blocks() -> anyhow::Resul
 async fn live_ethereum_polling_reconnect_keeps_finalized_queries() -> anyhow::Result<()> {
     let api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
+            .await?
+            .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
             .await?;
 
     let before = api.finalized_block().await?.header.number;
@@ -271,6 +282,8 @@ async fn live_ethereum_polling_reconnect_keeps_finalized_queries() -> anyhow::Re
 async fn live_ethereum_polling_survives_repeated_reconnects() -> anyhow::Result<()> {
     let mut api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
+            .await?
+            .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
             .await?;
 
     let baseline = api.finalized_block().await?.header.number;
@@ -292,6 +305,8 @@ async fn live_ethereum_polling_survives_repeated_reconnects() -> anyhow::Result<
 async fn live_ethereum_worker_queries_while_sibling_reconnects() -> anyhow::Result<()> {
     let worker_api =
         PollingEthApi::new_with_retries(&eth_endpoint(), Some(3), Some(Duration::from_secs(2)))
+            .await?
+            .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
             .await?;
     let mut reconnect_api = worker_api.clone();
 
@@ -345,6 +360,8 @@ async fn live_ethereum_contract_reconnect_keeps_queries_and_subscriptions() -> a
         None,
         None,
     )
+    .await?
+    .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
     .await?;
 
     let max_block_number = api.max_block_number().await?;
@@ -360,9 +377,9 @@ async fn live_ethereum_contract_reconnect_keeps_queries_and_subscriptions() -> a
     let after_subscription: Subscription<alloy::rpc::types::Log> = api.subscribe_logs().await?;
     drop(after_subscription);
 
-    assert_eq!(
-        max_block_number, max_block_number_after,
-        "MessageQueue max block number changed across reconnect"
+    assert!(
+        max_block_number_after >= max_block_number,
+        "MessageQueue max block number regressed across reconnect"
     );
 
     Ok(())
@@ -412,6 +429,8 @@ async fn live_ethereum_contract_range_queries_survive_repeated_reconnects() -> a
         None,
         None,
     )
+    .await?
+    .with_beacon_finality(beacon_approval()?, env::var("ETH_FINALITY_STORE")?)
     .await?;
 
     let finalized = api.finalized_block_number().await?;

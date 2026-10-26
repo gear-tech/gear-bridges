@@ -19,14 +19,14 @@ type Props = Pick<
   Transfer,
   'sourceNetwork' | 'destNetwork' | 'source' | 'destination' | 'amount' | 'sender' | 'receiver'
 > & {
-  getHistoryToken: (sourceAddress: HexString, destinationAddress: HexString) => Token;
+  getHistoryToken: (sourceAddress: HexString | null, destinationAddress: HexString | null) => Token;
 };
 
 function TransactionPair(props: Props) {
   const { sourceNetwork, destNetwork, source, destination, amount, sender, receiver, getHistoryToken } = props;
 
-  const sourceHex = source as HexString;
-  const destinationHex = destination as HexString;
+  const sourceHex = source as HexString | null;
+  const destinationHex = destination as HexString | null;
 
   const sourceToken = getHistoryToken(sourceHex, destinationHex);
   const sourceSymbol = sourceToken?.displaySymbol ?? 'Unit';

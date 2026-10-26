@@ -1,35 +1,36 @@
 use alloy::{
+    eips::eip2718::Encodable2718,
     primitives::{fixed_bytes, FixedBytes},
     rpc::types::TransactionReceipt,
 };
-use alloy_rlp::Encodable;
 use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
     beacon::electra::Block,
-    utils::{
-        self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof,
-        ReceiptEnvelope,
-    },
+    utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
 use gear_common::api_provider::ApiProvider;
 use relayer::message_relayer::{
     common::{EthereumSlotNumber, TxHashWithSlot},
     eth_to_gear::{
-        message_sender::{self, MessageSender, MessageSenderIo},
+        message_sender::{MessageSender, MessageStatus},
         proof_composer::{self, ProofComposerIo},
-        storage::NoStorage,
+        storage::{BlockStorage, Storage},
         tx_manager::*,
     },
 };
 use ruzstd::{self, StreamingDecoder};
-use sails_rs::{calls::Call, gclient::calls::GClientRemoting, Encode};
+use sails_rs::{
+    calls::{Call, Query},
+    gclient::calls::GClientRemoting,
+    Encode,
+};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
     sync::{Arc, LazyLock},
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use vft_manager_client::traits::VftManager;
 
 #[derive(Deserialize, Debug)]
@@ -57,12 +58,11 @@ use primitive_types::H160;
 
 impl TestTx {
     pub fn eth_token_id(&self) -> H160 {
-        use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
         let event = self.event();
 
-        let receipt =
-            ReceiptEnvelope::decode(&mut &event.receipt_rlp[..]).expect("Failed to decode receipt");
+        let receipt = eth_utils::decode_canonical_receipt(&event.receipt_rlp)
+            .expect("Failed to decode canonical receipt");
 
         if !receipt.is_success() {
             panic!("Receipt is not successful");
@@ -103,8 +103,7 @@ impl TestTx {
         let MerkleProof { proof, receipt } =
             eth_utils::generate_merkle_proof(self.tx_index, &receipts).unwrap();
 
-        let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
-        Encodable::encode(&receipt, &mut receipt_rlp);
+        let receipt_rlp = receipt.encoded_2718();
 
         let block = BlockGenericForBlockBody {
             slot: self.block.data.message.slot,
@@ -153,155 +152,28 @@ struct MockProofComposer;
 
 impl MockProofComposer {
     async fn run(
-        mut requests: UnboundedReceiver<proof_composer::Request>,
-        response: UnboundedSender<proof_composer::Response>,
+        mut requests: Receiver<proof_composer::Request>,
+        response: Sender<proof_composer::Response>,
     ) {
         tokio::task::spawn(async move {
-            loop {
-                if requests.is_closed() || response.is_closed() {
-                    return;
-                }
-
-                let req = requests.recv().await.unwrap();
-
+            while let Some(req) = requests.recv().await {
                 let tx = TRANSACTIONS.get(&req.tx.tx_hash).unwrap();
 
                 let event = tx.event();
                 println!("compose proof #{}: {:?}", req.tx_uuid, tx.tx_hash);
-                response
+                if response
                     .send(proof_composer::Response {
                         payload: event,
                         tx_uuid: req.tx_uuid,
                     })
-                    .unwrap();
-            }
-        });
-    }
-}
-
-struct MockMessageSender;
-
-impl MockMessageSender {
-    async fn run(
-        mut requests: UnboundedReceiver<message_sender::Request>,
-        responses: UnboundedSender<message_sender::Response>,
-    ) {
-        tokio::task::spawn(async move {
-            loop {
-                if requests.is_closed() || responses.is_closed() {
+                    .await
+                    .is_err()
+                {
                     return;
                 }
-                let req = requests.recv().await.unwrap();
-
-                let tx = TRANSACTIONS.get(&req.tx_hash).unwrap();
-                assert_eq!(tx.event(), req.payload);
-                println!("send message for #{}: {:?}", req.tx_uuid, req.tx_hash);
-                if req.tx_hash == TX_TO_FAIL {
-                    responses
-                        .send(message_sender::Response {
-                            tx_uuid: req.tx_uuid,
-                            status: message_sender::MessageStatus::Failure(
-                                "Mock failure for testing".to_string(),
-                            ),
-                        })
-                        .unwrap();
-                    continue;
-                }
-                responses
-                    .send(message_sender::Response {
-                        tx_uuid: req.tx_uuid,
-                        status: message_sender::MessageStatus::Success,
-                    })
-                    .unwrap();
             }
         });
     }
-}
-
-#[tokio::test]
-async fn test_relayer_mock() {
-    let txs = &*TRANSACTIONS;
-
-    for (_, tx) in txs.iter() {
-        println!(
-            "Eth token ID for transaction {:?}: {:?}",
-            tx.tx_hash,
-            tx.eth_token_id()
-        );
-    }
-
-    let (events_tx, mut events_rx) = unbounded_channel();
-
-    for (_, tx) in txs.iter() {
-        let tx_event = TxHashWithSlot {
-            tx_hash: tx.tx_hash,
-            slot_number: EthereumSlotNumber(tx.slot_number),
-        };
-
-        events_tx.send(tx_event).unwrap();
-    }
-
-    let (proof_req_tx, proof_req_rx) = unbounded_channel();
-    let (proof_res_tx, proof_res_rx) = unbounded_channel();
-
-    let mut proof_composer = ProofComposerIo::new(proof_req_tx, proof_res_rx);
-
-    let (message_req_tx, message_req_rx) = unbounded_channel();
-    let (message_res_tx, message_res_rx) = unbounded_channel();
-
-    let mut message_sender = MessageSenderIo::new(message_req_tx, message_res_rx);
-
-    let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
-    MockProofComposer::run(proof_req_rx, proof_res_tx).await;
-    MockMessageSender::run(message_req_rx, message_res_tx).await;
-    loop {
-        let res = tx_manager
-            .process(&mut events_rx, &mut proof_composer, &mut message_sender)
-            .await;
-        assert!(matches!(res, Ok(true)));
-
-        if tx_manager.completed.read().await.len() == txs.len() - 1
-            && tx_manager.failed.read().await.len() == 1
-        {
-            break;
-        }
-    }
-
-    for (_, tx) in tx_manager.completed.read().await.iter() {
-        assert!(
-            txs.contains_key(&tx.tx.tx_hash),
-            "Transaction {:?} not found in test data",
-            tx.tx.tx_hash
-        );
-    }
-
-    let failed = tx_manager.failed.read().await;
-
-    let (failed_tx, msg) = failed
-        .iter()
-        .next()
-        .expect("Expected one failed transaction");
-
-    assert_eq!(
-        tx_manager
-            .transactions
-            .read()
-            .await
-            .get(failed_tx)
-            .unwrap()
-            .tx
-            .tx_hash,
-        TX_TO_FAIL,
-        "Failed transaction does not match expected hash"
-    );
-    assert_eq!(
-        msg, "Mock failure for testing",
-        "Failed transaction does not match expected failure message"
-    );
-    println!("Failed transaction: {failed_tx:?}, reason: {msg}");
-
-    // drop here so that channel is not closed before the tasks finish
-    drop(events_tx);
 }
 
 #[tokio::test]
@@ -323,6 +195,197 @@ async fn test_api_provider() {
         client.last_block_number().await.is_ok(),
         "Failed to get block number"
     );
+}
+
+#[cfg(test)]
+struct TestStorage(BlockStorage);
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl Storage for TestStorage {
+    fn block_storage(&self) -> &BlockStorage {
+        &self.0
+    }
+    async fn save(&self, _manager: &TransactionManager) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn load(&self, _manager: &TransactionManager) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn save_blocks(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn custom_consumer_preserves_authenticated_original_result() {
+    use crate::{connect_to_node, DEFAULT_BALANCE};
+    use eth_events_electra_client::traits::EthEventsElectraFactory;
+    use gclient::{Event, EventProcessor, GearEvent};
+    use historical_proxy_client::traits::{HistoricalProxy, HistoricalProxyFactory};
+    use primitive_types::H256;
+    use sails_rs::{
+        calls::{ActionIo, Activation},
+        Decode,
+    };
+
+    let fixture = TRANSACTIONS.values().next().unwrap();
+    let proof = fixture.event();
+    let conn = connect_to_node(
+        &[DEFAULT_BALANCE],
+        "custom inbound consumer",
+        &[
+            historical_proxy::WASM_BINARY,
+            eth_events_electra::WASM_BINARY,
+            mock_contract::WASM_BINARY,
+        ],
+    )
+    .await;
+    let api = conn.api.with(&conn.accounts[0].2).unwrap();
+    let consumer = conn.accounts[0].0;
+    let (_, checkpoint, _) = api
+        .create_program_bytes(conn.code_ids[2], conn.salt, [], conn.gas_limit, 0)
+        .await
+        .unwrap();
+    let remoting = GClientRemoting::new(api.clone());
+    let endpoint = eth_events_electra_client::EthEventsElectraFactory::new(remoting.clone())
+        .new(checkpoint)
+        .send_recv(conn.code_ids[1], conn.salt)
+        .await
+        .unwrap();
+    let proxy = historical_proxy_client::HistoricalProxyFactory::new(remoting.clone())
+        .new()
+        .send_recv(conn.code_ids[0], conn.salt)
+        .await
+        .unwrap();
+    historical_proxy_client::HistoricalProxy::new(remoting)
+        .add_endpoint(fixture.slot_number, endpoint)
+        .send_recv(proxy)
+        .await
+        .unwrap();
+    let provider = ApiProvider::new("ws://127.0.0.1:9944".into(), 2)
+        .await
+        .unwrap();
+    let route = ("Ping", "SubmitReceipt").encode();
+    let sender = MessageSender::new(
+        consumer.into_bytes().into(),
+        route.clone(),
+        proxy.into_bytes().into(),
+        provider.connection(),
+        conn.accounts[0].2.clone(),
+        None,
+    )
+    .with_approved_gear_gas_limit(conn.gas_limit)
+    .unwrap();
+    // This account has no VFT-manager query interface. Only the manager route
+    // may require its domain/economic queries; generic preparation must work.
+    let manager_sender = MessageSender::new(
+        consumer.into_bytes().into(),
+        vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec(),
+        proxy.into_bytes().into(),
+        provider.connection(),
+        conn.accounts[0].2.clone(),
+        None,
+    )
+    .with_approved_gear_gas_limit(conn.gas_limit)
+    .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        assert!(manager_sender
+            .prepare_submission(&api, &proof)
+            .await
+            .is_err());
+        for accepted in [false, true] {
+            let mut signed = sender.prepare_submission(&api, &proof).await.unwrap();
+            let mut listener = api.subscribe().await.unwrap();
+            let mut receiver_reply = route.clone();
+            if accepted {
+                // Ping's non-unit Delivery body must remain intact.
+                receiver_reply
+                    .extend(Result::<_, u8>::Ok((H256::repeat_byte(7), vec![1u8, 2, 3])).encode());
+            } else {
+                receiver_reply.extend(Result::<(), u8>::Err(7).encode());
+            }
+            let consumer_reply = async {
+                let message_id = listener
+                    .proc(|event| match event {
+                        Event::Gear(GearEvent::UserMessageSent { message, .. })
+                            if message.source() == proxy
+                                && message.destination() == consumer
+                                && message.details().is_none()
+                                && message.payload_bytes().starts_with(&route) =>
+                        {
+                            let mut params = &message.payload_bytes()[route.len()..];
+                            let (slot, index, receipt) =
+                                <(u64, u64, Vec<u8>)>::decode(&mut params).unwrap();
+                            assert!(params.is_empty());
+                            assert_eq!(
+                                (slot, index),
+                                (fixture.slot_number, proof.transaction_index)
+                            );
+                            assert_eq!(receipt, proof.receipt_rlp);
+                            Some(message.id())
+                        }
+                        _ => None,
+                    })
+                    .await
+                    .unwrap();
+                api.send_reply_bytes(
+                    message_id,
+                    receiver_reply.clone(),
+                    conn.gas_limit / 100 * 95,
+                    0,
+                )
+                .await
+                .unwrap();
+            };
+            let submission = sender.reconcile_signed_submission(&api, &proof, &mut signed, None);
+            let (_, submitted) = tokio::join!(consumer_reply, submission);
+            submitted.unwrap();
+            let (status, outcome) = loop {
+                let result = sender
+                    .reconcile_signed_submission(&api, &proof, &mut signed, None)
+                    .await
+                    .unwrap();
+                if signed.finalized_reply.is_some() {
+                    break result;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            };
+            assert_eq!(outcome, Some(Ok(receiver_reply)));
+            assert!(signed.native_reconciliation.is_none());
+            if accepted {
+                assert!(matches!(status, MessageStatus::Success { .. }));
+                let pin = &signed.finalized_reply.as_ref().unwrap().observation;
+                sender
+                    .verify_saved_completion(&api, &proof, &signed, pin)
+                    .await
+                    .unwrap();
+            } else {
+                assert!(matches!(status, MessageStatus::NeedsReconciliation { .. }));
+            }
+            let id = signed.message_id.as_deref().unwrap().parse().unwrap();
+            assert!(sender
+                .find_finalized_reply(&mut signed.clone(), id, H256::zero())
+                .await
+                .is_err());
+            let changed_route = MessageSender::new(
+                consumer.into_bytes().into(),
+                ("Other", "SubmitReceipt").encode(),
+                proxy.into_bytes().into(),
+                provider.connection(),
+                conn.accounts[0].2.clone(),
+                None,
+            )
+            .with_approved_gear_gas_limit(conn.gas_limit)
+            .unwrap();
+            assert!(changed_route
+                .reconcile_signed_submission(&api, &proof, &mut signed.clone(), None)
+                .await
+                .is_err());
+        }
+    })
+    .await
+    .expect("custom consumer original-result qualification exceeded 120 seconds");
 }
 
 #[tokio::test]
@@ -349,8 +412,8 @@ async fn test_tx_manager() {
         .gclient_client(&contracts.suri)
         .expect("Failed to create GClient client");
 
-    let (proof_req_tx, proof_req_rx) = unbounded_channel();
-    let (proof_res_tx, proof_res_rx) = unbounded_channel();
+    let (proof_req_tx, proof_req_rx) = channel(128);
+    let (proof_res_tx, proof_res_rx) = channel(128);
 
     let mut proof_composer_io = ProofComposerIo::new(proof_req_tx, proof_res_rx);
 
@@ -362,69 +425,161 @@ async fn test_tx_manager() {
         contracts.historical_proxy.into_bytes().into(),
         conn.clone(),
         contracts.suri2.clone(),
-    );
+        None,
+    )
+    .with_approved_gear_gas_limit(contracts.gas_limit)
+    .unwrap();
 
     let mut message_sender_io = message_sender.run();
 
-    let tx_manager = TransactionManager::new(Arc::new(NoStorage::new()));
+    let tx_manager = TransactionManager::new(Arc::new(TestStorage(BlockStorage::new())));
 
-    let (events_tx, mut events_rx) = unbounded_channel();
+    let (events_tx, mut events_rx) = channel(128);
 
-    for (_, tx_data) in TRANSACTIONS.iter().filter(|(hash, _)| **hash != TX_TO_FAIL) {
-        let tx_event = TxHashWithSlot {
-            tx_hash: tx_data.tx_hash,
-            slot_number: EthereumSlotNumber(tx_data.slot_number),
+    // Bound the delivery batch independently of deployment and the paused-receipt scenario.
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        let produce = async {
+            for (_, tx_data) in TRANSACTIONS.iter().filter(|(hash, _)| **hash != TX_TO_FAIL) {
+                let tx_event = TxHashWithSlot {
+                    tx_hash: tx_data.tx_hash,
+                    slot_number: EthereumSlotNumber(tx_data.slot_number),
+                };
+
+                events_tx.send(tx_event).await.unwrap();
+            }
         };
+        let consume = async {
+            loop {
+                assert!(
+                    tx_manager
+                        .process(
+                            &mut events_rx,
+                            &mut proof_composer_io,
+                            &mut message_sender_io,
+                        )
+                        .await
+                        .expect("transaction manager failed while delivering receipts"),
+                    "transaction manager channel closed before delivery completed"
+                );
+                if tx_manager.completed.read().await.len() == TRANSACTIONS.len() - 1 {
+                    break;
+                }
+            }
+        };
+        tokio::join!(produce, consume);
+    })
+    .await
+    .expect("native receipt delivery batch exceeded 120 seconds after deployment");
 
-        events_tx.send(tx_event).unwrap();
-    }
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        let delivered = tx_manager
+            .completed
+            .read()
+            .await
+            .values()
+            .next()
+            .unwrap()
+            .clone();
+        let mut signed = delivered
+            .receipt
+            .as_ref()
+            .unwrap()
+            .signed_submission
+            .as_ref()
+            .unwrap()
+            .clone();
+        signed.chain_genesis_hash = format!("{:#x}", primitive_types::H256::zero());
+        assert!(
+            message_sender_io
+                .submit_prepared(
+                    delivered.uuid,
+                    delivered.tx.tx_hash,
+                    TRANSACTIONS.get(&delivered.tx.tx_hash).unwrap().event(),
+                    signed,
+                    None,
+                )
+                .await
+        );
+        let rejected = message_sender_io
+            .recv()
+            .await
+            .expect("message sender disconnected");
+        assert!(matches!(
+            rejected.status,
+            MessageStatus::NeedsReconciliation { .. }
+        ));
 
-    while let Ok(true) = tx_manager
-        .process(
-            &mut events_rx,
-            &mut proof_composer_io,
-            &mut message_sender_io,
-        )
-        .await
-    {
-        if tx_manager.completed.read().await.len() == TRANSACTIONS.len() - 1 {
-            break;
+        let remoting = GClientRemoting::new(client.clone());
+
+        let mut manager = vft_manager_client::VftManager::new(remoting);
+        manager
+            .pause()
+            .send_recv(contracts.vft_manager)
+            .await
+            .expect("Failed to pause vft-manager");
+
+        events_tx
+            .send(TxHashWithSlot {
+                tx_hash: TX_TO_FAIL,
+                slot_number: EthereumSlotNumber(TRANSACTIONS.get(&TX_TO_FAIL).unwrap().slot_number),
+            })
+            .await
+            .unwrap();
+
+        loop {
+            assert!(
+                tx_manager
+                    .process(
+                        &mut events_rx,
+                        &mut proof_composer_io,
+                        &mut message_sender_io,
+                    )
+                    .await
+                    .expect("transaction manager failed while retaining a paused receipt"),
+                "transaction manager channel closed before reconciliation evidence arrived"
+            );
+            let held_uuid = tx_manager
+                .transactions
+                .read()
+                .await
+                .values()
+                .find(|tx| tx.tx.tx_hash == TX_TO_FAIL)
+                .map(|tx| tx.uuid);
+            let failed = tx_manager.failed.read().await;
+            if held_uuid.is_some_and(|uuid| failed.contains_key(&uuid)) {
+                break;
+            }
         }
-    }
 
-    let remoting = GClientRemoting::new(client.clone());
+        let receipt_key = {
+            let pending = tx_manager.transactions.read().await;
+            let held = pending
+                .values()
+                .find(|tx| tx.tx.tx_hash == TX_TO_FAIL)
+                .unwrap();
+            assert!(matches!(held.status, TxStatus::PreparingSubmission));
+            let receipt = held.receipt.as_ref().unwrap();
+            assert!(receipt.signed_submission.is_none());
+            assert!(receipt.initial_response.is_none());
+            assert!(receipt.submission_attempts.is_empty());
+            assert_eq!(
+                held.receipt_event().unwrap().encode(),
+                TRANSACTIONS.get(&TX_TO_FAIL).unwrap().event().encode()
+            );
+            receipt.receipt_key
+        };
+        assert_eq!(
+            manager
+                .receipt_status(receipt_key.0, receipt_key.1)
+                .recv(contracts.vft_manager)
+                .await
+                .unwrap(),
+            vft_manager_client::ReceiptStatus::Unknown,
+        );
 
-    vft_manager_client::VftManager::new(remoting)
-        .pause()
-        .send_recv(contracts.vft_manager)
-        .await
-        .expect("Failed to pause vft-manager");
-
-    events_tx
-        .send(TxHashWithSlot {
-            tx_hash: TX_TO_FAIL,
-            slot_number: EthereumSlotNumber(TRANSACTIONS.get(&TX_TO_FAIL).unwrap().slot_number),
-        })
-        .unwrap();
-
-    while let Ok(true) = tx_manager
-        .process(
-            &mut events_rx,
-            &mut proof_composer_io,
-            &mut message_sender_io,
-        )
-        .await
-    {
-        if tx_manager.failed.read().await.len() == 1 {
-            break;
-        }
-    }
-
-    let failed = tx_manager.failed.read().await;
-    let msg = failed.first_key_value().unwrap().1;
-
-    assert!(msg.contains("Paused"));
-
-    // drop here so that channel is not closed before the tasks finish
-    drop(events_tx);
+        // drop here so that channel is not closed before the tasks finish
+        drop(events_tx);
+    })
+    .await
+    .expect("native paused-receipt scenario exceeded 120 seconds");
 }

@@ -5,27 +5,6 @@ import { Status } from '@/features/history/types';
 
 import styles from './tooltip-content.module.scss';
 
-function PriorityTooltipContent() {
-  return (
-    <>
-      <p>
-        <span className={styles.bold}>Transfer Speed</span> defines how quickly your transfer will be processed:
-      </p>
-
-      <ul className={styles.list}>
-        <li>
-          <span className={styles.bold}>Fast</span> - recommended accelerated processing (~20 minutes) with a higher
-          fee.
-        </li>
-
-        <li>
-          <span className={styles.bold}>Common</span> - standard speed (~1 hour) with a lower fee.
-        </li>
-      </ul>
-    </>
-  );
-}
-
 function ClaimTypeTooltipContent() {
   return (
     <>
@@ -53,7 +32,6 @@ function ClaimTypeTooltipContent() {
 }
 
 const TooltipContent = {
-  Priority: PriorityTooltipContent,
   ClaimType: ClaimTypeTooltipContent,
 };
 

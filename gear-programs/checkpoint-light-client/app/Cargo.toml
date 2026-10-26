@@ -4,17 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-ark-bls12-381 = { workspace = true, features = ["curve"] }
-ark-ec.workspace = true
-ark-scale.workspace = true
-ark-serialize.workspace = true
 checkpoint-light-client-io.workspace = true
 circular-buffer.workspace = true
 ethereum-common.workspace = true
-gbuiltin-bls381.workspace = true
 hex-literal.workspace = true
 sails-rs.workspace = true
-tree_hash_derive.workspace = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "none"))'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }

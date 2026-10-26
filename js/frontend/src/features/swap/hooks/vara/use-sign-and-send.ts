@@ -6,6 +6,8 @@ import { ISubmittableResult } from '@polkadot/types/types';
 import { useMutation } from '@tanstack/react-query';
 import { throwOnErrorReply } from 'sails-js';
 
+import { signAndSendFinalized, waitForFinalizedReplies } from '../../submission';
+
 type Extrinsic = SubmittableExtrinsic<'promise', ISubmittableResult>;
 
 type Parameters = {
@@ -15,6 +17,7 @@ type Parameters = {
 type SignAndSendParameters = {
   extrinsic: Extrinsic;
   addressOrPair?: AddressOrPair;
+  destinations: HexString[];
 };
 
 const DEFAULT_OPTIONS = {
@@ -25,69 +28,56 @@ function useSignAndSend({ programs }: Parameters) {
   const { api } = useApi();
   const { account } = useAccount();
 
-  // to handle errors in case of not enough gas
-  const checkErrorReplies = (blockHash: HexString, queuedMessages: MessageQueuedData[]) => {
+  const signAndSend = async ({ extrinsic, destinations, ...parameters }: SignAndSendParameters) => {
     if (!api) throw new Error('API is not initialized');
-
-    const promises = queuedMessages.map(async ({ destination, id }) => {
-      const program = programs.find((_program) => _program!.programId === destination.toHex());
-
-      if (!program) return;
-      const { programId, registry } = program;
-
-      const reply = await api.message.getReplyEvent(programId, id.toHex(), blockHash);
-      const { details, payload } = reply.data.message;
-
-      return throwOnErrorReply(details.unwrap().code, payload, api.specVersion, registry);
-    });
-
-    return Promise.all(promises);
+    if (!account) throw new Error('Account is not found');
+    const { address, signer } = account;
+    const { addressOrPair } = { ...DEFAULT_OPTIONS, ...parameters };
+    const deadline = Date.now() + 44 * 60 * 1000;
+    const {
+      events,
+      status,
+      txHash: originalHash,
+    } = await signAndSendFinalized(extrinsic, addressOrPair ?? address, addressOrPair ? {} : { signer }, deadline);
+    const blockHash = status.asFinalized.toHex();
+    const txHash = originalHash.toHex();
+    try {
+      const failed = events.find(({ event }) => event.section === 'system' && event.method === 'ExtrinsicFailed');
+      if (failed) {
+        const error = api.getExtrinsicFailedError(failed.event);
+        throw new Error(`${error.method}: ${error.docs}`);
+      }
+      if (!events.some(({ event }) => event.section === 'system' && event.method === 'ExtrinsicSuccess'))
+        throw new Error('Missing finalized extrinsic success');
+      const queued = events
+        .filter(({ event }) => event.section === 'gear' && event.method === 'MessageQueued')
+        .map(({ event }) => event.data as MessageQueuedData);
+      if (
+        queued.length !== destinations.length ||
+        queued.some((message, i) => message.destination.toHex().toLowerCase() !== destinations[i].toLowerCase())
+      )
+        throw new Error('Original transaction message count or destination mismatch');
+      const finalizedReplies = await waitForFinalizedReplies(api, blockHash, queued, deadline);
+      const replies = queued.map(({ destination, id }, index) => {
+        const programId = destination.toHex();
+        const messageId = id.toHex();
+        const program = programs.find((candidate) => candidate?.programId.toLowerCase() === programId.toLowerCase());
+        if (!program) throw new Error(`Program is not found: ${programId}`);
+        try {
+          const { details, payload } = finalizedReplies[index];
+          throwOnErrorReply(details.unwrap().code, payload, api.specVersion, program.registry);
+          return { programId, messageId, payload: payload.toU8a(true) };
+        } catch (error) {
+          throw new Error(`Message ${messageId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+      return { blockHash, txHash, replies };
+    } catch (error) {
+      throw new Error(
+        `Vara source transaction ${txHash} at ${blockHash}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   };
-
-  const signAndSend = ({ extrinsic, ...parameters }: SignAndSendParameters) =>
-    new Promise<{ blockHash: HexString }>((resolve, reject) => {
-      if (!api) throw new Error('API is not initialized');
-      if (!account) throw new Error('Account is not found');
-      if (programs.includes(undefined)) throw new Error('Each program is not found');
-
-      const { address, signer } = account;
-      const { addressOrPair } = { ...DEFAULT_OPTIONS, ...parameters };
-
-      const statusCallback = (result: ISubmittableResult) => {
-        const { events, status } = result;
-        if (!status.isInBlock) return;
-
-        const queuedMessages: MessageQueuedData[] = [];
-
-        events.forEach(({ event }) => {
-          const { method, section } = event;
-
-          if (method === 'MessageQueued' && section === 'gear') queuedMessages.push(event.data as MessageQueuedData);
-
-          if (method === 'ExtrinsicFailed') {
-            const error = api.getExtrinsicFailedError(event);
-            const message = `${error.method}: ${error.docs}`;
-
-            reject(new Error(message));
-          }
-
-          if (method === 'ExtrinsicSuccess') {
-            const blockHash = status.asInBlock.toHex();
-
-            checkErrorReplies(blockHash, queuedMessages)
-              .then(() => resolve({ blockHash }))
-              .catch((error: Error) => reject(error));
-          }
-        });
-      };
-
-      const _signAndSend = () =>
-        addressOrPair
-          ? extrinsic.signAndSend(addressOrPair, statusCallback)
-          : extrinsic.signAndSend(address, { signer }, statusCallback);
-
-      _signAndSend().catch((error: Error) => reject(error));
-    });
 
   return useMutation({ mutationFn: signAndSend });
 }

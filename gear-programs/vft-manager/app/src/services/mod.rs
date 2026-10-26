@@ -1,28 +1,47 @@
 use ::gstd::{static_mut, static_ref};
 use gstd::exec::{self};
 use sails_rs::{
-    calls::*,
-    gstd::{self, calls::GStdRemoting, msg},
+    calls::ActionIo,
+    gstd::{self, msg},
     prelude::*,
 };
-use vft_client::traits::*;
-use vft_manager_client::traits::VftManager as _;
 
+mod cutover;
 mod error;
 mod token_mapping;
+pub use cutover::{
+    handle_upgrade_reply, CustodyTransferAttempt, CustodyTransferOutcome, CutoverAbort,
+    CutoverPhase, CutoverStatus,
+};
 
 use error::Error;
-use request_bridging::{MessageStatus, TxDetails};
+pub use request_bridging::{
+    handle_bridge_reply, handle_source_token_reply, SourceRequestEvidence, SourceRequestOutcome,
+};
 use token_mapping::TokenMap;
 
 mod request_bridging;
 pub mod submit_receipt;
 
-pub use submit_receipt::abi as eth_abi;
+pub use submit_receipt::{abi as eth_abi, ReceiptRejectionEvidence};
 
-#[allow(dead_code)]
-mod vft_manager_client {
-    include!(concat!(env!("OUT_DIR"), "/vft_manager_client.rs"));
+fn decode_complete_reply<Action: ActionIo>(
+    bytes: &[u8],
+    map_decode_error: impl FnOnce(sails_rs::errors::Error) -> Error,
+) -> Result<Action::Reply, Error>
+where
+    Action::Reply: Encode,
+{
+    let reply = Action::decode_reply(bytes).map_err(map_decode_error)?;
+    let route_len = if Action::is_empty_tuple::<Action::Reply>() {
+        0
+    } else {
+        Action::ROUTE.len()
+    };
+    if bytes.len() != route_len + reply.encoded_size() {
+        return Err(Error::InvalidReply);
+    }
+    Ok(reply)
 }
 
 pub const SIZE_FILL_TRANSACTIONS_STEP: usize = 50_000;
@@ -33,6 +52,19 @@ pub const EMERGENCY_STOP_DURATION_BLOCKS: u32 = 57_600;
 pub enum Order {
     Direct,
     Reverse,
+}
+
+/// The on-chain outcome of an Ethereum receipt key.
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiptStatus {
+    /// No reservation or retained terminal record exists.
+    Unknown,
+    /// The receipt is currently being processed.
+    Reserved,
+    /// Every deposit settled or refunded, and the receipt remains in bounded history.
+    Processed,
+    /// Every deposit is terminal, with at least one rejection or retained liability.
+    Resolved,
 }
 
 /// VFT Manager service.
@@ -65,6 +97,22 @@ pub enum TokenSupply {
     /// For example this type of token supply can be used to work with
     /// `VARA VFT token`/`wrappedVARA ERC20 token` pair.
     Gear = 1,
+}
+
+/// Capabilities of the unchanged native wrapper approved by governance.
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
+pub enum NativeWrapperMode {
+    EscrowV1,
+    HeldEscrowV2,
+}
+
+/// Code identity is a governance assertion, independently authenticated offchain.
+#[derive(Debug, Decode, Encode, TypeInfo, Clone, Copy, PartialEq, Eq)]
+pub struct NativeWrapperConfig {
+    pub actor_id: ActorId,
+    pub ethereum_token: H160,
+    pub code_id: H256,
+    pub mode: NativeWrapperMode,
 }
 
 /// Events emitted by VFT Manager service.
@@ -145,6 +193,36 @@ pub enum Event {
         /// Respective Vara token Id
         token: ActorId,
     },
+    ReceiptDepositSettled {
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        deposit_count: u64,
+        operation_id: H256,
+        eth_token_id: H160,
+        vara_token_id: ActorId,
+        sender: H160,
+        receiver: ActorId,
+        amount: U256,
+        native: bool,
+    },
+    /// Original native payout rejected and fully refunded as backed wrapped VARA.
+    ReceiptDepositRefunded {
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        deposit_count: u64,
+        operation_id: H256,
+        eth_token_id: H160,
+        vara_token_id: ActorId,
+        sender: H160,
+        receiver: ActorId,
+        amount: U256,
+        native: bool,
+        child: MessageId,
+        payout_child: MessageId,
+        returned_value: u128,
+    },
 }
 
 static mut STATE: Option<State> = None;
@@ -188,9 +266,22 @@ pub struct State {
     historical_proxy_address: ActorId,
     /// Is the `vft-manager` currently on pause.
     is_paused: bool,
-    /// Address of the new vft-manager program which the current should upgrade to.
-    /// It is required to handle cases when gas exhausted during execution of `upgrade` method.
-    vft_manager_new: Option<ActorId>,
+    native_wrapper: Option<NativeWrapperConfig>,
+    cutover: CutoverStatus,
+    cutover_prior: Option<CutoverStatus>,
+    cutover_aborts: collections::BTreeMap<u64, CutoverAbort>,
+    custody_preflight: usize,
+    custody_cursor: usize,
+    custody_final_cursor: usize,
+    custody_active: u32,
+    frozen_mappings: Vec<(ActorId, H160, TokenSupply)>,
+    custody_transfers: Vec<CustodyTransferAttempt>,
+    custody_latest: collections::BTreeMap<ActorId, usize>,
+    custody_children: collections::BTreeMap<MessageId, usize>,
+    custody_completed: collections::BTreeSet<ActorId>,
+    has_economic_activity: bool,
+    maximum_admitted_receipt_slot: Option<u64>,
+    economic_revision: u64,
 }
 
 /// Config that should be provided to this service on initialization.
@@ -202,6 +293,9 @@ pub struct InitConfig {
     ///
     /// For more info see [State::historical_proxy_address].
     pub historical_proxy_address: ActorId,
+    /// Immutable inclusive receipt floor from the approved starting checkpoint.
+    /// A successor must be constructed with its cutover boundary plus one.
+    pub minimum_receipt_slot: u64,
     /// Config that will be used to send messages to the other programs.
     ///
     /// For more info see [Config].
@@ -238,6 +332,7 @@ impl VftManager {
     #[export]
     pub fn update_erc20_manager_address(&mut self, erc20_manager_address_new: H160) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         if erc20_manager_address_new == Default::default() {
             panic!("Invalid address of ERC20Manger");
@@ -256,6 +351,7 @@ impl VftManager {
     #[export]
     pub fn update_historical_proxy_address(&mut self, historical_proxy_address_new: ActorId) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         let old = self.state_mut().historical_proxy_address;
         self.state_mut().historical_proxy_address = historical_proxy_address_new;
@@ -264,6 +360,117 @@ impl VftManager {
             old,
             new: historical_proxy_address_new,
         });
+    }
+
+    #[export]
+    pub fn receipt_deposits(
+        &self,
+        slot: u64,
+        transaction_index: u64,
+    ) -> Vec<submit_receipt::ReceiptDepositState> {
+        submit_receipt::receipt_deposits((slot, transaction_index))
+    }
+
+    /// Read retained no-effect evidence for a terminally rejected deposit.
+    #[export]
+    pub fn receipt_rejection(
+        &self,
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+    ) -> Option<ReceiptRejectionEvidence> {
+        submit_receipt::receipt_rejection((slot, transaction_index), log_index)
+    }
+
+    /// Exact retained native error-child retry permission, not a status-only hint.
+    #[export]
+    pub fn receipt_retryable_native(
+        &self,
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        operation_id: H256,
+        child: MessageId,
+    ) -> bool {
+        submit_receipt::receipt_retryable_native(
+            (slot, transaction_index),
+            log_index,
+            operation_id,
+            child,
+        )
+    }
+
+    /// Reconcile original native payout outcomes; this never starts an economic child.
+    #[export]
+    pub async fn reconcile_receipt(
+        &mut self,
+        slot: u64,
+        transaction_index: u64,
+    ) -> Result<ReceiptStatus, Error> {
+        assert!(msg::value() == 0, "Reconciliation does not accept value");
+        self.ensure_receipt_domain(slot)?;
+        self.ensure_running()?;
+        submit_receipt::reconcile_receipt((slot, transaction_index), self.config()).await
+    }
+
+    /// Resolve one original deposit using no-effect proof or a retained native hold.
+    #[export]
+    pub async fn resolve_receipt_deposit(
+        &mut self,
+        slot: u64,
+        transaction_index: u64,
+        log_index: u64,
+        operation_id: H256,
+        child: Option<MessageId>,
+    ) -> Result<submit_receipt::ReceiptDepositOutcome, Error> {
+        self.ensure_admin();
+        submit_receipt::resolve_receipt_deposit(
+            self,
+            (slot, transaction_index),
+            log_index,
+            operation_id,
+            child,
+        )
+        .await
+    }
+
+    /// Settlement policy is explicit and cannot change after economic activity.
+    #[export]
+    pub async fn configure_native_wrapper(&mut self, wrapper: Option<NativeWrapperConfig>) {
+        self.ensure_admin();
+        self.ensure_native_wrapper_configuration(wrapper);
+        if let Some(binding) = wrapper {
+            let revision = self.state().economic_revision;
+            let admin = self.state().admin;
+            let config = self.config().clone();
+            let minimum: U256 =
+                cutover::query(binding.actor_id, "VftExtension", "MinimumBalance", &config).await;
+            assert!(
+                minimum.is_zero(),
+                "Native wrapper requires zero minimum balance"
+            );
+            self.ensure_admin();
+            // Avoid Debug operands: ActorId's SS58 diagnostics retain about 9 KiB of instrumented WASM.
+            assert!(
+                self.state().admin == admin,
+                "Wrapper approval authority changed"
+            );
+            assert_eq!(
+                self.state().economic_revision,
+                revision,
+                "Configuration changed while qualifying wrapper"
+            );
+            self.ensure_native_wrapper_configuration(wrapper);
+        }
+        if self.state().native_wrapper != wrapper {
+            self.ensure_economic_mutable();
+            self.state_mut().native_wrapper = wrapper;
+        }
+    }
+
+    #[export]
+    pub fn native_wrapper(&self) -> Option<NativeWrapperConfig> {
+        self.state().native_wrapper
     }
 
     /// Add a new token pair to a [State::token_map]. Can be called only by a [State::admin].
@@ -275,6 +482,13 @@ impl VftManager {
         supply_type: TokenSupply,
     ) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
+        if let Some(wrapper) = self.state().native_wrapper {
+            assert!(
+                vara_token_id != wrapper.actor_id && eth_token_id != wrapper.ethereum_token,
+                "Cannot overwrite native wrapper identity"
+            );
+        }
 
         self.state_mut()
             .token_map
@@ -292,7 +506,12 @@ impl VftManager {
     #[export]
     pub fn remove_vara_to_eth_address(&mut self, vara_token_id: ActorId) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
+        assert!(
+            self.state().native_wrapper.map(|wrapper| wrapper.actor_id) != Some(vara_token_id),
+            "Clear native wrapper configuration first"
+        );
         let (eth_token_id, supply_type) = self.state_mut().token_map.remove(vara_token_id);
 
         self.emit_event(Event::TokenMappingRemoved {
@@ -309,6 +528,7 @@ impl VftManager {
     #[export]
     pub fn update_config(&mut self, config: Config) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
 
         unsafe {
             CONFIG = Some(config);
@@ -401,8 +621,8 @@ impl VftManager {
     /// Pause the `vft-manager`.
     ///
     /// When `vft-manager` is paused it means that any requests to
-    /// `submit_receipt`, `request_bridging` and `handle_request_bridging_interrupted_transfer`
-    /// will be rejected.
+    /// `submit_receipt` and `request_bridging` will be rejected. Definite, authorized
+    /// interrupted-transfer refunds remain available while paused or emergency-stopped.
     ///
     /// Can be called only by a [State::admin] or [State::pause_admin].
     #[export]
@@ -415,6 +635,9 @@ impl VftManager {
         }
 
         if state.is_paused {
+            if state.cutover.phase == CutoverPhase::Draining {
+                return;
+            }
             panic!("Already paused");
         }
 
@@ -442,22 +665,24 @@ impl VftManager {
             panic!("Already unpaused");
         }
 
-        if state.vft_manager_new.is_some() {
-            panic!("Upgrading")
+        assert!(
+            state.cutover.minimum_receipt_slot > 0,
+            "Receipt deployment floor is not set"
+        );
+        assert!(
+            matches!(
+                state.cutover.phase,
+                CutoverPhase::Active | CutoverPhase::Draining | CutoverPhase::Ready
+            ),
+            "Cutover not ready"
+        );
+        if state.cutover.phase == CutoverPhase::Ready {
+            self.state_mut().cutover.phase = CutoverPhase::Active;
         }
-
         self.state_mut().is_paused = false;
 
         self.emit_event(Event::Unpaused)
             .expect("Failed to deposit event");
-    }
-
-    fn ensure_running(&self) -> Result<(), Error> {
-        if self.state().is_paused || self.is_emergency_stopped() {
-            Err(Error::Paused)
-        } else {
-            Ok(())
-        }
     }
 
     /// Submit rlp-encoded transaction receipt.
@@ -473,6 +698,11 @@ impl VftManager {
         transaction_index: u64,
         receipt_rlp: Vec<u8>,
     ) -> Result<(), Error> {
+        assert!(
+            msg::value() == 0,
+            "Receipt submission does not accept value"
+        );
+        self.ensure_receipt_domain(slot)?;
         self.ensure_running()?;
 
         submit_receipt::submit_receipt(self, slot, transaction_index, receipt_rlp).await
@@ -489,12 +719,29 @@ impl VftManager {
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
-        self.ensure_running()?;
-
         let value = msg::value();
         let fee = self.config().fee_incoming;
+        let admission = self
+            .ensure_source_domain()
+            .and_then(|_| self.ensure_running());
+        if let Err(error) = admission {
+            assert!(value == 0, "Rejected request returns attached value");
+            return Err(error);
+        }
         if value != fee {
             panic!("Please attach exactly {fee} value");
+        }
+        let admission = if receiver.is_zero() {
+            Err(Error::InvalidRecipient)
+        } else {
+            self.state()
+                .token_map
+                .get_eth_token_id(&vara_token_id)
+                .map(|_| ())
+        };
+        if let Err(error) = admission {
+            assert!(value == 0, "Rejected request returns attached value");
+            return Err(error);
         }
 
         let sender = Syscall::message_source();
@@ -518,76 +765,99 @@ impl VftManager {
         &mut self,
         msg_id: MessageId,
     ) -> Result<(), Error> {
-        self.ensure_running()?;
-
         request_bridging::handle_interrupted_transfer(self, msg_id).await
     }
 
     #[export]
-    pub async fn upgrade(&mut self, vft_manager_new: ActorId) {
+    pub fn begin_cutover(
+        &mut self,
+        destination: ActorId,
+        last_receipt_slot: u64,
+        expected_generation: u64,
+    ) {
         self.ensure_admin();
+        cutover::begin(self, destination, last_receipt_slot, expected_generation);
+    }
 
-        if !self.state().is_paused {
-            panic!("Not paused");
-        }
+    #[export]
+    pub fn abort_cutover(&mut self, expected_generation: u64) {
+        self.ensure_admin();
+        cutover::abort(self, expected_generation);
+    }
 
-        let service = vft_manager_client::VftManager::new(GStdRemoting);
-        let destination_paused = service
-            .is_paused()
-            .recv(vft_manager_new)
-            .await
-            .expect("vft_manager_new doesn't seem to be a VftManager program");
-        if !destination_paused {
-            panic!("Destination VftManager is not paused");
-        }
+    #[export]
+    pub fn cutover_abort(&self, generation: u64) -> Option<CutoverAbort> {
+        self.state().cutover_aborts.get(&generation).cloned()
+    }
 
-        if self
-            .state()
-            .vft_manager_new
-            .map(|address| address != vft_manager_new)
-            .unwrap_or(false)
-        {
-            panic!(
-                "Upgrade called with vft_manager_new = {:?}",
-                self.state().vft_manager_new
-            );
-        }
+    #[export]
+    pub async fn restore_aborted_cutover(&mut self, expected_generation: u64) {
+        self.ensure_admin();
+        cutover::restore_aborted(self, expected_generation).await;
+    }
 
-        self.state_mut().vft_manager_new = Some(vft_manager_new);
+    /// Prune only consumed terminal trackers; financial originals remain retained.
+    #[export]
+    pub fn prune_terminal_requests(&mut self, requests: Vec<MessageId>) -> u32 {
+        self.ensure_admin();
+        assert!(self.state().is_paused, "Not paused");
+        assert!(requests.len() <= 100, "At most 100 requests");
+        request_bridging::prune_terminal_requests(requests)
+    }
 
-        let vft_manager = Syscall::program_id();
-        let mut service = vft_client::Vft::new(GStdRemoting);
-        let mappings = self.state().token_map.read_state();
-        for (vft, _erc20, _supply) in mappings {
-            let balance = service
-                .balance_of(vft_manager)
-                .recv(vft)
-                .await
-                .expect("Unable to get the balance of VftManager");
+    #[export]
+    pub async fn prepare_cutover(&mut self, source: ActorId, last_receipt_slot: u64) {
+        self.ensure_admin();
+        cutover::prepare(self, source, last_receipt_slot).await;
+    }
 
-            if balance > 0.into()
-                && !service
-                    .transfer(vft_manager_new, balance)
-                    .send_recv(vft)
-                    .await
-                    .expect("Unable to request a transfer to the new VftManager")
-            {
-                panic!("Unable to transfer tokens to the new VftManager ({vft:?})");
-            }
-        }
+    #[export]
+    pub async fn upgrade(&mut self, destination: ActorId) {
+        self.ensure_admin();
+        cutover::upgrade(self, destination).await;
+    }
 
-        exec::exit(vft_manager_new);
+    #[export]
+    pub async fn finalize_cutover(&mut self) {
+        self.ensure_admin();
+        cutover::finalize(self).await;
+    }
+
+    #[export]
+    pub fn cutover_status(&self) -> CutoverStatus {
+        cutover::status(self)
+    }
+
+    #[export]
+    pub fn cutover_transfers(&self, start: u32, count: u32) -> Vec<CustodyTransferAttempt> {
+        self.state()
+            .custody_transfers
+            .iter()
+            .skip(start as usize)
+            .take(count as usize)
+            .cloned()
+            .collect()
     }
 
     #[export]
     pub async fn update_vfts(&mut self, vft_map: Vec<(ActorId, ActorId)>) {
         self.ensure_admin();
+        self.ensure_economic_mutable();
+        if let Some(wrapper) = self.state().native_wrapper {
+            assert!(
+                vft_map.iter().all(|(old, new)| {
+                    (*old != wrapper.actor_id && *new != wrapper.actor_id) || old == new
+                }),
+                "Cannot overwrite native wrapper identity"
+            );
+        }
 
+        let revision = self.state().economic_revision;
         let gas_required = self.config().gas_for_swap_token_maps;
         self.state_mut()
             .token_map
-            .update_vfts(gas_required, vft_map)
-            .await
+            .update_vfts(gas_required, vft_map, revision)
+            .await;
     }
 
     /// Get state of a `request_bridging` message tracker.
@@ -645,7 +915,7 @@ impl VftManager {
     /// Check if an observer's bounded emergency stop is active.
     #[export]
     pub fn is_emergency_stopped(&self) -> bool {
-        exec::block_height() < self.state().emergency_stop_until
+        self.emergency_stop_active()
     }
 
     /// Get the block at which the current or latest emergency stop expires.
@@ -674,85 +944,28 @@ impl VftManager {
 
     #[export]
     pub fn transactions(&self, order: Order, start: u32, count: u32) -> Vec<(u64, u64)> {
-        fn collect<'a, T, L, R, F>(start: u32, count: u32, left: L, right: R, before: F) -> Vec<T>
-        where
-            T: 'a + Copy + Ord,
-            L: Iterator<Item = &'a T>,
-            R: Iterator<Item = &'a T>,
-            F: Fn(&T, &T) -> bool,
-        {
-            let mut left = left.peekable();
-            let mut right = right.peekable();
-            let mut skipped = 0;
-            let mut result = Vec::new();
-
-            while result.len() < count as usize {
-                let next = match (left.peek(), right.peek()) {
-                    (Some(a), Some(b)) if a == b => {
-                        right.next();
-                        left.next()
-                    }
-                    (Some(a), Some(b)) if before(a, b) => left.next(),
-                    (Some(_), Some(_)) => right.next(),
-                    (Some(_), None) => left.next(),
-                    (None, Some(_)) => right.next(),
-                    (None, None) => break,
-                };
-
-                if skipped < start {
-                    skipped += 1;
-                } else if let Some(value) = next {
-                    result.push(*value);
-                }
-            }
-
-            result
-        }
-
         let processed = submit_receipt::transactions();
-        let reserved = submit_receipt::reserved_transactions();
         match order {
-            Order::Direct => collect(start, count, processed.iter(), reserved.iter(), |a, b| {
-                a < b
-            }),
-            Order::Reverse => collect(
-                start,
-                count,
-                processed.iter().rev(),
-                reserved.iter().rev(),
-                |a, b| a > b,
-            ),
+            Order::Direct => processed
+                .iter()
+                .skip(start as usize)
+                .take(count as usize)
+                .copied()
+                .collect(),
+            Order::Reverse => processed
+                .iter()
+                .rev()
+                .skip(start as usize)
+                .take(count as usize)
+                .copied()
+                .collect(),
         }
     }
 
+    /// Read the current status for one Ethereum receipt key.
     #[export]
-    pub async fn insert_transactions(&mut self, data: Vec<(u64, u64)>) {
-        self.ensure_admin();
-
-        if !self.state().is_paused {
-            panic!("Not paused");
-        }
-
-        let transactions = submit_receipt::transactions_mut();
-        for key in data {
-            if transactions.contains(&key) {
-                continue;
-            }
-
-            if transactions.len() >= submit_receipt::TX_HISTORY_DEPTH {
-                if transactions
-                    .first()
-                    .map(|first| &key < first)
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-
-                transactions.pop_first();
-            }
-
-            transactions.insert(key);
-        }
+    pub fn receipt_status(&self, slot: u64, transaction_index: u64) -> ReceiptStatus {
+        submit_receipt::receipt_status((slot, transaction_index))
     }
 
     /// The method is intended for tests and is available only when the feature `mocks`
@@ -761,47 +974,41 @@ impl VftManager {
     /// Returns false when the collection is populated.
     #[export]
     pub fn fill_transactions(&mut self) -> bool {
+        self.ensure_admin();
+        self.ensure_economic_mutable();
         #[cfg(feature = "mocks")]
         {
-            submit_receipt::fill_transactions()
+            let filled = submit_receipt::fill_transactions();
+            if let Some(&(slot, _)) = submit_receipt::transactions().last() {
+                self.record_receipt_admission(slot);
+            }
+            filled
         }
 
         #[cfg(not(feature = "mocks"))]
         panic!("Please rebuild with enabled `mocks` feature")
     }
 
-    /// Inserts recoverable message state during a paused program migration.
-    /// An ambiguous bridge request may be changed to `BridgeResponseReceived(None)` only
-    /// after external reconciliation proves that no Ethereum message was queued. Replays
-    /// are idempotent; conflicting or still in-flight state is rejected.
+    /// Reconcile only the immutable original request and its authenticated terminal
+    /// builtin reply. Missing/ambiguous outcomes are not evidence of queue absence.
     #[export]
-    pub fn insert_message_info(
+    pub fn reconcile_source_request(
         &mut self,
-        msg_id: MessageId,
-        status: MessageStatus,
-        details: TxDetails,
-    ) {
+        request: MessageId,
+        child: MessageId,
+        request_hash: H256,
+    ) -> Result<SourceRequestOutcome, Error> {
         self.ensure_admin();
-        if !self.state().is_paused {
-            panic!("Not paused");
+        assert!(self.state().is_paused, "Not paused");
+        if self.state().cutover.phase == CutoverPhase::Retired {
+            return Err(Error::Retired);
         }
-        if matches!(
-            &status,
-            MessageStatus::SendingMessageToDepositTokens
-                | MessageStatus::SendingMessageToBridgeBuiltin
-                | MessageStatus::SendingMessageToReturnTokens
-        ) {
-            panic!("Cannot migrate in-flight message info");
-        }
+        request_bridging::reconcile_source_request(request, child, request_hash)
+    }
 
-        let tracker = request_bridging::msg_tracker_mut();
-        if let Some(existing) = tracker.message_info.get(&msg_id) {
-            if existing.status != status || existing.details != details {
-                panic!("Conflicting message info");
-            }
-            return;
-        }
-        tracker.insert_message_info(msg_id, status, details);
+    #[export]
+    pub fn source_request_evidence(&self, request: MessageId) -> Option<SourceRequestEvidence> {
+        request_bridging::source_request_evidence(request)
     }
 
     /// The method is intended for tests and is available only when the feature `mocks`
@@ -816,39 +1023,12 @@ impl VftManager {
         _transaction_index: u64,
         _supply_type: TokenSupply,
     ) -> Result<(), Error> {
+        self.ensure_admin();
+        self.ensure_receipt_domain(_slot)?;
+        self.record_receipt_admission(_slot);
         #[cfg(feature = "mocks")]
         {
-            use submit_receipt::token_operations;
-
-            let source = Syscall::message_source();
-            let erc20_sender = H160::zero();
-            match _supply_type {
-                TokenSupply::Ethereum => {
-                    token_operations::mint(
-                        _slot,
-                        _transaction_index,
-                        erc20_sender,
-                        source,
-                        source,
-                        100u32.into(),
-                        self.config(),
-                    )
-                    .await
-                }
-
-                TokenSupply::Gear => {
-                    token_operations::unlock(
-                        _slot,
-                        _transaction_index,
-                        erc20_sender,
-                        source,
-                        source,
-                        100u32.into(),
-                        self.config(),
-                    )
-                    .await
-                }
-            }
+            submit_receipt::benchmark_reply(self, (_slot, _transaction_index), _supply_type).await
         }
 
         #[cfg(not(feature = "mocks"))]
@@ -861,6 +1041,12 @@ impl VftManager {
     /// Swaps internal hash maps of the TokenMap instance.
     #[export]
     pub async fn calculate_gas_for_token_map_swap(&mut self) {
+        self.ensure_admin();
+        self.ensure_economic_mutable();
+        assert!(
+            self.state().native_wrapper.is_none(),
+            "Cannot overwrite native wrapper identity"
+        );
         #[cfg(feature = "mocks")]
         {
             self.state_mut()
@@ -874,8 +1060,120 @@ impl VftManager {
 }
 
 impl VftManager {
+    fn emergency_stop_active(&self) -> bool {
+        exec::block_height() < self.state().emergency_stop_until
+    }
+
+    fn ensure_running(&self) -> Result<(), Error> {
+        if self.state().is_paused || self.emergency_stop_active() {
+            Err(Error::Paused)
+        } else {
+            Ok(())
+        }
+    }
+    fn ensure_native_wrapper_configuration(&self, wrapper: Option<NativeWrapperConfig>) {
+        let state = self.state();
+        assert!(state.is_paused, "Not paused");
+        assert_eq!(
+            state.cutover.phase,
+            CutoverPhase::Active,
+            "Economic configuration frozen"
+        );
+        assert!(
+            !state.has_economic_activity || state.native_wrapper == wrapper,
+            "Native wrapper binding has economic activity"
+        );
+        if let Some(wrapper) = wrapper {
+            assert!(!wrapper.actor_id.is_zero(), "Invalid native wrapper");
+            assert!(
+                !wrapper.ethereum_token.is_zero(),
+                "Invalid native Ethereum token"
+            );
+            assert!(!wrapper.code_id.is_zero(), "Invalid native wrapper CodeId");
+            assert!(
+                state.token_map.get_eth_token_id(&wrapper.actor_id) == Ok(wrapper.ethereum_token),
+                "Native wrapper Ethereum mapping differs"
+            );
+            assert!(
+                state.token_map.get_vara_token_id(&wrapper.ethereum_token) == Ok(wrapper.actor_id),
+                "Native wrapper Gear mapping differs"
+            );
+            assert!(
+                state.token_map.get_supply_type(&wrapper.actor_id) == Ok(TokenSupply::Gear),
+                "Native wrapper must have Gear supply"
+            );
+        }
+    }
+
+    pub(crate) fn record_receipt_admission(&mut self, slot: u64) {
+        let state = self.state_mut();
+        state.has_economic_activity = true;
+        state.maximum_admitted_receipt_slot = Some(
+            state
+                .maximum_admitted_receipt_slot
+                .map_or(slot, |previous| previous.max(slot)),
+        );
+    }
+
+    fn ensure_economic_mutable(&mut self) {
+        assert_eq!(
+            self.state().cutover.phase,
+            CutoverPhase::Active,
+            "Economic configuration frozen"
+        );
+        self.state_mut().economic_revision = self
+            .state()
+            .economic_revision
+            .checked_add(1)
+            .expect("Economic revision overflow");
+    }
+
+    fn ensure_receipt_domain(&self, slot: u64) -> Result<(), Error> {
+        let cutover = &self.state().cutover;
+        if cutover.phase == CutoverPhase::Retired {
+            return Err(Error::Retired);
+        }
+        if cutover.minimum_receipt_slot == 0
+            || slot < cutover.minimum_receipt_slot
+            || cutover.last_receipt_slot.is_some_and(|last| slot > last)
+        {
+            return Err(Error::ReceiptOutsideDeployment);
+        }
+        if !matches!(cutover.phase, CutoverPhase::Active | CutoverPhase::Draining) {
+            return Err(Error::CutoverNotReady);
+        }
+        Ok(())
+    }
+
+    fn ensure_source_domain(&self) -> Result<(), Error> {
+        if self.state().cutover.minimum_receipt_slot == 0 {
+            return Err(Error::CutoverNotReady);
+        }
+        match self.state().cutover.phase {
+            CutoverPhase::Active => Ok(()),
+            CutoverPhase::Retired => Err(Error::Retired),
+            _ => Err(Error::CutoverNotReady),
+        }
+    }
+
+    fn ensure_quiescent(&self) {
+        assert!(self.state().is_paused, "Not paused");
+        assert!(
+            submit_receipt::is_quiescent(),
+            "Unresolved receipt children"
+        );
+        assert!(
+            request_bridging::is_quiescent(),
+            "Unresolved source or refund obligations"
+        );
+    }
+
     /// Initialize VFT Manager service.
     pub fn seed(config: InitConfig) {
+        assert!(
+            config.minimum_receipt_slot > 0,
+            "Receipt deployment floor must be positive"
+        );
         unsafe {
             let source = Syscall::message_source();
             STATE = Some(State {
@@ -888,7 +1186,25 @@ impl VftManager {
                 token_map: TokenMap::default(),
                 historical_proxy_address: config.historical_proxy_address,
                 is_paused: true,
-                vft_manager_new: None,
+                native_wrapper: None,
+                cutover: CutoverStatus {
+                    minimum_receipt_slot: config.minimum_receipt_slot,
+                    ..CutoverStatus::default()
+                },
+                cutover_prior: None,
+                cutover_aborts: collections::BTreeMap::new(),
+                custody_preflight: 0,
+                custody_cursor: 0,
+                custody_final_cursor: 0,
+                custody_active: 0,
+                frozen_mappings: Vec::new(),
+                custody_transfers: Vec::new(),
+                custody_latest: collections::BTreeMap::new(),
+                custody_children: collections::BTreeMap::new(),
+                custody_completed: collections::BTreeSet::new(),
+                has_economic_activity: false,
+                maximum_admitted_receipt_slot: None,
+                economic_revision: 0,
             });
             CONFIG = Some(config.config);
         }

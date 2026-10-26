@@ -1,4 +1,4 @@
-import { Plugin, postgraphile, PostGraphileOptions } from 'postgraphile';
+import { Plugin, postgraphile, PostGraphileOptions, makeWrapResolversPlugin } from 'postgraphile';
 import ConnectionFilterPlugin from 'postgraphile-plugin-connection-filter';
 import { createServer } from 'node:http';
 import express from 'express';
@@ -38,6 +38,12 @@ async function main() {
       DefaultLimitPlugin(50, 100),
       PairsAliasPlugin,
       TransferAliasPlugin,
+      makeWrapResolversPlugin({
+        Transfer: {
+          amount: async (resolve, source, args, context, info) =>
+            BigInt(await resolve(source, args, context, info)).toString(),
+        },
+      }),
       // TODO: get rid of this plugin
       ConnectionFilterPlugin as unknown as Plugin,
     ],
@@ -53,7 +59,7 @@ async function main() {
 
   const port = process.env.GQL_PORT || 4350;
 
-  server.listen({ host: '0.0.0.0', port }, () => {
+  server.listen({ host: process.env.GQL_HOST || '0.0.0.0', port }, () => {
     const address = server.address()!;
     if (typeof address !== 'string') {
       const href = `http://${address.address}:${address.port}${options.graphiqlRoute || '/graphiql'}`;

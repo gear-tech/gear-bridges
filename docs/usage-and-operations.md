@@ -1,272 +1,156 @@
 # Usage and operations
 
-This guide is for operators and developers who already know the bridge topology and need to exercise it safely. Read [Running the bridge](running-the-bridge.md) for installation and configuration, [Internals](internals.md) for process flow, and [Merkle roots](merkle-roots.md) for root lifecycle details.
+This guide is for operators and developers who already know the bridge topology and need to exercise it safely. Read [Running the bridge](running-the-bridge.md) for installation, deployment/bootstrap and journal guards, [Internals](internals.md) for process flow, and [Merkle roots](merkle-roots.md) for the outbound root lifecycle. A source release does not activate BEEFY, upgrade public actors or approve a deployment.
 
 ## Bridge directions
 
-The repository contains two main message paths:
+- Gear to Ethereum: `beefy-relay tokens-follow` authenticates signed BEEFY commitments and authority handovers, then publishes queue snapshots with MMR proofs. Separate retained delivery workers submit individual-message Merkle proofs after finalized root acceptance and maturity.
+- Ethereum to Gear: `relayer eth-gear-core` updates the checkpoint-light-client from Beacon finality; delivery composes authenticated receipt/Beacon proofs for the historical proxy and VFT manager. Independent inbound proof-profile approval remains required, including the configured Deneb/Electra and network identity rules.
 
-- Gear to Ethereum: finalized Gear state is converted into an Ethereum-verifiable Merkle-root proof. The relayer submits the root proof to the Ethereum MessageQueue contract.
-- Ethereum to Gear: Ethereum transactions are observed through the configured RPC endpoint and delivered to Gear after the configured finality policy is satisfied.
-
-Token relayers are separate processes. They use the same source and destination concepts, but their contracts, checkpoints, and failure handling are not interchangeable with the core message relayer.
+Commitment acceptance, queue-root publication, message execution and economic settlement are different outcomes. Neither an HTTP acknowledgement nor a processed bit proves an original transaction succeeded.
 
 ## Choose the process
 
-Use the command that matches the responsibility of the process:
-
-| Responsibility | Command |
+| Responsibility | Executable and command |
 | --- | --- |
-| Gear message queues to Ethereum | gear-eth-core |
-| Ethereum message queues to Gear | eth-gear-core |
-| Gear token events to Ethereum | gear-eth-tokens |
-| Ethereum token events to Gear | eth-gear-tokens |
-| Manual message forwarding | gear-eth-manual or eth-gear-manual |
-| Stop or pause relaying | kill-switch |
-| Remove expired queue entries | queue-cleaner |
-| Fetch a root proof from a relayer | fetch-merkle-roots |
-| Update the Ethereum verifier | update-solidity-verifier |
+| Commitments, authority handovers and registered root publication | `beefy-relay tokens-follow` |
+| Resume an existing registered publication | `beefy-relay tokens-publish-root` |
+| Read-only retained-history authentication | `beefy-relay tokens-history-audit` |
+| Source status/events | `beefy-relay bridge-status`, `beefy-relay bridge-events` |
+| Ethereum checkpoints to Gear | `relayer eth-gear-core` |
+| Gear token messages to Ethereum | `relayer gear-eth-tokens {all-token-transfers,paid-token-transfers}` |
+| Ethereum token receipts to Gear | `relayer eth-gear-tokens {all-token-transfers,paid-token-transfers}` |
+| One reviewed manual delivery | `relayer gear-eth-manual`, `relayer eth-gear-manual` |
+| Independent observer-role root challenge | `relayer kill-switch` |
+| Gear queue maintenance | `relayer queue-cleaner` |
+| Inspect finalized published roots | `relayer fetch-merkle-roots` |
 
-The current CLI is authoritative for command names and flags:
-
-~~~text
-cargo run --release --bin relayer -- --help
-cargo run --release --bin relayer -- gear-eth-core --help
-cargo run --release --bin relayer -- eth-gear-core --help
-~~~
-
-## Configuration workflow
-
-The current relayer uses command-line flags and environment variables rather than a checked-in TOML schema. Start by printing help for the exact subcommand. Keep secrets outside the repository whenever the deployment system supports secret injection.
-
-A practical workflow is:
-
-1. Print the selected subcommand's help.
-2. Set the Gear and Ethereum endpoints.
-3. Set the correct network genesis values and destination addresses.
-4. Set signing keys through the deployment secret mechanism.
-5. Set storage and proof-storage paths on persistent volumes.
-6. Configure the HTTP token if the management API is enabled.
-7. Start one process with a low log level and verify health before enabling dependent token relayers.
-
-The core settings fall into four groups:
-
-- Chain identity: Gear RPC, Ethereum RPC, network genesis, and destination contracts.
-- Cryptographic material: signer keys, verifier inputs, authority-set data, and gnark-wrapper paths.
-- Durable state: relay state, proof state, checkpoints, and queues.
-- Operations: HTTP bind address, authentication token, Prometheus address, polling periods, batching, thresholds, and retry policy.
-
-## Starting locally
-
-For a single development process:
+The executable surface is authoritative:
 
 ~~~sh
-RUST_LOG=info \
-cargo run --release --bin relayer -- gear-eth-core --help
+target/release/beefy-relay --help
+target/release/beefy-relay tokens-follow --help
+target/release/beefy-relay tokens-publish-root --help
+target/release/relayer --help
+target/release/relayer gear-eth-tokens paid-token-transfers --help
+target/release/relayer eth-gear-tokens paid-token-transfers --help
+target/release/relayer eth-gear-core --help
 ~~~
 
-Use the equivalent command for the reverse direction. Supply the endpoint, key, genesis, contract, and storage arguments shown by that command's help.
+## Configuration and startup
 
-The first startup should be supervised interactively. Confirm:
+Use existing flags, environment inputs and approved deployment records, not a new configuration format. The retained `relayer` loads `.env`; its shared inputs include `GEAR_ENDPOINT`, `GEAR_MAX_RECONNECT_ATTEMPTS`, `GEAR_SURI`, `ETH_RPC`, `ETH_BEACON_RPC`, `ETH_MESSAGE_QUEUE_ADDRESS` and command-specific signer/storage arguments. Keep keys outside the repository. `beefy-relay` uses explicit source/witness/execution endpoints and protected wallet files; do not assume relayer environment variables configure it.
 
-- The process selected the intended network and command.
-- The configured endpoints are reachable.
-- The signer account is the expected account.
-- The relayer can read finalized blocks.
-- Persistent state was created at the expected path.
-- No proof generation or transaction submission is using an unintended temporary directory.
-- The HTTP and Prometheus listeners bound to the intended interfaces.
+For outbound publication, follow the [existing bootstrap and run procedure](running-the-bridge.md#local-nodes-and-hoodi). Authenticate the original source genesis, source/destination domains, MMR boundary, current/next authority sets, client/queue/verifier bindings and deployment receipts. Keep the approved manifest and original journal directory. Hoodi is the CLI default; mainnet requires explicit `--ethereum-network mainnet` and a separately reviewed retained-state migration manifest. Owned fixtures require their existing explicit network descriptor; rehearsal evidence is not production qualification.
+
+Give the commitment follower, root publisher and every independent Ethereum-submitting delivery/manual/observer process distinct configured fee-payer accounts. Keep deployment, checkpoint and governance authorities separate. An in-process nonce lock cannot coordinate another process or an external signing tool. Use one writer per journal and signer, including during restarts and manual recovery.
+
+First startup should be supervised. Confirm intended networks and profiles, finalized source/archive availability, signer identity/balance, storage permissions, authenticated catch-up and listener addresses before enabling dependent workers or traffic. Reverse proof composition, checkpoint freshness and approved inbound profiles must remain qualified independently.
 
 ## Running with Docker Compose
 
-The repository includes a Dockerfile; a deployment may wrap the image in Compose or another supervisor. Before starting it:
+The existing Docker image ships `relayer`, `beefy-relay` and `beefy-deploy`. It defaults to the `relayer` entrypoint; select the other executable explicitly with `--entrypoint` when needed. A deployment may wrap it in its existing supervisor or Compose definition.
 
-1. Review the image build arguments and dependency versions.
-2. Mount the configuration file and persistent state directories.
-3. Provide keys and tokens through the deployment environment or a secret store.
-4. Confirm that the container network can resolve both chain endpoints.
-5. Verify that host ports do not collide with another relayer instance.
+1. Review the locked image/toolchain and actual deployment identities.
+2. Mount protected secrets, approved manifests, private actor journals and authenticated history.
+3. Give each actor separate mutable storage, signer, HTTP/metrics bindings and restart ownership.
+4. Render the service definition before starting it and inspect logs/metrics after startup.
 
-Typical lifecycle commands are:
-
-~~~text
-docker compose build
+~~~sh
+docker compose config
 docker compose up -d
 docker compose logs -f <service>
 docker compose ps
 docker compose stop <service>
 ~~~
 
-The container image sets a larger Rust thread stack because proof-generation and storage code can use deep call stacks. Preserve that setting when translating the container command into another supervisor.
-
-Run one relayer per container when possible. This keeps restart, resource accounting, log routing, and persistent directories independent. Multiple logical relayers in one configuration are supported where the selected binary implements them, but they still need separate monitoring and state ownership.
+Restart the same actor against its original state. A supervisor is not permission to replace unresolved transactions or repeatedly restart a challenged watchdog as a repair loop.
 
 ## HTTP management API
 
-The HTTP server is an operator interface, not a public RPC service. Bind it to a private interface or place it behind an authenticated network boundary. Requests must include the configured X-Token header.
+Only the paid-token delivery workers expose these operator routes; all-token workers and the BEEFY publisher do not provide a root-proof service. Bind the API to a private interface or protected network boundary. The default delivery bind is `127.0.0.1:8443`. Each listener has its own configured token and enabled channel; another listener's token/channel is not interchangeable.
 
-The available routes are:
-
-| Route | Method | Purpose |
+| Route | Method | Body |
 | --- | --- | --- |
-| /relay_messages | POST | Ask the Gear-to-Ethereum path to relay specified messages |
-| /relay_transactions | POST | Ask the Ethereum-to-Gear path to relay specified transaction hashes |
-| /get_merkle_root_proof | POST | Return proofs for requested finalized blocks |
+| `/relay_messages` | POST | `{"messages":[{"block":12345,"nonce":"0x0123"}]}` |
+| `/relay_transactions` | POST | `{"transactions":[{"tx_hash":"0x...32-byte-transaction-hash..."}]}` |
 
-The route is asynchronous where the operation may take time. A successful request generally means that work was accepted or queued; it does not mean that the destination transaction is finalized.
+Send `Content-Type: application/json` and the configured `X-Token`. JSON bodies are limited to 131,072 bytes (128 KiB). Message block heights are `u32`; nonces use the serialized U256 hex string. Use the exact original finalized source block/message or Ethereum transaction hash, not a newly created transfer.
 
-Example proof request:
-
-~~~text
-curl -sS http://127.0.0.1:8080/get_merkle_root_proof \
+~~~sh
+curl -i -sS http://127.0.0.1:8443/relay_messages \
   -H 'Content-Type: application/json' \
-  -H 'X-Token: <configured-token>' \
-  -d '{"blocks":[12345]}'
+  -H "X-Token: $RELAYER_HTTP_TOKEN" \
+  --data '{"messages":[{"block":12345,"nonce":"0x0123"}]}'
+
+curl -i -sS http://127.0.0.1:8443/relay_transactions \
+  -H 'Content-Type: application/json' \
+  -H "X-Token: $RELAYER_HTTP_TOKEN" \
+  --data "{\"transactions\":[{\"tx_hash\":\"$ORIGINAL_ETH_TX_HASH\"}]}"
 ~~~
 
-The proof response contains the block number, root, proof, and related metadata needed by the configured submission path. Treat the response as versioned implementation output: validate it against the running binary before building an external automation contract around field names.
-
-Typical HTTP failures:
+These examples target the corresponding separate paid worker; use its actual bind and token. The server deduplicates `(block, nonce)` or the exact transaction-hash string within each request. Empty batches also succeed. Authentication does not bypass canonical queued/fee observations or durable ownership checks downstream. Paid inbound HTTP authenticates finalized receipt inclusion and requires a valid `FeePaid` from the configured payment contract before proof admission; it derives the receipt slot from that authenticated header, not a fresh numbered lookup. Unpaid, unfinalized, malformed or out-of-domain requests are rejected downstream without wedging subsequent requests; resubmit the original hash after finality when appropriate.
 
 | Status | Meaning |
 | --- | --- |
-| 401 | Missing or incorrect X-Token |
-| 400 | Malformed JSON or invalid request shape |
-| 404 | Route is not available in the selected process |
-| 500 | The request reached the relayer but the operation failed |
-| 202 | Work was accepted for asynchronous handling |
+| 200, empty body | All entries handed to the local channel or handled as within-request duplicates; includes an empty batch. |
+| 202, empty body | `/relay_messages` only: some entries handled (including duplicates), others failed channel handoff; no per-entry results. |
+| 429, empty body, `Retry-After: 1` | `/relay_transactions`: the complete deduplicated batch does not fit the bounded 128-entry ingress channel; nothing from this request was enqueued. Retry the same original hashes after backoff, splitting batches larger than 128. |
+| 500, empty body | The local receiver was unavailable; transaction batches are rejected without partial handoff. |
+| 401 | Missing/incorrect/unreadable token on an enabled, valid POST request. |
+| 400 | Malformed JSON or invalid request shape. |
+| 413 | JSON exceeds the body limit. |
+| 404 | Route not enabled on that listener, or unknown path. |
 
-Do not expose this API directly to the Internet. The token is an authentication check, not a replacement for TLS, network isolation, rate limiting, or audit logging.
+JSON extraction may reject malformed/oversized input before the handler checks authentication. HTTP acceptance is only local handoff: it does not establish fee admission, signing, finalized destination success or token/native settlement. After a timeout or partial response, reconcile original work and journals; do not create another economic request. The token does not replace TLS, network isolation or application-external rate limiting. Restrict unauthenticated Prometheus separately.
+
+Inbound transaction and proof handoffs are bounded to 128 entries and await capacity; saturation pauses new intake rather than dropping durable work. Discovery scans at most 128 new blocks per pass and persists each inspected block, including empty blocks, before advancing its extraction cursor; transaction handoffs are durable before acknowledgement. Preserve the paired original discovery/transaction journals during backpressure or restart; reconciliation continues independently of intake.
 
 ## Manual relay and recovery
 
-Use gear-eth-manual or eth-gear-manual only for an explicitly reviewed recovery or migration procedure. Record the source transaction, destination account, operator, reason, and resulting chain transaction.
+Use `gear-eth-manual` or `eth-gear-manual` only for an explicitly reviewed operation. Record source transaction/message, nonce, deployment, destination, signer and reason. Inspect automated state, original signed attempts and finalized destination effects first; ensure no other process owns the work or signer.
 
-Before manual relay:
+Both manual directions require a private, stable `--storage` directory dedicated to that original operation. Reuse it after interruption. Never clear, relabel or transplant storage to obtain a new signature. Unknown replies, absent receipts, timeouts or a coincident processed bit do not authorize replacement signing. Retain original bytes/hash/nonce, prior attempts, receipt/finality evidence and failed outcomes. See the [detailed journal and settlement rules](running-the-bridge.md#shutdown-restart-and-recovery).
 
-- Check whether the automated relayer already submitted the item.
-- Check the durable state and destination contract state.
-- Confirm that the message is not being retried by another process.
-- Confirm the nonce, queue, and destination network.
-- Capture the expected fee and signer account.
+After delivery, authenticate the original canonical finalized receipt, exact event and same-receipt economic effects. Native queued/mailbox value is not settlement. Preserve completed sidecars and failed journals; do not delete stale retry evidence merely because another caller processed the message. Fee failure retains the original bridge nonce/transaction for fee retry, never another bridge request. Historical paid obligations remain delivery inputs, not permission to offer new priority payments.
 
-After manual relay:
+## Observer challenge and governance response
 
-- Record the destination transaction hash.
-- Verify the transaction receipt and event.
-- Reconcile the local relay state.
-- Remove or quarantine any stale retry item only after confirming the destination state.
+`kill-switch` is observer-only. Configure its existing source/Ethereum/queue connections, optional `--from-eth-block`, metrics, and protected observer key through `--eth-observer-pk-path` or `ETH_OBSERVER_PK_PATH`. It needs neither an admin signer nor an HTTP repair endpoint.
 
-The kill-switch process is the emergency control for stopping relay activity. It does not repair proofs, roll back chain state, or replace a transaction already accepted by a destination contract. Use it to stop new work while the incident is investigated.
+It authenticates canonical Ethereum root events, including hot blocks connected to pinned finalized ancestry, and stored roots at the pinned head, then compares the exact historical finalized source root. Hot blocks are revisited until finalized. Missing/pruned source state alone cannot trigger a challenge; source bounds/finality failures and removed/inconsistent destination logs hold the cursor. The source RPC remains an operator-configured trust boundary.
+
+Typed transient failures during challenge gas estimation reconnect and rescan without broadcasting. Challenge receipt retries retain the same sent hash. An uncertain send requires original-transaction reconciliation, not another signature. A finalized revert requires a fresh scan before another submission. Once a challenge succeeds and finalizes, the watchdog exits for separately authorized operator intervention; it never repairs a root or unpauses the queue. The challenge pause is finite (currently two days), so persistent incidents require the existing governance pause before expiry. Use the [existing administration/recovery procedure](running-the-bridge.md#beefy-expiry-and-existing-administration) under its separate authorities; do not turn supervisor restarts into automatic repair.
 
 ## Queue cleaning
 
-queue-cleaner removes queue entries that have passed the configured expiry or delay policy. Run it only against the intended queue and network. A cleaner must not be treated as a generic database garbage collector: queue entries can represent messages whose delivery and dispute windows have protocol meaning.
+`queue-cleaner` performs Gear queue maintenance after the configured overflow delay. Check the exact command's help, intended network, signer, candidate queue and timing before a reviewed run. Capture resulting events and reconcile state afterward. It is not a generic database garbage collector; do not delete retained message or transaction evidence.
 
-Recommended procedure:
+## Root inspection and publication recovery
 
-1. Stop or pause normal relay work for the affected queue if the run is corrective.
-2. Confirm the target network and queue address.
-3. Dry-run or inspect the command help if the version supports a dry-run mode.
-4. Capture the candidate entries and the configured expiry.
-5. Run the cleaner.
-6. Verify queue length, events, and relayer state.
-7. Resume relay and watch retries.
+`fetch-merkle-roots` reads already-published Ethereum roots starting at `--from-eth-block`, with the configured Ethereum/queue and Gear connections. Log queries use inclusive pages of at most 100,000 blocks while retaining the original finalized destination view and inclusion/stored-root checks. It neither fetches a proof from an HTTP server nor creates one.
 
-## Root proof retrieval
+Use `beefy-relay tokens-history-audit` to authenticate retained follower history without a signer, with the original manifest/state and a separately owned proof directory. `bridge-status --source-rpc <source> [--at-block <height>]` and `bridge-events --source-rpc <source> --at-block <height> [--full]` inspect source observations; matching endpoint values alone are not trust approval.
 
-The fetch-merkle-roots utility is useful when the operator needs to retrieve a root proof without starting a full relay loop. It should use the same network genesis, Gear endpoint, authority-set context, and proof-storage conventions as the relayer that will consume the proof.
+A standalone `tokens-publish-root` must use the original follower registration, publisher state, wallet identity and registered output path. Stop the existing owner first; the deployment lock is exclusive. Preserve all inventoried publications and unresolved nonce ownership. See [Merkle roots](merkle-roots.md) for the executable command shape and finalized acceptance distinctions.
 
-A retrieved proof is useful for:
+A finalized original root publication is recovered from its retained receipt proof, inclusion, checkpoint and signed transaction, with canonical header/ancestry and historical-state validation. Recovery does not fetch a fresh receipt body or reinterpret the original as nonce-consumed; repeated reconciliation preserves the intent and original ownership. Missing or corrupt retained evidence, or a changed pinned inclusion, remains HOLD. Preserve the original journal and proof material rather than replacing, relabeling or re-signing it.
 
-- Inspecting a failed submission.
-- Replaying a submission in a controlled environment.
-- Comparing proof bytes produced by two revisions.
-- Supplying a manually reviewed recovery transaction.
+New commitment and root-publication requests bind the configured finality chain before signing. Before signed bytes enter a journal, the relay checks the recovered sender, reserved nonce, destination and original call semantics; root calls also require exact calldata and zero value. A failed check preserves the unsigned nonce reservation and does not broadcast. Resuming a commitment checks the original signed chain against that same configured identity, not a fresh RPC chain-ID response. A wrong-chain original remains HOLD: do not relabel, delete or re-sign it.
 
-A proof fetched from one network or genesis configuration must not be submitted to another. Keep the block number, root, proof format, circuit version, and source binary together in the incident record.
+## Monitoring and common holds
 
-## Updating the Solidity verifier
+Monitor progress as well as liveness: authenticated source/commitment height, authority handovers/client expiry, finalized root inventory/backfill, oldest pending message, queue maturity, signer balances, original transaction/receipt status, storage integrity/disk growth, RPC/archive errors, HTTP failures and observer challenges. A running process or zero exit status is not readiness.
 
-update-solidity-verifier generates or installs the Ethereum verifier output associated with the configured proof circuit. Treat generated verifier files as build artifacts. Do not hand-edit generated Solidity to solve a deployment problem.
+- **Startup exits or holds:** check approved chain/genesis/profile/bootstrap, key parsing, ownership locks, directory permissions, incomplete saves and historical archive coverage. Preserve the directory and diagnose the exact error.
+- **Commitments advance but a root does not:** inspect the registered source snapshot/root, covering accepted anchor, bounds/backfill, publication journal and original signed transaction. Missing history is HOLD, not permission to reset the inventory.
+- **Messages remain pending:** inspect finalized root and maturity, original message membership/fee evidence, original signed receipt and same-receipt token/native settlement. Do not equate broadcast or another caller's processed bit with original success.
+- **RPC or restart changes behavior:** resume the same paths and identities. Use the follower's bounded `--reconcile-once` and read-only history audit before an endpoint move. Transport recovery cannot weaken identity/finality, replace signed bytes or extend operation deadlines.
 
-Before updating:
+## Safe upgrade and release checklist
 
-- Pin the prover and gnark-wrapper revisions.
-- Preserve the current verifier address and deployment transaction.
-- Confirm the generated circuit public-input order.
-- Generate the verifier in a clean output directory.
-- Compare the generated source and hashes with the expected release artifact.
-- Deploy first on a test network.
-- Verify that MessageQueue accepts a known-good root proof and rejects a modified proof.
+Stop one independently owned actor cleanly, preserve its configuration/manifests, complete journals, authenticated history, backups and logs, install the reviewed binary, then resume the same paths under supervision. Do not run overlapping old/new writers. A protocol/governance or public actor change is separately authorized, not a routine binary restart.
 
-The verifier update changes a cryptographic trust boundary. It should be reviewed and deployed separately from routine relayer restarts.
+Historical proof stores, verifier material, old bytecode, payment history and deployment evidence remain retained for old obligations and incident analysis. Removal of active producer code does not authorize deleting those stores or rewriting retained manifests.
 
-## Monitoring
-
-At minimum, monitor:
-
-- Process liveness and restart count.
-- Gear and Ethereum RPC latency, errors, and reconnects.
-- Finalized block height observed by each direction.
-- Oldest unrelayed message and oldest pending root.
-- Proof-generation duration and failures.
-- Destination transaction submission, replacement, and receipt status.
-- Queue size and expired-message count.
-- Available disk space for storage and proof artifacts.
-- Memory and CPU during proof generation.
-- HTTP authentication failures and unexpected management requests.
-
-Alert on lack of progress, not only process exit. A relayer can remain alive while its source subscription, proof worker, signer, or destination transaction path is stalled.
-
-## Common failure patterns
-
-### The process starts and exits immediately
-
-Check configuration parsing, network genesis, key parsing, filesystem permissions, and whether another service already owns the configured port. Run the selected command in the foreground and increase RUST_LOG before changing deployment files.
-
-### The relayer sees blocks but does not submit
-
-Check finality policy, queue discovery, root priority, signer balance, destination contract address, and whether an earlier proof or transaction is still pending. For root relaying, inspect both the root lifecycle state and proof-storage artifacts.
-
-### Proof generation fails
-
-Check the exact block and authority-set context, proof-storage contents, native prover dependencies, memory, thread stack, and circuit/prover version. Do not reuse an artifact produced for a different genesis or circuit version.
-
-### Transactions are submitted but messages remain pending
-
-Check the destination receipt, contract event, message nonce, queue address, processing delay, and whether the message proof is valid. A submitted transaction is not the same as a processed message.
-
-### Restart changes behavior
-
-Check whether the process recovered its JSON state and whether a .bak file or interrupted atomic write is present. Compare the recovered block/root cursor with chain state. Preserve both the state file and its backup before attempting repair.
-
-## Safe upgrade procedure
-
-Use a rolling procedure for independent relayers:
-
-1. Stop one instance cleanly.
-2. Preserve its configuration, durable state, proof directory, and logs.
-3. Deploy the new binary or image.
-4. Start it in foreground or with a tightly watched supervisor.
-5. Confirm source progress and destination submission.
-6. Compare metrics and logs with the previous version.
-7. Continue with the next instance only after the first is healthy.
-
-Do not upgrade the prover, gnark wrapper, Solidity verifier, and relayer configuration simultaneously unless the release procedure explicitly couples them. If a circuit or verifier changes, treat the deployment as a protocol upgrade and retain the old artifacts for replay and incident analysis.
-
-## Release checklist
-
-Before declaring the bridge healthy:
-
-- Every endpoint resolves to the expected network.
-- Genesis values and contract addresses match the deployment manifest.
-- Keys are loaded from the intended secret source.
-- State and proof paths are persistent and writable.
-- No two relayers share a mutable state path.
-- Management endpoints require the expected token.
-- Metrics are reachable from the monitoring system.
-- A known source block has been observed.
-- A known test message or root has been traced through submission and receipt.
-- Alerts fire for a stopped or stalled worker.
-- Logs include the process name, network, and relayer identity.
+Before declaring readiness, require approved identities and reverse profiles, intended secret sources, distinct signers, exclusive durable ownership, consistent readiness views with no unfinished saves, authenticated catch-up and checkpoint freshness, private delivery listeners, reachable monitoring and original finalized settlement evidence. Existing historical/local observations are not a new public activation or production qualification claim.

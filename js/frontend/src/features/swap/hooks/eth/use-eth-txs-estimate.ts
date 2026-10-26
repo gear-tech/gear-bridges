@@ -31,7 +31,7 @@ function useEthTxsEstimate({ bridgingFee, shouldPayBridgingFee, formValues, ftBa
     definedAssert(token, 'Fungible Token');
     definedAssert(ethTxs.prepare, 'Prepared transactions');
 
-    const txs = await ethTxs.prepare({ ...formValues, isEstimate: true });
+    const txs = await ethTxs.prepare(formValues);
 
     const { maxFeePerGas } = await estimateFeesPerGas(config);
     const { totalGasLimit, totalValue } = estimateBridging(txs, maxFeePerGas);

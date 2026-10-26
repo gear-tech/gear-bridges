@@ -12,7 +12,7 @@ import {BridgingPaymentOwner} from "test/BridgingPaymentOwner.sol";
 
 contract BridgingPaymentTest is Test, Base {
     function setUp() public {
-        deployBridgeDependsOnEnvironment();
+        deployBridgeFromConstants();
     }
 
     function test_SetFee() public {

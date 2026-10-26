@@ -1,10 +1,10 @@
-use alloy::rpc::types::TransactionReceipt;
-use alloy_rlp::Encodable;
+use alloy::{eips::eip2718::Encodable2718, rpc::types::TransactionReceipt};
 use eth_events_deneb_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
     beacon::Block,
     utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
+use sails_rs::prelude::*;
 use serde::Deserialize;
 
 pub const HOLESKY_RECEIPTS_2_498_456: &[u8; 160_144] =
@@ -111,8 +111,7 @@ pub fn event() -> EthToVaraEvent {
     let MerkleProof { proof, receipt } =
         eth_utils::generate_merkle_proof(tx_index, &receipts[..]).unwrap();
 
-    let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
-    Encodable::encode(&receipt, &mut receipt_rlp);
+    let receipt_rlp = receipt.encoded_2718();
 
     let block = BlockGenericForBlockBody {
         slot: block.slot,

@@ -58,4 +58,18 @@ pub enum Error {
     Internal(String),
     /// Invalid or unexpected reply received from a VFT program.
     InvalidReply,
+    NativeSettlementPending,
+    NativeSettlementReturned,
+    ReceiptLeaseActive,
+    InvalidReconciliation,
+    ReceiptOutsideDeployment,
+    Retired,
+    CutoverNotReady,
+    /// Every receipt log is terminal, but at least one did not financially settle.
+    ReceiptResolved,
+    /// The original authenticated token operation explicitly rejected without effect.
+    TokenOperationRejected,
+    /// The approved immutable native wrapper cannot retain held liabilities.
+    NativeHoldUnsupported,
+    InvalidRecipient,
 }

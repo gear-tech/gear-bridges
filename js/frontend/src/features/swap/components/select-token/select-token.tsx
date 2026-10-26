@@ -7,6 +7,7 @@ import SearchSVG from '@/assets/search.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { FormattedBalance, Skeleton, TokenSVG } from '@/components';
 import { useTokens } from '@/context';
+import { useNetworkType } from '@/context/network-type';
 import { useEthFTBalances, useVaraFTBalances, useModal, useVaraAccountBalance, useEthAccountBalance } from '@/hooks';
 import { cx, isUndefined } from '@/utils';
 
@@ -26,6 +27,7 @@ type ModalProps = {
 };
 
 function SelectTokenModal({ close }: ModalProps) {
+  const { isMainnet } = useNetworkType();
   const { tokens, getActiveToken } = useTokens();
   const { token, network } = useBridgeContext();
 
@@ -72,7 +74,7 @@ function SelectTokenModal({ close }: ModalProps) {
 
     return filteredTokens.map(({ address, symbol, displaySymbol, isNative, network: tokenNetwork }, index) => {
       const isActive = address === token?.address;
-      const isDisabled = isEthToVaraUsdcBridgeDisabled({ network: tokenNetwork, symbol });
+      const isDisabled = isEthToVaraUsdcBridgeDisabled({ network: tokenNetwork, address }, isMainnet);
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {

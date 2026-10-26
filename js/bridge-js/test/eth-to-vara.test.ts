@@ -1,60 +1,1244 @@
-import { beforeAll, afterAll, test, expect, describe } from 'vitest';
-import { createPublicClient, PublicClient, webSocket } from 'viem';
-import { bytesToHex } from '@ethereumjs/util';
-import { GearApi } from '@gear-js/api';
+import { beforeAll, afterAll, beforeEach, afterEach, test, expect, describe, vi } from 'vitest';
+import { createPublicClient, PublicClient, webSocket, bytesToHex, hexToBytes, keccak256, TransactionReceipt, encodeEventTopics, encodeAbiParameters, parseAbiParameters } from 'viem';
+import { GearApi, HexString } from '@gear-js/api';
 import dotenv from 'dotenv';
 import * as fs from 'fs';
 
-import { BeaconClient, createBeaconClient, createEthereumClient, EthereumClient } from '../src/ethereum';
-import { encodeEthToVaraEvent, HistoricalProxyClient, ProofResult } from '../src/vara';
-import { composeProof } from '../src/eth-to-vara/proof-composer';
+import { BeaconClient, createBeaconClient, createEthereumClient, EthereumClient } from '../src/ethereum/index.js';
+import { encodeEthToVaraEvent, CheckpointClient, HistoricalProxyClient, ProofResult, getPrefix } from '../src/vara/index.js';
+import { composeProof, generateMerkleProof, immutableInboundProfile, parseInboundProofProfile, immutableOwnedFixtureNetwork, checkpointNetworkMatches, validateOwnedFixtureNetwork, validateLocalFixtureBeaconSpec, InboundProofProfile } from '../src/eth-to-vara/proof-composer.js';
+import { relayEthToVara, createVftManagerReplyContract, validateFinalizedEthToVaraReply, decodeConsumerReply, assertNativePendingReply, validateFinalizedNativeReconciliationReply } from '../src/eth-to-vara/relayer.js';
+import type { ConsumerReplyContract, RelayResult } from '../src/eth-to-vara/relayer.js';
+import { validateInboundTokenEffect, BridgingRequestedAbi, nativeOperationId, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
+  VFT_MANAGER_IDL_SHA256, NATIVE_WRAPPER_IDL_SHA256, NATIVE_WRAPPER_V1_IDL_SHA256, type NativeWrapperMode, type NativeReceiptDeposit, type NativeRedemption } from '../src/eth-to-vara/token-effect.js';
+import { encode as rlpEncode } from '@ethereumjs/rlp';
+import { HistoricalProxy } from '../src/vara/historical-proxy.js';
+import * as beaconMethods from '../src/ethereum/beacon-client.js';
+import * as proofMethods from '../src/eth-to-vara/proof-composer.js';
+import * as varaCodec from '../src/vara/eth-to-vara.js';
+import { blake2AsHex } from '@polkadot/util-crypto';
+import { ssz } from '@lodestar/types';
+import { Sails } from 'sails-js';
+import { SailsIdlParser } from 'sails-js-parser';
+import { createHash } from 'node:crypto';
+import { readApprovedFixtureProfile } from './setup/setup.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import './beacon-fixtures.js';
+import { nativeAssetKind, validateTokenPairInventory } from '../src/eth-to-vara/native-assets.js';
+import { authenticateInboundSource } from '../src/eth-to-vara/proof-composer.js';
+import { authenticateHistoricalReceipt } from '../src/eth-to-vara/historical-receipt.js';
+import { subscribeAdvisory } from '../src/vara/advisory-subscription.js';
 
 dotenv.config();
 
-let gearApi: GearApi;
-let publicClient: PublicClient;
-let beaconClient: BeaconClient;
-let ethClient: EthereumClient;
-let historicalProxyClient: HistoricalProxyClient;
 
-const TX_HASH = process.env.TX_HASH! as `0x${string}`;
-const RECEIPT_RLP = fs.readFileSync('test/tmp/receipt_rlp', 'utf8');
-const PROOF = fs.readFileSync('test/tmp/proof', 'utf8');
-const ETH_TO_VARA_EVENT = fs.readFileSync('test/tmp/eth_to_vara_scale', 'utf8');
+const hash = (value: number): HexString => ('0x' + value.toString(16).padStart(64, '0')) as HexString;
+const codec = (value: HexString) => ({ toHex: () => value, toString: () => value, eq: (other: unknown) => value === (typeof other === 'string' ? other : (other as { toHex(): string }).toHex()) });
 
-beforeAll(async () => {
-  gearApi = await GearApi.create({ providerAddress: process.env.VARA_WS_RPC });
-  publicClient = createPublicClient({ transport: webSocket(process.env.ETH_RPC_URL!) });
-  beaconClient = await createBeaconClient(process.env.BEACON_RPC_URL!);
-  ethClient = createEthereumClient(publicClient, beaconClient);
-  historicalProxyClient = new HistoricalProxyClient(gearApi, process.env.HISTORICAL_PROXY_ID! as `0x${string}`);
+async function managerRegistry() {
+  const idl = fs.readFileSync(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8');
+  expect(createHash('sha256').update(idl).digest('hex')).toBe(VFT_MANAGER_IDL_SHA256);
+  expect(createHash('sha256').update(fs.readFileSync(new URL('../../../api/gear/vft_vara.idl', import.meta.url))).digest('hex')).toBe(NATIVE_WRAPPER_IDL_SHA256);
+  expect(createHash('sha256').update(fs.readFileSync(new URL('../../../api/gear/vft_vara_v1.idl', import.meta.url))).digest('hex')).toBe(NATIVE_WRAPPER_V1_IDL_SHA256);
+  return new Sails(await SailsIdlParser.new()).parseIdl(idl).registry;
+}
+
+function originalReplyFixture() {
+  const proxy = hash(1), sender = hash(2), msgId = hash(3), txHash = hash(4);
+  const registry = new HistoricalProxyClient({} as GearApi, proxy).registry;
+  const receiptRlp = Uint8Array.of(2, 0xf8, 0, 1);
+  const innerReply = getPrefix('Ping', 'SubmitReceipt') + '010a';
+  const requestPayload = registry.createType('(String, String, u64, Vec<u8>, [u8;32], Vec<u8>)',
+    ['HistoricalProxy', 'Redirect', 100, '0x0102', hash(5), getPrefix('Ping', 'SubmitReceipt')]).toHex();
+  const replyPayload = registry.createType('(String, String, Result<(Vec<u8>, Vec<u8>), ProxyError>)',
+    ['HistoricalProxy', 'Redirect', { ok: [bytesToHex(receiptRlp), innerReply] }]).toHex();
+  const state = { finalized: 12, requestCanonical: true, source: proxy, destination: sender, runtimeSuccess: true,
+    payload: replyPayload, replyTo: msgId, requestPayload, queuedSource: sender, queuedDestination: proxy };
+  const phase = { isApplyExtrinsic: true, asApplyExtrinsic: { toNumber: () => 0 } };
+  const header = (height: number) => ({ number: { toBigInt: () => BigInt(height) }, parentHash: codec(hash(height - 1)) });
+  const events = (height: number) => height === 10 ? [
+    { phase, event: { section: 'gear', method: 'MessageQueued', data: [codec(msgId), codec(state.queuedSource), codec(state.queuedDestination)] } },
+    { phase, event: { section: 'system', method: 'ExtrinsicSuccess', data: [] } },
+  ] : height === 12 ? [{ phase: { isApplyExtrinsic: false }, event: { section: 'gear', method: 'UserMessageSent', data: [{
+    id: codec(hash(8)), source: codec(state.source), destination: codec(state.destination),
+    details: { isNone: false, unwrap: () => ({ to: codec(state.replyTo), code: { isSuccess: state.runtimeSuccess } }) },
+    payload: registry.createType('Bytes', state.payload),
+  }] } }] : [];
+  const api = {
+    genesisHash: codec(hash(9)),
+    createType: (name: string, value: string) => registry.createType(name, value),
+    blocks: {
+      getFinalizedHead: async () => codec(hash(state.finalized)),
+      get: async () => ({ block: { header: header(10), extrinsics: [{ hash: codec(txHash), isSigned: true, signer: { ...codec(sender), toHex: () => '0x00' + sender.slice(2) },
+        method: { section: 'gear', method: 'sendMessage', args: [codec(proxy), codec(state.requestPayload), {}, { toString: () => '0' }] } }] } }),
+      getBlockHash: async (height: bigint) => codec(hash(Number(height) === 10 && !state.requestCanonical ? 99 : Number(height))),
+      getEvents: async (pin: HexString) => events(Number(BigInt(pin))),
+    },
+    rpc: { chain: {
+      getHeader: async (pin: HexString) => header(Number(BigInt(pin))),
+      getFinalizedHead: async () => hash(state.finalized),
+      subscribeFinalizedHeads: async () => () => {},
+    } },
+    events: {
+      gear: {
+        MessageQueued: { is: (event: { section: string; method: string }) => event.section === 'gear' && event.method === 'MessageQueued' },
+        UserMessageSent: { is: (event: { section: string; method: string }) => event.section === 'gear' && event.method === 'UserMessageSent' },
+      },
+      system: {
+        ExtrinsicSuccess: { is: (event: { section: string; method: string }) => event.section === 'system' && event.method === 'ExtrinsicSuccess' },
+        ExtrinsicFailed: { is: () => false },
+      },
+    },
+  } as unknown as GearApi;
+  return { state, registry, innerReply, receiptRlp, params: { gearApi: api, historicalProxyId: proxy, sender, msgId,
+    blockHash: hash(10), txHash, requestPayload, receiptRlp, deadline: Date.now() + 1000 } };
+}
+
+  test('SDK timed-out Gear signing never submits after the original deadline', async () => {
+    vi.useFakeTimers();
+    let finishSigning!: () => void;
+    let signingStarted!: () => void;
+    const started = new Promise<void>((resolve) => { signingStarted = resolve; });
+    const signature = new Promise<void>((resolve) => { finishSigning = resolve; });
+    let broadcasts = 0;
+    const extrinsic = { args: [codec(hash(1)), codec('0x0102')], hash: codec(hash(4)),
+      signAsync: async () => { signingStarted(); await signature; return extrinsic; },
+      send: async () => { broadcasts++; return () => {}; } };
+    const transaction = { extrinsic, gasInfo: { min_limit: { toBigInt: () => 100n } },
+      withAccount: () => transaction, calculateGas: async () => transaction,
+      withGas: () => transaction, withValue: () => transaction,
+      signAndSend: async () => { await extrinsic.signAsync(); await extrinsic.send(); } };
+    const receipt = { blockNumber: 5n, blockHash: hash(5), status: 'success' };
+    try {
+      vi.spyOn(beaconMethods, 'createBeaconClient').mockResolvedValue({ genesisBlockTime: 0 } as BeaconClient);
+      vi.spyOn(proofMethods, 'composeProof').mockResolvedValue({ proofBlock: { block: { slot: 100n } } } as ProofResult);
+      vi.spyOn(varaCodec, 'encodeEthToVaraEvent').mockReturnValue('0x0102');
+      vi.spyOn(HistoricalProxy.prototype, 'redirect').mockReturnValue(transaction as unknown as ReturnType<HistoricalProxy['redirect']>);
+      const relay = relayEthToVara({ deadline: Date.now() + 1000,
+        gearApi: checkpointProofFixture().proxy.api, signer: hash(2),
+        transactionHash: hash(4), beaconRpcUrl: 'https://beacon.invalid', historicalProxyId: hash(1),
+        clientId: hash(3), clientServiceName: 'Ping', clientMethodName: 'SubmitReceipt',
+        inboundProfile: { ...checkpointProofFixture().profile, ethereumGenesisHash: hash(8), historicalProxyId: hash(1),
+          consumer: { ...checkpointProofFixture().profile.consumer, programId: hash(3), codeId: hash(13) } },
+        consumerReply: { registry: new HistoricalProxyClient({} as GearApi, hash(1)).registry,
+          resultType: 'Result<Null,String>', idlSha256: checkpointProofFixture().profile.consumer.idlSha256,
+          verifyEffect: async () => { throw new Error('Signing test must not reach settlement'); } },
+        ethereumPublicClient: { getChainId: async () => 1, getTransactionReceipt: async () => receipt,
+          getBlock: async ({ blockNumber, blockTag }: { blockNumber?: bigint; blockTag?: string }) =>
+            blockTag ? { number: 6n, hash: hash(5) } : { hash: blockNumber === 0n ? hash(8) : hash(5) } } as unknown as PublicClient,
+      }).catch((error: Error) => error);
+      await started;
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(await relay).toBeInstanceOf(Error);
+      expect((await relay as Error).message).toContain('deadline expired');
+      finishSigning();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(broadcasts).toBe(0);
+    } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
+  });
+
+test.each(['deadline', 'funded', 'insufficient', 'case-profile'] as const)('SDK original Gear request gas and dispatch evidence: %s', async (scenario) => {
+  vi.useFakeTimers();
+  const fixture = originalReplyFixture(), api = fixture.params.gearApi;
+  const profile = { ...checkpointProofFixture().profile, sourceBlockHash: hash(1), ethereumGenesisHash: hash(8),
+    consumer: { ...checkpointProofFixture().profile.consumer, programId: hash(5) } };
+  const inboundProfile = scenario === 'case-profile' ? parseInboundProofProfile(JSON.stringify({
+    ...profile, sourceRuntimeCodeHash: '0x' + profile.sourceRuntimeCodeHash.slice(2).toUpperCase(),
+  }, (_, value) => typeof value === 'bigint' ? value.toString() : value)) : profile;
+  if (scenario === 'case-profile') expect(inboundProfile.sourceRuntimeCodeHash).toBe(profile.sourceRuntimeCodeHash);
+  const inner = getPrefix('Ping', 'SubmitReceipt') + '00';
+  fixture.state.payload = fixture.registry.createType('(String,String,Result<(Vec<u8>,Vec<u8>),ProxyError>)',
+    ['HistoricalProxy', 'Redirect', { ok: [bytesToHex(fixture.receiptRlp), inner] }]).toHex();
+  let effectVerified = false, readStarted!: () => void;
+  const started = new Promise<void>(resolve => { readStarted = resolve; });
+  const canonical = api.blocks.getBlockHash;
+  api.blocks.getBlockHash = async (height) => {
+    if (effectVerified && scenario === 'deadline') { readStarted(); return new Promise<never>(() => {}); }
+    return canonical(height);
+  };
+  Object.assign(api, { blockGasLimit: { toBigInt: () => 10000n },
+    programStorage: { getProgram: async () => ({ state: { isInitialized: true }, codeId: codec(profile.consumer.codeId) }) } });
+  Object.assign(api.rpc, { state: { getStorage: async () => ({ isEmpty: false, toU8a: () => Uint8Array.of(1, 2, 3) }) } });
+  const stop = vi.fn();
+  let gas = 100n;
+  const balance = scenario === 'insufficient' ? 50n : 200n;
+  Object.assign(api.events.system.ExtrinsicFailed, { is: (event: { method: string }) => event.method === 'ExtrinsicFailed' });
+  api.getExtrinsicFailedError = () => ({ method: 'InsufficientBalance', docs: 'Insufficient user balance.', name: 'InsufficientBalance' });
+  const extrinsic = { args: [codec(hash(1)), codec(fixture.state.requestPayload)], hash: codec(hash(4)),
+    signAsync: async () => extrinsic, send: async (callback: (result: unknown) => void) => {
+      const events = gas > balance
+        ? [{ event: { section: 'system', method: 'ExtrinsicFailed', data: [] } }]
+        : await api.blocks.getEvents(hash(10));
+      callback({ events, status: { isInBlock: true, asInBlock: codec(hash(10)) } });
+      return stop;
+    } };
+  const transaction = { extrinsic, gasInfo: { min_limit: { toBigInt: () => 100n } },
+    withAccount: () => transaction, calculateGas: async () => transaction,
+    withGas: (limit: bigint) => { gas = limit; return transaction; }, withValue: () => transaction };
+  try {
+    vi.spyOn(beaconMethods, 'createBeaconClient').mockResolvedValue({ genesisBlockTime: 0 } as BeaconClient);
+    vi.spyOn(proofMethods, 'composeProof').mockResolvedValue({ proofBlock: { block: { slot: 100 } }, receiptRlp: fixture.receiptRlp } as ProofResult);
+    vi.spyOn(varaCodec, 'encodeEthToVaraEvent').mockReturnValue('0x0102');
+    vi.spyOn(HistoricalProxy.prototype, 'redirect').mockReturnValue(transaction as unknown as ReturnType<HistoricalProxy['redirect']>);
+    const relay = relayEthToVara({ deadline: Date.now() + 1000, gearApi: api, signer: hash(2),
+      transactionHash: hash(4), beaconRpcUrl: 'https://beacon.invalid', historicalProxyId: hash(1),
+      clientId: hash(5), clientServiceName: 'Ping', clientMethodName: 'SubmitReceipt', inboundProfile,
+      consumerReply: { registry: fixture.registry, resultType: 'Result<Null,String>', idlSha256: profile.consumer.idlSha256,
+        verifyEffect: async () => { effectVerified = true; } },
+      ethereumPublicClient: { getChainId: async () => 1, getTransactionReceipt: async () => ({ blockNumber: 5n, blockHash: hash(5) }),
+        getBlock: async ({ blockNumber, blockTag }: { blockNumber?: bigint; blockTag?: string }) =>
+          blockTag ? { number: 6n, hash: hash(5) } : { hash: blockNumber === 0n ? hash(8) : hash(5) } } as unknown as PublicClient,
+    }).catch((error: Error) => error);
+    if (scenario === 'deadline') {
+      await started;
+      await vi.advanceTimersByTimeAsync(1001);
+      expect((await relay as Error).message).toContain('deadline expired');
+      expect((await relay as Error).message).toContain('HOLD: original Gear transaction ' + hash(4));
+      expect((await relay as Error).message).toContain('Reconcile the original before retrying');
+    } else if (scenario === 'insufficient') {
+      const error = await relay as Error;
+      expect(error.message).toContain('InsufficientBalance: Insufficient user balance.');
+      expect(error.message).toContain(hash(4));
+      expect(effectVerified).toBe(false);
+    } else {
+      expect((await relay as RelayResult).clientReply).toBe(inner);
+      expect(effectVerified).toBe(true);
+    }
+    expect(stop).toHaveBeenCalledOnce();
+  } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
 });
 
-afterAll(async () => {
-  await gearApi.disconnect();
+
+describe('SDK inbound acceptance', () => {
+  test('returns original finalized raw inner Err bytes without advertising application success, including on resume', async () => {
+    const fixture = originalReplyFixture();
+    const result = await validateFinalizedEthToVaraReply(fixture.params);
+    expect(result.clientReply).toBe(fixture.innerReply);
+    expect(result).not.toHaveProperty('ok');
+    expect(result.replyBlockHash).toBe(hash(12));
+    expect(result.replyMessageId).toBe(hash(8));
+    expect(await result.isFinalized).toBe(true);
+    const resumed = await validateFinalizedEthToVaraReply(fixture.params);
+    expect(resumed.clientReply).toBe(result.clientReply);
+    expect(resumed.replyBlockHash).toBe(result.replyBlockHash);
+    expect(resumed.msgId).toBe(result.msgId);
+  });
+
+  test.each(['source', 'destination', 'queuedSource', 'queuedDestination', 'runtime', 'route', 'trailing', 'receipt', 'request', 'canonical'])(
+    'rejects mismatched original %s evidence', async (kind) => {
+      const fixture = originalReplyFixture();
+      if (kind === 'source') fixture.state.source = hash(99);
+      if (kind === 'destination') fixture.state.destination = hash(99);
+      if (kind === 'queuedSource') fixture.state.queuedSource = hash(99);
+      if (kind === 'queuedDestination') fixture.state.queuedDestination = hash(99);
+      if (kind === 'runtime') fixture.state.runtimeSuccess = false;
+      if (kind === 'route') fixture.state.payload = fixture.registry.createType('(String, String, Result<(Vec<u8>, Vec<u8>), ProxyError>)',
+        ['HistoricalProxy', 'Relayed', { ok: [bytesToHex(fixture.receiptRlp), fixture.innerReply] }]).toHex();
+      if (kind === 'trailing') fixture.state.payload = (fixture.state.payload + '00') as HexString;
+      if (kind === 'receipt') fixture.params.receiptRlp = Uint8Array.of(1);
+      if (kind === 'request') fixture.state.requestPayload = (fixture.state.requestPayload + '00') as HexString;
+      if (kind === 'canonical') fixture.state.requestCanonical = false;
+      await expect(validateFinalizedEthToVaraReply(fixture.params)).rejects.toThrow();
+    });
+
+  test('request finality cannot accept an unfinalized original reply or reopen an expired deadline', async () => {
+    const fixture = originalReplyFixture();
+    fixture.state.finalized = 10;
+    fixture.params.deadline = Date.now() + 30;
+    await expect(validateFinalizedEthToVaraReply(fixture.params)).rejects.toThrow();
+    fixture.state.finalized = 12;
+    await expect(validateFinalizedEthToVaraReply(fixture.params)).rejects.toThrow('deadline expired');
+  });
+
+  test('a finalized outer error remains a proxy error rather than client bytes', async () => {
+    const fixture = originalReplyFixture();
+    fixture.state.payload = fixture.registry.createType('(String, String, Result<(Vec<u8>, Vec<u8>), ProxyError>)',
+      ['HistoricalProxy', 'Redirect', { err: { SendFailure: 'no effect' } }]).toHex();
+    const result = await validateFinalizedEthToVaraReply(fixture.params);
+    expect(result.error).toEqual({ SendFailure: 'no effect' });
+    expect(result.clientReply).toBeUndefined();
+  });
+
+  test('preserves the actual nested proof-error variant rather than lowercased JSON aliases', async () => {
+    const fixture = originalReplyFixture();
+    fixture.state.payload = fixture.registry.createType('(String, String, Result<(Vec<u8>, Vec<u8>), ProxyError>)',
+      ['HistoricalProxy', 'Redirect', { err: { EthereumEventClient: 'InvalidReceiptProof' } }]).toHex();
+    const result = await validateFinalizedEthToVaraReply(fixture.params);
+    expect(result.error).toEqual({ EthereumEventClient: 'InvalidReceiptProof' });
+    expect(result.clientReply).toBeUndefined();
+  });
+
+  test('a stalled original-block RPC remains bounded by the same original deadline', async () => {
+    const fixture = originalReplyFixture();
+    fixture.params.gearApi.blocks.get = async () => new Promise<never>(() => {});
+    fixture.params.deadline = Date.now() + 30;
+    await expect(validateFinalizedEthToVaraReply(fixture.params)).rejects.toThrow('deadline expired');
+  });
+
+  test('bounded ordered header retrieval omits only absent slots', async () => {
+    let active = 0, peak = 0;
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).endsWith('/genesis')) return new Response(JSON.stringify({ data: { genesis_time: '0', genesis_validators_root: hash(1), genesis_fork_version: '0x00000000' } }));
+      const slot = Number(String(url).split('/').pop());
+      active++; peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, slot % 3));
+      active--;
+      return slot === 11 ? new Response('', { status: 404 }) : new Response(JSON.stringify({ data: { header: { message: { slot: String(slot) } } } }));
+    });
+    try {
+      const client = await createBeaconClient('https://owned-fixture.invalid');
+      const headers = await client.requestHeaders(5, 42);
+      expect(headers.map((item) => Number(item.header.message.slot))).toEqual(Array.from({ length: 38 }, (_, i) => i + 5).filter((slot) => slot !== 11));
+      expect(peak).toBeLessThanOrEqual(16);
+    } finally { fetch.mockRestore(); }
+  });
+
+  test.each([429, 503])('preserves non-absence Beacon failure %s instead of silently skipping history', async (status) => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).endsWith('/genesis')
+      ? new Response(JSON.stringify({ data: { genesis_time: '0', genesis_validators_root: hash(1), genesis_fork_version: '0x00000000' } }))
+      : new Response('', { status }));
+    try {
+      const client = await createBeaconClient('https://owned-fixture.invalid');
+      await expect(client.requestHeaders(5, 6)).rejects.toThrow();
+    } finally { fetch.mockRestore(); }
+  });
+
+  test.each(['legacy', 'eip2930', 'eip1559', 'eip4844', 'eip7702'] as const)(
+    'VB-20 reconstructed from HTML (7fe1b032): forwards exact raw %s EIP-2718 trie bytes', async (type) => {
+      const receipt = { type, transactionIndex: 0, status: 'success', cumulativeGasUsed: 21000n,
+        logsBloom: '0x' + '00'.repeat(256), logs: [] } as unknown as TransactionReceipt;
+      const legacy = 'f9010801825208b90100' + '00'.repeat(256) + 'c0';
+      const tag = ['legacy', 'eip2930', 'eip1559', 'eip4844', 'eip7702'].indexOf(type);
+      const trieValue = type === 'legacy' ? legacy : '0' + tag + legacy;
+      const result = await generateMerkleProof(0, [receipt]);
+      expect(bytesToHex(result.receiptRlp)).toBe('0x' + trieValue);
+      const leaf = rlpEncode([Uint8Array.of(0x20, 0x80), hexToBytes(('0x' + trieValue) as HexString)]);
+      expect(bytesToHex(result.root)).toBe(keccak256(leaf));
+      expect(result.proof.map((node) => bytesToHex(node))).toEqual([bytesToHex(leaf)]);
+    });
+
+  test('VB-20 reconstructed from HTML (7fe1b032): preserves historical PostState trie root', async () => {
+    const receipt = { type: 'legacy', transactionIndex: 0, root: '0x' + '42'.repeat(32), cumulativeGasUsed: 21000n,
+      logsBloom: '0x' + '00'.repeat(256), logs: [] } as unknown as TransactionReceipt;
+    const raw = hexToBytes(('0xf90128a0' + '42'.repeat(32) + '825208b90100' + '00'.repeat(256) + 'c0') as HexString);
+    const proof = await generateMerkleProof(0, [receipt]);
+    expect(proof.receiptRlp).toEqual(raw);
+    expect(bytesToHex(proof.root)).toBe(keccak256(rlpEncode([Uint8Array.of(0x20, 0x80), raw])));
+    const coerced = await generateMerkleProof(0, [{ ...receipt, root: undefined, status: 'success' }]);
+    expect(coerced.root).not.toEqual(proof.root);
+    await expect(generateMerkleProof(0, [{ ...receipt, root: '0x01' }])).rejects.toThrow();
+  });
 });
+
+describe('SDK finalized consumer and token effects', () => {
+  test('snapshots a complete immutable profile and rejects missing deployment pins', () => {
+    const original = checkpointProofFixture().profile;
+    const snapshot = immutableInboundProfile(original);
+    Object.defineProperty(original.consumer, 'codeId', { value: hash(99) });
+    expect(snapshot.consumer.codeId).not.toBe(hash(99));
+    expect(Object.isFrozen(snapshot.consumer)).toBe(true);
+    expect(() => immutableInboundProfile({ ...snapshot, historicalProxyIdlSha256: '' })).toThrow('HOLD');
+    expect(() => immutableInboundProfile({ ...snapshot, endpoint: { ...snapshot.endpoint, idlSha256: 'b'.repeat(64) } })).toThrow('HOLD');
+    expect(() => immutableInboundProfile(undefined as unknown as InboundProofProfile)).toThrow('HOLD');
+  });
+
+  test.each(['escrow-v1', 'held-escrow-v2'] as const)('normalizes all profile byte identities and binds %s to its actual IDL', async (mode) => {
+    const original = nativeProfile(mode), actorId = hash(0xabcdef), token = `0x${'abcdefabcd'.repeat(4)}` as HexString;
+    const profile: InboundProofProfile = { ...original, ethereumGenesisHash: actorId, beaconGenesisValidatorsRoot: actorId,
+      sourceGenesisHash: actorId, sourceBlockHash: actorId, sourceRuntimeCodeHash: actorId,
+      historicalProxyId: actorId, historicalProxyCodeId: actorId,
+      endpoint: { ...original.endpoint, programId: actorId, codeId: actorId },
+      checkpoint: { ...original.checkpoint, programId: actorId, codeId: actorId },
+      consumer: { ...original.consumer, programId: actorId, codeId: actorId },
+      nativeWrapper: { ...original.nativeWrapper!, programId: actorId, codeId: actorId, ethereumToken: token },
+      forks: original.forks.map(fork => ({ ...fork, version: '0xabcdefab' })) };
+    const upper = JSON.parse(JSON.stringify(profile, (_, value) => typeof value === 'bigint' ? value.toString() :
+      typeof value === 'string' && /^(?:0x)?[0-9a-fA-F]{8,}$/.test(value) ?
+        (value.startsWith('0x') ? '0x' + value.slice(2).toUpperCase() : value.toUpperCase()) : value));
+    const canonical = parseInboundProofProfile(JSON.stringify(upper));
+    expect(canonical).toEqual(profile);
+    expect(Object.isFrozen(canonical.nativeWrapper)).toBe(true);
+    expect(Object.isFrozen(canonical.forks[0])).toBe(true);
+    const registry = await managerRegistry();
+    const contract: ConsumerReplyContract = { registry, idlSha256: VFT_MANAGER_IDL_SHA256.toUpperCase(),
+      resultType: 'Result<Null, Error>', verifyEffect: async () => {},
+      nativeSettlement: { expectedEffect: { managerAddress: token, sourceToken: token, destinationToken: actorId,
+        sender: token, receiver: actorId, amount: 10n },
+        readDeposits: async () => [], readRedemption: async () => null, readReceiptStatus: async () => 'Reserved' } };
+    const pending = registry.createType('(String,String,Result<Null,Error>)',
+      ['VftManager', 'SubmitReceipt', { err: { NativeSettlementPending: null } }]).toHex();
+    expect(() => assertNativePendingReply(pending, canonical, contract)).not.toThrow();
+    const ok = registry.createType('(String,String,Result<Null,Error>)', ['VftManager', 'SubmitReceipt', { ok: null }]).toHex();
+    expect(decodeConsumerReply(ok, canonical, contract)).toBeNull();
+    for (const binding of [
+      { ...profile.nativeWrapper!, mode: mode === 'escrow-v1' ? 'held-escrow-v2' as const : 'escrow-v1' as const },
+      { ...profile.nativeWrapper!, mode: undefined },
+      { ...profile.nativeWrapper!, ethereumToken: '0x00' },
+      { ...profile.nativeWrapper!, codeId: hash(0) },
+      { ...profile.nativeWrapper!, idlSha256: 'b'.repeat(64) },
+    ]) expect(() => immutableInboundProfile({ ...profile, nativeWrapper: binding } as InboundProofProfile)).toThrow('HOLD');
+    const adapter = { registry, idlSha256: contract.idlSha256, ...contract.nativeSettlement! };
+    expect(() => createVftManagerReplyContract(canonical, adapter)).not.toThrow();
+    expect(() => createVftManagerReplyContract(canonical, { ...adapter,
+      expectedEffect: { ...adapter.expectedEffect, sourceToken: `0x${'ff'.repeat(20)}` } })).toThrow('mapping');
+    expect(() => createVftManagerReplyContract(canonical, { ...adapter,
+      expectedEffect: { ...adapter.expectedEffect, destinationToken: hash(0xff) } })).toThrow('mapping');
+  });
+
+  test.each(['escrow-v1', 'held-escrow-v2'] as const)('compares mixed-case native cohorts by bytes without weakening %s refund rules', async (mode) => {
+    const upper = (value: HexString) => ('0x' + value.slice(2).toUpperCase()) as HexString;
+    const expected = { managerAddress: `0x${'ab'.repeat(20)}` as HexString, sourceToken: `0x${'cd'.repeat(20)}` as HexString,
+      sender: `0x${'ef'.repeat(20)}` as HexString, destinationToken: hash(0xab), receiver: hash(0xcd), amount: 10n };
+    const log = { address: expected.managerAddress, topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
+      args: { from: expected.sender, to: expected.receiver, token: expected.sourceToken } }), data: encodeAbiParameters(parseAbiParameters('uint256'), [10n]) };
+    const { receiptRlp } = await generateMerkleProof(0, [{ type: 'eip1559', transactionIndex: 0, status: 'success',
+      cumulativeGasUsed: 21000n, logsBloom: '0x' + '00'.repeat(256), logs: [log] } as unknown as TransactionReceipt]);
+    const identity = { managerId: hash(0xef), proxyId: hash(0xfa), wrapperId: expected.destinationToken, wrapperMode: mode,
+      wrapperEthereumToken: expected.sourceToken, slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
+    const row: NativeReceiptDeposit = { log_index: 0, sender: expected.sender, receiver: expected.receiver, eth_token_id: expected.sourceToken,
+      token_id: expected.destinationToken, amount: 10n, outcome: 'NativeQueued', native: true, supply: 'Gear',
+      operation_id: nativeOperationId(identity, 0n), child: hash(0xabcd) };
+    const changedCase = { ...row, sender: upper(row.sender), receiver: upper(row.receiver), eth_token_id: upper(row.eth_token_id),
+      token_id: upper(row.token_id!), operation_id: upper(row.operation_id), child: upper(row.child!) };
+    const upperIdentity = { ...identity, managerId: upper(identity.managerId), proxyId: upper(identity.proxyId),
+      wrapperId: upper(identity.wrapperId), wrapperEthereumToken: upper(identity.wrapperEthereumToken) };
+    expect(() => validateNativePendingCohort(upperIdentity, [changedCase])).not.toThrow();
+    expect(() => validateNativeCohortContinuity([row], [changedCase], false)).not.toThrow();
+    const queued: NativeRedemption = { from: identity.managerId, to: row.receiver, amount: 10n, child: hash(0xbcde),
+      status: 'Queued', returned_value: 10n };
+    const upperQueued = { ...queued, from: upper(queued.from), to: upper(queued.to), child: upper(queued.child) };
+    expect(validateNativeRedemption(changedCase, upper(identity.managerId), mode, upperQueued, queued)).toBe('Queued');
+    expect(() => validateNativeTokenEffect(identity, [changedCase], new Map([[row.operation_id, upperQueued]]))).toThrow('not terminal');
+    const refunded = { ...changedCase, outcome: 'Refunded' };
+    const refund = { ...upperQueued, status: 'Refunded' as const };
+    const original = new Map([[upper(row.operation_id), upperQueued]]);
+    expect(validateNativeTokenEffect(upperIdentity, [refunded], new Map([[row.operation_id, refund]]), original)[0])
+      .toEqual({ operationId: row.operation_id, logIndex: 0n, child: row.child, redemption: { ...queued, status: 'Refunded' } });
+    expect(() => validateNativeCohortContinuity([row], [refunded], true)).not.toThrow();
+    const delivered = { ...changedCase, outcome: 'Settled' };
+    expect(() => validateInboundTokenEffect(receiptRlp, [delivered], {
+      ...expected, managerAddress: upper(expected.managerAddress), sourceToken: upper(expected.sourceToken),
+      destinationToken: upper(expected.destinationToken), sender: upper(expected.sender), receiver: upper(expected.receiver),
+    })).not.toThrow();
+    expect(validateNativeTokenEffect(identity, [delivered], new Map([[upper(row.operation_id),
+      { ...upperQueued, status: 'Delivered', returned_value: 0n }]]))[0].redemption.status).toBe('Delivered');
+    for (const change of [{ operation_id: hash(0xff) }, { child: hash(0xff) }, { token_id: hash(0xff) },
+      { receiver: hash(0xff) }, { eth_token_id: `0x${'ff'.repeat(20)}` as HexString }]) {
+      expect(() => validateNativeCohortContinuity([row], [{ ...refunded, ...change }], true)).toThrow('HOLD');
+    }
+    for (const change of [{ child: hash(0xff) }, { from: hash(0xff) }, { to: hash(0xff) }]) {
+      expect(() => validateNativeTokenEffect(identity, [refunded], new Map([[row.operation_id, { ...refund, ...change }]]), original)).toThrow('HOLD');
+    }
+    expect(() => validateNativePendingCohort({ ...identity, wrapperEthereumToken: `0x${'ff'.repeat(20)}` }, [row])).toThrow('HOLD');
+    expect(() => validateNativePendingCohort(identity, [{ ...row, operation_id: hash(0xff) }])).toThrow('HOLD');
+    expect(() => validateNativeTokenEffect(identity, [refunded], new Map([[hash(0xff), refund]]), original)).toThrow('HOLD');
+    expect(() => validateNativeTokenEffect(identity, [refunded], new Map([[row.operation_id, refund], [upper(row.operation_id), refund]]), original)).toThrow('duplicate');
+    for (const status of ['Returned', 'Ambiguous'] as const) {
+      expect(() => validateNativeRedemption(row, identity.managerId, mode, { ...queued, status })).toThrow('HOLD');
+    }
+    for (const returned_value of [1n, 9n, 11n]) {
+      const excess = { ...queued, returned_value };
+      if (mode === 'held-escrow-v2' && returned_value === 11n) {
+        expect(validateNativeRedemption(row, identity.managerId, mode, excess)).toBe('Queued');
+        expect(validateNativeRedemption(refunded, identity.managerId, mode, { ...excess, status: 'Refunded' }, excess)).toBe('Refunded');
+      } else {
+        expect(() => validateNativeRedemption(row, identity.managerId, mode, excess)).toThrow('HOLD');
+        expect(() => validateNativeRedemption(refunded, identity.managerId, mode, { ...excess, status: 'Refunded' })).toThrow('HOLD');
+      }
+    }
+  });
+
+  test('qualifies actual Electra and historical proxy IDL bytes and rejects either mutation', () => {
+    const original = checkpointProofFixture().profile;
+    const [proxyHash, endpointHash] = ['historical_proxy', 'eth_events_electra'].map(name => createHash('sha256').update(
+      fs.readFileSync(new URL(`../../../api/gear/${name}.idl`, import.meta.url))).digest('hex'));
+    const profile = { ...original, historicalProxyIdlSha256: proxyHash,
+      endpoint: { ...original.endpoint, idlSha256: endpointHash } };
+    expect(() => immutableInboundProfile(profile)).not.toThrow();
+    expect(() => immutableInboundProfile({ ...profile, historicalProxyIdlSha256: (proxyHash[0] === '0' ? '1' : '0') + proxyHash.slice(1) }))
+      .toThrow('HOLD: unqualified deployed inbound IDL or proof framing');
+    expect(() => immutableInboundProfile({ ...profile, endpoint: { ...profile.endpoint,
+      idlSha256: (endpointHash[0] === '0' ? '1' : '0') + endpointHash.slice(1) } }))
+      .toThrow('HOLD: unqualified deployed inbound IDL or proof framing');
+  });
+
+  test('pins non-native VftManager profiles, direct decoders and adapters before I/O or signing', async () => {
+    const profile = { ...nativeProfile(), nativeWrapper: undefined }, registry = await managerRegistry();
+    const adapter = { registry, idlSha256: VFT_MANAGER_IDL_SHA256,
+      expectedEffect: { managerAddress: ('0x' + '12'.repeat(20)) as HexString, sourceToken: ('0x' + '13'.repeat(20)) as HexString,
+        destinationToken: hash(8), sender: ('0x' + '14'.repeat(20)) as HexString, receiver: hash(9), amount: 10n },
+      readDeposits: vi.fn(async () => []), readRedemption: vi.fn(async () => null),
+      readReceiptStatus: vi.fn(async () => 'Processed' as const) };
+    const contract = createVftManagerReplyContract(profile, adapter);
+    expect(immutableInboundProfile(profile).nativeWrapper).toBeUndefined();
+    expect(contract.nativeSettlement).toBeUndefined();
+    const ok = registry.createType('(String,String,Result<Null,Error>)', ['VftManager', 'SubmitReceipt', { ok: null }]).toHex();
+    expect(decodeConsumerReply(ok, profile, contract)).toBeNull();
+    const bad = { ...profile, consumer: { ...profile.consumer, idlSha256: 'b'.repeat(64) } };
+    expect(() => immutableInboundProfile(bad)).toThrow('HOLD: unqualified deployed inbound IDL or proof framing');
+    expect(() => decodeConsumerReply(ok, bad, { ...contract, idlSha256: bad.consumer.idlSha256 })).toThrow('HOLD');
+    expect(() => createVftManagerReplyContract(bad, { ...adapter, idlSha256: bad.consumer.idlSha256 })).toThrow('HOLD');
+    expect(() => createVftManagerReplyContract(profile, { ...adapter, idlSha256: 'b'.repeat(64) })).toThrow('HOLD');
+    for (const consumer of [{ ...profile.consumer, service: 'Ping' }, { ...profile.consumer, method: 'Other' }]) {
+      expect(() => createVftManagerReplyContract({ ...profile, consumer }, adapter)).toThrow('HOLD');
+    }
+    const getChainId = vi.fn(async () => 1);
+    await expect(relayEthToVara({ gearApi: {} as GearApi, signer: hash(2), transactionHash: hash(4),
+      beaconRpcUrl: 'https://beacon.invalid', historicalProxyId: profile.historicalProxyId,
+      clientId: profile.consumer.programId, clientServiceName: 'VftManager', clientMethodName: 'SubmitReceipt',
+      inboundProfile: bad, consumerReply: contract, ethereumPublicClient: { getChainId } as unknown as PublicClient }))
+      .rejects.toThrow('HOLD: unqualified deployed inbound IDL or proof framing');
+    expect(getChainId).not.toHaveBeenCalled();
+    expect(adapter.readDeposits).not.toHaveBeenCalled();
+    expect(adapter.readRedemption).not.toHaveBeenCalled();
+    expect(adapter.readReceiptStatus).not.toHaveBeenCalled();
+  });
+
+  test('only the complete expected consumer tuple and inner Ok report success', () => {
+    const profile = checkpointProofFixture().profile;
+    const registry = new HistoricalProxyClient({} as GearApi, hash(1)).registry;
+    registry.register({ ConsumerError: { _enum: ['Rejected'] } });
+    const contract = { registry, resultType: 'Result<Null, ConsumerError>', idlSha256: profile.consumer.idlSha256,
+      verifyEffect: async () => { throw new Error('Codec-only test must not dispatch an effect'); } };
+    const encode = (service: string, method: string, value: unknown) => registry.createType(
+      '(String, String, Result<Null, ConsumerError>)', [service, method, value]).toHex();
+    const ok = encode('Ping', 'SubmitReceipt', { Ok: null });
+    expect(decodeConsumerReply(ok, profile, contract)).toBeNull();
+    for (const payload of [ok + '00', encode('Other', 'SubmitReceipt', { Ok: null }),
+      encode('Ping', 'Other', { Ok: null }), encode('Ping', 'SubmitReceipt', { Err: 'Rejected' })]) {
+      expect(() => decodeConsumerReply(payload as HexString, profile, contract)).toThrow();
+    }
+    expect(() => decodeConsumerReply(ok, profile, { ...contract, idlSha256: 'b'.repeat(64) })).toThrow();
+  });
+
+
+
+  test('recognizes only the actual typed NativeSettlementPending without relabeling it success', async () => {
+    const profile = nativeProfile(), registry = await managerRegistry();
+    const contract: ConsumerReplyContract = { registry, resultType: 'Result<Null, Error>', idlSha256: VFT_MANAGER_IDL_SHA256,
+      verifyEffect: async () => { throw new Error('Classifier must not verify or dispatch an effect'); },
+      nativeSettlement: { expectedEffect: { managerAddress: `0x${'12'.repeat(20)}`, sourceToken: `0x${'13'.repeat(20)}`, destinationToken: hash(8), sender: `0x${'14'.repeat(20)}`, receiver: hash(9), amount: 10n },
+        readDeposits: async () => [], readRedemption: async () => null, readReceiptStatus: async () => 'Reserved' as const } };
+    const encode = (error: string) => registry.createType('(String,String,Result<Null,Error>)', ['VftManager','SubmitReceipt',{ err: { [error]: null } }]).toHex();
+    const pending = encode('NativeSettlementPending');
+    expect(() => assertNativePendingReply(pending, profile, contract)).not.toThrow();
+    expect(() => decodeConsumerReply(pending, profile, contract)).toThrow();
+    for (const error of ['NativeSettlementReturned', 'MessageFailed', 'ReceiptLeaseActive', 'ReceiptResolved']) {
+      expect(() => assertNativePendingReply(encode(error), profile, contract)).toThrow();
+      expect(() => decodeConsumerReply(encode(error), profile, contract)).toThrow();
+    }
+    expect(() => assertNativePendingReply(pending, profile, { ...contract, nativeSettlement: undefined })).toThrow();
+    expect(() => assertNativePendingReply(pending, { ...profile, nativeWrapper: undefined }, contract)).toThrow();
+    expect(() => assertNativePendingReply((pending + '00') as HexString, profile, contract)).toThrow();
+  });
+
+  test('authenticates delivered and refunded native cohorts while preserving operation and both child identities', async () => {
+    const expected = { managerAddress: ('0x' + '12'.repeat(20)) as HexString, sourceToken: ('0x' + '13'.repeat(20)) as HexString,
+      destinationToken: hash(8), sender: ('0x' + '14'.repeat(20)) as HexString, receiver: hash(9), amount: 10n };
+    const logs = [10n, 20n].map(amount => ({ address: expected.managerAddress, topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
+      args: { from: expected.sender, to: expected.receiver, token: expected.sourceToken } }), data: encodeAbiParameters(parseAbiParameters('uint256'), [amount]) }));
+    const { receiptRlp } = await generateMerkleProof(0, [{ type: 'eip1559', transactionIndex: 0, status: 'success', cumulativeGasUsed: 21000n,
+      logsBloom: '0x' + '00'.repeat(256), logs } as unknown as TransactionReceipt]);
+    const identity = { managerId: hash(1), proxyId: hash(2), wrapperId: hash(8), wrapperMode: 'held-escrow-v2' as const,
+      wrapperEthereumToken: expected.sourceToken, slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
+    const rows: NativeReceiptDeposit[] = [10n, 20n].map((amount, log_index) => ({ log_index, sender: expected.sender, receiver: expected.receiver,
+      eth_token_id: expected.sourceToken, token_id: expected.destinationToken, amount, outcome: 'NativeQueued', native: true, supply: 'Gear',
+      operation_id: nativeOperationId(identity, BigInt(log_index)), child: hash(40 + log_index) }));
+    expect(() => validateNativePendingCohort(identity, rows)).not.toThrow();
+    const registry = await managerRegistry();
+    const tuple = registry.createType('([u8;21],[u8;32],[u8;32],H160,u64,u64,u64,H256)', [bytesToHex(new TextEncoder().encode('vara/native-escrow/v1')),
+      identity.managerId, identity.proxyId, expected.managerAddress, identity.slot, identity.transactionIndex, 0, keccak256(receiptRlp)]).toU8a();
+    expect(rows[0].operation_id).toBe(keccak256(tuple));
+    expect(rows[1].operation_id).not.toBe(rows[0].operation_id);
+    for (const outcome of ['Unknown', 'Pending', 'InFlight', 'Rejected', 'Retryable', 'Held']) expect(() => validateNativePendingCohort(identity, [{ ...rows[0], outcome }, rows[1]])).toThrow();
+    for (const change of [{ child: null }, { native: false }, { supply: 'Ethereum' as const }, { operation_id: hash(99) }, { amount: 11n }]) {
+      expect(() => validateNativePendingCohort(identity, [{ ...rows[0], ...change }, rows[1]])).toThrow();
+    }
+    const delivered = rows.map(row => ({ ...row, outcome: 'Settled' }));
+    expect(() => validateNativeCohortContinuity(rows, delivered, true)).not.toThrow();
+    expect(() => validateNativeCohortContinuity(rows, rows, true)).toThrow();
+    expect(() => validateNativePendingCohort(identity, delivered)).not.toThrow();
+    for (const change of [{ child: hash(99) }, { operation_id: hash(99) }, { amount: 11n }, { receiver: hash(99) }, { supply: 'Ethereum' as const }]) {
+      expect(() => validateNativeCohortContinuity(rows, [{ ...delivered[0], ...change }, delivered[1]], true)).toThrow();
+    }
+    expect(() => validateNativeCohortContinuity(rows, delivered.slice(0, 1), true)).toThrow();
+    const queued = { from: identity.managerId, to: expected.receiver, amount: 10n, child: hash(50), status: 'Queued' as const, returned_value: 0n };
+    expect(validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, queued)).toBe('Queued');
+    const returned = { ...queued, returned_value: 10n };
+    expect(validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, returned, queued)).toBe('Queued');
+    expect(() => validateNativeTokenEffect(identity, rows, new Map([[rows[0].operation_id, returned]]))).toThrow('HOLD');
+    for (const change of [{ returned_value: 1n }, { child: hash(99) }, { child: rows[0].child! },
+      { to: hash(99) }, { from: hash(99) }, { amount: 11n }, { status: 'Ambiguous' as const }, { status: 'Returned' as const }]) {
+      expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, { ...returned, ...change }, queued)).toThrow('HOLD');
+    }
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, queued, returned)).toThrow('HOLD');
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, { ...queued, status: 'Delivered' }, returned)).toThrow('HOLD');
+    expect(() => validateNativeRedemption({ ...rows[0], amount: 0n }, identity.managerId, identity.wrapperMode, { ...queued, amount: 0n })).toThrow('HOLD');
+    const settled = { ...queued, status: 'Delivered' as const };
+    expect(validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, settled, queued)).toBe('Delivered');
+    for (const change of [{ child: hash(99) }, { child: rows[0].child! }, { returned_value: 1n }, { status: 'Returned' as const }, { status: 'Ambiguous' as const },
+      { to: hash(99) }, { from: hash(99) }, { amount: 11n }]) expect(() => validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, { ...settled, ...change }, queued)).toThrow();
+    expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, null)).toThrow();
+    expect(() => validateInboundTokenEffect(receiptRlp, rows, expected)).toThrow();
+    expect(() => validateInboundTokenEffect(receiptRlp, delivered, expected)).not.toThrow();
+    const refunded = rows.map(row => ({ ...row, outcome: 'Refunded' }));
+    const refunds = new Map(rows.map(row => [row.operation_id, { ...queued, amount: row.amount, child: hash(50 + Number(row.log_index)),
+      status: 'Refunded' as const, returned_value: row.amount }]));
+    const originals = new Map([...refunds].map(([operation, value]) => [operation, { ...value, status: 'Queued' as const, returned_value: 0n }]));
+    expect(validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, refunds.get(rows[0].operation_id)!, queued)).toBe('Refunded');
+    expect(validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, refunds.get(rows[0].operation_id)!, returned)).toBe('Refunded');
+    const excess = { ...returned, returned_value: 11n };
+    const excessRefunds = new Map([...refunds].map(([operation, value]) => [operation,
+      { ...value, returned_value: BigInt(value.amount) + 1n }]));
+    const excessOriginals = new Map([...excessRefunds].map(([operation, value]) => [operation, { ...value, status: 'Queued' as const }]));
+    expect(validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, excess, queued)).toBe('Queued');
+    expect(validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, excessRefunds.get(rows[0].operation_id)!, excess)).toBe('Refunded');
+    const excessSettlements = validateNativeTokenEffect(identity, refunded, excessRefunds, excessOriginals);
+    expect(validateNativeTokenEffect(identity, refunded, excessRefunds, originals).map(entry => entry.redemption.returned_value)).toEqual([11n, 21n]);
+    expect(excessSettlements.map(entry => entry.redemption.returned_value)).toEqual([11n, 21n]);
+    expect(excessSettlements.map(entry => entry.redemption.amount)).toEqual([10n, 20n]);
+    for (const backing of [0n, 10n, 12n]) {
+      expect(() => validateNativeRedemption(rows[0], identity.managerId, identity.wrapperMode, { ...excess, returned_value: backing }, excess)).toThrow('HOLD');
+      expect(() => validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode,
+        { ...excess, status: 'Refunded', returned_value: backing }, excess)).toThrow('HOLD');
+    }
+    expect(() => validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, { ...excess, status: 'Delivered' }, queued)).toThrow('HOLD');
+    expect(() => validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode,
+      { ...excess, status: 'Refunded', returned_value: 12n }, excessRefunds.get(rows[0].operation_id)!)).toThrow('HOLD');
+    expect(() => validateNativeCohortContinuity(rows, refunded, true)).not.toThrow();
+    const authenticated = validateNativeTokenEffect(identity, refunded, refunds, originals);
+    expect(authenticated.map(entry => entry.redemption.status)).toEqual(['Refunded', 'Refunded']);
+    expect(authenticated[0]).toEqual({ operationId: rows[0].operation_id, logIndex: 0n, child: rows[0].child, redemption: refunds.get(rows[0].operation_id) });
+    expect(() => validateInboundTokenEffect(receiptRlp, refunded, expected)).toThrow();
+    expect(() => validateNativeTokenEffect(identity, refunded, new Map(), originals)).toThrow();
+    expect(() => validateNativeTokenEffect(identity, refunded, refunds, new Map())).toThrow();
+    expect(() => validateNativeTokenEffect(identity, rows, originals)).toThrow();
+    for (const change of [{ returned_value: 9n }, { returned_value: 0n }, { amount: 11n },
+      { child: hash(99) }, { child: rows[0].child! }, { to: hash(99) }, { from: hash(99) },
+      { status: 'Returned' as const }, { status: 'Ambiguous' as const }, { status: 'Queued' as const }]) {
+      const substituted = new Map<HexString, NativeRedemption>(refunds);
+      substituted.set(rows[0].operation_id, { ...refunds.get(rows[0].operation_id)!, ...change });
+      expect(() => validateNativeTokenEffect(identity, refunded, substituted, originals)).toThrow('HOLD');
+    }
+    expect(() => validateNativeCohortContinuity(refunded, delivered, true)).toThrow();
+    expect(() => validateNativeCohortContinuity(delivered, refunded, true)).toThrow();
+    expect(() => validateNativeRedemption(refunded[0], identity.managerId, identity.wrapperMode, refunds.get(rows[0].operation_id)!, settled)).toThrow();
+    expect(() => validateNativeRedemption(delivered[0], identity.managerId, identity.wrapperMode, settled, refunds.get(rows[0].operation_id)!)).toThrow();
+    expect(() => validateNativeTokenEffect(identity, [{ ...refunded[0], receiver: hash(99) }, refunded[1]], refunds, originals)).toThrow();
+    expect(() => validateNativeCohortContinuity(rows, [{ ...refunded[0], child: hash(99) }, refunded[1]], true)).toThrow();
+    const mixed = [refunded[0], delivered[1]];
+    const mixedRedemptions = new Map<HexString, NativeRedemption>(refunds);
+    mixedRedemptions.set(rows[1].operation_id, { ...refunds.get(rows[1].operation_id)!, status: 'Delivered', returned_value: 0n });
+    expect(validateNativeTokenEffect(identity, mixed, mixedRedemptions, originals).map(entry => entry.redemption.status)).toEqual(['Refunded', 'Delivered']);
+  });
+
+  test.each((['refund', 'delivered', 'direct-refund', 'partial', 'amount', 'child', 'manager-child', 'recipient', 'source', 'terminal', 'ambiguous', 'pin',
+    'reconcile-refund', 'reconcile-uncredited', 'queued-wait', 'queued-partial', 'queued-child', 'queued-recipient', 'queued-source', 'queued-amount', 'queued-ambiguous'] as const)
+    .flatMap(scenario => (['escrow-v1', 'held-escrow-v2'] as const).map(mode => [mode, scenario] as const)))(
+    'qualifies original native settlement at its saved finalized pin: %s/%s', async (mode, scenario) => {
+      const fixture = originalReplyFixture(), api = fixture.params.gearApi, registry = await managerRegistry();
+      const profile = nativeProfile(mode), direct = scenario === 'direct-refund', delivered = scenario === 'delivered';
+      const reconcile = scenario.startsWith('reconcile-') || scenario.startsWith('queued-');
+      const expected = { managerAddress: ('0x' + '12'.repeat(20)) as HexString, sourceToken: ('0x' + '13'.repeat(20)) as HexString,
+        destinationToken: profile.nativeWrapper!.programId, sender: ('0x' + '14'.repeat(20)) as HexString, receiver: hash(9), amount: 10n };
+      const log = { address: expected.managerAddress, topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
+        args: { from: expected.sender, to: expected.receiver, token: expected.sourceToken } }), data: encodeAbiParameters(parseAbiParameters('uint256'), [10n]) };
+      const { receiptRlp } = await generateMerkleProof(0, [{ type: 'eip1559', transactionIndex: 0, status: 'success', cumulativeGasUsed: 21000n,
+        logsBloom: '0x' + '00'.repeat(256), logs: [log] } as unknown as TransactionReceipt]);
+      const identity = { managerId: profile.consumer.programId, proxyId: profile.historicalProxyId, wrapperId: expected.destinationToken,
+        wrapperMode: profile.nativeWrapper!.mode, wrapperEthereumToken: profile.nativeWrapper!.ethereumToken,
+        slot: 100n, transactionIndex: 3n, receiptRlp, expectedEffect: expected };
+      const row: NativeReceiptDeposit = { log_index: 0, sender: expected.sender, receiver: expected.receiver, eth_token_id: expected.sourceToken,
+        token_id: expected.destinationToken, amount: 10n, outcome: 'NativeQueued', native: true, supply: 'Gear',
+        operation_id: nativeOperationId(identity, 0n), child: hash(40) };
+      const queued: NativeRedemption = { from: identity.managerId, to: expected.receiver, amount: 10n, child: hash(50), status: 'Queued', returned_value: 0n };
+      const terminal: NativeRedemption = { ...queued, status: delivered ? 'Delivered' : 'Refunded', returned_value: delivered ? 0n : 10n };
+      const finalPin = direct ? hash(12) : reconcile ? hash(15) : hash(13);
+      const readDeposits = vi.fn(async (pin: HexString) => [{ ...row,
+        outcome: (pin === hash(12) && !direct) || (reconcile && pin === hash(13)) || scenario === 'reconcile-uncredited' ? 'NativeQueued' : delivered ? 'Settled' : 'Refunded',
+        ...(scenario === 'manager-child' && pin === hash(13) ? { child: hash(99) } : {}) }]);
+      const readRedemption = vi.fn(async (_operation: HexString, pin: HexString): Promise<NativeRedemption> => {
+        if (pin === hash(12) && !direct) return scenario === 'terminal' ? { ...queued, status: 'Delivered' } : queued;
+        if (reconcile && (pin === hash(13) || scenario === 'reconcile-uncredited')) return { ...queued, returned_value: scenario === 'queued-wait' ? 0n : 10n,
+          ...(scenario === 'queued-partial' ? { returned_value: 9n } : {}), ...(scenario === 'queued-child' ? { child: hash(99) } : {}),
+          ...(scenario === 'queued-recipient' ? { to: hash(99) } : {}), ...(scenario === 'queued-source' ? { from: hash(99) } : {}),
+          ...(scenario === 'queued-amount' ? { amount: 11n } : {}), ...(scenario === 'queued-ambiguous' ? { status: 'Ambiguous' as const } : {}) };
+        return { ...terminal, ...(scenario === 'partial' ? { returned_value: 9n } : {}),
+          ...(scenario === 'amount' ? { amount: 11n } : {}), ...(scenario === 'child' ? { child: hash(99) } : {}),
+          ...(scenario === 'recipient' ? { to: hash(99) } : {}), ...(scenario === 'source' ? { from: hash(99) } : {}),
+          ...(scenario === 'ambiguous' ? { status: 'Ambiguous' as const } : {}) };
+      });
+      const inner = registry.createType('(String,String,Result<Null,Error>)', ['VftManager', 'SubmitReceipt',
+        direct ? { ok: null } : { err: { NativeSettlementPending: null } }]).toHex();
+      fixture.state.requestPayload = fixture.registry.createType('(String,String,u64,Vec<u8>,[u8;32],Vec<u8>)',
+        ['HistoricalProxy', 'Redirect', 100, '0x0102', profile.consumer.programId, getPrefix('VftManager', 'SubmitReceipt')]).toHex();
+      fixture.state.payload = fixture.registry.createType('(String,String,Result<(Vec<u8>,Vec<u8>),ProxyError>)',
+        ['HistoricalProxy', 'Redirect', { ok: [bytesToHex(receiptRlp), inner] }]).toHex();
+      fixture.state.finalized = 13;
+      vi.spyOn(api.rpc.chain, 'getFinalizedHead').mockImplementation(async () => codec(hash(fixture.state.finalized)) as never);
+      let effectVerified = false, broadcasts = 0, reconciliations = 0;
+      const canonical = api.blocks.getBlockHash;
+      api.blocks.getBlockHash = async (height) => scenario === 'pin' && effectVerified && BigInt(height.toString()) === 13n ? codec(hash(99)) as never : canonical(height);
+      Object.assign(api, { blockGasLimit: { toBigInt: () => 10000n },
+        programStorage: { getProgram: async (id: HexString) => ({ state: { isInitialized: true },
+          codeId: codec(id === identity.wrapperId ? profile.nativeWrapper!.codeId : profile.consumer.codeId) }) } });
+      Object.assign(api.rpc, { state: { getStorage: async () => ({ isEmpty: false, toU8a: () => Uint8Array.of(1, 2, 3) }) } });
+      const extrinsic = { args: [codec(hash(1)), codec(fixture.state.requestPayload)], hash: codec(hash(4)),
+        signAsync: async () => extrinsic, send: async (callback: (value: unknown) => void) => {
+          broadcasts++;
+          callback({ events: await api.blocks.getEvents(hash(10)), status: { isInBlock: true, asInBlock: codec(hash(10)) } });
+          return () => {};
+        } };
+      const transaction = { extrinsic, gasInfo: { min_limit: { toBigInt: () => 100n } },
+        withAccount: () => transaction, calculateGas: async () => transaction, withGas: () => transaction, withValue: () => transaction };
+      // Exercise the real TransactionBuilder and finalized request/reply scanner for
+      // the separate ReconcileReceipt, not a mocked terminal-status shortcut.
+      const originalBlock = api.blocks.get, originalEvents = api.blocks.getEvents;
+      const phase = { isApplyExtrinsic: true, asApplyExtrinsic: { toNumber: () => 0 } };
+      const reconcileEvents = [
+        { phase, event: { section: 'gear', method: 'MessageQueued', data: [codec(hash(70)), codec(hash(2)), codec(identity.managerId)] } },
+        { phase, event: { section: 'system', method: 'ExtrinsicSuccess', data: [] } },
+      ];
+      let reconciliationExtrinsic: unknown;
+      interface TxArg { toHex(): HexString; toString(): string }
+      const sendMessage = (...args: TxArg[]) => {
+        const tx = { args, hash: codec(hash(71)), isSigned: true, signer: codec(hash(2)),
+          method: { section: 'gear', method: 'sendMessage', args },
+          signAsync: vi.fn(async (_signer: unknown, options: { nonce: number }) => { expect(options.nonce).toBe(-1); return tx; }),
+          send: async (callback: (value: unknown) => void) => {
+            reconciliations++;
+            expect(effectVerified).toBe(false);
+            const request = registry.createType('(String,String,u64,u64)', args[1].toHex());
+            expect(request.toJSON()).toEqual(['VftManager', 'ReconcileReceipt', 100, 3]);
+            expect(args[0].toHex()).toBe(identity.managerId);
+            expect(args[3].toString()).toBe('0');
+            fixture.state.finalized = 15;
+            callback({ events: reconcileEvents, status: { isInBlock: true, asInBlock: codec(hash(14)) } });
+            return () => {};
+          } };
+        reconciliationExtrinsic = tx;
+        return tx;
+      };
+      Object.assign(api, {
+        message: { send: ({ destination, payload }: { destination: HexString; payload: Uint8Array }) =>
+          sendMessage(codec(destination), registry.createType('Bytes', bytesToHex(payload)), registry.createType('u64', 0), registry.createType('u128', 0)) },
+        tx: { gear: { sendMessage } },
+        program: { calculateGas: { handle: async () => ({ min_limit: registry.createType('u64', 100) }) } },
+      });
+      api.blocks.get = async (pin) => pin === hash(14) ? { block: {
+        header: { number: { toBigInt: () => 14n }, parentHash: codec(hash(13)) }, extrinsics: [reconciliationExtrinsic] } } as never : originalBlock(pin);
+      api.blocks.getEvents = async (pin) => pin === hash(14) ? reconcileEvents as never : pin === hash(15) ? [{
+        phase: { isApplyExtrinsic: false }, event: { section: 'gear', method: 'UserMessageSent', data: [{
+          id: codec(hash(72)), source: codec(identity.managerId), destination: codec(hash(2)),
+          details: { isNone: false, unwrap: () => ({ to: codec(hash(70)), code: { isSuccess: true } }) },
+          payload: registry.createType('Bytes', registry.createType('(String,String,Result<ReceiptStatus,Error>)',
+            ['VftManager', 'ReconcileReceipt', { ok: 'Processed' }]).toHex()),
+        }] } }] as never : originalEvents(pin);
+      try {
+        vi.spyOn(beaconMethods, 'createBeaconClient').mockResolvedValue({ genesisBlockTime: 0 } as BeaconClient);
+        vi.spyOn(proofMethods, 'composeProof').mockResolvedValue({ proofBlock: { block: { slot: 100 } }, transactionIndex: 3, receiptRlp } as ProofResult);
+        vi.spyOn(varaCodec, 'encodeEthToVaraEvent').mockReturnValue('0x0102');
+        vi.spyOn(HistoricalProxy.prototype, 'redirect').mockReturnValue(transaction as never);
+        const verifyEffect = vi.fn(async (_value: unknown, result: RelayResult, proof: ProofResult) => {
+          expect(result.effectBlockHash).toBe(finalPin);
+          const deposits = await readDeposits(result.effectBlockHash!);
+          const redemptions = new Map([[row.operation_id, await readRedemption(row.operation_id, result.effectBlockHash!)]]);
+          expect(validateNativeTokenEffect(identity, deposits, redemptions)).toEqual(result.nativeSettlements);
+          expect(proof.receiptRlp).toEqual(receiptRlp);
+          effectVerified = true;
+        });
+        const pending = relayEthToVara({ deadline: Date.now() + 1000, gearApi: api, signer: hash(2), transactionHash: hash(4),
+          beaconRpcUrl: 'https://beacon.invalid', historicalProxyId: profile.historicalProxyId, clientId: profile.consumer.programId,
+          clientServiceName: 'VftManager', clientMethodName: 'SubmitReceipt', inboundProfile: profile,
+          statusCb: (status) => {
+            if (scenario === 'queued-wait' && status.startsWith('Native payout pending')) throw new Error('HOLD: original payout is still waiting');
+          },
+          consumerReply: { registry, resultType: 'Result<Null, Error>', idlSha256: VFT_MANAGER_IDL_SHA256, verifyEffect,
+            nativeSettlement: { expectedEffect: expected, readDeposits, readRedemption,
+              readReceiptStatus: async (pin) => reconcile && pin === hash(13) ? 'Reserved' : 'Processed' } },
+          ethereumPublicClient: { getChainId: async () => 1, getTransactionReceipt: async () => ({ blockNumber: 5n, blockHash: hash(5) }),
+            getBlock: async ({ blockNumber, blockTag }: { blockNumber?: bigint; blockTag?: string }) =>
+              blockTag ? { number: 6n, hash: hash(5) } : { hash: blockNumber === 0n ? profile.ethereumGenesisHash : hash(5) } } as unknown as PublicClient });
+        if (['refund', 'delivered', 'direct-refund', 'reconcile-refund'].includes(scenario)) {
+          const result = await pending;
+          expect(result.nativeSettlements?.[0].redemption.status).toBe(delivered ? 'Delivered' : 'Refunded');
+          expect(result.clientReply).toBe(inner); expect(result.replyBlockHash).toBe(hash(12)); expect(result.effectBlockHash).toBe(finalPin);
+          if (reconcile) expect(result.nativeReconciliation?.msgId).toBe(hash(70));
+          else expect(result.nativeReconciliation).toBeUndefined();
+          expect(verifyEffect).toHaveBeenCalledOnce();
+          expect(readRedemption).toHaveBeenCalledWith(row.operation_id, finalPin);
+          if (!direct) expect(readRedemption).toHaveBeenCalledWith(row.operation_id, hash(12));
+        } else {
+          await expect(pending).rejects.toThrow(scenario === 'reconcile-uncredited' ? 'original native cohort identity or outcome changed' : 'HOLD');
+          // This case changes canonical history inside the effect verifier; the
+          // post-readback guard must reject it rather than return that result.
+          if (scenario === 'pin') expect(effectVerified).toBe(true);
+          else expect(verifyEffect).not.toHaveBeenCalled();
+        }
+        expect(broadcasts).toBe(1);
+        expect(reconciliations).toBe(scenario === 'reconcile-refund' || scenario === 'reconcile-uncredited' ? 1 : 0);
+      } finally { vi.restoreAllMocks(); }
+    });
+
+  test('authenticates the separately signed original ReconcileReceipt reply and exact receipt coordinates', async () => {
+    const registry = await managerRegistry();
+    const fixture = originalReplyFixture(), profile = nativeProfile();
+    const requestPayload = registry.createType('(String,String,u64,u64)', ['VftManager', 'ReconcileReceipt', 100, 3]).toHex();
+    fixture.state.requestPayload = requestPayload;
+    fixture.state.payload = registry.createType('(String,String,Result<ReceiptStatus,Error>)', ['VftManager','ReconcileReceipt',{ ok: 'Processed' }]).toHex();
+    const params = { ...fixture.params, registry, inboundProfile: profile, slot: 100n, transactionIndex: 3n, requestPayload };
+    const result = await validateFinalizedNativeReconciliationReply(params);
+    expect(result.txHash).toBe(fixture.params.txHash); expect(result.msgId).toBe(fixture.params.msgId); expect(result.replyBlockHash).toBe(hash(12));
+    expect(() => validateFinalizedNativeReconciliationReply({ ...params, transactionIndex: 4n })).toThrow();
+    for (const status of ['Reserved', 'Resolved']) {
+      fixture.state.payload = registry.createType('(String,String,Result<ReceiptStatus,Error>)', ['VftManager','ReconcileReceipt',{ ok: status }]).toHex();
+      await expect(validateFinalizedNativeReconciliationReply(params)).rejects.toThrow();
+    }
+    fixture.state.payload = registry.createType('(String,String,Result<ReceiptStatus,Error>)', ['VftManager','ReconcileReceipt',{ ok: 'Processed' }]).toHex();
+    fixture.state.requestCanonical = false;
+    await expect(validateFinalizedNativeReconciliationReply(params)).rejects.toThrow();
+  });
+
+
+  test.each(['legacy', 'eip2930', 'eip1559', 'eip4844', 'eip7702'] as const)(
+    'authenticates every original %s manager log and exact settled multi-log effects', async (type) => {
+      const address = (n: number) => ('0x' + n.toString(16).padStart(40, '0')) as HexString;
+      const expected = { managerAddress: address(1), sourceToken: address(2), destinationToken: hash(3),
+        sender: address(4), receiver: hash(5), amount: 10n };
+      const logs = [10n, 20n].map(amount => ({ address: expected.managerAddress,
+        topics: encodeEventTopics({ abi: BridgingRequestedAbi, eventName: 'BridgingRequested',
+          args: { from: expected.sender, to: expected.receiver, token: expected.sourceToken } }),
+        data: encodeAbiParameters(parseAbiParameters('uint256'), [amount]) }));
+      const receipt = { type, transactionIndex: 0, status: 'success', cumulativeGasUsed: 21000n,
+        logsBloom: '0x' + '00'.repeat(256), logs } as unknown as TransactionReceipt;
+      const { receiptRlp } = await generateMerkleProof(0, [receipt]);
+      const rows = [10n, 20n].map((amount, log_index) => ({ log_index, sender: expected.sender,
+        receiver: expected.receiver, eth_token_id: expected.sourceToken, token_id: expected.destinationToken, amount, outcome: 'Settled' }));
+      const identical = await generateMerkleProof(0, [{ ...receipt, logs: [receipt.logs[0], receipt.logs[0]] }]);
+      expect(() => validateInboundTokenEffect(identical.receiptRlp, [rows[0], { ...rows[1], amount: 10n }], expected)).not.toThrow();
+      expect(() => validateInboundTokenEffect(receiptRlp, rows, expected)).not.toThrow();
+      for (const outcome of ['Pending', 'InFlight', 'Rejected', 'Unknown', 'NativeQueued', 'Refunded']) {
+        expect(() => validateInboundTokenEffect(receiptRlp, [{ ...rows[0], outcome }, rows[1]], expected)).toThrow();
+      }
+      for (const badRows of [rows.slice(0, 1), [rows[0], rows[0]], [{ ...rows[0], amount: 11n }, rows[1]],
+        [{ ...rows[0], token_id: hash(99) }, rows[1]], [{ ...rows[0], receiver: hash(99) }, rows[1]]]) {
+        expect(() => validateInboundTokenEffect(receiptRlp, badRows, expected)).toThrow();
+      }
+      expect(() => validateInboundTokenEffect(receiptRlp, rows, { ...expected, amount: 11n })).toThrow();
+      const failed = await generateMerkleProof(0, [{ ...receipt, status: 'reverted' }]);
+      expect(() => validateInboundTokenEffect(failed.receiptRlp, rows, expected)).toThrow();
+      expect(() => validateInboundTokenEffect(new Uint8Array([...receiptRlp, 0]), rows, expected)).toThrow();
+      // VB-20 reconstructed from HTML; audited revision 7fe1b032.
+      expect(() => validateInboundTokenEffect(rlpEncode(receiptRlp), rows, expected)).toThrow();
+      // Historical decoding is explicit; the bytes used for original IDs are never canonicalized.
+      const historical = type === 'legacy' ? receiptRlp : rlpEncode(receiptRlp);
+      const historyFixture = checkpointProofFixture();
+      const historyProfile = immutableInboundProfile({ ...historyFixture.profile, historicalReceipts: [{
+        managerId: historyFixture.profile.consumer.programId, managerCodeId: historyFixture.profile.consumer.codeId,
+        endpointId: historyFixture.profile.endpoint.programId, endpointCodeId: historyFixture.profile.endpoint.codeId, framing: 'network-rlp', minimumSlot: 100n, maximumSlot: 100n,
+      }] });
+      const authority = await authenticateHistoricalReceipt(historyProfile, { api: historyFixture.proxy.api, preparedBlockHash: hash(20), receiptHash: keccak256(historical), slot: 100n, transactionIndex: 0n }, historical, 100n, 0n);
+      expect(() => validateInboundTokenEffect(historical, rows, expected, authority)).not.toThrow();
+      expect(() => validateInboundTokenEffect(historical, rows, expected, { ...authority })).toThrow('authority');
+      if (type !== 'legacy') expect(keccak256(historical)).not.toBe(keccak256(receiptRlp));
+      expect(() => validateInboundTokenEffect(new Uint8Array([...historical, 0]), rows, expected, authority)).toThrow();
+      expect(() => validateInboundTokenEffect(receiptRlp, [{ ...rows[0], token_id: null, outcome: 'Rejected' }, rows[1]], expected)).toThrow('retained liability');
+      const postState = await generateMerkleProof(0, [{ ...receipt, root: hash(42) }]);
+      expect(() => validateInboundTokenEffect(postState.receiptRlp, rows, expected)).toThrow();
+      const zeroGas = await generateMerkleProof(0, [{ ...receipt, cumulativeGasUsed: 0n }]);
+      expect(() => validateInboundTokenEffect(zeroGas.receiptRlp, rows, expected)).not.toThrow();
+    });
+});
+
+
+function nativeProfile(mode: NativeWrapperMode = 'held-escrow-v2'): InboundProofProfile {
+  const original = checkpointProofFixture().profile;
+  return immutableInboundProfile({ ...original, sourceBlockHash: hash(1), consumer: { ...original.consumer, idlSha256: VFT_MANAGER_IDL_SHA256, service: 'VftManager' },
+    nativeWrapper: { programId: hash(8), ethereumToken: `0x${'13'.repeat(20)}`, codeId: hash(18), mode,
+      idlSha256: mode === 'escrow-v1' ? NATIVE_WRAPPER_V1_IDL_SHA256 : NATIVE_WRAPPER_IDL_SHA256 } });
+}
+
+
+describe('SDK identity boundaries reconstructed from HTML 7fe1b032: VB-11/20/38/39/41', () => {
+  test('malicious active pairs cannot grant native capabilities; symbols and inactive history are not authority', () => {
+    const profile = immutableInboundProfile({ ...nativeProfile('escrow-v1'), nativeEth: { ethereumToken: `0x${'21'.repeat(20)}`, runtimeCodeHash: hash(22), varaToken: hash(23), varaCodeId: hash(24) } });
+    const pair = { varaToken: profile.nativeWrapper!.programId, ethToken: profile.nativeWrapper!.ethereumToken, tokenSupply: 'Gear', isActive: true, symbol: 'totally-not-native' };
+    const mapping: [string, string, string][] = [[pair.varaToken, pair.ethToken, 'Gear']];
+    expect(() => validateTokenPairInventory([pair], mapping)).not.toThrow();
+    expect(nativeAssetKind(profile, pair.varaToken, pair.ethToken, 'Gear')).toBe('vara');
+    expect(nativeAssetKind(profile, hash(99), pair.ethToken, 'Gear')).toBeUndefined();
+    expect(nativeAssetKind(profile, pair.varaToken, pair.ethToken, 'Ethereum')).toBeUndefined();
+    expect(nativeAssetKind(profile, profile.nativeEth!.varaToken, profile.nativeEth!.ethereumToken, 'Ethereum')).toBe('eth');
+    for (const changed of [{ ...pair, varaToken: hash(99), symbol: 'ETH VARA USDC' }, { ...pair, ethToken: `0x${'99'.repeat(20)}` }, { ...pair, tokenSupply: 'Ethereum' }]) {
+      expect(() => validateTokenPairInventory([changed], mapping)).toThrow('HOLD');
+    }
+    expect(() => validateTokenPairInventory([pair, pair], mapping)).toThrow('HOLD');
+    expect(() => validateTokenPairInventory([], mapping)).toThrow('incomplete');
+    expect(() => validateTokenPairInventory([pair, { ...pair, varaToken: hash(99), isActive: false }], mapping)).not.toThrow();
+    expect(Object.isFrozen(profile.nativeEth)).toBe(true);
+  });
+
+  test('signing-to-settlement runtime transition needs independent activation approval and preserves bootstrap', async () => {
+    const fixture = checkpointProofFixture();
+    const api = fixture.proxy.api;
+    const nextCode = Uint8Array.of(7, 8, 9);
+    api.rpc.state.getStorage = (async (_key: string, pin: HexString) => ({ isEmpty: false, toU8a: () => pin === hash(21) ? nextCode : Uint8Array.of(1, 2, 3) })) as typeof api.rpc.state.getStorage;
+    await authenticateInboundSource(api, fixture.profile, hash(20));
+    await expect(authenticateInboundSource(api, fixture.profile, hash(21))).rejects.toThrow('unapproved runtime');
+    const approved = immutableInboundProfile({ ...fixture.profile, runtimeTransitions: [{ blockHash: hash(21), codeHash: blake2AsHex(nextCode, 256) }] });
+    await authenticateInboundSource(api, approved, hash(21));
+    expect(approved.sourceRuntimeCodeHash).toBe(fixture.profile.sourceRuntimeCodeHash);
+    await expect(authenticateInboundSource(api, { ...approved, sourceRuntimeCodeHash: hash(99) }, hash(21))).rejects.toThrow('original runtime');
+    await expect(authenticateInboundSource(api, { ...approved, runtimeTransitions: [{ blockHash: hash(21), codeHash: hash(99) }] }, hash(21))).rejects.toThrow('activation');
+  });
+
+  test('historical network receipt authority binds original hash, selected endpoint, CodeIds and nonoverlapping slot range', async () => {
+    const fixture = checkpointProofFixture();
+    const approval = { managerId: fixture.profile.consumer.programId, managerCodeId: fixture.profile.consumer.codeId, endpointId: fixture.profile.endpoint.programId, endpointCodeId: fixture.profile.endpoint.codeId, framing: 'network-rlp' as const, minimumSlot: 100n, maximumSlot: 100n };
+    const profile = immutableInboundProfile({ ...fixture.profile, historicalReceipts: [approval] });
+    const receipt = rlpEncode(Uint8Array.of(2, 0xc0));
+    const original = { api: fixture.proxy.api, preparedBlockHash: hash(20), receiptHash: keccak256(receipt), slot: 100n, transactionIndex: 0n };
+    await expect(authenticateHistoricalReceipt(profile, original, receipt, 100n, 0n)).resolves.toMatchObject({ framing: 'network-rlp', receiptHash: original.receiptHash });
+    for (const changed of [{ ...original, receiptHash: hash(99) }, { ...original, slot: 101n }, { ...original, transactionIndex: 1n }]) {
+      await expect(authenticateHistoricalReceipt(profile, changed, receipt, 100n, 0n)).rejects.toThrow('identity');
+    }
+    await expect(authenticateHistoricalReceipt({ ...profile, historicalReceipts: [{ ...approval, endpointCodeId: hash(99) }] }, original, receipt, 100n, 0n)).rejects.toThrow('approval');
+    await expect(authenticateHistoricalReceipt({ ...profile, historicalReceipts: [] }, original, receipt, 100n, 0n)).rejects.toThrow('approval');
+    expect(() => immutableInboundProfile({ ...profile, historicalReceipts: [approval, { ...approval, endpointId: hash(99) }] })).toThrow('overlapping');
+  });
+
+  test.each(['prefix', 'trailing', 'sync-callback', 'async-callback'] as const)('proxy advisory rejects %s without escaping or certifying success', async (scenario) => {
+    let receive!: (event: unknown) => void;
+    const stop = vi.fn(), errors = vi.fn();
+    const api = { gearEvents: { subscribeToGearEvent: async (_name: string, callback: (event: unknown) => void) => { receive = callback; return stop; } } } as unknown as GearApi;
+    const client = new HistoricalProxyClient(api, hash(1));
+    const callback = vi.fn(() => {
+      if (scenario === 'sync-callback') throw new Error('sync');
+      if (scenario === 'async-callback') return Promise.reject(new Error('async'));
+    });
+    const unsubscribe = await client.historicalProxy.subscribeToRelayedEvent(callback, errors);
+    const valid = client.registry.createType('(String,String,{"slot":"u64","block_number":"u64","transaction_index":"u32"})', ['HistoricalProxy', 'Relayed', { slot: 1, block_number: 1, transaction_index: 0 }]).toHex();
+    const payload = scenario === 'prefix' ? '0xff' : scenario === 'trailing' ? valid + '00' : valid;
+    expect(() => receive({ data: { message: { source: codec(hash(1)), destination: codec(hash(0)), payload: client.registry.createType('Bytes', payload) } } })).not.toThrow();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledTimes(scenario.endsWith('callback') ? 1 : 0);
+    unsubscribe();
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  test('advisory decode and asynchronous callback failure close even a late subscription handle', async () => {
+    for (const asyncFailure of [false, true]) {
+      const stop = vi.fn(), error = vi.fn();
+      const callback = vi.fn(async () => { if (asyncFailure) throw new Error('callback'); });
+      await subscribeAdvisory<number>(async (dispatch) => {
+        dispatch(() => { if (!asyncFailure) throw new Error('decode'); return 1; });
+        await Promise.resolve();
+        return stop;
+      }, callback, error);
+      await Promise.resolve(); await Promise.resolve();
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledTimes(asyncFailure ? 1 : 0);
+    }
+  });
+});
+
+function checkpointProofFixture(fault = '') {
+  const proxyId = hash(1), endpointId = hash(2), checkpointId = hash(3);
+  const registry = new HistoricalProxyClient({} as GearApi, proxyId).registry;
+  registry.register({ CheckpointError: { _enum: ['OutDated', 'NotPresent'] }, Network: { _enum: ['Mainnet', 'Sepolia', 'Holesky', 'Hoodi'] } });
+  const runtime = Uint8Array.of(1, 2, 3);
+  const receipt = { type: 'eip1559', transactionIndex: 0, transactionHash: hash(5), blockNumber: 5n, blockHash: hash(6),
+    status: 'success', cumulativeGasUsed: 21000n, logsBloom: '0x' + '00'.repeat(256), logs: [] } as unknown as TransactionReceipt;
+  const encodedReceipt = hexToBytes(('0x02f9010801825208b90100' + '00'.repeat(256) + 'c0') as HexString);
+  const receiptsRoot = keccak256(rlpEncode([Uint8Array.of(0x20, 0x80), encodedReceipt]));
+  const block = ssz.fulu.BeaconBlock.defaultValue();
+  block.slot = 100;
+  block.body.executionPayload.blockNumber = 5;
+  block.body.executionPayload.blockHash = hexToBytes(receipt.blockHash);
+  block.body.executionPayload.receiptsRoot = hexToBytes(receiptsRoot);
+  const root = bytesToHex(ssz.fulu.BeaconBlock.hashTreeRoot(block));
+  const profile: InboundProofProfile = { ethereumChainId: 1n, ethereumGenesisHash: hash(7), beaconGenesisValidatorsRoot: hash(8), beaconGenesisTime: 0n,
+    sourceGenesisHash: hash(9), sourceBlockHash: hash(20), sourceRuntimeCodeHash: blake2AsHex(runtime, 256), historicalProxyId: proxyId, historicalProxyCodeId: hash(11),
+    historicalProxyIdlSha256: '4bde230e4759abfedd44070790b3a579d7f75aadff14266e0f1a287f61942bc7',
+    endpoint: { programId: endpointId, codeId: hash(12), idlSha256: '70cc917357c2a589063f1efca80b2da0390f3c12c58eecb0b9367228c4bce1b0', framing: 'electra' },
+    checkpoint: { programId: checkpointId, codeId: hash(13), idlSha256: '2e5d5576576bdbbf8bfe7c3a9f83f48be400e602bf47d906d5ab3a7ff1f28b4f', network: 'Hoodi' },
+    consumer: { programId: proxyId, codeId: hash(11), idlSha256: 'a'.repeat(64), service: 'Ping', method: 'SubmitReceipt' },
+    forks: [{ name: 'electra', epoch: 0n, version: '0x01000000' }, { name: 'fulu', epoch: 1n, version: '0x02000000' }] };
+  let release: (() => void) | undefined;
+  const state = { absent: false, proofReads: 0, checkpointPins: [] as HexString[], release: () => release?.() };
+  const api = {
+    query: { gearProgram: { programStorage: async (_id: HexString, subscriber?: unknown) => subscriber ? () => {} : { isNone: false, unwrap: () => ({ isExited: false, isTerminated: false }) } } },
+    genesisHash: codec(profile.sourceGenesisHash), blockGasLimit: { toBigInt: () => 10000n }, specVersion: 1,
+    blocks: {
+      getFinalizedHead: async () => codec(hash(state.absent && fault === 'regression' ? 19 : ['intermediate-history', 'late-intermediate-history'].includes(fault) && state.checkpointPins.includes(hash(21)) ? 22 : 21)),
+      getBlockHash: async (height: bigint) => codec(hash((Number(height) === 20 && ((state.absent && fault === 'history') || (state.proofReads > 0 && fault === 'late-history'))) ||
+        (Number(height) === 21 && ((fault === 'intermediate-history' && state.checkpointPins.includes(hash(21))) || (fault === 'late-intermediate-history' && state.proofReads > 0))) ? 99 : Number(height))),
+    },
+    rpc: { chain: { getHeader: async (pin: HexString) => ({ number: { toBigInt: () => BigInt(pin) } }) },
+      state: { getStorage: async (_key: string, pin: HexString) => ({ isEmpty: false,
+        toU8a: () => pin !== profile.sourceBlockHash && fault === 'runtime' ? Uint8Array.of(9) : runtime }) } },
+    programStorage: { getProgram: async (id: HexString, pin: HexString) => {
+      if (pin !== profile.sourceBlockHash && fault === 'stalled') await new Promise<void>(resolve => { release = resolve; });
+      const index = [proxyId, endpointId, checkpointId].indexOf(id);
+      return { state: { isInitialized: true }, codeId: codec(hash(pin !== profile.sourceBlockHash && fault === ['proxy-code', 'endpoint-code', 'checkpoint-code'][index] ? 99 : 11 + index)) };
+    } },
+    message: { calculateReply: async ({ destination, payload, at }: { destination: HexString; payload: Uint8Array; at: HexString }) => {
+      const [service, method] = registry.createType('(String,String)', payload);
+      let type: string, result: unknown;
+      if (method.toString() === 'Network') {
+        return { code: { isSuccess: true }, payload: registry.createType('Bytes', registry.createType('(String,String,Network)',
+          [service.toString(), method.toString(), fault === 'network' ? 'Mainnet' : 'Hoodi']).toHex()) };
+      }
+      if (destination === proxyId) { type = 'Result<[u8;32],ProxyError>'; result = { ok: at !== profile.sourceBlockHash && fault === 'endpoint' ? hash(99) : endpointId }; }
+      else if (destination === endpointId) { type = '[u8;32]'; result = (at !== profile.sourceBlockHash && fault === 'checkpoint') || (state.proofReads > 0 && fault === 'late-checkpoint') ? hash(99) : checkpointId; }
+      else {
+        type = 'Result<(u64,H256),CheckpointError>'; state.checkpointPins.push(at);
+        if (fault === 'unknown') throw new Error('Unknown checkpoint failure');
+        result = at === profile.sourceBlockHash || fault === 'absent' || (at === hash(21) && ['intermediate-history', 'late-intermediate-history'].includes(fault)) ? { err: fault === 'outdated' ? 'OutDated' : 'NotPresent' } : { ok: [100, root] };
+        state.absent = true;
+      }
+      return { code: { isSuccess: true }, payload: registry.createType('Bytes', registry.createType('(String,String,' + type + ')', [service.toString(), method.toString(), result]).toHex()) };
+    } },
+  } as unknown as GearApi;
+  const beacon = { genesisBlock: { genesis_time: '0', genesis_validators_root: profile.beaconGenesisValidatorsRoot },
+    getBlock: async () => { state.proofReads++; return { ...ssz.fulu.BeaconBlock.toJson(block), fork: 'fulu' }; },
+    getSpec: async () => ({ ELECTRA_FORK_EPOCH: '0', ELECTRA_FORK_VERSION: '0x01000000', FULU_FORK_EPOCH: '1', FULU_FORK_VERSION: '0x02000000',
+      ...(fault === 'fork' ? { UNKNOWN_FORK_EPOCH: '2', UNKNOWN_FORK_VERSION: '0x03000000' } : {}) }),
+    getBlockHeader: async () => ({ canonical: true, root }),
+  } as unknown as BeaconClient;
+  const ethereum = { getTransactionReceipt: async () => receipt, getSlot: async () => 100,
+    getBlockByHash: async () => ({ hash: receipt.blockHash, number: receipt.blockNumber, transactions: [receipt.transactionHash], receiptsRoot }) } as unknown as EthereumClient;
+  return { state, profile, beacon, ethereum, proxy: new HistoricalProxyClient(api, proxyId), receipt, receiptsRoot };
+}
+
+describe('SDK owned LocalFixture approvals', () => {
+  const serialize = (profile: InboundProofProfile) => JSON.stringify(profile, (_, value) => typeof value === 'bigint' ? value.toString() : value);
+  function localProfile(): InboundProofProfile {
+    const profile = checkpointProofFixture().profile;
+    return { ...profile, ethereumChainId: 31337n, beaconGenesisTime: 1234n,
+      checkpoint: { ...profile.checkpoint, idlSha256: '65c15d4eccb2a19a8ad240b82738a6335b0e9efd9a054340856f665addaca7e5',
+        network: { localFixture: { genesis_time: 1234n, genesis_validators_root: profile.beaconGenesisValidatorsRoot } } },
+      forks: ['phase0', 'altair', 'bellatrix', 'capella', 'deneb', 'electra', 'fulu'].map((name, index) => ({ name,
+        epoch: name === 'fulu' ? 18446744073709551615n : 0n, version: ('0x' + index.toString(16).padStart(2, '0') + '003137') as HexString }))
+        .map(fork => fork.name === 'electra' ? { ...fork, version: '0x60003137' } : fork) };
+  }
+  const descriptor = (profile: InboundProofProfile) => ({ schemaVersion: 1 as const, ethereumChainId: 31337 as const,
+    ethereumGenesisHash: profile.ethereumGenesisHash, beaconGenesisValidatorsRoot: profile.beaconGenesisValidatorsRoot, beaconGenesisTime: 1234 });
+  const transports = ['ws://127.0.0.1:9944', 'ws://[::1]:8546', 'http://127.0.0.1:5052'];
+
+  test('uses the actual hash-pinned IDL enum with unchanged public indices and fixture payload', async () => {
+    const profile = immutableInboundProfile(localProfile());
+    const idl = fs.readFileSync(new URL('../../../api/gear/checkpoint_light_client.idl', import.meta.url), 'utf8');
+    expect(createHash('sha256').update(idl).digest('hex')).toBe(profile.checkpoint.idlSha256);
+    const generated = new Sails(await SailsIdlParser.new()).parseIdl(idl).registry;
+    const sdk = new CheckpointClient({} as GearApi, hash(3)).registry;
+    const fixture = { LocalFixture: { genesis_time: 1234n, genesis_validators_root: profile.beaconGenesisValidatorsRoot } };
+    const encoded = generated.createType('Network', fixture).toU8a();
+    expect(encoded[0]).toBe(4);
+    expect(sdk.createType('Network', fixture).toU8a()).toEqual(encoded);
+    expect(checkpointNetworkMatches(sdk.createType('Network', encoded).toJSON(), profile.checkpoint.network)).toBe(true);
+    for (const [index, network] of ['Mainnet', 'Sepolia', 'Holesky', 'Hoodi'].entries()) {
+      const value = sdk.createType('Network', { [network]: null });
+      expect(value.toU8a()).toEqual(Uint8Array.of(index));
+      expect(checkpointNetworkMatches(value.toJSON(), network as 'Hoodi')).toBe(true);
+    }
+    expect(() => immutableInboundProfile({ ...profile, checkpoint: { ...profile.checkpoint,
+      idlSha256: checkpointProofFixture().profile.checkpoint.idlSha256 } })).toThrow('unqualified deployed inbound IDL');
+  });
+
+  test('snapshots and deeply freezes nested fixture identity after JSON parsing', () => {
+    const supplied = localProfile();
+    const approved = parseInboundProofProfile(serialize(supplied));
+    expect(typeof approved.checkpoint.network).toBe('object');
+    if (typeof approved.checkpoint.network === 'string' || typeof supplied.checkpoint.network === 'string') throw new Error('fixture required');
+    expect(Object.isFrozen(approved.checkpoint.network)).toBe(true);
+    expect(Object.isFrozen(approved.checkpoint.network.localFixture)).toBe(true);
+    expect(Reflect.set(approved.checkpoint.network.localFixture, 'genesis_time', 99n)).toBe(false);
+    Reflect.set(supplied.checkpoint.network.localFixture, 'genesis_time', 99n);
+    expect(approved.checkpoint.network.localFixture.genesis_time).toBe(1234n);
+    expect(checkpointNetworkMatches({ localFixture: { genesis_time: '1234', genesis_validators_root: approved.beaconGenesisValidatorsRoot } }, approved.checkpoint.network)).toBe(true);
+    expect(checkpointNetworkMatches({ localFixture: { genesis_time: '1235', genesis_validators_root: approved.beaconGenesisValidatorsRoot } }, approved.checkpoint.network)).toBe(false);
+    expect(checkpointNetworkMatches({ localFixture: { genesis_time: '1234', genesis_validators_root: hash(99) } }, approved.checkpoint.network)).toBe(false);
+    expect(checkpointNetworkMatches('Hoodi', approved.checkpoint.network)).toBe(false);
+    expect(checkpointNetworkMatches(approved.checkpoint.network, 'Hoodi')).toBe(false);
+    expect(checkpointNetworkMatches({ hoodi: null }, 'Hoodi')).toBe(true);
+    expect(checkpointNetworkMatches({ mainnet: null }, 'Hoodi')).toBe(false);
+  });
+
+  test('normalizes nested local-fixture genesis bytes and independent descriptors before freezing', () => {
+    const profile = localProfile(), root = hash(0xabcdef);
+    if (typeof profile.checkpoint.network === 'string') throw new Error('fixture required');
+    const upper = ('0x' + root.slice(2).toUpperCase()) as HexString;
+    const approved = immutableInboundProfile({ ...profile, beaconGenesisValidatorsRoot: upper,
+      checkpoint: { ...profile.checkpoint, network: { localFixture: { ...profile.checkpoint.network.localFixture,
+        genesis_validators_root: upper } } } });
+    if (typeof approved.checkpoint.network === 'string') throw new Error('fixture required');
+    expect(approved.beaconGenesisValidatorsRoot).toBe(root);
+    expect(approved.checkpoint.network.localFixture.genesis_validators_root).toBe(root);
+    const network = immutableOwnedFixtureNetwork({ ...descriptor(profile), ethereumGenesisHash: upper, beaconGenesisValidatorsRoot: upper }, transports);
+    expect(network.ethereumGenesisHash).toBe(root);
+    expect(network.beaconGenesisValidatorsRoot).toBe(root);
+  });
+
+  test('rejects changed fixture root, time, fork and execution domain before I/O', () => {
+    const profile = localProfile();
+    for (const changed of [
+      { ...profile, beaconGenesisTime: 1235n }, { ...profile, beaconGenesisValidatorsRoot: hash(99) },
+      { ...profile, ethereumChainId: 560048n },
+      { ...profile, forks: profile.forks.map(fork => fork.name === 'electra' ? { ...fork, version: '0x60000910' as HexString } : fork) },
+      { ...profile, forks: profile.forks.map(fork => fork.name === 'fulu' ? { ...fork, epoch: 1n } : fork) },
+    ]) expect(() => immutableInboundProfile(changed)).toThrow('LocalFixture');
+  });
+
+  test('independent wallet-chain descriptor remains immutable without inventing an inbound consumer approval', () => {
+    const supplied = descriptor(localProfile());
+    const approved = immutableOwnedFixtureNetwork(supplied, transports);
+    expect(Object.isFrozen(approved)).toBe(true);
+    supplied.beaconGenesisTime = 9999;
+    expect(approved.beaconGenesisTime).toBe(1234);
+    for (const changed of [{ ...approved, schemaVersion: 2 }, { ...approved, ethereumChainId: 560048 },
+      { ...approved, beaconGenesisTime: 0 }, { ...approved, ethereumGenesisHash: hash(0) },
+      { ...approved, beaconGenesisValidatorsRoot: hash(0) }, { ...approved, unapproved: true }]) {
+      expect(() => immutableOwnedFixtureNetwork(changed as typeof supplied, transports)).toThrow('owned-fixture-network');
+    }
+  });
+
+  test('requires offline descriptor equality and numeric loopback, without relaxing Hoodi full-test approval', () => {
+    const profile = immutableInboundProfile(localProfile());
+    expect(() => validateOwnedFixtureNetwork(profile, descriptor(profile), transports)).not.toThrow();
+    for (const changed of [ { ...descriptor(profile), ethereumGenesisHash: hash(99) },
+      { ...descriptor(profile), beaconGenesisValidatorsRoot: hash(99) }, { ...descriptor(profile), beaconGenesisTime: 1235 } ]) {
+      expect(() => validateOwnedFixtureNetwork(profile, changed, transports)).toThrow('owned-fixture-network');
+    }
+    for (const transport of ['https://ethereum-hoodi-rpc.publicnode.com', 'http://localhost:5052', 'http://127.0.0.2:5052', 'http://user@127.0.0.1:5052']) {
+      expect(() => validateOwnedFixtureNetwork(profile, descriptor(profile), [transport])).toThrow('numeric loopback');
+    }
+    const directory = fs.mkdtempSync(join(tmpdir(), 'bridge-owned-profile-'));
+    const filename = join(directory, 'approved.json');
+    try {
+      fs.writeFileSync(filename, serialize(profile));
+      expect(() => readApprovedFixtureProfile(filename, profile.historicalProxyId, '')).toThrow('OWNED_FIXTURE_NETWORK_PATH');
+      const publicProfile = { ...checkpointProofFixture().profile, ethereumChainId: 560048n,
+        ethereumGenesisHash: '0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b' as HexString,
+        beaconGenesisValidatorsRoot: '0x212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f' as HexString };
+      fs.writeFileSync(filename, serialize(publicProfile));
+      expect(readApprovedFixtureProfile(filename, publicProfile.historicalProxyId, '')).toEqual(immutableInboundProfile(publicProfile));
+      fs.writeFileSync(filename, serialize({ ...publicProfile, ethereumGenesisHash: hash(99) }));
+      expect(() => readApprovedFixtureProfile(filename, publicProfile.historicalProxyId, '')).toThrow('Hoodi');
+    } finally { fs.rmSync(directory, { recursive: true }); }
+  });
+
+  test('requires real Beacon mainnet preset, not a reduced committee or accelerated slots', () => {
+    const profile = immutableInboundProfile(localProfile());
+    const spec = { PRESET_BASE: 'mainnet', SECONDS_PER_SLOT: '12', SLOTS_PER_EPOCH: '32', EPOCHS_PER_SYNC_COMMITTEE_PERIOD: '256',
+      SYNC_COMMITTEE_SIZE: '512', DENEB_FORK_EPOCH: '0', ELECTRA_FORK_EPOCH: '0', ELECTRA_FORK_VERSION: '0x60003137', FULU_FORK_EPOCH: '18446744073709551615' };
+    expect(() => validateLocalFixtureBeaconSpec(profile, spec)).not.toThrow();
+    for (const [key, value] of [['PRESET_BASE', 'minimal'], ['SYNC_COMMITTEE_SIZE', '32'], ['SECONDS_PER_SLOT', '1'], ['ELECTRA_FORK_VERSION', '0x60000910']]) {
+      expect(() => validateLocalFixtureBeaconSpec(profile, { ...spec, [key]: value })).toThrow('standard mainnet preset');
+    }
+  });
+});
+
+
+describe('SDK unsigned checkpoint waiting', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  test('waits for an applied checkpoint at a later authenticated finalized pin', async () => {
+    const fixture = checkpointProofFixture();
+    const pending = composeProof(fixture.beacon, fixture.ethereum, fixture.proxy, fixture.receipt.transactionHash, fixture.profile, true).catch(error => error);
+    await vi.advanceTimersByTimeAsync(3000);
+    const proof = await pending;
+    expect(proof).not.toBeInstanceOf(Error);
+    expect(proof.proofBlock.block.slot).toBe(100);
+    expect(bytesToHex(proof.proofBlock.block.body.executionPayload.receiptsRoot)).toBe(fixture.receiptsRoot);
+    expect(fixture.state.checkpointPins).toEqual([hash(20), hash(21)]);
+    expect(fixture.profile.sourceBlockHash).toBe(hash(20));
+  });
+
+  test.each([
+    'history', 'regression', 'runtime',
+    'intermediate-history', 'late-intermediate-history', 'late-history', 'unknown',
+    'endpoint', 'checkpoint', 'late-checkpoint', 'network',
+    'proxy-code', 'endpoint-code', 'checkpoint-code', 'outdated', 'fork',
+  ])('holds instead of accepting %s while waiting unsigned', async (fault) => {
+    const fixture = checkpointProofFixture(fault);
+    const pending = composeProof(fixture.beacon, fixture.ethereum, fixture.proxy, fixture.receipt.transactionHash, fixture.profile, true).catch(error => error);
+    await vi.advanceTimersByTimeAsync(6000);
+    const error = await pending as Error;
+    expect(error).toBeInstanceOf(Error);
+  });
+
+  test('wait:false refuses the absent supplied-pin checkpoint', async () => {
+    const fixture = checkpointProofFixture();
+    await expect(composeProof(fixture.beacon, fixture.ethereum, fixture.proxy, fixture.receipt.transactionHash, fixture.profile)).rejects.toThrow('Checkpoint');
+    expect(fixture.state.proofReads).toBe(0);
+  });
+
+  test('NotPresent polling keeps its original deadline and stops after timeout', async () => {
+    const fixture = checkpointProofFixture('absent');
+    const deadline = Date.now() + 7000;
+    const pending = composeProof(fixture.beacon, fixture.ethereum, fixture.proxy, fixture.receipt.transactionHash, fixture.profile, true, undefined, deadline).catch(error => error);
+    await vi.advanceTimersByTimeAsync(7000);
+    expect((await pending as Error).message).toBe('Original relay deadline expired');
+    const observedPins = [...fixture.state.checkpointPins];
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(fixture.state.checkpointPins).toEqual(observedPins);
+    expect(fixture.state.proofReads).toBe(0);
+  });
+
+  test('a late source RPC cannot resume proof preparation after the original deadline', async () => {
+    const fixture = checkpointProofFixture('stalled');
+    const pending = composeProof(fixture.beacon, fixture.ethereum, fixture.proxy, fixture.receipt.transactionHash, fixture.profile, true, undefined, Date.now() + 4000).catch(error => error);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect((await pending as Error).message).toBe('Original relay deadline expired');
+    fixture.state.release();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(fixture.state.proofReads).toBe(0);
+  });
+
+  test('an expired original deadline cannot begin checkpoint preparation', async () => {
+    const fixture = checkpointProofFixture();
+    await expect(composeProof(fixture.beacon, fixture.ethereum, fixture.proxy, fixture.receipt.transactionHash, fixture.profile, true, undefined, Date.now() - 1)).rejects.toThrow('Original relay deadline expired');
+  });
+
+});
+
 
 describe('EthToVara', () => {
+  let gearApi: GearApi;
+  let publicClient: PublicClient;
+  let beaconClient: BeaconClient;
+  let ethClient: EthereumClient;
+  let historicalProxyClient: HistoricalProxyClient;
+  let profile: InboundProofProfile;
   let proof: ProofResult;
+  let receiptRlp: string, merkleProof: string, encodedEvent: string;
 
-  test('generate proof', async () => {
-    proof = await composeProof(beaconClient, ethClient, historicalProxyClient, TX_HASH);
+  beforeAll(async () => {
+    const deadline = Date.now() + 55_000;
+    receiptRlp = fs.readFileSync('test/tmp/receipt_rlp', 'utf8');
+    merkleProof = fs.readFileSync('test/tmp/proof', 'utf8');
+    encodedEvent = fs.readFileSync('test/tmp/eth_to_vara_scale', 'utf8');
+    profile = parseInboundProofProfile(fs.readFileSync('test/tmp/inbound-profile.json', 'utf8'));
+    gearApi = await GearApi.create({ providerAddress: process.env.VARA_WS_RPC });
+    publicClient = createPublicClient({ transport: webSocket(process.env.ETH_RPC_URL!, { reconnect: false }) });
+    beaconClient = await createBeaconClient(process.env.BEACON_RPC_URL!);
+    ethClient = createEthereumClient(publicClient, beaconClient);
+    historicalProxyClient = new HistoricalProxyClient(gearApi, process.env.HISTORICAL_PROXY_ID! as HexString);
+    proof = await composeProof(beaconClient, ethClient, historicalProxyClient, process.env.TX_HASH as HexString,
+      profile, true, undefined, deadline);
+  }, 60_000);
+  afterAll(async () => {
+    if (gearApi) await gearApi.disconnect();
+    if (publicClient) (await publicClient.transport.getRpcClient()).close();
   });
-
-  test('receipt rlp should be correct', () => {
-    expect(bytesToHex(proof.receiptRlp).replace('0x', '')).toEqual(RECEIPT_RLP);
-  });
-
-  test('proof should be correct', () => {
-    expect(
-      proof.proof
-        .map(bytesToHex)
-        .map((b) => b.replace('0x', ''))
-        .join(''),
-    ).toEqual(PROOF);
-  });
-
-  test('eth to vara event should match', () => {
-    expect(encodeEthToVaraEvent(proof).slice(2)).toEqual(ETH_TO_VARA_EVENT);
-  });
+  test('receipt rlp should be correct', () => expect(bytesToHex(proof.receiptRlp).slice(2)).toEqual(receiptRlp));
+  test('proof should be correct', () => expect(proof.proof.map((node) => bytesToHex(node)).map((bytes) => bytes.slice(2)).join('')).toEqual(merkleProof));
+  test('eth to vara event should match', () => expect(encodeEthToVaraEvent(proof).slice(2)).toEqual(encodedEvent));
 });

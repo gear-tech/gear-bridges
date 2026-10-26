@@ -17,6 +17,7 @@ export interface UserMessageSentHandlerContext extends CommonHandlerContext {
   readonly method: string;
   readonly decoder: Decoder;
   readonly event: UserMessageSentEvent;
+  readonly receiptDomain?: { minimum: bigint; last?: bigint };
 }
 
 export interface MessageQueuedContext extends CommonHandlerContext {

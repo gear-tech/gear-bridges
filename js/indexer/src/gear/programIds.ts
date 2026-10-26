@@ -1,4 +1,6 @@
 import pg from 'pg';
+import type { Store } from '@subsquid/typeorm-store';
+import { GearProgram } from '../model/index.js';
 
 import { ProgramName } from './util.js';
 import { config } from './config.js';
@@ -33,15 +35,15 @@ export async function init(programs: Record<string, string>): Promise<Map<string
     console.log('Table gear_programs created.');
   }
 
+  // Configuration seeds missing roles; finalized on-chain rotations remain authoritative.
   for (const [name, id] of Object.entries(programs)) {
     await client.query(
       `INSERT INTO gear_programs (name, program_id)
        VALUES ($1, $2)
-       ON CONFLICT (name)
-       DO UPDATE SET program_id = EXCLUDED.program_id`,
+       ON CONFLICT (name) DO NOTHING`,
       [name, id],
     );
-    console.log(`Program ${name} set to ${id}`);
+    console.log(`Program ${name} initialized`);
   }
 
   const ids = await client.query('SELECT name, program_id FROM gear_programs WHERE name = ANY($1::text[])', [
@@ -63,10 +65,26 @@ export async function setPrograms() {
   });
 }
 
-export async function updateId(name: string, programId: string) {
-  const client = createClient();
-  await client.connect();
-  await client.query('UPDATE gear_programs SET program_id = $1 WHERE name = $2', [programId, name]);
-  await client.end();
-  programs[name] = programId;
+// Reload on every callback, including retries after a failed COMMIT. A tentative
+// in-memory rotation is never authority for the next transaction.
+export async function reloadPrograms(store: Store) {
+  const rows = await store.find(GearProgram, {});
+  const roles = [ProgramName.VftManager, ProgramName.HistoricalProxy, ProgramName.BridgingPayment];
+  const selected = rows.filter((row) => roles.includes(row.id as ProgramName));
+  if (selected.length !== roles.length || new Set(selected.map((row) => row.programId)).size !== roles.length ||
+      selected.some((row) => !/^0x[0-9a-f]{64}$/.test(row.programId))) {
+    throw new Error('HOLD: incomplete or conflicting committed Gear program roles');
+  }
+  programs = new Map(selected.map((row) => [row.programId, row.id as ProgramName]));
+}
+
+export async function updateId(store: Store, name: ProgramName, programId: string) {
+  if (!/^0x[0-9a-f]{64}$/.test(programId) || /^0x0+$/.test(programId)) throw new Error('HOLD: invalid role successor');
+  const previous = [...programs].find(([, role]) => role === name)?.[0];
+  if (!previous || (programs.has(programId) && programs.get(programId) !== name)) {
+    throw new Error('HOLD: conflicting Gear program role rotation');
+  }
+  await store.save(new GearProgram({ id: name, programId }));
+  programs.delete(previous);
+  programs.set(programId, name);
 }

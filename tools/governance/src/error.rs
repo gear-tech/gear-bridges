@@ -11,6 +11,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// Describes possible errors that might happen when user interacts with this crate
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Invalid governance capability: {0}")]
+    Control(&'static str),
     #[error("I/O error: {0}")]
     IO(#[from] IOError),
     #[error("Toml deserialization error: {0}")]

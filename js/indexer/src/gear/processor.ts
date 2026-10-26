@@ -13,10 +13,10 @@ import { hostname } from 'node:os';
 import { config } from './config.js';
 
 const processor = new SubstrateBatchProcessor()
-  .setGateway({ url: config.archiveUrl, apiKey: config.apiKey })
   .setRpcEndpoint({
     url: config.rpcUrl,
     rateLimit: config.rateLimit,
+    requestTimeout: 15_000,
     headers: {
       'User-Agent': hostname(),
     },
@@ -42,6 +42,8 @@ const processor = new SubstrateBatchProcessor()
     extrinsic: true,
     call: true,
   });
+
+if (!config.rpcOnly) processor.setGateway({ url: config.archiveUrl, apiKey: config.apiKey });
 
 export type Fields = SubstrateBatchProcessorFields<typeof processor>;
 export type Block = BlockHeader<Fields>;

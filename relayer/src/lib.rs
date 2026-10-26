@@ -1,13 +1,11 @@
 pub mod cli;
 pub mod common;
-pub mod config;
 pub mod ethereum_checkpoints;
+pub mod ethereum_evidence;
 pub mod hex_utils;
 pub mod kill_switch;
-pub mod merkle_roots;
+pub mod lane_policy;
 pub mod message_relayer;
-pub mod proof_storage;
-pub mod prover_interface;
 pub mod queue_cleaner;
 pub mod rpc;
 pub mod server;

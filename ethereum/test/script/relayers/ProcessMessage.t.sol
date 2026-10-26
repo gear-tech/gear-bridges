@@ -16,13 +16,15 @@ contract ProcessMessageScriptTest is Test, Base {
         bytes32 messageHash =
             keccak256(abi.encodePacked(message.nonce, message.source, message.destination, message.payload));
         bytes32 merkleRoot = keccak256(abi.encodePacked(bytes32(0), messageHash));
+        bytes memory rootProof = _rootProof(1, merkleRoot);
 
         // forge-lint: disable-start(unsafe-cheatcode)
         vm.setEnv("PRIVATE_KEY", "1");
         vm.setEnv("MESSAGE_QUEUE", vm.toString(address(messageQueue)));
         vm.setEnv("BLOCK_NUMBER", "1");
-        vm.setEnv("TOTAL_LEAVES", "1");
-        vm.setEnv("LEAF_INDEX", "0");
+        // The message is the right-hand leaf of [bytes32(0), messageHash].
+        vm.setEnv("TOTAL_LEAVES", "2");
+        vm.setEnv("LEAF_INDEX", "1");
         vm.setEnv("NONCE", "1");
         vm.setEnv("SOURCE", vm.toString(message.source));
         vm.setEnv("DESTINATION", vm.toString(message.destination));
@@ -31,7 +33,7 @@ contract ProcessMessageScriptTest is Test, Base {
         // forge-lint: disable-end(unsafe-cheatcode)
 
         vm.prank(address(this));
-        messageQueue.submitMerkleRoot(1, merkleRoot, "");
+        messageQueue.submitMerkleRoot(1, merkleRoot, rootProof);
         vm.warp(block.timestamp + 5 minutes);
 
         ProcessMessageScript relayingScript = new ProcessMessageScript();

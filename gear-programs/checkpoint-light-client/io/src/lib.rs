@@ -1,5 +1,10 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+mod crypto;
+pub mod verification;
+
 pub use ark_bls12_381::{G1Projective as G1, G2Projective as G2};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 pub use ethereum_common::{
@@ -71,11 +76,13 @@ pub struct Update {
 #[scale_info(crate = sails_rs::scale_info)]
 pub struct Init {
     pub network: Network,
+    pub bootstrap_header: BeaconBlockHeader,
     pub sync_committee_current_pub_keys: Box<SyncCommitteeKeys>,
     pub sync_committee_current_aggregate_pubkey: BLSPubKey,
     pub sync_committee_current_branch: Vec<[u8; 32]>,
     pub update: Update,
     pub sync_aggregate_encoded: Vec<u8>,
+    pub trusted_bootstrap_root: Hash256,
 }
 
 #[derive(Clone, Debug, Decode, Encode, TypeInfo)]
@@ -95,6 +102,12 @@ pub enum Error {
         replay_back: Option<ReplayBack>,
         checkpoint: (Slot, Hash256),
     },
+    StateChanged,
+    InvalidBootstrapRoot,
+    UnsupportedBootstrapPeriod,
+    InvalidBootstrapProof,
+    InvalidBootstrapUpdate,
+    InvalidHeaders,
 }
 
 #[derive(Clone, Debug, Decode, Encode, TypeInfo)]

@@ -9,6 +9,7 @@ import { definedAssert } from '@/utils';
 
 import { FUNCTION_NAME } from '../../consts/eth';
 import { useBridgeContext } from '../../context';
+import { assertSuccessfulReceipt } from '../../submission';
 
 const abi = ERC20_ABI;
 
@@ -37,9 +38,9 @@ function useApprove() {
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
     const args = [NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS, amount] as const;
 
-    const hash = await writeContractAsync({ address, abi, functionName, args });
+    const hash = await writeContractAsync({ address, abi, functionName, args, chainId: NETWORK_PRESET.ETH_CHAIN_ID });
 
-    return waitForTransactionReceipt(config, { hash });
+    return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };
 
   return { ...useMutation({ mutationFn: approve }), getGasLimit };

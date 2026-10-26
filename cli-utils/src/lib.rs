@@ -1,9 +1,7 @@
-pub mod common;
 pub mod ethereum;
 pub mod gear;
 pub mod prometheus;
 
-pub use common::*;
 pub use ethereum::*;
 pub use gear::*;
 pub use prometheus::*;
@@ -11,7 +9,7 @@ pub use prometheus::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     #[derive(Parser, Debug)]
     struct TestGearCli {
@@ -31,14 +29,45 @@ mod tests {
     }
 
     #[derive(Parser, Debug)]
-    struct TestEthCli {
+    struct TestFinalityCli {
         #[clap(flatten)]
-        eth: EthereumConnectionArgs,
+        finality: EthereumFinalityArgs,
+        #[clap(flatten)]
+        identity: EthereumChainIdentityArgs,
     }
 
     #[test]
-    fn test_eth_parsing() {
-        let cli = TestEthCli::parse_from(["test", "--ethereum-endpoint", "https://eth.com"]);
-        assert_eq!(cli.eth.ethereum_endpoint, "https://eth.com");
+    fn ethereum_authority_requires_beacon_approval_without_a_data_witness() {
+        let complete = [
+            "test",
+            "--ethereum-finality-beacon-rpc",
+            "https://beacon.example",
+            "--ethereum-finality-bootstrap",
+            "approved-bootstrap.json",
+            "--ethereum-finality-bootstrap-sha256",
+            "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123",
+            "--ethereum-finality-store",
+            "owned-evidence",
+            "--ethereum-chain-id",
+            "560048",
+            "--ethereum-genesis-hash",
+            "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123",
+        ];
+        let parse = |args: Vec<&str>| {
+            TestFinalityCli::command()
+                .mut_args(|arg| arg.env(None::<&str>))
+                .try_get_matches_from(args)
+        };
+        assert!(parse(complete.to_vec()).is_ok());
+        for missing in (1..complete.len()).step_by(2) {
+            let args = complete
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| {
+                    (!(missing..=missing + 1).contains(&index)).then_some(*value)
+                })
+                .collect();
+            assert!(parse(args).is_err());
+        }
     }
 }

@@ -1,135 +1,71 @@
-import { createPublicClient, createWalletClient, http, webSocket, zeroAddress } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { execSync } from 'child_process';
-import { Keyring } from '@polkadot/api';
+import assert from 'node:assert/strict';
+import { readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { GearApi, HexString } from '@gear-js/api';
-import { hoodi } from 'viem/chains';
-import dotenv from 'dotenv';
-import assert from 'assert';
-import * as fs from 'fs';
+import { Keyring } from '@polkadot/api';
+import { cryptoWaitReady } from '@polkadot/util-crypto';
+import { createPublicClient, http } from 'viem';
+import { parseInboundProofProfile, relayEthToVara } from '../src/index.js';
+import { PingClient, type Delivery } from './lib.js';
+import { relayFailure } from './relay-failure.js';
 
-import { relayEthToVara } from '../src';
-import { PingClient } from './lib';
-
-dotenv.config();
-
-const assertEnv = (name: string) =>
-  assert.notStrictEqual(process.env[name], undefined, `Missing ${name} environment variable`);
-
-assertEnv('HISTORICAL_PROXY_ID');
-const HISTORICAL_PROXY_ID = process.env.HISTORICAL_PROXY_ID! as `0x${string}`;
-assertEnv('BEACON_RPC_URL');
-const BEACON_RPC = process.env.BEACON_RPC_URL!;
-assertEnv('ETH_RPC_URL');
-const ETH_WS_RPC = process.env.ETH_RPC_URL!;
-assertEnv('VARA_WS_RPC');
-const VARA_WS_RPC = process.env.VARA_WS_RPC!;
-assertEnv('ETH_PRIVATE_KEY');
-const ETH_PRIVATE_KEY = process.env.ETH_PRIVATE_KEY! as `0x${string}`;
-const PING_SERVICE_NAME = 'Ping';
-const PING_METHOD_NAME = 'SubmitReceipt';
-const PING_WASM_PATH = '../../target/wasm32-gear/release/ping.opt.wasm';
-
-const [txHash, programId] = process.argv.slice(2).map((arg) => {
-  const match = arg.match(/^--(hash|program)=(0x[0-9a-f]+)$/);
-  return match ? (match[2] as HexString) : undefined;
-});
-
-if (!programId && !fs.existsSync(PING_WASM_PATH)) {
-  console.log(`Ping wasm wasn't found. Building the program...`);
-  execSync('cargo build -p ping --release', { stdio: 'inherit' });
+// The caller records and approves this original intent before running the example.
+interface Intent {
+  transactionHash: HexString; applicationId: HexString; payload: HexString; deadline: number; signerPublicKey: HexString;
+  profile: unknown;
 }
 
-const main = async () => {
-  const publicClient = createPublicClient({ transport: webSocket(ETH_WS_RPC) });
-  const gearApi = await GearApi.create({ providerAddress: VARA_WS_RPC, noInitWarn: true });
+const original: { ethereumTransactionHash?: HexString; gearTransactionHash?: HexString } = {};
 
-  const keyring = new Keyring({ type: 'sr25519', ss58Format: 137 });
-  const account = keyring.createFromUri('//Alice');
-
-  if (txHash && programId) {
-    const { error, ok } = await relayEthToVara({
-      transactionHash: txHash,
-      beaconRpcUrl: BEACON_RPC,
-      ethereumPublicClient: publicClient,
-      gearApi,
-      historicalProxyId: HISTORICAL_PROXY_ID,
-      clientId: programId,
-      clientServiceName: PING_SERVICE_NAME,
-      clientMethodName: PING_METHOD_NAME,
-      signer: account,
-      wait: true,
-      statusCb: (status, details) => {
-        console.log(`[relayEthToVara]: ${status}`, details || '');
+async function main() {
+  assert(process.argv.length === 3, 'Usage: example:eth-to-vara /absolute/path/original-intent.json');
+  const intent: Intent = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+  assert(/^0x[0-9a-fA-F]{64}$/.test(intent.transactionHash), 'Original Ethereum transaction hash required');
+  original.ethereumTransactionHash = intent.transactionHash;
+  assert(/^0x[0-9a-fA-F]{64}$/.test(intent.applicationId) && BigInt(intent.applicationId) !== 0n, 'Nonzero application ID required');
+  assert(/^0x(?:[0-9a-fA-F]{2}){0,1024}$/.test(intent.payload), 'Expected original payload required');
+  assert(Number.isSafeInteger(intent.deadline) && Date.now() < intent.deadline, 'Original deadline expired or absent');
+  const profile = parseInboundProofProfile(JSON.stringify(intent.profile));
+  assert(profile.consumer.service === 'Ping' && profile.consumer.method === 'SubmitReceipt', 'Use the approved Ping deployment');
+  for (const name of ['ETH_RPC_URL', 'VARA_WS_RPC', 'BEACON_RPC_URL', 'GEAR_SURI_FILE', 'PING_IDL_PATH']) {
+    assert(process.env[name], 'Missing ' + name);
+  }
+  const idl = readFileSync(process.env.PING_IDL_PATH!);
+  assert.equal(createHash('sha256').update(idl).digest('hex'), profile.consumer.idlSha256, 'Ping IDL differs from approval');
+  // This generated registry is tied to the checked-in ABI, not an arbitrary supplied IDL.
+  assert.equal(idl.toString(), readFileSync(new URL('../../../ping/ping.idl', import.meta.url), 'utf8'), 'Unsupported Ping ABI');
+  const secret = statSync(process.env.GEAR_SURI_FILE!);
+  assert(secret.isFile() && (secret.mode & 0o777) === 0o600, 'Signer file must be regular mode 0600');
+  await cryptoWaitReady();
+  const signer = new Keyring({ type: 'sr25519' }).addFromUri(readFileSync(process.env.GEAR_SURI_FILE!, 'utf8').trim());
+  assert.equal('0x' + Buffer.from(signer.publicKey).toString('hex'), intent.signerPublicKey.toLowerCase(), 'Original signer mismatch');
+  const ethereumPublicClient = createPublicClient({ transport: http(process.env.ETH_RPC_URL!) });
+  const gearApi = await GearApi.create({ providerAddress: process.env.VARA_WS_RPC! });
+  try {
+    const ping = new PingClient(gearApi, profile.consumer.programId);
+    const result = await relayEthToVara({ transactionHash: intent.transactionHash, beaconRpcUrl: process.env.BEACON_RPC_URL!,
+      ethereumPublicClient, gearApi, historicalProxyId: profile.historicalProxyId, inboundProfile: profile,
+      clientId: profile.consumer.programId, clientServiceName: 'Ping', clientMethodName: 'SubmitReceipt', signer,
+      wait: true, deadline: intent.deadline, consumerReply: {
+        registry: ping.registry, resultType: 'Result<Delivery, PingError>', idlSha256: profile.consumer.idlSha256,
+        verifyEffect: async (value, result, proof) => {
+          const expected: Delivery = { application_id: intent.applicationId.toLowerCase() as HexString, payload: intent.payload.toLowerCase() as HexString };
+          assert.deepEqual(value, expected, 'Original consumer reply differs from expected delivery');
+          const pin = result.effectBlockHash ?? result.replyBlockHash;
+          const delivery = await ping.ping.received(BigInt(proof.proofBlock.block.slot), BigInt(proof.transactionIndex)).atBlock(pin).call();
+          assert.deepEqual(delivery, expected, 'Original receipt has no exact finalized application effect');
+          assert.equal(await ping.ping.payloadOf(intent.applicationId).atBlock(pin).call(), expected.payload, 'Finalized payload mismatch');
+        },
       },
     });
+    original.gearTransactionHash = result.txHash;
+    assert(!result.error && await result.isFinalized, 'Original relay did not finalize');
+    console.log('Verified original application delivery', { txHash: result.txHash, replyBlockHash: result.replyBlockHash });
+  } finally { await gearApi.disconnect(); }
+}
 
-    if (error) {
-      throw new Error(JSON.stringify(error));
-    }
-
-    console.log(`Done. Reply from client: ${ok}`);
-  }
-
-  const pingClient = new PingClient(gearApi);
-  const code = fs.readFileSync(PING_WASM_PATH);
-
-  const tx = pingClient.newCtorFromCode(code).withAccount(account).withGas('max');
-  const { response } = await tx.signAndSend();
-
-  await response();
-
-  const pingProgramId = pingClient.programId;
-
-  console.log(`Ping program uploaded with id: ${pingProgramId}`);
-
-  const walletClient = createWalletClient({
-    chain: hoodi,
-    transport: http(),
-    account: privateKeyToAccount(ETH_PRIVATE_KEY),
-  });
-
-  const ethTxHash = await walletClient.sendTransaction({
-    to: zeroAddress,
-    value: 0n,
-  });
-
-  console.log(`Ethereum transaction sent with hash: ${ethTxHash}. Waiting for 15 block confirmations...`);
-
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: ethTxHash, confirmations: 5 });
-
-  if (receipt.status !== 'success') {
-    throw new Error(`Ethereum transaction failed with status: ${receipt.status}`);
-  }
-
-  console.log(`Ethereum transaction confirmed. Starting relayer...`);
-
-  const { error, ok } = await relayEthToVara({
-    transactionHash: ethTxHash,
-    beaconRpcUrl: BEACON_RPC,
-    ethereumPublicClient: publicClient,
-    gearApi,
-    historicalProxyId: HISTORICAL_PROXY_ID,
-    clientId: pingProgramId,
-    clientServiceName: PING_SERVICE_NAME,
-    clientMethodName: PING_METHOD_NAME,
-    signer: account,
-    wait: true,
-    statusCb: (status, details) => {
-      console.log(`[relayEthToVara]: ${status}`, details || '');
-    },
-  });
-
-  if (error) {
-    throw new Error(JSON.stringify(error));
-  }
-
-  console.log(`Done. Reply from client: ${ok}`);
-};
-
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  })
-  .then(() => process.exit());
+main().catch((error) => {
+  console.error('HOLD: original intent not proven delivered. Reconcile it before any retry; do not replace its transaction or deadline.',
+    relayFailure(error, original));
+  process.exitCode = 1;
+});

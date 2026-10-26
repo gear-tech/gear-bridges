@@ -15,7 +15,7 @@ contract SubmitMerkleRootScriptTest is Test, Base {
         vm.setEnv("MESSAGE_QUEUE", vm.toString(address(messageQueue)));
         vm.setEnv("BLOCK_NUMBER", "1");
         vm.setEnv("MERKLE_ROOT", vm.toString(bytes32(uint256(1))));
-        vm.setEnv("PLONKY2_PROOF", "0x");
+        vm.setEnv("MMR_PROOF", vm.toString(_rootProof(1, bytes32(uint256(1)))));
         // forge-lint: disable-end(unsafe-cheatcode)
 
         SubmitMerkleRootScript relayingScript = new SubmitMerkleRootScript();

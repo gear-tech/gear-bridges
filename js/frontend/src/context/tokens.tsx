@@ -3,6 +3,9 @@ import { createPairHash } from 'gear-bridge-common';
 import { createContext, PropsWithChildren, useContext, useMemo } from 'react';
 
 import { usePairs } from '@/features/history';
+import type { InboundProofProfile } from '@gear-js/bridge';
+import { useNetworkType } from './network-type';
+import { pairNativeKind } from './token-identity';
 import { NetworkEnum, Pair } from '@/features/history/graphql/graphql';
 import { NETWORK } from '@/features/swap/consts';
 import { useVaraSymbol } from '@/hooks';
@@ -19,7 +22,7 @@ type Value = {
     eth: Token | undefined;
   };
 
-  getHistoryToken: ((sourceAddress: HexString, destinationAddress: HexString) => Token) | undefined;
+  getHistoryToken: ((sourceAddress: HexString | null, destinationAddress: HexString | null) => Token) | undefined;
   getActiveToken: ((address: HexString) => Token) | undefined;
 };
 
@@ -51,6 +54,7 @@ type Token = {
   displaySymbol: string;
   decimals: number;
   isNative: boolean;
+  supply: 'Gear' | 'Ethereum';
   network: 'vara' | 'eth';
   isActive: boolean;
 };
@@ -63,20 +67,22 @@ const TOKEN_PLACEHOLDER: Token = {
   displaySymbol: 'Unit',
   decimals: 0,
   isNative: false,
+  supply: 'Ethereum',
   network: 'vara',
   isActive: false,
 };
 
-const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
+const deriveTokens = (pairs: Pair[], varaSymbol: string, profile?: InboundProofProfile) => {
   const addressToActiveToken: Record<HexString, Token> = {};
   const pairHashToHistoryToken: Record<string, Token> = {};
 
   pairs.forEach((pair) => {
-    const varaAddress = pair.varaToken as HexString;
-    const isVaraNative = pair.tokenSupply === NetworkEnum.Vara && pair.varaTokenSymbol.toLowerCase().includes('vara');
+    const varaAddress = pair.varaToken.toLowerCase() as HexString;
+    const native = pairNativeKind(profile, pair);
+    const isVaraNative = native === 'vara';
 
-    const ethAddress = pair.ethToken as HexString;
-    const isEthNative = pair.tokenSupply === NetworkEnum.Ethereum && pair.ethTokenSymbol.toLowerCase().includes('eth');
+    const ethAddress = pair.ethToken.toLowerCase() as HexString;
+    const isEthNative = native === 'eth';
 
     // changing wrapped native symbol to native symbol
     const varaDisplaySymbol = isVaraNative ? varaSymbol : pair.varaTokenSymbol;
@@ -92,6 +98,7 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       isNative: isVaraNative,
       network: 'vara',
       isActive: pair.isActive,
+      supply: pair.tokenSupply === NetworkEnum.Vara ? 'Gear' : 'Ethereum',
     };
 
     const ethToken: Token = {
@@ -104,6 +111,7 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
       isNative: isEthNative,
       network: 'eth',
       isActive: pair.isActive,
+      supply: pair.tokenSupply === NetworkEnum.Vara ? 'Gear' : 'Ethereum',
     };
 
     if (pair.isActive) {
@@ -120,15 +128,17 @@ const deriveTokens = (pairs: Pair[], varaSymbol: string) => {
 
 function TokensProvider({ children }: PropsWithChildren) {
   const { data: pairs } = usePairs();
+  const { NETWORK_PRESET } = useNetworkType();
+  const profile = NETWORK_PRESET.INBOUND_PROOF_PROFILE.profile;
 
   const varaSymbol = useVaraSymbol();
 
   const { pairHashToHistoryToken, addressToActiveToken } = useMemo(
     () =>
       pairs && varaSymbol
-        ? deriveTokens(pairs, varaSymbol)
+        ? deriveTokens(pairs, varaSymbol, profile)
         : { pairHashToHistoryToken: undefined, addressToActiveToken: undefined },
-    [pairs, varaSymbol],
+    [pairs, varaSymbol, profile],
   );
 
   const activeTokens = useMemo(
@@ -156,12 +166,19 @@ function TokensProvider({ children }: PropsWithChildren) {
       },
 
       getActiveToken: addressToActiveToken
-        ? (address: HexString) => addressToActiveToken[address] || TOKEN_PLACEHOLDER
+        ? (address: HexString) => addressToActiveToken[address.toLowerCase() as HexString] || TOKEN_PLACEHOLDER
         : undefined,
 
       getHistoryToken: pairHashToHistoryToken
-        ? (sourceAddress: HexString, destinationAddress: HexString) =>
-            pairHashToHistoryToken[createPairHash(sourceAddress, destinationAddress)] || TOKEN_PLACEHOLDER
+        ? (sourceAddress: HexString | null, destinationAddress: HexString | null) =>
+            (sourceAddress && destinationAddress
+              ? pairHashToHistoryToken[
+                  createPairHash(
+                    sourceAddress.toLowerCase() as HexString,
+                    destinationAddress.toLowerCase() as HexString,
+                  )
+                ]
+              : undefined) || TOKEN_PLACEHOLDER
         : undefined,
     }),
     [

@@ -1,220 +1,108 @@
-# Circuits and proofs
+# Proofs and authentication
 
-The bridge uses recursive Plonky2 circuits to prove Gear finality and storage inclusion, then wraps the resulting proof in a gnark Plonk circuit so Ethereum can verify it with Solidity verifier contracts.
+Vara→Ethereum uses native BEEFY commitments and Merkle Mountain Range (MMR) inclusion proofs, not a recursive ZK producer. Ethereum→Vara retains its independent Beacon light-client and receipt-proof composition. This existing page explains both authentication boundaries; its filename is historical.
 
-The main Rust implementation is under [prover/src](../prover/src). The Ethereum verifier boundary is [ethereum/src/interfaces/IVerifier.sol](../ethereum/src/interfaces/IVerifier.sol), [ethereum/src/VerifierMainnet.sol](../ethereum/src/VerifierMainnet.sol), and [ethereum/src/VerifierTestnet.sol](../ethereum/src/VerifierTestnet.sol).
+The outbound implementation is [BeefyClient](../ethereum/src/beefy/BeefyClient.sol), [VaraQueueRootVerifier](../ethereum/src/VaraQueueRootVerifier.sol), [MessageQueue](../ethereum/src/MessageQueue.sol) and the existing [beefy-relay actor](../tools/beefy-relay/src/main.rs). Source changes do not migrate public actors, custody or existing deployments. See [bridge internals](internals.md) for retained-lane evidence and scheduling limits, and the [Ethereum deployment and recovery policy](../ethereum/README.md) for release gates.
 
-## Proof statement
+## Outbound proof statement
 
-The final proof establishes, at a high level:
-
-1. a Gear block is finalized by the authority set that signed its GRANDPA justification;
-2. the finalized block contains the relevant bridge storage item;
-3. the storage item contains the message-queue root;
-4. the authority-set proof descends from the configured genesis authority set;
-5. the public root and Gear block number are the values supplied to Ethereum.
-
-The proof does not prove that a token transfer UI request was made, that a token contract is correctly configured, or that a user has waited through MessageQueue's message delay. Those are separate protocol and token-relayer responsibilities.
-
-## Circuit layers
-
-### Block finality
-
-[prover/src/block_finality/mod.rs](../prover/src/block_finality/mod.rs) parses a GRANDPA pre-commit message and proves that more than two thirds of the authority set signed the finalized block. The circuit:
-
-- hashes the validator public keys with Blake2;
-- checks the Ed25519 signatures used by the GRANDPA pre-commits;
-- checks the pre-commit discriminant and message fields;
-- exposes the authority-set hash and GRANDPA message as public inputs.
-
-The implementation derives the required signer count as (2 * validator_count) / 3 + 1. The prover constants cap the supported validator count at 64. The bridge's core finality proof uses GRANDPA/Ed25519; the presence of the reusable plonky2_ecdsa crate does not mean ECDSA is part of this final proof.
-
-### Storage inclusion
-
-[prover/src/storage_inclusion/mod.rs](../prover/src/storage_inclusion/mod.rs) proves that a storage value is present beneath a Substrate state root. It composes:
-
-- a block-header parser;
-- a storage address circuit;
-- branch and leaf node parsers;
-- Blake2 hashing and trie-root reconstruction.
-
-The circuit currently supports StorageValue-style entries and the node forms documented in the source. It does not generally support StorageMap/StorageDoubleMap layouts, BranchWithValue nodes, or inlined values shorter than 32 bytes. Check the source comments and tests before adding a new storage representation.
-
-For the bridge root, the storage item is the data encoding whose Blake2 hash is connected to the storage-inclusion proof. The raw storage bytes and trie node data come from Gear RPC inclusion-proof DTOs and are converted by [relayer/src/prover_interface.rs](../relayer/src/prover_interface.rs).
-
-### Authority-set recursion
-
-The latest-validator-set circuits recursively link authority-set changes from the configured genesis set to the set that finalized the target block. A transition proves:
-
-- a block finalized by the current set;
-- inclusion of the next authority-set data in that block's storage;
-- consistency of the next set hash;
-- recursion from the previous authority-set proof.
-
-The root relayer stores these intermediate proofs through ProofStorage so every message root does not need to rebuild the entire authority history.
-
-GenesisConfig is part of the circuit statement. Changing the genesis authority-set id or hash changes the proof's fixed inputs and the resulting circuit digest. Existing proof storage and the deployed Solidity verifier must be treated as one compatibility unit.
-
-### Message-sent composition
-
-[prover/src/final_proof/message_sent.rs](../prover/src/final_proof/message_sent.rs) composes:
-
-- a block-finality proof;
-- a storage-inclusion proof;
-- a chain of Blake2-hashed Gear headers;
-- the raw message/root storage bytes.
-
-The header chain connects the block hash in the storage proof to the block hash in the finality proof. The storage bytes are hashed inside the circuit and connected to the storage-inclusion target. This prevents a caller from supplying a root that is unrelated to the proven storage leaf.
-
-### Final proof
-
-[prover/src/final_proof/mod.rs](../prover/src/final_proof/mod.rs) recursively verifies the MessageSent proof and the latest-validator-set proof. It connects:
-
-- the validator-set hash in MessageSent to the current authority-set hash;
-- the authority-set id in MessageSent to the current authority-set id;
-- the current proof's genesis id/hash to GenesisConfig;
-- the message contents/root and block number as the final public inputs.
-
-The public target is therefore the 32-byte message-queue root plus the Gear block number. The relayer extracts those values from the gnark public-input response into [relayer/src/prover_interface.rs](../relayer/src/prover_interface.rs).
-
-## Plonky2 representation
-
-The Rust prover uses the Goldilocks field and Poseidon configuration from [prover/src/lib.rs](../prover/src/lib.rs), with recursion depth parameter D equal to 2. Circuit data contains the common circuit data and verifier-only data required to verify a serialized Plonky2 proof.
-
-The reusable circuit crates include:
-
-- plonky2_blake2b256 for generic Blake2 hashing;
-- plonky2_sha512 for SHA-512;
-- plonky2_ed25519 for Ed25519 operations;
-- plonky2_ecdsa for secp256k1/ECDSA gadgets;
-- plonky2_u32 for arithmetic, range checks, comparisons, and witness helpers.
-
-The final bridge path uses only the pieces wired by the prover modules described above. Treat other circuit crates as libraries unless a call path from FinalProof or the relayer proves otherwise.
-
-## Plonky2 to gnark to Solidity
-
-The bridge crosses a deliberate format boundary:
+The authentication chain is:
 
 ~~~text
-Rust Plonky2 proof
-       |
-       v
-ExportedProofWithCircuitData JSON
-       |
-       v
-Rust C ABI -> gnark-wrapper
-       |
-       v
-BN254 Plonk proof + compressed public inputs
-       |
-       v
-Solidity Verifier -> MessageQueue
+finalized source queue at block B
+        |
+MMR leaf inserted at B+1 commits the historical queue snapshot
+        |
+native BEEFY commitment at C authenticates the MMR root
+        |
+commitment follower -> BeefyClient accepted live anchor
+        |
+authenticated MMR root publisher -> VaraQueueRootVerifier -> MessageQueue
+        |
+individual-message Merkle proof + block maturity + replay checks
+        |
+application/token-manager dispatch and finalized settlement evidence
 ~~~
 
-The Rust type ExportedProofWithCircuitData contains JSON strings for:
+These are separate proofs and acceptance stages. An authenticated queue root does not prove a UI request, correct token configuration, payment eligibility, maturity or completed transfer. A canonically mined commitment/root is not finalized acceptance; a processed nonce alone is not proof of the original transfer's economic effect.
 
-- the Plonky2 proof with public inputs;
-- common circuit data;
-- verifier-only circuit data.
+## Commitment authentication
 
-The Rust FFI adapter in [relayer/src/prover_interface.rs](../relayer/src/prover_interface.rs) serializes that value and calls the exported prove function. [gnark-wrapper/main.go](../gnark-wrapper/main.go) then:
+The [follower](../tools/beefy-relay/src/follower.rs) authenticates source/witness identity and follows ordered native BEEFY commitments. The [Ethereum relay](../tools/beefy-relay/src/ethereum.rs) uses `createFiatShamirFinalBitfield` and `submitFiatShamir`; the client also supports the interactive protocol. The Rust actor checks every available signature, while the Fiat-Shamir EVM path verifies its selected sample. Bootstrap trusts the configured current/next authority sets; a next-set update authenticates its handover through the newest MMR leaf's next-authority data.
 
-1. loads the proving key and R1CS from the configured data directory;
-2. compiles the gnark circuit and creates keys when the proving key is absent;
-3. verifies the inner Plonky2 proof inside the gnark circuit;
-4. creates a BN254 Plonk proof;
-5. verifies that proof locally with the verifying key;
-6. serializes the proof with gnark's Solidity format;
-7. compresses the Goldilocks public inputs into the two Ethereum public inputs.
+The client supports at most 256 validators. Both EVM signature ceilings are 86, capped by `floor(N/3)+1` with native small-set quorum rules: N=59 requires 20 EVM signatures and native quorum 40; N=256 requires 86 and 171 respectively; N=2 requires both. Distinct signer positions and accounts are required, and authenticated native rosters require distinct source keys and derived EVM accounts. These limits do not qualify an actual production validator roster.
 
-The data directory can therefore contain SRS material, R1CS, proving/verifying keys, and a generated verifier.sol. Mount it as persistent, deployment-specific data. Keep proving data separated when running multiple networks whose verifier keys differ.
+Accepted updates authenticate source freshness using the newest leaf's parent timestamp. The client expires after 24 hours without a sufficiently fresh authenticated source checkpoint. Mandatory authority handovers and the existing idle heartbeat are not optional merely because no user message is waiting. Expiry, source stalls and unresolved original transactions HOLD; none permits fabricated freshness or a verifier fallback.
 
-The generated Solidity libraries [PlonkVerifierMainnet.sol](../ethereum/src/libraries/PlonkVerifierMainnet.sol) and [PlonkVerifierTestnet.sol](../ethereum/src/libraries/PlonkVerifierTestnet.sol) explicitly say they are generated code. Regenerate through the established Go/Rust workflow and review the output; do not hand-edit generated verifier code.
+The consensus sources derive from Snowbridge commit `1201293e482ef052b9c3989dcf680046704fef3d`; the separate architectural reference is `630c2081359e2417496e7f4c1a189a7eb40f7bd4`. Vara snapshot/domain/freshness and queue changes are not identical audited upstream bytecode. Synthetic interop vectors and test-only checkpoint injection are not production consensus-authentication evidence.
 
-## Ethereum verification boundary
+## Historical queue snapshot and MMR inclusion
 
-MessageQueue.submitMerkleRoot receives:
+The [protocol encoding](../tools/beefy-relay/src/protocol.rs) commits this 86-byte snapshot:
 
-- the uint256 Gear block number;
-- the bytes32 root;
-- the serialized gnark Plonk proof.
-
-It packs the root and the low 32 bits of the block number into two public inputs, then calls the configured IVerifier. A proof can therefore be valid only when:
-
-- the gnark proof matches the deployed verifier's circuit;
-- the verifier's fixed circuit digest and constants match the Rust proof;
-- the root and block number match the proof public inputs;
-- MessageQueue accepts the block-range and challenge/emergency-state checks.
-
-After verification, the contract stores the root by Gear block number. MessageQueue.processMessage performs a separate binary Merkle proof check for an individual message and enforces the root delay.
-
-## Where data comes from
-
-The relayer assembles circuit inputs from Gear RPC:
-
-- GRANDPA justifications and pre-commits for BlockFinality;
-- block headers for the header chain;
-- storage trie branches/leaves and the original stored data for StorageInclusion;
-- the authority-set transition data for recursive authority proofs;
-- the queue root and block-inclusion proof for the final proof.
-
-[relayer/src/prover_interface.rs](../relayer/src/prover_interface.rs) converts RPC DTOs into prover-owned structures, reverses branch-node order into root-to-leaf order, expands storage addresses into nibbles, and extracts the final block/root from gnark public inputs.
-
-A proof failure can therefore originate in RPC evidence, trie encoding, authority-set history, circuit compatibility, gnark setup, or Ethereum contract state. The error message alone may not identify the layer; inspect the logs around the proof stage.
-
-## Runtime and memory constraints
-
-The main runtime sets up Rayon and Tokio workers before starting relayers. The root relayer's default thread count is 24, and each proof thread can allocate substantial memory. The prover also builds a thread pool for header hashing and reads RUST_MIN_STACK when composing MessageSent.
-
-For operators:
-
-- set RUST_MIN_STACK to at least 4194304 bytes;
-- start with a conservative thread_count on a new host;
-- keep SRS/key data on local durable storage;
-- do not share filesystem proof/key directories between independent relayers;
-- reserve CPU and memory for the gnark proving phase as well as Rust circuits.
-
-For maintainers, treat circuit digest, verifier-only data, gnark R1CS, proving key, verifying key, Solidity verifier, and deployment network as a single versioned artifact set.
-
-## Tests and debugging
-
-Run focused tests from the repository root:
-
-~~~sh
-cargo test -p prover
-cargo test -p plonky2_blake2b256
-cargo test -p plonky2_ecdsa
-cargo test -p plonky2_ed25519
-cargo test -p plonky2_u32
+~~~text
+version=2:u8 | "vara":4 | bridgeDomain:32 | timestamp:u64LE
+| initialized:u8 | queueId:u64LE | root:32
 ~~~
 
-The Ethereum circuit/verifier tests live under [ethereum/test](../ethereum/test) and can be run with Foundry when dependencies are installed:
+The domain is Keccak256 over `vara/gear-eth-bridge-domain/v2`, source domain (32 bytes), destination chain ID (32-byte big-endian) and destination queue address (20 bytes), concatenated in order. Under the native protocol the source domain is the approved source genesis. Domain binding is one destination lane, not a destination registry or permission to reuse another deployment's bootstrap.
 
-~~~sh
-cd ethereum
-forge test
+The outer leaf has version 0 and 113 SCALE bytes. Its inherited Solidity field `parachainHeadsRoot` contains the snapshot hash, not parachain heads. It also commits the parent identity and next-authority set. For queue block B, insertion L=B+1, first MMR insertion S and commitment C, the leaf index is L−S and leaf count C−S+1, requiring B<C and B≥S.
+
+[Source::proof](../tools/beefy-relay/src/source.rs) reads the exact historical snapshot and checks initialization, parent identity, insertion-time authorities, geometry and signed MMR root. It must not reconstruct an old snapshot from current queue state. Archive state and offchain MMR nodes are required; unavailable or pruned evidence is HOLD, not an empty root or a mismatch. Source/witness identity, runtime code, actual first insertion and domain activation are authenticated separately from deployment approval. See the [native activation gates](runtime-upgrade-and-beefy-activation.md).
+
+## Typed Ethereum verifier boundary
+
+`MessageQueue.submitMerkleRoot(uint256 sourceBlock, bytes32 merkleRoot, bytes proof)` retains its external submission shape. It calls the typed [IVerifier](../ethereum/src/interfaces/IVerifier.sol) directly:
+
+~~~solidity
+function safeVerifyProof(uint256 sourceBlock, bytes32 merkleRoot, bytes calldata proof)
+    external view returns (bool success);
 ~~~
 
-The gnark wrapper has Go tests:
+The proof is the canonical ABI-encoded v2 envelope: proof/bridge versions, initialization, bridge domain, source timestamp, QueueId, anchor block/root, MMR leaf, sibling items and proof order. It is not raw sibling hashes or a packed field-element input. `VaraQueueRootVerifier`:
 
-~~~sh
-cd gnark-wrapper
-go test ./...
-~~~
+- accepts the safe entrypoint only from its configured queue on its configured destination chain;
+- rejects heights above `uint32` before narrowing, avoiding source-height aliasing;
+- bounds the envelope and at most 256 MMR items, rejects unused proof-order bits and requires exact canonical ABI re-encoding;
+- catches malformed decoding through a self-only decoder and returns false;
+- requires initialized version-2 metadata and the exact destination-bound domain;
+- binds leaf parent number to the original source height and the snapshot hash to the leaf;
+- requires a live client, source height at/above MMR start and strictly before the anchor, and an exact retained accepted nonzero anchor block/root;
+- verifies the SCALE leaf hash and MMR inclusion against that accepted root.
 
-For an integration-oriented relayer check:
+A false root-proof result reverts submission with `InvalidQueueRootProof`. A signed publication tied to an older anchor cannot be rewritten or re-signed merely because the client advanced. Empty initialized queue progress uses `safeVerifyEmptyQueueProgress` and the same authentication with a zero root; it advances eligible progress only and creates neither a registered root nor maturity.
 
-~~~sh
-cargo check -p relayer
-cargo test -p relayer merkle_roots
-cargo test -p relayer prover
-~~~
+`BeefyClient` retains the last 64 genuinely accepted `(block, MMR root)` pairs from either acceptance protocol; bootstrap is not inserted. `isAcceptedAnchor(uint64,bytes32)` reports exact retained membership, and `verifyMMRLeafProof(uint64,bytes32,bytes32,bytes32[],uint256)` additionally requires a live client. Latest fields still govern commitment ordering and freshness. A later commitment does not invalidate an earlier proof until its anchor is evicted. Eviction never authorizes rewriting a signed original or releasing its nonce, and does not invalidate already finalized root publications or their history evidence.
 
-When debugging a failed final proof, classify it in this order:
+The 64-entry window is a count, not a time guarantee. Production release requires measured inclusion and finality latency to fit inside that window under adversarial commitment rates; otherwise release remains gated pending a reviewed capacity or atomic-publication alternative.
 
-1. Does the Gear RPC return the requested finalized block and a consistent GRANDPA proof?
-2. Does the stored data hash match the trie inclusion proof and expected queue root?
-3. Does proof storage contain the authority-set proof for the signer set?
-4. Does the gnark data directory contain matching SRS/key/verifier material?
-5. Does the returned public input encode the expected root and Gear block number?
-6. Does the deployed MessageQueue point at the expected verifier and accept the block range?
+## Publication, delivery and persistence
+
+Use the existing `beefy-relay tokens-follow` commitment follower/root publisher or `tokens-publish-root` standalone publisher. `tokens-history-audit`, `bridge-status` and `bridge-events` provide the existing audit/status surfaces. There is no root-proof HTTP service, recursive authority-proof store or separate producer setup.
+
+Each follower/root journal has one owner. Preserve source/client/anchor identity, original signed bytes, nonce, transaction hash, inclusion and finality archives. Receipt uncertainty does not permit another signature or nonce allocation; re-included originals remain held until the new inclusion is finalized. Authenticated external progress can satisfy unsigned work but cannot rewrite the identity or success/failure of a signed original. Use distinct EVM fee payers for every independent submitting process, including message delivery.
+
+The immutable BEEFY publication floor is not the first published block. Historical missing nonzero roots at/above the floor still need their own publication even behind later roots or empty progress; bounded-distance catch-up uses actual initialized historical snapshots. A zero BEEFY floor rejects new publication without disabling historical redemption. Each newly registered block has its own maturity, including repeated root hashes. A queue reset prevents substituting a later cumulative root for an older queue.
+
+`MessageQueue.processMessage` remains a separate binary Merkle inclusion check over the original message, leaf index and total leaves. It enforces the applicable 300/3600-second delay, pause/emergency controls and global nonce replay protection before dispatch. Historical registered roots, legacy root-keyed timestamps where applicable, processed nonces and custody remain retained; missing applicable maturity fails closed. Root authentication does not authorize resetting them.
+
+Completion requires canonical finalized original evidence and the exact queue message effect plus the expected token-manager effect in that original receipt. A competitor's success, reverted replay or missing original receipt cannot complete the original operation. The retained token/manual workers and SDK use individual-message inclusion proofs, not a SNARK boundary.
+
+## Observer challenge versus authorized recovery
+
+The observer-only `relayer kill-switch` authenticates destination event inclusion from a pinned canonical head back to finalized ancestry, checks stored-root consistency at that head, and compares the exact finalized historical source root. Hot destination blocks are scanned before finality and revisited until finalized. Missing/pruned data alone cannot trigger a challenge; inconsistent/removed destination logs hold the scan cursor. Its configured source RPC remains an operational trust boundary, not an additional independent consensus verifier.
+
+A qualified mismatch sends `challengeRoot()` with the observer key. The hash is retained across receipt uncertainty; a finalized revert requires a fresh scan before another submission. A finalized successful challenge exits for separately authorized operator intervention. The observer has no admin signer, root repair URL, automatic republication or unpause.
+
+The challenge pause is finite: `CHALLENGE_ROOT_DELAY` is two days. Persistent incidents require the existing governance pause. Challenge removal, emergency-admin actions and any authenticated publication are separately authorized responses, not observer automation.
+
+Expiry recovery is also separate: the reviewed positive-delay timelock can replace only an expired verifier with a live forward checkpoint retaining source/MMR history and queue/chain binding. It preserves floor, roots, maturity, custody and replay state, leaves claims paused, and grants no UUPS role. Recovery is trusted re-bootstrap authority: a compromised multisig can select malicious history; monotonic checks do not prove continuity with the expired set. Follow the [recovery policy](../ethereum/README.md#expiry-recovery-and-initializer-scope) and [custody-preserving migration gates](../ethereum/README.md#mainnet-custody-preserving-migration-candidate), not an ad hoc repair flow.
+
+## Independent Ethereum→Vara proofs and GRANDPA discovery
+
+The [checkpoint worker](../relayer/src/ethereum_checkpoints/) advances [checkpoint-light-client](../gear-programs/checkpoint-light-client/) from finalized Beacon data. Bootstrap requires an independently trusted checkpoint and genesis validators identity; the actor's network fixes the fork schedule. Sequential committee transitions, ordered ancestry, BLS verification and revision checks remain unchanged.
+
+The inbound [proof composer](../relayer/src/message_relayer/eth_to_gear/proof_composer.rs) retains Beacon/Deneb/Electra proof composition, receipt inclusion and historical headers. [HistoricalProxy](../gear-programs/historical-proxy/app/src/service.rs) selects the appropriate event verifier; consumer/application replies and actual settlement must still be authenticated. Outer proxy success is not economic completion. Preserve original Gear dispatch/reply and per-log settlement evidence, including pending native payout and backed-refund obligations described in [internals](internals.md#ethereum-to-gear).
+
+GRANDPA justifications, subscriptions and authority annotations remain in finalized message discovery and queue cleaning. Removing the outbound recursive proving graph does not replace source finality, remove reverse proofs or make a numeric cursor alone authenticated history.

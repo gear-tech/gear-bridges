@@ -1,0 +1,15 @@
+[package]
+name = "vft-vara-v1"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+vft-vara-app = { package = "vft-vara-v1-app", path = "app" }
+
+[build-dependencies]
+vft-vara-app = { package = "vft-vara-v1-app", path = "app" }
+sails-rs = { workspace = true, features = ["wasm-builder"] }
+sails-idl-gen.workspace = true
+
+[features]
+wasm-binary = []

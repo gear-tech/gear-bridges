@@ -3,6 +3,7 @@
 pragma solidity ^0.8.37;
 
 import {IPausable} from "src/interfaces/IPausable.sol";
+import {IVerifier} from "src/interfaces/IVerifier.sol";
 
 /**
  * @dev Type representing message being bridged from Gear-based chain (Vara Network) to Ethereum.
@@ -13,6 +14,24 @@ struct VaraMessage {
     bytes32 source;
     address destination;
     bytes payload;
+}
+
+/// @dev Canonical control fields; the wire format is a flat ABI tuple, not an encoded struct.
+struct GovernanceControl {
+    uint64 sequence;
+    uint64 validUntil;
+    uint64 incidentEpoch;
+    bytes32 requiredAdminAction;
+    bytes32 requiredBarrier;
+}
+
+struct LegacyControl {
+    VaraMessage message;
+    uint256 sourceBlock;
+    uint256 totalLeaves;
+    uint256 leafIndex;
+    bytes32[] proof;
+    uint64 validUntil;
 }
 
 /**
@@ -45,9 +64,58 @@ interface IMessageQueue is IPausable {
     error EmergencyStopNotEnabled();
 
     /**
-     * @dev The plonk proof is invalid.
+     * @dev The BEEFY-authenticated queue root proof is invalid.
      */
-    error InvalidPlonkProof();
+    error InvalidQueueRootProof();
+    /**
+     * @dev A zero root cannot be registered as a message root.
+     */
+    error InvalidMerkleRoot();
+
+    /**
+     * @dev Empty-queue progress requires an initialized queue and a strictly newer source block.
+     */
+    error EmptyQueueNotInitialized();
+    error EmptyQueueProgressNotForward();
+    error InvalidEmptyQueueProgressProof();
+    error InvalidBeefyVerifier();
+    /// @dev Legacy state changed or the proposed BEEFY publication boundary is unsafe.
+    error InvalidBeefyMigration();
+    error InvalidBeefyRecoveryTimelock();
+    error NotBeefyRecoveryTimelock();
+    error InvalidBeefyRecovery();
+    error InvalidGovernanceControl();
+    error GovernanceControlExpired();
+    error GovernanceControlConsumed();
+    error GovernanceDependencyMissing();
+    error LegacyPublicationFrozen();
+    error InvalidLegacyStage();
+    error InvalidMigrationBarrier();
+
+    event GovernanceControlCompleted(bytes32 indexed messageHash, bytes32 indexed stream, uint64 sequence);
+    event LegacyMigrationStaged(uint256 cut, bytes32 migrationMessage, bytes32 recoveryMessage);
+    event LegacyPublicationRecovered(uint256 cut);
+    event MigrationBarrierRecorded(bytes32 indexed barrier, uint256 sourceBlock, bytes32 publicationHash);
+    event MigrationPublicationHashCaptured(
+        uint256 indexed sourceBlock, bytes32 indexed identity, bytes32 publicationHash
+    );
+
+    function stageLegacyMigration(
+        IVerifier expectedLegacyVerifier,
+        uint256 expectedLegacyMaxBlock,
+        LegacyControl calldata migration,
+        LegacyControl calldata recovery
+    ) external;
+    function recoverLegacyPublication(IVerifier expectedLegacyVerifier, uint256 expectedLegacyMaxBlock) external;
+    /// @dev Permissionless canonical identity capture within 256 blocks; does not attest finality.
+    function captureMigrationPublicationHash(uint256 sourceBlock) external returns (bytes32);
+    function migrationPublicationBlockHash(uint256 sourceBlock) external view returns (bytes32);
+    /// @dev Admin attests destination finality; canonical publication identity is independently checked on-chain.
+    function recordMigrationBarrier(uint256 sourceBlock, bytes32 publicationBlockHash) external returns (bytes32);
+
+    event BeefyVerifierRecovered(
+        address indexed previousVerifier, address indexed replacementVerifier, uint256 maxBlock
+    );
 
     /**
      * @dev Message nonce is already processed.
@@ -63,6 +131,9 @@ interface IMessageQueue is IPausable {
      * @dev Merkle root delay is not passed.
      */
     error MerkleRootDelayNotPassed();
+    error MerkleRootTimestampNotFound(uint256 blockNumber);
+    error InvalidSourceBlock();
+    error BlockNumberBelowMinimum(uint256 blockNumber, uint256 minimum);
 
     /**
      * @dev Merkle proof is invalid.
@@ -83,11 +154,6 @@ interface IMessageQueue is IPausable {
      * @dev Caller is not emergency stop observer.
      */
     error NotEmergencyStopObserver();
-
-    /**
-     * @dev Block number is before genesis block.
-     */
-    error BlockNumberBeforeGenesis(uint256 blockNumber, uint256 genesisBlock);
 
     /**
      * @dev Block number is too far from max block number.
@@ -124,6 +190,11 @@ interface IMessageQueue is IPausable {
      * @dev Emitted when block number and merkle root are stored.
      */
     event MerkleRoot(uint256 blockNumber, bytes32 merkleRoot);
+    /// @dev A verified empty source snapshot advanced height without registering a root.
+    event EmptyQueueProgress(uint256 indexed sourceBlock);
+    event MigratedToBeefy(
+        address indexed legacyVerifier, address indexed beefyVerifier, uint256 legacyMaxBlock, uint256 firstBeefyBlock
+    );
 
     /**
      * @dev Emitted when message processing is allowed during emergency stop.
@@ -273,11 +344,15 @@ interface IMessageQueue is IPausable {
      *
      * @param blockNumber Block number on Vara Network
      * @param merkleRoot Merkle root of transactions included in block with corresponding block number
-     * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
+     * @param proof Canonical v2 BEEFY-authenticated MMR queue proof envelope.
      * @dev Reverts if emergency stop status is enabled with `EmergencyStop` error.
-     * @dev Reverts if `proof` or `publicInputs` are malformed with `InvalidPlonkProof` error.
+     * @dev Reverts if the queue proof is invalid or malformed with `InvalidQueueRootProof`.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external;
+    /**
+     * @dev Advance height using an authenticated initialized zero-root snapshot; does not store root/timestamp.
+     */
+    function submitEmptyQueueProgress(uint256 sourceBlock, bytes calldata authenticatedSnapshotProof) external;
 
     /**
      * @dev Returns merkle root for specified block number.
@@ -287,13 +362,27 @@ interface IMessageQueue is IPausable {
      */
     function getMerkleRoot(uint256 blockNumber) external view returns (bytes32);
 
-    /**
-     * @dev Returns timestamp when merkle root was set.
-     *      Returns `0` if merkle root was not provided for specified block number.
-     * @param merkleRoot Target merkle root.
-     * @return timestamp Timestamp when merkle root was set.
-     */
+    /// @dev Retained legacy root-keyed timestamp; new registrations do not write this mapping.
     function getMerkleRootTimestamp(bytes32 merkleRoot) external view returns (uint256);
+
+    /// @dev Returns effective block maturity, zero for absent roots, and rejects missing applicable timestamps.
+    function getMerkleRootTimestampForBlock(uint256 blockNumber) external view returns (uint256);
+
+    /// @dev Permanent publication floor; historical message redemption remains available.
+    function beefyRootMinimum() external view returns (uint256);
+
+    /// @dev Preserve legacy state while atomically switching a paused proxy to a disjoint BEEFY publication range.
+    function migrateToBeefy(
+        IVerifier expectedLegacyVerifier,
+        IVerifier beefyVerifier,
+        uint256 expectedLegacyMaxBlock,
+        uint256 firstBeefyBlock,
+        address recoveryTimelock
+    ) external;
+
+    /// @dev Timelocked expiry recovery does not grant upgrade authority or reset retained claims.
+    function recoverBeefyVerifier(IVerifier expectedVerifier, IVerifier replacementVerifier, uint256 expectedMaxBlock)
+        external;
 
     /**
      * @dev Verifies and processes message originated from Vara Network.

@@ -8,7 +8,7 @@ use super::{
 };
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::Log;
 use alloy_rlp::Encodable;
 use core::{fmt, str::FromStr};
@@ -19,6 +19,37 @@ const CAPACITY_RLP_RECEIPT: usize = 10_000;
 pub type ReceiptEnvelope = alloy_consensus::ReceiptEnvelope<Log>;
 /// Tuple with a transaction index and the related receipt.
 pub type Receipt = (u64, ReceiptEnvelope);
+
+/// Decode the exact raw EIP-2718 receipt trie value, never its P2P RLP wrapper.
+/// Retained originals must not be reencoded to migrate their receipt identity.
+pub fn decode_canonical_receipt(bytes: &[u8]) -> alloy_rlp::Result<ReceiptEnvelope> {
+    let mut input = bytes;
+    let receipt = ReceiptEnvelope::decode_2718(&mut input)?;
+    if !input.is_empty() {
+        return Err(alloy_rlp::Error::UnexpectedLength);
+    }
+    if receipt.encoded_2718() != bytes {
+        return Err(alloy_rlp::Error::Custom("Noncanonical receipt"));
+    }
+    Ok(receipt)
+}
+
+/// Decode an unchanged historical P2P-framed receipt only after its manager and
+/// endpoint CodeIds/range have been independently approved and authenticated.
+/// Fresh admission must use `decode_canonical_receipt` instead.
+pub fn decode_canonical_network_receipt(bytes: &[u8]) -> alloy_rlp::Result<ReceiptEnvelope> {
+    let mut input = bytes;
+    let receipt = ReceiptEnvelope::network_decode(&mut input)?;
+    if !input.is_empty() {
+        return Err(alloy_rlp::Error::UnexpectedLength);
+    }
+    let mut canonical = Vec::with_capacity(receipt.network_len());
+    receipt.network_encode(&mut canonical);
+    if canonical != bytes {
+        return Err(alloy_rlp::Error::Custom("Noncanonical historical receipt"));
+    }
+    Ok(receipt)
+}
 
 /// Describes possible errors in generating Merkle proof.
 #[derive(Clone, Debug)]
@@ -295,7 +326,7 @@ pub fn map_receipt_envelope(
 
     let result = ReceiptWithBloom::new(
         Receipt {
-            status: receipt.status().into(),
+            status: receipt.as_receipt().expect("supported receipt type").status,
             cumulative_gas_used: receipt.cumulative_gas_used(),
             logs,
         },
@@ -374,4 +405,122 @@ where
         .collect::<Result<Vec<_>, _>>()?;
 
     List::<_, N>::try_from(list).map_err(de::Error::custom)
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::*;
+    use alloy_consensus::{Eip658Value, Receipt as ConsensusReceipt, ReceiptWithBloom, TxType};
+
+    // VB-20 reconstructed from HTML; audited revision 7fe1b032.
+    // Synthetic vectors test framing, not historical deployed endpoint qualification.
+    #[test]
+    fn canonical_receipt_types_reject_wrappers_trailing_and_noncanonical_rlp() {
+        let body = ReceiptWithBloom::new(
+            ConsensusReceipt::<Log> {
+                status: true.into(),
+                cumulative_gas_used: 21_000,
+                logs: Vec::new(),
+            },
+            Default::default(),
+        );
+        let mut legacy = hex::decode("f9010801825208b90100").unwrap();
+        legacy.extend_from_slice(&[0; 256]);
+        legacy.push(0xc0);
+        for (tag, ty) in [
+            TxType::Legacy,
+            TxType::Eip2930,
+            TxType::Eip1559,
+            TxType::Eip4844,
+            TxType::Eip7702,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut raw = Vec::new();
+            if tag != 0 {
+                raw.push(tag as u8);
+            }
+            raw.extend_from_slice(&legacy);
+            let expected = ReceiptEnvelope::from_typed(ty, body.clone());
+            assert_eq!(decode_canonical_receipt(&raw).unwrap(), expected);
+            assert_eq!(expected.encoded_2718(), raw);
+
+            let mut wrapped = Vec::new();
+            raw.as_slice().encode(&mut wrapped);
+            assert!(decode_canonical_receipt(&wrapped).is_err());
+            let mut trailing = raw.clone();
+            trailing.push(0);
+            assert!(decode_canonical_receipt(&trailing).is_err());
+            assert!(decode_canonical_receipt(&raw[..raw.len() - 1]).is_err());
+
+            // Overlong encoding of status 1, with a matching outer list length.
+            let offset = usize::from(tag != 0);
+            let mut noncanonical = raw;
+            noncanonical[offset + 2] += 1;
+            noncanonical.insert(offset + 3, 0x81);
+            assert!(decode_canonical_receipt(&noncanonical).is_err());
+        }
+        for tag in [0, 5, 0x7f] {
+            let mut raw = vec![tag];
+            raw.extend_from_slice(&legacy);
+            assert!(decode_canonical_receipt(&raw).is_err());
+        }
+        assert!(decode_canonical_receipt(&[]).is_err());
+        // Canonical decoding does not itself assert economic success.
+        let mut failed = body;
+        failed.receipt.status = false.into();
+        assert_eq!(
+            decode_canonical_receipt(&ReceiptEnvelope::Legacy(failed).encoded_2718())
+                .unwrap()
+                .as_receipt()
+                .unwrap()
+                .status,
+            Eip658Value::Eip658(false)
+        );
+    }
+
+    // VB-20 / Phase 3E.6 reconstructed from HTML; audited revision 7fe1b032.
+    #[cfg(feature = "std")]
+    #[test]
+    fn rpc_post_state_mapping_preserves_exact_receipt_and_trie_root() {
+        use crate::{hash_db::Hasher, keccak_hasher::KeccakHasher};
+
+        let status = Eip658Value::PostState(alloy_primitives::B256::repeat_byte(0x42));
+        let rpc = alloy_consensus::ReceiptEnvelope::Legacy(ReceiptWithBloom::new(
+            ConsensusReceipt::<alloy::rpc::types::Log> {
+                status,
+                cumulative_gas_used: 21_000,
+                logs: Vec::new(),
+            },
+            Default::default(),
+        ));
+        let mapped = map_receipt_envelope(&rpc);
+        let mut raw = hex::decode("f90128a0").unwrap();
+        raw.extend_from_slice(&[0x42; 32]);
+        raw.extend_from_slice(&hex::decode("825208b90100").unwrap());
+        raw.extend_from_slice(&[0; 256]);
+        raw.push(0xc0);
+        assert_eq!(mapped.as_receipt().unwrap().status, status);
+        assert_eq!(mapped.encoded_2718(), raw);
+        assert_eq!(decode_canonical_receipt(&raw).unwrap(), mapped);
+
+        // Independently encode the single-leaf MPT node for transaction index 0.
+        let mut leaf = rlp::RlpStream::new_list(2);
+        leaf.append(&[0x20u8, 0x80].as_slice());
+        leaf.append(&raw.as_slice());
+        let expected_root = KeccakHasher::hash(&leaf.out());
+        let root_for = |receipt: &ReceiptEnvelope| {
+            let mut db = memory_db::new();
+            let mut root = H256::zero();
+            let mut trie = TrieDBMut::new(&mut db, &mut root);
+            let (key, value) = rlp_encode_index_and_receipt(&0, receipt);
+            trie.insert(&key, &value).unwrap();
+            *trie.root()
+        };
+        assert_eq!(root_for(&mapped), expected_root);
+        let mut coerced = mapped;
+        coerced.as_receipt_with_bloom_mut().unwrap().receipt.status = rpc.status().into();
+        assert_ne!(root_for(&coerced), expected_root);
+    }
 }

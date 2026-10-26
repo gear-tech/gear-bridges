@@ -24,6 +24,7 @@ pub(crate) struct EthContracts {
     pub admin: ActorId,
     pub suri: String,
     pub suri2: String,
+    pub gas_limit: u64,
 
     pub mock_contract: ActorId,
     pub historical_proxy: ActorId,
@@ -80,6 +81,12 @@ impl EthContracts {
         println!("mock-contract deployed at: {mock_contract:?}, message={message:?}");
 
         let remoting = GClientRemoting::new(api.clone());
+        let min_slot = super::eth_to_gear::TRANSACTIONS
+            .values()
+            .map(|tx_data| tx_data.slot_number)
+            .min()
+            .expect("No transactions found");
+        assert!(min_slot > 0, "fixture checkpoint floor must be positive");
         let mut vfts = [ActorId::zero(); 3];
         let vft_manager = {
             /* upload vft-manager and VFTs for each ERC20 token */
@@ -88,6 +95,7 @@ impl EthContracts {
                 .new(InitConfig {
                     gear_bridge_builtin: Default::default(),
                     historical_proxy_address: Default::default(),
+                    minimum_receipt_slot: min_slot,
                     config: Config {
                         gas_for_token_ops: 10_000_000_000,
                         gas_for_reply_deposit: 10_000_000_000,
@@ -200,12 +208,6 @@ impl EthContracts {
 
             let mut service = historical_proxy_client::HistoricalProxy::new(remoting.clone());
 
-            let min_slot = super::eth_to_gear::TRANSACTIONS
-                .values()
-                .map(|tx_data| tx_data.slot_number)
-                .min()
-                .expect("No transactions found");
-
             println!("Add endpoint #{min_slot}");
             service
                 .add_endpoint(min_slot, eth_events)
@@ -227,6 +229,7 @@ impl EthContracts {
             admin,
             suri,
             suri2: connection.accounts[1].2.clone(),
+            gas_limit,
 
             mock_contract,
             historical_proxy,

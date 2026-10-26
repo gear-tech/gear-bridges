@@ -7,25 +7,14 @@ pragma solidity ^0.8.37;
  */
 interface IVerifier {
     /**
-     * @dev Verifies zk-SNARK Plonk proof, which lets us know that
-     *      `blockNumber` and `merkleRoot` are on Vara Network.
-     * @param proof Serialised Plonk proof (using gnark's `MarshalSolidity`).
-     * @param publicInputs Reduced public inputs in the following format:
-     *        ```solidity
-     *        uint256 blockNumber = 0xcccccccc; // actually `uint32` (because Vara Network uses 32-bit block numbers)
-     *        bytes32 merkleRoot = 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb;
-     *
-     *        uint256[] memory publicInputs = new uint256[](2);
-     *        publicInputs[0] = uint256(merkleRoot) >> 64;
-     *        publicInputs[1] = ((uint256(merkleRoot) & uint256(type(uint64).max)) << 128)
-     *            | ((blockNumber & uint256(type(uint32).max)) << 96);
-     *
-     *        assert(publicInputs[0] == 0x0000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);
-     *        assert(publicInputs[1] == 0x0000000000000000bbbbbbbbbbbbbbbbcccccccc000000000000000000000000);
-     *        ```
-     * @return success `true` if proof is valid, `false` otherwise.
-     * @dev Actually, it is a wrapper around `IPlonkVerifier.verifyProof` function.
-     *      It is used to avoid reverts in case of invalid proof.
+     * @dev Authenticates a Vara queue root with a BEEFY-backed MMR proof.
+     * @param sourceBlock Original source block number, bounded to uint32.
+     * @param merkleRoot Queue root at the source block.
+     * @param proof Canonical v2 queue proof envelope.
+     * @return success `true` if proof is valid, `false` otherwise, including malformed proofs.
      */
-    function safeVerifyProof(bytes calldata proof, uint256[] calldata publicInputs) external view returns (bool success);
+    function safeVerifyProof(uint256 sourceBlock, bytes32 merkleRoot, bytes calldata proof)
+        external
+        view
+        returns (bool success);
 }

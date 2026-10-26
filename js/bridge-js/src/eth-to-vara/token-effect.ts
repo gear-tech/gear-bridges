@@ -1,0 +1,222 @@
+import { decode as decodeRlp, encode as encodeRlp } from '@ethereumjs/rlp';
+import { bytesToHex, concatHex, decodeEventLog, keccak256, stringToHex } from 'viem';
+import type { HexString } from '@gear-js/api';
+import { assertHistoricalReceiptAuthority, type HistoricalReceiptAuthority } from './historical-receipt.js';
+
+export interface InboundTokenEffect {
+  readonly managerAddress: HexString;
+  readonly sourceToken: HexString;
+  readonly destinationToken: HexString;
+  readonly sender: HexString;
+  readonly receiver: HexString;
+  readonly amount: bigint;
+}
+
+export interface SettledReceiptDeposit {
+  log_index: number | string | bigint;
+  sender: HexString;
+  receiver: HexString;
+  eth_token_id: HexString;
+  token_id: HexString | null;
+  amount: number | string | bigint;
+  outcome: string;
+}
+
+export const VFT_MANAGER_IDL_SHA256 = '6af2095193bef52ebeed5ac723f9d9f712afed29e2075c023223fd1abb190bed';
+export const NATIVE_WRAPPER_IDL_SHA256 = '8ef5f27c84e720d05b7ffb3496153a0049e1e642e2c5c8a72cadff662c9ff2f1';
+export const NATIVE_WRAPPER_V1_IDL_SHA256 = 'afd6509bb15544b1302dcd4c5659bd77ef07c7dfb98a292f0c4a99b59c73fca9';
+export type NativeWrapperMode = 'escrow-v1' | 'held-escrow-v2';
+
+export function nativeWrapperIdlSha256(mode: NativeWrapperMode): string {
+  if (mode === 'escrow-v1') return NATIVE_WRAPPER_V1_IDL_SHA256;
+  if (mode === 'held-escrow-v2') return NATIVE_WRAPPER_IDL_SHA256;
+  throw new Error('HOLD: unknown native wrapper capability');
+}
+
+function hexIdentity(value: unknown, bytes: 20 | 32): HexString {
+  if (typeof value !== 'string' || !(bytes === 20 ? /^0x[0-9a-fA-F]{40}$/ : /^0x[0-9a-fA-F]{64}$/).test(value)) {
+    throw new Error('HOLD: malformed hexadecimal identity');
+  }
+  return value.toLowerCase() as HexString;
+}
+const sameActor = (a: unknown, b: unknown) => hexIdentity(a, 32) === hexIdentity(b, 32);
+const sameToken = (a: unknown, b: unknown) => hexIdentity(a, 20) === hexIdentity(b, 20);
+
+export interface NativeReceiptDeposit extends SettledReceiptDeposit {
+  supply: 'Gear' | 'Ethereum' | null; native: boolean; operation_id: HexString; child: HexString | null;
+}
+export interface NativeRedemption {
+  from: HexString; to: HexString; amount: number | string | bigint; child: HexString;
+  status: 'Queued' | 'Delivered' | 'Returned' | 'Ambiguous' | 'Refunded'; returned_value: number | string | bigint;
+}
+export interface NativeTokenSettlement {
+  operationId: HexString; logIndex: bigint; child: HexString;
+  redemption: NativeRedemption & { status: 'Delivered' | 'Refunded' };
+}
+export interface NativeReceiptIdentity {
+  managerId: HexString; proxyId: HexString; wrapperId: HexString; slot: bigint; transactionIndex: bigint;
+  wrapperMode: NativeWrapperMode; wrapperEthereumToken: HexString;
+  receiptRlp: Uint8Array; expectedEffect: InboundTokenEffect;
+  /** Set only after exact historical deployment/original authentication; never for new signing. */
+  historicalReceipt?: HistoricalReceiptAuthority;
+}
+function u64Le(value: bigint): HexString {
+  if (value < 0n || value > 0xffffffffffffffffn) throw new Error('Invalid native operation coordinate');
+  const bytes = new Uint8Array(8); new DataView(bytes.buffer).setBigUint64(0, value, true);
+  return bytesToHex(bytes);
+}
+/** Byte-identical to the actor's original fixed-array SCALE tuple; no Vec prefix. */
+export function nativeOperationId(identity: NativeReceiptIdentity, logIndex: bigint): HexString {
+  return keccak256(concatHex([stringToHex('vara/native-escrow/v1'), hexIdentity(identity.managerId, 32), hexIdentity(identity.proxyId, 32),
+    hexIdentity(identity.expectedEffect.managerAddress, 20), u64Le(identity.slot), u64Le(identity.transactionIndex),
+    u64Le(logIndex), keccak256(identity.receiptRlp)]));
+}
+const messageId = (id: HexString | null) => typeof id === 'string' && /^0x[0-9a-fA-F]{64}$/.test(id) && BigInt(id) !== 0n;
+
+/** Validate the original known-pending cohort without treating its projected rows as settled. */
+export function validateNativePendingCohort(identity: NativeReceiptIdentity, rows: readonly NativeReceiptDeposit[]): void {
+  nativeWrapperIdlSha256(identity.wrapperMode);
+  if (identity.historicalReceipt && (!sameActor(identity.historicalReceipt.managerId, identity.managerId) || !sameActor(identity.historicalReceipt.proxyId, identity.proxyId) ||
+      identity.historicalReceipt.slot !== identity.slot || identity.historicalReceipt.transactionIndex !== identity.transactionIndex)) throw new Error('HOLD: historical receipt authority belongs to another operation');
+  validateInboundTokenEffect(identity.receiptRlp, rows.map(row => ({ ...row, outcome: 'Settled' })), identity.expectedEffect, identity.historicalReceipt);
+  let native = 0;
+  for (const row of rows) {
+    if (row.outcome !== 'Settled' && !(row.native && (row.outcome === 'NativeQueued' || row.outcome === 'Refunded'))) throw new Error('HOLD: incomplete original native cohort');
+    if (!sameActor(row.operation_id, nativeOperationId(identity, BigInt(row.log_index)))) throw new Error('HOLD: substituted original operation ID');
+    if (row.native) {
+      if (row.supply !== 'Gear' || !sameActor(row.token_id, identity.wrapperId) ||
+          !sameToken(row.eth_token_id, identity.wrapperEthereumToken) || !messageId(row.child)) throw new Error('HOLD: wrong native wrapper or original economic child');
+      native++;
+    }
+  }
+  if (!native) throw new Error('HOLD: native-pending reply lacks its original native operation');
+}
+
+/** Only original NativeQueued -> Settled/Refunded is allowed; terminal outcomes and economic identities remain fixed. */
+export function validateNativeCohortContinuity(original: readonly NativeReceiptDeposit[], current: readonly NativeReceiptDeposit[], settled: boolean): void {
+  if (current.length !== original.length) throw new Error('HOLD: native cohort row count changed');
+  original.forEach((before, index) => {
+    const after = current[index];
+    if (BigInt(before.log_index) !== BigInt(after.log_index) || !sameToken(before.sender, after.sender) || !sameActor(before.receiver, after.receiver) ||
+        !sameToken(before.eth_token_id, after.eth_token_id) || !sameActor(before.token_id, after.token_id) || BigInt(before.amount) !== BigInt(after.amount) ||
+        before.supply !== after.supply || before.native !== after.native || !sameActor(before.operation_id, after.operation_id) ||
+        (before.child === null || after.child === null ? before.child !== after.child : !sameActor(before.child, after.child)) ||
+        (before.outcome !== 'NativeQueued' ? after.outcome !== before.outcome :
+          after.outcome !== 'Settled' && after.outcome !== 'Refunded' && !(after.outcome === 'NativeQueued' && !settled))) {
+      throw new Error('HOLD: original native cohort identity or outcome changed');
+    }
+  });
+}
+
+/** Queued/full return authorizes reconciliation only, never wrapped-refund completion. Both child identities remain immutable. */
+export function validateNativeRedemption(row: NativeReceiptDeposit, managerId: HexString, mode: NativeWrapperMode, value: NativeRedemption | null, original?: NativeRedemption): 'Queued' | 'Delivered' | 'Refunded' {
+  nativeWrapperIdlSha256(mode);
+  const amount = BigInt(row.amount);
+  const backed = (returned: bigint) => mode === 'escrow-v1' ? returned === amount : returned >= amount;
+  if (!value || !row.native || amount <= 0n || !sameActor(value.from, managerId) || !sameActor(value.to, row.receiver) || BigInt(value.amount) !== amount ||
+      !messageId(row.child) || !messageId(value.child) || sameActor(value.child, row.child) ||
+      (value.status !== 'Queued' && value.status !== 'Delivered' && value.status !== 'Refunded') ||
+      (value.status === 'Queued' ? BigInt(value.returned_value) !== 0n && !backed(BigInt(value.returned_value)) :
+        value.status === 'Refunded' ? !backed(BigInt(value.returned_value)) : BigInt(value.returned_value) !== 0n) ||
+      (original && (!sameActor(value.from, original.from) || !sameActor(value.to, original.to) || BigInt(value.amount) !== BigInt(original.amount) ||
+        !sameActor(value.child, original.child) || (original.status !== 'Queued' &&
+          (value.status !== original.status || BigInt(value.returned_value) !== BigInt(original.returned_value))) ||
+        (original.status === 'Queued' && BigInt(original.returned_value) !== 0n &&
+          (BigInt(value.returned_value) !== BigInt(original.returned_value) || value.status === 'Delivered')))) ||
+      (row.outcome === 'Settled' ? value.status !== 'Delivered' : row.outcome === 'Refunded' ? value.status !== 'Refunded' : row.outcome !== 'NativeQueued')) {
+    throw new Error('HOLD: native payout missing, partially returned, ambiguous or substituted');
+  }
+  return value.status;
+}
+
+/** Refunded rows qualify only with the exact wrapper redemption, never through generic settled-token validation. */
+export function validateNativeTokenEffect(identity: NativeReceiptIdentity, rows: readonly NativeReceiptDeposit[],
+  redemptions: ReadonlyMap<HexString, NativeRedemption | null>, originals?: ReadonlyMap<HexString, NativeRedemption>): NativeTokenSettlement[] {
+  validateNativePendingCohort(identity, rows);
+  const canonicalMap = <T>(values: ReadonlyMap<HexString, T>) => {
+    const result = new Map<HexString, T>();
+    for (const [operation, value] of values) {
+      const key = hexIdentity(operation, 32);
+      if (result.has(key)) throw new Error('HOLD: duplicate native operation identity');
+      result.set(key, value);
+    }
+    return result;
+  };
+  redemptions = canonicalMap(redemptions);
+  if (originals) originals = canonicalMap(originals);
+  return rows.filter(row => row.native).map(row => {
+    const operationId = hexIdentity(row.operation_id, 32);
+    const redemption = redemptions.get(operationId) ?? null;
+    const status = validateNativeRedemption(row, identity.managerId, identity.wrapperMode, redemption, originals?.get(operationId));
+    if (status === 'Queued' || row.outcome === 'NativeQueued' || (originals && !originals.has(operationId))) {
+      throw new Error('HOLD: original native operation is not terminal');
+    }
+    return { operationId, logIndex: BigInt(row.log_index), child: hexIdentity(row.child, 32),
+      redemption: { ...redemption!, from: hexIdentity(redemption!.from, 32), to: hexIdentity(redemption!.to, 32),
+        child: hexIdentity(redemption!.child, 32), status } };
+  });
+}
+
+
+export const BridgingRequestedAbi = [{ type: 'event', name: 'BridgingRequested', anonymous: false, inputs: [
+  { name: 'from', type: 'address', indexed: true }, { name: 'to', type: 'bytes32', indexed: true },
+  { name: 'token', type: 'address', indexed: true }, { name: 'amount', type: 'uint256', indexed: false },
+] }] as const;
+
+/** Compare durable settled rows to every original authenticated manager log, not balances or proxy success. */
+export function validateInboundTokenEffect(receiptRlp: Uint8Array, deposits: readonly SettledReceiptDeposit[], expected: InboundTokenEffect, historicalAuthority?: HistoricalReceiptAuthority): void {
+  for (const value of [expected.managerAddress, expected.sourceToken, expected.sender]) hexIdentity(value, 20);
+  for (const value of [expected.destinationToken, expected.receiver]) hexIdentity(value, 32);
+  for (const row of deposits) {
+    hexIdentity(row.sender, 20); hexIdentity(row.eth_token_id, 20);
+    hexIdentity(row.receiver, 32);
+    if (row.token_id === null) throw new Error('HOLD: unmapped token is a retained liability, not a settlement or refund');
+    hexIdentity(row.token_id, 32);
+  }
+  // Fresh admission uses the raw trie value. Never unwrap/rewrite retained
+  // historical originals: their framing and operation IDs belong to old code.
+  let trieValue = receiptRlp;
+  if (historicalAuthority !== undefined) {
+    assertHistoricalReceiptAuthority(historicalAuthority, receiptRlp);
+    const wrapped = decodeRlp(receiptRlp);
+    // Legacy receipts are already an RLP list. Typed network receipts contain exactly the original raw bytes.
+    if (wrapped instanceof Uint8Array) {
+      if (bytesToHex(encodeRlp(wrapped)) !== bytesToHex(receiptRlp) || ![1, 2, 3, 4].includes(wrapped[0])) throw new Error('Noncanonical historical receipt wrapper');
+      trieValue = wrapped;
+    }
+  }
+  const typed = trieValue.length > 0 && trieValue[0] <= 0x7f;
+  if (typed && ![1, 2, 3, 4].includes(trieValue[0])) throw new Error('Unsupported original receipt envelope');
+  const payload = typed ? trieValue.subarray(1) : trieValue;
+  const receipt = decodeRlp(payload);
+  if (bytesToHex(encodeRlp(receipt)) !== bytesToHex(payload)) throw new Error('Noncanonical original receipt envelope');
+  if (!Array.isArray(receipt) || receipt.length !== 4 ||
+      !(receipt[0] instanceof Uint8Array) || bytesToHex(receipt[0]) !== '0x01' ||
+      !(receipt[1] instanceof Uint8Array) || receipt[1].length > 8 || receipt[1][0] === 0 ||
+      !(receipt[2] instanceof Uint8Array) || receipt[2].length !== 256 || !Array.isArray(receipt[3])) {
+    throw new Error('Invalid successful original receipt frame');
+  }
+  const topic = keccak256(stringToHex('BridgingRequested(address,bytes32,address,uint256)'));
+  let matched = 0, expectedMatches = 0;
+
+  for (const [index, log] of receipt[3].entries()) {
+    if (!Array.isArray(log) || log.length !== 3 || !(log[0] instanceof Uint8Array) || log[0].length !== 20 || !Array.isArray(log[1]) ||
+        !(log[2] instanceof Uint8Array) || !log[1].every(item => item instanceof Uint8Array && item.length === 32)) {
+      throw new Error('Malformed original receipt log');
+    }
+    const topics = (log[1] as Uint8Array[]).map(item => bytesToHex(item));
+    if (bytesToHex(log[0]).toLowerCase() !== expected.managerAddress.toLowerCase() || topics[0] !== topic) continue;
+    const { args } = decodeEventLog({ abi: BridgingRequestedAbi, data: bytesToHex(log[2]), topics: topics as [HexString, ...HexString[]], strict: true });
+    const rows = deposits.filter(row => BigInt(row.log_index) === BigInt(index));
+    if (rows.length !== 1) throw new Error('Missing or ambiguous original receipt deposit');
+    const row = rows[0];
+    if (row.outcome !== 'Settled' || row.sender.toLowerCase() !== args.from.toLowerCase() ||
+        row.receiver.toLowerCase() !== args.to.toLowerCase() || row.eth_token_id.toLowerCase() !== args.token.toLowerCase() ||
+        BigInt(row.amount) !== args.amount) throw new Error('Original receipt deposit is not the exact settled effect');
+    matched++;
+    if (args.from.toLowerCase() === expected.sender.toLowerCase() && args.to.toLowerCase() === expected.receiver.toLowerCase() &&
+        args.token.toLowerCase() === expected.sourceToken.toLowerCase() && row.token_id?.toLowerCase() === expected.destinationToken.toLowerCase() &&
+        args.amount === expected.amount) expectedMatches++;
+  }
+  if (!matched || matched !== deposits.length || expectedMatches < 1) throw new Error('Original receipt does not prove the expected token effect');
+}

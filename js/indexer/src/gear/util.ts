@@ -43,6 +43,8 @@ export const enum VftManagerServices {
 
 export const enum VftManagerMethods {
   BridgingRequested = 'BridgingRequested',
+  ReceiptDepositSettled = 'ReceiptDepositSettled',
+  ReceiptDepositRefunded = 'ReceiptDepositRefunded',
   TokenMappingAdded = 'TokenMappingAdded',
   TokenMappingRemoved = 'TokenMappingRemoved',
   HistoricalProxyAddressChanged = 'HistoricalProxyAddressChanged',

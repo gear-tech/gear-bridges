@@ -1,8 +1,27 @@
+import { immutableOwnedFixtureNetwork, type OwnedFixtureNetwork } from '@gear-js/bridge';
 import * as ethNetworks from '@reown/appkit/networks';
 
 import { NETWORK_LOCAL_STORAGE_KEY, NETWORK_SEARCH_PARAM, NETWORK_TYPE } from './consts';
 
-const getEthNetwork = (id: number) => {
+const getEthNetwork = (id: number, ownedFixture?: { descriptor: string | undefined; rpcUrl: string }) => {
+  if (id === 31337) {
+    if (!ownedFixture?.descriptor) throw new Error('HOLD: chain 31337 requires independent owned fixture approval');
+    const descriptor = immutableOwnedFixtureNetwork(JSON.parse(ownedFixture.descriptor) as OwnedFixtureNetwork, [
+      ownedFixture.rpcUrl,
+    ]);
+    const url = new URL(ownedFixture.rpcUrl);
+    if (!['http:', 'https:'].includes(url.protocol))
+      throw new Error('HOLD: owned wallet chain requires numeric loopback HTTP RPC');
+    return ethNetworks.defineChain({
+      id: descriptor.ethereumChainId,
+      chainNamespace: 'eip155',
+      caipNetworkId: 'eip155:31337',
+      name: 'Owned Ethereum Fixture',
+      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      rpcUrls: { default: { http: [ownedFixture.rpcUrl] } },
+      testnet: true,
+    });
+  }
   const result = Object.values(ethNetworks)
     .filter((network) => 'id' in network)
     .find((network) => network.id === id);

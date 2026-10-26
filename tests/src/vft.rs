@@ -1,13 +1,12 @@
 use super::{connect_to_node, DEFAULT_BALANCE};
 use anyhow::anyhow;
-use gclient::{Result, WSAddress};
-use gear_common::api_provider::ApiProvider;
+use gclient::Result;
 use sails_rs::{calls::*, gclient::calls::*, prelude::*};
 use vft::WASM_BINARY as WASM_VFT;
 use vft_client::traits::*;
 
 #[tokio::test]
-async fn upgrade() -> Result<()> {
+async fn exit_to_successor_preserves_inactive_program_behavior() -> Result<()> {
     let conn = connect_to_node(
         &[DEFAULT_BALANCE, DEFAULT_BALANCE, DEFAULT_BALANCE],
         "vft",
@@ -116,66 +115,6 @@ async fn upgrade() -> Result<()> {
         .await
         .expect("Failed to allocate next allowances shard")
     {}
-
-    // migrate balances
-    let api_provider = ApiProvider::new(WSAddress::dev().url(), 2).await.unwrap();
-
-    let connection = api_provider.connection();
-
-    api_provider.spawn();
-
-    gear_common::migrate_balances(connection, suri_admin.clone(), 100, vft_id_1, vft_id_new)
-        .await?;
-
-    // new VFT should have no allowances
-    let service_vft = vft_client::VftExtension::new(remoting.clone().with_suri(suri_user_2));
-    let allowances = service_vft
-        .allowances(0, 100)
-        .with_gas_limit(gas_limit)
-        .recv(vft_id_new)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert!(allowances.is_empty());
-
-    // user balances should be migrated
-    let balances = service_vft
-        .balances(0, 10)
-        .with_gas_limit(gas_limit)
-        .recv(vft_id_new)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(balances.len(), 2);
-    assert_eq!(
-        balances
-            .iter()
-            .find_map(|(id, balance)| (id == &id_user_1).then_some(*balance))
-            .unwrap(),
-        vft_balance_1
-    );
-    assert_eq!(
-        balances
-            .iter()
-            .find_map(|(id, balance)| (id == &id_user_2).then_some(*balance))
-            .unwrap(),
-        vft_balance_2
-    );
-
-    let service_vft = vft_client::Vft::new(remoting.clone());
-    let balance = service_vft
-        .balance_of(id_user_1)
-        .with_gas_limit(gas_limit)
-        .recv(vft_id_new)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(balance, vft_balance_1);
-
-    let balance = service_vft
-        .balance_of(id_user_2)
-        .with_gas_limit(gas_limit)
-        .recv(vft_id_new)
-        .await
-        .map_err(|e| anyhow!("{e:?}"))?;
-    assert_eq!(balance, vft_balance_2);
 
     // upgrade
     let mut service = vft_client::VftAdmin::new(remoting.clone());

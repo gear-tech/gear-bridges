@@ -7,6 +7,13 @@ export interface BeaconClient {
   readonly requestHeaders: (startSlot: number, endSlot: number) => Promise<BeaconBlockHeader[]>;
   readonly getBlock: (blockNumber: number | bigint) => Promise<IBeaconBlock>;
   readonly getBlockByHash: (blockHash: string) => Promise<IBeaconBlock>;
+  readonly getSpec: () => Promise<Record<string, string>>;
+}
+
+class BeaconRequestError extends Error {
+  constructor(public readonly status: number) {
+    super('Beacon request failed with status ' + status);
+  }
 }
 
 class _BeaconClient implements BeaconClient {
@@ -14,7 +21,7 @@ class _BeaconClient implements BeaconClient {
   private _genesisBlock: BeaconGenesisBlock;
   private _initialized: boolean;
 
-  constructor(url: string) {
+  constructor(url: string, private readonly _deadline?: number) {
     if (!url.startsWith('https') && !url.startsWith('http')) {
       throw new Error('Invalid URL');
     }
@@ -39,6 +46,7 @@ class _BeaconClient implements BeaconClient {
     endpoint: string,
     pathParams?: string[],
     queryParams?: Record<string, string>,
+    retainMetadata = false,
   ) {
     if (!endpoint.startsWith('/')) {
       endpoint = `/${endpoint}`;
@@ -51,15 +59,17 @@ class _BeaconClient implements BeaconClient {
       url += `?${new URLSearchParams(queryParams).toString()}`;
     }
 
-    const response = await fetch(url);
+    const remaining = this._deadline === undefined ? undefined : this._deadline - Date.now();
+    if (remaining !== undefined && (!Number.isSafeInteger(this._deadline) || remaining <= 0)) throw new Error('Original relay deadline expired');
+    const response = await fetch(url, remaining === undefined ? undefined : { signal: AbortSignal.timeout(remaining) });
 
     if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`);
+      throw new BeaconRequestError(response.status);
     }
 
     const result = await response.json();
 
-    return result.data;
+    return retainMetadata ? result : result.data;
   }
 
   public get genesisBlockTime(): number {
@@ -75,26 +85,41 @@ class _BeaconClient implements BeaconClient {
   }
 
   public async requestHeaders(startSlot: number, endSlot: number): Promise<BeaconBlockHeader[]> {
-    const result = Array.from({ length: endSlot - startSlot + 1 }, (_, i) => startSlot + i);
-
-    return (await Promise.all(result.map((slot) => this.getBlockHeader(slot).catch(() => null)))).filter(
-      Boolean,
-    ) as BeaconBlockHeader[];
+    if (!Number.isSafeInteger(startSlot) || !Number.isSafeInteger(endSlot) || startSlot < 0 || endSlot < startSlot) {
+      throw new Error('Invalid Beacon header range');
+    }
+    const headers: BeaconBlockHeader[] = [];
+    for (let start = startSlot; start <= endSlot; start += 16) {
+      const end = Math.min(start + 15, endSlot);
+      const page = await Promise.all(Array.from({ length: end - start + 1 }, (_, index) =>
+        this.getBlockHeader(start + index).catch((error: unknown) => {
+          if (error instanceof BeaconRequestError && error.status === 404) return null;
+          throw error;
+        })));
+      for (const header of page) if (header) headers.push(header);
+    }
+    return headers;
   }
 
-  public async getBlock(bn: number | bigint): Promise<IBeaconBlock> {
-    const result = await this._req('v2', '/beacon/blocks', [bn.toString()]);
-
-    return result.message;
+  public async getBlock(bn: number | bigint | string): Promise<IBeaconBlock> {
+    const result = await this._req('v2', '/beacon/blocks', [bn.toString()], undefined, true);
+    if (typeof result.version !== 'string' || result.execution_optimistic !== false || result.finalized !== true) {
+      throw new Error('Beacon block fork/finalized/non-optimistic metadata unavailable');
+    }
+    return { ...result.data.message, fork: result.version.toLowerCase() };
   }
 
   public getBlockByHash(blockHash: string): Promise<IBeaconBlock> {
-    return this._req('v2', '/beacon/blocks', [blockHash]);
+    return this.getBlock(blockHash);
+  }
+
+  public getSpec(): Promise<Record<string, string>> {
+    return this._req('v1', '/config/spec');
   }
 }
 
-export async function createBeaconClient(url: string): Promise<BeaconClient> {
-  const client = new _BeaconClient(url);
+export async function createBeaconClient(url: string, deadline?: number): Promise<BeaconClient> {
+  const client = new _BeaconClient(url, deadline);
 
   await client.init();
 

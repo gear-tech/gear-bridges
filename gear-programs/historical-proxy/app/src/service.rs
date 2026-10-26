@@ -33,8 +33,8 @@ fn decode_client_route(mut input: &[u8]) -> Result<(String, String), ProxyError>
 #[codec(crate = sails_rs::scale_codec)]
 #[scale_info(crate = sails_rs::scale_info)]
 pub enum Event {
-    /// Tx receipt is checked to be valid and successfully sent to the
-    /// underlying program.
+    /// Receipt proof accepted and consumer reply returned. This is transport
+    /// evidence, not proof that the app-owned reply reports application success.
     Relayed {
         /// Ethereum slot containing target transaction.
         slot: u64,
@@ -149,6 +149,7 @@ impl<'a> HistoricalProxyService<'a> {
         client_route: Vec<u8>,
     ) -> Result<(Vec<u8>, Vec<u8>), ProxyError> {
         let client_route = decode_client_route(&client_route)?;
+        let requested_slot = slot;
         let state = self.state.borrow();
         let endpoint = state.endpoints.endpoint_for(slot)?;
         drop(state);
@@ -159,21 +160,31 @@ impl<'a> HistoricalProxyService<'a> {
             payload
         };
 
+        let reply = gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
+            .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {e:?}")))?
+            .await
+            .map_err(|e| ProxyError::ReplyFailure(format!("failed to receive reply: {e:?}")))?;
+        let route = eth_events::ethereum_event_client::io::CheckProofs::ROUTE;
+        let mut input = reply.strip_prefix(route).ok_or_else(|| {
+            ProxyError::DecodeFailure("receipt verifier reply route mismatch".into())
+        })?;
+        let checked = <Result<eth_events_common::CheckedProofs, eth_events_common::Error>>::decode(
+            &mut input,
+        )
+        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {e:?}")))?;
+        if !input.is_empty() {
+            return Err(ProxyError::DecodeFailure(
+                "receipt verifier reply contains trailing bytes".into(),
+            ));
+        }
         let eth_events_common::CheckedProofs {
             receipt_rlp,
             transaction_index,
             block_number,
             slot,
-        } = eth_events::ethereum_event_client::io::CheckProofs::decode_reply(
-            gstd::msg::send_bytes_for_reply(endpoint, check_proofs, 0, 0)
-                .map_err(|e| ProxyError::SendFailure(format!("failed to send message: {e:?}")))?
-                .await
-                .map_err(|e| ProxyError::ReplyFailure(format!("failed to receive reply: {e:?}")))?,
-        )
-        .map_err(|e| ProxyError::DecodeFailure(format!("failed to decode reply: {e:?}")))?
-        .map_err(ProxyError::EthereumEventClient)?;
+        } = checked.map_err(ProxyError::EthereumEventClient)?;
 
-        if self.state.borrow().endpoints.endpoint_for(slot)? != endpoint {
+        if slot != requested_slot || self.state.borrow().endpoints.endpoint_for(slot)? != endpoint {
             return Err(ProxyError::DecodeFailure(format!(
                 "verified slot {slot} is outside the selected endpoint range"
             )));

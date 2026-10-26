@@ -25,7 +25,7 @@ contract WrappedVaraTest is Test, Base {
     using GovernancePacker for UpgradeProxyMessage;
 
     function setUp() public {
-        deployBridgeDependsOnEnvironment();
+        deployBridgeFromConstants();
     }
 
     function test_PauseWithGovernanceAdmin() public {
@@ -33,7 +33,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -41,7 +41,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -75,7 +75,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -83,7 +83,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -126,7 +126,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -134,7 +134,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
@@ -175,7 +175,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack(_unpauseControl(address(wrappedVara)))
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -183,6 +183,7 @@ contract WrappedVaraTest is Test, Base {
 
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
+        proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -211,7 +212,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -219,7 +220,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         // forge-lint: disable-next-item(reentrancy-no-eth)
         vm.expectEmit(address(messageQueue));
@@ -260,7 +261,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack(_unpauseControl(address(wrappedVara)))
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -268,6 +269,7 @@ contract WrappedVaraTest is Test, Base {
 
         blockNumber = currentBlockNumber++;
         merkleRoot = messageHash;
+        proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)
@@ -307,7 +309,7 @@ contract WrappedVaraTest is Test, Base {
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
                 proxy: address(wrappedVara), newImplementation: address(newImplementationMock), data: ""
-            }).pack()
+            }).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -315,7 +317,7 @@ contract WrappedVaraTest is Test, Base {
 
         uint256 blockNumber = currentBlockNumber++;
         bytes32 merkleRoot = messageHash;
-        bytes memory proof1 = "";
+        bytes memory proof1 = _rootProof(blockNumber, merkleRoot);
 
         vm.expectEmit(address(messageQueue));
         // forge-lint: disable-next-item(reentrancy-events)

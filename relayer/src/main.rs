@@ -3,58 +3,35 @@ use anyhow::{anyhow, Context, Result as AnyResult};
 use clap::Parser;
 use eth_events_electra_client::traits::EthereumEventClient;
 use ethereum_beacon_client::BeaconClient;
-use ethereum_client::{EthApi, PollingEthApi};
+use ethereum_client::{beacon_finality::BeaconFinalityConfig, EthApi, PollingEthApi};
 use ethereum_common::SLOTS_PER_EPOCH;
 use gclient::ext::sp_runtime::AccountId32;
 use gear_common::api_provider::{ApiProvider, ApiProviderConnection};
 use historical_proxy_client::{traits::HistoricalProxy as _, HistoricalProxy};
 use primitive_types::U256;
-use prover::consts::SIZE_THREAD_STACK_MIN;
 use relayer::{
     cli::{
         BeaconRpcArgs, Cli, CliCommands, EthGearManualArgs, EthGearTokensArgs,
         EthGearTokensCommands, EthereumArgs, EthereumKillSwitchArgs, EthereumSignerArgs, FeePayers,
-        FetchMerkleRootsArgs, GearEthCoreArgs, GearEthTokensCommands, GearSignerArgs,
-        DEFAULT_COUNT_CONFIRMATIONS, DEFAULT_COUNT_THREADS,
-    },
-    common,
-    config::{
-        EffectiveConfig, EffectiveEthereumConfig, EffectiveGearConfig, EffectiveProofStorageConfig,
-        EffectiveRelayerConfig,
+        FetchMerkleRootsArgs, GearEthTokensCommands, GearSignerArgs, DEFAULT_COUNT_CONFIRMATIONS,
     },
     ethereum_checkpoints, hex_utils,
     kill_switch::KillSwitchRelayer,
-    merkle_roots::{
-        self, authority_set_sync::SharedAuthoritySetSync, prover::SharedFinalityProver,
-    },
     message_relayer::{self, eth_to_gear, gear_to_eth},
-    proof_storage::{FileSystemProofStorage, GearProofStorage, ProofStorage},
-    prover_interface, server,
+    server,
 };
 use sails_rs::{calls::Query, gclient::calls::GClientRemoting, ActorId};
 use std::{
-    collections::HashSet,
-    env,
-    fs::{self, File},
-    future::Future,
-    io::Read as _,
-    net::TcpListener,
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::Arc,
+    collections::HashSet, fs::File, io::Read as _, net::TcpListener, path::Path, str::FromStr,
     time::Duration,
 };
 
-use tokio::{sync::mpsc, task, time};
-use utils_prometheus::{MeteredService, MetricsBuilder};
+use tokio::{sync::mpsc, task};
+use utils_prometheus::MetricsBuilder;
 use vft_manager_client::traits::VftManager;
 use zeroize::Zeroizing;
 
 fn main() -> AnyResult<()> {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(30)
-        .build_global()?;
-
     // we need at least 2 native threads to run some of the blocking tasks like proof composition
     // so lets set minimum to 4 threads or to available parallelism.
     tokio::runtime::Builder::new_multi_thread()
@@ -70,7 +47,6 @@ async fn run() -> AnyResult<()> {
     pretty_env_logger::formatted_timed_builder()
         .filter_level(log::LevelFilter::Off)
         .format_target(false)
-        .filter(Some("prover"), log::LevelFilter::Info)
         .filter(Some("relayer"), log::LevelFilter::Info)
         .filter(Some("ethereum-client"), log::LevelFilter::Info)
         .filter(Some("metrics"), log::LevelFilter::Info)
@@ -81,126 +57,8 @@ async fn run() -> AnyResult<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        CliCommands::UpdateVerifierSol(args) => {
-            let working_directory = env::current_dir()?;
-            let path_srs_setup = {
-                let mut path = working_directory.join("data");
-                path.push("srs_setup");
-
-                path
-            };
-            let path_main_ignition = {
-                let mut path = working_directory.join("data");
-                path.push("MAIN IGNITION");
-
-                path
-            };
-
-            if !fs::exists(&path_srs_setup)? || !fs::exists(&path_main_ignition)? {
-                log::warn!(
-                    r#"There are no "data/srs_setup"/"data/MAIN IGNITION" in the working directory ("{}"). Generation may take longer time."#,
-                    working_directory.display()
-                );
-            }
-
-            let gear_api = gear_rpc_client::GearApi::new(
-                &args.gear_args.get_endpoint()?,
-                args.gear_args.max_reconnect_attempts,
-            )
-            .await?;
-
-            let finalized_head = gear_api.api.legacy().chain_get_finalized_head().await?;
-            let header_finalized = gear_api
-                .api
-                .legacy()
-                .chain_get_header(Some(finalized_head))
-                .await?
-                .expect("Finalized header");
-
-            let (block_number, block_hash) = match args.block_number {
-                None => (header_finalized.number, finalized_head),
-                Some(block_number) => (
-                    block_number,
-                    gear_api
-                        .block_number_to_hash(block_number)
-                        .await
-                        .context("Unable to determine hash of block with merkle root")?,
-                ),
-            };
-
-            log::info!("Block number with merkle root (for fn prove_final): {block_number} ({block_hash:?})");
-
-            let auth_set_id = gear_api.authority_set_id(block_hash).await?;
-            log::info!("Its authority set id is: {auth_set_id}");
-
-            let auth_set_id_block_first = gear_api
-                .find_era_first_block(auth_set_id)
-                .await
-                .context("Unable to find the first block of an era")?;
-            let auth_set_id_block_number_first = gear_api
-                .block_hash_to_number(auth_set_id_block_first)
-                .await?;
-
-            let aut_set_id_previous_block_number = auth_set_id_block_number_first - 1;
-            let aut_set_id_previous_block = gear_api
-                .block_number_to_hash(aut_set_id_previous_block_number)
-                .await?;
-
-            let state = gear_api
-                .authority_set_state(Some(aut_set_id_previous_block))
-                .await?;
-            log::debug!("auth_set_id_block_first = {auth_set_id_block_first}");
-            log::debug!("authority_set_id = {}", state.authority_set_id);
-            log::debug!(
-                "authority_set_hash = {}",
-                hex::encode(state.authority_set_hash)
-            );
-
-            let genesis_config = prover::proving::GenesisConfig {
-                authority_set_id: state.authority_set_id,
-                authority_set_hash: state.authority_set_hash,
-            };
-
-            let count_thread = match args.thread_count {
-                None => Some(DEFAULT_COUNT_THREADS),
-                Some(thread_count) => thread_count.into(),
-            };
-
-            let (justification, _headers) = gear_api.grandpa_prove_finality(block_number).await?;
-
-            let proof_previous =
-                crate::prover_interface::prove_genesis(&gear_api, genesis_config, count_thread)
-                    .await?;
-
-            let gear_api = gear_rpc_client::GearApi::new(
-                &args.gear_args.get_endpoint()?,
-                args.gear_args.max_reconnect_attempts,
-            )
-            .await?;
-
-            let proof = crate::prover_interface::prove_final(
-                &gear_api,
-                proof_previous,
-                genesis_config,
-                block_hash,
-                count_thread,
-                PathBuf::from("data"),
-                Some(gear_api.produce_finality_proof(&justification).await?),
-            )
-            .await?;
-
-            log::info!("proof = '{}'", hex::encode(&proof.proof));
-            log::info!("block_number = {}", proof.block_number);
-            log::info!("merkle_root = '{}'", hex::encode(proof.merkle_root));
-        }
-
-        CliCommands::GearEthCore(args) => {
-            return run_gear_eth_core(args).await;
-        }
-
+        CliCommands::EthereumEvidence(args) => return relayer::ethereum_evidence::run(args).await,
         CliCommands::KillSwitch(args) => {
-            use reqwest::header;
-
             let api_provider = ApiProvider::new(
                 args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
@@ -208,33 +66,20 @@ async fn run() -> AnyResult<()> {
             .await
             .expect("Failed to connect to Gear API");
 
-            let (eth_observer_api, eth_admin_api) =
-                create_eth_killswitch_client(&args.ethereum_args)
-                    .await
-                    .expect("Failed to create Ethereum client");
-            let http_client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(args.relayer_http_args.timeout_secs))
-                .default_headers({
-                    let mut headers = header::HeaderMap::new();
-                    headers.insert(
-                        "X-Token",
-                        header::HeaderValue::from_str(&args.relayer_http_args.access_token)
-                            .expect("Invalid token"),
-                    );
-                    headers
-                })
-                .build()
-                .expect("Failed to create HTTP client");
+            let eth_observer_api = create_eth_killswitch_client(&args.ethereum_args).await?;
+            eth_observer_api
+                .enable_finality_archive(
+                    &args.ethereum_finality_dir,
+                    eth_observer_api.finality_identity()?.1,
+                )
+                .await?;
 
             let metrics = MetricsBuilder::new();
 
             let mut kill_switch = KillSwitchRelayer::new(
                 api_provider.connection(),
                 eth_observer_api,
-                eth_admin_api,
-                http_client,
                 args.from_eth_block,
-                args.relayer_http_args.url,
             )
             .await;
 
@@ -260,7 +105,8 @@ async fn run() -> AnyResult<()> {
         }
 
         CliCommands::GearEthTokens(args) => {
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let lane_approvals = args.lane.load()?;
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await?;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
                 vara_endpoint: args.gear_args.get_endpoint()?,
@@ -334,13 +180,16 @@ async fn run() -> AnyResult<()> {
                     let relayer = gear_to_eth::all_token_transfers::Relayer::new(
                         eth_api,
                         provider.connection(),
-                        args.confirmations_merkle_root
-                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
-                        args.confirmations_status
-                            .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        args.from_block,
+                        (
+                            args.confirmations_merkle_root
+                                .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                            args.confirmations_status
+                                .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
+                        ),
                         args.storage_path,
-                        governance_admin,
-                        governance_pauser,
+                        (governance_admin, governance_pauser),
+                        lane_approvals,
                     )
                     .await
                     .unwrap();
@@ -373,7 +222,6 @@ async fn run() -> AnyResult<()> {
                         "gear-eth-token-paid-transfers".to_string(),
                         Some(sender),
                         None,
-                        None,
                     )
                     .context("Failed to create web server")?;
                     let handle_server = web_server.handle();
@@ -383,6 +231,7 @@ async fn run() -> AnyResult<()> {
                         eth_api,
                         bridging_payment_address,
                         provider.connection(),
+                        args.from_block,
                         args.confirmations_merkle_root
                             .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                         args.confirmations_status
@@ -392,6 +241,7 @@ async fn run() -> AnyResult<()> {
                         args.storage_path.clone(),
                         governance_admin,
                         governance_pauser,
+                        lane_approvals,
                     )
                     .await
                     .unwrap();
@@ -434,19 +284,34 @@ async fn run() -> AnyResult<()> {
                 .run(args.prometheus_args.prometheus_endpoint)
                 .await;
 
-            relayer.run().await;
+            relayer.run().await?;
         }
         CliCommands::EthGearTokens(EthGearTokensArgs {
             command,
             vft_manager_address,
             gear_args,
             ethereum_rpc,
+            finality,
+            identity,
             beacon_rpc,
             prometheus_args,
             storage_path,
             ethereum_blocks,
+            ethereum_start_block,
+            root_minimum_receipt_slot,
+            cutover_seal,
+            successor_manager_code_id,
+            native_wrapper,
+            approved_gear_gas_limit,
+            historical_receipts,
         }) => {
-            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
+            let eth_api = create_polling_eth_client(&ethereum_rpc, &finality, &identity).await?;
+            let approved_manager_code = successor_manager_code_id
+                .as_deref()
+                .map(hex_utils::decode_h256)
+                .transpose()?;
+            let native_wrapper_approval = native_wrapper.load()?;
+            let historical_receipts = historical_receipts.load(&eth_api)?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -500,7 +365,14 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_start_block,
                         ethereum_blocks.clone(),
+                        cutover_seal.clone(),
+                        approved_manager_code,
+                        root_minimum_receipt_slot,
+                        native_wrapper_approval.clone(),
+                        approved_gear_gas_limit,
+                        historical_receipts,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -523,12 +395,11 @@ async fn run() -> AnyResult<()> {
                             .expect("Failed to parse address");
 
                     let tcp_listener = TcpListener::bind(web_server_address)?;
-                    let (sender, receiver) = mpsc::unbounded_channel();
+                    let (sender, receiver) = mpsc::channel(128);
                     let web_server = server::create(
                         tcp_listener,
                         web_server_token,
                         "eth-gear-token-paid-transfers".to_string(),
-                        None,
                         None,
                         Some(sender),
                     )
@@ -547,8 +418,15 @@ async fn run() -> AnyResult<()> {
                         connection,
                         storage_path,
                         genesis_time,
+                        ethereum_start_block,
                         ethereum_blocks.clone(),
                         Some(receiver),
+                        cutover_seal.clone(),
+                        approved_manager_code,
+                        root_minimum_receipt_slot,
+                        native_wrapper_approval.clone(),
+                        approved_gear_gas_limit,
+                        historical_receipts,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -566,10 +444,11 @@ async fn run() -> AnyResult<()> {
             }
         }
         CliCommands::GearEthManual(args) => {
+            let lane_approvals = args.lane.load()?;
             let nonce =
                 hex_utils::decode_byte_vec(&args.nonce).expect("Failed to parse message nonce");
             let nonce = U256::from_big_endian(&nonce[..]);
-            let eth_api = create_eth_signer_client(&args.ethereum_args).await;
+            let eth_api = create_eth_signer_client(&args.ethereum_args).await?;
             let api_provider = ApiProvider::new(
                 args.gear_args.get_endpoint()?,
                 args.gear_args.max_reconnect_attempts,
@@ -599,18 +478,29 @@ async fn run() -> AnyResult<()> {
                     .unwrap_or(DEFAULT_COUNT_CONFIRMATIONS),
                 governance_admin,
                 governance_pauser,
+                &args.storage,
+                lane_approvals,
             )
-            .await;
+            .await?;
         }
 
         CliCommands::EthGearManual(EthGearManualArgs {
             tx_hash,
+            storage,
+            cutover_seal,
+            successor_manager_code_id,
+            root_minimum_receipt_slot,
+            native_wrapper,
+            approved_gear_gas_limit,
+            historical_receipts,
             checkpoint_light_client,
             historical_proxy,
             receiver_program,
             receiver_route,
             gear_args,
             ethereum_rpc,
+            finality,
+            identity,
             beacon_args,
         }) => {
             use sails_rs::calls::ActionIo;
@@ -618,7 +508,7 @@ async fn run() -> AnyResult<()> {
             let gear_client_args = message_relayer::common::GSdkArgs {
                 vara_endpoint: gear_args.connection.get_endpoint()?,
             };
-            let eth_api = PollingEthApi::new(&ethereum_rpc).await?;
+            let eth_api = create_polling_eth_client(&ethereum_rpc, &finality, &identity).await?;
             let beacon_client = create_beacon_client(&beacon_args).await;
             let provider = ApiProvider::new(
                 gear_client_args.vara_endpoint.clone(),
@@ -680,6 +570,7 @@ async fn run() -> AnyResult<()> {
                 })
                 .unwrap_or(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec());
 
+            let historical_receipts = historical_receipts.load(&eth_api)?;
             eth_to_gear::manual::relay(
                 provider_connection,
                 gear_args.suri,
@@ -690,291 +581,24 @@ async fn run() -> AnyResult<()> {
                 receiver_address,
                 receiver_route,
                 tx_hash,
+                &storage,
+                cutover_seal.as_deref(),
+                successor_manager_code_id
+                    .as_deref()
+                    .map(hex_utils::decode_h256)
+                    .transpose()?,
+                root_minimum_receipt_slot,
+                native_wrapper.load()?,
+                approved_gear_gas_limit,
+                historical_receipts,
             )
             .await?;
-
-            loop {
-                // relay() spawns thread and exits, so we need to add this loop after calling run.
-                time::sleep(Duration::from_secs(1)).await;
-            }
         }
 
         CliCommands::FetchMerkleRoots(args) => fetch_merkle_roots(args).await?,
     };
 
     Ok(())
-}
-
-async fn run_gear_eth_core(args: GearEthCoreArgs) -> AnyResult<()> {
-    let rust_min_stack = env::var("RUST_MIN_STACK").context("RUST_MIN_STACK")?;
-    let rust_min_stack = rust_min_stack.parse::<usize>().context("RUST_MIN_STACK")?;
-    if rust_min_stack < SIZE_THREAD_STACK_MIN {
-        return Err(anyhow!("RUST_MIN_STACK={rust_min_stack} is less than the required minimum ({SIZE_THREAD_STACK_MIN}). Re-run the program with the corresponding environment variable set.\n\nAt the moment we cannot control how the external libraries spawn threads so base on the environment variable from standard library. For details - https://doc.rust-lang.org/std/thread/index.html#stack-size"));
-    }
-
-    let EffectiveConfig {
-        prometheus_endpoint,
-        relayers,
-    } = match args.config.as_ref() {
-        Some(path) => EffectiveConfig::from_path(path)?,
-        None => EffectiveConfig::from_cli(&args)?,
-    };
-
-    if relayers.len() == 1 {
-        let relayer = relayers
-            .into_iter()
-            .next()
-            .expect("relayers length is checked immediately above");
-        let running =
-            start_gear_eth_core_relayer(relayer, Some(prometheus_endpoint), None, false).await?;
-        return wait_single_relayer(running).await;
-    }
-
-    run_gear_eth_core_relayers(relayers, prometheus_endpoint).await
-}
-
-struct RunningGearEthCoreRelayer {
-    id: String,
-    task: task::JoinHandle<AnyResult<()>>,
-    server_handle: ServerHandle,
-    metrics: Option<MetricsBuilder>,
-}
-
-async fn run_gear_eth_core_relayers(
-    mut relayers: Vec<EffectiveRelayerConfig>,
-    prometheus_endpoint: String,
-) -> AnyResult<()> {
-    log::info!(
-        "Starting {} merkle-root relayers in one process. Prometheus endpoint {prometheus_endpoint} uses relayer labels for per-relayer collectors",
-        relayers.len()
-    );
-
-    // Start higher-priority relayers first; authority-set proving is serialized by
-    // SharedAuthoritySetSync so only one heavy proving job runs at a time.
-    relayers.sort_by(|a, b| b.priority.cmp(&a.priority));
-    let shared_authority_set_sync = SharedAuthoritySetSync::new();
-
-    let shared_prover = SharedFinalityProver::new();
-    let mut metrics = MetricsBuilder::new();
-    metrics.register_service_mut(&shared_prover);
-
-    let mut running = start_required_gear_eth_core_relayers(relayers, |mut relayer| {
-        relayer
-            .options
-            .shared_authority_set_sync
-            .replace(shared_authority_set_sync.clone());
-        start_gear_eth_core_relayer(relayer, None, Some(&shared_prover), true)
-    })
-    .await?;
-
-    for relayer in &mut running {
-        if let Some(relayer_metrics) = relayer.metrics.take() {
-            metrics.append(relayer_metrics);
-        }
-    }
-    metrics.build().run(prometheus_endpoint).await;
-
-    supervise_running_gear_eth_core_relayers(running).await
-}
-
-async fn start_required_gear_eth_core_relayers<I, F, Fut>(
-    relayers: impl IntoIterator<Item = I>,
-    mut start: F,
-) -> AnyResult<Vec<RunningGearEthCoreRelayer>>
-where
-    F: FnMut(I) -> Fut,
-    Fut: Future<Output = AnyResult<RunningGearEthCoreRelayer>>,
-{
-    let mut running = Vec::new();
-    for relayer in relayers {
-        match start(relayer).await {
-            Ok(relayer) => running.push(relayer),
-            Err(err) => {
-                stop_running_gear_eth_core_relayers(running).await;
-                return Err(err);
-            }
-        }
-    }
-    Ok(running)
-}
-
-async fn stop_running_gear_eth_core_relayers(running: Vec<RunningGearEthCoreRelayer>) {
-    let mut tasks = Vec::with_capacity(running.len());
-    for relayer in running {
-        stop_web_server(relayer.server_handle).await;
-        relayer.task.abort();
-        tasks.push(relayer.task);
-    }
-
-    for task in tasks {
-        let _ = task.await;
-    }
-}
-
-async fn supervise_running_gear_eth_core_relayers(
-    running: Vec<RunningGearEthCoreRelayer>,
-) -> AnyResult<()> {
-    if running.is_empty() {
-        return Err(anyhow!("no merkle-root relayers started"));
-    }
-
-    let mut tasks = Vec::with_capacity(running.len());
-    let mut ids = Vec::with_capacity(running.len());
-    let mut server_handles = Vec::with_capacity(running.len());
-
-    for relayer in running {
-        ids.push(relayer.id);
-        server_handles.push(relayer.server_handle);
-        tasks.push(relayer.task);
-    }
-
-    let (result, index, remaining_tasks) = futures::future::select_all(tasks).await;
-    for server_handle in server_handles {
-        stop_web_server(server_handle).await;
-    }
-    for task in remaining_tasks {
-        task.abort();
-    }
-
-    let id = ids
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| "<unknown>".to_string());
-
-    match result {
-        Ok(Ok(())) => Err(anyhow!("merkle-root relayer {id} exited unexpectedly")),
-        Ok(Err(err)) => Err(err).with_context(|| format!("merkle-root relayer {id} failed")),
-        Err(err) => Err(anyhow!("merkle-root relayer {id} task failed: {err}")),
-    }
-}
-
-async fn wait_single_relayer(running: RunningGearEthCoreRelayer) -> AnyResult<()> {
-    let RunningGearEthCoreRelayer {
-        id,
-        task,
-        server_handle,
-        ..
-    } = running;
-    match task.await {
-        Ok(result) => result,
-        Err(err) => {
-            stop_web_server(server_handle).await;
-            Err(anyhow!("merkle-root relayer {id} task failed: {err}"))
-        }
-    }
-}
-
-async fn start_gear_eth_core_relayer(
-    config: EffectiveRelayerConfig,
-    prometheus_endpoint: Option<String>,
-    shared_prover: Option<&SharedFinalityProver>,
-    label_metrics: bool,
-) -> AnyResult<RunningGearEthCoreRelayer> {
-    let id = config.id.clone();
-    let api_provider = ApiProvider::new(
-        config.gear.endpoint.clone(),
-        config.gear.max_reconnect_attempts,
-    )
-    .await
-    .context("Failed to connect to Gear API")?;
-
-    let eth_api = create_eth_signer_client_from_config(&config.ethereum).await?;
-
-    let mut metrics = MetricsBuilder::new();
-
-    let metric_relayer_id = label_metrics.then_some(id.as_str());
-    let proof_storage = create_proof_storage_from_config(
-        &config.proof_storage,
-        &config.gear,
-        &mut metrics,
-        metric_relayer_id,
-    )
-    .await?;
-    let storage = relayer::merkle_roots::storage::MerkleRootStorage::new(
-        proof_storage,
-        config.storage.block_storage.clone(),
-    );
-
-    let tcp_listener = TcpListener::bind(&config.http.address)?;
-
-    let (sender, receiver) = mpsc::unbounded_channel();
-    let web_server = server::create(
-        tcp_listener,
-        config.http.token.clone(),
-        format!("merkle-root relayer {}", config.id),
-        None,
-        Some(sender),
-        None,
-    )
-    .context("Failed to create web server")?;
-    let handle_server = web_server.handle();
-    let task_handle_server = handle_server.clone();
-    tokio::spawn(web_server);
-
-    let relayer = if let Some(shared_prover) = shared_prover {
-        let prover = shared_prover.register(
-            id.clone(),
-            config.priority,
-            api_provider.connection(),
-            config.options.genesis_config,
-            config.options.count_thread,
-            config.options.gnark_data_path.clone(),
-        );
-        merkle_roots::Relayer::new_with_prover_io(
-            api_provider.connection(),
-            eth_api,
-            receiver,
-            storage,
-            config.options,
-            prover,
-        )
-        .await
-    } else {
-        merkle_roots::Relayer::new(
-            api_provider.connection(),
-            eth_api,
-            receiver,
-            storage,
-            config.options,
-        )
-        .await
-    };
-
-    register_gear_eth_core_metrics(&mut metrics, metric_relayer_id, &relayer);
-
-    let metrics = if let Some(prometheus_endpoint) = prometheus_endpoint {
-        metrics.build().run(prometheus_endpoint).await;
-        None
-    } else {
-        Some(metrics)
-    };
-    api_provider.spawn();
-
-    let task_id = id.clone();
-    let task = tokio::spawn(async move {
-        let result = relayer.run().await;
-        stop_web_server(task_handle_server).await;
-        result
-    });
-
-    Ok(RunningGearEthCoreRelayer {
-        id: task_id,
-        task,
-        server_handle: handle_server,
-        metrics,
-    })
-}
-
-fn register_gear_eth_core_metrics(
-    metrics: &mut MetricsBuilder,
-    relayer_id: Option<&str>,
-    service: &impl MeteredService,
-) {
-    if let Some(relayer_id) = relayer_id {
-        metrics.register_labeled_service_mut(service, [("relayer", relayer_id)]);
-    } else {
-        metrics.register_service_mut(service);
-    }
 }
 
 async fn stop_web_server(handle: ServerHandle) {
@@ -989,6 +613,8 @@ async fn stop_web_server(handle: ServerHandle) {
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
     let endpoint = args.connection.get_endpoint().expect("Invalid gear args");
+    gear_common::signer_ownership::validate_suri(&args.suri, Some(&endpoint))
+        .expect("Gear signer admission failed");
     gclient::GearApi::builder()
         .suri(&args.suri)
         .uri(endpoint)
@@ -997,14 +623,56 @@ async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
         .expect("GearApi client should be created")
 }
 
-async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
+fn load_beacon_finality(
+    finality: &cli_utils::EthereumFinalityArgs,
+    identity: &cli_utils::EthereumChainIdentityArgs,
+) -> AnyResult<BeaconFinalityConfig> {
+    let config = BeaconFinalityConfig::load(
+        &finality.ethereum_finality_bootstrap,
+        finality.ethereum_finality_bootstrap_sha256.parse()?,
+        &finality.ethereum_finality_beacon_rpc,
+    )?;
+    anyhow::ensure!(
+        config.identity()
+            == (
+                identity.ethereum_chain_id,
+                identity.ethereum_genesis_hash.parse()?,
+            ),
+        "HOLD: configured Ethereum identity differs from independently approved Beacon identity"
+    );
+    config.with_proof_sources(finality.ethereum_finality_proof_sources.clone())
+}
+
+async fn create_polling_eth_client(
+    endpoint: &str,
+    finality: &cli_utils::EthereumFinalityArgs,
+    identity: &cli_utils::EthereumChainIdentityArgs,
+) -> AnyResult<PollingEthApi> {
+    let config = load_beacon_finality(finality, identity)?;
+    let (chain_id, genesis) = config.identity();
+    let mut api = PollingEthApi::new(endpoint)
+        .await?
+        .with_beacon_finality(config, &finality.ethereum_finality_store)
+        .await?;
+    if let Some(witness) = &finality.ethereum_witness_rpc {
+        api = api.with_data_witness(witness, chain_id, genesis).await?;
+    }
+    Ok(api)
+}
+
+async fn create_eth_signer_client(args: &EthereumSignerArgs) -> AnyResult<EthApi> {
     let EthereumArgs {
         connection,
+        finality,
+        identity,
         tx,
         mq_address,
+        queue_deployment_transaction,
     } = &args.ethereum_args;
 
-    EthApi::new_with_retries(
+    let config = load_beacon_finality(finality, identity)?;
+    let (chain_id, genesis) = config.identity();
+    let mut api = EthApi::new_with_retries(
         &connection.ethereum_endpoint,
         mq_address,
         Some(&args.eth_fee_payer),
@@ -1013,27 +681,18 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> EthApi {
         tx.max_fee_per_gas,
         tx.max_priority_fee_per_gas,
     )
-    .await
-    .expect("Error while creating ethereum client")
+    .await?
+    .with_max_gas_per_message(tx.max_gas_per_message)
+    .with_beacon_finality(config, &finality.ethereum_finality_store)
+    .await?
+    .with_queue_deployment_transaction(*queue_deployment_transaction);
+    if let Some(witness) = &finality.ethereum_witness_rpc {
+        api = api.with_data_witness(witness, chain_id, genesis).await?;
+    }
+    Ok(api)
 }
 
-async fn create_eth_signer_client_from_config(args: &EffectiveEthereumConfig) -> AnyResult<EthApi> {
-    EthApi::new_with_retries(
-        &args.endpoint,
-        &args.message_queue_address,
-        Some(&args.fee_payer),
-        args.max_retries,
-        args.retry_interval_ms.map(Duration::from_millis),
-        args.max_fee_per_gas,
-        args.max_priority_fee_per_gas,
-    )
-    .await
-    .context("Error while creating ethereum client")
-}
-
-async fn create_eth_killswitch_client(
-    args: &EthereumKillSwitchArgs,
-) -> AnyResult<(EthApi, Option<EthApi>)> {
+async fn create_eth_killswitch_client(args: &EthereumKillSwitchArgs) -> AnyResult<EthApi> {
     fn read_pk_bytes<P: AsRef<Path>>(path: P, buf: &mut Zeroizing<[u8; 32]>) -> AnyResult<()> {
         let path = path.as_ref();
         let mut file = File::open(path)?;
@@ -1054,43 +713,32 @@ async fn create_eth_killswitch_client(
     })?;
     let observer_pk_str = format!("0x{}", hex::encode(buf.as_ref()));
 
-    let observer_api = create_eth_signer_client(&EthereumSignerArgs {
+    create_eth_signer_client(&EthereumSignerArgs {
         ethereum_args: args.ethereum_args.clone(),
         eth_fee_payer: observer_pk_str,
     })
-    .await;
-
-    let is_admin_pk_set = args
-        .eth_admin_pk_path
-        .as_deref()
-        .and_then(|path| read_pk_bytes(path, &mut buf).ok());
-
-    let maybe_admin_api = if is_admin_pk_set.is_some() {
-        let admin_pk_str = format!("0x{}", hex::encode(buf.as_ref()));
-        Some(
-            create_eth_signer_client(&EthereumSignerArgs {
-                ethereum_args: args.ethereum_args.clone(),
-                eth_fee_payer: admin_pk_str,
-            })
-            .await,
-        )
-    } else {
-        None
-    };
-
-    Ok((observer_api, maybe_admin_api))
+    .await
 }
 
-async fn create_eth_client(args: &EthereumArgs) -> EthApi {
-    EthApi::new(
+async fn create_eth_client(args: &EthereumArgs) -> AnyResult<EthApi> {
+    let config = load_beacon_finality(&args.finality, &args.identity)?;
+    let (chain_id, genesis) = config.identity();
+    let mut api = EthApi::new(
         &args.connection.ethereum_endpoint,
         &args.mq_address,
         None,
         args.tx.max_fee_per_gas,
         args.tx.max_priority_fee_per_gas,
     )
-    .await
-    .expect("Error while creating ethereum client")
+    .await?
+    .with_max_gas_per_message(args.tx.max_gas_per_message)
+    .with_beacon_finality(config, &args.finality.ethereum_finality_store)
+    .await?
+    .with_queue_deployment_transaction(args.queue_deployment_transaction);
+    if let Some(witness) = &args.finality.ethereum_witness_rpc {
+        api = api.with_data_witness(witness, chain_id, genesis).await?;
+    }
+    Ok(api)
 }
 
 async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
@@ -1101,51 +749,40 @@ async fn create_beacon_client(args: &BeaconRpcArgs) -> BeaconClient {
         .expect("Failed to create beacon client")
 }
 
-async fn create_proof_storage_from_config(
-    proof_storage_config: &EffectiveProofStorageConfig,
-    gear_config: &EffectiveGearConfig,
-    metrics: &mut MetricsBuilder,
-    relayer_id: Option<&str>,
-) -> AnyResult<Arc<dyn ProofStorage>> {
-    let proof_storage: Arc<dyn ProofStorage> = match proof_storage_config {
-        EffectiveProofStorageConfig::Gear {
-            fee_payer,
-            config_dir,
-        } => {
-            let proof_storage = GearProofStorage::new(
-                &gear_config.endpoint,
-                gear_config.max_reconnect_attempts,
-                fee_payer,
-                config_dir.clone(),
-            )
-            .await
-            .context("Failed to initialize proof storage")?;
-
-            register_gear_eth_core_metrics(metrics, relayer_id, &proof_storage);
-
-            Arc::new(proof_storage)
-        }
-        EffectiveProofStorageConfig::FileSystem { path } => {
-            log::warn!("Fee payer not present, falling back to FileSystemProofStorage");
-            Arc::new(FileSystemProofStorage::new(path.clone()).await?)
-        }
-    };
-
-    Ok(proof_storage)
-}
-
 async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
-    let eth_api = create_eth_client(&args.ethereum_args).await;
-    let block_finalized = eth_api.finalized_block_number().await?;
+    let eth_api = create_eth_client(&args.ethereum_args).await?;
+    let mut view = eth_api.verified_finalized_view().await?;
+    let block_finalized = view.block_number();
 
     if args.from_eth_block > block_finalized {
         return Ok(());
     }
 
-    let block_range = common::create_range(args.from_eth_block.into(), block_finalized);
+    let start = ethereum_client::get_block(eth_api.raw_provider(), args.from_eth_block).await?;
+    anyhow::ensure!(
+        start.header.number == args.from_eth_block,
+        "HOLD: root scan start header height changed"
+    );
     let merkle_roots = eth_api
-        .fetch_merkle_roots_in_range(block_range.from, block_range.to)
+        .fetch_merkle_roots_in_range(args.from_eth_block, block_finalized)
         .await?;
+    let mut targets = std::collections::BTreeMap::from([
+        (args.from_eth_block, start.header.hash),
+        (view.block_number(), view.block_hash()),
+    ]);
+    for observation in &merkle_roots {
+        anyhow::ensure!(
+            !observation.removed,
+            "HOLD: removed merkle root observation"
+        );
+        if let Some(old) = targets.insert(observation.block_number, observation.block_hash) {
+            anyhow::ensure!(
+                old == observation.block_hash,
+                "HOLD: conflicting root inclusion hashes"
+            );
+        }
+    }
+    view.verify_blocks(eth_api.raw_provider(), &targets).await?;
 
     let gear_api = gear_rpc_client::GearApi::new(
         &args.gear_args.get_endpoint()?,
@@ -1153,13 +790,21 @@ async fn fetch_merkle_roots(args: FetchMerkleRootsArgs) -> AnyResult<()> {
     )
     .await?;
 
-    for (root, block_number_eth) in merkle_roots {
-        let block_hash = gear_api
-            .block_number_to_hash(root.block_number as u32)
+    for observation in merkle_roots {
+        let source_block = u32::try_from(observation.entry.block_number)?;
+        anyhow::ensure!(
+            eth_api
+                .read_merkle_root_in_view(source_block, &view)
+                .await?
+                == Some(observation.entry.merkle_root.0),
+            "HOLD: observed merkle root differs from finalized queue state"
+        );
+        let timestamp = eth_api
+            .get_block_timestamp_by_hash(observation.block_number, observation.block_hash)
             .await?;
+        let block_hash = gear_api.block_number_to_hash(source_block).await?;
         let authority_set_id = gear_api.signed_by_authority_set_id(block_hash).await?;
-
-        log::info!("{root:?}, block_hash = {block_hash:?}, authority_set_id = {authority_set_id}, block_number_eth = {block_number_eth:?}");
+        log::info!("{observation:?}, block_hash = {block_hash:?}, authority_set_id = {authority_set_id}, timestamp = {timestamp}");
     }
 
     Ok(())
@@ -1202,187 +847,4 @@ async fn fetch_historical_proxy_and_checkpoints(
     log::info!("Checkpoint light client address is {checkpoints_address:#?} for slot #{slot}");
 
     Ok((historical_proxy_address, checkpoints_address))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use actix_web::{web, App, HttpResponse, HttpServer};
-    use std::{
-        net::SocketAddr,
-        sync::{Arc, Mutex},
-    };
-
-    #[tokio::test]
-    async fn supervisor_reports_unexpected_relayer_exit_with_id() {
-        let (running, _addr) = dummy_running_relayer("mainnet", Ok(()));
-
-        let err = supervise_running_gear_eth_core_relayers(vec![running])
-            .await
-            .expect_err("supervisor must reject unexpected relayer exit");
-
-        assert!(err.to_string().contains("mainnet"));
-        assert!(err.to_string().contains("exited unexpectedly"));
-    }
-
-    #[tokio::test]
-    async fn supervisor_reports_relayer_error_with_id() {
-        let (running, _addr) = dummy_running_relayer("testnet", Err(anyhow!("boom")));
-
-        let err = supervise_running_gear_eth_core_relayers(vec![running])
-            .await
-            .expect_err("supervisor must report relayer task error");
-
-        assert!(err.to_string().contains("testnet"));
-        assert!(err.to_string().contains("failed"));
-    }
-
-    #[tokio::test]
-    async fn supervisor_stops_http_server_on_relayer_exit() {
-        let (running, addr) = dummy_running_relayer("mainnet", Ok(()));
-        wait_until_server_accepts(addr).await;
-
-        let _ = supervise_running_gear_eth_core_relayers(vec![running])
-            .await
-            .expect_err("unexpected relayer exit should still stop the HTTP server");
-
-        wait_until_server_stops(addr).await;
-    }
-
-    #[tokio::test]
-    async fn startup_failure_stops_already_started_relayers() {
-        let started_addr = Arc::new(Mutex::new(None));
-        let started_addr_for_start = started_addr.clone();
-
-        let err = match start_required_gear_eth_core_relayers(["first", "second"], |id| {
-            let id = id.to_string();
-            let started_addr = started_addr_for_start.clone();
-            async move {
-                if id == "first" {
-                    let (running, addr) = dummy_pending_relayer(&id);
-                    *started_addr.lock().unwrap() = Some(addr);
-                    wait_until_server_accepts(addr).await;
-                    Ok(running)
-                } else {
-                    Err(anyhow!("failed to start {id}"))
-                }
-            }
-        })
-        .await
-        {
-            Ok(_) => panic!("startup failure must be returned"),
-            Err(err) => err,
-        };
-
-        assert!(err.to_string().contains("second"));
-        let addr = started_addr
-            .lock()
-            .unwrap()
-            .expect("first relayer must have started");
-        wait_until_server_stops(addr).await;
-    }
-
-    #[tokio::test]
-    async fn startup_starts_all_requested_relayers() {
-        let mut addresses = Vec::new();
-        let running = start_required_gear_eth_core_relayers(["first", "second", "third"], |id| {
-            let (running, addr) = dummy_pending_relayer(id);
-            addresses.push(addr);
-            async move { Ok(running) }
-        })
-        .await
-        .expect("all relayers should start");
-
-        assert_eq!(running.len(), 3);
-        for addr in &addresses {
-            wait_until_server_accepts(*addr).await;
-        }
-
-        stop_running_gear_eth_core_relayers(running).await;
-
-        for addr in addresses {
-            wait_until_server_stops(addr).await;
-        }
-    }
-
-    fn dummy_running_relayer(
-        id: &str,
-        result: AnyResult<()>,
-    ) -> (RunningGearEthCoreRelayer, SocketAddr) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = HttpServer::new(|| {
-            App::new().route("/", web::get().to(|| async { HttpResponse::Ok().finish() }))
-        })
-        .listen(listener)
-        .unwrap()
-        .disable_signals()
-        .run();
-        let server_handle = server.handle();
-        tokio::spawn(server);
-
-        (
-            RunningGearEthCoreRelayer {
-                id: id.to_string(),
-                task: tokio::spawn(async move { result }),
-                server_handle,
-                metrics: None,
-            },
-            addr,
-        )
-    }
-
-    fn dummy_pending_relayer(id: &str) -> (RunningGearEthCoreRelayer, SocketAddr) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = HttpServer::new(|| {
-            App::new().route("/", web::get().to(|| async { HttpResponse::Ok().finish() }))
-        })
-        .listen(listener)
-        .unwrap()
-        .disable_signals()
-        .run();
-        let server_handle = server.handle();
-        tokio::spawn(server);
-
-        (
-            RunningGearEthCoreRelayer {
-                id: id.to_string(),
-                task: tokio::spawn(async { futures::future::pending::<AnyResult<()>>().await }),
-                server_handle,
-                metrics: None,
-            },
-            addr,
-        )
-    }
-
-    async fn wait_until_server_accepts(addr: SocketAddr) {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(100))
-            .build()
-            .unwrap();
-        let url = format!("http://{addr}/");
-        for _ in 0..50 {
-            if client.get(&url).send().await.is_ok() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("dummy HTTP server did not start");
-    }
-
-    async fn wait_until_server_stops(addr: SocketAddr) {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(100))
-            .build()
-            .unwrap();
-        let url = format!("http://{addr}/");
-        for _ in 0..50 {
-            if client.get(&url).send().await.is_err() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("dummy HTTP server did not stop");
-    }
 }

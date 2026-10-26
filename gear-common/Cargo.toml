@@ -6,10 +6,19 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 gclient.workspace = true
+gear-core.workspace = true
 gear-rpc-client.workspace = true
 gsdk.workspace = true
+hex = { workspace = true, features = ["std"] }
+libc.workspace = true
 log.workspace = true
+primitive-types = { workspace = true, features = ["std", "serde"] }
 sails-rs = { workspace = true, features = ["gclient"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sp-core.workspace = true
 tokio.workspace = true
+url.workspace = true
 vft-client.workspace = true
 vft-manager-client.workspace = true

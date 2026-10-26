@@ -1,9 +1,10 @@
 use alloy::{
     contract::Error as ContractError,
     network::Ethereum,
-    primitives::Address,
+    primitives::{Address, B256},
     providers::{DynProvider, Provider, ProviderBuilder},
     sol,
+    sol_types::{SolType, SolValue},
 };
 use clap::Parser;
 use gprimitives::ActorId;
@@ -309,6 +310,11 @@ async fn main() -> Result<(), Error> {
     let Cli {
         eth_connection,
         command,
+        sequence,
+        valid_until,
+        incident_epoch,
+        required_admin_action,
+        required_barrier,
     } = Cli::parse();
 
     let DeploymentConfig {
@@ -341,9 +347,18 @@ async fn main() -> Result<(), Error> {
     let Message {
         source,
         destination,
-        payload,
+        mut payload,
     } = match command {
         DestinationCommand::GovernanceAdmin { command } => match command {
+            GovernanceAdminCommand::Cancel {
+                source,
+                destination,
+                through,
+            } => Message {
+                source: governance_info.governance_admin,
+                destination: deployment.governance_admin,
+                payload: [vec![4], (source, destination, through).abi_encode_params()].concat(),
+            },
             GovernanceAdminCommand::ChangeGovernance { new_governance } => change_governance(
                 governance_info,
                 deployment,
@@ -396,6 +411,58 @@ async fn main() -> Result<(), Error> {
             ),
         },
     };
+    if destination == governance_admin || destination == governance_pauser {
+        let sequence = sequence
+            .filter(|value| *value != 0)
+            .ok_or(Error::Control("positive --sequence required"))?;
+        let valid_until = valid_until
+            .filter(|value| *value != 0)
+            .ok_or(Error::Control("positive --valid-until required"))?;
+        let action = payload[0];
+        let target = match action {
+            0 => destination,
+            4 => message_queue,
+            _ => Address::from_slice(&payload[1..21]),
+        };
+        if action != 2
+            && (incident_epoch != 0
+                || required_admin_action != B256::ZERO
+                || required_barrier != B256::ZERO)
+        {
+            return Err(Error::Control("dependency fields apply only to unpause"));
+        }
+        if action == 2 && required_admin_action == B256::ZERO {
+            return Err(Error::Control("unpause requires --required-admin-action"));
+        }
+        let inner = if action == 4 {
+            &payload[1..]
+        } else {
+            &payload[..]
+        };
+        let encoded = <sol!((
+            uint8, uint64, uint64, uint8, address, uint64, bytes32, bytes32, bytes
+        ))>::abi_encode_params(&(
+            1u8,
+            sequence,
+            valid_until,
+            action,
+            target,
+            incident_epoch,
+            required_admin_action,
+            required_barrier,
+            inner,
+        ));
+        payload = [&[0xff][..], encoded.as_slice()].concat();
+    } else if sequence.is_some()
+        || valid_until.is_some()
+        || incident_epoch != 0
+        || required_admin_action != B256::ZERO
+        || required_barrier != B256::ZERO
+    {
+        return Err(Error::Control(
+            "capability fields do not apply to ERC20Manager registration",
+        ));
+    }
 
     println!("source: {source}");
     println!("destination: {destination}");

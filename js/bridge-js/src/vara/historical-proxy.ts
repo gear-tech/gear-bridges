@@ -1,5 +1,6 @@
-import { GearApi, BaseGearProgram } from '@gear-js/api';
+import { GearApi } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
+import { subscribeAdvisory } from './advisory-subscription.js';
 import {
   TransactionBuilder,
   ActorId,
@@ -29,16 +30,17 @@ export type ProxyError =
   /**
    * `eth-events-*` returned error.
    */
-  | { EthereumEventClient: Error };
+  | { EthereumEventClient: 'DecodeReceiptEnvelopeFailure' | 'FailedEthTransaction' | 'SendFailure' |
+      'ReplyFailure' | 'HandleResultDecodeFailure' | 'MissingCheckpoint' | 'InvalidBlockProof' |
+      'TrieDbFailure' | 'InvalidReceiptProof' | 'UnsupportedFork' };
 
 export class HistoricalProxyClient {
   public readonly registry: TypeRegistry;
   public readonly historicalProxy: HistoricalProxy;
-  private _program: BaseGearProgram;
 
   constructor(
     public api: GearApi,
-    programId: `0x${string}`,
+    private readonly _programId: `0x${string}`,
   ) {
     const types: Record<string, any> = {
       ProxyError: {
@@ -61,6 +63,7 @@ export class HistoricalProxyClient {
           'InvalidBlockProof',
           'TrieDbFailure',
           'InvalidReceiptProof',
+          'UnsupportedFork',
         ],
       },
     };
@@ -68,14 +71,12 @@ export class HistoricalProxyClient {
     this.registry = new TypeRegistry();
     this.registry.setKnownTypes({ types });
     this.registry.register(types);
-    this._program = new BaseGearProgram(programId, api);
 
     this.historicalProxy = new HistoricalProxy(this);
   }
 
   public get programId(): `0x${string}` {
-    if (!this._program) throw new Error(`Program ID is not set`);
-    return this._program.id;
+    return this._programId;
   }
 }
 
@@ -156,32 +157,18 @@ export class HistoricalProxy {
    * underlying program.
    */
   public subscribeToRelayedEvent(
-    callback: (data: {
-      slot: number | string | bigint;
-      block_number: number | string | bigint;
-      transaction_index: number;
-    }) => void | Promise<void>,
+    callback: (data: { slot: number | string | bigint; block_number: number | string | bigint; transaction_index: number }) => void | Promise<void>,
+    onError?: (error: unknown) => void | Promise<void>,
   ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
-      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
-        return;
-      }
-
-      const payload = message.payload.toHex();
-      if (getServiceNamePrefix(payload) === 'HistoricalProxy' && getFnNamePrefix(payload) === 'Relayed') {
-        callback(
-          this._program.registry
-            .createType(
-              '(String, String, {"slot":"u64","block_number":"u64","transaction_index":"u32"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as {
-            slot: number | string | bigint;
-            block_number: number | string | bigint;
-            transaction_index: number;
-          },
-        );
-      }
-    });
+    return subscribeAdvisory((dispatch) => this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+      dispatch(() => {
+        if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) return;
+        const raw = message.payload.toHex();
+        if (getServiceNamePrefix(raw) !== 'HistoricalProxy' || getFnNamePrefix(raw) !== 'Relayed') return;
+        const decoded = this._program.registry.createType('(String,String,{"slot":"u64","block_number":"u64","transaction_index":"u32"})', raw);
+        if (decoded.toHex() !== raw.toLowerCase()) throw new Error('Malformed or trailing proxy event payload');
+        return decoded[2].toJSON() as unknown as { slot: number | string | bigint; block_number: number | string | bigint; transaction_index: number };
+      });
+    }), callback, onError);
   }
 }

@@ -1,10 +1,9 @@
 use crate::message_relayer::common::web_request::{
-    EthTransaction, EthTransactions, MerkleRootBlocks, MerkleRootsRequest, Message, Messages,
+    EthTransaction, EthTransactions, Message, Messages,
 };
 use actix_web::{guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer};
-use futures::{stream::FuturesUnordered, StreamExt};
 use std::{collections::HashSet, net::TcpListener};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{error::TrySendError, Sender, UnboundedSender};
 
 const HEADER_TOKEN: &str = "X-Token";
 
@@ -68,7 +67,7 @@ async fn relay_transactions(
     transactions: web::Json<EthTransactions>,
     secret: web::Data<Secret>,
     log_context: web::Data<LogContext>,
-    channel: web::Data<UnboundedSender<EthTransaction>>,
+    channel: web::Data<Sender<EthTransaction>>,
 ) -> HttpResponse {
     if !request
         .headers()
@@ -81,104 +80,31 @@ async fn relay_transactions(
     }
 
     let transactions = transactions.into_inner().transactions;
-    let len = transactions.len();
-    let mut to_process = len;
-
-    let mut seen = HashSet::with_capacity(len);
-
-    for transaction in transactions {
-        if !seen.insert(transaction.tx_hash.clone()) {
-            to_process -= 1;
-            continue;
+    let mut seen = HashSet::with_capacity(transactions.len());
+    let transactions: Vec<_> = transactions
+        .into_iter()
+        .filter(|transaction| seen.insert(transaction.tx_hash.clone()))
+        .collect();
+    if transactions.is_empty() {
+        return HttpResponse::Ok().finish();
+    }
+    // Reserve the entire batch atomically: overload never partially accepts a request.
+    let permits = match channel.try_reserve_many(transactions.len()) {
+        Ok(permits) => permits,
+        Err(TrySendError::Full(_)) => {
+            return HttpResponse::TooManyRequests()
+                .insert_header(("Retry-After", "1"))
+                .finish();
         }
-        match channel.send(transaction.clone()) {
-            Ok(_) => to_process -= 1,
-
-            Err(e) => {
-                log::error!(
-                    r#"[{}] Unable to send transaction "{transaction:?}": {e:?}"#,
-                    log_context.0.as_str()
-                );
-            }
+        Err(TrySendError::Closed(_)) => {
+            log::error!("[{}] Transaction receiver unavailable", log_context.0);
+            return HttpResponse::InternalServerError().finish();
         }
+    };
+    for (permit, transaction) in permits.zip(transactions) {
+        permit.send(transaction);
     }
-
-    if to_process == 0 {
-        HttpResponse::Ok().finish()
-    } else if to_process == len {
-        HttpResponse::InternalServerError().finish()
-    } else {
-        HttpResponse::Accepted().finish()
-    }
-}
-
-async fn get_merkle_root_proof(
-    request: HttpRequest,
-    blocks: web::Json<MerkleRootBlocks>,
-    secret: web::Data<Secret>,
-    log_context: web::Data<LogContext>,
-    channel: web::Data<UnboundedSender<MerkleRootsRequest>>,
-) -> HttpResponse {
-    if !request
-        .headers()
-        .get(HEADER_TOKEN)
-        .and_then(|h| h.to_str().ok())
-        .map(|t| t == secret.0.as_str())
-        .unwrap_or(false)
-    {
-        return HttpResponse::Unauthorized().finish();
-    }
-
-    let blocks = blocks.into_inner().blocks;
-    let len = blocks.len();
-
-    let mut futures = FuturesUnordered::new();
-    let mut failed_sends = 0;
-
-    for block in blocks {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        let request = MerkleRootsRequest::GetMerkleRootProof {
-            block_number: block,
-            response: sender,
-        };
-
-        if channel.send(request).is_err() {
-            log::error!(
-                "[{}] Unable to send merkle root proof request for block {block}",
-                log_context.0.as_str()
-            );
-            failed_sends += 1;
-            continue;
-        }
-
-        futures.push(receiver);
-    }
-    let mut to_process = failed_sends + futures.len();
-
-    let mut merkle_roots = Vec::new();
-
-    while let Some(result) = futures.next().await {
-        match result {
-            Ok(response) => {
-                merkle_roots.push(response);
-                to_process -= 1;
-            }
-            Err(e) => {
-                log::error!(
-                    "[{}] Unable to receive merkle root proof response: {e:?}",
-                    log_context.0.as_str()
-                );
-            }
-        }
-    }
-
-    if to_process == 0 {
-        HttpResponse::Ok().json(merkle_roots)
-    } else if to_process == len {
-        HttpResponse::InternalServerError().finish()
-    } else {
-        HttpResponse::Accepted().json(merkle_roots)
-    }
+    HttpResponse::Ok().finish()
 }
 
 pub fn create(
@@ -186,11 +112,9 @@ pub fn create(
     secret: String,
     log_context: String,
     messages_channel: Option<UnboundedSender<Message>>,
-    merkle_roots_channel: Option<UnboundedSender<MerkleRootsRequest>>,
-    transactions_channel: Option<UnboundedSender<EthTransaction>>,
+    transactions_channel: Option<Sender<EthTransaction>>,
 ) -> std::io::Result<actix_web::dev::Server> {
     let messages_channel = messages_channel.map(web::Data::new);
-    let merkle_roots_channel = merkle_roots_channel.map(web::Data::new);
     let transactions_channel = transactions_channel.map(web::Data::new);
 
     let secret = web::Data::new(Secret(secret));
@@ -210,20 +134,6 @@ pub fn create(
             app.app_data(channel.clone()).service(
                 web::resource("/relay_messages")
                     .route(web::post().to(relay_messages))
-                    .route(
-                        web::route()
-                            .guard(guard::Any(guard::Get()).or(guard::Post()))
-                            .to(HttpResponse::Unauthorized),
-                    ),
-            )
-        } else {
-            app
-        };
-
-        app = if let Some(channel) = merkle_roots_channel.as_ref() {
-            app.app_data(channel.clone()).service(
-                web::resource("/get_merkle_root_proof")
-                    .route(web::post().to(get_merkle_root_proof))
                     .route(
                         web::route()
                             .guard(guard::Any(guard::Get()).or(guard::Post()))
@@ -259,7 +169,6 @@ pub fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message_relayer::common::web_request::MerkleRootsResponse;
     use ethereum_common::U256;
     use reqwest::{
         header::{HeaderValue, CONTENT_TYPE},
@@ -288,7 +197,6 @@ mod tests {
             SECRET.to_string(),
             "test".to_string(),
             Some(channel),
-            None,
             None,
         )
         .unwrap();
@@ -371,6 +279,21 @@ mod tests {
 
         assert!(receiver.try_recv().is_err());
 
+        let response = client
+            .post(&url)
+            .json(&Messages {
+                messages: vec![message.clone(), message.clone()],
+            })
+            .header(HEADER_TOKEN, SECRET)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let message_received = receiver.recv().await.unwrap();
+        assert_eq!(message.block, message_received.block);
+        assert_eq!(message.nonce, message_received.nonce);
+        assert!(receiver.try_recv().is_err());
+
         receiver.close();
 
         let response = client
@@ -387,177 +310,168 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_merkle_root_proof_server() {
+    async fn test_transaction_server() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
 
         const SECRET: &str = "SECRET123";
-        let (channel, mut receiver) = mpsc::unbounded_channel();
-
+        let (channel, mut receiver) = mpsc::channel(128);
         let server = super::create(
             listener,
             SECRET.to_string(),
             "test".to_string(),
             None,
             Some(channel),
-            None,
         )
         .unwrap();
-
         task::spawn(server);
 
         let client = ClientBuilder::new()
             .timeout(Duration::from_secs(60))
             .build()
             .unwrap();
-
-        let url = format!("http://127.0.0.1:{port}/get_merkle_root_proof");
-        let body = MerkleRootBlocks { blocks: vec![123] };
+        let url = format!("http://127.0.0.1:{port}/relay_transactions");
+        let transaction = EthTransaction {
+            tx_hash: format!("0x{}", "ab".repeat(32)),
+        };
+        let body = EthTransactions {
+            transactions: vec![transaction.clone(), transaction.clone()],
+        };
 
         let response = client.post(&url).json(&body).send().await.unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+        assert!(receiver.try_recv().is_err());
 
-        let client_for_request = client.clone();
-        let url_for_request = url.clone();
-        let request = task::spawn(async move {
-            client_for_request
-                .post(&url_for_request)
-                .json(&body)
-                .header(HEADER_TOKEN, SECRET)
-                .send()
-                .await
-                .unwrap()
-        });
-
-        let request_received = receiver.recv().await.unwrap();
-        match request_received {
-            MerkleRootsRequest::GetMerkleRootProof {
-                block_number,
-                response,
-            } => {
-                assert_eq!(block_number, 123);
-                response
-                    .send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number })
-                    .unwrap();
-            }
-        }
-
-        let response = request.await.unwrap();
-        assert_eq!(response.status(), reqwest::StatusCode::OK);
-        let body = response.json::<Vec<MerkleRootsResponse>>().await.unwrap();
-        assert_eq!(
-            body,
-            vec![MerkleRootsResponse::NoMerkleRootOnBlock { block_number: 123 }]
-        );
-    }
-
-    #[tokio::test]
-    async fn test_merkle_root_proof_separate_listeners_route_independently() {
-        const SECRET_A: &str = "SECRET_A";
-        const SECRET_B: &str = "SECRET_B";
-
-        let (url_a, mut receiver_a) = spawn_merkle_root_server(SECRET_A, "relayer-a");
-        let (url_b, mut receiver_b) = spawn_merkle_root_server(SECRET_B, "relayer-b");
-
-        let client = ClientBuilder::new()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .unwrap();
-
-        let request_a = {
-            let client = client.clone();
-            let url = url_a.clone();
-            task::spawn(async move {
-                client
-                    .post(&url)
-                    .json(&MerkleRootBlocks { blocks: vec![111] })
-                    .header(HEADER_TOKEN, SECRET_A)
-                    .send()
-                    .await
-                    .unwrap()
-            })
-        };
-
-        let request_received = receiver_a.recv().await.unwrap();
-        match request_received {
-            MerkleRootsRequest::GetMerkleRootProof {
-                block_number,
-                response,
-            } => {
-                assert_eq!(block_number, 111);
-                response
-                    .send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number })
-                    .unwrap();
-            }
-        }
-        assert!(receiver_b.try_recv().is_err());
-        assert_eq!(request_a.await.unwrap().status(), reqwest::StatusCode::OK);
-
-        let request_b = {
-            let client = client.clone();
-            let url = url_b.clone();
-            task::spawn(async move {
-                client
-                    .post(&url)
-                    .json(&MerkleRootBlocks { blocks: vec![222] })
-                    .header(HEADER_TOKEN, SECRET_B)
-                    .send()
-                    .await
-                    .unwrap()
-            })
-        };
-
-        let request_received = receiver_b.recv().await.unwrap();
-        match request_received {
-            MerkleRootsRequest::GetMerkleRootProof {
-                block_number,
-                response,
-            } => {
-                assert_eq!(block_number, 222);
-                response
-                    .send(MerkleRootsResponse::NoMerkleRootOnBlock { block_number })
-                    .unwrap();
-            }
-        }
-        assert!(receiver_a.try_recv().is_err());
-        assert_eq!(request_b.await.unwrap().status(), reqwest::StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_merkle_root_proof_closed_channel_is_error() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        const SECRET: &str = "SECRET123";
-        let (channel, receiver) = mpsc::unbounded_channel();
-        drop(receiver);
-
-        let server = super::create(
-            listener,
-            SECRET.to_string(),
-            "test".to_string(),
-            None,
-            Some(channel),
-            None,
-        )
-        .unwrap();
-
-        task::spawn(server);
-
-        let client = ClientBuilder::new()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .unwrap();
-
-        let url = format!("http://127.0.0.1:{port}/get_merkle_root_proof");
         let response = client
             .post(&url)
-            .json(&MerkleRootBlocks { blocks: vec![123] })
+            .json(&body)
+            .header(HEADER_TOKEN, "wrong-token")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+        assert!(receiver.try_recv().is_err());
+
+        let response = client
+            .post(&url)
+            .json(&EthTransactions::default())
             .header(HEADER_TOKEN, SECRET)
             .send()
             .await
             .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert!(receiver.try_recv().is_err());
 
+        let response = client
+            .post(&url)
+            .json(&body)
+            .header(HEADER_TOKEN, SECRET)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert!(response.bytes().await.unwrap().is_empty());
+        assert_eq!(receiver.recv().await.unwrap().tx_hash, transaction.tx_hash);
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_messages_separate_listeners_route_independently() {
+        const SECRET_A: &str = "SECRET_A";
+        const SECRET_B: &str = "SECRET_B";
+
+        let (url_a, mut receiver_a) = spawn_message_server(SECRET_A, "relayer-a");
+        let (url_b, mut receiver_b) = spawn_message_server(SECRET_B, "relayer-b");
+        let client = ClientBuilder::new()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap();
+        let body_a = Messages {
+            messages: vec![Message {
+                block: 111,
+                nonce: 1.into(),
+            }],
+        };
+        let body_b = Messages {
+            messages: vec![Message {
+                block: 222,
+                nonce: 2.into(),
+            }],
+        };
+
+        for (url, secret) in [(&url_a, SECRET_B), (&url_b, SECRET_A)] {
+            let response = client
+                .post(url)
+                .json(&body_a)
+                .header(HEADER_TOKEN, secret)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+        }
+        assert!(receiver_a.try_recv().is_err());
+        assert!(receiver_b.try_recv().is_err());
+
+        let response = client
+            .post(&url_a)
+            .json(&body_a)
+            .header(HEADER_TOKEN, SECRET_A)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let message = receiver_a.recv().await.unwrap();
+        assert_eq!(message.block, 111);
+        assert_eq!(message.nonce, 1.into());
+        assert!(receiver_b.try_recv().is_err());
+
+        let response = client
+            .post(&url_b)
+            .json(&body_b)
+            .header(HEADER_TOKEN, SECRET_B)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let message = receiver_b.recv().await.unwrap();
+        assert_eq!(message.block, 222);
+        assert_eq!(message.nonce, 2.into());
+        assert!(receiver_a.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_transactions_closed_channel_is_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        const SECRET: &str = "SECRET123";
+        let (channel, receiver) = mpsc::channel(128);
+        drop(receiver);
+        let server = super::create(
+            listener,
+            SECRET.to_string(),
+            "test".to_string(),
+            None,
+            Some(channel),
+        )
+        .unwrap();
+        task::spawn(server);
+
+        let client = ClientBuilder::new()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap();
+        let response = client
+            .post(format!("http://127.0.0.1:{port}/relay_transactions"))
+            .json(&EthTransactions {
+                transactions: vec![EthTransaction {
+                    tx_hash: format!("0x{}", "ab".repeat(32)),
+                }],
+            })
+            .header(HEADER_TOKEN, SECRET)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(
             response.status(),
             reqwest::StatusCode::INTERNAL_SERVER_ERROR
@@ -565,83 +479,158 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_merkle_root_proof_dropped_response_is_error() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-
+    async fn test_messages_dropped_receiver_is_error() {
         const SECRET: &str = "SECRET123";
-        let (channel, mut receiver) = mpsc::unbounded_channel();
-
-        let server = super::create(
-            listener,
-            SECRET.to_string(),
-            "test".to_string(),
-            None,
-            Some(channel),
-            None,
-        )
-        .unwrap();
-
-        task::spawn(server);
-
+        let (url, receiver) = spawn_message_server(SECRET, "test");
+        drop(receiver);
         let client = ClientBuilder::new()
             .timeout(Duration::from_secs(60))
             .build()
             .unwrap();
-
-        let url = format!("http://127.0.0.1:{port}/get_merkle_root_proof");
-        let body = MerkleRootBlocks { blocks: vec![123] };
-
-        let request = task::spawn(async move {
-            client
-                .post(&url)
-                .json(&body)
-                .header(HEADER_TOKEN, SECRET)
-                .send()
-                .await
-                .unwrap()
-        });
-
-        let request_received = receiver.recv().await.unwrap();
-        match request_received {
-            MerkleRootsRequest::GetMerkleRootProof {
-                block_number,
-                response,
-            } => {
-                assert_eq!(block_number, 123);
-                drop(response);
-            }
-        }
-
-        let response = request.await.unwrap();
+        let response = client
+            .post(&url)
+            .json(&Messages {
+                messages: vec![Message {
+                    block: 123,
+                    nonce: 1.into(),
+                }],
+            })
+            .header(HEADER_TOKEN, SECRET)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(
             response.status(),
             reqwest::StatusCode::INTERNAL_SERVER_ERROR
         );
     }
 
-    fn spawn_merkle_root_server(
+    #[tokio::test]
+    async fn test_retained_routes_reject_invalid_and_oversized_payloads() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        const SECRET: &str = "SECRET123";
+        let (messages, mut message_receiver) = mpsc::unbounded_channel();
+        let (transactions, mut transaction_receiver) = mpsc::channel(128);
+        let server = super::create(
+            listener,
+            SECRET.to_string(),
+            "test".to_string(),
+            Some(messages),
+            Some(transactions),
+        )
+        .unwrap();
+        task::spawn(server);
+        let client = ClientBuilder::new()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap();
+
+        for (route, body) in [
+            ("relay_messages", r#"{"messages":[]}"#),
+            ("relay_transactions", r#"{"transactions":[]}"#),
+        ] {
+            let url = format!("http://127.0.0.1:{port}/{route}");
+            for (payload, status) in [
+                ("{".to_string(), reqwest::StatusCode::BAD_REQUEST),
+                (
+                    format!("{body}{}", " ".repeat(131_072)),
+                    reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+                ),
+            ] {
+                // Rejection cases are independent; oversized requests may leave unread bodies.
+                let response = client
+                    .post(&url)
+                    .body(payload)
+                    .header(HEADER_TOKEN, SECRET)
+                    .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                    .header(reqwest::header::CONNECTION, "close")
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), status);
+                response.bytes().await.unwrap();
+            }
+        }
+        assert!(message_receiver.try_recv().is_err());
+        assert!(transaction_receiver.try_recv().is_err());
+    }
+
+    // Reconstructed from supplied PR860 HTML, C4; not the unavailable original PoC.
+    #[actix_web::test]
+    async fn reconstructed_transaction_overload_is_atomic_and_recovers() {
+        let (channel, mut receiver) = mpsc::channel(128);
+        let transaction = EthTransaction {
+            tx_hash: format!("0x{}", "ab".repeat(32)),
+        };
+        for _ in 0..127 {
+            channel.try_send(transaction.clone()).unwrap();
+        }
+        let app = actix_web::test::init_service(
+            App::new()
+                .app_data(web::Data::new(Secret("secret".into())))
+                .app_data(web::Data::new(LogContext("overload".into())))
+                .app_data(web::Data::new(channel.clone()))
+                .route("/relay_transactions", web::post().to(relay_transactions)),
+        )
+        .await;
+        let batch = EthTransactions {
+            transactions: vec![
+                transaction.clone(),
+                EthTransaction {
+                    tx_hash: format!("0x{}", "cd".repeat(32)),
+                },
+            ],
+        };
+        let request = actix_web::test::TestRequest::post()
+            .uri("/relay_transactions")
+            .insert_header((HEADER_TOKEN, "secret"))
+            .set_json(&batch)
+            .to_request();
+        let response = actix_web::test::call_service(&app, request).await;
+        assert_eq!(
+            response.status(),
+            actix_web::http::StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(response.headers().get("Retry-After").unwrap(), "1");
+        assert_eq!(receiver.len(), 127, "overload must not partially enqueue");
+        receiver.recv().await.unwrap();
+        let request = actix_web::test::TestRequest::post()
+            .uri("/relay_transactions")
+            .insert_header((HEADER_TOKEN, "secret"))
+            .set_json(&batch)
+            .to_request();
+        let response = actix_web::test::call_service(&app, request).await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::OK);
+        assert_eq!(receiver.len(), 128);
+        let request = actix_web::test::TestRequest::post()
+            .uri("/relay_transactions")
+            .insert_header((HEADER_TOKEN, "secret"))
+            .set_json(&batch)
+            .to_request();
+        assert_eq!(
+            actix_web::test::call_service(&app, request).await.status(),
+            actix_web::http::StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    fn spawn_message_server(
         secret: &str,
         log_context: &str,
-    ) -> (String, mpsc::UnboundedReceiver<MerkleRootsRequest>) {
+    ) -> (String, mpsc::UnboundedReceiver<Message>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let (channel, receiver) = mpsc::unbounded_channel();
-
         let server = super::create(
             listener,
             secret.to_string(),
             log_context.to_string(),
-            None,
             Some(channel),
             None,
         )
         .unwrap();
         task::spawn(server);
 
-        (
-            format!("http://127.0.0.1:{port}/get_merkle_root_proof"),
-            receiver,
-        )
+        (format!("http://127.0.0.1:{port}/relay_messages"), receiver)
     }
 }

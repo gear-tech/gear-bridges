@@ -42,10 +42,8 @@
             protobuf
             rocksdb
             gcc
-            go
             llvmPackages.clang
             llvmPackages.libclang
-            jemalloc
             binaryen
             foundry
             toolchain

@@ -30,6 +30,11 @@ interface IERC20Manager is IPausable, IMessageHandler {
     error InvalidAmount();
 
     /**
+     * @dev Error thrown when governance has no wrapped native token configured.
+     */
+    error InvalidWrappedVara();
+
+    /**
      * @dev Error thrown when the token type is invalid (`TokenType.Unknown`).
      */
     error InvalidTokenType();
@@ -38,6 +43,17 @@ interface IERC20Manager is IPausable, IMessageHandler {
      * @dev Error thrown when the bridging payment is invalid (not created by `ERC20Manager`).
      */
     error InvalidBridgingPayment();
+
+    /**
+     * @dev Error thrown when the destination is zero or a forbidden native payout identity.
+     */
+    error InvalidRecipient();
+
+    error TokenAdmissionDisabled(address token);
+    event TokenAdmissionChanged(address indexed token, bool enabled);
+
+    /// @dev Registered retained tokens default to enabled; disabling does not prevent existing claims.
+    function tokenAdmissionEnabled(address token) external view returns (bool);
 
     /**
      * @dev Event emitted when bridging request is made.

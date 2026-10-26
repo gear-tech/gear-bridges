@@ -4,6 +4,16 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      approved_commit:
+        description: Full commit independently approved in the protected fixture environment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -11,6 +21,7 @@ concurrency:
 
 jobs:
   check-files-changed:
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     outputs:
       frontend_changed: ${{ steps.changed.outputs.frontend }}
@@ -21,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Check changed files
         id: changed
@@ -31,41 +44,40 @@ jobs:
               - 'js/frontend/**'
             indexer:
               - 'js/indexer/**'
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'tests/src/checkpoint_light_client/chain-data/**'
             common:
               - 'js/common/**'
+              - 'api/**'
+              - 'package.json'
+              - 'yarn.lock'
+              - 'lerna.json'
+              - '.yarnrc.yml'
+              - '.yarn/**'
+              - '.github/workflows/ci-js.yml'
             bridge_js:
               - 'js/bridge-js/**'
+              - 'tests/src/checkpoint_light_client/chain-data/**'
 
   bridge-js:
     runs-on: ubuntu-latest
-    environment: bridge-js-test
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.bridge_js_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Install rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: false
-          components: rustfmt
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: 'Install: binaryen'
-        run: |
-          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-x86_64-linux.tar.gz -O - | tar -xz -C .
-          sudo cp binaryen-version_123/bin/wasm-opt /usr/bin/
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
 
-      - name: Install golang
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.20.1'
-
-      # TODO: swicth back to `arduino/setup-protoc@v3` after it supports Node 24
-      #       https://github.com/arduino/setup-protoc/pull/113
-      - name: Install Protoc
-        uses: StackOverflowExcept1on/setup-protoc@3c8638272249639ffb4bc8571caff93ee0383579
 
       - name: 'Install: NodeJS 20.x'
         uses: actions/setup-node@v7
@@ -78,10 +90,74 @@ jobs:
       - name: 'Build @gear-js/bridge lib'
         run: yarn build:bridge-js
 
-      - name: 'Build test packages'
-        run: cargo build -p js-test --release
+      - name: Typecheck SDK and examples
+        run: |
+          yarn workspace @gear-js/bridge typecheck
+          yarn workspace @gear-js/bridge build:examples
+      - name: Read-only CI gateway boundaries
+        run: node js/bridge-js/test/test_readonly_rpc_gateway.mjs
+      - name: Offline SDK protocol checks (not live qualification)
+        run: yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.test.ts test/examples.test.ts --mode unit
 
-      - name: 'Run tests'
+
+      - name: 'Lint'
+        run: yarn lint:bridge-js
+
+  qualify-live-sdk:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: bridge-js-test
+    permissions:
+      contents: read
+    env:
+      APPROVED_COMMIT: ${{ vars.APPROVED_QUALIFICATION_COMMIT }}
+      REQUESTED_COMMIT: ${{ inputs.approved_commit }}
+    steps:
+      - name: Require independently approved exact commit
+        run: |
+          if [[ ! "$APPROVED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || [[ "$REQUESTED_COMMIT" != "$APPROVED_COMMIT" ]]; then
+            echo "A matching independently approved full commit is required" >&2
+            exit 1
+          fi
+      - name: Checkout approved source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ vars.APPROVED_QUALIFICATION_COMMIT }}
+          persist-credentials: false
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+      - name: Install native build tools
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-version_133/bin/wasm-opt /usr/bin/
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+      - name: Install dependencies
+        run: yarn workspaces focus @gear-js/bridge gear-bridges
+      - name: Build SDK and test programs
+        run: |
+          yarn build:bridge-js
+          cargo build --locked -p js-test --release
+      - name: Load independently approved inbound fixture profile
+        env:
+          INBOUND_PROOF_PROFILE_JSON: ${{ secrets.INBOUND_PROOF_PROFILE_JSON }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path').join(process.env.RUNNER_TEMP, 'inbound-proof-profile.json');
+          const profile = process.env.INBOUND_PROOF_PROFILE_JSON;
+          if (!profile) throw new Error('Missing independently approved inbound proof profile');
+          JSON.parse(profile);
+          fs.writeFileSync(path, profile, { mode: 0o600, flag: 'wx' });
+          fs.appendFileSync(process.env.GITHUB_ENV, `INBOUND_PROOF_PROFILE_PATH=${path}\n`);
+          NODE
+      - name: Run independently approved live fixture
         working-directory: js/bridge-js
         run: yarn test
         env:
@@ -92,17 +168,57 @@ jobs:
           VARA_TO_ETH_BLOCK_NUMBER: ${{ secrets.VARA_TO_ETH_BLOCK_NUMBER }}
           VARA_TO_ETH_NONCE: ${{ secrets.VARA_TO_ETH_NONCE }}
 
-      - name: 'Lint'
-        run: yarn lint:bridge-js
-
   build-indexer:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.indexer_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' || needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
+    env:
+      __GEAR_WASM_BUILDER_NO_FEATURES_TRACKING: "1"
+      ETH_EVIDENCE_BINARY: ${{ github.workspace }}/target/release/relayer
+      ETH_EVIDENCE_FIXTURE_BINARY: ${{ github.workspace }}/target/release/examples/export_beacon_fixture
+      INDEXER_TEST_DATABASE_URL: postgres://indexer_evidence:indexer_evidence@127.0.0.1:5432/indexer_evidence_ci
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: indexer_evidence
+          POSTGRES_PASSWORD: indexer_evidence
+          POSTGRES_DB: indexer_evidence_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U indexer_evidence -d indexer_evidence_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
+
+      - name: Install rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+
+      - name: Install native build tools
+        run: |
+          sudo apt update
+          sudo apt install -y protobuf-compiler
+          wget -c https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz -O - | tar -xz -C .
+          sudo cp binaryen-version_133/bin/wasm-opt /usr/bin/
+
+      - name: Build matching native evidence executables
+        run: |
+          cargo build --locked --release -p relayer --bin relayer
+          cargo build --locked --release -p ethereum-client --example export_beacon_fixture --features test-fixtures
 
       - name: Set up Node.js 20.x
         uses: actions/setup-node@v7
@@ -115,25 +231,62 @@ jobs:
       - name: Build
         run: yarn build:indexer
 
+      - name: Check finalized receipt and settlement behavior
+        run: yarn workspace indexer test
+
+      - name: Check preserving migration and live SQL backlog
+        run: yarn workspace indexer test:evidence-db
+
       - name: 'Lint'
         run: yarn lint:indexer
 
   build-frontend:
     runs-on: ubuntu-latest
     needs: check-files-changed
-    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' }}
+    if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' || needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
+    env:
+      # Offline build-only origins: never deployment approvals or network fixtures.
+      VITE_FUNDS_ORIGIN: https://funds.build.invalid
+      VITE_FAUCET_ORIGIN: https://faucet.build.invalid
+      BRIDGE_CSP_CONNECT_ORIGINS: '[]'
+      VITE_ISOLATED_FAUCET: 'true'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Set up Node.js 20.x
+      - name: Verify candidate checkout
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
+
+      - name: Set up Node.js 24.x
         uses: actions/setup-node@v7
         with:
-          node-version: 20.x
+          node-version: 24.x
 
       - name: Install dependencies
         run: yarn workspaces focus frontend gear-bridges gear-bridge-common @gear-js/bridge
 
+      - name: Compare frontend clients with checked-in canonical IDLs
+        run: yarn workspace frontend check:sails
+
       - name: Build
         run: yarn build:frontend
+
+      - name: Build separate faucet entry (offline policy fixture)
+        run: yarn build:faucet
+
+      - name: Reconstructed HTML7fe1b032 web isolation policy regressions
+        run: |
+          yarn workspace frontend test:policy
+          node --experimental-strip-types js/frontend/src/features/faucet/isolated-api.check.mjs
+          node --test tools/test-faucet.test.cjs
+
+      - name: Run submission and native profile regressions
+        run: yarn workspace frontend test
+
+      - name: Typecheck frontend against shared SDK
+        run: PATH="$PWD/node_modules/.bin:$PATH" yarn workspace frontend exec tsc -p tsconfig.app.json --noEmit

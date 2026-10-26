@@ -1,7 +1,10 @@
 pub mod utils;
 
 use super::*;
-use crate::{common::BASE_RETRY_DELAY, message_relayer::common::AuthoritySetId};
+use crate::{
+    common::BASE_RETRY_DELAY,
+    message_relayer::common::{AuthoritySetId, QualifiedMerkleRoot},
+};
 use ethereum_client::EthApi;
 use primitive_types::H256;
 use prometheus::IntGauge;
@@ -9,15 +12,18 @@ use sails_rs::ActorId;
 use std::sync::Arc;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
-    RwLock,
+    oneshot, RwLock,
 };
-use utils::{Added, MerkleRoots, Messages};
+use utils::{Added, MerkleRoots, Messages, RootAddError};
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub authority_set_id: AuthoritySetId,
+    pub queue_id: u64,
+    /// One scheduling-cycle exclusion after unavailable proof evidence, never durable absence.
+    pub excluded_root: Option<RelayedMerkleRoot>,
     pub block: GearBlockNumber,
     pub block_hash: H256,
     pub tx_uuid: Uuid,
@@ -35,14 +41,30 @@ pub enum Response {
 
     /// Accumulator buffer is full and the message cannot be processed.
     Overflowed(Request),
+}
+pub struct RootUpdate {
+    pub root: QualifiedMerkleRoot,
+    acknowledgement: Option<oneshot::Sender<anyhow::Result<()>>>,
+}
 
-    /// Message is stuck and cannot be processed.
-    Stuck {
-        authority_set_id: AuthoritySetId,
-        block: GearBlockNumber,
-        tx_uuid: Uuid,
-        merkle_root: RelayedMerkleRoot,
-    },
+impl RootUpdate {
+    pub fn untracked(root: QualifiedMerkleRoot) -> Self {
+        Self {
+            root,
+            acknowledgement: None,
+        }
+    }
+
+    pub fn tracked(root: QualifiedMerkleRoot) -> (Self, oneshot::Receiver<anyhow::Result<()>>) {
+        let (sender, receiver) = oneshot::channel();
+        (
+            Self {
+                root,
+                acknowledgement: Some(sender),
+            },
+            receiver,
+        )
+    }
 }
 
 pub struct AccumulatorIo {
@@ -61,16 +83,21 @@ impl AccumulatorIo {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn send_message(
         &self,
         tx_uuid: Uuid,
         authority_set_id: AuthoritySetId,
+        queue_id: u64,
+        excluded_root: Option<RelayedMerkleRoot>,
         block: GearBlockNumber,
         block_hash: H256,
         source: ActorId,
     ) -> bool {
         let request = Request {
             authority_set_id,
+            queue_id,
+            excluded_root,
             block,
             block_hash,
             tx_uuid,
@@ -89,7 +116,7 @@ pub struct Accumulator {
     metrics: Metrics,
     messages: Messages,
     merkle_roots: Arc<RwLock<MerkleRoots>>,
-    receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
+    receiver_roots: UnboundedReceiver<RootUpdate>,
     governance_admin: ActorId,
     governance_pauser: ActorId,
     eth_api: EthApi,
@@ -112,7 +139,7 @@ impl_metered_service! {
 
 impl Accumulator {
     pub fn new(
-        receiver_roots: UnboundedReceiver<RelayedMerkleRoot>,
+        receiver_roots: UnboundedReceiver<RootUpdate>,
         merkle_roots: Arc<RwLock<MerkleRoots>>,
         governance_admin: ActorId,
         governance_pauser: ActorId,
@@ -190,13 +217,10 @@ async fn run_inner(
             _ = poll_interval.tick() => {
                 let latest_block = this.eth_api.latest_block_number().await?;
 
-                if latest_block <= last_block {
-                    continue;
+                if latest_block > last_block {
+                    last_block = latest_block;
+                    last_timestamp = this.eth_api.get_block_timestamp(latest_block).await?;
                 }
-                last_block = latest_block;
-
-                let timestamp = this.eth_api.get_block_timestamp(latest_block).await?;
-                last_timestamp = timestamp;
 
                 let merkle_roots = this.merkle_roots.read().await;
                 for (merkle_root, message) in this.messages.drain_timestamp(last_timestamp, &message_delay, &merkle_roots) {
@@ -211,6 +235,7 @@ async fn run_inner(
                         return Ok(());
                     };
                 }
+                this.messages.retry_unavailable_candidates();
             }
             message = requests.recv() => {
                 match message {
@@ -218,7 +243,8 @@ async fn run_inner(
                         let merkle_roots = this.merkle_roots.read().await;
                         let delay = message_delay(message.source);
                         if let Some(merkle_root) =
-                            merkle_roots.find(message.authority_set_id, message.block, last_timestamp, delay)
+                            merkle_roots.find(message.authority_set_id, message.queue_id, message.block, message.excluded_root, last_timestamp, delay)
+                                .filter(|_| message.excluded_root.is_none())
                         {
                             log::trace!("Found merkle root for the message '{message:?}' with delay = {delay:?}");
                             messages_out.send(Response::Success {
@@ -247,32 +273,30 @@ async fn run_inner(
                 }
             }
 
-            merkle_root = this.receiver_roots.recv() => {
-                let Some(merkle_root) = merkle_root else {
+            update = this.receiver_roots.recv() => {
+                let Some(update) = update else {
                     log::info!("Channel with merkle roots closed. Exiting");
                     return Ok(());
                 };
+                let RootUpdate { root: merkle_root, acknowledgement } = update;
 
-                let mut merkle_roots = this.merkle_roots.write().await;
-                match merkle_roots.add(merkle_root) {
-                    Ok(Added::Ok | Added::Overwritten(_)) => {}
+                let added = this.merkle_roots.write().await.add(merkle_root);
+
+                match added {
+                    Ok(Added::Ok) => {}
 
                     Ok(Added::Removed(merkle_root_old)) => {
-                        log::warn!("Removing merkle root = {merkle_root_old:?}");
-                        let messages = this.messages.drain_all(&merkle_root_old);
-                        for message in messages {
-                            log::error!("Remove stuck message = {message:?}");
-                            messages_out.send(Response::Stuck {
-                                authority_set_id: message.authority_set_id,
-                                block: message.block,
-                                tx_uuid: message.tx_uuid,
-                                merkle_root: merkle_root_old,
-                            })?;
-                        }
+                        // Eviction bounds the cache, not the lifetime of a liability.
+                        // A later cumulative publication may still cover waiting messages.
+                        log::debug!("Evicted retained root {merkle_root_old:?}");
                     }
 
-                    Err(_i) => {
-                        // There is already a corresponding merkle root at the position.
+                    Err(RootAddError::Conflict) => {
+                        let _ = acknowledgement.map(|ack| ack.send(Err(anyhow::anyhow!("Conflicting finalized root provenance; HOLD"))));
+                        anyhow::bail!("Conflicting finalized root provenance; HOLD");
+                    }
+                    Err(RootAddError::Unchanged(_)) => {
+                        let _ = acknowledgement.map(|acknowledgement| acknowledgement.send(Ok(())));
                         continue;
                     }
                 }
@@ -283,9 +307,10 @@ async fn run_inner(
                         authority_set_id: message.authority_set_id,
                         block: message.block,
                         tx_uuid: message.tx_uuid,
-                        merkle_root,
+                        merkle_root: merkle_root.root,
                     })?;
                 }
+                let _ = acknowledgement.map(|acknowledgement| acknowledgement.send(Ok(())));
             }
         }
 

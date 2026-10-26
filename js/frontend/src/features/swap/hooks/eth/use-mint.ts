@@ -4,11 +4,14 @@ import { useConfig, useWriteContract } from 'wagmi';
 import { estimateGas, waitForTransactionReceipt } from 'wagmi/actions';
 
 import { WRAPPED_ETH_ABI } from '@/consts';
+import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 import { useBridgeContext } from '../../context';
+import { assertSuccessfulReceipt } from '../../submission';
 
 function useMint() {
+  const { NETWORK_PRESET } = useNetworkType();
   const { token } = useBridgeContext();
   const { writeContractAsync } = useWriteContract();
   const config = useConfig();
@@ -17,13 +20,14 @@ function useMint() {
     definedAssert(token?.address, 'Fungible token address');
 
     const hash = await writeContractAsync({
+      chainId: NETWORK_PRESET.ETH_CHAIN_ID,
       abi: WRAPPED_ETH_ABI,
       address: token.address, // only for wrapped eth
       functionName: 'deposit',
       value,
     });
 
-    return waitForTransactionReceipt(config, { hash });
+    return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };
 
   const getGasLimit = ({ value }: { value: bigint }) => {

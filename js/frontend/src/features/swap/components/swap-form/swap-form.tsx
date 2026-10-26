@@ -10,7 +10,7 @@ import { useAccountsConnection, useVaraSymbol } from '@/hooks';
 import { definedAssert, isUndefined } from '@/utils';
 
 import PlusSVG from '../../assets/plus.svg?react';
-import { CLAIM_TYPE, FIELD_NAME, NETWORK, PRIORITY } from '../../consts';
+import { CLAIM_TYPE, FIELD_NAME, NETWORK } from '../../consts';
 import { useBridgeContext } from '../../context';
 import { useSwapForm } from '../../hooks';
 import { UseSendTxs, UseAccountBalance, UseFTBalance, UseFee, FormattedValues, UseTxsEstimate } from '../../types';
@@ -37,11 +37,12 @@ type Props = {
 function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsEstimate }: Props) {
   const { NETWORK_PRESET } = useNetworkType();
   const { network, token, destinationToken } = useBridgeContext();
+  const inboundHold = !network.isVara ? NETWORK_PRESET.INBOUND_PROOF_PROFILE.hold : undefined;
 
   const { api } = useApi();
 
-  const { bridgingFee, vftManagerFee, priorityFee, ...config } = useFee();
-  const fees = { bridgingFee, vftManagerFee, priorityFee };
+  const { bridgingFee, vftManagerFee, ...config } = useFee();
+  const fees = { bridgingFee, vftManagerFee };
   const accountBalance = useAccountBalance();
   const ftBalance = useFTBalance(token?.address);
 
@@ -52,9 +53,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
     Omit<ComponentProps<typeof TransactionModal>, 'renderProgressBar'> | undefined
   >();
 
-  const [priority, setPriority] = useState<(typeof PRIORITY)[keyof typeof PRIORITY]>(PRIORITY.HIGH);
-  const shouldPayPriorityFee = priority === PRIORITY.HIGH;
-  const time = shouldPayPriorityFee || !network.isVara ? '20 mins' : '1 hour';
+  const time = network.isVara ? 'Depends on finality and queue maturity' : '20 mins';
 
   const [claimType, setClaimType] = useState<(typeof CLAIM_TYPE)[keyof typeof CLAIM_TYPE]>(CLAIM_TYPE.AUTO);
   const shouldPayBridgingFee = claimType === CLAIM_TYPE.AUTO;
@@ -70,24 +69,22 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const txsEstimate = useTxsEstimate({
     formValues: formattedValues,
     shouldPayBridgingFee,
-    shouldPayPriorityFee,
     ftBalance: ftBalance.data,
     ...fees,
   });
 
   const getContractFees = () => {
-    if (isUndefined(bridgingFee)) return;
+    if (shouldPayBridgingFee && isUndefined(bridgingFee)) return;
 
     let result = 0n;
 
     if (network.isVara) {
-      if (isUndefined(vftManagerFee) || isUndefined(priorityFee)) return;
+      if (isUndefined(vftManagerFee)) return;
 
       result += vftManagerFee;
-      if (shouldPayPriorityFee) result += priorityFee;
     }
 
-    if (shouldPayBridgingFee) result += bridgingFee;
+    if (shouldPayBridgingFee) result += bridgingFee!;
 
     return result;
   };
@@ -103,6 +100,7 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   const totalFees = getTotalFees();
 
   const openTransactionModal = (values: FormattedValues) => {
+    if (inboundHold) throw new Error(inboundHold);
     definedAssert(token, 'Token');
     definedAssert(destinationToken, 'Destination token');
     definedAssert(totalFees, 'Transaction estimation');
@@ -121,14 +119,16 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
 
   const sendTxs = useSendTxs({
     shouldPayBridgingFee,
-    shouldPayPriorityFee,
     ftBalance: ftBalance.data,
     onTransactionStart: openTransactionModal,
     ...fees,
   });
 
+  const isFeeLoading = network.isVara
+    ? isUndefined(vftManagerFee) || (shouldPayBridgingFee && isUndefined(bridgingFee))
+    : config.isLoading;
   const isLoading =
-    sendTxs.isPending || accountBalance.isLoading || ftBalance.isLoading || config.isLoading || txsEstimate.isLoading;
+    sendTxs.isPending || accountBalance.isLoading || ftBalance.isLoading || isFeeLoading || txsEstimate.isLoading;
 
   const renderFromBalance = () => {
     const balance = token?.isNative ? accountBalance : ftBalance;
@@ -145,12 +145,21 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
   };
 
   const isEnoughBalance = () => {
-    if (!api || !token || isUndefined(bridgingFee) || !txsEstimate.data || !accountBalance.data) return false;
+    if (inboundHold) return false;
+    if (
+      !api ||
+      !token ||
+      (shouldPayBridgingFee && isUndefined(bridgingFee)) ||
+      !txsEstimate.data ||
+      !accountBalance.data
+    )
+      return false;
 
     return accountBalance.data > txsEstimate.data.requiredBalance;
   };
 
   const getButtonText = () => {
+    if (inboundHold) return 'HOLD: inbound deployment not approved';
     if (!txsEstimate.data) return 'Fill the form';
     if (!isEnoughBalance()) return `Not Enough ${network.isVara ? varaSymbol : 'ETH'}`;
 
@@ -227,13 +236,11 @@ function SwapForm({ useAccountBalance, useFTBalance, useFee, useSendTxs, useTxsE
           </div>
 
           <Settings
-            priority={priority}
             claimType={claimType}
-            onPriorityChange={setPriority}
             onClaimTypeChange={setClaimType}
             isVaraNetwork={network.isVara}
             fee={totalFees || contractFees}
-            isFeeLoading={config.isLoading || txsEstimate.isLoading}
+            isFeeLoading={isFeeLoading || txsEstimate.isLoading}
             disabled={isLoading}
             time={time}
           />

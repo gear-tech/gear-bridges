@@ -1,3 +1,4 @@
+import { HexString } from '@gear-js/api';
 import { Extrinsic } from '@polkadot/types/interfaces';
 
 import { useNetworkType } from '@/context/network-type';
@@ -21,23 +22,18 @@ type Transaction = {
   gasLimit: bigint;
   estimatedFee: bigint;
   value?: bigint;
-};
+} & (
+  | { purpose: 'mint' | 'approve' | 'bridge'; programId: HexString; decodePayload: (payload: Uint8Array) => unknown }
+  | { purpose?: never; programId?: never; decodePayload?: never }
+);
 
 type Params = {
   bridgingFee: bigint | undefined;
   shouldPayBridgingFee: boolean;
-  priorityFee: bigint | undefined;
-  shouldPayPriorityFee: boolean;
   vftManagerFee: bigint | undefined;
 };
 
-function usePrepareVaraTxs({
-  bridgingFee,
-  shouldPayBridgingFee,
-  priorityFee,
-  shouldPayPriorityFee,
-  vftManagerFee,
-}: Params) {
+function usePrepareVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee }: Params) {
   const { NETWORK_PRESET } = useNetworkType();
   const { token } = useBridgeContext();
 
@@ -47,7 +43,7 @@ function usePrepareVaraTxs({
   const approve = usePrepareApprove();
   const requestBridging = usePrepareRequestBridging();
 
-  if (isUndefined(bridgingFee) || isUndefined(vftManagerFee) || isUndefined(priorityFee) || !token) return;
+  if (isUndefined(vftManagerFee) || !token || (shouldPayBridgingFee && isUndefined(bridgingFee))) return;
 
   return async ({ amount, accountAddress }: FormattedValues) => {
     const txs: Transaction[] = [];
@@ -61,6 +57,9 @@ function usePrepareVaraTxs({
 
       txs.push({
         extrinsic: transaction.extrinsic,
+        purpose: 'mint',
+        programId: transaction.programId,
+        decodePayload: (payload) => transaction.decodePayload(payload),
         gasLimit: transaction.gasInfo.min_limit.toBigInt(),
         estimatedFee: fee,
         value: amount,
@@ -74,6 +73,9 @@ function usePrepareVaraTxs({
 
       txs.push({
         extrinsic: transaction.extrinsic,
+        purpose: 'approve',
+        programId: transaction.programId,
+        decodePayload: (payload) => transaction.decodePayload(payload),
         gasLimit: transaction.gasInfo.min_limit.toBigInt(),
         estimatedFee: fee,
       });
@@ -87,6 +89,9 @@ function usePrepareVaraTxs({
 
     txs.push({
       extrinsic: transaction.extrinsic,
+      purpose: 'bridge',
+      programId: transaction.programId,
+      decodePayload: (payload) => transaction.decodePayload(payload),
       gasLimit: GAS_LIMIT.BRIDGE,
       estimatedFee: fee,
       value: vftManagerFee,
@@ -100,7 +105,6 @@ function usePrepareVaraTxs({
     };
 
     if (shouldPayBridgingFee) txs.push({ ...feesTx, value: bridgingFee });
-    if (shouldPayPriorityFee) txs.push({ ...feesTx, value: priorityFee });
 
     return txs;
   };

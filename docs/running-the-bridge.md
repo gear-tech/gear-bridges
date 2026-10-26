@@ -36,6 +36,34 @@ For a native build, install the toolchains used by the workspace:
 
 The root README also calls out the [ring build instructions](https://github.com/gear-tech/ring/blob/main/BUILDING.md). Follow those instructions when a native build fails while compiling `ring`.
 
+Signing processes must share an operator-provisioned, canonical absolute
+`VARA_BRIDGE_SIGNER_LOCK_DIR` on the same host (owner UID, mode `0700`; lock files
+are `0600`). Mount the same directory into every signing container and never
+replace or unlink a lock inode. There is no HOME fallback or automatic directory
+creation. Separate hosts must use distinct signing accounts: filesystem locks
+are not cross-host nonce coordination. Preserve durable cutover ownership even
+after a process exits.
+
+Gear signer URIs are explicit (`--gear-suri` / `GEAR_SURI`), with no Alice default.
+Development accounts, including equivalent mnemonic/seed spellings, are rejected
+unless `GEAR_BRIDGE_OWNED_FIXTURE=1` and the endpoint has a numeric loopback host.
+This fixture opt-in does not relax the shared namespace requirement. Production
+must never set it. Ethereum clients without a key are read-only; they can
+requalify original receipts/account proofs but return `SignerNotConfigured`
+before fresh signing. Fresh Ethereum nonces require equal primary/witness
+pending values at or above the Beacon-proven account nonce, under ownership.
+
+Finality archives retain old `fence.json` bytes and obligations unchanged.
+Only a fully qualified view commits a digest-addressed, predecessor-linked
+`verified/` record. `verified-head.json` is a recoverable derived pointer, not
+authority; corrupt immutable records, missing links, pending writes and conflicting
+legacy evidence still HOLD. Restarts requalify retained proofs and ancestry;
+header chunks are reusable hints, not finality verdicts. Immutable records are
+not pruned and requalification cost grows with retained history. Reconnect
+rebuilds both execution transports while preserving approvals and ownership.
+Fee/deposit/root discovery compares complete normalized log sets, including
+empty results, before returning progress to scanners or the kill switch.
+
 Build the relayer from the repository root:
 
 ~~~sh
@@ -149,6 +177,33 @@ Never share writable stores between independent owners or reset a retained fence
 
 Gear-to-Ethereum delivery additionally requires `--lane-approval` / `GEAR_ETH_LANE_APPROVAL` and `--lane-approval-sha256` / `GEAR_ETH_LANE_APPROVAL_SHA256`. The independently approved file has `schemaVersion: 1` and `lanes` entries binding `chainId`, `genesisHash`, `queue`, `sourceManager`, `destination`, `evmManager`, `tokenDeliveryRequired` and optional historical `originalHash`. Token lanes require the exact destination manager and token-delivery effect; generic lanes must be explicitly approved separately. The policy is saved before signing. Unknown lanes, ambiguous approvals and historical originals without exact approval remain HOLD; receipt-time contract lookups cannot downgrade the requirement.
 
+New message signing also requires a positive `maxGasPerMessage` in that independently
+approved lane and an identical `--max-gas-per-message` / `ETH_MAX_GAS_PER_MESSAGE`
+setting. Missing, zero or mismatched ceilings HOLD new work without rewriting or
+preventing reconciliation of retained signed originals. Gas is quoted by both
+providers at the retained canonical finalized hash; disagreement or an estimate
+above the cap is rejected before nonce selection/signing, never clamped. Paired
+market fees must agree and fit the existing fee/tip ceilings. Signed gas and fee
+fields must equal the admitted quote. Historical policies without the gas field
+remain readable, but cannot authorize another original.
+
+Ethereum-to-Gear fresh signing requires `--approved-gear-gas-limit` /
+`GEAR_APPROVED_GAS_LIMIT`; omitting it permits retained-original reconciliation
+only. The full encoded signed Redirect must fit the runtime's normal extrinsic
+and message-payload limits, and the pinned gas estimate must fit the approved
+ceiling. Oversize/over-budget work is retained as `Unprocessable`, not silently
+clamped or discarded.
+
+Historical reconciliation may reuse an existing approved cutover coverage policy
+through `--historical-receipt-policy PATH` and
+`--historical-receipt-policy-keccak256 DIGEST`. Its `historicalReceipts` entries
+bind exact manager/endpoint IDs and CodeIds, selected slot ranges, and
+`network-rlp` framing. These approvals describe the historical concrete-token
+receipt-state ABI, not arbitrary old ABIs. The sender reauthenticates those
+identities at the original finalized pin; fresh receipts remain strict raw
+EIP-2718. This read policy does not authorize fresh gas, change saved bytes or
+rewrite receipt/payout identities.
+
 Relayer startup still reauthenticates all retained terminal history. Provision archive retention and request capacity for that history; this phase introduces no sampling, pruning or rolling-window exception. Missing historical state remains HOLD.
 
 ### Independently approved execution authority
@@ -156,6 +211,26 @@ Relayer startup still reauthenticates all retained terminal history. Provision a
 New commitment/root signing, token configuration and fresh deployment require a strict schema-2 manifest with `executionAuthorized: true` and its **independently supplied** exact-file SHA-256 in `BEEFY_APPROVED_MANIFEST_SHA256`. Editing the manifest invalidates that approval. Unknown or duplicate fields, missing approvals and mismatched identities HOLD; setting the boolean alone cannot authorize writes. Legacy or read-only manifests remain usable only for their permitted original-authentication paths, not fresh signing.
 
 The `execution` section binds the authenticated source-identity report, Beacon approval, bootstrap, complete unchanged token inventory, runtime replay-safety/heartbeat and custody-authority approvals, native manager CodeId, and each token actor/CodeId. Native wrappers additionally pin `escrow-v1` or `held-escrow-v2` and the exact IDL SHA-256. These report digests identify independent reviews; the tool does not manufacture the reviews or infer that liabilities are settled. `hoodi-message-stack` is explicitly message-only, with an empty token inventory and zero native manager identity; it is not a token-bridge qualification.
+
+Fresh commitment/root/heartbeat signing additionally requires distinct addresses
+in `execution.signers.{commitment,root,heartbeat}` and explicit
+`execution.signingPolicy` fields: `commitmentGasUnits`, `rootGasUnits`,
+`maxFeePerGas`, `maxPriorityFeePerGas`, `maxTransactionCost`, `dailyBudget` and
+`walletWarningReserve`. Gas/fee/account observations are independently corroborated;
+missing values forbid new signing, not original read/reconcile. Heartbeat uses the
+commitment gas ceiling. Amounts are wei; fee limits are wei/gas.
+
+The chain/genesis/account ownership namespace also holds the spend ledger and
+immutable completion records. Worst-case gas cost is reserved before signing and
+counted once across retry/restart. Unresolved reservations carry into later UTC
+days; finalized originals are conservatively charged their admitted maximum for
+their inclusion day. Both successful and reverted finalized originals resolve
+spend, but nonce-consumed-without-receipt evidence does not refund a reservation.
+At 128 unresolved originals, reconcile before admitting more. Back up these files
+with actor journals; never delete them to reset a budget. A low wallet reserve
+emits a warning, never an automatic top-up, fee replacement or repricing.
+
+Approved source upgrades use optional `execution.runtimeTransitions` entries, each containing the exact independently reviewed `identity` in the existing source-identity report format. Keep the original `anchor.sourceIdentity` unchanged and approve the resulting complete manifest digest separately. The qualification pin must be finalized and its parent must already carry the new runtime code: the relay checks ordered authority sets, API versions, unchanged genesis/domain/first binding/MMR origin, and a real MMR leaf against the historical queue snapshot. Unknown code or changed invariants HOLD. Captures, proofs and root scans check `:code` storage hashes; expensive qualification is cached per digest for the session, and computed code digests are reused across reconnects without treating the cache as approval. Missing historical QueueId is zero only when that hash's runtime metadata declares its zero ValueQuery default.
 
 `executionAuthorized` is enforced by the native authority parser and signing gate; it is not an advisory flag. These checks do not expand this branch's retained-v1 scope or authorize production execution. The retained production manifest must bind the unchanged VFT/VFT-VARA and Ethereum token identities and `escrow-v1`; `held-escrow-v2` support describes separately qualified deployments only. A manager replacement requires a newly constructed program, complete inventory and actual v1 zero-outstanding proof, not an in-place initializer or wrapper migration.
 
@@ -273,9 +348,11 @@ Inbound block snapshots serialize their writers, sync staged data, atomically re
 
 Outbound saves serialize transaction snapshots, sync and atomically replace individual files, and retain `.state/save.pending` until the snapshot is complete. An incomplete marker, temporary write, or malformed committed journal blocks startup; persistence failures stop processing. Preserve the entire directory for reconciliation.
 
-`gear_events.json` uses schema 2 and binds the canonical `fee_exempt_sources` set into the outbound lane identity. Schema 1 or a missing/changed policy holds without migration. A payment-enabled lane requires the original first-fee observation unless the original message source is explicitly exempt; the default admin/pauser exemptions remain supported, including the nonce-zero bootstrap. An actually observed fee is retained even for an exempt source. Manual and all-token no-payment lanes bind an explicit empty exemption set.
+`gear_events.json` uses schema 3 and binds the canonical `fee_exempt_sources` set into the outbound lane identity. Schema 2 upgrades on its next durable write after preserving its exact original bytes; schema 1, unknown fields, or a missing/changed policy hold without rewriting evidence. A payment-enabled lane requires the original first-fee observation unless the original message source is explicitly exempt; the default admin/pauser exemptions remain supported, including the nonce-zero bootstrap. An actually observed fee is retained even for an exempt source. Manual and all-token no-payment lanes bind an explicit empty exemption set.
 
 Automatic completion writes an immutable `completed_nonce_<noncehex>.json` sidecar containing the original UUID, full message, source/lane and first-fee evidence. Discovery is acknowledged only after durable Completed ownership; active, held and failed work remains retained. A missing known sidecar or conflicting ownership holds during ongoing discovery as well as restart. Later normal or priority payments advance the canonical cursor without recreating completed backlog; genuinely unseen paid-first nonces remain eligible. Preserve sidecars together with their original UUID journals.
+
+Unsigned unmatched unpaid observations leave hot replay bookkeeping only after **both** finalized event cursors pass their source block by 14,400 blocks (approximately one day at six seconds/block). Each pass archives at most 128 observations; paid, exempt, UUID-owned, signed and ambiguous/unknown-QueueId work remains hot or fenced. `unpaid-archive/` holds immutable SHA-256-addressed original snapshots, observations and nonce-index shards; `gear_events.json` retains at most 256 shard digests, not the cold payloads. Objects and directories are synced before the atomic cursor/index publication, and restart repairs old block bookkeeping from these references. This is retention, **not completion, cancellation, refund or financial settlement**. A later finalized fee from the bound payment actor atomically rehydrates the exact original into the normal paid pair once; repeated fees do not create another pair. Missing or changed archive objects/indexes and interrupted publication mean HOLD. Preserve the entire archive alongside the event journal; do not prune it or replace its references. Reconstructed-from-HTML C11/VB-29 tests cover late fees, interrupted publication, missing evidence and original-byte retention.
 
 Authenticated operator requests still require the retained canonical queued observation and, where applicable, its original first-fee pair before transaction admission. An early request defers without creating a UUID or save marker. Reconnect bookkeeping deduplicates nonces through channel handoff and retires only validated durable ownership; it does not discard the original journals or genuinely unseen paid-first work.
 
@@ -312,7 +389,62 @@ Sender responses wake the shared inbound transaction manager instead of waiting 
 
 New inbound attempts persist the exact signed Gear extrinsic, hash, account nonce, chain/program identities, receipt binding, and finalized scan checkpoints before broadcast. Restart reconciles or rebroadcasts those same signed bytes; it does not sign a replacement merely because receipt status is Unknown. A new attempt requires finalized no-effect evidence: a failed dispatch before message queuing, a complete canonical scan proving the original extrinsic absent through a finalized consumed nonce, or a retryable per-log VFT reply. Preserve every prior attempt. In a compatible schema-5 journal, a held entry without signed identity remains status-query-only; unsupported older schemas never enter the worker.
 
+Inbound transaction journals now use schema 8. Migration from schemas 5–7 first retains
+the exact old JSON bytes under `legacy/`; no signed bytes, unknown JSON fields, receipt
+identity or native operation ID are rewritten. `state.json` holds at most 1,000 active
+UUID/digest references. `records/` contains immutable versioned transaction records;
+large byte arrays are content-addressed under `evidence/`. Automatic-lane completions
+and typed `Unprocessable` liabilities move to the hash-linked `archive/`, with an
+authenticated radix ownership index under `ownership/`. Back up all of these together,
+not just `state.json`. Missing referenced files or mismatched digests are HOLD, never
+proof that a receipt was unseen.
+
+Ingress and worker request/response handoffs are bounded to 128 entries. At 1,000 active
+transactions intake backpressures while replies and reconciliation continue. Scheduling
+and record work yield in batches of 128; each proof/native attempt history is bounded to
+128 without deleting originals. Records and ownership are synced before the state pointer,
+and the pointer is committed before an ingress acknowledgment. A complete durable
+`state.write-intent` replays its exact original records and pointer after a crash;
+interrupted temporary pointer bytes are retained separately. A truncated or contradictory
+intent, an orphan `state.json.new`, or an incomplete block snapshot fences signing:
+retain every file and independently qualify the interrupted original, never remove it
+to obtain a replacement nonce. Sealed journals remain read-only.
+
+Cold history is not demoted into the new-work queue on restart. Explicit history/cutover
+qualification uses `read_journal_inventory`, validating the complete linked inventory;
+indexed replay deduplication validates the selected original and its digest path. Neither
+operation treats a saved status as fresh financial proof. A manual journal is deliberately
+bounded to one original and retains its completion hot for mandatory original/settlement
+requalification on rerun.
+
+Fresh Gear signing requires an explicit approved gas budget; oversized full Redirect/
+extrinsic envelopes or authenticated quotes above that budget must not allocate a nonce
+or clamp gas downward. `Unprocessable` retains the original authenticated receipt/proof,
+Ethereum transaction hash, slot/index, envelope size and gas reason outside automatic
+retry scheduling. Subsequent ordinary deposits may continue, but this is **containment,
+not refund or settlement**: VB-19/VB-25 liabilities still block production and cutover.
+Retry authority is typed and bound to the exact finalized observation; a pause/error enum
+alone, an elapsed timeout, or a receipt status does not authorize another signed attempt.
+
+
 Even when the manager reports a receipt already processed, the worker first checks the persisted signed attempt against the current Gear genesis, sender, manager/proxy, receipt payload, and exact transaction hash. A coincident receipt key on another deployment cannot complete a mismatched journal. Before returning a proof, composition authenticates the full Beacon block against its checkpoint chain, binds the selected raw transaction hash and index, and verifies receipt metadata and the MPT value against the authenticated receipts root. A Processed shortcut cannot replace these checks.
+
+Fresh Ethereum receipt delivery uses the exact raw EIP-2718 receipt trie value:
+the legacy RLP list, or a type byte 1–4 followed by that list. Composers forward
+those authenticated bytes unchanged; the verifier and fresh manager independently
+reject network RLP wrappers, noncanonical encoding and trailing bytes. Admission
+requires explicit successful EIP-658 status. Historical `PostState` roots remain
+intact when reconstructing receipt tries; they are not successful-status evidence.
+
+Rebuilding source does not update immutable deployed receipt endpoints. Before
+activating a fresh manager, independently qualify the CodeId, framing and slot
+range of **every** historical-proxy endpoint intersecting its receipt floor.
+Preserve old journals, signed payloads, receipt hashes and native operation IDs
+byte-for-byte. Network-wrapped historical originals are not migrated by unwrapping
+them: the fresh validators HOLD them. Reconciliation against their original
+manager/endpoint requires independently approved old CodeIds and framing; manager
+or proxy address equality and a wrapper CodeId alone do not grant that authority.
+That historical reconciliation approval integration remains a cutover gate.
 
 Manual inbound relay requires a private, stable `--storage` directory with exclusive ownership. Reruns bind the same original Ethereum transaction/inclusion, receipt slot/index, route, deployment and Gear signer, and restore the shared durable sender before work starts. Its optional schema-5 `manual_identity` cannot be adopted by automatic workers. Changed identities or signed bytes (including completed and archived attempts) hold without rewriting evidence; successful completed manager reruns require historical and current canonical Processed observations. Custom consumers instead require the exact-route Sails SCALE `Result<T,E>` from the authenticated original finalized reply. Their opaque `Ok` body proves application acceptance, not token settlement; `Err`, malformed envelopes and route mismatches remain unresolved. Never clear held storage to obtain a new signature. Before restoring any transaction, every persisted map key must equal its embedded UUID, and active/completed journals must not share a UUID; conflicting ownership holds without collapsing signed attempts into another transaction.
 
@@ -326,11 +458,20 @@ Inbound token workers restore receipt and block journals before starting listene
 
 Inbound token workers require `--ethereum-blocks <discovery.json>` and `--ethereum-start-block <deployment-block>`. Discovery schema 1 pins the complete runtime identity, original deployment start, contiguous discovered/extracted block-hash cursors and pending transaction handoffs. Keep it paired with transaction state and separate from the transaction directory’s `blocks.json`. Restart authenticates cursor/pending coverage and replays only pending work before scanning new blocks; bounded channel backpressure replaces all-history height replay. Each handoff is durable before extraction is acknowledged and is cleared only after transaction intent is durable. Unbound legacy arrays, a changed start/identity, gaps, missing original hashes, incomplete journal pairs or interrupted snapshots HOLD unchanged; never bump the start to bypass them. Completed proof evidence remains retained: real transitions still persist it, but idle ticks no longer rewrite the full history.
 
+Root inbound lanes also require `--root-minimum-receipt-slot <approved-starting-checkpoint-slot>`
+(or `ROOT_MINIMUM_RECEIPT_SLOT`). Obtain this positive slot from independent deployment
+approval, never by copying the receiver's RPC response. Startup requires exact equality
+with the constructor floor, the configured root identity and no predecessor.
+Successor lanes instead require the immutable cutover seal and approved CodeId;
+the root-floor option is forbidden with a seal. The same rule applies to manual
+`SubmitReceipt` delivery. Existing signed originals and historical journals are not
+rewritten to add or change a floor.
+
 The BEEFY publisher persists its transaction intent, source block identity, and nonce before broadcast; after an uncertain send it reconciles the same transaction and canonical contract state instead of choosing a new nonce. Fresh commitment records include the source block number before the first nonce-reservation checkpoint. Restart selects that exact reserved source block rather than an earlier eligible handover; an archive that passes it without finding it holds the lane. Saved signed bytes are decoded completely and checked against their hash, sender, nonce, and destination. RPC transaction lookups decode only the required identity and optional inclusion fields, so a missing `accessList` does not prevent recovery; malformed or conflicting identity still holds the operation. Canonical receipt and checkpoint verification remain mandatory. Keep root publication and token relayer signing keys separate. A conflicting root or source reorganization requires operator investigation; do not discard the journal to force progress.
 
-Follower schema 4 separates commitment provenance: `origin: "own"` retains `submission`; `origin: "external"` retains the actual accepted signed `acceptedTransaction`. First attachment may adopt progress beyond the authenticated deployment bootstrap, but only after ordered source authority handovers and canonical finalized transaction/receipt proofs are verified. A log or current checkpoint alone is insufficient. `lastSuccessfulUpdate` remains own-success accounting; authenticated external progress may advance finalized/observed progress without completing an original transaction. Signed originals retain nonce ownership until their own finalized receipt or consumed-nonce disposition is durable; terminal originals move atomically into `terminalSubmissions` with complete original bytes and evidence. Competitor hashes never replace originals. Changed unfinalized inclusion requires independent finalized-header, transaction/receipt-trie, source-proof and accepted-checkpoint authentication; `firstInclusion` remains retained and finalized history cannot move. Idle same-set commitments are skipped; authenticated handovers, uncovered root demand and the 12-hour heartbeat drive paid updates. Readiness uses authenticated source age and the onchain 24-hour expiry, not an obsolete 64-block lag policy.
+Follower schema 5 preserves commitment provenance: `origin: "own"` retains `submission`; `origin: "external"` retains the actual accepted signed `acceptedTransaction`, including a nullable destination/embedded chain ID. First attachment may adopt progress beyond the authenticated deployment bootstrap, but only after ordered source authority handovers and canonical finalized transaction/receipt proofs are verified. A log or current checkpoint alone is insufficient. `lastSuccessfulUpdate` remains own-success accounting; authenticated external progress may advance finalized/observed progress without completing an original transaction. Signed originals retain nonce ownership until their own finalized receipt or consumed-nonce disposition is durable; terminal originals move atomically into `terminalSubmissions` with complete original bytes and evidence. Competitor hashes never replace originals. Changed unfinalized inclusion requires independent finalized-header, transaction/receipt-trie, source-proof and accepted-checkpoint authentication; `firstInclusion` remains retained and finalized history cannot move. Idle same-set commitments are skipped; authenticated handovers, uncovered root demand and the 12-hour heartbeat drive paid updates. Readiness uses authenticated source age and the onchain 24-hour expiry, not an obsolete 64-block lag policy. Schema migration retains exact previous bytes before publishing the new pointer. Cumulative `coveredBy` rows refer to the selected finalized publication and are not individual registrations; unknown schema/status/reference evidence HOLDs. Run the independently owned heartbeat-only process described in [Merkle-root operations](merkle-roots.md) to isolate freshness from root-worker HOLDs.
 
-On follower restart, saved finalized commitments are revalidated against their original signed identity, receipt inclusion, finalized anchor and source block before any new submission. A finalized boolean is not sufficient. The worker uses one fresh verified finalized view, deduplicated targets and bounded 32-way checks. Durable hash-linked RLP headers and transaction/receipt trie evidence are locally authenticated on reload; incomplete ancestry fences and interior progress survive interruption beyond the unchanged 32,768-header memory bound. History revalidation and pending-transaction reconciliation share one 300-second startup deadline. Changed or incomplete evidence holds instead of skipping history, resetting the journal or extending warmup deadlines.
+On follower restart, saved finalized commitments are revalidated against original signed identity, receipt inclusion, finalized anchor and source history before new signing. Authentication uses 32-record batches, bounded concurrent checks and durable hash-linked qualification/proof progress, without a global 300-second startup deadline. Persisted qualification markers are not authority on restart. Long-lived publisher sessions cache only exact fully qualified immutable root/anchor identities; client maintenance does not revalidate lifetime root inventory. `tokens-history-audit` still authenticates complete retained history. Full follower JSON remains lifetime-sized, so storage/capacity qualification is still required.
 
 BEEFY recovery verifies embedded original receipt proofs against freshly qualified inclusion/finality headers, without requiring a separate receipt-cache file or historical block bodies for those proofs. Missing legacy proof fields still require cache/RPC reconstruction; malformed or contradictory retained proofs HOLD instead of falling back. Historical contract-state and source-chain checks remain required.
 
@@ -362,7 +503,7 @@ becomes healthy without buying a transaction or extending the accepted expiry.
 Back up the authenticated execution proof cache with the signed journals. The
 693-record timing is not a guarantee for an arbitrarily old cold journal; use
 the read-only audit to warm/qualify retained history before moving an aged actor,
-and retain resumable evidence rather than weakening the startup deadline.
+and retain resumable evidence without imposing an aggregate startup deadline.
 
 
 Public Ethereum selection is explicit: `--ethereum-network mainnet` applies to the follower, root publisher and history audit; the default remains Hoodi. Mainnet requires an independently reviewed `mainnet-token-stack` deployment with chain 1, no rehearsal/fixture approval, and HTTPS or WSS. Its execution genesis and finalized-history archive are pinned to Ethereum mainnet, never learned as approval from the endpoint. Existing Hoodi journals retain their original modes and identities; do not relabel them for mainnet. Fresh `tokens-manifest`/`tokens-configure` tooling remains Hoodi/owned-fixture scoped; mainnet consumes the separately reviewed retained-state migration manifest.
@@ -372,6 +513,8 @@ The read-only execution-boundary check is `BEEFY_TEST_MAINNET_RPC=<mainnet-EL> c
 Root-intent schema 4 distinguishes `observed` external progress from an original `publicationReceipt`. Matching unsigned roots and unsigned empty targets already covered by finalized monotonic progress need no broadcast, but require authenticated signed transaction, receipt and inclusion/finality evidence in `observedProgress`. Unfinalized competitors remain pending; conflicting roots HOLD. Refresh a stale anchor/proof only before signing, preserving any reserved nonce. After signing, anchor transaction/checkpoint, proof, queue proof, nonce, hash and bytes remain immutable. A proven failed original is archived before a later publication may be prepared. Canonical mining is not final acceptance. Use an archival execution RPC; pruned-state fallback is unsupported.
 
 Authenticated external adoption releases an unsigned root intent's nonce reservation, including a stale reservation recovered on restart. This applies only when no local signed transaction exists; signed or ambiguous originals remain fenced.
+
+Spend admission adds a separate durable `spendReservationId` and normalized `spendReservationNonce`, freezing the exact unsigned proof/anchor before wallet filling. Retry preserves the same ID; signing checks the approved role, paired quote/balance and actual signed limits. Finalized original success/revert settles the account's spending evidence idempotently. An external effect or consumed nonce without the original receipt never releases spending authority, including an unsigned nonce reservation that was safely released for externally satisfied work. Old originals without spend fields remain unchanged. Missing new-signing approval does not prevent read/reconciliation.
 
 When a signed root original remains unresolved but authenticated `observedProgress` satisfies its target, the root stays `pending` and retains its exact signature, nonce and anchor. Reconciliation returns promptly instead of waiting out the original-receipt timeout on every follower tick; the independent BEEFY signer may advance. The root signer remains fenced, and a later original revert is archived as a failure, never replaced by the competitor's success. Missing, conflicting or reorged external evidence still holds. The standalone `tokens-publish-root` command finishes on authenticated `Observed` as well as original `Accepted` and releases its deployment lock; this does not report an unresolved local original as successful.
 
@@ -446,21 +589,18 @@ handovers, weakening proofs, starving an already signed original or using
 custody balances. Escalate funding/traffic/SLA decisions before the envelope is
 exceeded; existing liabilities and messages must remain recoverable.
 
-The next cost design is unsigned **root coalescing within each QueueId**, not
-merely delaying the existing publisher: the runtime's cumulative root changes
-once per changed source block, and the current publisher retains each row.
-The implemented frozen demand batch shares a BEEFY update, not publications.
-A later root may cover earlier messages in the same queue epoch, but a cutover
-must prove complete nonce/leaf coverage, preserve every nonzero queue epoch and
-historical claim, update proof/discovery consumers together, and leave signed
-originals immutable. Qualify overflow, epoch reset, backfill and restart before
-root elimination. Aligning a valid final root with each 2-hour handover could
-avoid extra demand updates, at up to roughly 2 hours of additional batching
-latency. With exactly one root per handover, 100 ERC20 executions/day and the
-same allowances, the indicative 1-gwei total is $3,985/month; queue overflow,
-extra epochs and stricter latency increase it. This is a researched design,
-**not deployed savings**. Do not change quorum/sample security or migrate custody
-to another chain to make the estimate fit.
+Unsigned **root coalescing within each QueueId** is implemented for consumers that
+authenticate cumulative roots. The runtime changes its root once per changed
+source block; discovery retains every row, but a completed discovery batch selects
+the newest covered unsigned snapshot of each queue and preserves closed queues'
+final nonzero roots. Existing intent files, reservations and signed originals are
+not eliminated. Earlier rows become `covered` only after the selected publication
+finalizes and retain its exact reference. Qualify overflow, reset, backfill,
+consumer migration and restart before activation. This is not a fixed two-hour
+batching policy or measured production savings. With exactly one root per handover,
+100 ERC20 executions/day and the same allowances, the indicative 1-gwei total is
+$3,985/month; extra epochs and stricter latency increase it. Do not change
+quorum/sample security or migrate custody to make the estimate fit.
 
 Free public dRPC currently resolves the observed Hoodi archive failure, but is
 not the production availability plan. [dRPC pricing](https://drpc.org/pricing)
@@ -609,6 +749,12 @@ target/release/beefy-deploy tokens --source-rpc "$SOURCE_RPC" \
 ~~~
 
 The durable output is `$RUN/tokens/token-stack.json`. Preparation allocates the configured balance/allowance shards and keeps the manager paused. Resume the original state rather than reconstructing programs. Four Ethereum-supply assets (USDC, USDT, WBTC, WETH), Gear-origin GOT and native WTVARA are configured; native value must be backed by actual deposits, never administrative minting.
+
+`CHECKPOINT_SLOT` must be positive and independently approved. It is also the fresh
+manager's immutable `InitConfig.minimum_receipt_slot`. The new constructor intent
+records `programs.vftManager.minimumReceiptSlot` before signing; preparation and
+activation validate the exact on-chain floor and root domain. Existing manager
+intents missing this approval HOLD rather than being upgraded in place.
 
 Preparation and configuration hold the canonical `token-stack.lock` for the whole operation; configuration acquires the deployment lock first. New constructors start unsigned. Every Init/Handle call persists its original raw extrinsic, hash, nonce, signer, immutable call intent and canonical scan anchor before broadcast. Restart scans authenticated finalized originals and replays their exact replies; an absent original may rebroadcast only its saved bytes after a complete archive scan and unconsumed nonce check. The original broadcast watch is retained through finality rather than repeatedly submitting a still-included transaction. Recovery decodes metadata-checked `MessageQueued` and `UserMessageSent` events independently: unrelated runtime-pallet changes do not invalidate these stable schemas, but incompatible target-event metadata still HOLDs. Shard allocation retains each ordered message separately even when payloads repeat.
 
@@ -774,6 +920,12 @@ Every role pin records the actual mode-supported observations: v1 requires `outs
 
 Seal the exact old transaction, block, discovery and completed coverage/admission bytes in immutable `cutover.json`; install matching `.cutover-seal` markers while old writer locks remain held. Normal relayers must not reopen sealed lanes. Only read-only `verify-cutover` may reauthenticate their original evidence. Successor journals are new paths bound to that seal and the approved new receiver, beginning at execution block B+1 and receipt slot S+1. An incomplete handoff or unavailable original history is HOLD, not permission to relabel the old target.
 
+Construct the successor with `InitConfig.minimum_receipt_slot = S.checked_add(1)`
+before preparation. `PrepareCutover` validates, never overwrites, that floor.
+A mismatched or zero-floor manager must not be activated. A root manager's floor
+is its independently approved starting checkpoint, not zero; pre-floor liability
+accounting and the actual source manager's handoff capability remain separate gates.
+
 Before publishing either report, retain the pending seal's exact checkpoint,
 coverage/lifecycle projections and old-journal digests in mutable work. A restart
 authenticates that frozen projection and any retained temporary report, link,
@@ -796,12 +948,40 @@ Pass the same file/digest on prepare, finalize, verify and relayer restart.
 Only genuinely wrapper-free lanes omit both arguments. Local fixture approvals
 do not authorize production custody or governance.
 
+New preparation requires an independently approved `--coverage-policy` JSON and
+`--coverage-policy-digest` (Keccak-256 of its exact bytes). Schema-5 reports seal
+that policy: `ethereum_chain_id`, `ethereum_genesis_hash`, `erc20_manager`,
+`deployment_block`, `deployment_hash`, `deployment_transaction`,
+`deployment_transaction_index`, sorted unique `fee_emitters`,
+`max_redirect_bytes`, and `max_gas`. The deployment floor is authenticated through
+both transaction and receipt tries and direct CREATE address derivation, not a
+caller-supplied scan cursor. Factory/CREATE2 deployments remain HOLD until their
+exact provenance is supported; do not substitute a later deployment or numeric floor.
+The scanner and report verifier use the same deployment floor and commit complete
+ancestry blocks and candidates incrementally. All archive receipts/transactions,
+fee emitters, token cooperation and full Redirect/gas composability are checked
+before `BeginCutover`, with Ethereum deposits/payment creation paused. Failed
+candidates retain exact coordinates, raw evidence, original ownership and reasons;
+later candidates are still inventoried. Unmapped/oversize receipts remain liabilities,
+not refunds or exclusions, and prevent beginning/sealing the cutover.
+
+Optional `historicalReceipts` entries use the shared SDK/Rust fields `managerId`,
+`managerCodeId`, `endpointId`, `endpointCodeId`, `framing` (`network-rlp`),
+`minimumSlot` and `maximumSlot`. Approve them independently with the policy digest.
+Reconciliation authenticates the actual manager and proxy-selected endpoint CodeIds
+at the original finalized pin and retains exact signed/network receipt bytes and
+native operation IDs. Overlapping authorities are rejected. Fresh submissions
+remain canonical raw EIP-2718; PostState receipts retain trie identity but are not
+successful economic deposits. Old singular-fee reports and signed originals are
+read without rewriting; no new approval is learned from those originals.
+
 ~~~sh
 target/release/vft-manager-tool --gear-endpoint "$SOURCE_RPC" prepare-cutover \
   --old-vft-manager "$OLD_MANAGER" --new-vft-manager "$NEW_MANAGER" \
   --new-manager-code-id "$NEW_MANAGER_CODE_ID" \
   --native-wrapper-approval "$WRAPPER_APPROVAL" \
   --native-wrapper-approval-sha256 "$WRAPPER_APPROVAL_SHA256" \
+  --coverage-policy "$COVERAGE_POLICY" --coverage-policy-digest "$COVERAGE_POLICY_KECCAK256" \
   --old-transactions "$OLD_TRANSACTIONS" --old-discovery "$OLD_DISCOVERY" \
   --ethereum-rpc "$EL_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" --beacon-rpc "$BEACON_RPC" \
   --ethereum-finality-store "$CUTOVER_DIR/finality" \
@@ -828,9 +1008,21 @@ target/release/vft-manager-tool --gear-endpoint "$SOURCE_RPC" verify-cutover \
   --ethereum-finality-proof-source "$OLD_RELAYER_FINALITY_STORE"
 ~~~
 
-Supply the authorized Gear lifecycle signer through protected `GEAR_SURI` for prepare/finalize; the CLI development-key default is not an operator identity. `verify-cutover` neither uses a signing credential nor changes journals. Add `--sponsor-unpaid` to prepare/finalize only with explicit authorization to pay for authentic unpaid deposits. Otherwise unresolved unpaid receipts remain HOLD; previously fulfilled external receipts require their own authenticated original and settlement evidence, never borrowed lane provenance.
+Supply the authorized Gear lifecycle signer through protected `GEAR_SURI` for prepare/finalize/abort; production rejects development accounts. `verify-cutover` neither uses a signing credential nor changes journals. Add `--sponsor-unpaid` to prepare/finalize only with explicit authorization to pay for authentic unpaid deposits. Otherwise unresolved unpaid receipts remain HOLD; previously fulfilled external receipts require their own authenticated original and settlement evidence, never borrowed lane provenance. A finalized external settlement satisfies the liability without converting the runner's failed original to success or releasing its nonce. A fresh retry requires exact requalified finalized no-effect evidence; Paused, AlreadyProcessed and lease errors alone never authorize another original.
 
 Preparation leaves the source `Draining`. Finalization resumes original custody and role calls, requires the actual finalized authorized EVM successor-registration transaction while retaining the old registration, seals the historical lane, initializes the new lane at B+1/S+1, and only then activates it. The tool has no EVM signer. Missing registration is HOLD after custody/role handoff; perform that authorized registration externally and resume the same directory. Do not restore or reuse old lane files to bypass a HOLD.
+
+Before any custody child has ever been dispatched, an authorized paused source in
+Draining may use `abort-cutover --cutover-dir "$CUTOVER_DIR" --expected-generation "$GENERATION"`
+with the same Ethereum finality and native-capability arguments as preparation.
+The tool records the exact source abort generation, authenticates its successor,
+boundary and fingerprint, and restores only the matching destination preparation.
+Both remain paused; original evidence and floors survive. Retain the terminal
+`cutover-abort-<generation>.json` and use a new approved work directory for another
+generation. Once any custody child was sent, even failed or timed out, abort is
+forbidden: frozen-token cooperation remains a production gate. EscrowV1 retirement
+requires actual immutable-wrapper `OutstandingRedemptions == 0`, never v2 Held
+or BlockingRedemptions as a substitute.
 
 Before beginning the source drain, direct and paid lane identities must bind the same Ethereum emitter as the cutover manifest. A stale emitter identity is rejected before `BeginCutover`, not deferred until successor startup.
 

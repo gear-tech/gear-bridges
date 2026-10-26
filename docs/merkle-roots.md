@@ -16,11 +16,23 @@ The active implementation is in [follower.rs](../tools/beefy-relay/src/follower.
 
 `beefy-relay tokens-follow` authenticates two independent source endpoints against the original manifest/bootstrap, source binding and ordered authority history. It advances the Ethereum client using signed BEEFY commitments, retaining original transaction evidence for each submission. Authority handovers, heartbeat/client-expiry requirements and root demand remain authenticated even when root publication is held.
 
+Run `tokens-heartbeat` as a separately supervised process to isolate client freshness from publisher HOLDs or outages. Use a dedicated approved heartbeat wallet, output directory and finality store. It needs the independently approved client/genesis/adapter/bootstrap and signer role even before binding, but no root inventory, root wallet or publication lock:
+
+```sh
+target/release/beefy-relay tokens-heartbeat \
+  --source-rpc "$SOURCE_RPC" --witness-rpc "$WITNESS_RPC" \
+  --ethereum-rpc "$EL_RPC" --ethereum-witness-rpc "$EL_WITNESS_RPC" \
+  --wallet "$HEARTBEAT_WALLET" --deployment-manifest "$DEPLOYMENT_MANIFEST" \
+  --output-dir "$HEARTBEAT_DIR" --ethereum-finality-store "$HEARTBEAT_FINALITY_STORE"
+```
+
+Also supply the approved Beacon/finality configuration described in the operating guide. The manifest's `execution.signers` binds distinct `commitment`, `root` and `heartbeat` accounts; provision the common host signer-lock namespace. No heartbeat process may reuse a follower/root journal. Forty-eight-hour publisher-outage and two-week owned-testnet qualification remain required; unit tests do not satisfy these gates.
+
 Held, already-covered publications retry after a short maintenance window at
 completed source polls or same-set commitment boundaries. This does not cancel
 source work or bypass mandatory handovers and client heartbeats.
 
-The follower inventories historical source progress starting at immutable `beefyRootMinimum`, not first publication or maximum progress. Later roots or empty progress cannot satisfy an older missing nonzero queue epoch. A frozen demand batch may share a BEEFY update; it does not eliminate each inventoried publication.
+The follower inventories source progress inclusively from immutable `beefyRootMinimum`, reading paired predecessor/current `(QueueId, root)` storage in at most 32 blocks per turn without `System.Events`. New unsigned publications coalesce only after the fixed discovery target completes, selecting the newest anchor-covered snapshot per QueueId and preserving closed queues' final nonzero snapshots. An earlier discovery row becomes `covered` only after that selected publication finalizes. Queue resets never share coverage, and existing intent files/reservations remain untouched.
 
 For each registered target, the publisher:
 
@@ -72,15 +84,92 @@ Retained Gear→Ethereum token/manual workers consume finalized publications, re
 
 The retained root extractor owns `ethereum_roots.json`, binding observations to finalized block hashes and transaction/log coordinates. Subscriptions only wake finalized catch-up. Its bounded cache uses publication order, so a newly backfilled historical root can remain usable even when its source height is old. Preserve historical execution headers and source archives; unavailable finality evidence cannot advance discovery.
 
+### Queue identity and cumulative delivery
+
+Delivery journals retain `queue_id` separately from `authority_set_id`. A candidate
+publication must have the same authenticated QueueId as the original message and a
+source height at least as large. Its **own** finalized publication timestamp controls
+maturity. GRANDPA set equality is not queue identity: stable keys can span a set
+transition without resetting the queue, and overflow can reset a queue within one set.
+The selected source block/hash/root and Ethereum transaction/log inclusion refer to
+the actual publication, not to an earlier root supposedly registered by coverage.
+Producer coalescing is not enabled by this consumer change.
+
+Missing legacy `queue_id` is unknown, never zero. Unsigned delivery work rehydrates
+it against the original canonical finalized hash, original queued event and signing
+set; retained roots reauthenticate their original destination inclusion and source
+snapshot. Missing archives, conflicting evidence and unknown JSON fields HOLD without
+overwriting the original. Before atomic replacement, original raw JSON with missing
+queue identity is fsynced under `queue-id-originals/<sha256>.json`; retain this directory
+with the existing journals. Signed bytes, nonce, message identity and signed root
+selection are not rewritten. A null membership RPC response is unavailable evidence,
+not authenticated absence. The worker defers that exact candidate for one scheduling
+cycle, allowing another qualified root (including an earlier one) and unrelated work;
+the exclusion then expires. No rejection watermark or settlement is persisted, and
+restart retries the original identity. Root-cache eviction is not financial completion
+or proof that an older message can never be delivered.
+
+SDK outbound preparation follows the same matching rule without reading follower
+inventory `coveredBy` records. It requires historical Gear metadata and explicit
+eight-byte QueueId storage at the original and candidate finalized hashes; absent
+storage is not defaulted to zero. Ethereum must support `eth_call` at the retained
+finalized block: preparation simulates the selected claim using the queue contract's
+own maturity/governance policy. Immature or non-member candidates allow alternatives;
+other execution errors stay visible. Pre-sign simulation remains mandatory. No
+original signed submission, proof bytes or message identity is rewritten by discovery.
+
+### Overflow recovery qualification
+
+The queue cleaner uses one owned bounded retry loop and finalized, hash-pinned
+`QueueOverflowedSince`/QueueId/GRANDPA observations. Storage failure is not “no
+overflow.” Each attempt requests a current finalized proof whose target is at or
+after overflow and whose signing set is the current set. It rechecks the tuple before
+dispatch and after uncertainty; another cleaner or a set transition causes fresh
+observation rather than a stale reset or process exit. RPC and submission rounds
+are bounded to 90 seconds; retry backoff is capped at 60 seconds or the configured
+base delay, whichever is larger.
+
+The reconstructed VB-16 regression (supplied HTML, audited `7fe1b032`, not the
+unavailable original PoC) **executes the actual runtime verifier**. Prepare an owned
+loopback Gear node with an overflowing queue, then advance GRANDPA's set ID with
+unchanged ordered keys and unchanged QueueId. Retain the raw pre-transition
+`grandpa_proveFinality` SCALE proof covering the overflow. Independently pin the
+genesis and SHA-256 of the deployed runtime `:code`; a magic-proof mock is not valid.
+Provide `QUEUE_CLEANER_TEST_RPC`, `QUEUE_CLEANER_TEST_GENESIS`,
+`QUEUE_CLEANER_TEST_CODE_SHA256`, funded dedicated `QUEUE_CLEANER_TEST_SURI`, and
+`QUEUE_CLEANER_TEST_OLD_PROOF` (binary file path). The explicitly selected test fails
+if any prerequisite is absent; it submits invalid/old proof negative controls and
+the current proof, then requires finalized overflow clearance and QueueId advance:
+
+```sh
+rtk cargo test --locked --release -p relayer --lib queue_cleaner::tests::real_runtime_overflow_survives_stable_key_set_transition -- --ignored --exact --nocapture
+```
+
+Do not run this mutation test against a public network. Unit matching/membership
+tests do not replace this runtime qualification.
+
 ## Durable state and uncertainty
 
 Back up the original deployment/bootstrap records, follower `state.json`, all registered `root-publications/` intents, terminal submissions, authenticated execution proof cache and delivery discovery/transaction journals together. Use private stable paths and exclusive ownership. Do not transplant journals to another network, signer, deployment or rehearsal mode.
 
-Follower schema 4 distinguishes own submissions from authenticated external accepted transactions. Root-intent schema 4 distinguishes `observedProgress` from the original `publicationReceipt`. A matching current root/checkpoint or a log alone is insufficient: accepted observations require signed transaction, receipt inclusion, canonical finalized ancestry and exact historical state authentication.
+Follower schema 5 preserves provenance (`own` versus actual `external` accepted transactions), adds actor-role isolation and `coveredBy` references for cumulative discovery rows. Before upgrading an existing schema-3/4 state, exact original bytes are retained in `state.pre-schema5.json`. Root-intent schema 4 still distinguishes `observedProgress` from the original `publicationReceipt`. External envelopes preserve their actual nullable destination and embedded chain ID, including authenticated pre-EIP-155 legacy envelopes; no destination/chain is fabricated. Complete transaction/receipt inclusion, exact finalized effects and historical state remain mandatory.
 
 Original signed root bytes, hash, nonce, proof and anchor are immutable. A transport timeout, absent lookup, pending competitor or source advancement cannot authorize a new signature. An authenticated external publication may satisfy the target while a local original remains unresolved: record observed progress, retain its original nonce ownership and keep that root signer fenced. An independent commitment signer may continue authenticated handovers/heartbeats. Archive proven failed originals before any later permitted publication; do not overwrite them with a competitor's success.
 
-Unsigned stale anchors/proofs may refresh only before signing while preserving any reserved nonce. Mining alone is not finalized acceptance. Pruned-state fallback is unsupported. After interruption, resume the same identities and directory, reauthenticate retained history and reconcile original signed work before new submission. The follower's `--reconcile-once` is bounded; it is not a reset or an extended retry deadline.
+Missing/moved/noncanonical unfinalized inclusion is pending, not a new-signature permit. `firstInclusion` and subsequent observations remain evidence; the authoritative inclusion changes only after the same signed bytes authenticate at the new finalized inclusion. Finalized conflicts still HOLD. Authenticated finalized reverts archive the original disposition independently of an external successful effect. Known incomplete owned scratch writes are retained as non-authoritative digest-named evidence; complete conflicting scratch fences the owner.
+
+Unsigned stale anchors/proofs may refresh only before signing **and before spend admission**, preserving any reserved nonce. A durable spend reservation also freezes its proof/anchor; retry uses the same account/nonce/immutable-proof digest and does not reserve a new daily charge. New signing requires the approved root role, paired gas/fee/balance admission and signed-envelope validation. Only an authenticated original finalized success/revert settles its spend reservation; consumed nonce without a receipt or an external successful effect does not. An unsigned external adoption may release its nonce but retains any unresolved spending reservation. Missing policy prevents new signing, not read/reconciliation. Mining alone is not finalized acceptance. Resume the same identities/directories and never reset a journal to recover budget or nonce authority.
+
+History authentication has no aggregate startup deadline: commitment batches contain at most 32 records, and source/destination RPC bounds still apply. Root qualification and anchor caches live only for one publisher session and key exact immutable identities; restart rechecks proofs. `tokens-history-audit` authenticates all retained commitment/root history explicitly. The full follower JSON still grows with lifetime evidence.
+
+Reconstructed regressions derive from the supplied HTML at audited revision `7fe1b032`, not the unavailable original PoC bundle. After integration, select the ordinary follower/root-publication unit tests plus:
+
+```sh
+rtk cargo test --locked --release -p beefy-relay --lib follower::tests::native_root_scan_faults_preserve_cursor -- --ignored --exact --nocapture
+rtk cargo test --locked --release -p beefy-relay --lib root_publication::root_publication_tests::reconstructed_slow_history_progress_exceeds_300_seconds -- --ignored --exact --nocapture
+```
+
+The native scan regression requires paired owned archived RPCs and `SOURCE_SCAN_QUEUED_BLOCK`; it poisons full-events reads with an 8 MiB response/error while requiring storage-based progress. The slow-history test simulates per-record latency and cache/restart scheduling; it is not a real-network proof or soak result. Preserve candidate/source/artifact identities with executed results.
 
 Historical proof stores, backups, verifier artifacts, frozen bytecode, deployment records and already-paid historical messages remain evidence for old obligations. Removal of their producer code does not authorize deleting those stores, changing custody/maturity/replay state or rewriting a retained public actor's identity. They are not an active fallback producer.
 

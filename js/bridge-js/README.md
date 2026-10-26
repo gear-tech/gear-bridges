@@ -12,7 +12,25 @@ npm install @gear-js/bridge
 
 Use authenticated deployment identities, not RPC URLs alone: Ethereum chain ID/genesis and Beacon genesis/fork schedule; source genesis, a canonical finalized runtime pin; configured queue/proxy, deployed endpoint/checkpoint CodeIds and exact IDL digests. Inbound preparation requires an `inboundProfile` from that qualified deployment. Only reviewed Electra/Fulu receipt blocks using the deployed Electra-compatible framing are supported by this SDK path. Unknown forks, endpoint/IDL mismatches and unavailable history stop the relay. Checkpoint waiting is bounded as described below.
 
+Fresh proofs forward raw EIP-2718 trie bytes (legacy list or type 1–4 plus list),
+not the P2P RLP wrapper. Token-effect validation rejects wrappers and trailing or
+noncanonical framing; native operation IDs hash these exact source bytes. Never
+reencode a retained historical request to use this path. Old framed originals
+require reconciliation under their independently approved original manager and
+endpoint code; missing that authority is HOLD. Qualify every deployed historical
+endpoint slot range intersecting the fresh manager floor: rebuilding the SDK or
+verifier source does not upgrade immutable endpoints. Historical post-state roots
+are preserved for trie reconstruction, not treated as successful admission.
+
 The native-capable token frontend also requires approved `nativeWrapper.programId`, `nativeWrapper.ethereumToken` (H160), `nativeWrapper.codeId`, `nativeWrapper.mode` (`escrow-v1` or `held-escrow-v2`) and the actual deployed `nativeWrapper.idlSha256`; missing native pins HOLD before signing. `escrow-v1` is bound to the exact `83eafd9e8a143fdbf9ac3ea8574ec7a47f3744a6` IDL in `api/gear/vft_vara_v1.idl`, never to the modern wrapper IDL. Generic SDK/Ping profiles without native settlement may omit that binding. These approvals do not establish a live deployment's CodeId: finalized program identity must still match.
+
+Native ETH capability additionally requires independently approved `nativeEth.ethereumToken`, `runtimeCodeHash` (Keccak-256 of deployed EVM runtime bytecode), `varaToken` and `varaCodeId`, with Ethereum-side supply. Symbols never select native or permit targets. `queueDeployment: { address, block }` is bound to the profile's Ethereum chain/genesis; the frontend passes it only for that configured queue, and the SDK retains its historical discovery fallback.
+
+`runtimeTransitions: [{ blockHash, codeHash }]` is an ordered, independently requalified activation list, not RPC-learned trust. Each activation must preserve the approved bridge semantics and deployed actor identities; the SDK authenticates its finalized canonical block and raw runtime hash in both proof preparation and settlement. The original bootstrap pin remains immutable. Unknown runtimes HOLD.
+
+Historical reconciliation uses `historicalReceipts` entries `{ managerId, managerCodeId, endpointId, endpointCodeId, framing: 'network-rlp', minimumSlot, maximumSlot }` in the independently approved old profile. Overlapping ranges for one manager are rejected. `createVftManagerReplyContract` accepts an explicit `historicalOriginal` containing the API, original finalized preparation block hash, original receipt hash, slot and transaction index. It requalifies the proxy-selected endpoint and both old CodeIds before decoding. That adapter cannot sign a new request. The low-level validator accepts historical framing only with the per-session authority returned by `authenticateHistoricalReceipt`; a string flag, copied capability or changed receipt hash is rejected and restart must requalify. The raw original bytes, native operation IDs and prior replies are never replaced. Missing authority remains HOLD; unmapped/null-token rows are retained liabilities, never refunds or successful settlement.
+
+SDK advisory subscriptions accept an optional error callback, stop on malformed canonical payloads or sync/async callback failures, and release late-arriving subscription handles. They never certify financial settlement.
 
 Accepted profile hashes, program IDs, CodeIds, Ethereum token addresses, IDL SHA-256 hashes and fork versions are byte identities: hexadecimal letter case does not change approval. Snapshotting normalizes every validated hex identity to lowercase before deep-freezing, including local-fixture genesis and nested actor bindings. Native cohort/effect validation likewise compares operation IDs, both children, actors and tokens by bytes; a changed byte still fails.
 

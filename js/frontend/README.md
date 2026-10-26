@@ -19,7 +19,7 @@ During an authorized drain, retain the approved predecessor bundle and profile a
 
 Seamless predecessor claiming remains deferred behind this production gate; reviewer acknowledgment is still required, not presumed. This branch finalization does not execute cutover or authorize production activation.
 
-For a loopback preview with a separate GraphQL API, use the preview origin for the testnet indexer URL and set the Node-side `BRIDGE_INDEXER_PROXY=http://127.0.0.1:5450`. Vite development and preview both proxy `/graphql` (including WebSockets); absent means no proxy, and malformed/non-HTTP(S) targets fail startup. This avoids broadening backend CORS or exposing the API. Open `http://127.0.0.1:5273/?network=testnet`, verify the actual live token pairs and indexed transfer states, and connect real approved wallets. Wallet metadata uses the browser origin. Hoodi USDC is selectable; the mainnet USDC business restriction remains.
+For an owned preview with a separate GraphQL API, configure the approved HTTPS funds origin as the testnet indexer URL and set Node-side `BRIDGE_INDEXER_PROXY=http://127.0.0.1:5450`. Vite development and preview proxy `/graphql` (including WebSockets); malformed/non-HTTP(S) targets fail startup. Put the loopback preview behind the operator's HTTPS endpoint matching `VITE_FUNDS_ORIGIN`; another origin is intentionally refused. Preview reads the generated build's security headers, rather than inventing a permissive development CSP. Wallet metadata uses a self-hosted icon and the browser origin. WalletConnect's project owner must independently approve that exact origin.
 
 Vara queue block/message identifiers apply only to Vara-origin transfers. Ethereum-origin transfers show their native destination settlement under Timings rather than permanent loading placeholders for those source-only fields.
 
@@ -43,6 +43,8 @@ Reply waiting scans only canonical finalized blocks under one 44-minute deadline
 
 For GraphQL regeneration, set the singular Node-side `VITE_INDEXER_ADDRESS` to the approved schema endpoint and run `yarn workspace frontend codegen`. Format `src/features/history/graphql/index.ts` with the existing frontend Prettier config afterward; schema/operation artifacts remain generated, not hand-edited. The schema endpoint does not supply bridge trust approval.
 
+After exporting canonical Cargo IDLs, run `yarn workspace frontend generate:sails` and `yarn workspace frontend check:sails`. The pinned generator preserves advisory event handling and adapts constructor services to the installed Sails runtime. Each generated client exports `IDL_SHA256` for its exact source bytes; regeneration does not approve a deployed program or profile.
+
 Focused regression checks (repository root):
 
 ```sh
@@ -52,3 +54,34 @@ yarn workspace @gear-js/bridge test test/vara-to-eth.test.ts test/eth-to-vara.te
 ```
 
 The SDK root-availability helper scans bounded recent-first history and closes the watcher handoff gap; it is advisory, not proof membership or claim authorization. Builds and unit checks do not qualify browser transfers: record genuine wallet-originated source transactions, exact destination balance effects and finalized settlement metadata.
+
+## Funds origin integrity and separate faucet
+
+`yarn build:frontend` produces one closed JavaScript entry and bundled CSS. It requires independently approved `VITE_FUNDS_ORIGIN`, `VITE_FAUCET_ORIGIN` (HTTPS, distinct hostnames), and `BRIDGE_CSP_CONNECT_ORIGINS` (a JSON array of exact HTTPS/WSS origins). Include only approved RPC, Beacon, indexer, wallet, token-price and error-reporting services. Never derive this allowlist from indexer rows, API replies or user input; paths, credentials, wildcards and protocol-wide sources are rejected. Build-time values are not approvals by themselves.
+
+The build hashes emitted JS/CSS/modulepreload entries with SHA-384, adds SRI, and emits `dist/serve.json` with the matching hash-based script CSP. It refuses extra JS chunks, external entry imports, executable public assets, workers and unbundled WASM rather than silently allowing them. Literal imports are bundled into the entry; dormant framework computed-import helpers remain in that hashed entry, but the hash-only CSP blocks additional unauthorized module loads. Entry-tag SRI is not an integrity guarantee for an arbitrary runtime import. Images/fonts are self-hosted or bundled data; remote CSS imports are rejected. Wallet CSS-in-JS/style attributes retain style-only permission; scripts never get `unsafe-inline`, general `unsafe-eval`, `self`, `strict-dynamic` or broad HTTPS authorization. Workers, objects, base URLs, embedding and form submission are disabled. GTM and session replay are not loaded. `BRIDGE_CSP_WASM_EVAL` defaults false: enable only after actual wallet/WASM browser evidence proves it necessary, retaining that evidence with the approved release.
+
+Serve using `yarn workspace frontend serve`, or the Docker command with its equivalent script. The pinned `serve` resolves `--config serve.json` inside the served directory (`dist/` or `dist-faucet/`), not the process working directory. The generated policy applies to `/`, assets and SPA fallback routes. `vite preview` also reads those same generated headers; it is not a deployment substitute. DNS/TLS, exact approved wallet origins, reverse-proxy routes and ingress preservation of headers remain operator prerequisites. Verify real wallet connect/network switch/WASM startup, allowed RPC/WebSockets, denied foreign scripts/endpoints, tampered SRI resources and fallback routes before release. Build/unit checks do not prove browser compatibility or SRI enforcement.
+
+`yarn build:faucet` produces a separate `dist-faucet/` entry. Docker selects it with `FRONTEND_APP=faucet`; never serve it from the funds origin. Funds token cards link to the exact configured origin with no referrer/opener and do not import the faucet or Turnstile. The faucet accepts pasted recipients and never connects a wallet, requests a signature, approves a token, or imports bridge signing contexts. No bridge wallet/local-storage/session state is transferred. Test labels do not choose payout routes.
+
+For the existing isolated Gear/Hoodi dispenser, build with `VITE_ISOLATED_FAUCET=true`. The same service at loopback `127.0.0.1:5485` retains its keys, port ownership, authenticated journal, claim cooldowns and unresolved originals; do not initialize another dispenser or rewrite old identity records. Update only its private approved configuration with the new `origin` and the distinct `fundsOrigin`. The historical journal's original origin remains unchanged deliberately. The new entry uses only same-origin `/faucet/config`, `/faucet/status` and `/faucet/request` with redirect rejection; pending is never shown as finalized.
+
+Install the emitted `faucet.nginx.conf` in nginx's **http context on the existing service host**, behind the approved HTTPS terminator forwarding the exact Host. Serve the complete artifact at `/srv/vara-faucet`, provision `/etc/nginx/faucet.htpasswd` with a separate faucet-only credential/realm, and independently validate/reload nginx under deployment authorization. The generated listener is loopback `5486`. `/faucet/*` strips credentials/cookies, overwrites the authenticated-user header only after Basic auth, rejects foreign/missing POST Origin and disables upstream retries. The service also requires that authentication header and its configured exact POST Origin. Never expose loopback `5485`, share funds credentials, forward funds sessions, set parent-domain cookies, or keep the old funds-origin `/faucet/*` proxy enabled. This source change does not alter the running host.
+
+For the existing public captcha-backed payout service, leave isolated mode false. Provide `VITE_FAUCET_PROFILE` as `{ "genesis": "0x…", "tokens": [{ "name": "Test token", "address": "0x…" }] }` using independently approved test-chain/token identities; no ticker grants a capability. Provide the approved `VITE_TURNSTILE_SITEKEY`, `VITE_TURNSTILE_HOSTNAME` matching the faucet hostname, and Node-only `BRIDGE_FAUCET_PUBLIC_UPSTREAM` (existing HTTPS payout origin). The same-origin proxy strips `/faucet/`, so `/faucet/bridge/request` reaches the existing `/bridge/request` route. The upstream operator must approve the new Origin/site key and validate Turnstile hostname/site responses before release. Only this separate public-faucet CSP permits `https://challenges.cloudflare.com` scripts/frames. Isolated faucet CSP has no such exception. Test VARA/ERC20 requests and the external Hoodi ETH faucet link remain available; API acceptance is not finalized payout proof.
+
+Reconstructed HTML7fe1b032 isolation checks (not the unavailable original PoC bundle):
+
+```sh
+yarn workspace frontend test:policy
+node --experimental-strip-types js/frontend/src/features/faucet/isolated-api.check.mjs
+node --test tools/test-faucet.test.cjs
+yarn build:faucet
+```
+
+CI's `.invalid` origins are offline build fixtures, never production approval. Record the actual candidate SHA, artifact digests and browser evidence independently.
+
+## Approved token identity
+
+Active indexer pairs are checked against finalized approved manager mappings, code and runtime identity before they enable bridging. Native capabilities require the exact profile's `nativeWrapper`/`nativeEth` pair and code identity, never names, symbols or indexer-selected targets. Missing independent native-ETH code/pair approval disables native ETH. The frontend refreshes qualification every 30 seconds and on focus/reconnect, holds on stale/failed refresh, and rechecks the selected pair immediately before wallet operations. Permit selection has been removed in favor of exact-amount approval of the selected, validated token.

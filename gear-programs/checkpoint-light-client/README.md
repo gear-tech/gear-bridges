@@ -42,3 +42,19 @@ the same 95% block-gas ceiling as the checkpoint worker. An exact minimum
 estimate can underfund asynchronous builtin replies; demand above the ceiling
 is rejected before signing. A finalized failed constructor retains its original
 identity: authenticate its terminal reply before creating a distinct program.
+
+## Restart-safe historical replay
+
+`StartReplayBack` for the identical authenticated target resumes the active
+replay; a conflicting target remains rejected. Once that target is committed,
+repeating Start returns Finished without another event. `ReplayBack` accepts an
+authenticated already-consumed prefix (including the equal boundary header)
+and advances only the remaining ancestry. A broken link, duplicate slot,
+different boundary header or header beyond the target rejects the whole batch
+before changing replay state.
+
+`NewCheckpoint` events describe committed checkpoints only: staged checkpoints
+emit nothing until the replay reaches its committed base. Workers rebuild the
+active replay interval after concurrent AlreadyStarted, NotStarted, StateChanged
+or NotActual responses; malformed ancestry remains a hard error. The default
+worker batch is three epochs (96 headers), still subject to runtime gas limits.

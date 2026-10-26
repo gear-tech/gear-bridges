@@ -68,10 +68,14 @@ The proof is the canonical ABI-encoded v2 envelope: proof/bridge versions, initi
 - catches malformed decoding through a self-only decoder and returns false;
 - requires initialized version-2 metadata and the exact destination-bound domain;
 - binds leaf parent number to the original source height and the snapshot hash to the leaf;
-- requires a live client, source height at/above MMR start and strictly before the anchor, and the exact latest accepted nonzero anchor block/root;
+- requires a live client, source height at/above MMR start and strictly before the anchor, and an exact retained accepted nonzero anchor block/root;
 - verifies the SCALE leaf hash and MMR inclusion against that accepted root.
 
 A false root-proof result reverts submission with `InvalidQueueRootProof`. A signed publication tied to an older anchor cannot be rewritten or re-signed merely because the client advanced. Empty initialized queue progress uses `safeVerifyEmptyQueueProgress` and the same authentication with a zero root; it advances eligible progress only and creates neither a registered root nor maturity.
+
+`BeefyClient` retains the last 64 genuinely accepted `(block, MMR root)` pairs from either acceptance protocol; bootstrap is not inserted. `isAcceptedAnchor(uint64,bytes32)` reports exact retained membership, and `verifyMMRLeafProof(uint64,bytes32,bytes32,bytes32[],uint256)` additionally requires a live client. Latest fields still govern commitment ordering and freshness. A later commitment does not invalidate an earlier proof until its anchor is evicted. Eviction never authorizes rewriting a signed original or releasing its nonce, and does not invalidate already finalized root publications or their history evidence.
+
+The 64-entry window is a count, not a time guarantee. Production release requires measured inclusion and finality latency to fit inside that window under adversarial commitment rates; otherwise release remains gated pending a reviewed capacity or atomic-publication alternative.
 
 ## Publication, delivery and persistence
 

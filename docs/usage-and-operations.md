@@ -89,19 +89,22 @@ curl -i -sS http://127.0.0.1:8443/relay_transactions \
   --data "{\"transactions\":[{\"tx_hash\":\"$ORIGINAL_ETH_TX_HASH\"}]}"
 ~~~
 
-These examples target the corresponding separate paid worker; use its actual bind and token. The server deduplicates `(block, nonce)` or the exact transaction-hash string within each request. Empty batches also succeed. Authentication does not bypass canonical queued/fee observations or durable ownership checks downstream: an early request may defer without creating a transaction UUID.
+These examples target the corresponding separate paid worker; use its actual bind and token. The server deduplicates `(block, nonce)` or the exact transaction-hash string within each request. Empty batches also succeed. Authentication does not bypass canonical queued/fee observations or durable ownership checks downstream. Paid inbound HTTP authenticates finalized receipt inclusion and requires a valid `FeePaid` from the configured payment contract before proof admission; it derives the receipt slot from that authenticated header, not a fresh numbered lookup. Unpaid, unfinalized, malformed or out-of-domain requests are rejected downstream without wedging subsequent requests; resubmit the original hash after finality when appropriate.
 
 | Status | Meaning |
 | --- | --- |
 | 200, empty body | All entries handed to the local channel or handled as within-request duplicates; includes an empty batch. |
-| 202, empty body | Some entries handled (including duplicate handling), others failed channel handoff; no per-entry results. |
-| 500, empty body | No entries handled because the local receiver was unavailable. |
+| 202, empty body | `/relay_messages` only: some entries handled (including duplicates), others failed channel handoff; no per-entry results. |
+| 429, empty body, `Retry-After: 1` | `/relay_transactions`: the complete deduplicated batch does not fit the bounded 128-entry ingress channel; nothing from this request was enqueued. Retry the same original hashes after backoff, splitting batches larger than 128. |
+| 500, empty body | The local receiver was unavailable; transaction batches are rejected without partial handoff. |
 | 401 | Missing/incorrect/unreadable token on an enabled, valid POST request. |
 | 400 | Malformed JSON or invalid request shape. |
 | 413 | JSON exceeds the body limit. |
 | 404 | Route not enabled on that listener, or unknown path. |
 
 JSON extraction may reject malformed/oversized input before the handler checks authentication. HTTP acceptance is only local handoff: it does not establish fee admission, signing, finalized destination success or token/native settlement. After a timeout or partial response, reconcile original work and journals; do not create another economic request. The token does not replace TLS, network isolation or application-external rate limiting. Restrict unauthenticated Prometheus separately.
+
+Inbound transaction and proof handoffs are bounded to 128 entries and await capacity; saturation pauses new intake rather than dropping durable work. Discovery scans at most 128 new blocks per pass and persists each inspected block, including empty blocks, before advancing its extraction cursor; transaction handoffs are durable before acknowledgement. Preserve the paired original discovery/transaction journals during backpressure or restart; reconciliation continues independently of intake.
 
 ## Manual relay and recovery
 

@@ -278,7 +278,7 @@ label price assumptions (for example ETH_USD = 3,000 is a planning assumption,
 not a current quote). For a US$5,000 gross ceiling, require the complete formula
 to stay below that ceiling with operational headroom; fee income is not a
 substitute for the gross-cost bound. Sparse scheduling does not waive any
-source-domain, latest-anchor, authority-handover, original-signature, finality or
+source-domain, retained-accepted-anchor, authority-handover, original-signature, finality or
 24-hour client-expiry requirement.
 
 See the [operating envelope](../docs/running-the-bridge.md#monthly-operating-cost-envelope)
@@ -389,11 +389,12 @@ Without the RPC variable, the fork test is explicitly skipped, not qualified.
 The shared fork path in `test/Base.sol::deployBridge` pins the mainnet block,
 legacy code and initializer, retains all existing bridge contracts, and calls the
 same typed migration validation, calldata and governance helpers as the operational
-runner. Only pause and atomic-upgrade roots are registered under the old verifier.
-The expected legacy maximum includes those two roots, not an unpause permission.
-After the paused upgrade passes retained-state readback, a fixture-signed empty
-BEEFY epoch advances the queue. Only then is a new unpause message constructed in
-a later authenticated epoch; it must wait for its own governance maturity.
+runner. Pause, migration, staging recovery and freeze-installation controls are
+prepublished under the old verifier before the exact approved cut C. Initializer 7
+atomically installs the staging implementation and freezes publication at C;
+initializer 8 migrates only the exact prepublished migration control, with floor C+1.
+After finalized upgrade readback, a nonempty root or initialized-empty BEEFY snapshot
+provides progress. The new unpause names the finalized barrier; QueueId need not change.
 
 This remains a **fork rehearsal**, not production authorization. Synthetic legacy
 source-proof checks are scoped mocks and immediately cleared. BEEFY signatures and
@@ -429,10 +430,20 @@ Use `script/RetainedBridgeMigration.sol:RetainedBridgeMigrationScript`, with
 `DEPLOYMENT_MODE=retained-beefy-migration` and `RETAINED_RPC_URL` pointing to the
 same chain as `--rpc-url`. The fresh deployment entrypoint deliberately rejects
 this mode. Preparation, verification and reconciliation do not read a signing key.
-No replacement queue, manager, token or governance authority is deployed.
+Queue, manager, token and governance-handler identities are retained; only independently approved proxy implementations change.
 Use Foundry v1.8.5, matching CI: v1.7.1 can compile the scripts but lacks their
 required RPC cheatcode overload. Add `-vvvv` to preparation runs to inspect the
 `RetainedMigrationPrepared` event containing the migration calldata and upgrade payload.
+
+Before capturing the plan, upgrade the actual retained ERC20Manager implementation
+through approved governance, stop its deposits/payment creation and stop new source
+admission. Keep queue processing open while draining authorized inbound obligations
+and outbound claims. Only then capture the finalized drain inventory and pause the
+queue. Manager pause intentionally does **not** disable retained claim/release dispatch.
+Per-token admission uses the existing source-admin manager message route with exact
+body `0x03 || token(20 bytes) || enabled(1 byte, 0 or 1)`; existing registrations
+default enabled. Disable and drain before removing a destination mapping. Native
+WrappedVARA rejects the canonical Gear SYSTEM recipient before burn/custody.
 
 
 Keep approved inputs under `broadcast/migration-inputs/`, outside disposable
@@ -442,31 +453,35 @@ build output. Types are declared in
 
 | Input | JSON shape / approval |
 |---|---|
-| `RETAINED_PLAN` | `{"schemaVersion":1,"plan":"0x..."}` containing `MigrationPlan`; exact-file Keccak must equal independently approved `RETAINED_PLAN_HASH` |
-| `RETAINED_ACTION` | `{"schemaVersion":2,"action":"0x..."}` containing `MigrationAction`; exact-file Keccak must equal `RETAINED_ACTION_HASH`; `action.planHash` binds the approved plan file; schema-1 actions are rejected |
-| `RETAINED_SOURCE_CUT` | `queue`, `sourceDomain`, `legacyMax`, `firstBeefyBlock`, and `roots` containing ABI-encoded `LegacyRootPin[]`; file digest must equal `plan.sourceCutApproval` |
+| `RETAINED_PLAN` | `{"schemaVersion":2,"plan":"0x..."}` containing `MigrationPlan`; exact-file Keccak must equal independently approved `RETAINED_PLAN_HASH`; preserve older files unchanged |
+| `RETAINED_ACTION` | `{"schemaVersion":3,"action":"0x..."}` containing `MigrationAction`; exact-file Keccak must equal `RETAINED_ACTION_HASH`; `action.planHash` binds the plan; older action schemas are rejected, never rewritten |
+| `RETAINED_SOURCE_CUT` | `queue`, `sourceDomain`, `legacyMax`, `firstBeefyBlock`, nonzero `sourceCoverageDigest`, and sorted unique ABI-encoded `LegacyRootPin[]` in `roots`, ending exactly at C; digest equals `plan.sourceCutApproval`. The approved source report must establish complete cumulative coverage of every message through C, not a sample of roots |
+| `RETAINED_DRAIN` | Digest equals `plan.drainedInventoryApproval`; `manager`, `queue`, nonzero `sourceAdmissionEvidence` and `liabilityInventory` digests, zero `unsettledInbound`, `unsettledOutbound`, `unprocessable`; `capture` ABI-encodes a `FinalizedPin`, `custody` ABI-encodes the complete ordered `CustodyLedger[]` (token, balance, requiredBacking, managedSupply, releases). `managedSupply` is the captured total supply for Gear-supply representations, zero for independently issued Ethereum tokens; every later managed mint must have an approved exact `Bridged` effect, and burns remain forbidden while admission is stopped |
 | `RETAINED_UNPAUSE_INVENTORY` | `queue`, `sourcePauser`, `unpauseNonces` array; digest must equal `plan.outstandingUnpauseInventory`; every listed old permission must already be consumed |
 | `RETAINED_DEPLOYMENTS` | `implementation`, `client`, `verifier`, each containing ABI-encoded `OriginalTransaction`; exact-file digest must equal `RETAINED_DEPLOYMENTS_HASH` |
-| `RETAINED_FINALITY_OUTPUT` | Absent output path for the stage-9 upgrade observation or stage-10 original-transaction reconciliation; capture reserves `<path>.capture` and writes the exact observation file |
+| `RETAINED_FINALITY_OUTPUT` | Absent output path for the stage-9 upgrade observation or stage-10 finalized progress-effect reconciliation; capture reserves `<path>.capture` and writes the exact observation file without changing an own pending/reverted original |
 | `RETAINED_UPGRADE_OBSERVATION` | Captured `{"schemaVersion":1,"planHash":"0x...","stage":8,"transactionHash":"0x...","observation":"0x..."}`; `observation` is ABI-encoded `FinalityObservation`, copied into `action.barrier.upgradeReadback`; exact-file Keccak must equal `RETAINED_UPGRADE_OBSERVATION_HASH` |
-| `RETAINED_BARRIER_OBSERVATION` | Same captured format with numeric `stage:10` and the original empty-progress transaction; copy the decoded observation into `action.barrier.publication`; exact-file Keccak must equal `RETAINED_BARRIER_OBSERVATION_HASH` |
+| `RETAINED_BARRIER_OBSERVATION` | Same captured format with numeric `stage:10` and the successful progress-effect transaction (nonempty root or initialized empty progress, regardless of executor); copy the decoded observation into `action.barrier.publication`; exact-file Keccak must equal `RETAINED_BARRIER_OBSERVATION_HASH` |
 
 Review decoded fields before approving their file digests. A freshly calculated
 hash is not independent approval. The plan pins the chain/genesis, proxy and
 underlying implementation hashes, all existing contracts/source authorities,
 token/payment inventories, cut/floor, constructor bootstrap, recovery delay and
-roles, and retained-state readbacks. Include bridge custody, root/maturity,
-replay and token-policy readbacks in `retainedState`; include applicable custom
-proxy implementation slots in `retainedProxies`. These pins are checked at each
-stage and against the archived upgrade poststate, so do not pin globally mutable
-canonical-token `totalSupply` across stages: unrelated WETH wrapping or USDC
-issuance must not invalidate a migration. Keep supply-preservation evidence
-transaction-local (for example, an upgrade trace proving no token mint/burn),
-separate from the immutable cross-stage pins; refreshing a supply pin would
-conflict with the archived poststate. Custody, roles, configuration and inventory
-checks remain mandatory. Supplied roots and nonce lists
-must come from the complete independently approved liability/permission audit;
-the tool cannot infer missing historical obligations from an incomplete list.
+roles, and immutable retained-state readbacks. Include root/maturity, replay and
+token-policy readbacks in `retainedState`, and implementation slots in `retainedProxies`.
+Do not include mutable `balanceOf` or `totalSupply` pins: they are rejected.
+The drain capture must prove manager paused / queue running, after both cohorts
+were drained. Each token ledger binds captured balance and required backing.
+From that pin to the execution view the runner authenticates Transfer logs against
+canonical finalized receipts. Incoming donations remain surplus, not inferred claims.
+Each outgoing transfer requires an independently approved exact transaction/log,
+recipient/amount and distinct matching manager `Bridged` effect log; a compensating
+donation cannot mask an unapproved outflow. Missing evidence, unfinalized deltas,
+nonstandard unaccounted balance changes or deficient backing HOLD.
+Global external issuance does not invalidate the plan; upgrade-local supply
+preservation remains a separate required artifact. Complete source admission,
+liability and permission inventories require independent approval: the runner
+cannot discover missing source obligations from a self-reported list.
 The RPC must support canonical finalized blocks, archival state and recovery
 timelock grant/revoke history.
 The retained production profile must keep the approved v1 wrapper identity and
@@ -484,13 +499,22 @@ Each invocation handles one approved stage and at most one transaction:
 | 0 | Prepare calldata and upgrade payload | Complete approved retained plan/cut/inventory |
 | 1–3 | Deploy implementation, client, verifier | Exact planned signer/nonce/address; finalized original constructor records for prior deployments |
 | 4 | Bootstrap | All three original constructors authenticated; real BEEFY signature-entrypoint calldata |
-| 5–6 | Register pause and upgrade roots | Genuine legacy proofs; no root beyond the approved legacy ceiling |
-| 7 | Pause | Both governance roots mature; every approved liability root registered; exact approved maximum |
-| 8 | Atomic upgrade | Paused queue, live bootstrapped client, unchanged identities and complete registered cut coverage |
-| 9 | Verify and capture upgrade finality observation | Original upgrade authenticated; canonical finalized paused poststate with complete cut coverage; absent `RETAINED_FINALITY_OUTPUT` |
-| 10 | Publish empty BEEFY barrier | Independently approved upgrade observation; source timestamp later than its `observedAt` plus allowed clock skew |
-| 11 | Register new unpause root | Original empty-barrier receipt and approved barrier observation; strictly later source epoch and timestamp |
-| 12 | Process unpause | Original root-registration receipt authenticated and governance maturity passed |
+| 5–6, 13–14 | Register pause, migration, freeze-installation and recovery roots | Genuine legacy proofs at/below independently approved C; migration/recovery `LegacyControl` proofs and positive expiry are part of the plan |
+| 7 | Pause queue | Deposits/payment creation/source admission stopped; both cohorts drained; all cut roots registered; exact maximum C |
+| 15 | Freeze-installation | Mature migration/recovery/freeze controls; initializer 7 independently proven unused; current maximum equals C atomically or the entire upgrade rolls back |
+| 16 | Pre-migration recovery, only if needed | Exact prepublished unexpired recovery control; leaves queue paused with originals/storage retained. Further preparation requires separate approval, not replay of initializer 7 |
+| 8 | Migrate | Canonical finalized exact freeze effect in `action.freeze`; paused frozen C; accepted client root and sufficient remaining lifetime; initializer 8 consumes only the staged migration message |
+| 9 | Verify and capture upgrade observation | Exact finalized upgrade `MessageProcessed` effect and paused archive poststate; absent `RETAINED_FINALITY_OUTPUT` |
+| 10 | Publish progress barrier | `barrier.root` nonzero or zero for initialized-empty progress; source timestamp after approved upgrade observation plus skew |
+| 19 | Capture publication hash | Known authenticated publication; capture canonical block hash within 256 blocks. Permissionless capture is not finality approval |
+| 18, then 17 | Register, then process barrier attestation | Finalized publication observation; explicit versioned admin `UpgradeProxyMessage` invoking `recordMigrationBarrier` on the same implementation. Captured hash survives the one-hour governance delay |
+| 11, then 12 | Register, then process new unpause | Exact migration action + recorded barrier + incident epoch in `delivery.control`; new source issuance after approved barrier observation; own governance maturity; unchanged QueueId permitted |
+
+Stage ordinals are schema identifiers, not numerical execution order. Stages 5–7
+and freeze require remaining source-authenticated lifetime strictly greater than
+the actual admin governance delay plus positive approved `finalityMargin` and
+`operationalMargin`. An independently owned prebinding heartbeat must refresh the
+client; a positive `isLive` with seconds remaining is insufficient.
 
 Bootstrap can require multiple separately approved stage-4 actions for the
 interactive signature path. It never bypasses client signature verification or
@@ -498,18 +522,21 @@ the normal follower's pre-migration binding checks.
 Constructor history remains pinned to the original bootstrap inputs; legitimate
 native authenticated validator handovers do not require rewriting that approval.
 
-Every stage from Verify onward requires `action.upgrade`, containing the approved
-upgrade delivery and original transaction evidence. Matching state produced by
-another executor cannot substitute for an unresolved original transaction.
-Complete approved liability-root coverage is rechecked after migration as well
-as before Pause.
+Post-upgrade stages require `action.upgrade.delivery` and its independently
+authenticated `effectTransactionHash`. A third-party executor/forwarder may satisfy
+the exact message, canonical successful receipt and implementation/state effect.
+`action.effectTransactionHash` similarly adopts a completed root/control stage.
+This path does not rewrite or release the runner's separate `original` or attempt
+marker, and never reclassifies an own reverted/pending transaction as successful.
+Deployment constructors retain strict original-envelope authentication.
 
 After stage 9, independently approve the captured file and its exact Keccak before
-setting `RETAINED_UPGRADE_OBSERVATION[_HASH]` and approving a source empty epoch.
-After stage 10 is finalized, reconcile its original transaction with a new absent
-`RETAINED_FINALITY_OUTPUT`; approve that capture as
-`RETAINED_BARRIER_OBSERVATION[_HASH]` before authorizing the later unpause epoch.
-Re-encode and independently approve the schema-2 action with both observations.
+setting `RETAINED_UPGRADE_OBSERVATION[_HASH]` and approving source progress.
+After stage 10 finalizes, capture and approve `RETAINED_BARRIER_OBSERVATION[_HASH]`;
+the publication pin is its exact inclusion block, not a later arbitrary readback.
+Use stage 19 within the blockhash window, then source-authorize the explicit
+stage-18/17 finality attestation and subsequently the new unpause.
+Re-encode and independently approve new schema-3 actions; never modify signed originals.
 An observation contains the qualified finalized `state`, the then-current latest
 `head`, and `observedAt` in UTC seconds. Source timestamps must exceed the relevant
 `observedAt * 1000 + MAX_FUTURE_SOURCE_SKEW_MS`, not the older inclusion timestamp.
@@ -532,18 +559,21 @@ unchanged; deployment-history records reference their exact hashes and indices.
 
 An atomic marker under `broadcast/` owns the chain/signer/nonce before an actual
 broadcast attempt. Missing receipts, pending inclusion, reverts, changed intent,
-noncanonical blocks and rival successes all HOLD; never delete the marker or
-blindly use `--resume` to create another signature. Reconciliation authenticates
-the original transaction's input, value, signer, nonce, destination/creation,
-receipt and canonical finalized inclusion before checking state.
+noncanonical blocks HOLD the **original's disposition**; never delete its marker or
+blindly use `--resume` to create another signature. Strict original reconciliation
+authenticates input, value, signer, nonce, destination/creation, receipt and finality.
+A separately authenticated competing effect can advance the administrative stage
+without clearing that original's ownership.
 
-Unpause also requires `RETAINED_ROOT_ARTIFACT`, `RETAINED_ROOT_ARTIFACT_HASH`,
-`RETAINED_ROOT_TRANSACTION_INDEX` and `RETAINED_ROOT_TRANSACTION_HASH`.
-Its barrier carries the original empty-progress transaction and approved finality
-observations. Both source timestamps must exceed the relevant observed finality
-time by the client's allowed future skew; a higher message nonce is insufficient.
-Outstanding old unpause permissions remain a separate governance-reconciliation
-gate, not something this script can safely cancel or ignore.
+Unpause root-effect authentication uses `RETAINED_ROOT_TRANSACTION_HASH`; an
+executor's Foundry artifact is not required. The historically named `EmptyBarrier`
+now carries either root kind, its exact successful publication transaction hash
+in `original.transactionHash`, and approved finality observations; retained artifact
+fields remain evidence, not executor restrictions. Both source timestamps must
+exceed observed finality plus the client's future skew. A later cumulative snapshot
+alone does not authorize an old unpause: the new payload must name the exact
+migration action, barrier identity and incident epoch. Outstanding old permissions
+remain a separate governance-reconciliation gate.
 
 Release pipeline, in order:
 
@@ -571,8 +601,8 @@ Release pipeline, in order:
    and backfill against the approved retained-state profile.
    The normal token follower requires the queue to be bound to the new verifier,
    while migration requires an accepted nonzero client MMR root beyond the cut floor.
-   Separately qualify the original bootstrap commitment before the atomic queue
-   cutover; the normal follower is not a pre-migration binding-check bypass.
+   Separately qualify original bootstrap and independently owned prebinding heartbeat
+   before queue cutover; normal follower binding checks are not bypassed.
 4. Reconcile all five assets, all historical managers/native programs, paid and
    unpaid pending messages, registered and missing roots, fees and replay state
    through an approved cut. Token identity agreement and sample claims are not
